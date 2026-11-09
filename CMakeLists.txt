@@ -18,6 +18,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/lowering.cpp
     src/neura-ir/ir_print.cpp
     src/neura-ir/integer.cpp
+    src/neura-ir/verifier.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
 neura_target_defaults(neura_compiler)
