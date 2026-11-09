@@ -1,6 +1,6 @@
 # Core language
 
-This is a proposed initial core. Examples are illustrative and not compiler-verified.
+This page defines the initial core. See [Feature status](Status.md) for the frontend’s coverage and open semantic decisions.
 
 ## Source and bindings
 

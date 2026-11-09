@@ -1,6 +1,6 @@
 # Polymorphism
 
-Polymorphism lets one piece of code work with values of different types. This document develops the language design illustrated by [polymorphism.nra](../../examples/types/polymorphism.nra). Class inheritance and overrides follow the existing examples; bodyless class methods and generic syntax below are proposals, not features verified by a compiler. This repository does not yet contain an implementation.
+Polymorphism lets one piece of code work with values of different types. This document develops the language design illustrated by [polymorphism.nra](../../examples/types/polymorphism.nra). The frontend represents inheritance, overrides, generic types, and dynamic calls in NeuraIR. Runtime representation and dispatch behavior remain part of the execution design.
 
 ## Subtypes and dynamic dispatch
 

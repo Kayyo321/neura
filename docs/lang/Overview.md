@@ -1,6 +1,6 @@
 # Neura language overview
 
-Neura is a proposed statically typed language organized around modules, classes, and explicit interfaces. This repository contains design documents and illustrative `.nra` programs, not a compiler. No example has been compiler-verified. The documents describe an initial design target; “proposed” means a decision for implementation, not an existing feature.
+Neura is a statically typed language organized around modules, classes, and explicit interfaces. The [frontend](Tooling.md) checks and lowers the repository’s illustrative `.nra` programs to typed NeuraIR. The language pages also describe proposed behavior that requires further specification or an executor.
 
 Start with [Core language](CoreLanguage.md), [Types](Types.md), [Modules](Modules.md), and [Collections](Collections.md). Then read [Errors](Errors.md), [Testing](Testing.md), [Standard library](StandardLibrary.md), [Resources and concurrency](ResourcesConcurrency.md), and [Tooling](Tooling.md). [Status](Status.md) records the boundaries of this design. [Tutorial](Tutorial.md) walks through a small project.
 

@@ -16,6 +16,7 @@ Pure computations can use feedforward circuits. Stateful execution carries mutab
 
 - [Project design](docs/Project.md) covers the pipeline, execution model, decompilation, and verification.
 - [Language overview](docs/lang/Overview.md) and [tutorial](docs/lang/Tutorial.md) cover Neura syntax and semantics. See [examples](examples/) for sample `.nra` programs.
+- [Tooling](docs/lang/Tooling.md) covers building the frontend, checking source, and inspecting NeuraIR.
 - [Contributing](CONTRIBUTING.md) explains how to propose changes and verify them.
 
 ## Rules for agents

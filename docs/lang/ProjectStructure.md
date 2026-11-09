@@ -1,6 +1,6 @@
 # Project structure
 
-This page proposes a convention for organizing multi-file Neura projects. The repository currently contains language examples and documentation, not a compiler or package manager; module discovery, package distribution, and the commands to build or run a project are not yet specified by an implementation.
+The [frontend](Tooling.md) uses this layout to find project-local modules. Give it one or more source roots with `-I`. It also searches beside the importing file and the explicit input files. If multiple files match an import, the frontend reports an ambiguity.
 
 ## Project-local modules
 
@@ -23,4 +23,4 @@ See [the complete example](../../examples/modules/multi-file/main.nra). `SysIo` 
 
 ## Packages and open questions
 
-The `Acme` namespace illustrates how a project can group its own modules. It does not imply a package manifest, dependency installation, or a published package format. Source-root selection, external dependencies, name collisions, capitalization conversion, circular imports, and entry-point discovery still need specification before interoperable tooling can be built. See [Modules](Modules.md) for exports, imports, and module inheritance.
+The `Acme` namespace illustrates how a project can group its own modules. It does not imply a package manifest, dependency installation, or a published package format. Package and dependency management and entry-point discovery remain open. The frontend converts PascalCase components to kebab-case and resolves them in the supplied source roots. See [Modules](Modules.md) for exports, imports, and module inheritance.

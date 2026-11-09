@@ -20,7 +20,7 @@ let io = import:SysIo;
 io.println("Hello");
 ```
 
-For project-local modules, the proposed qualified-name and file layout convention is described in [Project structure](ProjectStructure.md). The [multi-file example](../../examples/modules/multi-file/main.nra) shows a project module importing another project module. This convention is not yet backed by a compiler in this repository.
+For project-local modules, the proposed qualified-name and file layout convention is described in [Project structure](ProjectStructure.md). The [multi-file example](../../examples/modules/multi-file/main.nra) shows a project module importing another project module.
 
 ## Interfaces and inheritance
 

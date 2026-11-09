@@ -1,6 +1,6 @@
 # Object lifecycle
 
-This page proposes constructors and explicit destruction for the class model illustrated by [polymorphism.nra](../../examples/types/polymorphism.nra). The syntax and rules here are a language design, not implemented or compiler-verified behavior. Ownership, allocation, and error handling remain open design areas.
+This page proposes constructors and explicit destruction for the class model illustrated by [polymorphism.nra](../../examples/types/polymorphism.nra). The frontend recognizes the lifecycle syntax and emits NeuraIR operations for it. Ownership, allocation, and error handling remain open design areas.
 
 ## Construction
 
