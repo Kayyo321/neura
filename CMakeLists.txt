@@ -41,8 +41,10 @@ add_library(neura_compiler STATIC
     src/ir-optimization/integer_folding.cpp
     src/ir-optimization/optimizer.cpp
     src/ir-optimization/passes.cpp
+    src/backend/circuit.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
+target_link_libraries(neura_compiler PUBLIC neura_nvr)
 neura_target_defaults(neura_compiler)
 
 add_executable(neura src/cli/main.cpp)
