@@ -35,6 +35,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/lowering.cpp
     src/neura-ir/ir_print.cpp
     src/neura-ir/integer.cpp
+    src/neura-ir/float.cpp
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
     src/ir-optimization/analysis.cpp
@@ -43,6 +44,7 @@ add_library(neura_compiler STATIC
     src/ir-optimization/passes.cpp
     src/backend/block_synth.cpp
     src/backend/circuit.cpp
+    src/backend/float_circuit.cpp
     src/backend/converter.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
@@ -69,6 +71,7 @@ if(BUILD_TESTING)
     add_executable(neura_ir_tests
         tests/ir-optimization/behavior_tests.cpp
         tests/ir-optimization/evaluator.cpp
+        tests/ir-optimization/float_reference.cpp
         tests/ir-optimization/main.cpp
         tests/ir-optimization/structure_tests.cpp
         tests/ir-optimization/support.cpp
@@ -90,10 +93,12 @@ if(BUILD_TESTING)
         tests/backend/circuit_tests.cpp
         tests/backend/conversion_tests.cpp
         tests/backend/fixtures.cpp
+    tests/backend/float_tests.cpp
         tests/backend/format_tests.cpp
         tests/backend/nir_tests.cpp
         tests/backend/vm_tests.cpp
         tests/ir-optimization/evaluator.cpp
+        tests/ir-optimization/float_reference.cpp
         tests/ir-optimization/main.cpp
         tests/ir-optimization/support.cpp
     )
@@ -101,7 +106,7 @@ if(BUILD_TESTING)
     target_include_directories(neura_backend_tests PRIVATE tests)
     neura_target_defaults(neura_backend_tests)
 
-    foreach(suite IN ITEMS circuits format vm nir conversion)
+    foreach(suite IN ITEMS circuits floats format vm nir conversion)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()

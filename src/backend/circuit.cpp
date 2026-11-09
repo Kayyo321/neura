@@ -237,7 +237,9 @@ Word constant_word(std::uint64_t bits, unsigned width) {
     Word word;
     word.reserve(width);
     for (unsigned i = 0; i < width; ++i) {
-        word.push_back(Signal::of(static_cast<std::int64_t>((bits >> i) & 1U)));
+        // Words can be wider than 64 lanes (the float circuits shift
+        // significands in wide words); lanes past bit 63 are zero.
+        word.push_back(Signal::of(i < 64 ? static_cast<std::int64_t>((bits >> i) & 1U) : 0));
     }
     return word;
 }
@@ -434,6 +436,39 @@ Division unsigned_divide(Circuit& circuit, const Word& a, const Word& b) {
 }
 
 } // namespace
+
+Checked add_with_carry(Circuit& circuit, const Word& a, const Word& b, const Signal& carry) {
+    auto sum = ripple(circuit, a, b, carry);
+    return {std::move(sum.sum), sum.carries.back()};
+}
+
+Word multiply_full(Circuit& circuit, const Word& a, const Word& b) {
+    // The column multiplier of unsigned_multiply, continued through every
+    // column of the product.
+    const auto width = a.size() + b.size();
+    Word result;
+    Signal carry;
+    std::int64_t carry_max = 0;
+    for (std::size_t k = 0; k < width; ++k) {
+        Signal column = carry;
+        std::int64_t maximum = carry_max;
+        for (std::size_t i = 0; i < b.size(); ++i) {
+            if (k < i || k - i >= a.size()) {
+                continue;
+            }
+            const auto product = circuit.logical_and(a[k - i], b[i]);
+            if (!product.is_constant(0)) {
+                column = column + product;
+                maximum += 1;
+            }
+        }
+        auto split_column = split(circuit, column, maximum);
+        result.push_back(split_column.bit);
+        carry = split_column.carry;
+        carry_max = split_column.carry_max;
+    }
+    return result;
+}
 
 Checked add(Circuit& circuit, const Word& a, const Word& b, bool is_signed) {
     auto sum = ripple(circuit, a, b, Signal::of(0));

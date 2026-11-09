@@ -110,6 +110,11 @@ Checked multiply(Circuit& circuit, const Word& a, const Word& b, bool is_signed)
 // The quotient of an exact division. `failure` is set when the divisor is
 // zero, the quotient is out of range, or the remainder is nonzero.
 Checked divide(Circuit& circuit, const Word& a, const Word& b, bool is_signed);
+// a + b + carry on unsigned words of equal width. `failure` is the carry out
+// of the top lane.
+Checked add_with_carry(Circuit& circuit, const Word& a, const Word& b, const Signal& carry);
+// The exact product of two unsigned words, a.size() + b.size() lanes wide.
+Word multiply_full(Circuit& circuit, const Word& a, const Word& b);
 
 Signal equal(Circuit& circuit, const Word& a, const Word& b);
 Signal less(Circuit& circuit, const Word& a, const Word& b, bool is_signed);
