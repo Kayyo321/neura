@@ -44,8 +44,16 @@ if(BUILD_TESTING)
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/main.cpp
         tests/ir-optimization/support.cpp
+        tests/ir-optimization/verifier_tests.cpp
     )
     target_link_libraries(neura_ir_tests PRIVATE neura_compiler)
     target_include_directories(neura_ir_tests PRIVATE tests)
     neura_target_defaults(neura_ir_tests)
+
+    # Each suite is a separate test, so a failure names the kind of evidence
+    # that broke.
+    foreach(suite IN ITEMS verifier)
+        add_test(NAME ir-optimization-${suite}
+            COMMAND neura_ir_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
 endif()
