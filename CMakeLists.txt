@@ -25,6 +25,7 @@ neura_target_defaults(neura_nvr)
 add_library(neura_nvm STATIC
     src/nvm/host.cpp
     src/nvm/machine.cpp
+    src/nvm/trace.cpp
 )
 target_link_libraries(neura_nvm PUBLIC neura_nvr)
 neura_target_defaults(neura_nvm)
