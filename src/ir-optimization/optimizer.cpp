@@ -27,6 +27,8 @@ const std::vector<RegisteredPass>& registry() {
          simplify_short_circuits},
         {{"simplify-control-flow", "select branches with literal conditions, remove while (false) and empty blocks"},
          simplify_control_flow},
+        {{"remove-unreachable", "remove statements after a statement that never completes"},
+         remove_unreachable},
     };
     return passes;
 }

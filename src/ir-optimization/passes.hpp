@@ -13,5 +13,6 @@ namespace neura::optimization {
 std::size_t fold_constants(IrProgram& program);
 std::size_t simplify_short_circuits(IrProgram& program);
 std::size_t simplify_control_flow(IrProgram& program);
+std::size_t remove_unreachable(IrProgram& program);
 
 } // namespace neura::optimization

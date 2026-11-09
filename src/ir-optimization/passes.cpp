@@ -3,6 +3,8 @@
 #include "analysis.hpp"
 #include "integer_folding.hpp"
 
+#include <algorithm>
+#include <iterator>
 #include <string_view>
 #include <utility>
 
@@ -223,6 +225,18 @@ std::size_t simplify_control_flow(IrProgram& program) {
         }
         region = std::move(kept);
         return count;
+    });
+}
+
+std::size_t remove_unreachable(IrProgram& program) {
+    return rewrite_regions(program, [](std::vector<IrNode>& region) -> std::size_t {
+        const auto last = std::ranges::find_if(region, never_completes);
+        if (last == region.end()) {
+            return 0;
+        }
+        const auto removed = static_cast<std::size_t>(std::distance(std::next(last), region.end()));
+        region.erase(std::next(last), region.end());
+        return removed;
     });
 }
 
