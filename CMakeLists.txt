@@ -66,7 +66,7 @@ target_link_libraries(neura_decompiler PUBLIC neura_compiler neura_nvm)
 neura_target_defaults(neura_decompiler)
 
 add_executable(neura src/cli/main.cpp)
-target_link_libraries(neura PRIVATE neura_compiler neura_nvm)
+target_link_libraries(neura PRIVATE neura_compiler neura_nvm neura_decompiler)
 neura_target_defaults(neura)
 
 # The compiler and the runner ship as one executable: `neura run` loads

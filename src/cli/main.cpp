@@ -1,4 +1,6 @@
 #include "backend/converter.hpp"
+#include "decompiler/assembly.hpp"
+#include "decompiler/decompile.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
@@ -44,17 +46,21 @@ void usage(std::ostream& out) {
            "       neura build [--no-optimize] [--no-source-map] <file.nir> -o <file.nvr>\n"
            "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] <file.nvr> [-- args...]\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
-           "                  [--max-heap-cells N] <file.nra>...\n";
+           "                  [--max-heap-cells N] <file.nra>...\n"
+           "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
+           "       neura assemble <file.nvra> -o <file.nvr>\n"
+           "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n";
 }
 
-enum class Command { Check, EmitIr, Build, Run, Test };
+enum class Command { Check, EmitIr, Build, Run, Test, Disassemble, Assemble, Decompile };
 
-constexpr const char* commands = "expected check, emit-ir, build, run, or test";
+constexpr const char* commands = "expected check, emit-ir, build, run, test, disassemble, assemble, or decompile";
 
 struct Options {
     Command command = Command::Check;
     bool optimize = true;
     bool source_map = true;
+    bool provenance = true;
     std::vector<fs::path> files;
     std::vector<fs::path> roots;
     std::optional<fs::path> output;
@@ -88,12 +94,20 @@ Options read_options(int argc, char** argv) {
         options.command = Command::Run;
     } else if (command == "test") {
         options.command = Command::Test;
+    } else if (command == "disassemble") {
+        options.command = Command::Disassemble;
+    } else if (command == "assemble") {
+        options.command = Command::Assemble;
+    } else if (command == "decompile") {
+        options.command = Command::Decompile;
     } else {
         throw std::runtime_error(commands);
     }
     const bool runs = options.command == Command::Run || options.command == Command::Test;
     const bool compiles = options.command == Command::Check || options.command == Command::EmitIr ||
                           options.command == Command::Build || options.command == Command::Test;
+    const bool single_input = options.command == Command::Run || options.command == Command::Disassemble ||
+                              options.command == Command::Assemble || options.command == Command::Decompile;
     bool positional_only = false;
     for (int i = 2; i < argc; ++i) {
         const std::string_view arg = argv[i];
@@ -123,14 +137,21 @@ Options read_options(int argc, char** argv) {
                 throw std::runtime_error("--no-optimize applies only to emit-ir, build, and test");
             }
             options.optimize = false;
+        } else if (arg == "--no-provenance") {
+            if (options.command != Command::Decompile) {
+                throw std::runtime_error("--no-provenance applies only to decompile");
+            }
+            options.provenance = false;
         } else if (arg == "--no-source-map") {
             if (options.command != Command::Build) {
                 throw std::runtime_error("--no-source-map applies only to build");
             }
             options.source_map = false;
         } else if (arg == "-o") {
-            if (options.command != Command::EmitIr && options.command != Command::Build) {
-                throw std::runtime_error("-o applies only to emit-ir and build");
+            if (options.command != Command::EmitIr && options.command != Command::Build &&
+                options.command != Command::Disassemble && options.command != Command::Assemble &&
+                options.command != Command::Decompile) {
+                throw std::runtime_error("-o applies only to emit-ir, build, disassemble, assemble, and decompile");
             }
             options.output = fs::path(next());
         } else if (runs && arg == "--max-steps") {
@@ -147,7 +168,8 @@ Options read_options(int argc, char** argv) {
             throw std::runtime_error("unknown option: " + std::string(arg));
         } else if (options.command == Command::Run && !options.files.empty()) {
             throw std::runtime_error("program arguments follow --");
-
+        } else if (single_input && !options.files.empty()) {
+            throw std::runtime_error("expected one input file");
         } else {
             options.files.push_back(fs::canonical(argv[i]));
         }
@@ -158,6 +180,9 @@ Options read_options(int argc, char** argv) {
     }
     if (options.command == Command::Build && !options.output) {
         throw std::runtime_error("build requires -o <file.nvr>");
+    }
+    if (options.command == Command::Assemble && !options.output) {
+        throw std::runtime_error("assemble requires -o <file.nvr>");
     }
     return options;
 }
@@ -262,6 +287,49 @@ neura::nvr::Image load_image(const fs::path& path) {
         throw std::runtime_error(path.string() + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
                                  error.what());
     }
+}
+
+void write_text(const Options& options, const std::string& text) {
+    if (options.output) {
+        write_file(*options.output, std::vector<std::uint8_t>(text.begin(), text.end()));
+    } else {
+        std::cout << text;
+    }
+}
+
+int disassemble(const Options& options) {
+    write_text(options, neura::decompiler::disassemble(load_image(options.files.front())));
+    return 0;
+}
+
+int decompile(const Options& options) {
+    neura::decompiler::DecompileOptions decompile_options;
+    decompile_options.provenance = options.provenance;
+    write_text(options, neura::decompiler::decompile(load_image(options.files.front()), decompile_options).text);
+    return 0;
+}
+
+int assemble(const Options& options) {
+    const auto bytes = read_file(options.files.front());
+    neura::nvr::Image image;
+    try {
+        image = neura::decompiler::assemble(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+    } catch (const neura::decompiler::AssemblyError& error) {
+        throw std::runtime_error(options.files.front().string() + ": " + error.what());
+    }
+    std::vector<std::uint8_t> encoded;
+    try {
+        encoded = neura::nvr::encode(image);
+        // The assembled image passes the same validation as any other.
+        neura::nvr::load(encoded);
+    } catch (const std::invalid_argument& error) {
+        throw std::runtime_error(options.files.front().string() + ": cannot encode the image: " + error.what());
+    } catch (const neura::nvr::LoadError& error) {
+        throw std::runtime_error(options.files.front().string() + ": the assembled image is " +
+                                 std::string(neura::nvr::describe(error.kind)) + ": " + error.what());
+    }
+    write_file(*options.output, encoded);
+    return 0;
 }
 
 int run(const Options& options) {
@@ -409,6 +477,12 @@ int main(int argc, char** argv) {
             return run(options);
         case Command::Test:
             return run_tests(options);
+        case Command::Disassemble:
+            return disassemble(options);
+        case Command::Assemble:
+            return assemble(options);
+        case Command::Decompile:
+            return decompile(options);
         }
     } catch (const neura::Diagnostic& error) {
         const auto& span = error.span;
