@@ -39,4 +39,13 @@ if(BUILD_TESTING)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontend-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/frontend.cmake"
     )
+
+    add_executable(neura_ir_tests
+        tests/ir-optimization/evaluator.cpp
+        tests/ir-optimization/main.cpp
+        tests/ir-optimization/support.cpp
+    )
+    target_link_libraries(neura_ir_tests PRIVATE neura_compiler)
+    target_include_directories(neura_ir_tests PRIVATE tests)
+    neura_target_defaults(neura_ir_tests)
 endif()
