@@ -12,6 +12,7 @@ function(neura_target_defaults target)
 endfunction()
 
 add_library(neura_compiler STATIC
+    src/cli/source_loader.cpp
     src/lexer/lexer.cpp
     src/parser/parser.cpp
     src/neura-ir/lowering.cpp
