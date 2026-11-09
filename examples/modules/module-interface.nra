@@ -1,38 +1,38 @@
 let io = import:SysIo;
 
-let Logger = module {
+let Logger = module (
     export let default_level: string = "INFO";
 
-    export let LogEntry = class {
+    export let LogEntry = class (
         export let level: string;
         export let message: string;
 
         export let format = func() -> string {
             return "[" + level + "] " + message;
         }
-    };
+    );
 
     export let log = func(string message) -> void;
 
     export let log_entry = func(LogEntry entry) -> void {
         log(entry.format());
     }
-};
+);
 
-let ConsoleLogger = module:Logger { // ConsoleLogger module inherits from Logger interface
+let ConsoleLogger = module:Logger ( // ConsoleLogger module inherits from Logger interface
     export let prefix: string = "stdout";
 
-    export let Config = class {
+    export let Config = class (
         export let show_timestamp: bool = false;
-    };
+    );
 
-    export let log = func(string message) -> void {
+    export let.override log = func(string message) -> void {
         io.println(prefix + " -> " + message);
     }
-};
+);
 
-let App = module:io.Entry {
-    export let main = func(string[] args) -> Entry.ExitCode {
+let App = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
         ConsoleLogger.log("Application started");
 
         let entry = new Logger.LogEntry();
@@ -43,4 +43,4 @@ let App = module:io.Entry {
 
         return Entry.ExitCode.Ok;
     }
-};
+);

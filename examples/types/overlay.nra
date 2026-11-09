@@ -1,4 +1,4 @@
-let Overlay = module {
+let Overlay = module (
     // A type definition gives an existing type another name.
     export let Integer = int32;
     export let Name = string;
@@ -16,4 +16,4 @@ let Overlay = module {
     export let next_user_id = func(UserId user_id) -> UserId {
         return user_id + 1;
     };
-};
+);

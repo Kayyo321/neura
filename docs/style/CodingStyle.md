@@ -27,26 +27,26 @@ This document defines the official coding style and naming conventions for Neura
 #### Modules (`PascalCase`)
 Modules must be defined using `PascalCase`:
 ```neura
-let Logger = module {
+let Logger = module (
     // ...
-};
+);
 
-let ConsoleLogger = module:Logger {
+let ConsoleLogger = module:Logger (
     // ...
-};
+);
 ```
 
 #### Classes (`PascalCase`)
 Class definitions must use `PascalCase`:
 ```neura
-export let LogEntry = class {
+export let LogEntry = class (
     export let level: string;
     export let message: string;
-};
+);
 
-export let NetworkBuffer = class {
+export let NetworkBuffer = class (
     // ...
-};
+);
 ```
 
 #### Enums and Enum Variants (`PascalCase`)
@@ -86,10 +86,10 @@ export let default_level: string = "INFO";
 export let prefix: string = "stdout";
 
 // Class fields
-export let Config = class {
+export let Config = class (
     export let show_timestamp: bool = false;
     export let retry_limit: int = 3;
-};
+);
 
 // Local variables
 let user_entry = new Logger.LogEntry();
@@ -128,13 +128,13 @@ export let format_log = func(string log_message, int log_level) -> string {
   export let prefix: string = "stdout";
   ```
 
-### Braces and Semicolons
-- Use K&R / 1TBS brace style (open brace on the same line, close brace on a new line).
-- Module and class definitions end with `};`:
+### Delimiters and Semicolons
+- Use parentheses for module and class definitions, with the opening parenthesis on the same line and the closing parenthesis on a new line. Function bodies use braces in K&R / 1TBS style.
+- Module and class definitions end with `);`:
   ```neura
-  let HelloWorld = module:io.Entry {
+  let HelloWorld = module:io.Entry (
       // ...
-  };
+  );
   ```
 - Terminate statements, variable bindings, and function signatures with a semicolon `;`:
   ```neura
@@ -146,12 +146,12 @@ export let format_log = func(string log_message, int log_level) -> string {
 - Use `//` for single-line comments.
 - Place comments above the relevant code or inline with a single space after code:
   ```neura
-  let HelloWorld = module:io.Entry { // Inherits from SysIo.Entry
+  let HelloWorld = module:io.Entry ( // Inherits from SysIo.Entry
       // Implementation of entrypoint
       export let.override main = func(string[] args) -> Entry.ExitCode {
           // ...
       }
-  };
+  );
   ```
 
 ---
@@ -168,13 +168,13 @@ const DefaultPort = 8080;
 const MaxConnectionAttempts = 5;
 
 // Modules: PascalCase
-let ServiceMonitor = module {
+let ServiceMonitor = module (
     // Variables: snake_case
     export let default_service_name: string = "auth_service";
 
     // Enums: PascalCase
     // Classes: PascalCase
-    export let ServiceConfig = class {
+    export let ServiceConfig = class (
         export let retry_count: int = MaxConnectionAttempts;
         export let enable_ssl: bool = true;
 
@@ -182,7 +182,7 @@ let ServiceMonitor = module {
         export let get_connection_info = func() -> string {
             return default_service_name + ":" + DefaultPort;
         }
-    };
+    );
 
     // Functions: snake_case
     export let ping_service = func(string target_host, int timeout_seconds) -> void;
@@ -190,10 +190,10 @@ let ServiceMonitor = module {
     export let run_health_check = func(ServiceConfig config) -> void {
         io.println("Running check for: " + config.get_connection_info());
     }
-};
+);
 
 // Module inheritance: PascalCase
-let App = module:io.Entry {
+let App = module:io.Entry (
     // Main entrypoint: snake_case
     export let.override main = func(string[] args) -> Entry.ExitCode {
         let monitor_config = new ServiceMonitor.ServiceConfig();
@@ -201,7 +201,7 @@ let App = module:io.Entry {
 
         return Entry.ExitCode.Ok;
     }
-};
+);
 ```
 
 ---
@@ -211,8 +211,8 @@ let App = module:io.Entry {
 | Do | Don't | Reason |
 | :--- | :--- | :--- |
 | `const Thousand = 1000;` | `const THOUSAND = 1000;` or `const thousand = 1000;` | Constants use `PascalCase`. |
-| `let LogEntry = class { ... };` | `let log_entry = class { ... };` | Classes use `PascalCase`. |
-| `let ConsoleLogger = module { ... };` | `let console_logger = module { ... };` | Modules use `PascalCase`. |
+| `let LogEntry = class ( ... );` | `let log_entry = class ( ... );` | Classes use `PascalCase`. |
+| `let ConsoleLogger = module ( ... );` | `let console_logger = module ( ... );` | Modules use `PascalCase`. |
 | `export let log_message = func(...)` | `export let logMessage = func(...)` | Functions use `snake_case`. |
 | `let default_level: string = "INFO";` | `let DefaultLevel: string = "INFO";` | Variables use `snake_case`. |
 | `func(string target_host)` | `func(string targetHost)` | Parameters use `snake_case`. |
