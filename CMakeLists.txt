@@ -36,6 +36,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/ir_print.cpp
     src/neura-ir/integer.cpp
     src/neura-ir/verifier.cpp
+    src/neura-ir/nir_format.cpp
     src/ir-optimization/analysis.cpp
     src/ir-optimization/integer_folding.cpp
     src/ir-optimization/optimizer.cpp
