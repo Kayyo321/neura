@@ -3,8 +3,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
-#include <string_view>
-#include <vector>
+#include <utility>
 
 namespace neura {
 
@@ -16,20 +15,12 @@ struct Span {
     std::size_t length{};
 };
 
-enum class TokenKind { Identifier, Integer, Float, String, Keyword, Symbol, End };
-
-struct Token {
-    TokenKind kind;
-    std::string text;
-    Span span;
-};
-
 class Diagnostic : public std::runtime_error {
 public:
-    Diagnostic(Span location, std::string message);
+    Diagnostic(Span location, std::string message)
+        : std::runtime_error(std::move(message)), span(std::move(location)) {}
+
     Span span;
 };
-
-std::vector<Token> lex(std::string_view source, const std::string& file);
 
 } // namespace neura

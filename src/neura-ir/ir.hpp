@@ -1,6 +1,6 @@
 #pragma once
 
-#include "syntax.hpp"
+#include "util/diagnostic.hpp"
 
 #include <cstddef>
 #include <iosfwd>
@@ -9,6 +9,8 @@
 #include <vector>
 
 namespace neura {
+
+struct ParsedFile;
 
 using SymbolId = std::size_t;
 inline constexpr SymbolId no_symbol = static_cast<SymbolId>(-1);

@@ -207,9 +207,6 @@ private:
 
 } // namespace
 
-Diagnostic::Diagnostic(Span location, std::string message)
-    : std::runtime_error(std::move(message)), span(std::move(location)) {}
-
 std::vector<Token> lex(std::string_view source, const std::string& file) {
     return Lexer(source, file).run();
 }

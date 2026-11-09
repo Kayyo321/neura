@@ -1,4 +1,5 @@
 #include "ir.hpp"
+#include "parser/syntax.hpp"
 
 #include <algorithm>
 #include <array>

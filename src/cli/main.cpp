@@ -1,7 +1,7 @@
-#include "ir.hpp"
-#include "lexer.hpp"
+#include "lexer/lexer.hpp"
 #include "module_path.hpp"
-#include "syntax.hpp"
+#include "neura-ir/ir.hpp"
+#include "parser/syntax.hpp"
 
 #include <filesystem>
 #include <fstream>
