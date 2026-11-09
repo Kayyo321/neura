@@ -27,7 +27,7 @@ The following is the intended built-in type vocabulary. Details such as literal 
 
 Low-precision formats such as FP8 and packed integer formats are useful for AI workloads, but their names, encodings, arithmetic, and conversion rules have not yet been specified. Do not assume that a particular accelerator supports every type or operation.
 
-An array type is written with `[]` after its element type, for example `string[]` in an entry point. Array allocation, sizing, and ownership rules remain to be specified.
+Arrays and lists are built-in collection types, written `string[]` and `string[list]` respectively. Arrays have a fixed length; lists can grow and shrink. Suffixes can be combined for nested collections. See [Arrays and lists](Collections.md) for their syntax and safety rules.
 
 ## Type overlays
 

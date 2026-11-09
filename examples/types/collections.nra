@@ -1,0 +1,26 @@
+// Illustrates the intended collection syntax and behavior.
+let Collections = module (
+    export let example = func() -> void {
+        let names: string[] = ["Ada", "Lin"];
+        names[0] = "Grace"; // Replacing an element does not change the length.
+        let count: int = names.length; // 2
+
+        let queue: string[list] = ["first"];
+        queue.append("second");
+        queue.remove_at(0); // queue now contains "second".
+
+        // Each row is a separate array and can have a different length.
+        let grid: string[][] = [["a", "b"], ["c"]];
+        let cell: string = grid[0][1]; // "b"
+
+        let lists: string[list][list] = [["a"], ["b", "c"]];
+        lists[0].append("d");
+        let list_of_arrays: string[][list] = [["a"], ["b", "c"]];
+        list_of_arrays.append(["d"]);
+        let array_of_lists: string[list][] = [["a"], []];
+        array_of_lists[1].append("b");
+
+        // names[2] and names[-1] raise a bounds error; neither accesses memory.
+        // names.append("new"); is invalid: arrays cannot change length.
+    };
+);
