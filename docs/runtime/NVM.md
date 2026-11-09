@@ -1,6 +1,6 @@
 # Neura Virtual Machine
 
-The Neura Virtual Machine (NVM) loads and executes a Neura Virtual Runtime image (`.nvr`). An image contains compiled neuron graphs, typed execution metadata, constants, and the host imports needed by the program. This specification defines the NVM execution contract. [NVR format](NVR.md) defines its binary encoding.
+The Neura Virtual Machine (NVM) loads and executes a Neura Virtual Runtime image (`.nvr`). An image contains compiled neuron graphs, typed execution metadata, constants, and the host imports needed by the program. This specification defines the NVM execution contract. [NVR format](NVR.md) defines its binary encoding. [Neuron conversion and execution](../Backend.md) describes the implementation: its run limits, trap reporting, and embedding API, and the decisions the compiler takes where the language is open.
 
 ## Toolchain and distribution
 

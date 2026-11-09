@@ -19,9 +19,9 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 | Section count | u32 | Number of directory records |
 | File size | u64 | Total size in bytes, including the header and directory |
 
-The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four ASCII characters. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
+The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four printable ASCII characters and compare bytewise. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
 
-A 1.0 loader accepts major version 1 and minor version 0. Future revisions can define broader compatibility rules. An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections, which the loader skips by length. Executable sections never reference optional sections.
+A 1.0 loader accepts major version 1 and minor version 0. Future revisions can define broader compatibility rules. An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections, which the loader skips by length. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
 | --- | --- | --- |
@@ -32,8 +32,8 @@ A 1.0 loader accepts major version 1 and minor version 0. Future revisions can d
 | `IMPT` | Host import declarations | Yes |
 | `LAYO` | Object layout records | Yes |
 | `META` | Entry function index as one `u32` | Yes |
-| `TYPE` | Type records | Yes |
 | `SMAP` | Source locations for function blocks | Optional |
+| `TYPE` | Type records | Yes |
 
 Every section except `META` stores a vector of records. A required table with zero entries still carries a zero count. Readers must consume every byte in each recognized section.
 
@@ -59,7 +59,7 @@ A constant record contains `type:u32, payload:bytes`. A Boolean payload contains
 
 A layout record contains `parent:u32 optional, field_types:vector<u32>`. The field vector includes inherited fields as a prefix with identical types and indices. The layout index is its runtime type tag. A global record contains `type:u32, initializer:u32 optional`. An initializer names a matching constant. A global without one begins uninitialized. Compiler-generated entry blocks perform nonconstant program initialization before invoking application logic.
 
-NVM assigns reference handles in a deterministic order, starting with materialized reference constants in table order and then launch arguments and allocations in execution order. Zero is reserved. A destroyed handle cannot be assigned again during the run. The runner traps if its handle space is exhausted.
+NVM assigns reference handles in a deterministic order, starting with materialized reference constants in table order, then each launch argument's text in order, then the argument array, and then allocations in execution order. Zero is reserved. A destroyed handle cannot be assigned again during the run. The runner traps if its handle space is exhausted.
 
 ## Graphs, functions, and exits
 
@@ -67,7 +67,7 @@ A graph record contains `input_lanes:u32, nodes:vector<Node>, outputs:vector<u32
 
 A function record contains `parameter_count:u32, result_type:u32, frame_types:vector<u32>, blocks:vector<Block>`. The first parameter-count frame slots hold parameters in declaration order. Block zero is the function entry. The image's entry function takes one UTF-8 text array and returns a signed 32-bit integer.
 
-A value descriptor contains `kind:u8, type:u32, index:u32`. Kind 0 reads frame slot `index`. Kind 1 reads constant `index`. Kind 2 decodes a value starting at logical output lane `index`, using the declared type's width. The descriptor type must match the source slot or constant type for kinds 0 and 1. Consumers validate the decoded form and check reference handles as needed.
+A value descriptor contains `kind:u8, type:u32, index:u32`. Kind 0 reads frame slot `index`. Kind 1 reads constant `index`. Kind 2 decodes a value starting at logical output lane `index`, using the declared type's width. The descriptor type must match the source slot or constant type for kinds 0 and 1. Consumers validate the decoded form and check reference handles as needed. A reference decoded from lanes must name a live handle whose runtime type is compatible with the descriptor type, or the run traps; a dispatch block uses this check to pass a receiver at the parameter type of the selected function.
 
 A block record contains `graph:u32, inputs:vector<Value>, selector_start:u32, exits:vector<Exit>`. The inputs are concatenated in list order to fill the graph's input lanes. Only frame slots and constants may supply graph inputs. A block has at least one exit. With one exit, `selector_start` is zero and the runtime selects exit zero directly. Otherwise, it decodes an unsigned exit index starting at `selector_start`, using the minimum number of bits needed to represent the highest exit index.
 
@@ -82,7 +82,7 @@ An exit begins with `kind:u8, assignments:vector<Assignment>`. An assignment is 
 | Host call | 4 | `import:u32, arguments:vector<Value>, success_slot:u32 optional, success_block:u32, error_slot:u32 optional, error_block:u32` |
 | Trap | 5 | `reason:u32` |
 
-Resume blocks belong to the current function. A void result requires an absent slot. A nonvoid result requires a slot of the declared result type. Return values and arguments must be assignable to their declared types. A trap exit has no assignments. Reason codes 1 through 4 designate source arithmetic failure, source bounds failure, explicit program failure, and invalid dispatch. Other codes require a format revision. Loader and runtime faults have separate diagnostics.
+Resume blocks belong to the current function. For every exit that produces a result (a call, a state operation, and both continuations of a host call), a void result requires an absent slot, and a nonvoid result requires a slot to which the result is assignable. Return values and arguments must be assignable to their declared types. A trap exit has no assignments. Reason codes 1 through 4 designate source arithmetic failure, source bounds failure, explicit program failure, and invalid dispatch. Other codes require a format revision. Loader and runtime faults have separate diagnostics.
 
 ## State operations
 
@@ -103,9 +103,9 @@ The state-operation exit provides checked storage primitives. Its immediate is z
 | 10 | Write element | Zero | Array or list reference, index, element value | Void |
 | 11 | Append element | Zero | List reference, element value | Void |
 | 12 | Remove element | Zero | List reference, index | Void |
-| 13 | Construct text or bytes | Text or bytes type ID | Array of unsigned 8-bit values | Immutable copy of the selected type |
+| 13 | Construct text or bytes | Text or bytes type ID | Array or list of unsigned 8-bit values | Immutable copy of the selected type |
 
-Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Freeing an object invalidates its handle after language cleanup has completed.
+Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a list because operation 7 takes its elements as exit arguments, so a list is the only way to collect bytes whose number is known only at run time. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Freeing an object invalidates its handle after language cleanup has completed.
 
 ## Imports and optional source maps
 
