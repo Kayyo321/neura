@@ -1,0 +1,20 @@
+// Proposed core syntax; no compiler is available to verify this example.
+let Core = module (
+    export let sum_to = func(int32 limit) -> int32 {
+        let total: int32 = 0;
+        let current: int32 = 1;
+        while (current <= limit) {
+            total = total + current;
+            current = current + 1;
+        }
+        return total;
+    };
+
+    export let describe = func(int32 value) -> string {
+        if (value > 0) {
+            return "positive";
+        } else {
+            return "zero or negative";
+        }
+    };
+);

@@ -80,3 +80,11 @@ The derived class extends the base class's interface. A derived instance can be 
 ## Enums
 
 Enums group named variants. Existing examples use qualified variants such as `Entry.ExitCode.Ok`; enum declaration syntax and representation remain to be specified.
+
+## Inference, conversions, equality, and absence
+
+The proposed initial inference rule is local: an initialized binding without an annotation takes the initializer's type when that type is unambiguous. Public APIs should use explicit parameter and return types. Integer literal default types, inference across generic calls, and ambiguous literals need a precise specification. Empty collection literals require an expected type as described in [Collections](Collections.md).
+
+Implicit numeric widening, narrowing, signed/unsigned conversion, integer-to-float conversion, and casts are not yet specified. Code should use matching types rather than assume a conversion is safe. Likewise, equality for classes, collections, floating point, and strings needs a defined contract; do not assume structural equality or identity equality for these values. Basic scalar comparisons are illustrated in [core.nra](../../examples/guide/core.nra).
+
+Nullability, optional values, and their syntax are open. No implicit null value or null check should be assumed. Enum declarations, payload variants, exhaustive matching, and their representation are also open. These decisions are prerequisites for a general result type and fallible standard APIs. Generic syntax and its limitations are described in [Polymorphism](Polymorphism.md).

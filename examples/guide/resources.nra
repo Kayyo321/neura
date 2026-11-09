@@ -1,0 +1,10 @@
+// Proposed explicit lifecycle; alias safety and failure cleanup remain open.
+let Counter = class (
+    export let value: int32 = 0;
+    export let deinit = func() -> void {
+        // Release resources owned by this object here.
+    }
+);
+let counter = new Counter();
+counter.value = counter.value + 1;
+destroy counter; // No use of counter or its aliases after this point.

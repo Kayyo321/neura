@@ -1,0 +1,6 @@
+// Design sketch only: no file, parsing, or result API is specified yet.
+// read configuration file
+// if reading fails: report the path and the error, then stop
+// parse the requested count from its contents
+// if parsing fails: report that the count is invalid, then stop
+// otherwise use the parsed count

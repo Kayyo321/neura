@@ -1,0 +1,11 @@
+// Proposed test runner and Test module; not yet executable.
+let test = import:Test;
+let core = import:Core;
+
+let MathTests = module (
+    export let test_sum_to = func() -> void {
+        test.assert_equal_int32(6, core.sum_to(3));
+        test.assert(core.sum_to(0) == 0);
+        // Uncomment to demonstrate a failure: test.assert_equal_int32(7, core.sum_to(3));
+    };
+);
