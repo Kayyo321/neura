@@ -75,7 +75,7 @@ let NamedEntry = class:LogEntry (
 );
 ```
 
-The derived class extends the base class's interface. A derived instance can be passed where its base type is expected; an overridden method dispatches to the implementation for the actual instance. Declare an override with `let.override` or `const.override`. See `examples/types/classes.nra` for an example of polymorphism. The precise rules for constructors, visibility, and initialization in inherited classes remain to be specified.
+The derived class extends the base class's interface. A derived instance can be passed where its base type is expected; an overridden method dispatches to the implementation for the actual instance. Declare an override with `let.override` or `const.override`. See `examples/types/classes.nra` for an example of polymorphism. The precise rules for constructors, visibility, and initialization in inherited classes remain to be specified. See [Polymorphism](Polymorphism.md) for dynamic dispatch and proposed abstract methods and generics, and [Object lifecycle](ObjectLifecycle.md) for proposed construction and cleanup rules.
 
 ## Enums
 

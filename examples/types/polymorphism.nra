@@ -1,0 +1,92 @@
+// Design example: generics, abstract members, and lifecycle syntax are proposed.
+let Polymorphism = module (
+    // A bodyless method is a requirement for concrete subclasses.
+    export let Renderable = class (
+        export let render = func() -> string;
+
+        // This inherited implementation calls the actual object's render method.
+        export let framed = func() -> string {
+            return "[" + render() + "]";
+        }
+    );
+
+    export let Text = class:Renderable (
+        export let value: string = "";
+
+        export let.override render = func() -> string {
+            return value;
+        }
+    );
+
+    export let Alert = class:Text (
+        export let.override render = func() -> string {
+            return "Alert: " + value;
+        }
+    );
+
+    // Subtype polymorphism: the same function accepts different subclasses.
+    export let display = func(Renderable item) -> string {
+        return item.framed();
+    };
+
+    // Parametric polymorphism: T is preserved in the result.
+    export let identity = func<T>(T value) -> T {
+        return value;
+    };
+
+    // A bound permits render() while preserving the caller's concrete type.
+    export let render_twice = func<T:Renderable>(T item) -> string {
+        return item.render() + " / " + item.render();
+    };
+
+    // A generic class stores a value without erasing its type.
+    export let Box = class<T> (
+        export let value: T;
+
+        export let get = func() -> T {
+            return value;
+        }
+    );
+
+    // Construction initializes base state before derived state.
+    export let NamedText = class:Text (
+        export let label: string;
+
+        export let init = func(string name, string content) -> void {
+            super.init();
+            label = name;
+            value = content;
+        }
+
+        export let.override render = func() -> string {
+            return label + ": " + value;
+        }
+
+        // Called when this object is explicitly destroyed.
+        let deinit = func() -> void {
+            // Release resources owned by NamedText here, if any.
+        }
+    );
+
+    export let example = func() -> void {
+        let text = new Text();
+        text.value = "Hello";
+        let alert = new Alert();
+        alert.value = "Attention";
+
+        let first: string = display(text);       // "[Hello]"
+        let second: string = display(alert);     // "[Alert: Attention]"
+        let same: Alert = identity<Alert>(alert);
+        let repeated: string = render_twice<Alert>(same);
+        // repeated is "Alert: Attention / Alert: Attention"
+
+        let box = new Box<Text>();
+        box.value = text;
+        let unboxed: Text = box.get();
+        let third: string = display(unboxed);     // "[Hello]"
+
+        let named = new NamedText("Note", "Saved");
+        let fourth: string = display(named);      // "[Note: Saved]"
+        destroy named; // Runs NamedText cleanup, then base cleanup.
+    };
+);
