@@ -1,3 +1,4 @@
+#include "ir-optimization/optimizer.hpp"
 #include "neura-ir/ir.hpp"
 #include "source_loader.hpp"
 
@@ -14,12 +15,14 @@ namespace fs = std::filesystem;
 
 struct Options {
     bool emit_ir = false;
+    bool optimize = true;
     std::vector<fs::path> files;
     std::vector<fs::path> roots;
 };
 
 void usage(std::ostream& out) {
-    out << "usage: neura <check|emit-ir> [-I source-root] <file.nra>...\n";
+    out << "usage: neura check [-I source-root] <file.nra>...\n"
+           "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>...\n";
 }
 
 Options read_options(int argc, char** argv) {
@@ -43,6 +46,11 @@ Options read_options(int argc, char** argv) {
                 throw std::runtime_error("source root is not a directory: " + root.string());
             }
             options.roots.push_back(root);
+        } else if (!positional_only && arg == "--no-optimize") {
+            if (!options.emit_ir) {
+                throw std::runtime_error("--no-optimize applies only to emit-ir");
+            }
+            options.optimize = false;
         } else if (!positional_only && arg.starts_with('-')) {
             throw std::runtime_error("unknown option: " + std::string(arg));
         } else {
@@ -68,8 +76,13 @@ int main(int argc, char** argv) {
 
     try {
         const auto options = read_options(argc, argv);
-        const auto program = neura::lower(neura::read_sources(options.files, options.roots));
+        auto program = neura::lower(neura::read_sources(options.files, options.roots));
         if (options.emit_ir) {
+            // Unoptimized emission skips verification so that IR produced by
+            // a faulty lowering can still be inspected.
+            if (options.optimize) {
+                neura::optimize(program);
+            }
             neura::print_ir(std::cout, program);
         }
         return 0;

@@ -57,8 +57,9 @@ let both = func(bool left, bool right) -> bool {
 ]=])
 set(ir_inputs "${core}" "${types}/classes.nra" "${types}/collections.nra"
     "${types}/polymorphism.nra" "${predicate}")
-run_success(ir emit-ir ${ir_inputs})
-run_success(repeated_ir emit-ir ${ir_inputs})
+# Inspect lowering output directly; the optimizer has its own tests.
+run_success(ir emit-ir --no-optimize ${ir_inputs})
+run_success(repeated_ir emit-ir --no-optimize ${ir_inputs})
 if(NOT ir MATCHES "^neura[.]ir" OR NOT ir MATCHES "sum_to" OR NOT ir MATCHES "int32")
     message(FATAL_ERROR "Expected typed NeuraIR for the frontend fixtures\n${ir}")
 endif()
