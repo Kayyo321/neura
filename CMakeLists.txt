@@ -58,4 +58,11 @@ if(BUILD_TESTING)
         add_test(NAME ir-optimization-${suite}
             COMMAND neura_ir_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+
+    add_test(NAME ir-optimization-cli COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/ir-optimization-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ir-optimization/cli.cmake"
+    )
 endif()
