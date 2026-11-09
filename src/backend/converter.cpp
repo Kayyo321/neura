@@ -7,6 +7,7 @@
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/float.hpp"
 #include "neura-ir/integer.hpp"
+#include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvr/format.hpp"
 
@@ -2041,6 +2042,10 @@ Conversion convert(const IrProgram& program, const ConversionOptions& options) {
 }
 
 Conversion build(IrProgram program, const BuildOptions& options) {
+    // Specialization needs verified IR, and the result is verified again:
+    // by the optimizer, or directly when optimization is off.
+    require_valid_ir(program, "before specialization");
+    specialize(program);
     if (options.optimize) {
         optimize(program);
     } else {

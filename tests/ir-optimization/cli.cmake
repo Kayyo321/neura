@@ -44,7 +44,10 @@ function(symbol_section output listing)
 endfunction()
 
 # Emits `ARGN` twice with and twice without optimization. Each mode must be
-# reproducible, and optimization must not change the symbol table.
+# reproducible. Optimization must not change the symbol table; the default
+# listing is also specialized, which appends generic instances and retypes
+# uses of generic types, so programs with generics are checked for instances
+# instead.
 function(check_both_modes label)
     run_success(optimized emit-ir ${ARGN})
     run_success(optimized_again emit-ir ${ARGN})
@@ -61,7 +64,11 @@ function(check_both_modes label)
     endif()
     symbol_section(optimized_symbols "${optimized}")
     symbol_section(unoptimized_symbols "${unoptimized}")
-    if(NOT optimized_symbols STREQUAL unoptimized_symbols)
+    if(unoptimized_symbols MATCHES " generics=\\[")
+        if(NOT optimized_symbols MATCHES "\"[A-Za-z_][A-Za-z0-9_]*<[^\"]+>\"")
+            message(FATAL_ERROR "${label}: specialization added no instances")
+        endif()
+    elseif(NOT optimized_symbols STREQUAL unoptimized_symbols)
         message(FATAL_ERROR "${label}: optimization changed the symbol table")
     endif()
 endfunction()

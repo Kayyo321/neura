@@ -1,0 +1,20 @@
+// expect: 11:16 generic specialization does not terminate: the type arguments of 'grow
+let io = import:SysIo;
+
+// Each instance calls the next with a deeper type argument, so the set of
+// instances is infinite.
+let Grow = module:io.Entry (
+    let grow = func<T>(T value, int32 depth) -> int32 {
+        if (depth == 0) {
+            return 0;
+        }
+        return grow<T[]>([value], depth - 1) + 1;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (grow<int32>(1, 3) == 3) {
+            io.println("three");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

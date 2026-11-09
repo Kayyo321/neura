@@ -37,6 +37,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/integer.cpp
     src/neura-ir/float.cpp
     src/neura-ir/control_flow.cpp
+    src/neura-ir/specialize.cpp
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
     src/ir-optimization/analysis.cpp

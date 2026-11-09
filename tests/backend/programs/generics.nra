@@ -1,0 +1,121 @@
+// Generic functions and classes, specialized per type argument: explicit type
+// arguments, a bound, nested generic types, collections of instances, generic
+// methods in plain and generic classes, and int as an alias of int32.
+let io = import:SysIo;
+
+let Generics = module:io.Entry (
+    let report = func(bool holds, string label) -> void {
+        if (holds) {
+            io.println(label);
+        } else {
+            io.println("FAILED: " + label);
+        }
+    };
+
+    let Shape = class (
+        export let sides = func() -> int32;
+        export let name = func() -> string {
+            return "shape";
+        };
+    );
+
+    let Square = class:Shape (
+        export let.override sides = func() -> int32 {
+            return 4;
+        };
+        export let.override name = func() -> string {
+            return "square";
+        };
+    );
+
+    let Box = class<T> (
+        export let value: T;
+        export let get = func() -> T {
+            return value;
+        };
+        export let put = func(T next) -> void {
+            value = next;
+        };
+        // A generic method of a generic class.
+        export let pair = func<U>(U other) -> Pair<T, U> {
+            let result = new Pair<T, U>();
+            result.first = value;
+            result.second = other;
+            return result;
+        };
+    );
+
+    let Pair = class<A, B> (
+        export let first: A;
+        export let second: B;
+    );
+
+    // A generic method of a plain class.
+    let Tools = class (
+        export let twice = func<T>(T value) -> T[] {
+            return [value, value];
+        };
+    );
+
+    let identity = func<T>(T value) -> T {
+        return value;
+    };
+
+    let box_of = func<T>(T value) -> Box<T> {
+        let box = new Box<T>();
+        box.put(value);
+        return box;
+    };
+
+    let total_sides = func<T:Shape>(T[] shapes) -> int32 {
+        let total: int32 = 0;
+        for (let shape in shapes) {
+            total = total + shape.sides();
+        }
+        return total;
+    };
+
+    let count = func<T>(T[list] items) -> int {
+        let result: int = 0;
+        for (let item in items) {
+            result = result + 1;
+        }
+        return result;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        report(identity<int32>(7) == 7, "identity<int32>");
+        io.println(identity<string>("identity<string>"));
+        report(identity<bool>(true), "identity<bool>");
+
+        let numbers = box_of<int64>(40);
+        numbers.put(numbers.get() + 2);
+        report(numbers.get() == 42, "Box<int64> stores and updates");
+
+        let nested = box_of<Box<int32>>(box_of<int32>(5));
+        report(nested.get().get() == 5, "Box<Box<int32>> nests");
+
+        let aliased: Box<int> = box_of<int32>(9);
+        report(aliased.get() == 9, "Box<int> is Box<int32>");
+
+        let boxes: Box<uint8>[] = [box_of<uint8>(1), box_of<uint8>(2)];
+        report(boxes[1].get() == 2, "an array of Box<uint8>");
+
+        let both = numbers.pair<bool>(true);
+        report(both.first == 42 && both.second, "Box<int64>.pair<bool>");
+
+        let tools = new Tools();
+        let copies = tools.twice<int16>(3);
+        report(copies.length == 2 && copies[1] == 3, "Tools.twice<int16>");
+
+        let squares: Square[] = [new Square(), new Square()];
+        report(total_sides<Square>(squares) == 8, "a bound permits sides()");
+        io.println("dispatch through an instance: " + identity<Square>(squares[0]).name());
+
+        let letters: string[list] = ["a", "b", "c"];
+        report(count<string>(letters) == 3, "count<string>");
+        let flags: bool[list] = [];
+        report(count<bool>(flags) == 0, "count<bool> of an empty list");
+        return Entry.ExitCode.Ok;
+    }
+);

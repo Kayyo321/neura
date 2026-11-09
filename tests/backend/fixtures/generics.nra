@@ -1,0 +1,53 @@
+// Generic functions and classes behind scalar wrappers, compared against the
+// NeuraIR reference evaluator after specialization.
+let io = import:SysIo;
+
+let Generic = module (
+    let Box = class<T> (
+        export let value: T;
+        export let swap = func(T next) -> T {
+            let previous: T = value;
+            value = next;
+            return previous;
+        };
+    );
+
+    let larger = func<T>(T a, T b, bool first_wins) -> T {
+        if (first_wins) {
+            return a;
+        }
+        return b;
+    };
+
+    let sum = func<T>(T[list] values, T zero) -> T {
+        return zero;
+    };
+
+    export let box_swap_i8 = func(int8 a, int8 b) -> int8 {
+        let box = new Box<int8>();
+        box.value = a;
+        let previous: int8 = box.swap(b);
+        return previous - box.value;
+    };
+
+    export let nested_u8 = func(uint8 a) -> uint8 {
+        let outer = new Box<Box<uint8>>();
+        outer.value = new Box<uint8>();
+        outer.value.value = a;
+        return outer.value.swap(a / 2) + outer.value.value;
+    };
+
+    export let choose_i8 = func(int8 a, int8 b) -> int8 {
+        return larger<int8>(a, b, a > b);
+    };
+
+    export let choose_flag = func(bool a, bool b) -> bool {
+        return larger<bool>(a, b, b);
+    };
+);
+
+let Main = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        return Entry.ExitCode.Ok;
+    }
+);

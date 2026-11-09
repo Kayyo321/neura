@@ -486,6 +486,7 @@ private:
                 report(node.span, "direct call targets " + name(node.symbol) + ", which has no body");
             }
             check_arity(node, 0);
+            check_type_arguments(node);
             break;
         case IrOp::VirtualCall:
             if (check_symbol_kind(node, {SymbolKind::Function}, "virtual call") &&
@@ -493,6 +494,7 @@ private:
                 report(node.span, "virtual call targets external function " + name(node.symbol));
             }
             check_arity(node, 1);
+            check_type_arguments(node);
             break;
         case IrOp::ExternalCall:
             if (check_symbol_kind(node, {SymbolKind::Function}, "external call") &&
@@ -586,6 +588,44 @@ private:
                               " argument(s) to " + name(node.symbol) + ", which takes " +
                               std::to_string(parameters));
         }
+    }
+
+    // A generic call supplies one type argument per type parameter, and each
+    // satisfies its parameter's bound. Lowering checks bounds too, but a .nir
+    // file reaches the backend without lowering.
+    void check_type_arguments(const IrNode& node) {
+        if (!valid(node.symbol)) {
+            return;
+        }
+        const auto& generics = symbol(node.symbol).generics;
+        if (node.type_arguments.size() != generics.size()) {
+            report(node.span, "call passes " + std::to_string(node.type_arguments.size()) + " type argument(s) to " +
+                              name(node.symbol) + ", which takes " + std::to_string(generics.size()));
+            return;
+        }
+        for (std::size_t i = 0; i < generics.size(); ++i) {
+            if (!valid(generics[i]) || !symbol(generics[i]).bound) {
+                continue;
+            }
+            auto bound = *symbol(generics[i]).bound;
+            for (std::size_t j = 0; j < generics.size(); ++j) {
+                bound = substitute(std::move(bound), generics[j], node.type_arguments[j]);
+            }
+            if (!assignable(node.type_arguments[i], bound)) {
+                report(node.span, "type argument " + describe(node.type_arguments[i]) + " does not satisfy the bound " +
+                                  describe(bound) + " of " + name(generics[i]));
+            }
+        }
+    }
+
+    static IrType substitute(IrType type, SymbolId parameter, const IrType& argument) {
+        if (type.kind == TypeKind::TypeParameter && type.symbol == parameter) {
+            return argument;
+        }
+        for (auto& nested : type.arguments) {
+            nested = substitute(std::move(nested), parameter, argument);
+        }
+        return type;
     }
 
     void check_load(const IrNode& node, const Context& context) {

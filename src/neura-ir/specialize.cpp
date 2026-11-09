@@ -1,0 +1,482 @@
+#include "specialize.hpp"
+
+#include <algorithm>
+#include <deque>
+#include <map>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace neura {
+namespace {
+
+using Substitution = std::map<SymbolId, IrType>;
+
+// Where a chain of instantiations started in non-generic code, for
+// diagnostics about specialization that does not terminate.
+struct Origin {
+    Span span;
+    std::string name;
+};
+
+// A body to copy into an instance: a generic function's body into a
+// function instance, or a generic class's field initializers into a class
+// instance.
+struct Work {
+    std::size_t body = 0;
+    SymbolId owner = no_symbol;
+    Substitution substitution;
+    // Parameters of the original function mapped to the instance's.
+    std::map<SymbolId, SymbolId> symbols;
+    // The function whose locals belong to the original body, if any.
+    SymbolId original = no_symbol;
+    // The class instance that the body belongs to, if any.
+    SymbolId instance = no_symbol;
+    Origin origin;
+};
+
+struct Context {
+    const Substitution* substitution = nullptr;
+    std::map<SymbolId, SymbolId>* symbols = nullptr;
+    SymbolId original = no_symbol;
+    SymbolId owner = no_symbol;
+    SymbolId instance = no_symbol;
+    Origin origin;
+    // True while copying a generic body into an instance. Instantiations
+    // found while copying continue the chain that created the instance.
+    bool copying = false;
+};
+
+bool concrete(const IrType& type) {
+    if (type.kind == TypeKind::TypeParameter) {
+        return false;
+    }
+    return std::ranges::all_of(type.arguments, concrete);
+}
+
+std::string key(const IrType& type) {
+    std::string result = std::to_string(static_cast<int>(type.kind)) + ":" + type.name + "#" +
+                         (type.symbol == no_symbol ? std::string("-") : std::to_string(type.symbol));
+    if (!type.arguments.empty()) {
+        result += "<";
+        for (const auto& argument : type.arguments) {
+            result += key(argument) + ",";
+        }
+        result += ">";
+    }
+    return result;
+}
+
+std::string display(const IrType& type) {
+    if ((type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.size() == 1) {
+        return display(type.arguments.front()) + (type.kind == TypeKind::Array ? "[]" : "[list]");
+    }
+    std::string result = type.name;
+    if (!type.arguments.empty()) {
+        result += "<";
+        for (std::size_t i = 0; i < type.arguments.size(); ++i) {
+            result += (i == 0 ? "" : ", ") + display(type.arguments[i]);
+        }
+        result += ">";
+    }
+    return result;
+}
+
+std::string display(const std::vector<IrType>& arguments) {
+    std::string result = "<";
+    for (std::size_t i = 0; i < arguments.size(); ++i) {
+        result += (i == 0 ? "" : ", ") + display(arguments[i]);
+    }
+    return result + ">";
+}
+
+std::string location(const Span& span) {
+    return span.file + ":" + std::to_string(span.line) + ":" + std::to_string(span.column);
+}
+
+class Specializer {
+public:
+    Specializer(IrProgram& program, const SpecializationLimits& limits)
+        : program_(program), limits_(limits), original_symbols_(program.symbols.size()),
+          original_bodies_(program.bodies.size()) {}
+
+    void run() {
+        for (SymbolId id = 0; id < original_symbols_; ++id) {
+            const auto owner = program_.symbols[id].owner;
+            if (owner != no_symbol) {
+                members_[owner].push_back(id);
+            }
+        }
+        for (std::size_t i = 0; i < original_bodies_; ++i) {
+            body_of_[program_.bodies[i].owner] = i;
+        }
+
+        // Non-generic declarations keep their symbols; only the types they
+        // mention are rewritten. Their bodies are rewritten in place.
+        Substitution none;
+        std::map<SymbolId, SymbolId> identity;
+        for (SymbolId id = 0; id < original_symbols_; ++id) {
+            if (in_template(id)) {
+                continue;
+            }
+            Context context{&none, &identity, no_symbol, no_symbol, no_symbol,
+                            {program_.symbols[id].span, program_.symbols[id].name}, false};
+            // type() can append symbols, so it gets copies, not references
+            // into the symbol table.
+            const auto original = program_.symbols[id].type;
+            const auto span = program_.symbols[id].span;
+            auto rewritten = type(original, context, span);
+            program_.symbols[id].type = std::move(rewritten);
+        }
+        for (std::size_t i = 0; i < original_bodies_; ++i) {
+            const auto owner = program_.bodies[i].owner;
+            if (in_template(owner)) {
+                continue;
+            }
+            Context context{&none, &identity, no_symbol, owner, no_symbol, {program_.symbols[owner].span, ""}, false};
+            auto instructions = program_.bodies[i].instructions;
+            program_.bodies[i].instructions = region(instructions, context);
+        }
+        while (!work_.empty()) {
+            auto item = std::move(work_.front());
+            work_.pop_front();
+            Context context{&item.substitution, &item.symbols, item.original, item.owner, item.instance,
+                            item.origin, true};
+            const auto instructions = program_.bodies[item.body].instructions;
+            auto copied = region(instructions, context);
+            program_.bodies.push_back({item.owner, std::move(copied)});
+        }
+        check_result();
+    }
+
+private:
+    IrSymbol& symbol(SymbolId id) { return program_.symbols.at(id); }
+
+    // True for a declaration inside a generic class or function, including
+    // the generic declaration itself and its parameters and locals.
+    bool in_template(SymbolId id) const {
+        for (auto scope = id; scope != no_symbol && scope < original_symbols_;
+             scope = program_.symbols[scope].owner) {
+            const auto& item = program_.symbols[scope];
+            if (!item.generics.empty() || item.kind == SymbolKind::TypeParameter) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::size_t depth(const IrType& type) const {
+        if ((type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.size() == 1) {
+            return 1 + depth(type.arguments.front());
+        }
+        if (type.kind == TypeKind::Object) {
+            const auto found = instance_depth_.find(type.symbol);
+            return found == instance_depth_.end() ? 0 : found->second;
+        }
+        return 0;
+    }
+
+    std::size_t depth(const std::vector<IrType>& arguments) const {
+        std::size_t result = 0;
+        for (const auto& argument : arguments) {
+            result = std::max(result, depth(argument));
+        }
+        return result;
+    }
+
+    void check_limits(const std::string& name, std::size_t nesting, const Span& where, const Origin& origin) {
+        if (nesting > limits_.max_depth) {
+            throw Diagnostic(where, "generic specialization does not terminate: the type arguments of '" + name +
+                                        "' nest deeper than " + std::to_string(limits_.max_depth) +
+                                        " levels (the chain starts at " + location(origin.span) +
+                                        (origin.name.empty() ? "" : " with " + origin.name) + ")");
+        }
+        if (instances_.size() >= limits_.max_instances) {
+            throw Diagnostic(where, "generic specialization creates more than " +
+                                        std::to_string(limits_.max_instances) + " instances (the chain starts at " +
+                                        location(origin.span) + ")");
+        }
+    }
+
+    IrType type(const IrType& original, const Context& context, const Span& where) {
+        if (original.kind == TypeKind::TypeParameter) {
+            const auto found = context.substitution->find(original.symbol);
+            return found == context.substitution->end() ? original : found->second;
+        }
+        IrType result = original;
+        for (auto& argument : result.arguments) {
+            argument = type(argument, context, where);
+        }
+        if (result.kind == TypeKind::Object && result.symbol != no_symbol && result.symbol < original_symbols_ &&
+            !program_.symbols[result.symbol].generics.empty() && !result.arguments.empty() &&
+            std::ranges::all_of(result.arguments, concrete)) {
+            const auto instance = class_instance(result.symbol, result.arguments, where, context);
+            return program_.symbols[instance].type;
+        }
+        return result;
+    }
+
+    SymbolId add(IrSymbol item) {
+        program_.symbols.push_back(std::move(item));
+        return program_.symbols.size() - 1;
+    }
+
+    SymbolId class_instance(SymbolId generic, const std::vector<IrType>& arguments, const Span& where,
+                            const Context& context) {
+        const auto name = key(IrType{TypeKind::Object, "", generic, arguments});
+        if (const auto found = instances_.find(name); found != instances_.end()) {
+            return found->second;
+        }
+        IrSymbol copy = program_.symbols[generic];
+        const auto display_name = copy.name + display(arguments);
+        const Origin origin = context.copying ? context.origin : Origin{where, display_name};
+        check_limits(display_name, 1 + depth(arguments), where, origin);
+
+        copy.name = display_name;
+        copy.generics.clear();
+        const auto instance = add(std::move(copy));
+        symbol(instance).type = {TypeKind::Object, display_name, instance, {}};
+        instances_.emplace(name, instance);
+        instance_depth_[instance] = 1 + depth(arguments);
+        instance_of_[instance] = {generic, arguments};
+
+        Substitution substitution;
+        const auto generics = program_.symbols[generic].generics;
+        for (std::size_t i = 0; i < generics.size() && i < arguments.size(); ++i) {
+            substitution.emplace(generics[i], arguments[i]);
+        }
+        Context inner{&substitution, nullptr, no_symbol, instance, instance, origin, true};
+        // Fields and non-generic methods are copied now, so that dispatch by
+        // name finds them; generic methods are copied when called.
+        for (const auto member : members_[generic]) {
+            // A copy: creating instances appends to the symbol table.
+            const IrSymbol item = program_.symbols[member];
+            if (item.kind == SymbolKind::Field) {
+                IrSymbol field = item;
+                field.owner = instance;
+                field.type = type(item.type, inner, item.span);
+                member_map_[instance][member] = add(std::move(field));
+            } else if (item.kind == SymbolKind::Function && item.generics.empty()) {
+                member_map_[instance][member] = clone_function(member, instance, substitution, item.name, inner);
+            }
+        }
+        if (const auto body = body_of_.find(generic); body != body_of_.end()) {
+            work_.push_back({body->second, instance, substitution, {}, no_symbol, instance, origin});
+        }
+        return instance;
+    }
+
+    SymbolId clone_function(SymbolId original, SymbolId owner, const Substitution& substitution, std::string name,
+                            const Context& context) {
+        const IrSymbol declaration = program_.symbols[original];
+        IrSymbol copy = declaration;
+        copy.name = std::move(name);
+        copy.owner = owner;
+        copy.generics.clear();
+        copy.parameters.clear();
+        Context inner{&substitution, nullptr, no_symbol, owner, context.instance, context.origin, true};
+        copy.type = type(declaration.type, inner, declaration.span);
+        const auto parameters = declaration.parameters;
+        const auto function = add(std::move(copy));
+        Work item{0, function, substitution, {}, original, context.instance, context.origin};
+        for (const auto parameter : parameters) {
+            IrSymbol cloned = program_.symbols[parameter];
+            cloned.owner = function;
+            cloned.type = type(cloned.type, inner, cloned.span);
+            const auto id = add(std::move(cloned));
+            symbol(function).parameters.push_back(id);
+            item.symbols[parameter] = id;
+        }
+        if (const auto body = body_of_.find(original); body != body_of_.end()) {
+            item.body = body->second;
+            work_.push_back(std::move(item));
+        }
+        return function;
+    }
+
+    // The instance of a generic function or method for `arguments`, owned by
+    // `owner`: the class instance for a method of a generic class, otherwise
+    // the declaration's own owner.
+    SymbolId function_instance(SymbolId generic, SymbolId owner, const std::vector<IrType>& arguments,
+                               const Span& where, const Context& context) {
+        const auto name = "F" + std::to_string(generic) + "@" + std::to_string(owner) +
+                          key(IrType{TypeKind::Callable, "", no_symbol, arguments});
+        if (const auto found = instances_.find(name); found != instances_.end()) {
+            return found->second;
+        }
+        const auto display_name = program_.symbols[generic].name + display(arguments);
+        const Origin origin = context.copying ? context.origin : Origin{where, display_name};
+        check_limits(display_name, depth(arguments), where, origin);
+        Substitution substitution;
+        if (const auto found = instance_of_.find(owner); found != instance_of_.end()) {
+            const auto& class_generics = program_.symbols[found->second.first].generics;
+            for (std::size_t i = 0; i < class_generics.size(); ++i) {
+                substitution.emplace(class_generics[i], found->second.second[i]);
+            }
+        }
+        const auto generics = program_.symbols[generic].generics;
+        for (std::size_t i = 0; i < generics.size() && i < arguments.size(); ++i) {
+            substitution.emplace(generics[i], arguments[i]);
+        }
+        Context inner = context;
+        inner.origin = origin;
+        inner.instance = instance_of_.contains(owner) ? owner : no_symbol;
+        const auto function = clone_function(generic, owner, substitution, display_name, inner);
+        instances_.emplace(name, function);
+        return function;
+    }
+
+    // The copy of `member` in a class instance, or `member` itself when its
+    // owner is not generic.
+    SymbolId member_of(SymbolId member, SymbolId instance) const {
+        if (const auto found = member_map_.find(instance); found != member_map_.end()) {
+            if (const auto copy = found->second.find(member); copy != found->second.end()) {
+                return copy->second;
+            }
+        }
+        return member;
+    }
+
+    bool owned_by_generic_class(SymbolId member) const {
+        if (member == no_symbol || member >= original_symbols_) {
+            return false;
+        }
+        const auto owner = program_.symbols[member].owner;
+        return owner != no_symbol && owner < original_symbols_ &&
+               program_.symbols[owner].kind == SymbolKind::Class && !program_.symbols[owner].generics.empty();
+    }
+
+    std::vector<IrNode> region(const std::vector<IrNode>& nodes, Context& context) {
+        std::vector<IrNode> result;
+        result.reserve(nodes.size());
+        for (const auto& node : nodes) {
+            result.push_back(rewrite(node, context));
+        }
+        return result;
+    }
+
+    IrNode rewrite(const IrNode& node, Context& context) {
+        IrNode result;
+        result.op = node.op;
+        result.span = node.span;
+        result.text = node.text;
+        result.symbol = node.symbol;
+        result.operands = region(node.operands, context);
+        result.body = region(node.body, context);
+        result.alternative = region(node.alternative, context);
+        result.type = type(node.type, context, node.span);
+        for (const auto& argument : node.type_arguments) {
+            result.type_arguments.push_back(type(argument, context, node.span));
+        }
+        if (node.symbol == no_symbol) {
+            return result;
+        }
+        if (context.symbols) {
+            if (const auto found = context.symbols->find(node.symbol); found != context.symbols->end()) {
+                result.symbol = found->second;
+                return result;
+            }
+        }
+        switch (node.op) {
+        case IrOp::Initialize:
+            if (context.original != no_symbol && context.symbols &&
+                program_.symbols[node.symbol].kind == SymbolKind::Local &&
+                program_.symbols[node.symbol].owner == context.original) {
+                IrSymbol local = program_.symbols[node.symbol];
+                local.owner = context.owner;
+                local.type = type(local.type, context, local.span);
+                result.symbol = add(std::move(local));
+                (*context.symbols)[node.symbol] = result.symbol;
+            } else if (owned_by_generic_class(node.symbol)) {
+                result.symbol = member_of(node.symbol, context.instance);
+            }
+            break;
+        case IrOp::Field:
+            if (owned_by_generic_class(node.symbol) && !result.operands.empty()) {
+                result.symbol = member_of(node.symbol, result.operands.front().type.symbol);
+            }
+            break;
+        case IrOp::Receiver:
+        case IrOp::Destroy:
+            if (node.symbol < original_symbols_ && !program_.symbols[node.symbol].generics.empty()) {
+                result.symbol = node.op == IrOp::Receiver ? context.instance : result.operands.front().type.symbol;
+            }
+            break;
+        case IrOp::Allocate:
+            if (owned_by_generic_class(node.symbol)) {
+                result.symbol = member_of(node.symbol, result.type.symbol);
+            }
+            break;
+        case IrOp::Call:
+        case IrOp::VirtualCall: {
+            const auto target = node.symbol;
+            SymbolId owner = program_.symbols[target].owner;
+            if (owned_by_generic_class(target) && node.op == IrOp::VirtualCall && !result.operands.empty()) {
+                owner = result.operands.front().type.symbol;
+            }
+            if (!program_.symbols[target].generics.empty()) {
+                result.symbol = function_instance(target, owner, result.type_arguments, node.span, context);
+                result.type_arguments.clear();
+            } else if (owned_by_generic_class(target)) {
+                result.symbol = member_of(target, owner);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        return result;
+    }
+
+    void check_type(const IrType& type, const std::string& where) const {
+        if (!concrete(type)) {
+            throw std::logic_error("specialization left a type parameter in " + where);
+        }
+    }
+
+    void check_nodes(const std::vector<IrNode>& nodes, const std::string& where) const {
+        for (const auto& node : nodes) {
+            check_type(node.type, where);
+            if (!node.type_arguments.empty()) {
+                throw std::logic_error("specialization left type arguments in " + where);
+            }
+            check_nodes(node.operands, where);
+            check_nodes(node.body, where);
+            check_nodes(node.alternative, where);
+        }
+    }
+
+    void check_result() const {
+        for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+            if (id >= original_symbols_ || !in_template(id)) {
+                check_type(program_.symbols[id].type, "symbol " + program_.symbols[id].name);
+            }
+        }
+        for (const auto& body : program_.bodies) {
+            if (body.owner >= original_symbols_ || !in_template(body.owner)) {
+                check_nodes(body.instructions, "the body of " + program_.symbols[body.owner].name);
+            }
+        }
+    }
+
+    IrProgram& program_;
+    SpecializationLimits limits_;
+    const std::size_t original_symbols_;
+    const std::size_t original_bodies_;
+    std::map<SymbolId, std::vector<SymbolId>> members_;
+    std::map<SymbolId, std::size_t> body_of_;
+    std::map<std::string, SymbolId> instances_;
+    std::map<SymbolId, std::size_t> instance_depth_;
+    std::map<SymbolId, std::pair<SymbolId, std::vector<IrType>>> instance_of_;
+    std::map<SymbolId, std::map<SymbolId, SymbolId>> member_map_;
+    std::deque<Work> work_;
+};
+
+} // namespace
+
+void specialize(IrProgram& program, const SpecializationLimits& limits) {
+    Specializer(program, limits).run();
+}
+
+} // namespace neura

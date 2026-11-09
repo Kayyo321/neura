@@ -1,0 +1,13 @@
+identity<int32>
+identity<string>
+identity<bool>
+Box<int64> stores and updates
+Box<Box<int32>> nests
+Box<int> is Box<int32>
+an array of Box<uint8>
+Box<int64>.pair<bool>
+Tools.twice<int16>
+a bound permits sides()
+dispatch through an instance: square
+count<string>
+count<bool> of an empty list

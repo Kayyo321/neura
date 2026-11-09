@@ -335,7 +335,9 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
         if (actual.kind == TypeKind::Void) throw Diagnostic(args[i].span, "void is not a type argument");
         if (symbol(params[i]).bound) {
             auto bound = substitute(*symbol(params[i]).bound, result);
-            require_type(actual, bound, args[i].span);
+            if (!assignable(actual, bound))
+                throw Diagnostic(args[i].span, "type argument " + describe(actual) + " does not satisfy the bound " +
+                                               describe(bound) + " of type parameter '" + symbol(params[i]).name + "'");
         }
         result.emplace(params[i], std::move(actual));
     }

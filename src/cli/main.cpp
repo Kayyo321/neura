@@ -2,6 +2,7 @@
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
+#include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/host.hpp"
 #include "nvm/machine.hpp"
@@ -219,9 +220,12 @@ int emit_ir(const Options& options) {
         write_file(options.output.value(), neura::write_nir(program));
         return 0;
     }
-    // Unoptimized emission skips verification so that IR produced by a
-    // faulty lowering can still be inspected.
+    // Unoptimized emission shows lowering's output and skips verification, so
+    // that IR produced by a faulty lowering can still be inspected. The
+    // default listing is what conversion receives: specialized and optimized.
     if (options.optimize) {
+        neura::require_valid_ir(program, "before specialization");
+        neura::specialize(program);
         neura::optimize(program);
     }
     neura::print_ir(std::cout, program);
