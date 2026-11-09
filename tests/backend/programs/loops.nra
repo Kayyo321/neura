@@ -1,0 +1,132 @@
+// for and for-each loops: scope, continue running the step, nested loops,
+// early exits, empty collections, a collection expression evaluated once,
+// and element writes that the loop observes.
+let io = import:SysIo;
+
+let Loops = module:io.Entry (
+    let report = func(bool holds, string label) -> void {
+        if (holds) {
+            io.println(label);
+        } else {
+            io.println("FAILED: " + label);
+        }
+    };
+
+    let sum_below = func(int32 limit) -> int32 {
+        let total: int32 = 0;
+        for (let i: int32 = 0; i < limit; i = i + 1) {
+            total = total + i;
+        }
+        return total;
+    };
+
+    // continue runs the step before the condition is tested again.
+    let sum_odd_below = func(int32 limit) -> int32 {
+        let total: int32 = 0;
+        for (let i: int32 = 0; i < limit; i = i + 1) {
+            if (i % 2 == 0) {
+                continue;
+            }
+            total = total + i;
+        }
+        return total;
+    };
+
+    let pairs_until = func(int32 stop) -> int32 {
+        let count: int32 = 0;
+        for (let row: int32 = 0; row < 10; row = row + 1) {
+            for (let column: int32 = 0; column < 10; column = column + 1) {
+                if (column > row) {
+                    break;
+                }
+                count = count + 1;
+            }
+            if (row == stop) {
+                break;
+            }
+        }
+        return count;
+    };
+
+    let first_power_above = func(int32 limit) -> int32 {
+        let power: int32 = 1;
+        for (;;) {
+            if (power > limit) {
+                return power;
+            }
+            power = power * 2;
+        }
+    };
+
+    let sum = func(int32[] values) -> int32 {
+        let total: int32 = 0;
+        for (let value in values) {
+            total = total + value;
+        }
+        return total;
+    };
+
+    let first_negative = func(int32[list] values) -> int32 {
+        for (let value: int32 in values) {
+            if (value < 0) {
+                return value;
+            }
+        }
+        return 0;
+    };
+
+    let count_until_zero = func(int32[list] values) -> int32 {
+        let count: int32 = 0;
+        for (let value in values) {
+            if (value == 0) {
+                break;
+            }
+            if (value < 0) {
+                continue;
+            }
+            count = count + 1;
+        }
+        return count;
+    };
+
+    let made: int32 = 0;
+
+    let make = func() -> int32[] {
+        made = made + 1;
+        return [1, 2, 3];
+    };
+
+    let visit_changed = func() -> int32 {
+        let values: int32[list] = [1, 2, 3];
+        let total: int32 = 0;
+        for (let value in values) {
+            values[2] = 30;
+            total = total + value;
+        }
+        return total;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        report(sum_below(5) == 10, "for: sum below 5 is 10");
+        report(sum_below(0) == 0, "for: no iterations below 0");
+        report(sum_odd_below(10) == 25, "for: continue runs the step");
+        report(pairs_until(3) == 10, "for: nested loops with break");
+        report(first_power_above(100) == 128, "for (;;) leaves by return");
+        report(sum([4, 5, 6]) == 15, "for-each over an array");
+        let empty: int32[list] = [];
+        report(first_negative(empty) == 0, "for-each over an empty list");
+        report(first_negative([3, -4, -5]) == -4, "for-each returns early");
+        report(count_until_zero([1, -1, 2, 0, 3]) == 2, "for-each with continue and break");
+        let total: int32 = 0;
+        for (let value in make()) {
+            total = total + value;
+        }
+        report(total == 6 && made == 1, "the collection is evaluated once");
+        report(visit_changed() == 33, "an element write is visible to the loop");
+        let words: string[] = ["a", "b"];
+        for (let word in words) {
+            io.println("word " + word);
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

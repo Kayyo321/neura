@@ -53,6 +53,12 @@ struct Declaration;
 struct Statement {
     enum class Kind {
         Binding, Expression, Assignment, Block, If, While, Return, Break, Continue, Destroy,
+        // for (init; condition; step) body. `initializer` and `step` hold at
+        // most one statement each; `expressions` holds the condition if any.
+        For,
+        // for (let name: Type in collection) body. `declaration` names the
+        // element binding; `expressions` holds the collection.
+        ForEach,
     };
 
     Kind kind;
@@ -61,6 +67,8 @@ struct Statement {
     std::vector<Expr> expressions;
     std::vector<Statement> body;
     std::vector<Statement> alternative;
+    std::vector<Statement> initializer;
+    std::vector<Statement> step;
 };
 
 struct Declaration {

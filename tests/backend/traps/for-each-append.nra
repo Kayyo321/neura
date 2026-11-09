@@ -1,0 +1,21 @@
+// status: 70
+// stderr: collection modified during iteration \(trap reason 5\) .* at for-each-append\.nra:11:9
+let io = import:SysIo;
+
+// Appending to a list while a for-each loop visits it fails at the loop
+// before the next element is visited.
+let Grow = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let queue: string[list] = ["first", "second"];
+        let seen: int32 = 0;
+        for (let item in queue) {
+            io.println("visit " + item);
+            if (seen == 0) {
+                queue.append("third");
+            }
+            seen = seen + 1;
+        }
+        io.println("unreachable");
+        return Entry.ExitCode.Ok;
+    }
+);

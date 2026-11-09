@@ -247,11 +247,72 @@ private:
             result.kind = Statement::Kind::While;
             result.expressions.push_back(condition());
             result.body = block();
+        } else if (match("for")) {
+            result = for_statement();
         } else {
             result = simple_statement();
             expect(";");
         }
         result.span = span_from(start);
+        return result;
+    }
+
+    // After `for`. A header of the form `(let name [: Type] in collection)`
+    // is a for-each loop; anything else is a three-part loop.
+    Statement for_statement() {
+        Statement result{};
+        expect("(");
+        if (at("let") || at("const")) {
+            const auto start = cursor_;
+            const bool constant = at("const");
+            advance();
+            if (current().kind == TokenKind::Identifier) {
+                auto declaration = std::make_unique<Declaration>();
+                declaration->kind = Declaration::Kind::Binding;
+                declaration->constant = constant;
+                declaration->name = identifier().text;
+                if (match(":")) {
+                    declaration->type = type();
+                }
+                if (match("in")) {
+                    declaration->span = span_from(start);
+                    result.kind = Statement::Kind::ForEach;
+                    result.declaration = std::move(declaration);
+                    result.expressions.push_back(expression());
+                    expect(")");
+                    result.body = block();
+                    return result;
+                }
+            }
+            cursor_ = start;
+        }
+        result.kind = Statement::Kind::For;
+        if (at_declaration()) {
+            const auto start = cursor_;
+            Statement binding{};
+            binding.kind = Statement::Kind::Binding;
+            binding.declaration = std::make_unique<Declaration>(declaration(false));
+            binding.span = span_from(start);
+            result.initializer.push_back(std::move(binding));
+        } else if (!match(";")) {
+            const auto start = cursor_;
+            auto init = simple_statement();
+            init.span = span_from(start);
+            expect(";");
+            result.initializer.push_back(std::move(init));
+        }
+        if (!at(";")) {
+            result.expressions.push_back(expression());
+        }
+        expect(";");
+        if (!at(")")) {
+            const auto start = cursor_;
+            auto step = simple_statement();
+            step.span = span_from(start);
+            result.step.push_back(std::move(step));
+        }
+        expect(")");
+        result.body = block();
         return result;
     }
 

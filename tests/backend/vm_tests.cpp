@@ -3,6 +3,7 @@
 
 #include "fixtures.hpp"
 
+#include <fstream>
 #include <limits>
 
 namespace neura::testing {
@@ -242,6 +243,49 @@ NEURA_TEST(vm, repeated_runs_are_identical) {
         check_equal(second.output, first.output, std::string(name) + ": output of a repeated run");
         check_equal(second.result.steps, first.result.steps, std::string(name) + ": steps of a repeated run");
     }
+}
+
+} // namespace neura::testing
+
+namespace neura::testing {
+
+NEURA_TEST(vm, list_versions_count_structural_changes) {
+    // The hand-assembled 1.1 fixture reads a fresh list's version and traps
+    // with reason 5. A compiled program then shows that element writes keep
+    // a list's version and that an append during for-each changes it.
+    const auto image = nvr::load(version_bytes(1));
+    nvm::Execution execution(image, std::vector<std::string>{});
+    const auto event = execution.advance();
+    check(event.kind == nvm::Event::Kind::Trapped && event.trap.kind == nvm::TrapKind::Program &&
+              event.trap.reason == 5,
+          "the version fixture traps with reason 5");
+    const auto path = fs::temp_directory_path() / "neura-vm-tests" / "versions.nra";
+    fs::create_directories(path.parent_path());
+    std::ofstream(path) << R"(let io = import:SysIo;
+let App = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let values: int32[list] = [1, 2];
+        let seen: int32 = 0;
+        for (let value in values) {
+            values[1] = 5;
+            seen = seen + value;
+        }
+        if (seen == 6) {
+            io.println("element writes keep the version");
+        }
+        values.append(3);
+        values.remove_at(0);
+        for (let value in values) {
+            values.append(value);
+        }
+        return Entry.ExitCode.Ok;
+    }
+);
+)";
+    const auto run = run_captured(build_program({path}));
+    check_equal(run.output, std::string("element writes keep the version\n"), "output before the trap");
+    check(!run.result.completed && run.result.trap.kind == nvm::TrapKind::Program && run.result.trap.reason == 5,
+          "appending during for-each traps with reason 5");
 }
 
 } // namespace neura::testing

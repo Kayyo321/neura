@@ -21,7 +21,7 @@ constexpr bool is_name_char(char c) {
 
 constexpr auto keywords = std::to_array<std::string_view>({
     "let", "const", "export", "override", "func", "module", "class", "import", "new",
-    "destroy", "if", "else", "while", "break", "continue", "return", "true", "false",
+    "destroy", "if", "else", "while", "for", "in", "break", "continue", "return", "true", "false",
     "as",
 });
 

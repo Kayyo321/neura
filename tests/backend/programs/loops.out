@@ -1,0 +1,13 @@
+for: sum below 5 is 10
+for: no iterations below 0
+for: continue runs the step
+for: nested loops with break
+for (;;) leaves by return
+for-each over an array
+for-each over an empty list
+for-each returns early
+for-each with continue and break
+the collection is evaluated once
+an element write is visible to the loop
+word a
+word b

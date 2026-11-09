@@ -1,26 +1,11 @@
 #include "analysis.hpp"
 
+#include "neura-ir/control_flow.hpp"
+
 #include <algorithm>
 
 namespace neura::optimization {
 namespace {
-
-bool region_never_completes(const std::vector<IrNode>& region) {
-    return std::ranges::any_of(region, never_completes);
-}
-
-// Whether a break in `region` targets the loop that owns the region. A break
-// inside a nested loop targets that loop, so nested loops are not searched.
-bool breaks_out(const std::vector<IrNode>& region) {
-    return std::ranges::any_of(region, [](const IrNode& node) {
-        switch (node.op) {
-        case IrOp::Break: return true;
-        case IrOp::Block: return breaks_out(node.body);
-        case IrOp::Branch: return breaks_out(node.body) || breaks_out(node.alternative);
-        default: return false;
-        }
-    });
-}
 
 bool comparison(const IrNode& node) {
     const auto& op = node.text;
@@ -70,21 +55,7 @@ bool pure_and_total(const IrProgram& program, const IrNode& node) {
 }
 
 bool never_completes(const IrNode& statement) {
-    switch (statement.op) {
-    case IrOp::Return:
-    case IrOp::Break:
-    case IrOp::Continue:
-        return true;
-    case IrOp::Block:
-        return region_never_completes(statement.body);
-    case IrOp::Branch:
-        return region_never_completes(statement.body) && region_never_completes(statement.alternative);
-    case IrOp::Loop:
-        return statement.operands.size() == 1 && boolean_literal(statement.operands.front()) == true &&
-               !breaks_out(statement.body);
-    default:
-        return false;
-    }
+    return neura::never_completes(statement);
 }
 
 } // namespace neura::optimization

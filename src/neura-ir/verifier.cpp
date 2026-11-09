@@ -1,5 +1,6 @@
 #include "verifier.hpp"
 
+#include "control_flow.hpp"
 #include "integer.hpp"
 
 #include <algorithm>
@@ -55,45 +56,24 @@ bool is_statement(IrOp op) {
     case IrOp::Break:
     case IrOp::Continue:
     case IrOp::Destroy:
+    case IrOp::Fail:
         return true;
     default:
         return false;
     }
 }
 
+// True when `region` holds a return, break, or continue at any depth. A
+// loop latch may hold none of them.
+bool transfers_control(const std::vector<IrNode>& region) {
+    return std::ranges::any_of(region, [](const IrNode& node) {
+        return node.op == IrOp::Return || node.op == IrOp::Break || node.op == IrOp::Continue ||
+               transfers_control(node.body) || transfers_control(node.alternative);
+    });
+}
+
 bool is_collection(const IrType& type) {
     return (type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.size() == 1;
-}
-
-bool true_literal(const IrNode& node) {
-    return node.op == IrOp::Boolean && node.text == "true";
-}
-
-// A break in `region` that leaves the loop owning `region`. Breaks in nested
-// loops leave those loops instead.
-bool exits_loop(const std::vector<IrNode>& region) {
-    return std::ranges::any_of(region, [](const IrNode& node) {
-        return node.op == IrOp::Break ||
-               ((node.op == IrOp::Block || node.op == IrOp::Branch) &&
-                (exits_loop(node.body) || exits_loop(node.alternative)));
-    });
-}
-
-// Mirrors the frontend rule that a non-void function returns on every path:
-// a return, a block that always returns, a branch whose arms both always
-// return, or a `while (true)` loop that no break leaves.
-bool always_returns(const std::vector<IrNode>& region) {
-    return std::ranges::any_of(region, [](const IrNode& node) {
-        switch (node.op) {
-        case IrOp::Return: return true;
-        case IrOp::Block: return always_returns(node.body);
-        case IrOp::Branch: return always_returns(node.body) && always_returns(node.alternative);
-        case IrOp::Loop:
-            return node.operands.size() == 1 && true_literal(node.operands.front()) &&
-                   !exits_loop(node.body);
-        default: return false;
-        }
-    });
 }
 
 class Verifier {
@@ -329,12 +309,13 @@ private:
                 check_value(node.operands.front(), context);
                 expect_type(node.operands.front(), TypeKind::Bool, "loop condition");
             }
-            if (!node.alternative.empty()) {
-                report(node.span, "a loop has an else region");
-            }
             ++context.loops;
             check_region(node.body, context);
             --context.loops;
+            if (transfers_control(node.alternative)) {
+                report(node.span, "a loop latch contains return, break, or continue");
+            }
+            check_region(node.alternative, context);
             break;
         case IrOp::Return: check_return(node, context); break;
         case IrOp::Break:
@@ -342,6 +323,12 @@ private:
             expect_operands(node, 0, "loop control");
             if (context.loops == 0) {
                 report(node.span, "loop control appears outside a loop");
+            }
+            break;
+        case IrOp::Fail:
+            expect_operands(node, 0, "fail");
+            if (node.text != "iteration") {
+                report(node.span, "fail names unknown failure '" + node.text + "'");
             }
             break;
         case IrOp::Destroy:
@@ -554,6 +541,15 @@ private:
                                                                 node.type.kind == TypeKind::Integer))) {
                     report(node.span, "cannot convert " + describe(from) + " to " + describe(node.type));
                 }
+            }
+            break;
+        case IrOp::CollectionVersion:
+            if (expect_operands(node, 1, "collection version") &&
+                node.operands.front().type.kind != TypeKind::List) {
+                report(node.span, "collection version requires a list");
+            }
+            if (node.type != IrType{TypeKind::Integer, "uint64", no_symbol, {}}) {
+                report(node.span, "collection version has type " + describe(node.type) + ", expected uint64");
             }
             break;
         case IrOp::RemoveAt:

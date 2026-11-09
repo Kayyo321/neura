@@ -1,0 +1,26 @@
+// status: 70
+// stderr: collection modified during iteration \(trap reason 5\) .* at for-each-alias\.nra:18:9
+let io = import:SysIo;
+
+// A removal followed by an append leaves the length unchanged, and both go
+// through an alias, but the list's structural version still changes.
+let Alias = module:io.Entry (
+    let rotate = func(int32[list] values) -> void {
+        let first: int32 = values[0];
+        values.remove_at(0);
+        values.append(first);
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let numbers: int32[list] = [1, 2, 3];
+        let total: int32 = 0;
+        let alias: int32[list] = numbers;
+        for (let n in numbers) {
+            total = total + n;
+            io.println("visited one");
+            rotate(alias);
+        }
+        io.println("unreachable");
+        return Entry.ExitCode.Ok;
+    }
+);

@@ -183,8 +183,8 @@ NEURA_TEST(nir, corrupt_files_are_rejected) {
     changed[4] = 2;
     expect_nir_error(changed, "NeuraIR format 2.0 is not supported");
     changed = bytes;
-    changed[6] = 1;
-    expect_nir_error(changed, "NeuraIR format 1.1 is not supported");
+    changed[6] = 2;
+    expect_nir_error(changed, "NeuraIR format 1.2 is not supported");
     changed = bytes;
     changed.push_back(0);
     expect_nir_error(changed, "1 unread bytes");
@@ -212,6 +212,26 @@ NEURA_TEST(nir, corrupt_files_are_rejected) {
     }
     deep.bodies[0].instructions = {std::move(nested)};
     expect_nir_error(write_nir(deep), "nesting exceeds");
+}
+
+NEURA_TEST(nir, minor_version_follows_the_features_used) {
+    // Programs without 1.1 operations or loop latches are written as 1.0,
+    // so their files are unchanged; for loops and conversions need 1.1.
+    const auto hello = write_nir(lower_files({environment.examples() / "hello-world" / "hello-world.nra"}));
+    check_equal(static_cast<int>(hello[6]), 0, "hello-world.nir is NeuraIR 1.0");
+    const auto loops = write_nir(lower_files({program_path(environment, "loops")}));
+    check_equal(static_cast<int>(loops[6]), 1, "loops.nir is NeuraIR 1.1");
+    auto downgraded = loops;
+    downgraded[6] = 0;
+    try {
+        read_nir(downgraded, "loops.nir");
+        fail("a 1.0 header on a file with 1.1 features should be rejected");
+    } catch (const NirError& error) {
+        const std::string message = error.what();
+        check(message.find("invalid operation tag") != std::string::npos ||
+                  message.find("a loop latch requires NeuraIR format 1.1") != std::string::npos,
+              message);
+    }
 }
 
 } // namespace neura::testing

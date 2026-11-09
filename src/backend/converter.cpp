@@ -60,6 +60,7 @@ constexpr std::uint32_t arithmetic_failure = static_cast<std::uint32_t>(nvr::Tra
 constexpr std::uint32_t bounds_failure = static_cast<std::uint32_t>(nvr::TrapReason::Bounds);
 constexpr std::uint32_t program_failure = static_cast<std::uint32_t>(nvr::TrapReason::ProgramFailure);
 constexpr std::uint32_t dispatch_failure = static_cast<std::uint32_t>(nvr::TrapReason::InvalidDispatch);
+constexpr std::uint32_t iteration_failure = static_cast<std::uint32_t>(nvr::TrapReason::ModifiedDuringIteration);
 
 std::uint64_t width_mask(unsigned width) {
     return width >= 64 ? ~std::uint64_t{0} : (std::uint64_t{1} << width) - 1;
@@ -158,7 +159,8 @@ private:
     SymbolId self_class_ = no_symbol;
     SymbolId receiver_module_ = no_symbol;
     struct LoopTargets {
-        std::uint32_t head;
+        // Where `continue` goes: the latch, or the head when there is none.
+        std::uint32_t next;
         std::uint32_t exit;
     };
     std::vector<LoopTargets> loops_;
@@ -1172,8 +1174,17 @@ void FunctionCompiler::statement(const IrNode& node) {
         jump(loops_.back().exit);
         return;
     case IrOp::Continue:
-        jump(loops_.back().head);
+        jump(loops_.back().next);
         return;
+    case IrOp::Fail: {
+        // The only failure NeuraIR names is a list changed during for-each.
+        ExitSpec trap;
+        trap.kind = nvr::ExitKind::Trap;
+        trap.reason = iteration_failure;
+        operation_at(node.span);
+        close({trap});
+        return;
+    }
     case IrOp::Destroy:
         destroy(node);
         return;
@@ -1245,13 +1256,23 @@ void FunctionCompiler::loop(const IrNode& node) {
     const auto body = new_block();
     const auto exit = new_block();
     branch(condition, body, exit);
-    loops_.push_back({head, exit});
+    // A latch runs after the body and on continue, then the condition is
+    // tested again. A loop without one continues straight at its head.
+    const auto latch = node.alternative.empty() ? head : new_block();
+    loops_.push_back({latch, exit});
     begin(body, node.body.empty() ? node.span : node.body.front().span);
     region(node.body);
     if (open()) {
-        jump(head);
+        jump(latch);
     }
     loops_.pop_back();
+    if (latch != head) {
+        begin(latch, node.alternative.front().span);
+        region(node.alternative);
+        if (open()) {
+            jump(head);
+        }
+    }
     begin(exit, node.span);
 }
 
@@ -1438,6 +1459,10 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         auto narrowed = convert_integer(current().synth.circuit(), lanes(length), false, 32, true);
         fail_when(narrowed.failure, arithmetic_failure, node.span);
         return bits(c_.type_of(node.type, node.span), std::move(narrowed.value));
+    }
+    case IrOp::CollectionVersion: {
+        auto list = expression(node.operands.front());
+        return state(nvr::StateOp::ReadVersion, 0, {list}, c_.scalar(nvr::TypeKind::Unsigned, 64), node.span);
     }
     case IrOp::Convert:
         return convert(node);

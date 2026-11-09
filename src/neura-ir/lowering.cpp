@@ -1,3 +1,4 @@
+#include "control_flow.hpp"
 #include "float.hpp"
 #include "ir.hpp"
 #include "parser/syntax.hpp"
@@ -25,6 +26,7 @@ const IrType void_type{TypeKind::Void, "void", no_symbol, {}};
 const IrType bool_type{TypeKind::Bool, "bool", no_symbol, {}};
 const IrType string_type{TypeKind::String, "string", no_symbol, {}};
 const IrType int32_type{TypeKind::Integer, "int32", no_symbol, {}};
+const IrType uint64_type{TypeKind::Integer, "uint64", no_symbol, {}};
 const IrType float64_type{TypeKind::Float, "float64", no_symbol, {}};
 
 std::optional<IrType> primitive(std::string_view name) {
@@ -159,6 +161,8 @@ private:
                    const Substitution& replacements, Context& context);
     void place(const IrNode& destination) const;
     IrNode statement(const Statement& stmt, Context& context);
+    IrNode for_loop(const Statement& stmt, Context& context);
+    IrNode for_each(const Statement& stmt, Context& context);
     std::vector<IrNode> body(const std::vector<Statement>& stmts, Context& context);
     SymbolId owner_kind(SymbolId id, SymbolKind kind) const;
 };
@@ -1032,6 +1036,10 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         --context.loops;
         return result;
     }
+    case StmtKind::For:
+        return for_loop(stmt, context);
+    case StmtKind::ForEach:
+        return for_each(stmt, context);
     case StmtKind::Return: {
         if (context.function == no_symbol) {
             throw Diagnostic(stmt.span, "return is only allowed inside a function");
@@ -1070,6 +1078,144 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     throw std::logic_error("invalid statement kind");
 }
 
+IrNode Lowering::for_loop(const Statement& stmt, Context& context) {
+    // for (init; condition; step) body lowers to a block that holds the
+    // initializer and a loop whose latch is the step. The initializer's
+    // binding is scoped to the loop; `continue` runs the step and then tests
+    // the condition (CoreLanguage.md, Loops).
+    context.scopes.emplace_back();
+    auto result = node(IrOp::Block, stmt.span);
+    for (const auto& init : stmt.initializer) {
+        if (init.kind != StmtKind::Binding && init.kind != StmtKind::Assignment &&
+            init.kind != StmtKind::Expression)
+            throw Diagnostic(init.span, "a for loop initializer must be a binding, an assignment, or an expression");
+        result.body.push_back(statement(init, context));
+    }
+    auto loop = node(IrOp::Loop, stmt.span);
+    if (stmt.expressions.empty()) {
+        auto always = node(IrOp::Boolean, stmt.span, bool_type);
+        always.text = "true";
+        loop.operands.push_back(std::move(always));
+    } else {
+        loop.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
+    }
+    ++context.loops;
+    loop.body = body(stmt.body, context);
+    --context.loops;
+    for (const auto& step : stmt.step) {
+        if (step.kind != StmtKind::Assignment && step.kind != StmtKind::Expression)
+            throw Diagnostic(step.span, "a for loop step must be an assignment or an expression");
+        loop.alternative.push_back(statement(step, context));
+    }
+    context.scopes.pop_back();
+    result.body.push_back(std::move(loop));
+    return result;
+}
+
+IrNode Lowering::for_each(const Statement& stmt, Context& context) {
+    // The collection is evaluated once. A list's structural version is
+    // captured and checked before every advance, including the one that ends
+    // the loop, so an append or removal through any alias fails at the loop
+    // (CoreLanguage.md, Loops). `continue` re-enters the loop head, which
+    // checks and advances; `break` and `return` leave without advancing.
+    const auto& declaration = *stmt.declaration;
+    const auto& source = stmt.expressions.front();
+    auto result = node(IrOp::Block, stmt.span);
+    auto items = value(source, context);
+    if (!collection(items.type))
+        throw Diagnostic(source.span, "for-each requires an array or list, got " + describe(items.type));
+    const auto element = items.type.arguments.front();
+    const bool list = items.type.kind == TypeKind::List;
+    auto hidden = [&](std::string name, IrType hidden_type, IrNode initializer, bool constant) {
+        auto id = add(SymbolKind::Local, std::move(name), stmt.span, context.owner);
+        symbol(id).type = std::move(hidden_type);
+        symbol(id).constant = constant;
+        auto init = node(IrOp::Initialize, stmt.span);
+        init.symbol = id;
+        init.operands.push_back(std::move(initializer));
+        result.body.push_back(std::move(init));
+        return id;
+    };
+    auto load = [&](SymbolId id) {
+        auto loaded = node(IrOp::Load, stmt.span, symbol(id).type);
+        loaded.symbol = id;
+        return loaded;
+    };
+    auto version_of = [&](SymbolId id) {
+        auto version = node(IrOp::CollectionVersion, stmt.span, uint64_type);
+        version.operands.push_back(load(id));
+        return version;
+    };
+    auto binary_node = [&](std::string op, IrType type, IrNode left, IrNode right) {
+        auto combined = node(IrOp::Binary, stmt.span, std::move(type));
+        combined.text = std::move(op);
+        combined.operands.push_back(std::move(left));
+        combined.operands.push_back(std::move(right));
+        return combined;
+    };
+    auto integer = [&](std::string text) {
+        auto literal = node(IrOp::Integer, stmt.span, int32_type);
+        literal.text = std::move(text);
+        return literal;
+    };
+
+    const auto items_type = items.type;
+    const auto items_id = hidden("$items", items_type, std::move(items), true);
+    const auto version_id = list ? hidden("$version", uint64_type, version_of(items_id), true) : no_symbol;
+    const auto index_id = hidden("$index", int32_type, integer("0"), false);
+
+    auto loop = node(IrOp::Loop, stmt.span);
+    auto always = node(IrOp::Boolean, stmt.span, bool_type);
+    always.text = "true";
+    loop.operands.push_back(std::move(always));
+    if (list) {
+        auto check = node(IrOp::Branch, stmt.span);
+        check.operands.push_back(binary_node("!=", bool_type, version_of(items_id), load(version_id)));
+        auto failure = node(IrOp::Fail, stmt.span);
+        failure.text = "iteration";
+        check.body.push_back(std::move(failure));
+        loop.body.push_back(std::move(check));
+    }
+    {
+        auto length = node(IrOp::Length, stmt.span, int32_type);
+        length.operands.push_back(load(items_id));
+        auto done = node(IrOp::Branch, stmt.span);
+        done.operands.push_back(binary_node(">=", bool_type, load(index_id), std::move(length)));
+        done.body.push_back(node(IrOp::Break, stmt.span));
+        loop.body.push_back(std::move(done));
+    }
+
+    context.scopes.emplace_back();
+    IrType declared = element;
+    if (declaration.type) {
+        declared = type(*declaration.type, context);
+        require_type(element, declared, declaration.type->span);
+    }
+    auto access = node(IrOp::Index, stmt.span, element);
+    access.operands.push_back(load(items_id));
+    access.operands.push_back(load(index_id));
+    auto element_id = add(SymbolKind::Local, declaration.name, declaration.span, context.owner);
+    symbol(element_id).type = declared;
+    symbol(element_id).constant = declaration.constant;
+    context.scopes.back().emplace(declaration.name, element_id);
+    auto bind = node(IrOp::Initialize, stmt.span);
+    bind.symbol = element_id;
+    bind.operands.push_back(std::move(access));
+    loop.body.push_back(std::move(bind));
+    auto advance = node(IrOp::Store, stmt.span);
+    advance.operands.push_back(load(index_id));
+    advance.operands.push_back(binary_node("+", int32_type, load(index_id), integer("1")));
+    loop.body.push_back(std::move(advance));
+    ++context.loops;
+    for (const auto& item : stmt.body) {
+        loop.body.push_back(statement(item, context));
+    }
+    --context.loops;
+    context.scopes.pop_back();
+    result.body.push_back(std::move(loop));
+    return result;
+}
+
 std::vector<IrNode> Lowering::body(const std::vector<Statement>& stmts, Context& context) {
     context.scopes.emplace_back();
     std::vector<IrNode> instructions;
@@ -1079,44 +1225,6 @@ std::vector<IrNode> Lowering::body(const std::vector<Statement>& stmts, Context&
     }
     context.scopes.pop_back();
     return instructions;
-}
-
-bool terminates(const std::vector<IrNode>& instructions);
-
-bool exits_loop(const std::vector<IrNode>& instructions) {
-    for (const auto& instruction : instructions) {
-        if (instruction.op == IrOp::Break) {
-            return true;
-        }
-        if (instruction.op == IrOp::Block && exits_loop(instruction.body)) {
-            return true;
-        }
-        if (instruction.op == IrOp::Branch &&
-            (exits_loop(instruction.body) || exits_loop(instruction.alternative))) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool terminates(const std::vector<IrNode>& instructions) {
-    for (const auto& instruction : instructions) {
-        if (instruction.op == IrOp::Return) {
-            return true;
-        }
-        if (instruction.op == IrOp::Block && terminates(instruction.body)) {
-            return true;
-        }
-        if (instruction.op == IrOp::Branch &&
-            terminates(instruction.body) && terminates(instruction.alternative)) {
-            return true;
-        }
-        if (instruction.op == IrOp::Loop && instruction.operands.front().op == IrOp::Boolean &&
-            instruction.operands.front().text == "true" && !exits_loop(instruction.body)) {
-            return true;
-        }
-    }
-    return false;
 }
 
 void Lowering::check_constructor(SymbolId id, const Declaration& decl) {
@@ -1155,7 +1263,7 @@ void Lowering::lower_declaration(SymbolId id) {
         auto ctx = context(id);
         ctx.function = id;
         auto instructions = body(declaration.body, ctx);
-        if (symbol(id).type.kind != TypeKind::Void && !terminates(instructions))
+        if (symbol(id).type.kind != TypeKind::Void && !always_returns(instructions))
             throw Diagnostic(declaration.span, "function may exit without returning " +
                                                describe(symbol(id).type));
         program_.bodies.push_back({id, std::move(instructions)});
