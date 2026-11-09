@@ -21,7 +21,7 @@ This release carries the language below from source through NeuraIR, optimizatio
 
 | Area | Status |
 | --- | --- |
-| Standard library | Only `SysIo.println`, `SysIo.Entry`, and `Test` exist. Text and numeric formatting, collection operations beyond `length`, `append`, and `remove_at`, files and paths, a standard result type, and I/O APIs with explicit failure results are a separate topic ([Standard library](StandardLibrary.md)). |
+| Standard library | Only `SysIo.println`, `SysIo.Entry`, and `Test` exist. Text and numeric formatting, collection operations beyond `length`, `append`, and `remove_at`, files and paths, a standard result type, and I/O APIs with explicit failure results are a separate topic ([Standard library](StandardLibrary.md)). The [implementation plan](Stdlib.md) specifies the planned library and lists the language features it is blocked on; none of it is implemented. |
 | Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](ResourcesConcurrency.md)). |
 | Foreign interop | Java and other foreign-function interop are not part of the language. |
 | Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](ProjectStructure.md)). |

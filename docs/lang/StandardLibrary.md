@@ -12,3 +12,5 @@
 | Testing | Assertions and runner integration | See [Testing](Testing.md) |
 
 The initial file example in [errors.nra](../../examples/guide/errors.nra) is intentionally pseudocode until failure and resource APIs are settled. No network, filesystem, or numeric conversion API should be assumed from names alone. Standard modules need versioned contracts and examples for success and failure before implementation.
+
+The [standard library implementation plan](Stdlib.md) defines the planned modules, their contracts and algorithms, and the language features that must exist first. It is a plan: none of it is implemented, and this page's table remains the record of what is still undecided in the language today.
