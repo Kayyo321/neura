@@ -92,4 +92,45 @@ HostCompletion ConsoleWriteLine::invoke(const HostRequest& request) {
     return HostCompletion::failed(HostValue{console_write_failed, {}});
 }
 
+TestAssert::TestAssert(TestLog& log) : log_(log) {
+    signature_.name = "neura.test.assert";
+    signature_.version = 1;
+    signature_.parameters = {nvr::Type{nvr::TypeKind::Bool, 0, 0}};
+    signature_.success = nvr::Type{nvr::TypeKind::Void, 0, 0};
+    signature_.error = nvr::Type{nvr::TypeKind::Unsigned, 32, 0};
+}
+
+HostCompletion TestAssert::invoke(const HostRequest& request) {
+    if (request.arguments.at(0).bits != 0) {
+        return HostCompletion::ok();
+    }
+    if (!log_.failure) {
+        log_.failure = "assertion failed";
+    }
+    return HostCompletion::failed(HostValue{assertion_failed, {}});
+}
+
+TestAssertEqualInt32::TestAssertEqualInt32(TestLog& log) : log_(log) {
+    signature_.name = "neura.test.assert_equal_int32";
+    signature_.version = 1;
+    signature_.parameters = {nvr::Type{nvr::TypeKind::Signed, 32, 0}, nvr::Type{nvr::TypeKind::Signed, 32, 0}};
+    signature_.success = nvr::Type{nvr::TypeKind::Void, 0, 0};
+    signature_.error = nvr::Type{nvr::TypeKind::Unsigned, 32, 0};
+}
+
+HostCompletion TestAssertEqualInt32::invoke(const HostRequest& request) {
+    const auto value = [&](std::size_t i) {
+        return static_cast<std::int32_t>(static_cast<std::uint32_t>(request.arguments.at(i).bits));
+    };
+    const auto expected = value(0);
+    const auto actual = value(1);
+    if (expected == actual) {
+        return HostCompletion::ok();
+    }
+    if (!log_.failure) {
+        log_.failure = "expected " + std::to_string(expected) + ", got " + std::to_string(actual);
+    }
+    return HostCompletion::failed(HostValue{assertion_failed, {}});
+}
+
 } // namespace neura::nvm

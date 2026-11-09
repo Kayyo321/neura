@@ -1,0 +1,50 @@
+// Test runner behavior: passing and failing assertions, a failure that ends
+// its test, a runtime trap, and isolation of module state between tests.
+let io = import:SysIo;
+let test = import:Test;
+
+let Suite = module (
+    let counter: int32 = 0;
+
+    let bump = func() -> int32 {
+        counter = counter + 1;
+        return counter;
+    };
+
+    export let test_counter_starts_fresh = func() -> void {
+        test.assert_equal_int32(1, bump());
+    };
+
+    export let test_counter_starts_fresh_again = func() -> void {
+        test.assert_equal_int32(1, bump());
+        test.assert(counter == 1);
+    };
+
+    export let test_unequal = func() -> void {
+        io.println("before the failing assertion");
+        test.assert_equal_int32(3, 4);
+        io.println("unreachable: a failed assertion ends the test");
+    };
+
+    export let test_false = func() -> void {
+        test.assert(1 > 2);
+    };
+
+    export let test_trap = func() -> void {
+        let values: int32[] = [1];
+        test.assert(values[3] == 1);
+    };
+
+    // Not tests: not exported, takes an argument, or returns a value.
+    let test_private = func() -> void {
+        test.assert(false);
+    };
+
+    export let test_with_argument = func(int32 value) -> void {
+        test.assert(false);
+    };
+
+    export let test_with_result = func() -> int32 {
+        return 0;
+    };
+);

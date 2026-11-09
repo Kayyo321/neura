@@ -133,4 +133,39 @@ private:
 
 inline constexpr std::uint32_t console_write_failed = 1;
 
+// The assertion services of the Test module (Testing.md). Each records the
+// first failure of a run in a TestLog and answers with the uint32 error code
+// 1, whose error continuation ends the test.
+struct TestLog {
+    // Description of the first failed assertion, if any.
+    std::optional<std::string> failure;
+};
+
+inline constexpr std::uint32_t assertion_failed = 1;
+
+// neura.test.assert version 1: takes a Boolean; succeeds when it is true.
+class TestAssert final : public HostService {
+public:
+    explicit TestAssert(TestLog& log);
+    const HostSignature& signature() const override { return signature_; }
+    HostCompletion invoke(const HostRequest& request) override;
+
+private:
+    TestLog& log_;
+    HostSignature signature_;
+};
+
+// neura.test.assert_equal_int32 version 1: takes the expected and the actual
+// int32; succeeds when they are equal.
+class TestAssertEqualInt32 final : public HostService {
+public:
+    explicit TestAssertEqualInt32(TestLog& log);
+    const HostSignature& signature() const override { return signature_; }
+    HostCompletion invoke(const HostRequest& request) override;
+
+private:
+    TestLog& log_;
+    HostSignature signature_;
+};
+
 } // namespace neura::nvm

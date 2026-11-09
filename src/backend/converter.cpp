@@ -191,8 +191,10 @@ public:
     std::uint32_t layout(SymbolId cls, const Span& where);
     std::uint32_t field_index(SymbolId field, const Span& where);
     std::uint32_t global(SymbolId global, const Span& where);
-    std::uint32_t graph(const nvr::Graph& graph);
-    std::uint32_t console_import();
+    std::uint32_t graph(const nvr::Graph& graph) override;
+    // The import that an external function is bound to, or nothing when the
+    // function has no runtime binding.
+    std::optional<std::uint32_t> external_import(SymbolId function, const Span& where);
     std::uint32_t function(const FunctionOrigin& origin);
 
     SymbolId member(SymbolId owner, const std::string& name) const;
@@ -200,7 +202,6 @@ public:
     SymbolId implementation(SymbolId cls, SymbolId method) const;
     bool derives(SymbolId cls, SymbolId base) const;
     bool is_exit_code(SymbolId enumeration) const;
-    bool is_println(SymbolId function) const;
     const std::vector<IrNode>& body(SymbolId owner) const;
     const std::vector<const IrNode*>& field_initializers(SymbolId cls) const;
     std::optional<std::uint64_t> literal(const IrNode& node, std::uint32_t type);
@@ -247,7 +248,7 @@ private:
     std::map<SymbolId, std::uint32_t> fields_;
     std::map<SymbolId, std::uint32_t> globals_;
     std::map<std::string, std::uint32_t> graphs_;
-    std::optional<std::uint32_t> console_;
+    std::map<std::string, std::uint32_t> imports_;
     std::map<FunctionOrigin, std::uint32_t> functions_;
     std::vector<FunctionOrigin> origins_;
     std::size_t next_function_ = 0;
@@ -282,12 +283,6 @@ bool Converter::is_exit_code(SymbolId enumeration) const {
     const auto& entry = symbol(item.owner);
     return entry.kind == SymbolKind::Module && entry.name == "Entry" && entry.owner != no_symbol &&
            symbol(entry.owner).name == "SysIo" && symbol(entry.owner).owner == no_symbol;
-}
-
-bool Converter::is_println(SymbolId function) const {
-    const auto& item = symbol(function);
-    return item.external && item.name == "println" && item.owner != no_symbol &&
-           symbol(item.owner).name == "SysIo" && symbol(item.owner).owner == no_symbol;
 }
 
 std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
@@ -491,18 +486,40 @@ std::uint32_t Converter::graph(const nvr::Graph& graph) {
     return it->second;
 }
 
-std::uint32_t Converter::console_import() {
-    if (!console_) {
-        nvr::Import import;
-        import.name = "neura.console.write_line";
-        import.interface_version = 1;
-        import.parameter_types = {scalar(nvr::TypeKind::Text)};
-        import.success_type = scalar(nvr::TypeKind::Void);
-        import.error_type = scalar(nvr::TypeKind::Unsigned, 32);
-        console_ = static_cast<std::uint32_t>(image_.imports.size());
-        image_.imports.push_back(std::move(import));
+std::optional<std::uint32_t> Converter::external_import(SymbolId function, const Span& where) {
+    // Built-in external functions and the host services they bind to. Each
+    // takes its declared parameters, succeeds with no value, and fails with a
+    // uint32 code (docs/runtime/NVM.md, Host services).
+    const auto& item = symbol(function);
+    if (item.owner == no_symbol || symbol(item.owner).owner != no_symbol) {
+        return std::nullopt;
     }
-    return *console_;
+    const auto qualified = symbol(item.owner).name + "." + item.name;
+    std::string name;
+    if (qualified == "SysIo.println") {
+        name = "neura.console.write_line";
+    } else if (qualified == "Test.assert") {
+        name = "neura.test.assert";
+    } else if (qualified == "Test.assert_equal_int32") {
+        name = "neura.test.assert_equal_int32";
+    } else {
+        return std::nullopt;
+    }
+    if (const auto found = imports_.find(name); found != imports_.end()) {
+        return found->second;
+    }
+    nvr::Import import;
+    import.name = name;
+    import.interface_version = 1;
+    for (const auto parameter : item.parameters) {
+        import.parameter_types.push_back(type_of(symbol(parameter).type, where));
+    }
+    import.success_type = scalar(nvr::TypeKind::Void);
+    import.error_type = scalar(nvr::TypeKind::Unsigned, 32);
+    const auto index = static_cast<std::uint32_t>(image_.imports.size());
+    image_.imports.push_back(std::move(import));
+    imports_.emplace(name, index);
+    return index;
 }
 
 std::uint32_t Converter::function(const FunctionOrigin& origin) {
@@ -1896,20 +1913,23 @@ Operand FunctionCompiler::virtual_call(const IrNode& node) {
 }
 
 Operand FunctionCompiler::external_call(const IrNode& node) {
-    if (!c_.is_println(node.symbol)) {
+    // A failed host call ends the run with a program failure: a failed
+    // println write, or a failed assertion, which ends the test.
+    auto arguments = sequence(node.operands);
+    // The error slot's type is interned before the import's types, which
+    // keeps the type table order of images built before Test was bound.
+    const auto error_slot = new_slot(c_.scalar(nvr::TypeKind::Unsigned, 32));
+    const auto resume = new_block();
+    const auto failed = new_block();
+    const auto import = c_.external_import(node.symbol, node.span);
+    if (!import) {
         const auto& target = c_.symbol(node.symbol);
         throw Diagnostic(node.span, "external function '" + c_.symbol(target.owner).name + "." + target.name +
                                         "' has no runtime binding");
     }
-    // SysIo.println writes through neura.console.write_line. A failed write
-    // ends the run: the language has no error result for println yet.
-    auto arguments = sequence(node.operands);
-    const auto error_slot = new_slot(c_.scalar(nvr::TypeKind::Unsigned, 32));
-    const auto resume = new_block();
-    const auto failed = new_block();
     ExitSpec host;
     host.kind = nvr::ExitKind::Host;
-    host.target = c_.console_import();
+    host.target = *import;
     host.arguments = std::move(arguments);
     host.resume = resume;
     host.error_slot = error_slot;
