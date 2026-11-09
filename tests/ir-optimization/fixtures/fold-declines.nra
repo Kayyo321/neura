@@ -1,5 +1,5 @@
-// Constant expressions whose results depend on unspecified semantics. The
-// optimizer must leave each operation in place.
+// Constant expressions that trap at run time, and float arithmetic, which the
+// optimizer does not fold. It must leave each operation in place.
 let FoldDeclines = module (
     export let int8_overflow = func() -> int8 {
         return 127 + 1;
@@ -45,20 +45,16 @@ let FoldDeclines = module (
         return 1 / 0;
     };
 
-    export let inexact_division = func() -> int32 {
-        return 7 / 2;
+    export let remainder_by_zero = func() -> int32 {
+        return 1 % 0;
     };
 
-    export let negative_inexact_division = func() -> int32 {
-        return -7 / 2;
+    export let conversion_out_of_range = func() -> uint8 {
+        return 300 as uint8;
     };
 
-    export let unspecified_width = func() -> int {
-        return 1 + 2;
-    };
-
-    export let unspecified_byte = func() -> byte {
-        return 1 + 2;
+    export let negative_to_unsigned = func() -> uint32 {
+        return -1 as uint32;
     };
 
     export let floating_point = func() -> float64 {

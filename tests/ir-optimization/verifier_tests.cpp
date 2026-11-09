@@ -54,6 +54,45 @@ IrNode& first(std::vector<IrNode>& nodes, IrOp op) {
 
 } // namespace
 
+NEURA_TEST(verifier, rejects_unsatisfied_bounds_and_type_argument_counts) {
+    // polymorphism.nra calls render_twice<Alert>, whose T is bounded by
+    // Renderable. A .nir file could name any type there.
+    auto program = lower_files({environment.examples() / "types" / "polymorphism.nra"});
+    check(verify_ir(program).empty(), "the example verifies");
+    auto bad_bound = program;
+    auto& body = bad_bound.bodies.back().instructions;
+    std::function<IrNode*(std::vector<IrNode>&)> generic_call = [&](std::vector<IrNode>& nodes) -> IrNode* {
+        for (auto& node : nodes) {
+            if ((node.op == IrOp::Call || node.op == IrOp::VirtualCall) && !node.type_arguments.empty() &&
+                bad_bound.symbols[node.symbol].name == "render_twice") {
+                return &node;
+            }
+            for (auto* region : {&node.operands, &node.body, &node.alternative}) {
+                if (auto* found = generic_call(*region)) {
+                    return found;
+                }
+            }
+        }
+        return nullptr;
+    };
+    auto* call = generic_call(body);
+    check(call != nullptr, "the example calls render_twice");
+    auto missing = bad_bound;
+    call->type_arguments.front() = {TypeKind::Integer, "int32", no_symbol, {}};
+    auto issues = verify_ir(bad_bound);
+    check(std::ranges::any_of(issues, [](const VerificationIssue& issue) {
+              return issue.message.find("type argument int32 does not satisfy the bound Renderable") != std::string::npos;
+          }),
+          "an unsatisfied bound is reported:" + issues_text(issues));
+    auto* missing_call = generic_call(missing.bodies.back().instructions);
+    missing_call->type_arguments.clear();
+    issues = verify_ir(missing);
+    check(std::ranges::any_of(issues, [](const VerificationIssue& issue) {
+              return issue.message.find("passes 0 type argument(s)") != std::string::npos;
+          }),
+          "a missing type argument is reported:" + issues_text(issues));
+}
+
 NEURA_TEST(verifier, accepts_lowered_and_optimized_programs) {
     std::vector<std::vector<fs::path>> inputs;
     for (const auto& file : fixture_files(environment)) {

@@ -1,6 +1,6 @@
 // Functions compared against the NeuraIR reference evaluator on the same
-// inputs. Results the language leaves undefined, such as overflow or an
-// inexact division, must trap with reason 1 in the compiled image.
+// inputs. Operations that trap, such as overflow, a zero divisor, or an
+// out-of-range conversion, must trap with reason 1 in the compiled image.
 let io = import:SysIo;
 
 let Arithmetic = module (
@@ -98,6 +98,38 @@ let Arithmetic = module (
             b = t;
         }
         return a - b;
+    };
+
+    export let rem_i8 = func(int8 a, int8 b) -> int8 {
+        return a % b;
+    };
+
+    export let rem_u8 = func(uint8 a, uint8 b) -> uint8 {
+        return a % b;
+    };
+
+    export let to_unsigned_i8 = func(int8 a) -> uint8 {
+        return a as uint8;
+    };
+
+    export let to_signed_u8 = func(uint8 a) -> int8 {
+        return a as int8;
+    };
+
+    export let narrow_i16 = func(int16 a) -> int8 {
+        return a as int8;
+    };
+
+    export let widen_u8 = func(uint8 a) -> int64 {
+        return a as int64 - 128;
+    };
+
+    export let digit_sum_u8 = func(uint8 a) -> uint8 {
+        let total: uint8 = 0;
+        for (let rest: uint8 = a; rest > 0; rest = rest / 10) {
+            total = total + rest % 10;
+        }
+        return total;
     };
 );
 

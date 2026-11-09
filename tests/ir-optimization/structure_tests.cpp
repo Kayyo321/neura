@@ -68,19 +68,29 @@ NEURA_TEST(structure, folds_defined_integer_and_boolean_constants) {
                       {"Folding.boolean_negation", "(return (boolean true))"},
                       {"Folding.scaled", "(return (binary - (binary * (load value) (integer 3)) (integer 2)))"},
                       {"Folding.condition", "(block {(return (load value))})"},
+                      {"Folding.truncated_division", "(return (integer 3))"},
+                      {"Folding.negative_truncated_division", "(return (integer -3))"},
+                      {"Folding.remainder", "(return (integer -1))"},
+                      {"Folding.remainder_of_negative_divisor", "(return (integer 1))"},
+                      {"Folding.minimum_remainder", "(return (integer 0))"},
+                      {"Folding.unsigned_remainder", "(return (integer 15))"},
+                      {"Folding.int_alias", "(return (integer 3))"},
+                      {"Folding.byte_alias", "(return (integer 255))"},
+                      {"Folding.widening", "(return (integer -5))"},
+                      {"Folding.narrowing", "(return (integer 200))"},
                   });
 }
 
-NEURA_TEST(structure, declines_folds_that_depend_on_unspecified_semantics) {
+NEURA_TEST(structure, declines_folds_that_trap) {
     expect_unchanged(environment, "fold-declines.nra",
                      {"FoldDeclines.int8_overflow", "FoldDeclines.int8_underflow",
                       "FoldDeclines.int8_negated_minimum", "FoldDeclines.int8_division_overflow",
                       "FoldDeclines.uint8_negative", "FoldDeclines.int32_overflow", "FoldDeclines.int64_overflow",
                       "FoldDeclines.int64_product_overflow", "FoldDeclines.int64_division_overflow",
                       "FoldDeclines.uint64_overflow", "FoldDeclines.division_by_zero",
-                      "FoldDeclines.inexact_division", "FoldDeclines.negative_inexact_division",
-                      "FoldDeclines.unspecified_width", "FoldDeclines.unspecified_byte",
-                      "FoldDeclines.floating_point", "FoldDeclines.concatenation"});
+                      "FoldDeclines.remainder_by_zero", "FoldDeclines.conversion_out_of_range",
+                      "FoldDeclines.negative_to_unsigned", "FoldDeclines.floating_point",
+                      "FoldDeclines.concatenation"});
     expect_shapes(environment, "fold-declines.nra",
                   {
                       {"FoldDeclines.int8_overflow", "(return (binary + (integer 127) (integer 1)))"},
@@ -151,7 +161,9 @@ NEURA_TEST(structure, removes_only_pure_discards) {
     expect_unchanged(environment, "state.nra", {"State.bump"});
     expect_shapes(environment, "state.nra",
                   {
-                      {"State", "(initialize counter (integer 5))"},
+                      // A global initializer keeps its root form: written as
+                      // 2 + 3, it runs at program start rather than at load.
+                      {"State", "(initialize counter (binary + (integer 2) (integer 3)))"},
                       {"State.discards",
                        "(discard (virtual_call bump (receiver State) (integer 1))) "
                        "(discard (external_call assert (boolean true))) "

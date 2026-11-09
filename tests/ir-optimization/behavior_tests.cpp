@@ -195,7 +195,7 @@ NEURA_TEST(behavior, fixtures_match_unoptimized) {
         total = merge(total, differential({file}, {}, file.filename().string()));
     }
     check_equal(total.skipped, std::size_t{0}, "fixture functions skipped by the evaluator");
-    for (const auto status : {Status::Returned, Status::Unspecified, Status::LimitReached}) {
+    for (const auto status : {Status::Returned, Status::Trapped, Status::LimitReached}) {
         check(total.statuses[status] > 0, "the fixture domain never produced a " + describe(status) + " outcome");
     }
 }
@@ -231,7 +231,7 @@ NEURA_TEST(behavior, integer_folding_agrees_with_oracles) {
     const std::array cases{Case{"int8", true},    Case{"uint8", true},    Case{"int16", false},
                            Case{"uint16", false}, Case{"int32", false},   Case{"uint32", false},
                            Case{"int64", false},  Case{"uint64", false}};
-    const std::array<std::string, 11> operators{"+", "-", "*", "/", "==", "!=", "<", "<=", ">", ">=", "neg"};
+    const std::array<std::string, 12> operators{"+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "neg"};
     const IrType bool_type{TypeKind::Bool, "bool", no_symbol, {}};
     std::size_t checked = 0;
     std::size_t folded = 0;
@@ -255,7 +255,7 @@ NEURA_TEST(behavior, integer_folding_agrees_with_oracles) {
                 return IrNode{IrOp::Integer, type, where, no_symbol,
                               (value.negative ? "-" : "") + std::to_string(value.magnitude), {}, {}, {}, {}};
             };
-            const bool comparison = op != "+" && op != "-" && op != "*" && op != "/" && op != "neg";
+            const bool comparison = op != "+" && op != "-" && op != "*" && op != "/" && op != "%" && op != "neg";
             std::vector<std::pair<Value, Value>> inputs;
             for (const auto& left : values) {
                 if (op == "neg") {
@@ -300,7 +300,7 @@ NEURA_TEST(behavior, integer_folding_agrees_with_oracles) {
                              describe(right) + ": " + message());
                     }
                 };
-                expect(defined || reference.status == Status::Unspecified, [&] { return describe(reference); });
+                expect(defined || reference.status == Status::Trapped, [&] { return describe(reference); });
                 const bool was_folded = rewritten.op == IrOp::Integer || rewritten.op == IrOp::Boolean;
                 expect(was_folded == defined, [&] {
                     return "folded=" + std::to_string(was_folded) + " but evaluator says " + describe(reference);
@@ -337,7 +337,8 @@ NEURA_TEST(behavior, integer_folding_agrees_with_oracles) {
                     if (op == "-") exact = a - b;
                     if (op == "*") exact = a * b;
                     if (op == "neg") exact = -a;
-                    if (op == "/" && b != 0 && a % b == 0) exact = a / b;
+                    if (op == "/" && b != 0) exact = a / b;
+                    if (op == "%" && b != 0) exact = a % b;
                     if (op == "==") truth = a == b;
                     if (op == "!=") truth = a != b;
                     if (op == "<") truth = a < b;
@@ -400,7 +401,8 @@ NEURA_TEST(behavior, hand_derived_expectations) {
                returned(integer_value(int8, false, 13)));
 
     Outcome failure;
-    failure.status = Status::Unspecified;
+    failure.status = Status::Trapped;
+    failure.trap_reason = 1;
     failure.reason = "division by zero";
     auto program = lower_fixture(environment, "short-circuit.nra");
     const auto& keep_failure = body_of(program, "ShortCircuit.keep_failure");

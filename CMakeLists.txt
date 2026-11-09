@@ -109,6 +109,7 @@ if(BUILD_TESTING)
         tests/backend/fixtures.cpp
     tests/backend/float_tests.cpp
         tests/backend/format_tests.cpp
+    tests/backend/generics_tests.cpp
         tests/backend/nir_tests.cpp
         tests/backend/vm_tests.cpp
         tests/ir-optimization/evaluator.cpp
@@ -120,7 +121,7 @@ if(BUILD_TESTING)
     target_include_directories(neura_backend_tests PRIVATE tests)
     neura_target_defaults(neura_backend_tests)
 
-    foreach(suite IN ITEMS circuits floats format vm nir conversion)
+    foreach(suite IN ITEMS circuits floats format vm nir conversion generics)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()

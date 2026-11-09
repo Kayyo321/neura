@@ -1,0 +1,106 @@
+// Functions over objects, collections, and loops, compared against the
+// NeuraIR reference evaluator. Each takes and returns scalars so that the
+// comparison can call it directly; the state it builds lives in the heap.
+let Structures = module (
+    let Counter = class (
+        export let count: int16 = 0;
+        export let bump = func(int16 by) -> void {
+            count = count + by;
+        };
+    );
+
+    let Base = class (
+        export let order: int16 = 0;
+        export let init = func(int16 start) -> void {
+            order = start;
+        };
+        export let step = func() -> int16 {
+            return 1;
+        };
+    );
+
+    let Derived = class:Base (
+        export let scale: int16 = 10;
+        export let init = func(int16 start) -> void {
+            super.init(start);
+            order = order * scale;
+        };
+        export let.override step = func() -> int16 {
+            return 2;
+        };
+    );
+
+    export let two_counters = func(int8 a, int8 b) -> int16 {
+        let first = new Counter();
+        let second = new Counter();
+        first.bump(a as int16);
+        second.bump(b as int16);
+        first.bump(a as int16);
+        let result: int16 = first.count - second.count;
+        destroy second;
+        return result;
+    };
+
+    export let construction_order = func(int8 a, bool derived) -> int16 {
+        let item: Base = new Base(a as int16);
+        if (derived) {
+            item = new Derived(a as int16);
+        }
+        return item.order + item.step();
+    };
+
+    export let list_sum = func(int8 a, int8 b) -> int16 {
+        let values: int16[list] = [a as int16, b as int16];
+        values.append(values[0] + values[1]);
+        let total: int16 = 0;
+        for (let value in values) {
+            total = total + value;
+        }
+        return total;
+    };
+
+    export let element = func(uint8 position) -> int8 {
+        let values: int8[] = [10, 20, 30];
+        return values[position];
+    };
+
+    export let remove = func(int8 position) -> int8 {
+        let values: int8[list] = [1, 2, 3];
+        values.remove_at(position);
+        return values.length as int8;
+    };
+
+    export let grow_while_iterating = func(uint8 limit) -> uint8 {
+        let values: uint8[list] = [1, 2, 3];
+        let visits: uint8 = 0;
+        for (let value in values) {
+            visits = visits + 1;
+            if (visits == limit) {
+                values.append(value);
+            }
+        }
+        return visits;
+    };
+
+    export let skip_and_stop = func(uint8 stop) -> uint8 {
+        let total: uint8 = 0;
+        for (let i: uint8 = 0; i < 20; i = i + 1) {
+            if (i % 3 == 0) {
+                continue;
+            }
+            if (i == stop) {
+                break;
+            }
+            total = total + i;
+        }
+        return total;
+    };
+);
+
+let io = import:SysIo;
+
+let Main = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        return Entry.ExitCode.Ok;
+    }
+);

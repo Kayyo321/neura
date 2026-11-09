@@ -40,6 +40,9 @@ std::string_view op_name(IrOp op) {
     case IrOp::Continue: return "continue";
     case IrOp::Destroy: return "destroy";
     case IrOp::Discard: return "discard";
+    case IrOp::Convert: return "convert";
+    case IrOp::CollectionVersion: return "collection_version";
+    case IrOp::Fail: return "fail";
     }
     return "<invalid>";
 }

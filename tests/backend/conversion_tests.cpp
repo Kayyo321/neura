@@ -7,6 +7,8 @@
 #include "backend/converter.hpp"
 #include "ir-optimization/evaluator.hpp"
 #include "ir-optimization/optimizer.hpp"
+#include "neura-ir/float.hpp"
+#include "nvr/names.hpp"
 #include "neura-ir/integer.hpp"
 
 #include <fstream>
@@ -70,6 +72,13 @@ Value decode(std::uint64_t bits, const IrType& type) {
     if (type.kind == TypeKind::Bool) {
         return bool_value(bits != 0);
     }
+    if (type.kind == TypeKind::Float) {
+        Value value;
+        value.kind = Value::Kind::Float;
+        value.type = type;
+        value.magnitude = bits;
+        return value;
+    }
     const auto format = *specified_integer_format(type);
     if (format.is_signed && format.bits < 64 && ((bits >> (format.bits - 1)) & 1U) != 0) {
         const auto magnitude = (std::uint64_t{1} << format.bits) - bits;
@@ -84,6 +93,25 @@ Value decode(std::uint64_t bits, const IrType& type) {
 std::vector<std::uint64_t> operands(const IrType& type, bool exhaustive) {
     if (type.kind == TypeKind::Bool) {
         return {0, 1};
+    }
+    if (type.kind == TypeKind::Float) {
+        // Zeros, ones, halves, extremes, subnormals, infinities, a NaN, and
+        // pseudo-random encodings.
+        const auto format = *float_format(type);
+        const auto w = format.width();
+        const auto f = format.fraction_bits;
+        const auto sign = std::uint64_t{1} << (w - 1);
+        const auto ones = ((std::uint64_t{1} << format.exponent_bits) - 1) << f;
+        const auto one = format.bias() << f;
+        std::vector<std::uint64_t> values{0, sign, one, one | sign, one - (std::uint64_t{1} << f), one + 1,
+                                          1, sign | 1, ones - 1, ones, ones | sign, ones | (std::uint64_t{1} << (f - 1)),
+                                          (format.bias() + 3) << f, (std::uint64_t{1} << f) - 1};
+        std::uint64_t state = w * 7919;
+        for (int i = 0; i < (exhaustive ? 24 : 10); ++i) {
+            state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+            values.push_back((state >> 11) & (w == 64 ? ~std::uint64_t{0} : (std::uint64_t{1} << w) - 1));
+        }
+        return values;
     }
     const auto format = *specified_integer_format(type);
     const auto mask = format.bits == 64 ? ~std::uint64_t{0} : (std::uint64_t{1} << format.bits) - 1;
@@ -106,6 +134,14 @@ std::vector<std::uint64_t> operands(const IrType& type, bool exhaustive) {
         values.push_back((state >> (i % 2 == 0 ? 40 : 3)) & mask);
     }
     return values;
+}
+
+// The NVM fault that corresponds to a fault the evaluator reports.
+nvm::TrapKind fault_kind(const std::string& reason) {
+    if (reason == "index out of bounds") return nvm::TrapKind::IndexOutOfBounds;
+    if (reason == "read of an uninitialized field") return nvm::TrapKind::UninitializedField;
+    if (reason == "use of a destroyed object") return nvm::TrapKind::InvalidHandle;
+    return nvm::TrapKind::Program;
 }
 
 struct Comparison {
@@ -148,16 +184,23 @@ Comparison compare_function(const Compiled& compiled, Evaluator& evaluator, std:
             check(event.kind == nvm::Event::Kind::Completed,
                   label.str() + ": evaluator returned " + describe(*expected.result) + ", image " +
                       (event.kind == nvm::Event::Kind::Trapped ? nvm::describe(event.trap, compiled.image) : "paused"));
-            const auto width = expected.result->kind == Value::Kind::Bool
-                ? 1U
-                : specified_integer_format(function.type)->bits;
+            const auto width = expected.result->kind == Value::Kind::Bool    ? 1U
+                               : expected.result->kind == Value::Kind::Float ? float_format(function.type)->width()
+                                                                              : specified_integer_format(function.type)->bits;
             check_equal(event.result, encode(*expected.result, width), label.str() + " result bits");
             ++comparison.returned;
             break;
         }
-        case Status::Unspecified:
+        case Status::Faulted:
+            check(event.kind == nvm::Event::Kind::Trapped && event.trap.kind == fault_kind(expected.reason),
+                  label.str() + ": evaluator faulted (" + expected.reason + "), image " +
+                      (event.kind == nvm::Event::Kind::Completed ? "returned " + std::to_string(event.result)
+                                                                 : nvm::describe(event.trap, compiled.image)));
+            ++comparison.trapped;
+            break;
+        case Status::Trapped:
             check(event.kind == nvm::Event::Kind::Trapped && event.trap.kind == nvm::TrapKind::Program &&
-                      event.trap.reason == 1,
+                      event.trap.reason == expected.trap_reason,
                   label.str() + ": evaluator stopped (" + expected.reason + "), image " +
                       (event.kind == nvm::Event::Kind::Completed ? "returned " + std::to_string(event.result)
                                                                  : nvm::describe(event.trap, compiled.image)));
@@ -233,6 +276,10 @@ NEURA_TEST(conversion, functions_agree_with_the_reference_evaluator) {
         {"Arithmetic.clamp_i64", false},   {"Arithmetic.triangle_u64", false},
         {"Arithmetic.sum_to_u16", false},  {"Arithmetic.first_root_above_i32", false},
         {"Arithmetic.recursive_sum_u8", false}, {"Arithmetic.swap_difference_u32", false},
+        {"Arithmetic.rem_i8", true},       {"Arithmetic.rem_u8", true},
+        {"Arithmetic.to_unsigned_i8", true}, {"Arithmetic.to_signed_u8", true},
+        {"Arithmetic.narrow_i16", false},  {"Arithmetic.widen_u8", true},
+        {"Arithmetic.digit_sum_u8", true},
     };
     Comparison total;
     for (const auto& [name, exhaustive] : functions) {
@@ -244,17 +291,58 @@ NEURA_TEST(conversion, functions_agree_with_the_reference_evaluator) {
     check(total.trapped > 0, "some inputs reach an undefined result");
 }
 
+NEURA_TEST(conversion, floats_agree_with_the_reference_evaluator) {
+    // Float arithmetic, comparisons, and conversions in compiled functions,
+    // including literal operands, a loop, and traps on out-of-range
+    // conversions.
+    const auto compiled = compile_with_functions(fixture(environment, "floats"), "Floats");
+    Evaluator evaluator(compiled.program);
+    evaluator.initialize();
+    Comparison total;
+    for (const auto* name : {"Floats.add16", "Floats.multiply_bf16", "Floats.divide32", "Floats.subtract64",
+                             "Floats.ordered32", "Floats.scaled32", "Floats.truncate32", "Floats.from_int16",
+                             "Floats.narrow64", "Floats.polynomial64"}) {
+        const auto comparison = compare_function(compiled, evaluator, name, true);
+        check(comparison.returned > 0, std::string(name) + " returned for some inputs");
+        total.returned += comparison.returned;
+        total.trapped += comparison.trapped;
+    }
+    check(total.trapped > 0, "out-of-range conversions trap");
+}
+
+NEURA_TEST(conversion, structures_agree_with_the_reference_evaluator) {
+    // Objects, collections, and loops: results, program traps, and runtime
+    // faults must match the evaluator on every input of each 8-bit domain.
+    const auto compiled = compile_with_functions(fixture(environment, "structures"), "Structures");
+    Evaluator evaluator(compiled.program);
+    evaluator.initialize();
+    Comparison total;
+    for (const auto* name : {"Structures.two_counters", "Structures.construction_order", "Structures.list_sum",
+                             "Structures.element", "Structures.remove", "Structures.grow_while_iterating",
+                             "Structures.skip_and_stop"}) {
+        const auto comparison = compare_function(compiled, evaluator, name, true);
+        check(comparison.returned > 0, std::string(name) + " returned for some inputs");
+        total.returned += comparison.returned;
+        total.trapped += comparison.trapped;
+    }
+    check(total.trapped > 0, "some inputs trap or fault");
+}
+
 NEURA_TEST(conversion, programs_print_what_the_evaluator_records) {
     // Whole programs within the evaluator's model: the evaluator's effect
     // list and NVM's captured stdout must agree byte for byte.
-    for (const auto* name : {"computation", "short-circuit"}) {
+    const std::map<std::string, std::string> programs{
+        {"computation", "Computation"}, {"short-circuit", "ShortCircuit"}, {"integers", "Integers"},
+        {"loops", "Loops"}, {"objects", "Objects"}, {"collections", "Collections"},
+    };
+    for (const auto& [name, module] : programs) {
         const auto path = program_path(environment, name);
         const auto program = lower_files({path});
         Evaluator evaluator(program);
         for (const auto& outcome : evaluator.initialize()) {
             check(outcome.status == Status::Returned, std::string(name) + ": initializer " + describe(outcome));
         }
-        const auto main = find_symbol(program, std::string(name == std::string("computation") ? "Computation" : "ShortCircuit") + ".main");
+        const auto main = find_symbol(program, module + ".main");
         const auto expected = evaluator.call(main, {Value{}});
         check(expected.status == Status::Returned, std::string(name) + ": " + describe(expected));
         const auto image = build_program({path});
@@ -262,6 +350,30 @@ NEURA_TEST(conversion, programs_print_what_the_evaluator_records) {
         check(run.result.completed, std::string(name) + ": " + describe_trap(run.result, image));
         check_equal(run.output, expected_output(expected), std::string(name) + ": stdout");
     }
+}
+
+NEURA_TEST(conversion, initialization_order_matches_the_evaluator) {
+    // Two files, top-level statements, literal and computed module globals,
+    // and a top-level object: the start function and the evaluator must
+    // produce the same output in the same order.
+    const auto path = backend_dir(environment) / "initialization" / "main.nra";
+    const auto program = lower_files({path, backend_dir(environment) / "initialization" / "settings.nra"});
+    Evaluator evaluator(program);
+    std::string expected;
+    for (const auto& outcome : evaluator.initialize()) {
+        check(outcome.status == Status::Returned, "initialization: " + describe(outcome));
+        expected += expected_output(outcome);
+    }
+    const auto run = evaluator.call(find_symbol(program, "App.main"), {Value{}});
+    check(run.status == Status::Returned, "main: " + describe(run));
+    expected += expected_output(run);
+    const auto image = build_program({path});
+    const auto captured = run_captured(image);
+    check(captured.result.completed, describe_trap(captured.result, image));
+    check_equal(captured.output, expected, "stdout of the initialization program");
+    std::ifstream file(backend_dir(environment) / "initialization" / "main.out");
+    const std::string recorded((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    check_equal(captured.output, recorded, "stdout matches main.out");
 }
 
 NEURA_TEST(conversion, optimized_and_unoptimized_images_agree) {
@@ -344,8 +456,12 @@ NEURA_TEST(conversion, source_map_is_optional) {
     auto without_map = backend::build(lower_files({program_path(environment, "computation")}), options).image;
     check(with_map.source_map.has_value() && !with_map.source_map->empty(), "the default build has a source map");
     check(!without_map.source_map.has_value(), "--no-source-map omits SMAP");
+    check(without_map.other_sections.empty(), "--no-source-map omits NAME");
+    check(with_map.other_sections.size() == 1 && with_map.other_sections.front().tag == nvr::names_tag,
+          "the default build has a NAME section");
     with_map.source_map.reset();
-    check(with_map == without_map, "the source map is the only difference");
+    with_map.other_sections.clear();
+    check(with_map == without_map, "the source map and names are the only differences");
     const auto rebuilt = backend::build(lower_files({program_path(environment, "computation")}));
     for (const auto& location : *rebuilt.image.source_map) {
         check_equal(location.path, std::string("computation.nra"), "source map paths are relative");
