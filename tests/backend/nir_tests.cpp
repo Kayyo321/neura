@@ -66,7 +66,8 @@ bool same_program(const IrProgram& a, const IrProgram& b) {
         const auto where = "symbol " + std::to_string(i);
         if (x.kind != y.kind || x.name != y.name || x.owner != y.owner || x.base != y.base ||
             x.overrides != y.overrides || x.parameters != y.parameters || x.generics != y.generics ||
-            x.bound != y.bound || x.exported != y.exported || x.constant != y.constant ||
+            x.bound != y.bound || x.payload_types != y.payload_types ||
+            x.exported != y.exported || x.constant != y.constant ||
             x.external != y.external || x.has_body != y.has_body) {
             mismatch = where + " differs";
             return false;
@@ -183,8 +184,8 @@ NEURA_TEST(nir, corrupt_files_are_rejected) {
     changed[4] = 2;
     expect_nir_error(changed, "NeuraIR format 2.0 is not supported");
     changed = bytes;
-    changed[6] = 2;
-    expect_nir_error(changed, "NeuraIR format 1.2 is not supported");
+    changed[6] = 3;
+    expect_nir_error(changed, "NeuraIR format 1.3 is not supported");
     changed = bytes;
     changed.push_back(0);
     expect_nir_error(changed, "1 unread bytes");
@@ -231,6 +232,13 @@ NEURA_TEST(nir, minor_version_follows_the_features_used) {
         check(message.find("invalid operation tag") != std::string::npos ||
                   message.find("a loop latch requires NeuraIR format 1.1") != std::string::npos,
               message);
+    }
+    for (const auto* fixture : {"aggregates", "operators"}) {
+        auto current = write_nir(lower_files({program_path(environment, fixture)}));
+        check_equal(static_cast<int>(current[6]), 2, std::string(fixture) + " uses NeuraIR 1.2");
+        current[6] = 1;
+        expect_nir_error(current, std::string_view(fixture) == "operators"
+                          ? "bitwise operations require NeuraIR format 1.2" : "invalid");
     }
 }
 

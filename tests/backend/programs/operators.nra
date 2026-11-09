@@ -1,0 +1,47 @@
+let io = import:SysIo;
+
+let Operators = module:io.Entry (
+    let reads: int = 0;
+    let current: int = 3;
+
+    let subject = func() -> int {
+        reads = reads + 1;
+        return current;
+    };
+
+    let change_subject = func() -> int {
+        current = 2;
+        return 1;
+    };
+
+    let fail = func() -> int {
+        return 1 / 0;
+    };
+
+    let bit_ops = func(byte value, uint64 count, int8 signed_value) -> bool {
+        return (value & 10) == 8 && (value | 1) == 13 && (value ^ 3) == 15 &&
+            (~value == 243) && (value << count) == 128 && (value >> count) == 0 &&
+            (signed_value >> count) == -1 && ((1 as byte) << 7) == 128;
+    };
+
+    let wide_shift = func(uint64 value, int8 count) -> uint64 {
+        return value << count;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (subject() == change_subject() or 2 or 3 or fail() && reads == 1 && current == 2) {
+            io.println("or captures the subject and short-circuits");
+        }
+        if (subject() == 1 and fail() || reads == 2) {
+            io.println("and stops at the first false comparison");
+        }
+        if (subject() >= 0 and 1 and 2 && reads == 3) {
+            io.println("and requires each comparison");
+        }
+        if (bit_ops(12, 5, -3) && (wide_shift(1, 63) == 9223372036854775808) &&
+            ((~0 as int64) == -1) && (128 as byte << 1) == 0) {
+            io.println("fixed-width bitwise operations");
+        }
+        return Entry.ExitCode.Ok;
+    };
+);

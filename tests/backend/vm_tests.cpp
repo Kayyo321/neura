@@ -5,6 +5,7 @@
 
 #include <fstream>
 #include <limits>
+#include <utility>
 
 namespace neura::testing {
 namespace {
@@ -61,6 +62,64 @@ public:
     nvm::HostSignature signature_;
     std::vector<nvm::HostRequest> requests;
 };
+
+nvr::Block one_exit(nvr::Exit exit) {
+    nvr::Block block;
+    block.exits.push_back(std::move(exit));
+    return block;
+}
+
+nvr::Block state_block(nvr::StateOp operation, std::uint32_t resume, std::uint32_t result,
+                       std::vector<nvr::Value> arguments = {}, std::uint32_t immediate = 0) {
+    nvr::Exit exit;
+    exit.kind = nvr::ExitKind::State;
+    exit.operation = operation;
+    exit.resume = resume;
+    exit.result_slot = result;
+    exit.arguments = std::move(arguments);
+    exit.immediate = immediate;
+    return one_exit(std::move(exit));
+}
+
+nvr::Image garbage_collection_image() {
+    using Kind = nvr::TypeKind;
+    using Op = nvr::StateOp;
+    nvr::Image image;
+    image.types = {{Kind::Void}, {Kind::Signed, 32}, {Kind::Text}, {Kind::Array, 0, 2},
+                   {Kind::Object, 0, 0}, {Kind::List, 0, 4}, {Kind::Unsigned, 64}, {Kind::Unsigned, 32}};
+    image.constants = {{1, {0, 0, 0, 0}}, {6, {0, 0, 0, 0, 0, 0, 0, 0}}};
+    image.layouts = {{nvr::absent, {4}}};
+    image.graphs = {nvr::Graph{}};
+
+    nvr::Exit zero;
+    zero.kind = nvr::ExitKind::Return;
+    zero.arguments = {{ValueKind::Constant, 1, 0}};
+    nvr::Exit call;
+    call.kind = nvr::ExitKind::Call;
+    call.target = 1;
+    call.resume = 1;
+    nvr::Function entry;
+    entry.parameter_count = 1;
+    entry.result_type = 1;
+    entry.frame_types = {3};
+    entry.blocks = {one_exit(call), one_exit(zero)};
+
+    nvr::Function make_cycle;
+    make_cycle.frame_types = {4, 4};
+    const nvr::Value first{ValueKind::Slot, 4, 0};
+    const nvr::Value second{ValueKind::Slot, 4, 1};
+    nvr::Exit done;
+    done.kind = nvr::ExitKind::Return;
+    make_cycle.blocks = {
+        state_block(Op::AllocateObject, 1, 0),
+        state_block(Op::AllocateObject, 2, 1),
+        state_block(Op::WriteField, 3, nvr::absent, {first, second}),
+        state_block(Op::WriteField, 4, nvr::absent, {second, first}),
+        one_exit(done),
+    };
+    image.functions = {std::move(entry), std::move(make_cycle)};
+    return image;
+}
 
 } // namespace
 
@@ -232,6 +291,124 @@ NEURA_TEST(vm, arguments_reach_the_entry_frame) {
         fail("an invalid UTF-8 argument was accepted");
     } catch (const std::invalid_argument&) {
     }
+}
+
+NEURA_TEST(vm, garbage_collection_reclaims_cycles_after_a_return) {
+    auto image = garbage_collection_image();
+    auto& blocks = image.functions[0].blocks;
+    auto another_call = blocks.front();
+    another_call.exits[0].resume = 2;
+    blocks.insert(blocks.begin() + 1, std::move(another_call));
+    image = nvr::load(nvr::encode(image));
+
+    nvm::RunLimits limits;
+    limits.max_heap_cells = 5; // entry arguments and exactly two two-cell objects
+    const auto first = run_captured(image, limits);
+    const auto second = run_captured(image, limits);
+    check(first.result.completed && second.result.completed, describe_trap(first.result, image));
+    check_equal(first.result.steps, second.result.steps, "collection does not change the step count");
+    limits.max_handles = 4; // the second cycle still requires a fresh fifth handle
+    expect_trap(image, TrapKind::HandleLimit, {}, limits);
+}
+
+NEURA_TEST(vm, garbage_collection_preserves_references_during_parallel_assignment) {
+    using Op = nvr::StateOp;
+    auto image = garbage_collection_image();
+    auto& entry = image.functions[0];
+    entry.frame_types = {3, 4, 4, 5, 4, 7};
+    const nvr::Value first{ValueKind::Slot, 4, 1};
+    const nvr::Value second{ValueKind::Slot, 4, 2};
+    const nvr::Value list{ValueKind::Slot, 5, 3};
+    const nvr::Value index{ValueKind::Constant, 6, 1};
+    const nvr::Value fetched{ValueKind::Slot, 4, 4};
+    const auto call = entry.blocks.front();
+    const auto done = entry.blocks.back();
+    auto append = state_block(Op::AppendElement, 5, nvr::absent, {list, first});
+    // The argument is read before the assignment. At the safepoint the
+    // pending append is its sole root.
+    append.exits[0].assignments = {{1, second}};
+    entry.blocks = {call,
+                    state_block(Op::AllocateObject, 2, 1),
+                    state_block(Op::AllocateObject, 3, 2),
+                    state_block(Op::AllocateCollection, 4, 3, {}, 5),
+                    std::move(append),
+                    state_block(Op::ReadElement, 6, 4, {list, index}),
+                    state_block(Op::ReadTag, 7, 5, {fetched}),
+                    done};
+
+    nvm::RunLimits limits;
+    limits.max_heap_cells = 10; // appending exceeds the limit until the cycle is collected
+    auto run = run_captured(nvr::load(nvr::encode(image)), limits);
+    check(run.result.completed, describe_trap(run.result, image));
+
+    // The same pending reference is the sole child of an unborn list.
+    auto allocate = state_block(Op::AllocateCollection, 5, 3, {first}, 5);
+    allocate.exits[0].assignments = {{1, second}};
+    entry.blocks[3].exits[0].resume = 4;
+    entry.blocks[4] = std::move(allocate);
+    run = run_captured(nvr::load(nvr::encode(image)), limits);
+    check(run.result.completed, describe_trap(run.result, image));
+}
+
+NEURA_TEST(vm, garbage_collection_traces_objects_from_globals) {
+    using Op = nvr::StateOp;
+    auto image = garbage_collection_image();
+    image.globals = {{4, nvr::absent}};
+    auto rooted_cycle = image.functions[1];
+    rooted_cycle.blocks.insert(rooted_cycle.blocks.begin() + 4,
+                               state_block(Op::WriteGlobal, 5, nvr::absent, {{ValueKind::Slot, 4, 0}}));
+    image.functions.push_back(std::move(rooted_cycle));
+    auto& entry = image.functions[0];
+    entry.frame_types = {3, 4, 4, 7};
+    auto keep_cycle = entry.blocks.front();
+    keep_cycle.exits[0].target = 2;
+    auto drop_cycle = entry.blocks.front();
+    drop_cycle.exits[0].resume = 2;
+    const auto done = entry.blocks.back();
+    entry.blocks = {
+        std::move(keep_cycle),
+        std::move(drop_cycle),
+        state_block(Op::AllocateObject, 3, 1),
+        state_block(Op::ReadGlobal, 4, 1),
+        state_block(Op::ReadField, 5, 2, {{ValueKind::Slot, 4, 1}}),
+        state_block(Op::ReadTag, 6, 3, {{ValueKind::Slot, 4, 2}}),
+        done,
+    };
+    nvm::RunLimits limits;
+    limits.max_heap_cells = 9; // both cycles fit, but the next allocation forces collection
+    const auto run = run_captured(nvr::load(nvr::encode(image)), limits);
+    check(run.result.completed, describe_trap(run.result, image));
+}
+
+NEURA_TEST(vm, garbage_collection_preserves_startup_arguments) {
+    auto image = garbage_collection_image();
+    image.imports = {{"neura.console.write_line", 1, {2}, 0, 7}};
+    auto& entry = image.functions[0];
+    entry.frame_types = {3, 2, 7};
+    nvr::Exit print;
+    print.kind = nvr::ExitKind::Host;
+    print.arguments = {{ValueKind::Slot, 2, 1}};
+    print.resume = 2;
+    print.error_slot = 2;
+    print.error_resume = 2;
+    const auto done = entry.blocks.back();
+    entry.blocks = {
+        state_block(nvr::StateOp::ReadElement, 1, 1, {{ValueKind::Slot, 3, 0}, {ValueKind::Constant, 6, 1}}),
+        one_exit(print),
+        done,
+    };
+    image = nvr::load(nvr::encode(image));
+    // Preparing the second argument crosses the collector's initial growth
+    // threshold while the first argument belongs to an unpublished array.
+    const std::vector<std::string> arguments{std::string(240, 'a'), std::string(30, 'b')};
+    const auto run = run_captured(image, {}, std::nullopt, arguments);
+    check(run.result.completed, describe_trap(run.result, image));
+    check_equal(run.output, arguments.front() + '\n', "first launch argument survives collection");
+    nvm::RunLimits limits;
+    limits.max_heap_cells = 274; // two strings plus the array require 275
+    const auto exhausted = run_captured(image, limits, std::nullopt, arguments);
+    check(!exhausted.result.completed && exhausted.result.trap.kind == TrapKind::HeapLimit,
+          describe_trap(exhausted.result, image));
 }
 
 NEURA_TEST(vm, repeated_runs_are_identical) {

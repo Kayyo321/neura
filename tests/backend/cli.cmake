@@ -223,6 +223,16 @@ foreach(program IN LISTS programs)
     endforeach()
 endforeach()
 
+# The new source constructs produce the same image after a NIR round trip.
+foreach(name IN ITEMS operators closures aggregates)
+    neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
+    if(NOT emit_status STREQUAL "0")
+        message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")
+    endif()
+    build_image("${TEST_DIR}/${name}-from-nir.nvr" "${TEST_DIR}/${name}.nir")
+    same_bytes("${name} from NIR" "${TEST_DIR}/${name}.nvr" "${TEST_DIR}/${name}-from-nir.nvr")
+endforeach()
+
 # Runtime traps: stdout up to the trap, a diagnostic, and status 70.
 file(GLOB traps "${tests}/traps/*.nra")
 list(SORT traps)

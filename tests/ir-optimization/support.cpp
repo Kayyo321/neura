@@ -43,6 +43,14 @@ std::string_view op_name(IrOp op) {
     case IrOp::Convert: return "convert";
     case IrOp::CollectionVersion: return "collection_version";
     case IrOp::Fail: return "fail";
+    case IrOp::Tuple: return "tuple";
+    case IrOp::Project: return "project";
+    case IrOp::EnumConstruct: return "enum_construct";
+    case IrOp::EnumTag: return "enum_tag";
+    case IrOp::EnumProject: return "enum_project";
+    case IrOp::ComparisonChain: return "comparison_chain";
+    case IrOp::ScopedValue: return "scoped_value";
+    case IrOp::SelectValue: return "select_value";
     }
     return "<invalid>";
 }

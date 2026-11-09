@@ -1,0 +1,13 @@
+// status: 70
+// stderr: arithmetic failure
+let io = import:SysIo;
+
+let ShiftTrap = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        io.println("before shift");
+        let value: byte = 1;
+        let count: int = -1;
+        let result = value << count;
+        return Entry.ExitCode.Ok;
+    };
+);

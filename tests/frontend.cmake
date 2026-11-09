@@ -92,6 +92,21 @@ check_rejection(array-mutation [=[
 let names: string[] = ["Ada"];
 names.append("Lin");
 ]=] "3:[1-9][0-9]*" "append|list|array|member")
+check_rejection(closure-capture-assignment [=[
+let make = func() -> func() -> int {
+    let number = 1;
+    return func() -> int {
+        number = 2;
+        return number;
+    };
+};
+]=] "5:[1-9][0-9]*" "a captured binding cannot be reassigned")
+check_rejection(closure-argument-type [=[
+let run = func() -> int {
+    let callback = func(int number) -> int { return number; };
+    return callback(true);
+};
+]=] "4:[1-9][0-9]*" "expected int32, got bool")
 check_rejection(forward-value [=[
 let earlier: int32 = later;
 let later: int32 = 0;
@@ -244,6 +259,37 @@ let pick = func() -> Light {
 };
 ]=] "4:12" "cannot convert int32 to Light")
 check_rejection(duplicate-variant "let Light = enum (Red, Red);" "2:24" "duplicate declaration of 'Red'")
+
+check_rejection(nonexhaustive-match [=[
+let Option = enum (None, Some(int));
+let unwrap = func(Option value) -> int {
+    return match (value) { Option.Some(n) => n };
+};
+]=] "4:12" "non-exhaustive match, missing variant 'None'")
+check_rejection(wrong-payload-type [=[
+let Option = enum (None, Some(int));
+let result = Option.Some(true);
+]=] "3:[1-9][0-9]*" "expected int32, got bool")
+check_rejection(wrong-tuple-arity [=[
+let f = func() -> [int, bool] { return [1, true]; };
+let [value] = f();
+]=] "3:1" "destructuring requires a tuple with one element per binding")
+
+check_rejection(chain-with-comparison [=[
+let wrong = func(int x, int y) -> bool {
+    return x == 0 and y == 1;
+};
+]=] "3:25" "a comparison chain expects another value")
+check_rejection(mixed-chain-connectors [=[
+let wrong = func(int x) -> bool {
+    return x == 1 or 2 and 3;
+};
+]=] "3:24" "a comparison chain must use only")
+check_rejection(noninteger-shift-count [=[
+let wrong = func(int x) -> int {
+    return x << true;
+};
+]=] "3:17" "a shift count must be an integer")
 
 # Float literals convert directly to their format; values that do not fit are
 # compile-time errors.

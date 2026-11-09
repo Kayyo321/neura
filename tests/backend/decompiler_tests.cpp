@@ -277,8 +277,13 @@ NEURA_TEST(behavior, resynthesized_images_replay_the_original_trace) {
         const auto rebuilt = nvr::load(nvr::encode(decompiler::resynthesize(image, decompilation)));
         nvm::StringSink sink;
         nvm::ConsoleWriteLine console(sink);
+        nvm::TestLog test_log;
+        nvm::TestAssert assertion(test_log);
+        nvm::TestAssertEqualInt32 equal(test_log);
         nvm::HostRegistry registry;
         registry.add(console);
+        registry.add(assertion);
+        registry.add(equal);
         const auto bindings = nvm::bind(image, registry);
         nvm::RunLimits limits;
         limits.max_steps = 2'000'000;

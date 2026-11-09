@@ -17,7 +17,7 @@ using backend::Circuit;
 using backend::Signal;
 using backend::Word;
 
-enum class Op { Add, Subtract, Multiply, Divide, Remainder, Negate, Equal, Less };
+enum class Op { Add, Subtract, Multiply, Divide, Remainder, Negate, Equal, Less, ShiftLeft, ShiftRight };
 
 const char* name(Op op) {
     switch (op) {
@@ -29,6 +29,8 @@ const char* name(Op op) {
     case Op::Negate: return "neg";
     case Op::Equal: return "==";
     case Op::Less: return "<";
+    case Op::ShiftLeft: return "<<";
+    case Op::ShiftRight: return ">>";
     }
     return "?";
 }
@@ -66,6 +68,15 @@ Expected signed_result(std::int64_t value, unsigned width, bool overflowed) {
 Expected reference(Op op, std::uint64_t a, std::uint64_t b, unsigned width, bool is_signed) {
     if (op == Op::Equal) {
         return {false, a == b ? 1U : 0U};
+    }
+    if (op == Op::ShiftLeft || op == Op::ShiftRight) {
+        if (b >= width) {
+            return {true, 0};
+        }
+        if (op == Op::ShiftLeft) {
+            return {false, (a << b) & mask(width)};
+        }
+        return {false, is_signed ? static_cast<std::uint64_t>(to_signed(a, width) >> b) & mask(width) : a >> b};
     }
     if (is_signed) {
         const auto x = to_signed(a, width);
@@ -163,6 +174,8 @@ nvr::Graph circuit_for(Op op, unsigned width, bool is_signed) {
     case Op::Negate: result = backend::negate(circuit, a, is_signed); break;
     case Op::Equal: result = {{backend::equal(circuit, a, b)}, Signal::of(0)}; break;
     case Op::Less: result = {{backend::less(circuit, a, b, is_signed)}, Signal::of(0)}; break;
+    case Op::ShiftLeft: result = backend::shift(circuit, a, b, false, false); break;
+    case Op::ShiftRight: result = backend::shift(circuit, a, b, true, is_signed); break;
     }
     for (const auto& lane : result.value) {
         circuit.output(lane);
@@ -276,6 +289,26 @@ NEURA_TEST(circuits, wide_operations_on_boundary_and_random_operands) {
                     for (const auto b : values) {
                         checker.check_pair(a, b);
                     }
+                }
+            }
+        }
+    }
+}
+
+NEURA_TEST(circuits, shifts_cover_each_lane_and_trap_on_invalid_counts) {
+    for (const bool is_signed : {false, true}) {
+        for (const auto op : {Op::ShiftLeft, Op::ShiftRight}) {
+            Checker byte(op, 8, is_signed);
+            for (std::uint64_t value = 0; value < 256; ++value) {
+                for (std::uint64_t count = 0; count <= 8; ++count) {
+                    byte.check_pair(value, count);
+                }
+                byte.check_pair(value, 255);
+            }
+            Checker wide(op, 64, is_signed);
+            for (const auto value : samples(64, 8, 8)) {
+                for (const auto count : {0ULL, 1ULL, 32ULL, 63ULL, 64ULL, 1ULL << 63}) {
+                    wide.check_pair(value, count);
                 }
             }
         }

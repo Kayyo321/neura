@@ -1,0 +1,4 @@
+or captures the subject and short-circuits
+and stops at the first false comparison
+and requires each comparison
+fixed-width bitwise operations

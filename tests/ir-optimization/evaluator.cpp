@@ -70,6 +70,14 @@ Exact negated(Exact value) {
     return normalized(value);
 }
 
+U64 word_mask(unsigned bits) {
+    return bits == 64 ? std::numeric_limits<U64>::max() : (U64{1} << bits) - 1;
+}
+
+U64 word(const Value& value) {
+    return value.negative ? U64{0} - value.magnitude : value.magnitude;
+}
+
 // Forms the full 128-bit product of the magnitudes from 32-bit limbs.
 Exact multiply(Exact a, Exact b) {
     constexpr U64 mask = 0xffffffffU;
@@ -659,6 +667,9 @@ private:
             }
             return bool_value(condition(node.body.at(0), frame));
         }
+        case IrOp::ComparisonChain:
+            run_statement(node.body.at(0), frame);
+            return evaluate(node.body.at(1), frame);
         case IrOp::Call:
             return invoke(node.symbol, no_symbol, arguments(node, 0, frame), node.span);
         case IrOp::VirtualCall: {
@@ -724,10 +735,24 @@ private:
             const auto format = float_of(operand.type, node);
             return float_value(operand.type, operand.magnitude ^ (std::uint64_t{1} << (format.width() - 1)));
         }
+        if (node.text == "~" && operand.kind == Value::Kind::Integer) {
+            return word_value(node, ~word(operand));
+        }
         if (node.text != "-" || operand.kind != Value::Kind::Integer) {
             unsupported(node, "unary operation");
         }
         return arithmetic_result(node, negated(exact(operand)));
+    }
+
+    Value word_value(const IrNode& node, U64 bits) {
+        const auto format = format_of(node.type);
+        if (!format) {
+            unsupported(node, "bitwise operation on " + node.type.name);
+        }
+        const auto mask = word_mask(format->bits);
+        bits &= mask;
+        const bool negative = format->is_signed && ((bits >> (format->bits - 1)) != 0);
+        return integer_value(node.type, negative, negative ? ((~bits + 1) & mask) : bits);
     }
 
     Value arithmetic_result(const IrNode& node, const Exact& result) {
@@ -961,6 +986,26 @@ private:
         }
         if (left.kind != Value::Kind::Integer || right.kind != Value::Kind::Integer) {
             unsupported(node, "binary operation on these operands");
+        }
+        if (op == "&") return word_value(node, word(left) & word(right));
+        if (op == "|") return word_value(node, word(left) | word(right));
+        if (op == "^") return word_value(node, word(left) ^ word(right));
+        if (op == "<<" || op == ">>") {
+            const auto format = format_of(left.type);
+            if (!format) {
+                unsupported(node, "shift of " + left.type.name);
+            }
+            const auto count = right.magnitude;
+            if (right.negative || count >= format->bits) {
+                trap(node, 1, "shift count out of range");
+            }
+            if (op == "<<") {
+                return word_value(node, word(left) << count);
+            }
+            const auto divisor = U64{1} << count;
+            const auto rounded = left.magnitude / divisor +
+                (left.negative && left.magnitude % divisor != 0 ? 1 : 0);
+            return integer_value(node.type, left.negative, rounded);
         }
         const auto a = exact(left);
         const auto b = exact(right);

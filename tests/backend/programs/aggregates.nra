@@ -1,0 +1,70 @@
+let io = import:SysIo;
+let test = import:Test;
+
+let [default_code, default_weight] = [4, 1.5 as float];
+
+let Aggregates = module:io.Entry (
+    let Tree = enum (
+        Empty,
+        Leaf(int),
+        Node { left: Tree, right: Tree, label: string },
+    );
+
+    let calls: int = 0;
+
+    let sample = func() -> [int, float, string] {
+        calls = calls + 1;
+        return [default_code, default_weight, "neura"];
+    };
+
+    let leaf = func(int value) -> Tree {
+        calls = calls * 10 + value;
+        return Tree.Leaf(value);
+    };
+
+    let sum = func(Tree tree) -> int {
+        match (tree) {
+            Tree.Empty => { return 0; },
+            Tree.Leaf(value) => { return value; },
+            Tree.Node { right, label: _, left } => {
+                return sum(left) + sum(right);
+            },
+        }
+    };
+
+    let identity = func<T>(T value) -> T { return value; };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let [code, weight, _] = identity<[int, float, string]>(sample());
+        test.assert_equal_int32(1, calls);
+        test.assert_equal_int32(4, code);
+        test.assert(weight == 1.5);
+        code = code + 1;
+        let pair: [int, bool] = [code, true];
+        test.assert_equal_int32(5, pair[0]);
+        test.assert(pair[1]);
+        const [x, y] = [5, false];
+        test.assert(x == 5 && !y);
+
+        calls = 0;
+        let tree = Tree.Node { right: leaf(2), label: "tree", left: leaf(3) };
+        test.assert_equal_int32(23, calls);
+        test.assert_equal_int32(5, sum(tree));
+        test.assert_equal_int32(0, sum(Tree.Empty));
+        let value = match (tree) {
+            Tree.Empty => 1 / 0,
+            Tree.Leaf(n) => n,
+            Tree.Node { left, right, label: _ } => sum(left) * sum(right),
+        };
+        test.assert_equal_int32(6, value);
+
+        let selected = false;
+        match (tree) {
+            Tree.Empty => {},
+            _ => { selected = true; },
+        }
+        test.assert(selected);
+        io.println("tuples and enum payloads passed");
+        return Entry.ExitCode.Ok;
+    }
+);
