@@ -21,6 +21,8 @@ add_library(neura_compiler STATIC
     src/neura-ir/verifier.cpp
     src/ir-optimization/analysis.cpp
     src/ir-optimization/integer_folding.cpp
+    src/ir-optimization/optimizer.cpp
+    src/ir-optimization/passes.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
 neura_target_defaults(neura_compiler)
