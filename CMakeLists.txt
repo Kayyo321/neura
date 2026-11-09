@@ -55,6 +55,13 @@ target_include_directories(neura_compiler PUBLIC src)
 target_link_libraries(neura_compiler PUBLIC neura_nvr)
 neura_target_defaults(neura_compiler)
 
+# Lossless text assembly uses the shared image loader and writer.
+add_library(neura_decompiler STATIC
+    src/decompiler/assembly.cpp
+)
+target_link_libraries(neura_decompiler PUBLIC neura_nvr)
+neura_target_defaults(neura_decompiler)
+
 add_executable(neura src/cli/main.cpp)
 target_link_libraries(neura PRIVATE neura_compiler neura_nvm)
 neura_target_defaults(neura)
