@@ -36,6 +36,30 @@ std::size_t rewrite_nodes(IrProgram& program, Rewrite rewrite) {
     return count;
 }
 
+// Visits statement regions innermost first. Statement regions are bodies and
+// the regions of blocks, branches, and loops. The lazily evaluated operand of
+// a short-circuit operation is an expression, not a statement region.
+template <typename Rewrite>
+void statement_regions(std::vector<IrNode>& region, Rewrite& rewrite) {
+    for (auto& statement : region) {
+        if (statement.op == IrOp::Block || statement.op == IrOp::Branch || statement.op == IrOp::Loop) {
+            statement_regions(statement.body, rewrite);
+            statement_regions(statement.alternative, rewrite);
+        }
+    }
+    rewrite(region);
+}
+
+template <typename Rewrite>
+std::size_t rewrite_regions(IrProgram& program, Rewrite rewrite) {
+    std::size_t count = 0;
+    auto counted = [&](std::vector<IrNode>& region) { count += rewrite(region); };
+    for (auto& body : program.bodies) {
+        statement_regions(body.instructions, counted);
+    }
+    return count;
+}
+
 // A literal replacing `original` keeps its type and source span, so the
 // result still points at the source construct that it summarizes.
 IrNode literal_for(const IrNode& original, IrOp op, std::string text) {
@@ -168,6 +192,37 @@ std::size_t simplify_short_circuits(IrProgram& program) {
             }
         }
         return false;
+    });
+}
+
+std::size_t simplify_control_flow(IrProgram& program) {
+    return rewrite_regions(program, [](std::vector<IrNode>& region) {
+        std::size_t count = 0;
+        std::vector<IrNode> kept;
+        kept.reserve(region.size());
+        for (auto& statement : region) {
+            const auto condition = (statement.op == IrOp::Branch || statement.op == IrOp::Loop) &&
+                                           statement.operands.size() == 1
+                                       ? boolean_literal(statement.operands.front())
+                                       : std::nullopt;
+            if (statement.op == IrOp::Branch && condition) {
+                // The selected region keeps its own scope as a block.
+                ++count;
+                auto& selected = *condition ? statement.body : statement.alternative;
+                if (!selected.empty()) {
+                    kept.push_back({IrOp::Block, statement.type, statement.span, no_symbol, {}, {},
+                                    std::move(selected), {}, {}});
+                }
+            } else if ((statement.op == IrOp::Loop && condition == false) ||
+                       (statement.op == IrOp::Block && statement.body.empty())) {
+                // A `while (false)` body never runs, and an empty block does nothing.
+                ++count;
+            } else {
+                kept.push_back(std::move(statement));
+            }
+        }
+        region = std::move(kept);
+        return count;
     });
 }
 

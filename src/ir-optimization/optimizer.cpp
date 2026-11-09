@@ -25,6 +25,8 @@ const std::vector<RegisteredPass>& registry() {
          fold_constants},
         {{"simplify-short-circuit", "simplify && and || with a literal operand without evaluating more"},
          simplify_short_circuits},
+        {{"simplify-control-flow", "select branches with literal conditions, remove while (false) and empty blocks"},
+         simplify_control_flow},
     };
     return passes;
 }

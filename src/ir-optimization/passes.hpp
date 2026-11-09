@@ -12,5 +12,6 @@ namespace neura::optimization {
 // for each pass's preconditions.
 std::size_t fold_constants(IrProgram& program);
 std::size_t simplify_short_circuits(IrProgram& program);
+std::size_t simplify_control_flow(IrProgram& program);
 
 } // namespace neura::optimization
