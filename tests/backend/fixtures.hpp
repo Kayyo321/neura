@@ -27,6 +27,21 @@ nvr::Image version_model();
 std::vector<std::uint8_t> version_bytes(std::uint16_t minor);
 std::vector<std::uint8_t> logic_bytes();
 
+// One image of the corpus that the decompiler tests use.
+struct CorpusImage {
+    std::string label;
+    std::vector<std::uint8_t> bytes;
+    // Whether the compiler built it, rather than a hand-assembled fixture.
+    bool compiled = false;
+    bool optimized = false;
+    bool source_map = false;
+};
+
+// Every test and example program that has an entry point, built optimized
+// and unoptimized, with and without a source map, plus the hand-assembled
+// fixtures. Built once per process.
+const std::vector<CorpusImage>& image_corpus(const Environment& environment);
+
 struct Captured {
     nvm::RunResult result;
     std::string output;

@@ -106,6 +106,7 @@ if(BUILD_TESTING)
         tests/backend/assembler.cpp
         tests/backend/circuit_tests.cpp
         tests/backend/conversion_tests.cpp
+    tests/backend/decompiler_tests.cpp
         tests/backend/fixtures.cpp
     tests/backend/float_tests.cpp
         tests/backend/format_tests.cpp
@@ -117,12 +118,17 @@ if(BUILD_TESTING)
         tests/ir-optimization/main.cpp
         tests/ir-optimization/support.cpp
     )
-    target_link_libraries(neura_backend_tests PRIVATE neura_compiler neura_nvm)
+    target_link_libraries(neura_backend_tests PRIVATE neura_compiler neura_nvm neura_decompiler)
     target_include_directories(neura_backend_tests PRIVATE tests)
     neura_target_defaults(neura_backend_tests)
 
     foreach(suite IN ITEMS circuits floats format vm nir conversion generics)
         add_test(NAME backend-${suite}
+            COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
+
+    foreach(suite IN ITEMS lossless lift behavior)
+        add_test(NAME decompiler-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 

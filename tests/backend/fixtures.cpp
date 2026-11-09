@@ -3,6 +3,8 @@
 #include "assembler.hpp"
 #include "backend/converter.hpp"
 
+#include <algorithm>
+
 namespace neura::testing {
 
 using namespace nvr;
@@ -268,6 +270,64 @@ std::vector<std::uint8_t> logic_bytes() {
         {"GRPH", 1, graphs.bytes},    {"IMPT", 1, imports.bytes},   {"LAYO", 1, layouts.bytes},
         {"META", 1, meta.bytes},      {"SMAP", 0, source_map.bytes}, {"TYPE", 1, types.bytes},
     });
+}
+
+const std::vector<CorpusImage>& image_corpus(const Environment& environment) {
+    static std::vector<CorpusImage> corpus;
+    if (!corpus.empty()) {
+        return corpus;
+    }
+    struct Program {
+        std::string label;
+        std::vector<fs::path> files;
+        std::vector<fs::path> roots;
+    };
+    std::vector<Program> programs;
+    const auto backend = backend_dir(environment);
+    for (const auto* directory : {"programs", "traps", "arguments"}) {
+        for (const auto& entry : fs::directory_iterator(backend / directory)) {
+            if (entry.path().extension() == ".nra") {
+                programs.push_back({std::string(directory) + "/" + entry.path().filename().string(), {entry.path()}, {}});
+            }
+        }
+    }
+    for (const auto* fixture : {"arithmetic", "both", "shared-multiplier", "structures", "floats", "generics"}) {
+        programs.push_back({std::string("fixtures/") + fixture, {backend / "fixtures" / (std::string(fixture) + ".nra")}, {}});
+    }
+    programs.push_back({"initialization", {backend / "initialization" / "main.nra"}, {}});
+    const auto examples = environment.examples();
+    const std::vector<fs::path> roots{examples / "guide", examples / "types", examples / "testing"};
+    for (const auto* driver : {"core", "overlay", "classes", "collections", "polymorphism"}) {
+        programs.push_back({std::string("examples/") + driver, {backend / "examples" / (std::string(driver) + "-driver.nra")}, roots});
+    }
+    programs.push_back({"examples/hello-world", {examples / "hello-world" / "hello-world.nra"}, {}});
+    programs.push_back({"examples/module-interface", {examples / "modules" / "module-interface.nra"}, {}});
+    programs.push_back({"examples/multi-file", {examples / "modules" / "multi-file" / "main.nra"},
+                        {examples / "modules" / "multi-file"}});
+    std::sort(programs.begin(), programs.end(), [](const Program& a, const Program& b) { return a.label < b.label; });
+    for (const auto& program : programs) {
+        for (const bool optimize : {true, false}) {
+            for (const bool source_map : {true, false}) {
+                backend::BuildOptions options;
+                options.optimize = optimize;
+                options.source_map = source_map;
+                auto roots = program.roots;
+                for (const auto& file : program.files) {
+                    roots.push_back(file.parent_path());
+                }
+                const auto conversion = backend::build(lower_files(program.files, roots), options);
+                corpus.push_back({program.label + (optimize ? "" : " unoptimized") + (source_map ? "" : " no-map"),
+                                  nvr::encode(conversion.image), true, optimize, source_map});
+            }
+        }
+    }
+    corpus.push_back({"fixture hello", nvr_bytes::assemble(nvr_bytes::hello_sections()), false, false, false});
+    corpus.push_back({"fixture logic", logic_bytes(), false, false, true});
+    corpus.push_back({"fixture version", version_bytes(1), false, false, false});
+    auto extra = nvr_bytes::hello_sections();
+    extra.push_back({"XTRA", 0, {1, 2, 3}});
+    corpus.push_back({"fixture with an unknown optional section", nvr_bytes::assemble(extra), false, false, false});
+    return corpus;
 }
 
 Captured run_captured(const nvr::Image& image, nvm::RunLimits limits, std::optional<std::size_t> capacity,
