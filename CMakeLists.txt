@@ -19,6 +19,15 @@ add_library(neura_nvr STATIC
 target_include_directories(neura_nvr PUBLIC src)
 neura_target_defaults(neura_nvr)
 
+# The Neura Virtual Machine. It depends only on the image format, so a
+# runtime-only distribution needs no compiler code.
+add_library(neura_nvm STATIC
+    src/nvm/host.cpp
+    src/nvm/machine.cpp
+)
+target_link_libraries(neura_nvm PUBLIC neura_nvr)
+neura_target_defaults(neura_nvm)
+
 add_library(neura_compiler STATIC
     src/cli/source_loader.cpp
     src/lexer/lexer.cpp
