@@ -11,5 +11,6 @@ namespace neura::optimization {
 // number of rewrites by the size of the program. See docs/IrOptimization.md
 // for each pass's preconditions.
 std::size_t fold_constants(IrProgram& program);
+std::size_t simplify_short_circuits(IrProgram& program);
 
 } // namespace neura::optimization

@@ -46,6 +46,12 @@ IrNode boolean_for(const IrNode& original, bool value) {
     return literal_for(original, IrOp::Boolean, value ? "true" : "false");
 }
 
+// Replaces `node` with one of its own children.
+void forward(IrNode& node, IrNode& child) {
+    IrNode kept = std::move(child);
+    node = std::move(kept);
+}
+
 std::optional<IntegerOperation> arithmetic(std::string_view op) {
     if (op == "+") return IntegerOperation::Add;
     if (op == "-") return IntegerOperation::Subtract;
@@ -125,6 +131,42 @@ std::size_t fold_constants(IrProgram& program) {
     return rewrite_nodes(program, [](IrNode& node) {
         if (node.op == IrOp::Unary) return fold_unary(node);
         if (node.op == IrOp::Binary) return fold_binary(node);
+        return false;
+    });
+}
+
+std::size_t simplify_short_circuits(IrProgram& program) {
+    return rewrite_nodes(program, [&program](IrNode& node) {
+        if (node.op != IrOp::ShortCircuit || node.operands.size() != 1 || node.body.size() != 1 ||
+            (node.text != "&&" && node.text != "||")) {
+            return false;
+        }
+        // The left value that decides the result without evaluating the right
+        // operand: false for &&, true for ||.
+        const bool decisive = node.text == "||";
+        if (const auto left = boolean_literal(node.operands.front())) {
+            if (*left == decisive) {
+                // The right operand is never evaluated.
+                node = boolean_for(node, decisive);
+            } else {
+                // The right operand is always evaluated and is the result.
+                forward(node, node.body.front());
+            }
+            return true;
+        }
+        if (const auto right = boolean_literal(node.body.front())) {
+            if (*right != decisive) {
+                // `left && true` and `left || false` are `left`.
+                forward(node, node.operands.front());
+                return true;
+            }
+            // `left && false` is false, but `left` still has to be evaluated
+            // unless doing so has no observable effect.
+            if (pure_and_total(program, node.operands.front())) {
+                node = boolean_for(node, decisive);
+                return true;
+            }
+        }
         return false;
     });
 }

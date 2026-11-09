@@ -23,6 +23,8 @@ const std::vector<RegisteredPass>& registry() {
         {{"fold-constants",
           "fold !, unary -, arithmetic, and comparisons of bool and fixed-width integer literals"},
          fold_constants},
+        {{"simplify-short-circuit", "simplify && and || with a literal operand without evaluating more"},
+         simplify_short_circuits},
     };
     return passes;
 }
