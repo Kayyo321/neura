@@ -49,8 +49,12 @@ target_link_libraries(neura_compiler PUBLIC neura_nvr)
 neura_target_defaults(neura_compiler)
 
 add_executable(neura src/cli/main.cpp)
-target_link_libraries(neura PRIVATE neura_compiler)
+target_link_libraries(neura PRIVATE neura_compiler neura_nvm)
 neura_target_defaults(neura)
+
+# The compiler and the runner ship as one executable: `neura run` loads
+# images through the same NVM library as any other embedder.
+install(TARGETS neura RUNTIME DESTINATION bin)
 
 include(CTest)
 if(BUILD_TESTING)
