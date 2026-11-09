@@ -1,0 +1,9 @@
+evaluated left of &&
+evaluated left of ||
+|| decided by its left operand
+evaluated left of &&
+evaluated right of &&
+&& evaluated both operands
+skipped operands did not trap
+comparisons combine in one graph
+four operands evaluated

@@ -1,0 +1,15 @@
+// Exercises examples/types/overlay.nra. Build with -I examples/types.
+let io = import:SysIo;
+let overlay = import:Overlay;
+
+let OverlayDriver = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (overlay.next_user_id(overlay.default_user_id) == 2) {
+            io.println("next_user_id(default_user_id) = 2");
+        }
+        if (overlay.enabled) {
+            io.println(overlay.default_name + " is enabled");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

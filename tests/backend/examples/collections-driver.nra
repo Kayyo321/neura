@@ -1,0 +1,11 @@
+// Calls examples/types/collections.nra. Its `length` has type int, whose
+// width is not specified, so the build stops with a diagnostic.
+let io = import:SysIo;
+let collections = import:Collections;
+
+let CollectionsDriver = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        collections.example();
+        return Entry.ExitCode.Ok;
+    }
+);

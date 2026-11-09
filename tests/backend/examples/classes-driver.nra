@@ -1,0 +1,18 @@
+// Exercises examples/types/classes.nra. Build with -I examples/types.
+let io = import:SysIo;
+let classes = import:Classes;
+
+let ClassesDriver = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let dog = new classes.Dog();
+        dog.name = "Rover";
+        let cat = new classes.Cat();
+        cat.name = "Mittens";
+        io.println(classes.describe(dog));
+        io.println(classes.describe(cat));
+        io.println(classes.describe(new classes.Animal()));
+        classes.example();
+        io.println("Classes.example() completed");
+        return Entry.ExitCode.Ok;
+    }
+);

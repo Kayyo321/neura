@@ -1,0 +1,19 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) .* at inexact-division\.nra:[0-9]+:[0-9]+
+let io = import:SysIo;
+
+let Division = module:io.Entry (
+    let halve = func(int32 value) -> int32 {
+        return value / 2;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (halve(8) == 4) {
+            io.println("8 / 2 is exact");
+        }
+        if (halve(7) == 3) {
+            io.println("unreachable: rounding is not specified");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

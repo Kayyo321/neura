@@ -1,0 +1,9 @@
+sum_to(10) = 55
+sum_to(0) = 0
+factorial(20) = 2432902008176640000
+gcd(1071, 462) = 21
+first_square_above(50) = 8
+parity(7) is odd and parity(10) is even
+int8 bounds hold
+uint64 bounds hold
+exact signed division

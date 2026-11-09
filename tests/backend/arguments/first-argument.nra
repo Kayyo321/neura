@@ -1,0 +1,10 @@
+// Prints the first launch argument. Without arguments the index is out of
+// bounds and the run traps.
+let io = import:SysIo;
+
+let FirstArgument = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        io.println("first: " + args[0]);
+        return Entry.ExitCode.Ok;
+    }
+);

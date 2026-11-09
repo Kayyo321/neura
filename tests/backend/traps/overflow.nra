@@ -1,0 +1,17 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) in function [0-9]+ block [0-9]+ at overflow\.nra:7:16
+let io = import:SysIo;
+
+let Overflow = module:io.Entry (
+    let increment = func(int8 value) -> int8 {
+        return value + 1;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        io.println("before overflow");
+        if (increment(127) > 0) {
+            io.println("unreachable");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

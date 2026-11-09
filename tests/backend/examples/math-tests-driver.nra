@@ -1,0 +1,11 @@
+// Calls examples/testing/math-tests.nra. The Test module needs the test
+// runner, which is not specified, so the build stops with a diagnostic.
+let io = import:SysIo;
+let tests = import:MathTests;
+
+let MathTestsDriver = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        tests.test_sum_to();
+        return Entry.ExitCode.Ok;
+    }
+);

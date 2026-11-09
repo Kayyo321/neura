@@ -1,0 +1,17 @@
+// status: 70
+// stderr: invalid reference handle
+let io = import:SysIo;
+
+let Lifetime = module:io.Entry (
+    let Note = class (
+        export let text: string = "note";
+    );
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let note = new Note();
+        io.println(note.text);
+        destroy note;
+        io.println(note.text);
+        return Entry.ExitCode.Ok;
+    }
+);

@@ -1,0 +1,18 @@
+// status: 70
+// stderr: read of an uninitialized field
+let io = import:SysIo;
+
+let Fields = module:io.Entry (
+    let LogEntry = class (
+        export let level: string;
+        export let message: string;
+    );
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let entry = new LogEntry();
+        entry.level = "INFO";
+        io.println(entry.level);
+        io.println(entry.message);
+        return Entry.ExitCode.Ok;
+    }
+);

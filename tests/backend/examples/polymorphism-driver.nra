@@ -1,0 +1,12 @@
+// Calls examples/types/polymorphism.nra. Its generic functions and classes
+// are not specialized by IRtoNeuronConversion, so the build stops with a
+// diagnostic.
+let io = import:SysIo;
+let polymorphism = import:Polymorphism;
+
+let PolymorphismDriver = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        polymorphism.example();
+        return Entry.ExitCode.Ok;
+    }
+);

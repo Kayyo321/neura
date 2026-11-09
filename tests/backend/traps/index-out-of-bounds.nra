@@ -1,0 +1,13 @@
+// status: 70
+// stderr: index out of bounds: index 2 for length 2
+let io = import:SysIo;
+
+let Bounds = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let names: string[] = ["Ada", "Lin"];
+        let position: uint8 = 2;
+        io.println(names[position - 1]);
+        io.println(names[position]);
+        return Entry.ExitCode.Ok;
+    }
+);

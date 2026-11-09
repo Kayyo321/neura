@@ -1,0 +1,16 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\)
+let io = import:SysIo;
+
+let Division = module:io.Entry (
+    let divide = func(uint16 a, uint16 b) -> uint16 {
+        return a / b;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (divide(0, 0) == 0) {
+            io.println("unreachable");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

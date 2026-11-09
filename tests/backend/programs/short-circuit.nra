@@ -1,0 +1,50 @@
+// The right operand of && and || runs only when the left operand does not
+// decide the result. Skipped operands here would print or trap.
+let io = import:SysIo;
+
+let ShortCircuit = module:io.Entry (
+    let evaluated: int32 = 0;
+
+    let noisy = func(bool value, string label) -> bool {
+        io.println("evaluated " + label);
+        evaluated = evaluated + 1;
+        return value;
+    };
+
+    let increments = func(int8 value) -> bool {
+        return value + 1 > value;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (noisy(false, "left of &&") && noisy(true, "right of &&")) {
+            io.println("unexpected");
+        }
+        if (noisy(true, "left of ||") || noisy(false, "right of ||")) {
+            io.println("|| decided by its left operand");
+        }
+        if (noisy(true, "left of &&") && noisy(false, "right of &&")) {
+            io.println("unexpected");
+        } else {
+            io.println("&& evaluated both operands");
+        }
+
+        let largest: int8 = 127;
+        let check: bool = false;
+        if (check && largest + 1 > largest) {
+            io.println("unexpected");
+        }
+        if (!check || increments(largest)) {
+            io.println("skipped operands did not trap");
+        }
+
+        let small: int8 = 5;
+        let limit: int8 = 10;
+        if (small < limit && limit > small) {
+            io.println("comparisons combine in one graph");
+        }
+        if (evaluated == 4) {
+            io.println("four operands evaluated");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

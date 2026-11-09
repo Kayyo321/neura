@@ -1,0 +1,30 @@
+// Arrays and lists with checked indexing. Lengths are not used: their type,
+// int, has no specified width.
+let io = import:SysIo;
+
+let Collections = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let names: string[] = ["Ada", "Lin"];
+        names[0] = "Grace";
+        io.println(names[0] + " and " + names[1]);
+
+        let queue: int32[list] = [1];
+        queue.append(2);
+        queue.append(3);
+        queue.remove_at(0);
+        if (queue[0] == 2 && queue[1] == 3) {
+            io.println("list holds 2, 3");
+        }
+
+        let grid: string[][] = [["a", "b"], ["c"]];
+        io.println(grid[0][1] + grid[1][0]);
+
+        let position: uint8 = 1;
+        let values: int64[] = [10, 20, 30];
+        values[position] = values[position] + 5;
+        if (values[1] == 25) {
+            io.println("element updated through a uint8 index");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

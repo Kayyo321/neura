@@ -1,0 +1,110 @@
+// Independent object instances, inherited fields and methods, dynamic
+// dispatch, constructors with base initialization, and explicit cleanup.
+let io = import:SysIo;
+
+let Objects = module:io.Entry (
+    let Counter = class (
+        export let value: int32 = 0;
+        export let step: int32 = 1;
+
+        export let increment = func() -> void {
+            value = value + step;
+        }
+    );
+
+    let Shape = class (
+        export let name: string = "shape";
+
+        export let describe = func() -> string {
+            return name + " with " + sides_text();
+        }
+
+        export let sides_text = func() -> string {
+            return "no sides";
+        }
+
+        export let sides = func() -> int32 {
+            return 0;
+        }
+    );
+
+    let Triangle = class:Shape (
+        export let.override sides_text = func() -> string {
+            return "three sides";
+        }
+
+        export let.override sides = func() -> int32 {
+            return 3;
+        }
+    );
+
+    let Square = class:Shape (
+        export let.override sides = func() -> int32 {
+            return 4;
+        }
+    );
+
+    let total_sides = func(Shape first, Shape second) -> int32 {
+        return first.sides() + second.sides();
+    };
+
+    let Labeled = class (
+        export let label: string;
+
+        export let init = func(string text) -> void {
+            label = text;
+        }
+    );
+
+    let Loud = class:Labeled (
+        export let suffix: string = "!";
+
+        export let init = func(string text) -> void {
+            super.init(text);
+            label = label + suffix;
+        }
+    );
+
+    let Resource = class (
+        export let name: string = "resource";
+
+        let deinit = func() -> void {
+            io.println("release " + name);
+        }
+    );
+
+    let Connection = class:Resource (
+        let deinit = func() -> void {
+            io.println("close connection");
+        }
+    );
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let first = new Counter();
+        let second = new Counter();
+        first.increment();
+        first.increment();
+        second.step = 10;
+        second.increment();
+        if (first.value == 2 && second.value == 10) {
+            io.println("independent counters: 2 and 10");
+        }
+
+        let triangle = new Triangle();
+        triangle.name = "triangle";
+        let square = new Square();
+        io.println(triangle.describe());
+        io.println(square.describe());
+        if (total_sides(triangle, square) == 7) {
+            io.println("dispatch: 3 + 4 = 7");
+        }
+
+        let loud = new Loud("hello");
+        io.println(loud.label);
+
+        let resource: Resource = new Connection();
+        resource.name = "socket";
+        destroy resource;
+        return Entry.ExitCode.Ok;
+    }
+);

@@ -1,0 +1,17 @@
+// status: 70
+// run-options: --max-frames 100
+// stderr: frame depth limit exceeded
+let io = import:SysIo;
+
+let Recursion = module:io.Entry (
+    let depth = func(uint32 n) -> uint32 {
+        return depth(n + 1);
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (depth(0) == 0) {
+            io.println("unreachable");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);
