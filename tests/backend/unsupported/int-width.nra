@@ -1,0 +1,12 @@
+// expect: 6:9 the width of 'int' is not specified
+let io = import:SysIo;
+
+let App = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let count: int = 1;
+        if (count + 1 == 2) {
+            io.println("two");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

@@ -84,6 +84,27 @@ if(BUILD_TESTING)
             COMMAND neura_ir_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 
+    add_executable(neura_backend_tests
+        tests/backend/assembler.cpp
+        tests/backend/circuit_tests.cpp
+        tests/backend/conversion_tests.cpp
+        tests/backend/fixtures.cpp
+        tests/backend/format_tests.cpp
+        tests/backend/nir_tests.cpp
+        tests/backend/vm_tests.cpp
+        tests/ir-optimization/evaluator.cpp
+        tests/ir-optimization/main.cpp
+        tests/ir-optimization/support.cpp
+    )
+    target_link_libraries(neura_backend_tests PRIVATE neura_compiler neura_nvm)
+    target_include_directories(neura_backend_tests PRIVATE tests)
+    neura_target_defaults(neura_backend_tests)
+
+    foreach(suite IN ITEMS circuits format vm nir conversion)
+        add_test(NAME backend-${suite}
+            COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
+
     add_test(NAME ir-optimization-cli COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"

@@ -1,0 +1,9 @@
+// expect: 6:9 floating-point semantics are not specified
+let io = import:SysIo;
+
+let App = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let x: float64 = 1.5;
+        return Entry.ExitCode.Ok;
+    }
+);

@@ -1,0 +1,15 @@
+// expect: 10:13 generic function 'identity' is not supported
+let io = import:SysIo;
+
+let App = module:io.Entry (
+    let identity = func<T>(T value) -> T {
+        return value;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (identity<bool>(true)) {
+            io.println("true");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

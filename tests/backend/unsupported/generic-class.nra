@@ -1,0 +1,13 @@
+// expect: 10:9 generic class 'Box' is not supported
+let io = import:SysIo;
+
+let App = module:io.Entry (
+    let Box = class<T> (
+        export let value: T;
+    );
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let box = new Box<bool>();
+        return Entry.ExitCode.Ok;
+    }
+);

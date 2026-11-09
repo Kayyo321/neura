@@ -1,0 +1,6 @@
+// expect: 1:1 the program has no entry point
+let Library = module (
+    export let one = func() -> int32 {
+        return 1;
+    };
+);

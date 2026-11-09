@@ -1,0 +1,9 @@
+// expect: 6:9 the signedness of 'byte' is not specified
+let io = import:SysIo;
+
+let App = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let b: byte = 1;
+        return Entry.ExitCode.Ok;
+    }
+);

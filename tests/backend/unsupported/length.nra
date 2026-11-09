@@ -1,0 +1,12 @@
+// expect: 7:13 length has type 'int', whose width is not specified
+let io = import:SysIo;
+
+let App = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        let names: string[] = ["a"];
+        if (names.length == 1) {
+            io.println("one");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);
