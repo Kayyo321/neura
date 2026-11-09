@@ -23,6 +23,7 @@ public:
 private:
     const std::vector<Token>& tokens_;
     std::size_t cursor_{};
+    unsigned block_depth_ = 0;
 
     const Token& current() const { return tokens_[cursor_]; }
     bool at_end() const { return current().kind == TokenKind::End; }
@@ -74,9 +75,31 @@ private:
     TypeSyntax type() {
         const auto start = cursor_;
         TypeSyntax result{};
-        result.name = qualified_name();
-        if (match("<")) {
-            result.arguments = type_arguments();
+        if (match("[")) {
+            result.name = "[tuple]";
+            do {
+                result.arguments.push_back(type());
+            } while (match(",") && !at("]"));
+            expect("]");
+        } else if (match("(")) {
+            result = type();
+            expect(")");
+        } else if (match("func")) {
+            result.name = "[function]";
+            expect("(");
+            if (!at(")")) {
+                do {
+                    result.arguments.push_back(type());
+                } while (match(","));
+            }
+            expect(")");
+            expect("->");
+            result.arguments.push_back(type());
+        } else {
+            result.name = qualified_name();
+        if (!at_shift() && match("<")) {
+                result.arguments = type_arguments();
+            }
         }
         while (match("[")) {
             const bool list = current().kind == TokenKind::Identifier && current().text == "list";
@@ -153,7 +176,8 @@ private:
         }
 
         if (match("=")) {
-            if (match("func")) {
+            if (!result.type && block_depth_ == 0 && match("func")) {
+                const auto function_start = cursor_ - 1;
                 definition_has_no_annotation(result);
                 result.kind = Declaration::Kind::Function;
                 result.generics = generic_parameters();
@@ -164,16 +188,51 @@ private:
                 if (result.has_body) {
                     result.body = block();
                 }
+                if (result.has_body && result.generics.empty() && !result.override_member &&
+                    (at("(") || at("[") || at(".") || at("as") || precedence() != 0)) {
+                    auto lambda = std::make_shared<Declaration>();
+                    lambda->kind = Declaration::Kind::Function;
+                    lambda->parameters = std::move(result.parameters);
+                    lambda->type = std::move(result.type);
+                    lambda->body = std::move(result.body);
+                    lambda->has_body = true;
+                    lambda->span = span_from(function_start);
+                    auto value = make_expression(Expr::Kind::Lambda, lambda->span);
+                    value.lambda = std::move(lambda);
+                    result.kind = Declaration::Kind::Binding;
+                    result.type.reset();
+                    result.has_body = false;
+                    auto postfix = postfix_tail(function_start, std::move(value));
+                    auto cast = cast_tail(function_start, std::move(postfix));
+                    result.initializer = expression_tail(function_start, std::move(cast), 1);
+                }
             } else if (match("enum")) {
                 definition_has_no_annotation(result);
                 result.kind = Declaration::Kind::Enum;
                 expect("(");
                 while (!at(")")) {
+                    const auto variant_start = cursor_;
                     const auto& variant = identifier();
                     Declaration member{};
                     member.kind = Declaration::Kind::Binding;
                     member.name = variant.text;
-                    member.span = variant.span;
+                    const bool positional = match("(");
+                    member.named_payload = !positional && match("{");
+                    if (positional || member.named_payload) {
+                        const auto close = positional ? ")" : "}";
+                        do {
+                            const auto field_start = cursor_;
+                            std::string name;
+                            if (member.named_payload) {
+                                name = identifier().text;
+                                expect(":");
+                            }
+                            auto payload = type();
+                            member.parameters.push_back({span_from(field_start), std::move(name), std::move(payload)});
+                        } while (match(",") && !at(close));
+                        expect(close);
+                    }
+                    member.span = span_from(variant_start);
                     result.members.push_back(std::move(member));
                     if (!match(",")) {
                         break;
@@ -226,11 +285,13 @@ private:
 
     std::vector<Statement> block() {
         expect("{");
+        ++block_depth_;
         std::vector<Statement> result;
         while (!at_end() && !at("}")) {
             result.push_back(statement());
         }
         expect("}");
+        --block_depth_;
         return result;
     }
 
@@ -245,7 +306,19 @@ private:
         const auto start = cursor_;
         Statement result{};
 
-        if (at_declaration()) {
+        if ((at("let") || at("const")) && tokens_[cursor_ + 1].text == "[") {
+            result.kind = Statement::Kind::Destructure;
+            result.constant_bindings = match("const");
+            if (!result.constant_bindings) expect("let");
+            expect("[");
+            do {
+                result.bindings.push_back(identifier());
+            } while (match(",") && !at("]"));
+            expect("]");
+            expect("=");
+            result.expressions.push_back(expression());
+            expect(";");
+        } else if (at_declaration()) {
             result.kind = Statement::Kind::Binding;
             result.declaration = std::make_unique<Declaration>(declaration(false));
         } else if (at("{")) {
@@ -262,6 +335,8 @@ private:
                     result.alternative = block();
                 }
             }
+        } else if (match("match")) {
+            result = parse_match(false, start);
         } else if (match("while")) {
             result.kind = Statement::Kind::While;
             result.expressions.push_back(condition());
@@ -271,6 +346,49 @@ private:
         } else {
             result = simple_statement();
             expect(";");
+        }
+        result.span = span_from(start);
+        return result;
+    }
+
+    Statement parse_match(bool produces_value, std::size_t start) {
+        Statement result{};
+        result.kind = Statement::Kind::Match;
+        result.expressions.push_back(condition());
+        expect("{");
+        while (!at("}")) {
+            result.arms.push_back(match_arm(produces_value));
+            if (!match(",")) break;
+        }
+        expect("}");
+        result.span = span_from(start);
+        return result;
+    }
+
+    MatchArm match_arm(bool produces_value) {
+        const auto start = cursor_;
+        MatchArm result{};
+        result.variant = qualified_name();
+        const bool positional = match("(");
+        result.named = !positional && match("{");
+        if (positional || result.named) {
+            const auto close = positional ? ")" : "}";
+            while (!at(close)) {
+                auto binding = identifier();
+                if (result.named) {
+                    result.fields.push_back(binding.text);
+                    if (match(":")) binding = identifier();
+                }
+                result.bindings.push_back(std::move(binding));
+                if (!match(",")) break;
+            }
+            expect(close);
+        }
+        expect("=>");
+        if (produces_value) {
+            result.value = expression();
+        } else {
+            result.body = block();
         }
         result.span = span_from(start);
         return result;
@@ -360,23 +478,52 @@ private:
         return result;
     }
 
+    // Angle brackets remain individual tokens for nested type arguments.
+    bool at_shift() const {
+        if (!at("<") && !at(">")) {
+            return false;
+        }
+        const auto& next = tokens_[cursor_ + 1];
+        return next.text == current().text &&
+               next.span.offset == current().span.offset + current().span.length;
+    }
+
+    static constexpr int equality_precedence = 3;
+    static constexpr int ordering_precedence = 4;
+
     int precedence() const {
         if (at("||")) return 1;
         if (at("&&")) return 2;
-        if (at("==") || at("!=")) return 3;
-        if (at("<") || at("<=") || at(">") || at(">=")) return 4;
-        if (at("+") || at("-")) return 5;
-        if (at("*") || at("/") || at("%")) return 6;
+        if (at("==") || at("!=")) return equality_precedence;
+        if (at_shift()) return 8;
+        if (at("<") || at("<=") || at(">") || at(">=")) return ordering_precedence;
+        if (at("|")) return 5;
+        if (at("^")) return 6;
+        if (at("&")) return 7;
+        if (at("+") || at("-")) return 9;
+        if (at("*") || at("/") || at("%")) return 10;
         return 0;
     }
 
     Expr expression(int minimum_precedence = 1) {
         const auto start = cursor_;
-        auto left = cast();
+        return expression_tail(start, cast(), minimum_precedence);
+    }
+
+    Expr expression_tail(std::size_t start, Expr left, int minimum_precedence) {
         while (precedence() >= minimum_precedence) {
             const auto priority = precedence();
-            const auto op = advance().text;
+            const bool shift = at_shift();
+            auto op = advance().text;
+            if (shift) {
+                op += advance().text;
+            }
             auto right = expression(priority + 1);
+            if ((priority == equality_precedence || priority == ordering_precedence) &&
+                (at("and") || at("or"))) {
+                left = comparison_chain(start, std::move(op), std::move(left), std::move(right));
+                continue;
+            }
             auto binary = make_expression(Expr::Kind::Binary, span_from(start), op);
             binary.operands.push_back(std::move(left));
             binary.operands.push_back(std::move(right));
@@ -385,12 +532,35 @@ private:
         return left;
     }
 
+    Expr comparison_chain(std::size_t start, std::string op, Expr left, Expr first) {
+        const auto connector = current().text;
+        auto result = make_expression(Expr::Kind::ComparisonChain, left.span, std::move(op));
+        result.chain_conjunction = connector == "and";
+        result.operands.push_back(std::move(left));
+        result.operands.push_back(std::move(first));
+        do {
+            advance();
+            result.operands.push_back(expression(ordering_precedence + 1));
+            if (precedence() == equality_precedence || precedence() == ordering_precedence) {
+                throw Diagnostic(current().span, "a comparison chain expects another value; use '&&' or '||' between comparisons");
+            }
+        } while (at(connector));
+        if (at("and") || at("or")) {
+            throw Diagnostic(current().span, "a comparison chain must use only 'and' or only 'or'");
+        }
+        result.span = span_from(start);
+        return result;
+    }
+
     // `as` binds tighter than the binary operators and looser than unary
     // operators: `-x as int64` converts `-x`, and `a * b as int64` converts
     // only `b`.
     Expr cast() {
         const auto start = cursor_;
-        auto result = unary();
+        return cast_tail(start, unary());
+    }
+
+    Expr cast_tail(std::size_t start, Expr result) {
         while (match("as")) {
             auto target = type();
             auto conversion = make_expression(Expr::Kind::Cast, span_from(start));
@@ -403,7 +573,7 @@ private:
 
     Expr unary() {
         const auto start = cursor_;
-        if (at("!") || at("-")) {
+        if (at("!") || at("-") || at("~")) {
             const auto op = advance().text;
             auto operand = unary();
             auto result = make_expression(Expr::Kind::Unary, span_from(start), op);
@@ -442,7 +612,10 @@ private:
 
     Expr postfix() {
         const auto start = cursor_;
-        auto result = primary();
+        return postfix_tail(start, primary());
+    }
+
+    Expr postfix_tail(std::size_t start, Expr result) {
         while (true) {
             if (match(".")) {
                 const auto name = identifier().text;
@@ -460,8 +633,22 @@ private:
                 result = std::move(access);
                 continue;
             }
+            if (result.kind == Expr::Kind::Member && match("{")) {
+                auto construct = make_expression(Expr::Kind::NamedVariant, result.span);
+                construct.operands.push_back(std::move(result));
+                while (!at("}")) {
+                    construct.field_names.push_back(identifier().text);
+                    expect(":");
+                    construct.operands.push_back(expression());
+                    if (!match(",")) break;
+                }
+                expect("}");
+                construct.span = span_from(start);
+                result = std::move(construct);
+                continue;
+            }
             std::vector<TypeSyntax> arguments;
-            if (at("<") && (result.kind == Expr::Kind::Name || result.kind == Expr::Kind::Member)) {
+            if (at("<") && !at_shift() && (result.kind == Expr::Kind::Name || result.kind == Expr::Kind::Member)) {
                 arguments = call_type_arguments();
             }
             if (!match("(")) {
@@ -481,6 +668,25 @@ private:
 
     Expr primary() {
         const auto start = cursor_;
+        if (match("match")) {
+            auto statement = parse_match(true, start);
+            auto result = make_expression(Expr::Kind::Match, statement.span);
+            result.match = std::make_shared<Statement>(std::move(statement));
+            return result;
+        }
+        if (match("func")) {
+            auto lambda = std::make_shared<Declaration>();
+            lambda->kind = Declaration::Kind::Function;
+            lambda->parameters = parameters();
+            expect("->");
+            lambda->type = type();
+            lambda->body = block();
+            lambda->has_body = true;
+            lambda->span = span_from(start);
+            auto result = make_expression(Expr::Kind::Lambda, lambda->span);
+            result.lambda = std::move(lambda);
+            return result;
+        }
         if (match("(")) {
             auto result = expression();
             expect(")");

@@ -1,5 +1,6 @@
 #include "verifier.hpp"
 
+#include "aggregate.hpp"
 #include "control_flow.hpp"
 #include "integer.hpp"
 
@@ -25,6 +26,7 @@ std::string_view kind_name(TypeKind kind) {
     case TypeKind::Module: return "module";
     case TypeKind::Enum: return "enum";
     case TypeKind::Callable: return "callable";
+    case TypeKind::Tuple: return "tuple";
     }
     return "<invalid>";
 }
@@ -115,6 +117,18 @@ private:
             report(span, "type " + describe(type) + " refers to missing symbol %" +
                          std::to_string(type.symbol));
         }
+        if (type.kind == TypeKind::Tuple &&
+            (type.symbol != no_symbol || !type.name.empty() || type.arguments.empty() ||
+             std::ranges::any_of(type.arguments, [](const IrType& element) {
+                 return element.kind == TypeKind::Void || element.kind == TypeKind::Module ||
+                        element.kind == TypeKind::Callable;
+             }))) {
+            report(span, "a tuple must have one or more value types and no symbol");
+        }
+        if (type.kind == TypeKind::Enum &&
+            (!valid(type.symbol) || symbol(type.symbol).kind != SymbolKind::Enum || !type.arguments.empty())) {
+            report(span, "an enum type must name an enum declaration");
+        }
         for (const auto& argument : type.arguments) {
             check_type_references(argument, span);
         }
@@ -180,6 +194,19 @@ private:
             check_type_references(entry.type, entry.span);
             if (entry.bound) {
                 check_type_references(*entry.bound, entry.span);
+            }
+            if (entry.kind == SymbolKind::Variant &&
+                (!valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Enum ||
+                 entry.type.kind != TypeKind::Enum || entry.type.symbol != entry.owner)) {
+                report(entry.span, "a variant must belong to its enum type");
+            }
+            if (!entry.payload_types.empty() && entry.kind != SymbolKind::Variant) {
+                report(entry.span, "only enum variants can declare payload fields");
+            }
+            for (const auto& payload : entry.payload_types) {
+                check_type_references(payload, entry.span);
+                if (payload.kind == TypeKind::Void || payload.kind == TypeKind::Module ||
+                    payload.kind == TypeKind::Callable) report(entry.span, "an enum payload needs a value type");
             }
         }
     }
@@ -419,7 +446,9 @@ private:
         if (node.type.kind == TypeKind::Void && !allow_void) {
             report(node.span, "a void expression is used as a value");
         }
-        if (!node.alternative.empty() || (node.op != IrOp::ShortCircuit && !node.body.empty())) {
+        const bool allows_body = node.op == IrOp::ShortCircuit || node.op == IrOp::ComparisonChain ||
+                                 node.op == IrOp::ScopedValue || node.op == IrOp::SelectValue;
+        if ((node.op != IrOp::SelectValue && !node.alternative.empty()) || (!allows_body && !node.body.empty())) {
             report(node.span, "expression has a region it does not use");
         }
         for (const auto& operand : node.operands) {
@@ -447,6 +476,9 @@ private:
             check_symbol_kind(node, {SymbolKind::Variant, SymbolKind::Module, SymbolKind::Import,
                                      SymbolKind::Class, SymbolKind::Alias, SymbolKind::Enum},
                               "reference");
+            if (valid(node.symbol) && symbol(node.symbol).kind == SymbolKind::Variant &&
+                (node.type != symbol(node.symbol).type || has_enum_payload(program_, symbol(node.symbol).owner)))
+                report(node.span, "a payload enum value requires a variant constructor");
             break;
         case IrOp::Receiver:
             expect_operands(node, 0, "receiver");
@@ -460,6 +492,31 @@ private:
             for (const auto& element : node.operands) {
                 require_assignable(element.type, node.type.arguments.front(), element.span, "element");
             }
+            break;
+        case IrOp::Tuple:
+            if (node.type.kind != TypeKind::Tuple ||
+                !expect_operands(node, node.type.arguments.size(), "tuple construction")) {
+                if (node.type.kind != TypeKind::Tuple) report(node.span, "tuple construction needs a tuple type");
+                break;
+            }
+            for (std::size_t i = 0; i < node.operands.size(); ++i)
+                require_assignable(node.operands[i].type, node.type.arguments[i], node.operands[i].span, "tuple element");
+            break;
+        case IrOp::Project:
+        case IrOp::EnumProject:
+            check_projection(node);
+            break;
+        case IrOp::EnumConstruct:
+            check_enum_construct(node);
+            break;
+        case IrOp::EnumTag:
+            if (expect_operands(node, 1, "enum tag")) {
+                const auto& type = node.operands.front().type;
+                if (type.kind != TypeKind::Enum || !has_enum_payload(program_, type.symbol))
+                    report(node.span, "enum tag requires an enum with payloads");
+            }
+            if (node.type != IrType{TypeKind::Integer, "uint32", no_symbol, {}})
+                report(node.span, "enum tag result must be uint32");
             break;
         case IrOp::Integer: check_integer_literal(node); break;
         case IrOp::Float:
@@ -480,6 +537,13 @@ private:
         case IrOp::Unary: check_unary(node); break;
         case IrOp::Binary: check_binary(node); break;
         case IrOp::ShortCircuit: check_short_circuit(node, context); break;
+        case IrOp::ComparisonChain: check_comparison_chain(node, context); break;
+        case IrOp::ScopedValue:
+            check_scoped_value(node, context);
+            break;
+        case IrOp::SelectValue:
+            check_select_value(node, context);
+            break;
         case IrOp::Call:
             if (check_symbol_kind(node, {SymbolKind::Function}, "call") &&
                 (symbol(node.symbol).external || !symbol(node.symbol).has_body)) {
@@ -515,6 +579,15 @@ private:
             expect_type(node, TypeKind::Object, "allocation");
             if (node.symbol == no_symbol || check_symbol_kind(node, {SymbolKind::Function}, "allocation")) {
                 check_arity(node, 0);
+                if (valid(node.symbol)) {
+                    const auto& constructor = symbol(node.symbol);
+                    if (constructor.name != "init" || !valid(constructor.owner) ||
+                        symbol(constructor.owner).kind != SymbolKind::Class ||
+                        (constructor.owner != node.type.symbol &&
+                         !assignable(symbol(constructor.owner).type, node.type))) {
+                        report(node.span, "allocation has a constructor for an incompatible class");
+                    }
+                }
             }
             break;
         case IrOp::Length:
@@ -540,6 +613,7 @@ private:
                     return t.kind == TypeKind::Integer || t.kind == TypeKind::Float;
                 };
                 if (!numeric(node.type) || !(numeric(from) || (from.kind == TypeKind::Enum &&
+                                                                !has_enum_payload(program_, from.symbol) &&
                                                                 node.type.kind == TypeKind::Integer))) {
                     report(node.span, "cannot convert " + describe(from) + " to " + describe(node.type));
                 }
@@ -686,9 +760,85 @@ private:
             if ((operand.kind != TypeKind::Integer && operand.kind != TypeKind::Float) || node.type != operand) {
                 report(node.span, "unary '-' requires a numeric operand of its result type");
             }
+        } else if (node.text == "~") {
+            if (operand.kind != TypeKind::Integer || node.type != operand) {
+                report(node.span, "'~' requires an integer operand of its result type");
+            }
         } else {
             report(node.span, "unknown unary operator '" + node.text + "'");
         }
+    }
+
+    void check_scoped_value(const IrNode& node, Context& context) {
+        expect_operands(node, 0, "scoped value");
+        if (node.body.empty()) {
+            report(node.span, "a scoped value needs a result expression");
+            return;
+        }
+        scopes_.emplace_back();
+        for (std::size_t i = 0; i + 1 < node.body.size(); ++i) {
+            const auto& init = node.body[i];
+            if (init.op != IrOp::Initialize || !check_symbol_kind(init, {SymbolKind::Local}, "scoped value binding")) {
+                report(init.span, "a scoped value can only declare local bindings before its result");
+            } else {
+                check_statement(init, context);
+            }
+        }
+        check_value(node.body.back(), context);
+        require_assignable(node.body.back().type, node.type, node.span, "scoped value result");
+        scopes_.pop_back();
+    }
+
+    void check_select_value(const IrNode& node, Context& context) {
+        if (expect_operands(node, 1, "select value"))
+            expect_type(node.operands.front(), TypeKind::Bool, "selection condition");
+        for (const auto* region : {&node.body, &node.alternative}) {
+            if (region->size() != 1) {
+                report(node.span, "each selection arm needs one result expression");
+                continue;
+            }
+            check_value(region->front(), context);
+            require_assignable(region->front().type, node.type, node.span, "selection arm");
+        }
+    }
+
+    void check_enum_construct(const IrNode& node) {
+        if (!check_symbol_kind(node, {SymbolKind::Variant}, "enum construction")) return;
+        const auto& variant = symbol(node.symbol);
+        if (node.type != variant.type || !has_enum_payload(program_, variant.owner))
+            report(node.span, "enum construction result must be its variant's enum with payloads");
+        if (!expect_operands(node, variant.payload_types.size(), "enum construction")) return;
+        const auto order = enum_field_order(node.text, variant.payload_types.size());
+        if (!order) {
+            report(node.span, "enum construction has an invalid payload field order");
+            return;
+        }
+        for (std::size_t i = 0; i < node.operands.size(); ++i)
+            require_assignable(node.operands[i].type, variant.payload_types[(*order)[i]],
+                               node.operands[i].span, "enum payload");
+    }
+
+    void check_projection(const IrNode& node) {
+        if (!expect_operands(node, 1, "projection")) return;
+        const auto& source = node.operands.front().type;
+        const auto* fields = &source.arguments;
+        if (node.op == IrOp::Project) {
+            if (source.kind != TypeKind::Tuple) {
+                report(node.span, "tuple projection requires a tuple");
+                return;
+            }
+        } else {
+            if (!check_symbol_kind(node, {SymbolKind::Variant}, "enum projection")) return;
+            const auto& variant = symbol(node.symbol);
+            if (source != variant.type) {
+                report(node.span, "enum projection requires a value of the variant's enum type");
+                return;
+            }
+            fields = &variant.payload_types;
+        }
+        const auto index = aggregate_index(node.text);
+        if (!index || *index >= fields->size() || node.type != (*fields)[*index])
+            report(node.span, "projection index or result type does not match the aggregate field");
     }
 
     void check_binary(const IrNode& node) {
@@ -697,15 +847,21 @@ private:
         }
         const auto& left = node.operands[0].type;
         const auto& right = node.operands[1].type;
+        const auto& op = node.text;
+        if (is_shift(op)) {
+            if (left.kind != TypeKind::Integer || right.kind != TypeKind::Integer || node.type != left) {
+                report(node.span, "a shift takes two integers and produces the left operand's type");
+            }
+            return;
+        }
         if (left != right) {
             report(node.span, "binary operands have different types " + describe(left) + " and " +
                               describe(right));
             return;
         }
-        const auto& op = node.text;
         const bool numeric = left.kind == TypeKind::Integer || left.kind == TypeKind::Float;
-        if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
-            if ((op == "%" && left.kind != TypeKind::Integer) ||
+        if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || is_bitwise_binary(op)) {
+            if (((op == "%" || is_bitwise_binary(op)) && left.kind != TypeKind::Integer) ||
                 (!numeric && !(op == "+" && left.kind == TypeKind::String))) {
                 report(node.span, "operator '" + op + "' is not defined for " + describe(left));
             } else if (node.type != left) {
@@ -714,7 +870,8 @@ private:
             }
         } else if (op == "<" || op == "<=" || op == ">" || op == ">=" || op == "==" || op == "!=") {
             const bool equality = op == "==" || op == "!=";
-            if (!numeric && !(equality && (left.kind == TypeKind::Bool || left.kind == TypeKind::Enum))) {
+            const bool scalar_enum = left.kind == TypeKind::Enum && !has_enum_payload(program_, left.symbol);
+            if (!numeric && !(equality && (left.kind == TypeKind::Bool || scalar_enum))) {
                 report(node.span, "operator '" + op + "' is not defined for " + describe(left));
             }
             expect_type(node, TypeKind::Bool, "comparison");
@@ -737,6 +894,24 @@ private:
         }
         check_value(node.body.front(), context);
         expect_type(node.body.front(), TypeKind::Bool, "short-circuit right operand");
+    }
+
+    void check_comparison_chain(const IrNode& node, Context& context) {
+        expect_type(node, TypeKind::Bool, "comparison chain result");
+        expect_operands(node, 0, "comparison chain");
+        if (node.body.size() != 2 || node.body.front().op != IrOp::Initialize ||
+            !check_symbol_kind(node.body.front(), {SymbolKind::Local}, "comparison chain subject")) {
+            report(node.span, "a comparison chain requires a subject binding followed by a boolean expression");
+            return;
+        }
+        if (!symbol(node.body.front().symbol).constant) {
+            report(node.span, "a comparison chain subject must be constant");
+        }
+        scopes_.emplace_back();
+        check_initialize(node.body.front(), context);
+        check_value(node.body.back(), context);
+        expect_type(node.body.back(), TypeKind::Bool, "comparison chain body");
+        scopes_.pop_back();
     }
 };
 

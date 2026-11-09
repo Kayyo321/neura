@@ -118,6 +118,10 @@ Checked remainder(Circuit& circuit, const Word& a, const Word& b, bool is_signed
 // target range.
 Checked convert_integer(Circuit& circuit, const Word& a, bool from_signed, unsigned width, bool to_signed);
 
+// Fixed-width shift with a zero or sign-bit fill. Counts outside the word's
+// width set failure. The count is encoded in least-significant-first lanes.
+Checked shift(Circuit& circuit, Word word, const Word& count, bool right, bool sign_extend);
+
 // a + b + carry on unsigned words of equal width. `failure` is the carry out
 // of the top lane.
 Checked add_with_carry(Circuit& circuit, const Word& a, const Word& b, const Signal& carry);

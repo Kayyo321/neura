@@ -16,8 +16,8 @@ namespace neura {
 inline constexpr std::uint16_t nir_major_version = 1;
 // The highest minor version this code reads and writes. The writer emits the
 // lowest minor version that can represent the program, so a program that
-// uses no 1.1 feature is written as 1.0.
-inline constexpr std::uint16_t nir_minor_version = 1;
+// uses no newer feature is written as 1.0.
+inline constexpr std::uint16_t nir_minor_version = 2;
 
 std::vector<std::uint8_t> write_nir(const IrProgram& program);
 

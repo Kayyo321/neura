@@ -24,6 +24,23 @@ Unsigned unsigned_upper(IntegerFormat format) {
     return format.bits == 64 ? unsigned_max : (Unsigned{1} << format.bits) - 1;
 }
 
+Unsigned bits_of(const IntegerConstant& value) {
+    const auto bits = value.format.is_signed ? static_cast<Unsigned>(value.signed_value) : value.unsigned_value;
+    return bits & unsigned_upper(value.format);
+}
+
+IntegerConstant from_bits(Unsigned bits, IntegerFormat format) {
+    const auto mask = unsigned_upper(format);
+    bits &= mask;
+    if (!format.is_signed) {
+        return {format, 0, bits};
+    }
+    if ((bits >> (format.bits - 1)) != 0) {
+        bits |= ~mask;
+    }
+    return {format, static_cast<Signed>(bits), 0};
+}
+
 std::optional<IntegerConstant> make_signed(IntegerFormat format, Signed value) {
     if (value < signed_lower(format) || value > signed_upper(format)) {
         return {};
@@ -143,6 +160,32 @@ std::optional<IntegerConstant> negate(const IntegerConstant& value) {
                                                 : make_signed(value.format, -value.signed_value);
     }
     return value.unsigned_value == 0 ? std::optional{value} : std::nullopt;
+}
+
+IntegerConstant complement(const IntegerConstant& value) {
+    return from_bits(~bits_of(value), value.format);
+}
+
+std::optional<IntegerConstant> fold_bits(std::string_view op, const IntegerConstant& left,
+                                         const IntegerConstant& right) {
+    const auto a = bits_of(left);
+    const auto b = bits_of(right);
+    if (op == "&") return from_bits(a & b, left.format);
+    if (op == "|") return from_bits(a | b, left.format);
+    if (op == "^") return from_bits(a ^ b, left.format);
+    if (b >= left.format.bits || (right.format.is_signed && right.signed_value < 0)) {
+        return std::nullopt;
+    }
+    if (op == "<<") return from_bits(a << b, left.format);
+    if (op == ">>") {
+        const auto extended = left.format.is_signed && left.signed_value < 0
+            ? a | ~unsigned_upper(left.format) : a;
+        // Use sign fill explicitly so no C++ shift ever counts to 64.
+        const auto fill = left.format.is_signed && left.signed_value < 0 && b != 0
+            ? unsigned_max << (64 - b) : 0;
+        return from_bits((extended >> b) | fill, left.format);
+    }
+    return std::nullopt;
 }
 
 int compare(const IntegerConstant& left, const IntegerConstant& right) {

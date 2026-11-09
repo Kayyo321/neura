@@ -136,12 +136,18 @@ bool fold_unary(IrNode& node) {
             node = literal_for(node, IrOp::Integer, spelling(*result));
             return true;
         }
+    } else if (node.text == "~") {
+        if (const auto value = integer_constant(operand)) {
+            node = literal_for(node, IrOp::Integer, spelling(complement(*value)));
+            return true;
+        }
     }
     return false;
 }
 
 bool fold_binary(IrNode& node) {
-    if (node.operands.size() != 2 || node.operands[0].type != node.operands[1].type) {
+    if (node.operands.size() != 2 ||
+        (!is_shift(node.text) && node.operands[0].type != node.operands[1].type)) {
         return false;
     }
     const auto& op = node.text;
@@ -158,6 +164,14 @@ bool fold_binary(IrNode& node) {
     const auto right = integer_constant(node.operands[1]);
     if (!left || !right) {
         return false;
+    }
+    if (is_bitwise_binary(op)) {
+        const auto result = fold_bits(op, *left, *right);
+        if (!result) {
+            return false;
+        }
+        node = literal_for(node, IrOp::Integer, spelling(*result));
+        return true;
     }
     if (const auto operation = arithmetic(op)) {
         const auto result = fold(*operation, *left, *right);

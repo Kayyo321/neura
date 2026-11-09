@@ -30,12 +30,18 @@ struct Parameter {
     TypeSyntax type;
 };
 
+struct Declaration;
+struct MatchArm;
+struct Statement;
+
 struct Expr {
     enum class Kind {
         Name, Integer, Float, String, Boolean, Unary, Binary, Member, Call,
         Index, Collection, New, Import,
         // `operand as type`: the target type is in `type`.
-        Cast,
+        Cast, NamedVariant, Match,
+        ComparisonChain,
+        Lambda,
     };
 
     Kind kind;
@@ -46,9 +52,12 @@ struct Expr {
     std::vector<Expr> operands;
     std::vector<TypeSyntax> type_arguments;
     std::optional<TypeSyntax> type;
+    // True for an 'and' comparison chain and false for an 'or' chain.
+    bool chain_conjunction{};
+    std::shared_ptr<Declaration> lambda{};
+    std::vector<std::string> field_names{};
+    std::shared_ptr<Statement> match{};
 };
-
-struct Declaration;
 
 struct Statement {
     enum class Kind {
@@ -58,7 +67,7 @@ struct Statement {
         For,
         // for (let name: Type in collection) body. `declaration` names the
         // element binding; `expressions` holds the collection.
-        ForEach,
+        ForEach, Destructure, Match,
     };
 
     Kind kind;
@@ -69,10 +78,23 @@ struct Statement {
     std::vector<Statement> alternative;
     std::vector<Statement> initializer;
     std::vector<Statement> step;
+    std::vector<Token> bindings;
+    bool constant_bindings{};
+    std::vector<MatchArm> arms;
+};
+
+struct MatchArm {
+    Span span;
+    std::string variant;
+    std::vector<Token> bindings;
+    std::vector<std::string> fields;
+    bool named{};
+    std::vector<Statement> body;
+    std::optional<Expr> value;
 };
 
 struct Declaration {
-    // An enum's variants are its members, as bindings with only a name.
+    // An enum's variants are its members. Their parameters describe the payload.
     enum class Kind { Binding, Function, Class, Module, Enum };
 
     Kind kind;
@@ -88,6 +110,7 @@ struct Declaration {
     std::optional<Expr> initializer;
     std::vector<GenericParameter> generics;
     std::vector<Parameter> parameters;
+    bool named_payload{};
     std::vector<Declaration> members;
     std::vector<Statement> body;
 };

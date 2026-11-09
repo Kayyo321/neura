@@ -39,6 +39,7 @@ std::string_view spelling(TypeKind kind) {
     case TypeKind::Module: return "module";
     case TypeKind::Enum: return "enum";
     case TypeKind::Callable: return "callable";
+    case TypeKind::Tuple: return "tuple";
     }
     return "<invalid>";
 }
@@ -79,6 +80,14 @@ std::string_view spelling(IrOp op) {
     case IrOp::Convert: return "convert";
     case IrOp::CollectionVersion: return "collection_version";
     case IrOp::Fail: return "fail";
+    case IrOp::Tuple: return "tuple";
+    case IrOp::Project: return "project";
+    case IrOp::EnumConstruct: return "enum_construct";
+    case IrOp::EnumTag: return "enum_tag";
+    case IrOp::EnumProject: return "enum_project";
+    case IrOp::ComparisonChain: return "comparison_chain";
+    case IrOp::ScopedValue: return "scoped_value";
+    case IrOp::SelectValue: return "select_value";
     }
     return "<invalid>";
 }
@@ -171,6 +180,10 @@ void print_symbol(std::ostream& output, SymbolId id, const IrSymbol& symbol) {
     print_reference(output, "overrides=", symbol.overrides);
     print_references(output, "parameters=", symbol.parameters);
     print_references(output, "generics=", symbol.generics);
+    if (!symbol.payload_types.empty()) {
+        output << " payload=";
+        print_type_arguments(output, symbol.payload_types);
+    }
     if (symbol.bound) {
         output << " bound=";
         print_type(output, *symbol.bound);

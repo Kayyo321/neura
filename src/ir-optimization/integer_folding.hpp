@@ -38,6 +38,10 @@ std::optional<IntegerConstant> convert(const IntegerConstant& value, IntegerForm
 // Returns -value when it is in the operand's range.
 std::optional<IntegerConstant> negate(const IntegerConstant& value);
 
+IntegerConstant complement(const IntegerConstant& value);
+std::optional<IntegerConstant> fold_bits(std::string_view op, const IntegerConstant& left,
+                                         const IntegerConstant& right);
+
 // Three-way comparison of two values of the same format: -1, 0, or 1.
 int compare(const IntegerConstant& left, const IntegerConstant& right);
 

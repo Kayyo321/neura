@@ -5,6 +5,7 @@
 #include "float_circuit.hpp"
 #include "ir-optimization/analysis.hpp"
 #include "ir-optimization/optimizer.hpp"
+#include "neura-ir/aggregate.hpp"
 #include "neura-ir/float.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/specialize.hpp"
@@ -134,6 +135,8 @@ private:
     Operand virtual_call(const IrNode& node);
     Operand external_call(const IrNode& node);
     Operand allocate(const IrNode& node);
+    Operand aggregate(const IrNode& node);
+    Operand select_value(const IrNode& node);
     Operand to_index(const Operand& index, const IrType& type, const Span& span);
     Operand receiver_value(const IrNode& node);
     SymbolId module_of(const IrNode& receiver) const;
@@ -190,6 +193,8 @@ public:
     std::uint32_t constant(std::uint32_t type, std::vector<std::uint8_t> payload) override;
     std::uint32_t text_constant(const std::string& text, const Span& where);
     std::uint32_t layout(SymbolId cls, const Span& where);
+    std::uint32_t tuple_layout(const IrType& type, const Span& where);
+    std::uint32_t payload_start(SymbolId variant, const Span& where);
     std::uint32_t field_index(SymbolId field, const Span& where);
     std::uint32_t global(SymbolId global, const Span& where);
     std::uint32_t graph(const nvr::Graph& graph) override;
@@ -249,6 +254,8 @@ private:
     // -Wstringop-overread for ordered comparisons of std::vector<uint8_t>.
     std::map<std::pair<std::uint32_t, std::string>, std::uint32_t> constants_;
     std::map<SymbolId, std::uint32_t> layouts_;
+    std::vector<std::pair<IrType, std::uint32_t>> tuple_layouts_;
+    std::map<SymbolId, std::uint32_t> payload_starts_;
     std::map<SymbolId, std::uint32_t> fields_;
     std::map<SymbolId, std::uint32_t> globals_;
     std::map<std::string, std::uint32_t> graphs_;
@@ -325,12 +332,16 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
                                         "' is not supported: IRtoNeuronConversion does not specialize generics");
         }
         return type_index({nvr::TypeKind::Object, 0, layout(type.symbol, where)});
+    case TypeKind::Tuple:
+        return type_index({nvr::TypeKind::Object, 0, tuple_layout(type, where)});
     case TypeKind::Enum:
         // ExitCode is the entry function's int32 status; every other enum is
         // its variant ordinal (Types.md, Enums).
         if (is_exit_code(type.symbol)) {
             return scalar(nvr::TypeKind::Signed, 32);
         }
+        if (has_enum_payload(program_, type.symbol))
+            return type_index({nvr::TypeKind::Object, 0, layout(type.symbol, where)});
         return scalar(nvr::TypeKind::Unsigned, 32);
     case TypeKind::TypeParameter:
         throw Diagnostic(where, "type parameter '" + type.name +
@@ -372,6 +383,18 @@ std::uint32_t Converter::layout(SymbolId cls, const Span& where) {
     layouts_.emplace(cls, index);
     image_.layouts.emplace_back();
     nvr::Layout result;
+    if (item.kind == SymbolKind::Enum) {
+        result.fields.push_back(scalar(nvr::TypeKind::Unsigned, 32));
+        for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+            const auto& variant = symbol(id);
+            if (variant.owner != cls || variant.kind != SymbolKind::Variant) continue;
+            payload_starts_[id] = static_cast<std::uint32_t>(result.fields.size());
+            for (const auto& field : variant.payload_types)
+                result.fields.push_back(type_of(field, variant.span));
+        }
+        image_.layouts[index] = std::move(result);
+        return index;
+    }
     if (item.base != no_symbol) {
         result.parent = layout(item.base, where);
         result.fields = image_.layouts[result.parent].fields;
@@ -387,20 +410,31 @@ std::uint32_t Converter::layout(SymbolId cls, const Span& where) {
     return index;
 }
 
+std::uint32_t Converter::tuple_layout(const IrType& type, const Span& where) {
+    const auto existing = std::ranges::find(tuple_layouts_, type,
+                                            &std::pair<IrType, std::uint32_t>::first);
+    if (existing != tuple_layouts_.end()) return existing->second;
+    const auto index = static_cast<std::uint32_t>(image_.layouts.size());
+    tuple_layouts_.emplace_back(type, index);
+    image_.layouts.emplace_back();
+    nvr::Layout result;
+    for (const auto& field : type.arguments) result.fields.push_back(type_of(field, where));
+    image_.layouts[index] = std::move(result);
+    return index;
+}
+
+std::uint32_t Converter::payload_start(SymbolId variant, const Span& where) {
+    layout(symbol(variant).owner, where);
+    return payload_starts_.at(variant);
+}
+
 std::uint32_t Converter::field_index(SymbolId field, const Span& where) {
     layout(symbol(field).owner, where);
     return fields_.at(field);
 }
 
 std::uint64_t Converter::ordinal(SymbolId variant) const {
-    std::uint64_t position = 0;
-    for (SymbolId id = 0; id < variant; ++id) {
-        const auto& item = program_.symbols[id];
-        if (item.kind == SymbolKind::Variant && item.owner == symbol(variant).owner) {
-            ++position;
-        }
-    }
-    return position;
+    return enum_ordinal(program_, variant);
 }
 
 std::optional<std::uint64_t> Converter::literal(const IrNode& node, std::uint32_t type) {
@@ -1596,12 +1630,34 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         return binary(node);
     case IrOp::ShortCircuit:
         return short_circuit(node);
+    case IrOp::ComparisonChain:
+        statement(node.body.front());
+        return expression(node.body.back());
+    case IrOp::ScopedValue:
+        for (std::size_t i = 0; i + 1 < node.body.size(); ++i) statement(node.body[i]);
+        return expression(node.body.back());
+    case IrOp::SelectValue:
+        return select_value(node);
     case IrOp::Call:
     case IrOp::VirtualCall:
     case IrOp::ExternalCall:
         return call(node);
     case IrOp::Allocate:
         return allocate(node);
+    case IrOp::Tuple:
+    case IrOp::EnumConstruct:
+        return aggregate(node);
+    case IrOp::Project:
+    case IrOp::EnumTag:
+    case IrOp::EnumProject: {
+        const auto object = expression(node.operands.front());
+        std::uint32_t field = 0;
+        if (node.op != IrOp::EnumTag)
+            field = static_cast<std::uint32_t>(aggregate_index(node.text).value());
+        if (node.op == IrOp::EnumProject)
+            field += c_.payload_start(node.symbol, node.span);
+        return state(nvr::StateOp::ReadField, field, {object}, c_.type_of(node.type, node.span), node.span);
+    }
     case IrOp::Collection: {
         auto elements = sequence(node.operands);
         const auto type = c_.type_of(node.type, node.span);
@@ -1697,6 +1753,11 @@ Operand FunctionCompiler::unary(const IrNode& node) {
     if (node.text == "!") {
         return bits(c_.scalar(nvr::TypeKind::Bool), {Circuit::logical_not(lanes(operand).front())});
     }
+    if (node.text == "~") {
+        auto word = lanes(operand);
+        std::ranges::transform(word, word.begin(), Circuit::logical_not);
+        return bits(c_.type_of(node.type, node.span), std::move(word));
+    }
     if (node.type.kind == TypeKind::Float) {
         return bits(c_.type_of(node.type, node.span), float_negate(lanes(operand)));
     }
@@ -1732,6 +1793,25 @@ Operand FunctionCompiler::binary(const IrNode& node) {
         return bits(boolean, {op == "==" ? same : Circuit::logical_not(same)});
     }
     const auto format = integer_format(operand_type, node.span);
+    if (is_shift(op)) {
+        auto result = shift(circuit, a, b, op == ">>", format.is_signed);
+        fail_when(result.failure, arithmetic_failure, node.span);
+        return bits(c_.type_of(node.type, node.span), std::move(result.value));
+    }
+    if (is_bitwise_binary(op)) {
+        Word result;
+        result.reserve(a.size());
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            if (op == "&") {
+                result.push_back(circuit.logical_and(a[i], b[i]));
+            } else if (op == "|") {
+                result.push_back(circuit.logical_or(a[i], b[i]));
+            } else {
+                result.push_back(circuit.logical_xor(a[i], b[i]));
+            }
+        }
+        return bits(c_.type_of(node.type, node.span), std::move(result));
+    }
     if (is_comparison(op)) {
         Signal result;
         if (op == "==") {
@@ -2006,9 +2086,53 @@ Operand FunctionCompiler::external_call(const IrNode& node) {
     return {};
 }
 
-Operand FunctionCompiler::allocate(const IrNode& node) {
-    const auto cls = node.type.symbol;
+Operand FunctionCompiler::select_value(const IrNode& node) {
+    auto condition = expression(node.operands.front());
+    const auto when_true = new_block();
+    const auto when_false = new_block();
+    const auto join = new_block();
+    const auto result = new_slot(c_.type_of(node.type, node.span));
+    branch(condition, when_true, when_false);
+    const auto emit_arm = [&](std::uint32_t block, const IrNode& arm) {
+        begin(block, arm.span);
+        assign(result, expression(arm));
+        jump(join);
+    };
+    emit_arm(when_true, node.body.front());
+    emit_arm(when_false, node.alternative.front());
+    begin(join, node.span);
+    return slot_operand(result);
+}
+
+Operand FunctionCompiler::aggregate(const IrNode& node) {
+    auto fields = sequence(node.operands);
+    for (auto& field : fields) spill(field);
     const auto type = c_.type_of(node.type, node.span);
+    const auto layout = c_.type_at(type).reference;
+    const auto handle = state(nvr::StateOp::AllocateObject, layout, {}, type, node.span);
+    const auto nothing = c_.scalar(nvr::TypeKind::Void);
+    if (node.op == IrOp::EnumConstruct) {
+        const auto tag_type = c_.scalar(nvr::TypeKind::Unsigned, 32);
+        const auto tag = immediate(tag_type, c_.ordinal(node.symbol));
+        state(nvr::StateOp::WriteField, 0, {handle, tag}, nothing, node.span);
+        const auto start = c_.payload_start(node.symbol, node.span);
+        const auto order = enum_field_order(node.text, fields.size()).value();
+        for (std::size_t i = 0; i < fields.size(); ++i) {
+            const auto index = start + static_cast<std::uint32_t>(order[i]);
+            state(nvr::StateOp::WriteField, index, {handle, resolve(fields[i])}, nothing, node.span);
+        }
+    } else {
+        for (std::size_t i = 0; i < fields.size(); ++i) {
+            state(nvr::StateOp::WriteField, static_cast<std::uint32_t>(i),
+                  {handle, resolve(fields[i])}, nothing, node.span);
+        }
+    }
+    return handle;
+}
+
+Operand FunctionCompiler::allocate(const IrNode& node) {
+    const auto cls = node.symbol == no_symbol ? node.type.symbol : c_.symbol(node.symbol).owner;
+    const auto type = c_.type_of(c_.symbol(cls).type, node.span);
     auto arguments = sequence(node.operands);
     for (auto& argument : arguments) {
         spill(argument);

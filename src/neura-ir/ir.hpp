@@ -16,7 +16,8 @@ using SymbolId = std::size_t;
 inline constexpr SymbolId no_symbol = static_cast<SymbolId>(-1);
 
 enum class TypeKind {
-    Void, Bool, String, Integer, Float, Array, List, Object, TypeParameter, Module, Enum, Callable
+    Void, Bool, String, Integer, Float, Array, List, Object, TypeParameter, Module, Enum, Callable,
+    Tuple
 };
 
 struct IrType {
@@ -48,6 +49,8 @@ struct IrSymbol {
     bool constant = false;
     bool external = false;
     bool has_body = false;
+    // Only enum variants have payload types, in declaration order.
+    std::vector<IrType> payload_types{};
 };
 
 enum class IrOp {
@@ -56,7 +59,12 @@ enum class IrOp {
     Call, VirtualCall, ExternalCall, BaseInitialize, Allocate, Length, Append, RemoveAt,
     Return, Block, Branch, Loop, Break, Continue, Destroy, Discard,
     // NeuraIR 1.1.
-    Convert, CollectionVersion, Fail
+    Convert, CollectionVersion, Fail,
+    // NeuraIR 1.2. Projections use a zero-based decimal index in text.
+    Tuple, Project, EnumConstruct, EnumTag, EnumProject, ComparisonChain,
+    // ScopedValue has local initializers followed by a result expression in
+    // body. SelectValue evaluates one result region based on its operand.
+    ScopedValue, SelectValue
 };
 
 struct IrNode {

@@ -19,8 +19,8 @@ struct RunLimits {
     std::uint64_t max_steps = 100'000'000;
     // Active frames, including the entry frame.
     std::uint32_t max_frames = 10'000;
-    // Live heap storage: one cell per heap entry plus one per object field,
-    // collection element, and text or bytes byte.
+    // Heap storage after reclaiming unreachable entries: one cell per entry
+    // plus one per object field, collection element, and text or bytes byte.
     std::uint64_t max_heap_cells = std::uint64_t{1} << 26;
     // Reference handles assigned during the run. Handles are never reused.
     std::uint64_t max_handles = std::uint64_t{1} << 32;

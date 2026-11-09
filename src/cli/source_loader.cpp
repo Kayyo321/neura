@@ -14,6 +14,9 @@ namespace {
 
 namespace fs = std::filesystem;
 
+void collect_imports(const Declaration& declaration, std::vector<const Expr*>& imports);
+void collect_imports(const Statement& statement, std::vector<const Expr*>& imports);
+
 void collect_imports(const Expr& expression, std::vector<const Expr*>& imports) {
     if (expression.kind == Expr::Kind::Import) {
         imports.push_back(&expression);
@@ -21,9 +24,11 @@ void collect_imports(const Expr& expression, std::vector<const Expr*>& imports) 
     for (const auto& operand : expression.operands) {
         collect_imports(operand, imports);
     }
+    if (expression.lambda) {
+        collect_imports(*expression.lambda, imports);
+    }
+    if (expression.match) collect_imports(*expression.match, imports);
 }
-
-void collect_imports(const Statement& statement, std::vector<const Expr*>& imports);
 
 void collect_imports(const Declaration& declaration, std::vector<const Expr*>& imports) {
     if (declaration.initializer) {
@@ -49,6 +54,10 @@ void collect_imports(const Statement& statement, std::vector<const Expr*>& impor
     }
     for (const auto& child : statement.alternative) {
         collect_imports(child, imports);
+    }
+    for (const auto& arm : statement.arms) {
+        for (const auto& child : arm.body) collect_imports(child, imports);
+        if (arm.value) collect_imports(*arm.value, imports);
     }
 }
 

@@ -1,5 +1,7 @@
 #include "nir_format.hpp"
+#include "integer.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <map>
 #include <string_view>
@@ -12,25 +14,41 @@ constexpr std::uint32_t absent = 0xffffffffU;
 // Bounds the reader's recursion and that of the passes that later walk the
 // program, with room to spare under sanitizers.
 constexpr std::size_t max_depth = 1024;
-constexpr std::uint8_t max_type_kind = static_cast<std::uint8_t>(TypeKind::Callable);
 constexpr std::uint8_t max_symbol_kind = static_cast<std::uint8_t>(SymbolKind::Variant);
 // The last operation tag of each minor version.
 constexpr std::uint8_t max_op_1_0 = static_cast<std::uint8_t>(IrOp::Discard);
 constexpr std::uint8_t max_op_1_1 = static_cast<std::uint8_t>(IrOp::Fail);
+constexpr std::uint8_t max_op_1_2 = static_cast<std::uint8_t>(IrOp::SelectValue);
 
-// Whether `nodes` use a feature introduced in 1.1: an operation after
-// Discard or a loop latch.
-bool needs_1_1(const std::vector<IrNode>& nodes) {
-    for (const auto& node : nodes) {
-        if (static_cast<std::uint8_t>(node.op) > max_op_1_0 || (node.op == IrOp::Loop && !node.alternative.empty()) ||
-            needs_1_1(node.operands) || needs_1_1(node.body) || needs_1_1(node.alternative)) {
-            return true;
-        }
-    }
-    return false;
+bool needs_tuple_format(const IrType& type) {
+    return type.kind == TypeKind::Tuple || std::ranges::any_of(type.arguments, needs_tuple_format);
 }
 
-enum Flag : std::uint8_t { Exported = 1, Constant = 2, External = 4, HasBody = 8 };
+bool new_operator(const IrNode& node) {
+    return (node.op == IrOp::Unary && node.text == "~") ||
+           (node.op == IrOp::Binary && is_bitwise_binary(node.text));
+}
+
+std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
+    std::uint16_t version = 0;
+    for (const auto& node : nodes) {
+        const auto op = static_cast<std::uint8_t>(node.op);
+        if (op > max_op_1_1 || new_operator(node) || needs_tuple_format(node.type) ||
+            std::ranges::any_of(node.type_arguments, needs_tuple_format)) {
+            return 2;
+        }
+        if (op > max_op_1_0 || (node.op == IrOp::Loop && !node.alternative.empty())) {
+            version = 1;
+        }
+        for (const auto* region : {&node.operands, &node.body, &node.alternative}) {
+            version = std::max(version, required_minor(*region));
+        }
+        if (version == 2) return version;
+    }
+    return version;
+}
+
+enum Flag : std::uint8_t { Exported = 1, Constant = 2, External = 4, HasBody = 8, HasPayload = 16 };
 
 class Writer {
 public:
@@ -51,11 +69,19 @@ public:
             u8(static_cast<std::uint8_t>(c));
         }
         u16(nir_major_version);
-        bool newer = false;
-        for (const auto& body : program.bodies) {
-            newer = newer || needs_1_1(body.instructions);
+        std::uint16_t version = 0;
+        for (const auto& item : program.symbols) {
+            if (!item.payload_types.empty() || needs_tuple_format(item.type) ||
+                (item.bound && needs_tuple_format(*item.bound))) {
+                version = 2;
+                break;
+            }
         }
-        u16(newer ? 1 : 0);
+        for (const auto& body : program.bodies) {
+            if (version == 2) break;
+            version = std::max(version, required_minor(body.instructions));
+        }
+        u16(version);
         count(files_.size());
         for (const auto& file : files_) {
             text(file);
@@ -166,7 +192,9 @@ private:
             type(*value.bound);
         }
         u8(static_cast<std::uint8_t>((value.exported ? Exported : 0) | (value.constant ? Constant : 0) |
-                                     (value.external ? External : 0) | (value.has_body ? HasBody : 0)));
+                                     (value.external ? External : 0) | (value.has_body ? HasBody : 0) |
+                                     (value.payload_types.empty() ? 0 : HasPayload)));
+        if (!value.payload_types.empty()) types(value.payload_types);
     }
 
     void nodes(const std::vector<IrNode>& values) {
@@ -206,10 +234,11 @@ public:
         const auto minor = u16();
         if (major != nir_major_version || minor > nir_minor_version) {
             fail("NeuraIR format " + std::to_string(major) + "." + std::to_string(minor) +
-                 " is not supported; this reader accepts 1.0 and 1.1");
+                 " is not supported; this reader accepts 1.0 through 1.2");
         }
-        max_op_ = minor == 0 ? max_op_1_0 : max_op_1_1;
+        max_op_ = minor == 0 ? max_op_1_0 : minor == 1 ? max_op_1_1 : max_op_1_2;
         latches_ = minor > 0;
+        aggregates_ = minor >= 2;
         const auto file_count = count(4);
         files_.reserve(file_count);
         for (std::uint32_t i = 0; i < file_count; ++i) {
@@ -335,7 +364,8 @@ private:
     IrType type(std::size_t depth) {
         enter(depth);
         IrType value;
-        value.kind = static_cast<TypeKind>(tag(max_type_kind, "type kind"));
+        const auto max_kind = aggregates_ ? TypeKind::Tuple : TypeKind::Callable;
+        value.kind = static_cast<TypeKind>(tag(static_cast<std::uint8_t>(max_kind), "type kind"));
         value.name = text();
         value.symbol = reference();
         value.arguments = types(depth + 1);
@@ -383,13 +413,18 @@ private:
             value.bound = type(0);
         }
         const auto flags = u8();
-        if ((flags & ~(Exported | Constant | External | HasBody)) != 0) {
+        const auto allowed = Exported | Constant | External | HasBody | (aggregates_ ? HasPayload : 0);
+        if ((flags & ~allowed) != 0) {
             fail("invalid symbol flags");
         }
         value.exported = (flags & Exported) != 0;
         value.constant = (flags & Constant) != 0;
         value.external = (flags & External) != 0;
         value.has_body = (flags & HasBody) != 0;
+        if ((flags & HasPayload) != 0) {
+            value.payload_types = types(0);
+            if (value.payload_types.empty()) fail("a payload flag requires at least one payload type");
+        }
         return value;
     }
 
@@ -411,6 +446,7 @@ private:
         value.span = span();
         value.symbol = reference();
         value.text = text();
+        if (!aggregates_ && new_operator(value)) fail("bitwise operations require NeuraIR format 1.2");
         value.operands = nodes(depth + 1);
         value.body = nodes(depth + 1);
         value.alternative = nodes(depth + 1);
@@ -428,6 +464,7 @@ private:
     std::uint32_t symbol_count_ = 0;
     std::uint8_t max_op_ = max_op_1_0;
     bool latches_ = false;
+    bool aggregates_ = false;
 };
 
 } // namespace

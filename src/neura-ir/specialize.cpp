@@ -29,7 +29,7 @@ struct Work {
     Substitution substitution;
     // Parameters of the original function mapped to the instance's.
     std::map<SymbolId, SymbolId> symbols;
-    // The function whose locals belong to the original body, if any.
+    // The declaration that owns locals in the original body.
     SymbolId original = no_symbol;
     // The class instance that the body belongs to, if any.
     SymbolId instance = no_symbol;
@@ -128,6 +128,11 @@ public:
             const auto span = program_.symbols[id].span;
             auto rewritten = type(original, context, span);
             program_.symbols[id].type = std::move(rewritten);
+            const auto payload = program_.symbols[id].payload_types;
+            for (std::size_t field = 0; field < payload.size(); ++field) {
+                auto rewritten_field = type(payload[field], context, span);
+                program_.symbols[id].payload_types[field] = std::move(rewritten_field);
+            }
         }
         for (std::size_t i = 0; i < original_bodies_; ++i) {
             const auto owner = program_.bodies[i].owner;
@@ -262,7 +267,7 @@ private:
             }
         }
         if (const auto body = body_of_.find(generic); body != body_of_.end()) {
-            work_.push_back({body->second, instance, substitution, {}, no_symbol, instance, origin});
+            work_.push_back({body->second, instance, substitution, {}, generic, instance, origin});
         }
         return instance;
     }

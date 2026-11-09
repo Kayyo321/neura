@@ -17,6 +17,14 @@ struct IntegerFormat {
 
 std::optional<IntegerFormat> specified_integer_format(const IrType& type);
 
+constexpr bool is_shift(std::string_view op) {
+    return op == "<<" || op == ">>";
+}
+
+constexpr bool is_bitwise_binary(std::string_view op) {
+    return op == "&" || op == "|" || op == "^" || is_shift(op);
+}
+
 // The mathematical value of a decimal integer literal as NeuraIR spells it:
 // optional '-', then one or more ASCII digits.
 struct IntegerLiteral {

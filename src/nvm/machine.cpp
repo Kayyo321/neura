@@ -3,9 +3,12 @@
 #include "nvr/format.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 
 namespace neura::nvm {
@@ -227,10 +230,11 @@ public:
     std::uint64_t steps() const { return steps_; }
 
 private:
-    enum class EntryKind : std::uint8_t { Free, Object, Array, List, Text, Bytes };
+    enum class EntryKind : std::uint8_t { Object, Array, List, Text, Bytes };
 
     struct HeapEntry {
-        EntryKind kind = EntryKind::Free;
+        EntryKind kind = EntryKind::Object;
+        bool marked = false;
         // Layout of an object; type index of a collection, text, or bytes.
         std::uint32_t type = 0;
         std::vector<std::uint64_t> cells;
@@ -277,31 +281,135 @@ private:
         return 1 + entry.cells.size() + entry.bytes.size();
     }
 
-    std::uint64_t allocate(HeapEntry entry) {
-        if (heap_.size() >= limits_.max_handles) {
+    using TracePlans = std::unordered_map<std::uint32_t, std::vector<std::size_t>>;
+
+    const std::vector<std::size_t>& trace_plan(TracePlans& plans, std::uint32_t id,
+                                               const std::vector<std::uint32_t>& types) {
+        auto [entry, inserted] = plans.try_emplace(id);
+        auto& plan = entry->second;
+        if (inserted) {
+            for (std::size_t i = 0; i < types.size(); ++i) {
+                if (nvr::is_reference(type(types[i]).kind)) plan.push_back(i);
+            }
+        }
+        return plan;
+    }
+
+    void mark(std::uint64_t handle) {
+        if (handle == 0) {
+            return;
+        }
+        const auto found = heap_.find(handle);
+        // Explicit destruction can leave stale aliases in typed roots and
+        // fields. They keep their invalid-handle behavior when used.
+        if (found != heap_.end() && !found->second.marked) {
+            auto& entry = found->second;
+            entry.marked = true;
+            if (!entry.cells.empty()) {
+                mark_work_.push_back(&entry);
+            }
+        }
+    }
+
+    void mark_children(const HeapEntry& item) {
+        if (item.kind == EntryKind::Object) {
+            const auto& fields = image_.layouts[item.type].fields;
+            for (const auto field : trace_plan(layout_traces_, item.type, fields)) {
+                if (item.initialized[field]) mark(item.cells[field]);
+            }
+        } else if ((item.kind == EntryKind::Array || item.kind == EntryKind::List) &&
+                   nvr::is_reference(type(type(item.type).reference).kind)) {
+            for (const auto handle : item.cells) {
+                mark(handle);
+            }
+        }
+    }
+
+    void collect(std::span<const std::uint64_t> temporary_roots, const HeapEntry* allocation) {
+        for (std::size_t i = 0; i < const_values_.size(); ++i) {
+            if (nvr::is_reference(type(image_.constants[i].type).kind)) {
+                mark(const_values_[i]);
+            }
+        }
+        for (std::size_t i = 0; i < globals_.size(); ++i) {
+            if (global_initialized_[i] && nvr::is_reference(type(image_.globals[i].type).kind)) {
+                mark(globals_[i]);
+            }
+        }
+        for (const auto& frame : frames_) {
+            const auto& slots = image_.functions[frame.function].frame_types;
+            for (const auto slot : trace_plan(frame_traces_, frame.function, slots)) {
+                if (frame.initialized[slot]) mark(frame.slots[slot]);
+            }
+        }
+        for (const auto handle : temporary_roots) {
+            mark(handle);
+        }
+        if (allocation != nullptr) {
+            mark_children(*allocation);
+        }
+        while (!mark_work_.empty()) {
+            const auto& item = *mark_work_.back();
+            mark_work_.pop_back();
+            mark_children(item);
+        }
+        for (auto it = heap_.begin(); it != heap_.end();) {
+            if (it->second.marked) {
+                it->second.marked = false;
+                ++it;
+            } else {
+                live_cells_ -= entry_cells(it->second);
+                it = heap_.erase(it);
+            }
+        }
+        // Drop large bucket arrays after a substantial decrease in live
+        // entries, without churning the table during steady allocation.
+        if (heap_.bucket_count() > 256 && heap_.size() < heap_.bucket_count() / 4) {
+            heap_.reserve(heap_.size());
+        }
+        const auto headroom = limits_.max_heap_cells - live_cells_;
+        next_collection_ = live_cells_ + std::min(headroom, std::max<std::uint64_t>(256, live_cells_ / 2));
+    }
+
+    void ensure_heap_cells(std::uint64_t cells, std::string_view action,
+                           std::span<const std::uint64_t> temporary_roots = {}, const HeapEntry* allocation = nullptr) {
+        if (cells > limits_.max_heap_cells) {
+            fault(TrapKind::HeapLimit, std::string(action) + std::to_string(cells) + " cells");
+        }
+        if (cells > next_collection_ - std::min(live_cells_, next_collection_)) {
+            collect(temporary_roots, allocation);
+        }
+        if (cells > limits_.max_heap_cells - live_cells_) {
+            fault(TrapKind::HeapLimit, std::string(action) + std::to_string(cells) + " cells");
+        }
+        // An individual large request can cross the soft limit even after
+        // collection. Give the next allocation a new growth window.
+        if (cells > next_collection_ - live_cells_) {
+            const auto projected = live_cells_ + cells;
+            next_collection_ = projected + std::min(limits_.max_heap_cells - projected,
+                                                    std::max<std::uint64_t>(256, projected / 2));
+        }
+    }
+
+    std::uint64_t allocate(HeapEntry entry, std::span<const std::uint64_t> temporary_roots = {}) {
+        if (last_handle_ >= limits_.max_handles) {
             fault(TrapKind::HandleLimit);
         }
         const auto cells = entry_cells(entry);
-        if (cells > limits_.max_heap_cells - std::min(live_cells_, limits_.max_heap_cells)) {
-            fault(TrapKind::HeapLimit, "allocation of " + std::to_string(cells) + " cells");
-        }
+        ensure_heap_cells(cells, "allocation of ", temporary_roots, &entry);
+        const auto handle = last_handle_ + 1;
+        heap_.emplace(handle, std::move(entry));
+        last_handle_ = handle;
         live_cells_ += cells;
-        heap_.push_back(std::move(entry));
-        return heap_.size();
-    }
-
-    void reserve_cells(std::uint64_t cells) {
-        if (cells > limits_.max_heap_cells - std::min(live_cells_, limits_.max_heap_cells)) {
-            fault(TrapKind::HeapLimit, "growth by " + std::to_string(cells) + " cells");
-        }
-        live_cells_ += cells;
+        return handle;
     }
 
     HeapEntry& entry(std::uint64_t handle) {
-        if (handle == 0 || handle > heap_.size() || heap_[handle - 1].kind == EntryKind::Free) {
+        const auto found = heap_.find(handle);
+        if (found == heap_.end()) {
             fault(TrapKind::InvalidHandle, "handle " + std::to_string(handle));
         }
-        return heap_[handle - 1];
+        return found->second;
     }
 
     // The entry for a reference whose static type is `type_index`.
@@ -367,7 +475,7 @@ private:
             text.kind = EntryKind::Text;
             text.type = type(array_type).reference;
             text.bytes = argument;
-            array.cells.push_back(allocate(std::move(text)));
+            array.cells.push_back(allocate(std::move(text), array.cells));
         }
         const auto arguments = allocate(std::move(array));
         initialize_globals();
@@ -636,9 +744,9 @@ private:
             return 0;
         }
         case nvr::StateOp::FreeObject: {
-            auto& item = typed_entry(args[0], types[0].type);
+            const auto& item = typed_entry(args[0], types[0].type);
             live_cells_ -= entry_cells(item);
-            item = HeapEntry{};
+            heap_.erase(args[0]);
             return 0;
         }
         case nvr::StateOp::ReadGlobal:
@@ -674,8 +782,11 @@ private:
         }
         case nvr::StateOp::AppendElement: {
             auto& item = typed_entry(args[0], types[0].type);
-            reserve_cells(1);
+            const auto element_type = type(item.type).reference;
+            const std::array roots{args[0], nvr::is_reference(type(element_type).kind) ? args[1] : std::uint64_t{0}};
+            ensure_heap_cells(1, "growth by ", roots);
             item.cells.push_back(args[1]);
+            ++live_cells_;
             ++item.version;
             return 0;
         }
@@ -714,8 +825,16 @@ private:
     std::optional<std::uint32_t> start_function_;
     std::vector<std::uint64_t> start_arguments_;
     bool started_ = false;
-    std::vector<HeapEntry> heap_;
+    // Handles are monotonically assigned even as storage for dead entries
+    // is reclaimed. The table only holds entries that have not been freed.
+    std::unordered_map<std::uint64_t, HeapEntry> heap_;
+    // Build scanning plans only when a layout or frame participates in GC.
+    TracePlans layout_traces_;
+    TracePlans frame_traces_;
+    std::vector<HeapEntry*> mark_work_;
+    std::uint64_t last_handle_ = 0;
     std::uint64_t live_cells_ = 0;
+    std::uint64_t next_collection_ = std::min<std::uint64_t>(256, limits_.max_heap_cells);
     std::vector<std::uint64_t> const_values_;
     std::vector<std::uint64_t> globals_;
     std::vector<std::uint8_t> global_initialized_;

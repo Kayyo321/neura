@@ -563,6 +563,29 @@ Checked convert_integer(Circuit& circuit, const Word& a, bool from_signed, unsig
     return result;
 }
 
+Checked shift(Circuit& circuit, Word word, const Word& count, bool right, bool sign_extend) {
+    const auto width = word.size();
+    const auto fill = right && sign_extend ? word.back() : Signal::of(0);
+    std::size_t bit = 0;
+    // Each stage shifts by one power of two. Valid integer widths are powers
+    // of two, so any set count lane above those stages makes the count invalid.
+    for (std::size_t distance = 1; bit < count.size() && distance < width; distance *= 2, ++bit) {
+        if (count[bit].is_constant(0)) {
+            continue;
+        }
+        Word next;
+        next.reserve(width);
+        for (std::size_t i = 0; i < width; ++i) {
+            const auto shifted = right ? (i + distance < width ? word[i + distance] : fill)
+                                       : (i >= distance ? word[i - distance] : fill);
+            next.push_back(circuit.choose(count[bit], shifted, word[i]));
+        }
+        word = std::move(next);
+    }
+    const Word high(count.begin() + static_cast<std::ptrdiff_t>(bit), count.end());
+    return {std::move(word), circuit.any(high)};
+}
+
 Signal equal(Circuit& circuit, const Word& a, const Word& b) {
     std::vector<Signal> same;
     same.reserve(a.size());

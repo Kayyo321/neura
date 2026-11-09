@@ -22,10 +22,10 @@ constexpr bool is_name_char(char c) {
 constexpr auto keywords = std::to_array<std::string_view>({
     "let", "const", "export", "override", "func", "module", "class", "import", "new",
     "destroy", "if", "else", "while", "for", "in", "break", "continue", "return", "true", "false",
-    "as", "enum",
+    "as", "enum", "match", "and", "or",
 });
 
-constexpr auto pairs = std::to_array<std::string_view>({"->", "==", "!=", "<=", ">=", "&&", "||"});
+constexpr auto pairs = std::to_array<std::string_view>({"->", "=>", "==", "!=", "<=", ">=", "&&", "||"});
 
 class Lexer {
 public:
@@ -124,7 +124,7 @@ private:
             advance();
             return TokenKind::Symbol;
         }
-        constexpr std::string_view symbols = "(){}[]:;,.=+-*/%!<>";
+        constexpr std::string_view symbols = "(){}[]:;,.=+-*/%!<>&|^~";
         if (symbols.find(peek()) != std::string_view::npos) {
             advance();
             return TokenKind::Symbol;

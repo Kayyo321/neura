@@ -1,6 +1,7 @@
 #include "analysis.hpp"
 
 #include "neura-ir/control_flow.hpp"
+#include "neura-ir/integer.hpp"
 
 #include <algorithm>
 
@@ -39,9 +40,10 @@ bool pure_and_total(const IrProgram& program, const IrNode& node) {
         return kind == SymbolKind::Local || kind == SymbolKind::Parameter;
     }
     case IrOp::Unary:
-        return node.text == "!" && all_operands(node.operands);
+        return (node.text == "!" || node.text == "~") && all_operands(node.operands);
     case IrOp::Binary: {
-        if (!comparison(node) || node.operands.size() != 2) {
+        if ((!comparison(node) && (!is_bitwise_binary(node.text) || is_shift(node.text))) ||
+            node.operands.size() != 2) {
             return false;
         }
         const auto kind = node.operands.front().type.kind;
