@@ -105,6 +105,21 @@ if(BUILD_TESTING)
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 
+    add_test(NAME backend-cli COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/backend-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/cli.cmake"
+    )
+
+    add_test(NAME backend-install COMMAND ${CMAKE_COMMAND}
+        "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-tests"
+        "-DCONFIG=$<CONFIG>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/install.cmake"
+    )
+
     add_test(NAME ir-optimization-cli COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
