@@ -16,8 +16,8 @@ Pure computations can use feedforward circuits. Stateful execution carries mutab
 
 - [Project design](docs/Project.md) covers the pipeline, execution model, decompilation, and verification.
 - [Language overview](docs/lang/Overview.md) and [tutorial](docs/lang/Tutorial.md) cover Neura syntax and semantics. See [examples](examples/) for sample `.nra` programs.
-- [Tooling](docs/lang/Tooling.md) covers building the compiler, checking source, inspecting NeuraIR, and building and running `.nvr` images.
-- [Neura Virtual Machine](docs/runtime/NVM.md) and [NVR format](docs/runtime/NVR.md) define execution and the executable image. [Neuron conversion and execution](docs/Backend.md) describes the implementation.
+- [Tooling](docs/lang/Tooling.md) covers building the compiler, checking source, inspecting NeuraIR, building and running `.nvr` images, running tests, and disassembling and decompiling images.
+- [Neura Virtual Machine](docs/runtime/NVM.md) and [NVR format](docs/runtime/NVR.md) define execution and the executable image. [Neuron conversion and execution](docs/Backend.md) and [Decompiler](docs/Decompiler.md) describe the implementation, and the [release checklist](docs/Release.md) maps each feature to its tests.
 - [Contributing](CONTRIBUTING.md) explains how to propose changes and verify them.
 
 ## Rules for agents

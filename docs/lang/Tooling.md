@@ -46,9 +46,29 @@ build/neura run hello.nvr -- arg1 arg2
 
 [Neuron conversion and execution](../Backend.md) lists the supported operations and the build diagnostics for unsupported ones. The status of each example is in [Feature status](Status.md).
 
+## Test
+
+```sh
+build/neura test -I examples/guide examples/testing/math-tests.nra
+```
+
+`test` builds the listed files, runs every test they declare in a fresh execution, prints `PASS` or `FAIL` with the failure and its location for each, and a summary line. It exits with status 0 only when every test passes. [Testing](Testing.md) defines tests and assertions.
+
+## Inspect and decompile images
+
+```sh
+build/neura disassemble hello.nvr -o hello.nvra
+build/neura assemble hello.nvra -o copy.nvr
+build/neura decompile hello.nvr
+```
+
+`disassemble` writes the lossless text form of an image: every table, graph, neuron, weight, block, exit, import, the source map, and any optional section, in order. `assemble` turns that text back into an image, validates it with the same loader as `run`, and writes it; assembling an unedited disassembly reproduces the original bytes. Edited assembly is how tests and tools construct images by hand.
+
+`decompile` writes a typed reconstruction of the image: functions, blocks, state operations, calls, host effects, and the operations each block's graph computes, with every block labeled by how its meaning was established. `--no-provenance` omits names and source locations from the optional NAME section and source map. [Decompiler](../Decompiler.md) specifies both forms and the evidence behind them.
+
 ## Execution contract
 
-The [NVM specification](../runtime/NVM.md#toolchain-and-distribution) defines how `neura build` produces an executable `.nvr` image from source or `.nir` and how `neura run` executes that image. The language test runner and package configuration are specified separately.
+The [NVM specification](../runtime/NVM.md#toolchain-and-distribution) defines how `neura build` produces an executable `.nvr` image from source or `.nir` and how `neura run` executes that image. Package configuration is not part of this release.
 
 Diagnostics should identify the source file, line and column, the offending span, a clear explanation and, where possible, a correction. For example, passing a `string` to a function expecting `int32` should report both types and the argument location. Diagnostics go to standard error and compilation fails on errors. Exact format, encoding of column offsets and warning policy remain open.
 

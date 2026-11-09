@@ -1,42 +1,67 @@
 # Feature status and implementation decisions
 
-The C++ frontend implements lexing, parsing, and semantic lowering to typed NeuraIR for the existing examples. It handles their functions, control flow, modules, classes, generic declarations and calls, overlays, and nested collections. The I/O and testing modules provide frontend signatures. The IR optimization stage verifies NeuraIR and applies the passes described in [NeuraIR optimization](../IrOptimization.md). It folds only operations that have defined semantics and leaves the open decisions below in place. IRtoNeuronConversion converts a supported subset into `.nvr` images, and the Neura Virtual Machine runs them; [Neuron conversion and execution](../Backend.md) lists that subset. The language-level test runner is a future stage. See [Tooling](Tooling.md) for the commands.
+This release carries the language below from source through NeuraIR, optimization, neuron conversion, and the `.nvr` image to execution in the Neura Virtual Machine. Every feature marked supported compiles to a standalone image, runs under `neura run`, and has end-to-end tests; the [release checklist](../Release.md) maps each one to its tests. See [Tooling](Tooling.md) for the commands.
 
-| Area | Current design | Open decisions |
+## Supported in this release
+
+| Area | Supported | Specification |
 | --- | --- | --- |
-| Core | Bindings, functions, control flow and basic operators proposed | Complete grammar, literals, overflow, scoping and evaluation details |
-| Types | Primitive vocabulary, classes, overlays and collections described | Numeric conversions, inference, equality, nullability, enum syntax and representation |
-| Modules | Imports, exports and inheritance described | Resolution, cycles, entry-point discovery and interface checking |
-| Lifecycle | Constructors and explicit destruction proposed | Ownership, alias safety, initialization compatibility and failure cleanup |
-| Errors | Expected failures should be explicit | Result representation, propagation, runtime failure behavior |
-| Testing | Explicit test modules and serial isolated runner proposed | Runner interface, assertion reporting and integration |
-| Library | Capability requirements outlined | Concrete signatures and error contracts |
-| Tooling | Workflow and diagnostic requirements outlined | Commands, targets, manifests, dependency management |
-| Concurrency | Deferred | Memory model, synchronization, cancellation and ownership |
+| Core | Bindings, functions, `if`/`else`, `while`, three-part `for`, for-each, `break`, `continue`, `return`, operator precedence | [Core language](CoreLanguage.md) |
+| Numbers | `int8`..`int64`, `uint8`..`uint64`, `int` (`int32`), `byte` (`uint8`), `float16`, `bfloat16`, `float32`, `float64`; checked integer arithmetic with truncating `/` and `%`; IEEE 754 float arithmetic; `as` conversions | [Numbers](Numbers.md) |
+| Types | Classes, inheritance, overlays, enums declared in source, collections | [Types](Types.md) |
+| Generics | Generic functions, classes, and methods with explicit type arguments, bounds, nested instances; specialization per type arguments | [Polymorphism](Polymorphism.md) |
+| Modules | Imports, exports, module inheritance, module interfaces, the entry point, program initialization order, top-level statements | [Modules](Modules.md) |
+| Lifecycle | Constructors, field initializers, `destroy`, destructors | [Object lifecycle](ObjectLifecycle.md) |
+| Collections | Arrays, lists, `length`, indexing, `append`, `remove_at`, for-each with modification checks | [Collections](Collections.md) |
+| Errors | Expected failures as returned values; runtime failures trap with documented reasons | [Errors](Errors.md) |
+| Testing | `neura test`, `Test.assert`, `Test.assert_equal_int32` | [Testing](Testing.md) |
+| Tooling | `check`, `emit-ir`, `build`, `run`, `test`, `disassemble`, `assemble`, `decompile` | [Tooling](Tooling.md), [Decompiler](../Decompiler.md) |
+
+## Outside this release
+
+| Area | Status |
+| --- | --- |
+| Standard library | Only `SysIo.println`, `SysIo.Entry`, and `Test` exist. Text and numeric formatting, collection operations beyond `length`, `append`, and `remove_at`, files and paths, a standard result type, and I/O APIs with explicit failure results are a separate topic ([Standard library](StandardLibrary.md)). |
+| Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](ResourcesConcurrency.md)). |
+| Foreign interop | Java and other foreign-function interop are not part of the language. |
+| Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](ProjectStructure.md)). |
+
+## Open language decisions
+
+These remain open. The compiler rejects or does not offer the affected constructs, so no program depends on a choice.
+
+| Area | Open decisions |
+| --- | --- |
+| Core | Shadowing, Unicode identifiers and escapes, compound assignment |
+| Types | Type inference beyond local bindings, nullability, equality for classes, collections, and strings, enum payloads and exhaustive matching |
+| Generics | Inference of type arguments, multiple bounds, generic inheritance, variance |
+| Modules | Interface checking beyond overrides, package-level resolution |
+| Lifecycle | Ownership, alias safety, definite field initialization, failure cleanup |
 
 ## Frontend conventions
 
 - Identifiers use ASCII letters, digits, and underscores. Source strings and comments support UTF-8. String literals support escaped quotes, backslashes, tabs, carriage returns, and newlines.
-- Decimal integer literals default to `int32` and decimal floating-point literals default to `float64`. A numeric context can select a matching literal kind with a different width. The frontend checks integer literal ranges and uses a 32-bit signed range for `int` literals. Arithmetic overflow and floating-point rounding still need execution rules.
+- Decimal integer literals default to `int32` and decimal floating-point literals default to `float64`. A numeric context selects a literal of a different width; [Numbers](Numbers.md) specifies ranges and rounding.
+- `for`, `in`, `as`, and `enum` are keywords, so they cannot name bindings.
 - Local value bindings require an initializer. A nonempty collection literal without an expected type infers an array, and an empty literal requires an expected collection type.
-- The examples initialize some fields after construction. The frontend accepts that pattern while [object lifecycle](ObjectLifecycle.md) rules for definite field initialization and alias safety remain open. Successful lowering establishes frontend acceptance. Runtime behavior requires separate verification.
+- The examples initialize some fields after construction. The frontend accepts that pattern; reading a field before any store is a runtime fault.
 
 ## Backend conventions
 
-Where a rule above is open, conversion takes the narrowest choice that agrees with every result the language could later define, or rejects the construct with a diagnostic. [Neuron conversion and execution](../Backend.md#semantic-decisions) gives the reasons.
+[Neuron conversion and execution](../Backend.md#semantic-decisions) records how conversion implements each rule.
 
-- Integer overflow and division by zero trap at run time. Division returns a result only when it is exact; a nonzero remainder traps, because rounding is open.
-- `int`, `byte`, floating-point types, generic functions and classes, enums other than `SysIo.Entry.ExitCode`, the `Test` module, top-level statements, and nonconstant module initializers stop the build with a diagnostic. `length` has type `int`, so it is rejected too.
+- Integer overflow, a zero divisor, `MIN / -1`, and an out-of-range conversion trap with reason 1. Division truncates toward zero.
+- A negative index traps with reason 2; a list modified during for-each traps with reason 5.
 - The entry point is the one function that overrides `SysIo.Entry.main`. `Entry.ExitCode.Ok` is the status 0.
-- A field without an initializer starts uninitialized, and reading it before a store traps. Construction and `destroy` follow the order proposed in [Object lifecycle](ObjectLifecycle.md).
-- A failed `println` write traps the run, because the language has no error result for it yet.
+- A field without an initializer starts uninitialized, and reading it before a store faults. Construction and `destroy` follow the order in [Object lifecycle](ObjectLifecycle.md).
+- A failed `println` write and a failed test assertion trap the run with reason 3.
+
+## Examples
 
 | Example | Status |
 | --- | --- |
 | `hello-world`, `modules/module-interface.nra`, `modules/multi-file` | Compile and run. |
-| `guide/core.nra`, `types/overlay.nra`, `types/classes.nra` | Libraries. Test drivers that import them compile and run. |
-| `types/collections.nra` | Rejected: `length` has type `int`. |
-| `types/polymorphism.nra` | Rejected: generics are not converted. |
-| `testing/math-tests.nra` | Rejected: the `Test` module needs the unspecified runner. |
-| `guide/resources.nra` | Rejected: a top-level statement and a nonconstant initializer. |
-| `guide/errors.nra` | No code. |
+| `guide/core.nra`, `types/overlay.nra`, `types/classes.nra`, `types/collections.nra`, `types/polymorphism.nra` | Libraries. Test drivers in `tests/backend/examples` import them, compile, and run. |
+| `guide/resources.nra` | Top-level statements; runs with the test driver `tests/backend/examples/resources-driver.nra`, built together with it. |
+| `testing/math-tests.nra` | Tests; `neura test -I examples/guide examples/testing/math-tests.nra` passes. |
+| `guide/errors.nra` | Commented pseudocode for file input, which belongs to the standard library. |
