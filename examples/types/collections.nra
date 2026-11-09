@@ -1,4 +1,4 @@
-// Illustrates the intended collection syntax and behavior.
+// Collection syntax and behavior. tests/backend/examples/collections-driver.nra runs it.
 let Collections = module (
     export let example = func() -> void {
         let names: string[] = ["Ada", "Lin"];

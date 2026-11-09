@@ -1,4 +1,5 @@
-// Proposed test runner and Test module; not yet executable.
+// Tests for guide/core.nra. Run them with:
+//     neura test -I examples/guide examples/testing/math-tests.nra
 let test = import:Test;
 let core = import:Core;
 

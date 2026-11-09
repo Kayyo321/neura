@@ -1,4 +1,5 @@
-// Design example: generics, abstract members, and lifecycle syntax are proposed.
+// Generics, abstract members, dynamic dispatch, and object lifecycle.
+// tests/backend/examples/polymorphism-driver.nra runs it.
 let Polymorphism = module (
     // A bodyless method is a requirement for concrete subclasses.
     export let Renderable = class (

@@ -74,3 +74,28 @@ const Xyz = module (
 ```
 
 A `let` module can be used as a base; a `const` module closes that inheritance point. This rule concerns inheritance and does not by itself specify the mutability of every member.
+
+## Initialization
+
+A program's files, modules, and top-level statements initialize before the entry function runs, in this order:
+
+1. Every module or file global whose initializer is written as a literal (a number, a string, `true` or `false`, or an enum variant, optionally with a leading `-`) holds its value when the image loads.
+2. Each file runs after every file it imports. Files that do not depend on each other, and files that import each other, run in the order the compiler received them.
+3. Within a file, top-level statements and the remaining initializers of the file's globals and of its modules' members run in source order, by their position in the file.
+
+Then `main` runs. The same initialization runs before each test under `neura test`.
+
+```neura
+let io = import:SysIo;
+let settings = import:Settings;   // settings.nra initializes first
+
+io.println("starting");                       // runs second
+let banner: string = "[" + settings.label + "]";  // runs third
+let Counter = class ( export let value: int32 = 0; );
+let shared = new Counter();                   // runs fourth
+```
+
+Whether an initializer is a literal is decided by how it is written, not by its value: `let size: int32 = 2 * 3;` is computed at program start in source order, while `let size: int32 = 6;` is set when the image loads. Reading a global before its initializer has run, for example from a file-level statement that precedes the declaration of a module whose member it reads, is a fault that ends the run with status 70. Within one module or file, a global cannot be read before its declaration; the frontend rejects that.
+
+Initialization has no separate failure handling: a trap during initialization ends the run before `main`. Cyclic imports between files are allowed only as far as the order above permits; reads of globals that are not yet initialized fault.
+

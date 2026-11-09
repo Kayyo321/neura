@@ -32,6 +32,43 @@ let sum_to = func(int32 limit) -> int32 {
 
 `if (condition) { ... } else { ... }` selects a branch; `while (condition) { ... }` repeats while its Boolean condition is true. `break` exits the innermost loop and `continue` starts its next iteration. Conditions must be `bool`; there is no implicit truthiness. See [core.nra](../../examples/guide/core.nra).
 
+## Loops
+
+Neura has three loop statements: `while`, the three-part `for`, and `for`-each over arrays and lists.
+
+```neura
+for (let i: int32 = 0; i < limit; i = i + 1) {
+    total = total + i;
+}
+
+for (let name in names) {
+    io.println(name);
+}
+```
+
+**Three-part `for`.** `for (initializer; condition; step) { body }` runs the initializer once, then tests the condition before each iteration and runs the step after each iteration. The initializer is a binding, an assignment, an expression, or empty; a binding declared there is visible in the condition, the step, and the body, and not after the loop. The condition must be `bool`; when it is omitted, as in `for (;;)`, it is `true`. The step is an assignment, an expression, or empty, and cannot contain `break`, `continue`, or `return`. `continue` runs the step and then tests the condition; `break` leaves without running the step.
+
+**For-each.** `for (let name in collection) { body }` visits the elements of an array or list in index order. `const` instead of `let` makes the element binding constant. An optional annotation, `let name: Type`, must accept the element type. The element binding is scoped to the body, and the body cannot declare another binding with its name.
+
+- The collection expression is evaluated once, before the first iteration.
+- Each iteration reads the element at the next index, binds it, and then runs the body. `continue` advances to the next element; `break` and `return` leave the loop without advancing.
+- Assigning to an element by index during the loop is allowed. A later iteration sees the new value.
+- For a list, the loop captures the list's *structural version* when it starts. Every successful `append` or `remove_at` on the list, through any alias, changes the version. Before each advance, including the one that would end the loop, the loop compares the current version with the captured one. If they differ, the run traps at the `for` statement with trap reason 5 ("collection modified during iteration"). A removal followed by an append therefore traps even though the length is unchanged. Arrays cannot change length, so a for-each over an array needs no check.
+
+Both loops lower to NeuraIR's existing loop and branch operations ([Backend](../Backend.md#loops)).
+
 ## Expressions
 
-The initial operators are arithmetic `+ - * /`, comparisons `== != < <= > >=`, Boolean `&& || !`, and assignment `=`. Arithmetic operands must have compatible types. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions; the intended precedence from tightest to loosest is unary, multiplication/division, addition/subtraction, ordering, equality, `&&`, `||`, assignment. Assignment is a statement, not a value. Integer overflow, division by zero, floating-point behavior, and the complete operator and literal grammar require specification before implementation. String concatenation with `+` accepts two strings; implicit conversion to string is not specified.
+The operators are arithmetic `+ - * / %`, comparisons `== != < <= > >=`, Boolean `&& || !`, unary `-`, the conversion `as`, and assignment `=`. Arithmetic operands must have the same type; `%` applies to integers only. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. Precedence, from tightest to loosest:
+
+1. member access, indexing, and calls
+2. unary `!` and `-`
+3. `as`
+4. `*`, `/`, `%`
+5. `+`, `-`
+6. `<`, `<=`, `>`, `>=`
+7. `==`, `!=`
+8. `&&`
+9. `||`
+
+Assignment is a statement, not a value. [Numbers](Numbers.md) specifies integer and floating-point literals, arithmetic, overflow, division, rounding, and conversions. String concatenation with `+` accepts two strings; implicit conversion to string is not specified.

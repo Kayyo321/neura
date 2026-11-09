@@ -1,4 +1,4 @@
-// Proposed core syntax; no compiler is available to verify this example.
+// Core syntax: functions, loops, and branches. tests/backend/examples/core-driver.nra runs it.
 let Core = module (
     export let sum_to = func(int32 limit) -> int32 {
         let total: int32 = 0;

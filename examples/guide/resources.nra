@@ -1,4 +1,5 @@
-// Proposed explicit lifecycle; alias safety and failure cleanup remain open.
+// Explicit lifecycle in top-level statements, which run before main.
+// Alias safety and failure cleanup remain open.
 let Counter = class (
     export let value: int32 = 0;
     export let deinit = func() -> void {

@@ -26,7 +26,7 @@ let rows: string[][] = [["a", "b"], ["c"]];
 
 An array's length is fixed when it is created, including when that length is determined at runtime. The length is a property of the value, not part of the type: arrays of different lengths can both have type `string[]`. Elements can be replaced, but an array cannot be extended, shortened, or resized. Assigning a different array to a variable replaces its value; it does not resize the original array.
 
-A list can grow or shrink through its built-in operations. Both collections expose their current element count as `length`. `append(value)` adds an element to a list, and `remove_at(index)` removes the element at an index and shifts subsequent elements left. These operations are not available on arrays.
+A list can grow or shrink through its built-in operations. Both collections expose their current element count as `length`, of type `int` (`int32`). `append(value)` adds an element to a list, and `remove_at(index)` removes the element at an index and shifts subsequent elements left. These operations are not available on arrays.
 
 ## Indexing and safety
 
@@ -36,4 +36,10 @@ Collection operations must also check length and allocation arithmetic for overf
 
 The spelling of bounds and allocation errors, error handling, ownership and aliasing, collection equality, and general allocation APIs remain to be specified. In particular, a fixed array length does not imply immutable elements or exclusive ownership.
 
-See [collections.nra](../../examples/types/collections.nra) for examples of indexing, mutation, and nested types. These examples describe the intended language design; this repository does not yet establish an implementation of these operations.
+A negative index fails with trap reason 2 (bounds failure); an index at or past the length is a bounds fault detected by NVM. Both end the run with status 70.
+
+## Iteration
+
+`for (let element in collection) { ... }` visits an array's or a list's elements in index order ([Core language](CoreLanguage.md#loops)). Assigning to elements by index during the loop is allowed. Appending to or removing from a list while a for-each loop visits it, through any alias, makes the loop trap with reason 5 before its next advance; each list carries a structural version that every successful `append` and `remove_at` changes.
+
+See [collections.nra](../../examples/types/collections.nra) for examples of indexing, mutation, and nested types; the test driver in `tests/backend/examples/collections-driver.nra` builds and runs it.

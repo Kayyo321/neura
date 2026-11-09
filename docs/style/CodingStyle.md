@@ -70,7 +70,7 @@ All function definitions, exported routines, and class methods must use `snake_c
 export let log = func(string message) -> void;
 
 export let log_entry = func(LogEntry entry) -> void {
-    log(entry.format_message());
+    log(entry.format());
 }
 
 export let.override main = func(string[] args) -> Entry.ExitCode {
@@ -164,7 +164,7 @@ Here is a complete example demonstrating the coding style conventions:
 let io = import:SysIo;
 
 // Constants: PascalCase
-const DefaultPort = 8080;
+const DefaultPort = "8080";
 const MaxConnectionAttempts = 5;
 
 // Modules: PascalCase
@@ -172,7 +172,9 @@ let ServiceMonitor = module (
     // Variables: snake_case
     export let default_service_name: string = "auth_service";
 
-    // Enums: PascalCase
+    // Enums: PascalCase, variants PascalCase
+    export let Health = enum (Healthy, Degraded, Down);
+
     // Classes: PascalCase
     export let ServiceConfig = class (
         export let retry_count: int = MaxConnectionAttempts;

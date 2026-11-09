@@ -25,6 +25,35 @@ let name: string = identity<string>("Neura");
 
 A bound, written `T:Renderable`, requires the supplied type to be `Renderable` or a subtype and makes the bound's exported interface available inside the generic body. Thus `render_twice<Alert>(alert)` can call `render` while retaining `Alert` as the type argument. The bound is checked at compile time; overridden methods still dispatch using the actual object. Unlike `display`, a function returning `T` can preserve the caller's chosen type rather than returning only the base type.
 
-The examples supply type arguments explicitly. Type inference, multiple bounds, generic inheritance, variance, specialization, and runtime representation are not specified. In particular, this proposal does not assume that `Box<Alert>` is a subtype of `Box<Renderable>`; mutable boxes would make such a conversion unsafe. These rules do not specify ownership, nullability, or lifetime behavior.
+### Type arguments and specialization
+
+Calls to generic functions and uses of generic classes supply their type arguments explicitly; type arguments are not inferred. A class or function may have several type parameters, written `class<K, V>`; each can have one bound. Type arguments can be any type, including enums, collections, and other generic instances such as `Box<Box<int32>>` and `Box<int32>[]`. `Box<int>` and `Box<int32>` are the same type, because `int` is an alias.
+
+A method of a class can be generic itself:
+
+```neura
+let Box = class<T> (
+    export let value: T;
+    export let pair = func<U>(U other) -> Pair<T, U> {
+        let result = new Pair<T, U>();
+        result.first = value;
+        result.second = other;
+        return result;
+    };
+);
+```
+
+A type argument that does not satisfy its parameter's bound is a compile-time error at the type argument, naming the bound. Missing or extra type arguments are errors too.
+
+Every generic class and function is specialized: the compiler makes a concrete copy for each combination of declaration and type arguments that the program instantiates, and each distinct combination gets exactly one copy. Specialization happens when the program is built, so generic code runs at the same cost as code written for the concrete types. A program whose instances never stop growing, such as a function that calls itself with `T[]` or `Box<T>`, is rejected. The compiler stops when a type argument nests more than 32 generic instances or collections deep, or when a program needs more than 4,096 instances. The diagnostic points at the instantiating call and names the chain's starting instantiation.
+
+These restrictions apply:
+
+- A generic class cannot be a base class, and a class cannot derive from a generic instance (generic inheritance is not part of the language).
+- A generic method cannot override or be overridden.
+- Constructors and destructors cannot have their own type parameters.
+- A type parameter grants no construct or destroy permission; `new T()` is not valid.
+
+`Box<Alert>` is not a subtype of `Box<Renderable>`; mutable boxes would make such a conversion unsafe. These rules do not specify ownership, nullability, or lifetime behavior.
 
 For proposed constructor and destructor behavior, including cleanup through a base-typed reference, see [Object lifecycle](ObjectLifecycle.md).
