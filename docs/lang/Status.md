@@ -6,12 +6,12 @@ This release carries the language below from source through NeuraIR, optimizatio
 
 | Area | Supported | Specification |
 | --- | --- | --- |
-| Core | Bindings, functions, `if`/`else`, `while`, three-part `for`, for-each, `break`, `continue`, `return`, operator precedence | [Core language](CoreLanguage.md) |
-| Numbers | `int8`..`int64`, `uint8`..`uint64`, `int` (`int32`), `byte` (`uint8`), `float16`, `bfloat16`, `float32`, `float64`; checked integer arithmetic with truncating `/` and `%`; IEEE 754 float arithmetic; `as` conversions | [Numbers](Numbers.md) |
-| Types | Classes, inheritance, overlays, enums declared in source, collections | [Types](Types.md) |
+| Core | Bindings and destructuring, functions and closures, `if`/`else`, comparison chains, `while`, three-part `for`, for-each, `break`, `continue`, `return` | [Core language](CoreLanguage.md) |
+| Numbers | Sized integers and floats, `int` (`int32`), `byte` (`uint8`), `float` (`float32`), checked arithmetic, integer bitwise operations and shifts, and `as` conversions | [Numbers](Numbers.md) |
+| Types | Classes, inheritance, overlays, tuples, enums with named and positional payloads and exhaustive matching, collections | [Types](Types.md) |
 | Generics | Generic functions, classes, and methods with explicit type arguments, bounds, nested instances; specialization per type arguments | [Polymorphism](Polymorphism.md) |
 | Modules | Imports, exports, module inheritance, module interfaces, the entry point, program initialization order, top-level statements | [Modules](Modules.md) |
-| Lifecycle | Constructors, field initializers, `destroy`, destructors | [Object lifecycle](ObjectLifecycle.md) |
+| Lifecycle | Constructors, field initializers, `destroy`, destructors, deterministic tracing garbage collection | [Object lifecycle](ObjectLifecycle.md) |
 | Collections | Arrays, lists, `length`, indexing, `append`, `remove_at`, for-each with modification checks | [Collections](Collections.md) |
 | Errors | Expected failures as returned values; runtime failures trap with documented reasons | [Errors](Errors.md) |
 | Testing | `neura test`, `Test.assert`, `Test.assert_equal_int32` | [Testing](Testing.md) |
@@ -33,7 +33,7 @@ These remain open. The compiler rejects or does not offer the affected construct
 | Area | Open decisions |
 | --- | --- |
 | Core | Shadowing, Unicode identifiers and escapes, compound assignment |
-| Types | Type inference beyond local bindings, nullability, equality for classes, collections, and strings, enum payloads and exhaustive matching |
+| Types | Type inference beyond local bindings, nullability, equality for classes, collections, and strings, nested enum patterns, match guards, generic enum declarations |
 | Generics | Inference of type arguments, multiple bounds, generic inheritance, variance |
 | Modules | Interface checking beyond overrides, package-level resolution |
 | Lifecycle | Ownership, alias safety, definite field initialization, failure cleanup |
@@ -42,7 +42,7 @@ These remain open. The compiler rejects or does not offer the affected construct
 
 - Identifiers use ASCII letters, digits, and underscores. Source strings and comments support UTF-8. String literals support escaped quotes, backslashes, tabs, carriage returns, and newlines.
 - Decimal integer literals default to `int32` and decimal floating-point literals default to `float64`. A numeric context selects a literal of a different width; [Numbers](Numbers.md) specifies ranges and rounding.
-- `for`, `in`, `as`, and `enum` are keywords, so they cannot name bindings.
+- `for`, `in`, `as`, `enum`, `match`, `and`, and `or` are keywords, so they cannot name bindings.
 - Local value bindings require an initializer. A nonempty collection literal without an expected type infers an array, and an empty literal requires an expected collection type.
 - The examples initialize some fields after construction. The frontend accepts that pattern; reading a field before any store is a runtime fault.
 

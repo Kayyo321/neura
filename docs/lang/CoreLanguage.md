@@ -32,6 +32,27 @@ let sum_to = func(int32 limit) -> int32 {
 
 `if (condition) { ... } else { ... }` selects a branch; `while (condition) { ... }` repeats while its Boolean condition is true. `break` exits the innermost loop and `continue` starts its next iteration. Conditions must be `bool`; there is no implicit truthiness. See [core.nra](../../examples/guide/core.nra).
 
+### Function values and closures
+
+A lambda is a function expression with typed parameters and a body. Its type lists the parameter types in order, followed by the result. An invocation evaluates the callable expression first and its arguments from left to right.
+
+```neura
+let make_adder = func(int offset) -> func(int) -> int {
+    return func(int value) -> int {
+        return value + offset;
+    };
+};
+
+let add_two = make_adder(2);
+let result = add_two(40);
+```
+
+Functions with the same concrete parameter and result types have the same function type. A function value can be assigned, passed as an argument, returned, and stored in a field or collection. Parenthesize the function type before a collection suffix to write an array of functions, such as `(func(int) -> int)[]`. A named non-generic function used as a value is callable through the same interface. Reading a class method as a value binds its receiver and keeps normal virtual dispatch.
+
+A lambda captures the values of enclosing parameters and local bindings it uses when it is created. A captured binding cannot be reassigned within the lambda. Capturing an object or collection keeps a reference to the same instance, so updates to its contents are visible. A lambda in a class method can use its enclosing receiver, and a nested lambda can capture values available to its enclosing lambda. Module and file globals are read when the body runs. Closures may outlive the scope that created them.
+
+Function-value signatures and captured types must be concrete. Use a direct call with explicit type arguments for a generic function. Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
+
 ## Loops
 
 Neura has three loop statements: `while`, the three-part `for`, and `for`-each over arrays and lists.
@@ -59,16 +80,26 @@ Both loops lower to NeuraIR's existing loop and branch operations ([Backend](../
 
 ## Expressions
 
-The operators are arithmetic `+ - * / %`, comparisons `== != < <= > >=`, Boolean `&& || !`, unary `-`, the conversion `as`, and assignment `=`. Arithmetic operands must have the same type; `%` applies to integers only. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. Precedence, from tightest to loosest:
+The operators include arithmetic `+ - * / %`, comparisons `== != < <= > >=`, Boolean `&& || !`, integer bitwise operators `~ & ^ | << >>`, unary `-`, the conversion `as`, and assignment `=`. Arithmetic operands must have the same type. Remainder applies to integers. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. Precedence, from tightest to loosest:
 
 1. member access, indexing, and calls
-2. unary `!` and `-`
+2. unary `!`, `-`, and `~`
 3. `as`
 4. `*`, `/`, `%`
 5. `+`, `-`
-6. `<`, `<=`, `>`, `>=`
-7. `==`, `!=`
-8. `&&`
-9. `||`
+6. `<<`, `>>`
+7. `&`
+8. `^`
+9. `|`
+10. `<`, `<=`, `>`, `>=`
+11. `==`, `!=`
+12. `&&`
+13. `||`
 
 Assignment is a statement, not a value. [Numbers](Numbers.md) specifies integer and floating-point literals, arithmetic, overflow, division, rounding, and conversions. String concatenation with `+` accepts two strings; implicit conversion to string is not specified.
+
+### Comparison chains
+
+A comparison can use one subject and several alternatives. For example, `x == 0 or 1 or 2` tests whether `x` equals any of those values, and `x != 0 and 1` tests whether it differs from both. The subject is evaluated once. Each alternative is evaluated left to right and compared with the captured subject using the original operator. An `or` chain stops at the first true comparison. An `and` chain stops at the first false comparison.
+
+The chain consumes its alternatives before the surrounding `&&` or `||`. An alternative can be an arithmetic or bitwise expression. Use parentheses around comparisons that follow a chain connector. Each chain uses a single connector throughout. Join independent comparisons with `&&` or `||`, as in `x == 0 && y == 1`.

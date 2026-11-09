@@ -67,6 +67,8 @@ The execution contract defines initial state, how and when state commits, how co
 | --- | --- |
 | Bindings and assignment | Immutable values can travel on edges. Mutable values use explicit state slots or memory operations where their lifetime requires it. |
 | Functions | A typed call interface passes arguments and returns values. Reusable function circuits can share topology and weights across calls, with independent locals for each active invocation. |
+| Closures | A function value uses an object handle whose layout describes its captured values. The signature supplies a common interface and the environment layout selects the function body using ordinary virtual dispatch. |
+| Tuples and enum payloads | Typed object layouts store tuple fields or an enum discriminant and variant payload. A match reads the discriminant and selects the region that can read the active payload. |
 | Loops and recursion | A transition circuit can update control state and revisit a region. Recursive calls require storage for active frames and return continuations, with a defined limit for finite targets. |
 | Classes and objects | Classes define layouts and method circuits. Each object has its own state, and method calls pass a receiver reference to shared circuits. |
 | Dynamic dispatch | A method call resolves from the runtime type of the receiver using the declared class interface. A backend can lower this to a type tag and circuit selection. |
@@ -75,6 +77,8 @@ The execution contract defines initial state, how and when state commits, how co
 ### Runtime boundary
 
 The [Neura Virtual Machine](runtime/NVM.md) evaluates feedforward neuron graphs and follows their selected exits. It owns frames, state storage, and host service dispatch. The compiled graph makes arithmetic, comparison, and branch decisions. Heap operations and host effects use explicit requests with typed inputs and continuations.
+
+The NVM traces initialized reference roots at allocation safepoints and reclaims unreachable objects, collections, text, and closure environments, including cycles. It keeps live handles stable and leaves explicit destruction and host resource cleanup under program control.
 
 IRtoNeuronConversion, the NVR writer and loader, and a reference NVM are implemented for the whole language of this release: Booleans, integers, IEEE floating point, enums, control flow including loops, calls, generics after specialization, module dispatch, classes with dynamic dispatch, arrays, lists, text, program initialization, console output, and test assertions. [Neuron conversion and execution](Backend.md) lists the supported operations. It also describes the circuits and their measured costs, the semantics the compiler fixes where the language is open, and the tests that compare compiled graphs with the IR reference evaluator.
 

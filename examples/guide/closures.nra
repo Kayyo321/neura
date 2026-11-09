@@ -1,0 +1,6 @@
+// A function value retains the offset after the factory returns.
+export let make_adder = func(int offset) -> func(int) -> int {
+    return func(int value) -> int {
+        return value + offset;
+    };
+};

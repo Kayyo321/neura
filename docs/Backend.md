@@ -41,6 +41,7 @@ Conversion lowers an operation only where the language defines its result. Where
 | `load`, `store` of module globals | `ReadGlobal` and `WriteGlobal` state operations. |
 | `unary !`, `binary == !=` on `bool` | Graph gadgets. |
 | `unary -`, `binary + - * / %` on `int8` to `uint64` | Checked integer circuits with trap exits for overflow, a zero divisor, and `MIN / -1`. |
+| `unary ~`, `binary & ^ \| << >>` on integers | Per-lane Boolean circuits and fixed-width shift circuits with a trap exit for out-of-range counts. |
 | `float` literals, `unary -`, `binary + - * /` on the four float formats | Float circuits; negation only flips the sign lane. |
 | Comparisons on integers, floats, enums, and `bool` | Graph circuits. |
 | `convert` | Integer range checks, float rounding, and truncation circuits, with trap exits where [Numbers](lang/Numbers.md#conversions) specifies them. |
@@ -48,6 +49,7 @@ Conversion lowers an operation only where the language defines its result. Where
 | `collection_version`, `fail` | `ReadVersion` and a reason-5 `Trap` exit, for for-each loops. |
 | `binary +` on `string` | A call to a generated concatenation function. |
 | `short_circuit` | One graph neuron when the right operand is pure and total. Otherwise the left operand selects a block that evaluates the right operand or a block that skips it. |
+| `comparison_chain` | Initialize the hidden subject slot once, then lower the comparisons and lazy connectors using the ordinary comparison and short-circuit rules. |
 | `branch`, `loop`, `break`, `continue`, `block`, `return` | Blocks connected by `Continue` exits that the graph selects, and `Return` exits. A loop's latch gets its own block, which `continue` reaches. |
 | `call` | A `Call` exit. Module functions are specialized for their module. |
 | `virtual_call` on a module | Resolved statically: the most derived implementation in the concrete module, specialized for that module. |
@@ -122,6 +124,7 @@ Arithmetic uses these gadgets:
 - Multiplication sums partial products by column. One identity neuron sums each column, and thresholds split the sum into the result bit and an integer carry. Overflow is any partial product at or above the type's width, or a carry out of the top column. Signed multiplication multiplies magnitudes and checks the result against `2^(w-1) - 1`, or against `2^(w-1)` for a negative result.
 - Division uses restoring division, one quotient bit per column; the remainder comes out of the same circuit. Signed division divides magnitudes and applies the result's sign; the remainder takes the dividend's sign.
 - Integer conversions extend or truncate lanes and check that every dropped lane equals the sign the target needs.
+- Integer shifts use one mux stage per power of two below the word width. The left shift fills with zeros, and the right shift fills with zeros or the sign bit. Any set lane above the count lanes used by the stages selects a reason-1 trap.
 
 Float circuits (`src/backend/float_circuit.cpp`) are written once for any exponent and fraction width and instantiated for the four formats. An operand is unpacked into sign, exponent, and significand with an explicit leading bit, and flags for NaN, infinity, and zero. Addition aligns the smaller operand with a barrel shifter that keeps a sticky bit, adds or subtracts with three extra lanes (guard, round, sticky), and normalizes. Multiplication forms the full product of the significands with the column multiplier. Division normalizes both significands and runs restoring division for `fraction + 3` quotient bits, with the remainder as sticky. Every operation and conversion ends in one shared round-and-pack step: a leading-zero normalization limited by the exponent, a right shift into the subnormal range, round to nearest even, and overflow to infinity. Special cases select the canonical NaN, an infinity, or a signed zero last.
 

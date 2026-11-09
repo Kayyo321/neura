@@ -26,7 +26,9 @@ For a derived class, `super.init(...)` must be the first statement of a declared
 
 A class may declare a zero-argument `deinit` function returning `void`. The proposed `destroy object;` operation ends the object's lifetime and invokes cleanup from the most-derived class toward its bases, regardless of the static type of the reference. Each class's `deinit` runs at most once; base cleanup is automatic and must not be called explicitly. A class without `deinit` has no cleanup body of its own. Cleanup should release resources owned by that class, not resources it merely borrows.
 
-After destruction the object must not be accessed or destroyed again through any alias. How the language enforces this, and whether destruction is allowed when aliases exist, are unresolved. The example uses `destroy` only after the last use of its object. Automatic destruction at scope exit, garbage collection, cleanup on errors, destructor visibility, and the behavior of failing cleanup are not specified; do not assume deterministic cleanup without an explicit `destroy`. Calling overridable methods during cleanup is likewise unspecified.
+Destruction invalidates the object for every alias. The VM traps if an operation subsequently dereferences the invalid handle. The example uses `destroy` only after the last use of its object. Static ownership checks, cleanup on errors, destructor visibility, and the behavior of failing cleanup remain open. Calling overridable methods during cleanup is likewise unspecified.
+
+The VM automatically reclaims unreachable heap storage, including cyclic object graphs. Reclamation can occur at allocation and list growth. It does not run `deinit`, and leaving a source scope does not schedule cleanup. Use explicit `destroy` for cleanup with program-visible effects. [Garbage collection in NVM](../runtime/NVM.md#garbage-collection) describes which references retain an object and how reclamation interacts with runtime limits.
 
 ## Generic and polymorphic values
 

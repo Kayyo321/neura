@@ -35,7 +35,15 @@ Nothing wraps or saturates: an operation either produces its exact mathematical 
 
 `==`, `!=`, `<`, `<=`, `>`, and `>=` compare two operands of the same integer type by their mathematical values and produce `bool`.
 
+## Bitwise operations
+
+The unary operator `~` complements every bit. The operators `&`, `|`, and `^` compute per-bit AND, OR, and XOR on two integers of the same type. All four produce a value of the operand type.
+
+The operators `<<` and `>>` shift the fixed-width bit pattern of the left operand. The count can have any integer type. A negative count or a count greater than or equal to the left operand's width traps. A left shift shifts in zeros and discards bits beyond the width. A right shift of a signed integer extends its sign bit, and a right shift of an unsigned integer shifts in zeros. The result has the left operand's type.
+
 ## Floating-point types
+
+`float` is an alias of `float32`. An unconstrained decimal floating-point literal still defaults to `float64`.
 
 | Type | Format | Precision (significand bits) | Exponent bits | Largest finite value |
 | --- | --- | --- | --- | --- |

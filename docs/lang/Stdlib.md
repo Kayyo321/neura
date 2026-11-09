@@ -77,7 +77,7 @@ Add an `interface` declaration alongside `class`.
 
 - A function type is written from its parameter types and result type. Two function types are the same when those agree. It can be used wherever a type can.
 - A function value is created from a named function, from a method bound to a receiver, or from an anonymous function expression (a closure).
-- **Capture.** A closure can read bindings of enclosing functions. Only bindings that are never reassigned after initialization can be captured; capturing a reassigned binding is a compile-time error at the capture. Captured values are copied into the closure when it is created. The closure body cannot assign to a captured binding. Shared mutable state goes through an object reference.
+- **Capture.** A closure can read bindings of enclosing functions. Captured values are copied into the closure when it is created. The closure body cannot assign to a captured binding. Shared mutable state goes through an object reference.
 - A closure can capture the enclosing method's receiver.
 - **Lowering.** Each function type is a compiler-generated interface with one method. Each closure expression is a compiler-generated closed class whose fields are the captured values and whose single method is the body. Calling a function value is an interface dispatch (L1). A function value is an `Object`: its `equals` and `hash_code` are identity-based and its `to_string` is the text `function`.
 - [Section 5.6](#56-function-shapes) names the function shapes the library uses.
@@ -87,7 +87,7 @@ Add an `interface` declaration alongside `class`.
 A Java-style library cannot be written with only manual `destroy`: an `Optional`, an iterator, or a string builder has no single owner to free it.
 
 - NVM reclaims objects, arrays, lists, and texts that are unreachable from frames, globals, pending continuations, and the constant pool.
-- **Determinism.** Reclamation is not observable except through the live-heap limit. NVM runs a full reachability pass exactly when an allocation or growth would exceed `--max-heap-cells`. If the request fits after the pass, execution continues; otherwise the run ends with the existing heap-limit fault. A host may reclaim earlier as an optimization only if that cannot change any result, including whether the limit fault occurs.
+- **Determinism.** The NVM collects at deterministic allocation and growth safepoints. Before exceeding `--max-heap-cells`, it traces reachability and continues if the request fits after reclamation. Otherwise the run ends with the heap-limit fault. [Neura Virtual Machine](../runtime/NVM.md)
 - Handles are never reused, as today.
 - **No finalization.** Reclaiming an object does not run `deinit`. `deinit` runs only for an explicit `destroy`. The library never requires `destroy` and releases host resources through `Closeable` ([section 5.5](#55-closeable)).
 - A reclaimed object's identity number is never reissued.

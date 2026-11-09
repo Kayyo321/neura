@@ -107,7 +107,7 @@ Dispatch blocks are recognized separately: the graph is evaluated for every layo
 
 Lifting recognizes the circuits the compiler emits in both optimized and unoptimized images, because both are built by the same circuit library. A graph whose weights were edited no longer matches its original operations: an edited block is either lifted as whatever it now computes, still proven by identical regeneration or exhaustive evaluation, or shown as a circuit. Stale metadata cannot affect the result, because metadata is never read during lifting.
 
-What lifting does not recover: operations nested deeper than two levels in one block, expressions with more than three input words, constants that the probes do not reveal, and blocks whose checks belong to computations that no exit reads. Those blocks are shown as circuits. In the repository's test corpus, 1,274 of 1,314 blocks that compute something lift structurally (97%), and the remaining 40 are shown as circuits.
+Lifting leaves a block in circuit form when the search cannot recover its expression, such as a deeply nested operation, an undiscovered constant, or a check whose value no exit reads. Bitwise and shift graphs can also remain in circuit form. In the repository's test corpus, 1,536 of 1,608 blocks that compute something lift structurally, and the remaining 72 are shown as circuits.
 
 ## Re-synthesis and behavior comparison
 
@@ -118,7 +118,7 @@ What lifting does not recover: operations nested deeper than two levels in one b
 | Test | What it establishes | Kind of check |
 | --- | --- | --- |
 | `decompiler-lossless` | Every corpus image (every test and example program, optimized and unoptimized, with and without the source map, plus hand-assembled and edited images) disassembles to text that assembles to the same model and the same bytes, and disassembly is stable. Assembly errors name their line. | Exact, over the corpus |
-| `decompiler-lift` | Every structural claim in the corpus is re-checked by regeneration. At least 90% of graph blocks lift structurally (measured: 97%). Lifted text names the source operations for known programs. A block whose weight is edited is not lifted as its original operation, and every other block keeps its evidence. Output without provenance equals output from an image with the source map and names removed. | Structural, over the corpus |
+| `decompiler-lift` | Every structural claim in the corpus is re-checked by regeneration. At least 90% of graph blocks lift structurally. Lifted text names the source operations for known programs. A block whose weight is edited is not lifted as its original operation, and every other block keeps its evidence. Output without provenance equals output from an image with the source map and names removed. | Structural, over the corpus |
 | `decompiler-behavior` | The regenerated image of every compiled corpus image replays the original's host trace and outcome, with and without program arguments, including programs with conditional output and programs that trap. Scalar functions of two fixtures return the same result or trap on every 8-bit input in the original and the regenerated image. | Sampled inputs for programs; exhaustive over 8-bit domains for the fixture functions |
 
 The behavior comparison follows from the structural proof for lifted blocks; it checks the regeneration, trace, and replay machinery end to end. Programs are compared on the inputs they are run with, not on all inputs.

@@ -21,6 +21,7 @@ The built-in types are listed below. [Numbers](Numbers.md) specifies the numeric
 | `uint8`, `uint16`, `uint32`, `uint64` | Unsigned integers of the indicated width in bits. |
 | `int` | General-purpose integer: another name for `int32`. |
 | `float16`, `float32`, `float64` | IEEE 754 binary16, binary32, and binary64 floating point. |
+| `float` | Another name for `float32`. |
 | `bfloat16` | Brain floating point (BF16): binary32's 8-bit exponent with a 7-bit fraction. |
 | `string` | Text. Its encoding and indexing rules remain to be specified. |
 | `void` | No return value. |
@@ -28,6 +29,33 @@ The built-in types are listed below. [Numbers](Numbers.md) specifies the numeric
 Low-precision formats such as FP8 and packed integer formats are not part of the language. Every numeric operation is computed by neuron circuits, so no type depends on hardware support.
 
 Arrays and lists are built-in collection types, written `string[]` and `string[list]` respectively. Arrays have a fixed length; lists can grow and shrink. Suffixes can be combined for nested collections. See [Arrays and lists](Collections.md) for their syntax and safety rules.
+
+## Tuples
+
+A tuple has one or more ordered elements, each with its own static type. Write
+`[T1, T2, ...]` in a type position and `[value1, value2, ...]` where a tuple is
+expected. Tuple types may appear in bindings, fields, function signatures, type
+arguments, and collection element types.
+
+```neura
+let measure = func() -> [int, float] {
+    return [42, 0.5];
+};
+
+let [count, weight] = measure();
+const [label, _] = ["answer", count];
+let pair: [string, float] = [label, weight];
+let description = pair[0];
+```
+
+Destructuring evaluates its initializer once. Each name introduces a new
+binding with the corresponding element type. `_` ignores an element while
+preserving its evaluation. `let` creates mutable bindings and `const` creates
+constant bindings. A bracket literal on the right of a destructuring declaration
+infers a tuple from its elements. An uncontextualized bracket literal elsewhere
+continues to infer an array. A tuple can be indexed with a zero-based integer
+literal in range. The tuple's elements are immutable. A reference stored in a
+tuple retains the behavior of the referenced value.
 
 ## Type overlays
 
@@ -92,7 +120,38 @@ let next = func(Light current) -> Light {
 };
 ```
 
-An enum is a type: it can annotate bindings, fields, parameters, results, collection elements, and type arguments. Variants are values of their enum, visible wherever the enum is, and the variant list must not be empty or repeat a name. Enum values support `==` and `!=`, and `variant as T` converts a variant to its ordinal, its zero-based position in the declaration, in any integer type `T`. There is no ordering, no conversion from an integer to an enum, and no payload. The built-in `SysIo.Entry.ExitCode`, whose only variant is `Ok`, is the entry function's status: `Ok` is status 0.
+An enum can annotate bindings, fields, parameters, results, collection elements, and type arguments. Its variant names are visible wherever the enum is visible. Each enum declares at least one variant, and names are unique. An entirely fieldless enum supports `==` and `!=`. The checked conversion `variant as T` converts one of its values to its zero-based declaration ordinal in integer type `T`. The built-in `SysIo.Entry.ExitCode.Ok` is the entry function's status 0.
+
+An enum can mix unit variants, positional payloads, and named payloads. A
+constructor evaluates its fields in written order, even when named arguments
+are reordered. The payload belongs to the selected variant and is read through
+a match. An enum with payloads has no built-in equality or numeric cast.
+
+```neura
+let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });
+
+let sum = func(Tree tree) -> int {
+    return match (tree) {
+        Tree.Empty => 0,
+        Tree.Leaf(value) => value,
+        Tree.Branch { left, right } => sum(left) + sum(right),
+    };
+};
+
+let tree = Tree.Branch { right: Tree.Leaf(2), left: Tree.Leaf(1) };
+```
+
+`match (value)` evaluates the subject once and evaluates only the selected arm.
+Each arm names a different variant, or a final `_` arm covers the remaining
+variants. Without a wildcard, every variant must appear. A payload pattern
+specifies each field, using `_` to ignore a field. Named patterns allow
+`field: binding` and the shorthand `field`. Pattern bindings are constant and
+visible only in their arm. A match expression uses expression arms with a
+common type. When no surrounding type is available, the first arm establishes
+the result type. A match statement uses a statement block in each arm.
+
+Patterns currently cover one variant level. Generic enum declarations, nested
+patterns, guards, and derives are open language decisions.
 
 ## Inference, conversions, equality, and absence
 
@@ -100,4 +159,4 @@ The proposed initial inference rule is local: an initialized binding without an 
 
 There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](Numbers.md#conversions). Floating-point equality follows IEEE 754. Equality for classes, collections, and strings needs a defined contract; do not assume structural equality or identity equality for these values. Basic scalar comparisons are illustrated in [core.nra](../../examples/guide/core.nra).
 
-Nullability, optional values, and their syntax are open. No implicit null value or null check should be assumed. Enum payload variants and exhaustive matching are also open. These decisions are prerequisites for a general result type and fallible standard APIs. Generic syntax and its limitations are described in [Polymorphism](Polymorphism.md).
+Nullability, optional values, and their syntax are open. No implicit null value or null check should be assumed. Generic syntax and its limitations are described in [Polymorphism](Polymorphism.md).

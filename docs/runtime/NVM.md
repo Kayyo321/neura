@@ -65,6 +65,16 @@ An allocation creates a fresh handle and uninitialized fields. Compiler-generate
 
 For example, incrementing a counter runs a block that requests a field read, a graph that adds to the returned value, and a block that requests a field write. The heap handler performs the read and write. The graph supplies the new value.
 
+### Garbage collection
+
+NVM uses a non-moving tracing collector. The root set comprises reference constants, initialized reference globals, and initialized reference slots in every active frame. Temporary references also remain rooted while constructing the launch arguments, allocating a collection from its already evaluated elements, or appending an element after the exit's parallel assignments. NVM traces initialized reference fields by the object's actual layout and visits reference elements in arrays and lists. Text and byte storage are leaves. Numeric slots never keep an object alive even when their bits match its handle.
+
+Allocation and list growth are safepoints. The collector marks reachable entries iteratively and sweeps the remaining entries, including unreachable cycles. It attempts collection before an allocation or growth would exceed the configured heap limit. It also collects at a soft threshold that grows with the retained heap, so workloads that release objects can reclaim space before reaching the hard limit. Collection does not consume program steps and uses no clocks or background threads. An initialized frame slot retains its reference until the slot is overwritten or its frame returns.
+
+The collector caches the reference positions in each encountered object layout and frame signature. Subsequent traces visit those positions directly and skip scalar cells.
+
+Collection reclaims storage without invoking language cleanup methods. An explicit `destroy` runs its compiled cleanup and invalidates the object immediately. Both reclaimed and explicitly destroyed handles remain invalid, and every new allocation receives a fresh handle. The run's handle limit counts all assigned handles independently of reclaimed storage. Programs must keep references in typed storage across safepoints to retain their targets.
+
 ## Host calls and standard output
 
 A host import declares a service name, interface version, typed arguments, and typed success and error results. An exit references an import by table index. At load time the runtime binds each declared import to a registered service with the same signature and version under the runner's service policy. Imports grant access only to their bound service. A service that needs filesystem or network access defines that authority in its own interface and configuration.
