@@ -1,0 +1,19 @@
+let Overlay = module {
+    // A type definition gives an existing type another name.
+    export let Integer = int32;
+    export let Name = string;
+    export let Enabled = bool;
+
+    // Names can describe what a value represents.
+    export let UserId = Integer;
+    export let DisplayName = Name;
+
+    // Use the names in variable declarations and function signatures.
+    export let default_user_id: UserId = 1;
+    export let default_name: DisplayName = "Guest";
+    export let enabled: Enabled = true;
+
+    export let next_user_id = func(UserId user_id) -> UserId {
+        return user_id + 1;
+    };
+};
