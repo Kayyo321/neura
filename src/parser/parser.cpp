@@ -286,13 +286,13 @@ private:
         if (at("==") || at("!=")) return 3;
         if (at("<") || at("<=") || at(">") || at(">=")) return 4;
         if (at("+") || at("-")) return 5;
-        if (at("*") || at("/")) return 6;
+        if (at("*") || at("/") || at("%")) return 6;
         return 0;
     }
 
     Expr expression(int minimum_precedence = 1) {
         const auto start = cursor_;
-        auto left = unary();
+        auto left = cast();
         while (precedence() >= minimum_precedence) {
             const auto priority = precedence();
             const auto op = advance().text;
@@ -303,6 +303,22 @@ private:
             left = std::move(binary);
         }
         return left;
+    }
+
+    // `as` binds tighter than the binary operators and looser than unary
+    // operators: `-x as int64` converts `-x`, and `a * b as int64` converts
+    // only `b`.
+    Expr cast() {
+        const auto start = cursor_;
+        auto result = unary();
+        while (match("as")) {
+            auto target = type();
+            auto conversion = make_expression(Expr::Kind::Cast, span_from(start));
+            conversion.type = std::move(target);
+            conversion.operands.push_back(std::move(result));
+            result = std::move(conversion);
+        }
+        return result;
     }
 
     Expr unary() {

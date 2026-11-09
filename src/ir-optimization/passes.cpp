@@ -83,6 +83,7 @@ std::optional<IntegerOperation> arithmetic(std::string_view op) {
     if (op == "-") return IntegerOperation::Subtract;
     if (op == "*") return IntegerOperation::Multiply;
     if (op == "/") return IntegerOperation::Divide;
+    if (op == "%") return IntegerOperation::Remainder;
     return {};
 }
 
@@ -151,12 +152,27 @@ bool fold_binary(IrNode& node) {
     return false;
 }
 
+bool fold_convert(IrNode& node) {
+    if (node.operands.size() != 1) {
+        return false;
+    }
+    const auto value = integer_constant(node.operands.front());
+    const auto target = specified_integer_format(node.type);
+    const auto result = value && target ? convert(*value, *target) : std::nullopt;
+    if (!result) {
+        return false;
+    }
+    node = literal_for(node, IrOp::Integer, spelling(*result));
+    return true;
+}
+
 } // namespace
 
 std::size_t fold_constants(IrProgram& program) {
     return rewrite_nodes(program, [](IrNode& node) {
         if (node.op == IrOp::Unary) return fold_unary(node);
         if (node.op == IrOp::Binary) return fold_binary(node);
+        if (node.op == IrOp::Convert) return fold_convert(node);
         return false;
     });
 }

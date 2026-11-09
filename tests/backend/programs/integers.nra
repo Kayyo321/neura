@@ -1,0 +1,81 @@
+// Integer semantics: truncating division and remainder, checked conversions,
+// the int and byte aliases, collection length, and boundary literals. Each
+// check prints its label when the computed value matches.
+let io = import:SysIo;
+
+let Integers = module:io.Entry (
+    let report = func(bool holds, string label) -> void {
+        if (holds) {
+            io.println(label);
+        } else {
+            io.println("FAILED: " + label);
+        }
+    };
+
+    let quotient = func(int32 a, int32 b) -> int32 {
+        return a / b;
+    };
+
+    let rest = func(int32 a, int32 b) -> int32 {
+        return a % b;
+    };
+
+    let unsigned_rest = func(uint16 a, uint16 b) -> uint16 {
+        return a % b;
+    };
+
+    let narrow = func(int64 value) -> int8 {
+        return value as int8;
+    };
+
+    let widen = func(int8 value) -> int64 {
+        return value as int64;
+    };
+
+    let to_unsigned = func(int32 value) -> uint32 {
+        return value as uint32;
+    };
+
+    let count = func(byte[] values) -> int {
+        return values.length;
+    };
+
+    let pick = func(int32 a, int32 b) -> int32 {
+        return a - b;
+    };
+
+    // The product of two parameters gets a block of its own; the sum computed
+    // before it must survive that block.
+    let combine = func(int32 x, int32 y, int32 z) -> int32 {
+        return pick(x + 1, y * z);
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        report(quotient(7, 2) == 3, "7 / 2 = 3");
+        report(quotient(-7, 2) == -3, "-7 / 2 = -3");
+        report(quotient(7, -2) == -3, "7 / -2 = -3");
+        report(quotient(-2147483647, -1) == 2147483647, "-(MAX) / -1 = MAX");
+        report(rest(7, 2) == 1, "7 % 2 = 1");
+        report(rest(-7, 2) == -1, "-7 % 2 = -1");
+        report(rest(7, -2) == 1, "7 % -2 = 1");
+        report(rest(-2147483648, -1) == 0, "MIN % -1 = 0");
+        report(unsigned_rest(65535, 256) == 255, "65535 % 256 = 255");
+        report(narrow(-128) == -128, "-128 as int8 = -128");
+        report(narrow(127) == 127, "127 as int8 = 127");
+        report(widen(-5) == -5, "-5 as int64 = -5");
+        report(to_unsigned(2147483647) == 2147483647, "int32 max as uint32");
+        let small: int = 40;
+        let total: int32 = small + 2;
+        report(total == 42, "int is int32");
+        let full: byte = 255;
+        let same: uint8 = full;
+        report(same == 255, "byte is uint8");
+        report(count([1, 2, 3]) == 3, "length of a byte[] is 3");
+        let lowest: int64 = -9223372036854775808;
+        report(lowest + 9223372036854775807 == -1, "int64 minimum literal");
+        let lowest32: int32 = -2147483648;
+        report(lowest32 % 10 == -8, "int32 minimum literal");
+        report(combine(2, 6, 7) == -39, "a sum survives an isolated product");
+        return Entry.ExitCode.Ok;
+    }
+);

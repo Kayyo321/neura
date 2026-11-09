@@ -11,10 +11,13 @@ std::optional<IntegerFormat> specified_integer_format(const IrType& type) {
     if (type.kind != TypeKind::Integer) {
         return {};
     }
-    constexpr std::array<std::pair<std::string_view, IntegerFormat>, 8> formats{{
+    // Lowering spells `int` and `byte` as int32 and uint8. The alias names
+    // are accepted too, for IR that spells them directly.
+    constexpr std::array<std::pair<std::string_view, IntegerFormat>, 10> formats{{
         {"int8", {8, true}},    {"int16", {16, true}},   {"int32", {32, true}},
         {"int64", {64, true}},  {"uint8", {8, false}},   {"uint16", {16, false}},
-        {"uint32", {32, false}}, {"uint64", {64, false}},
+        {"uint32", {32, false}}, {"uint64", {64, false}}, {"int", {32, true}},
+        {"byte", {8, false}},
     }};
     for (const auto& [name, format] : formats) {
         if (type.name == name) {

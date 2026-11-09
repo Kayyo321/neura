@@ -1,3 +1,4 @@
+#include "float.hpp"
 #include "ir.hpp"
 #include "parser/syntax.hpp"
 
@@ -23,7 +24,6 @@ using DeclKind = Declaration::Kind;
 const IrType void_type{TypeKind::Void, "void", no_symbol, {}};
 const IrType bool_type{TypeKind::Bool, "bool", no_symbol, {}};
 const IrType string_type{TypeKind::String, "string", no_symbol, {}};
-const IrType int_type{TypeKind::Integer, "int", no_symbol, {}};
 const IrType int32_type{TypeKind::Integer, "int32", no_symbol, {}};
 const IrType float64_type{TypeKind::Float, "float64", no_symbol, {}};
 
@@ -31,7 +31,12 @@ std::optional<IrType> primitive(std::string_view name) {
     if (name == "void") return void_type;
     if (name == "bool") return bool_type;
     if (name == "string") return string_type;
-    constexpr std::array integers{"byte", "int", "int8", "int16", "int32", "int64",
+    // `int` and `byte` are aliases of int32 and uint8 (Types.md). Lowering
+    // spells every integer type by its sized name, so the aliases are
+    // interchangeable with it everywhere.
+    if (name == "int") return int32_type;
+    if (name == "byte") return IrType{TypeKind::Integer, "uint8", no_symbol, {}};
+    constexpr std::array integers{"int8", "int16", "int32", "int64",
                                   "uint8", "uint16", "uint32", "uint64"};
     constexpr std::array floats{"float16", "float32", "float64", "bfloat16"};
     if (std::ranges::find(integers, name) != integers.end())
@@ -602,7 +607,7 @@ IrNode Lowering::select(const Expr& expr, Context& context) {
     auto nominal = receiver_type(receiver.type);
     if (collection(nominal)) {
         if (expr.text == "length") {
-            auto result = node(IrOp::Length, expr.span, int_type);
+            auto result = node(IrOp::Length, expr.span, int32_type);
             result.operands.push_back(std::move(receiver));
             return result;
         }
@@ -750,7 +755,19 @@ IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative)
                        expected && expected->kind == kind ? *expected
                                                          : (floating ? float64_type : int32_type));
     result.text = negative ? "-" + expr.text : expr.text;
-    if (floating) return result;
+    if (floating) {
+        // Literals convert directly from decimal to the target format, so a
+        // literal that does not fit is a compile-time error (Numbers.md).
+        const auto format = float_format(result.type);
+        const auto parsed = parse_float_literal(result.text, *format);
+        if (parsed.error == FloatLiteralError::Overflow)
+            throw Diagnostic(expr.span, "float literal is outside the range of " + result.type.name);
+        if (parsed.error == FloatLiteralError::Underflow)
+            throw Diagnostic(expr.span, "nonzero float literal rounds to zero in " + result.type.name);
+        if (parsed.error)
+            throw Diagnostic(expr.span, "malformed float literal");
+        return result;
+    }
     const auto& name = result.type.name;
     const bool signed_integer = name.starts_with("int");
     unsigned bits = 32;
@@ -804,6 +821,7 @@ IrNode Lowering::binary(const Expr& expr, Context& context, const IrType* expect
     bool numeric = left.type.kind == TypeKind::Integer || left.type.kind == TypeKind::Float;
     bool concatenate = left.type.kind == TypeKind::String && op == "+";
     bool equatable = equality && (left.type.kind == TypeKind::Bool || left.type.kind == TypeKind::Enum);
+    if (op == "%" && left.type.kind != TypeKind::Integer) numeric = false;
     if (!(numeric || concatenate || equatable))
         throw Diagnostic(expr.span, "operator '" + op + "' is not defined for " + describe(left.type));
     auto result = node(IrOp::Binary, expr.span, comparison ? bool_type : left.type);
@@ -900,6 +918,20 @@ IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* ex
     }
     case ExprKind::New:
         return allocate(expr, context);
+    case ExprKind::Cast: {
+        auto target = type(*expr.type, context);
+        auto source = value(expr.operands.front(), context);
+        const auto numeric = [](const IrType& t) {
+            return t.kind == TypeKind::Integer || t.kind == TypeKind::Float;
+        };
+        const bool allowed = numeric(target) &&
+            (numeric(source.type) || (source.type.kind == TypeKind::Enum && target.kind == TypeKind::Integer));
+        if (!allowed)
+            throw Diagnostic(expr.span, "cannot convert " + describe(source.type) + " to " + describe(target));
+        auto result = node(IrOp::Convert, expr.span, std::move(target));
+        result.operands.push_back(std::move(source));
+        return result;
+    }
     case ExprKind::Import:
         throw Diagnostic(expr.span, "import must initialize a module-level alias");
     }

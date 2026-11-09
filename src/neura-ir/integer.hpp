@@ -8,9 +8,8 @@
 
 namespace neura {
 
-// Width and signedness of an integer type whose representation the language
-// specifies. Types.md specifies int8..int64 and uint8..uint64. The width of
-// `int` and the signedness of `byte` are open, so they have no format.
+// Width and signedness of an integer type. Types.md specifies int8..int64
+// and uint8..uint64; `int` and `byte` are aliases of int32 and uint8.
 struct IntegerFormat {
     unsigned bits;
     bool is_signed;

@@ -1,0 +1,19 @@
+7 / 2 = 3
+-7 / 2 = -3
+7 / -2 = -3
+-(MAX) / -1 = MAX
+7 % 2 = 1
+-7 % 2 = -1
+7 % -2 = 1
+MIN % -1 = 0
+65535 % 256 = 255
+-128 as int8 = -128
+127 as int8 = 127
+-5 as int64 = -5
+int32 max as uint32
+int is int32
+byte is uint8
+length of a byte[] is 3
+int64 minimum literal
+int32 minimum literal
+a sum survives an isolated product

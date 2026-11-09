@@ -1,0 +1,55 @@
+// Floating-point functions compared against the NeuraIR reference evaluator
+// on special and pseudo-random operands.
+let io = import:SysIo;
+
+let Floats = module (
+    export let add16 = func(float16 a, float16 b) -> float16 {
+        return a + b;
+    };
+
+    export let multiply_bf16 = func(bfloat16 a, bfloat16 b) -> bfloat16 {
+        return a * b;
+    };
+
+    export let divide32 = func(float32 a, float32 b) -> float32 {
+        return a / b;
+    };
+
+    export let subtract64 = func(float64 a, float64 b) -> float64 {
+        return a - b;
+    };
+
+    export let ordered32 = func(float32 a, float32 b) -> bool {
+        return a < b || a >= b;
+    };
+
+    export let scaled32 = func(float32 a) -> float32 {
+        return a * 2.5 - 1.0;
+    };
+
+    export let truncate32 = func(float32 a) -> int32 {
+        return a as int32;
+    };
+
+    export let from_int16 = func(int16 a) -> float16 {
+        return a as float16;
+    };
+
+    export let narrow64 = func(float64 a) -> float32 {
+        return a as float32;
+    };
+
+    export let polynomial64 = func(float64 x) -> float64 {
+        let total: float64 = 0.0;
+        for (let i: int32 = 0; i < 3; i = i + 1) {
+            total = total * x + 1.5;
+        }
+        return -total;
+    };
+);
+
+let Main = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        return Entry.ExitCode.Ok;
+    }
+);

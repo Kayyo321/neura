@@ -510,19 +510,57 @@ Checked divide(Circuit& circuit, const Word& a, const Word& b, bool is_signed) {
     const auto zero_divisor = circuit.all(invert(b));
     if (!is_signed) {
         auto division = unsigned_divide(circuit, a, b);
-        const auto inexact = circuit.any(division.remainder);
-        return {std::move(division.quotient), circuit.logical_or(zero_divisor, inexact)};
+        return {std::move(division.quotient), zero_divisor};
     }
+    // Dividing magnitudes truncates toward zero. The only quotient out of
+    // range is 2^(width-1) with a positive sign, from MIN / -1.
     const auto width = a.size();
     const auto& sign_a = a.back();
     const auto& sign_b = b.back();
     auto division = unsigned_divide(circuit, conditional_negate(circuit, a, sign_a),
                                     conditional_negate(circuit, b, sign_b));
     const auto negative = circuit.logical_xor(sign_a, sign_b);
-    const auto inexact = circuit.any(division.remainder);
     const auto overflow = circuit.logical_and(Circuit::logical_not(negative), division.quotient[width - 1]);
-    const auto failure = circuit.any({zero_divisor, inexact, overflow});
-    return {conditional_negate(circuit, division.quotient, negative), failure};
+    return {conditional_negate(circuit, division.quotient, negative), circuit.logical_or(zero_divisor, overflow)};
+}
+
+Checked remainder(Circuit& circuit, const Word& a, const Word& b, bool is_signed) {
+    const auto zero_divisor = circuit.all(invert(b));
+    if (!is_signed) {
+        auto division = unsigned_divide(circuit, a, b);
+        return {std::move(division.remainder), zero_divisor};
+    }
+    // |a| mod |b| is below |b| <= 2^(width-1), so it fits, and it takes the
+    // dividend's sign.
+    const auto& sign_a = a.back();
+    const auto& sign_b = b.back();
+    auto division = unsigned_divide(circuit, conditional_negate(circuit, a, sign_a),
+                                    conditional_negate(circuit, b, sign_b));
+    return {conditional_negate(circuit, division.remainder, sign_a), zero_divisor};
+}
+
+Checked convert_integer(Circuit& circuit, const Word& a, bool from_signed, unsigned width, bool to_signed) {
+    const auto from = a.size();
+    const Signal sign = from_signed ? a.back() : Signal::of(0);
+    const auto extended = [&](std::size_t i) { return i < from ? a[i] : sign; };
+    Checked result;
+    for (std::size_t i = 0; i < width; ++i) {
+        result.value.push_back(extended(i));
+    }
+    // The value fits when every source bit at or above the target's top
+    // magnitude bit equals the source's sign, and a negative value is only
+    // converted to a signed type.
+    std::vector<Signal> out_of_range;
+    const std::size_t first = to_signed ? width - 1 : width;
+    const std::size_t magnitude_bits = from_signed ? from - 1 : from;
+    for (std::size_t i = first; i < magnitude_bits; ++i) {
+        out_of_range.push_back(from_signed ? circuit.logical_xor(a[i], sign) : a[i]);
+    }
+    if (from_signed && !to_signed) {
+        out_of_range.push_back(sign);
+    }
+    result.failure = circuit.any(out_of_range);
+    return result;
 }
 
 Signal equal(Circuit& circuit, const Word& a, const Word& b) {

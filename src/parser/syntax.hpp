@@ -34,6 +34,8 @@ struct Expr {
     enum class Kind {
         Name, Integer, Float, String, Boolean, Unary, Binary, Member, Call,
         Index, Collection, New, Import,
+        // `operand as type`: the target type is in `type`.
+        Cast,
     };
 
     Kind kind;

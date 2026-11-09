@@ -16,18 +16,24 @@ struct IntegerConstant {
     std::uint64_t unsigned_value = 0;
 };
 
-enum class IntegerOperation { Add, Subtract, Multiply, Divide };
+enum class IntegerOperation { Add, Subtract, Multiply, Divide, Remainder };
 
 // Reads an Integer literal whose type has a specified format and whose value
 // is in range. Returns nothing for any other node.
 std::optional<IntegerConstant> integer_constant(const IrNode& node);
 
-// Returns the exact mathematical result of `left op right` when it is defined
-// by every candidate overflow, division-by-zero, and rounding rule: the
-// divisor is nonzero, a division has no remainder, and the result is in the
-// operands' range. Returns nothing otherwise. Never overflows a C++ integer.
+// Returns the result of `left op right` when the language defines one: the
+// divisor is nonzero and the result is in the operands' range. Division
+// truncates toward zero and the remainder takes the dividend's sign
+// (docs/lang/Numbers.md); MIN % -1 is 0. Returns nothing when the operation
+// traps at run time, so the trap stays in the program. Never overflows a C++
+// integer.
 std::optional<IntegerConstant> fold(IntegerOperation op, const IntegerConstant& left,
                                     const IntegerConstant& right);
+
+// Returns `value` converted to `target` when it is in range, and nothing when
+// the checked conversion traps.
+std::optional<IntegerConstant> convert(const IntegerConstant& value, IntegerFormat target);
 
 // Returns -value when it is in the operand's range.
 std::optional<IntegerConstant> negate(const IntegerConstant& value);

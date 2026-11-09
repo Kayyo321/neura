@@ -544,6 +544,18 @@ private:
                 }
             }
             break;
+        case IrOp::Convert:
+            if (expect_operands(node, 1, "conversion")) {
+                const auto& from = node.operands.front().type;
+                const auto numeric = [](const IrType& t) {
+                    return t.kind == TypeKind::Integer || t.kind == TypeKind::Float;
+                };
+                if (!numeric(node.type) || !(numeric(from) || (from.kind == TypeKind::Enum &&
+                                                                node.type.kind == TypeKind::Integer))) {
+                    report(node.span, "cannot convert " + describe(from) + " to " + describe(node.type));
+                }
+            }
+            break;
         case IrOp::RemoveAt:
             if (expect_operands(node, 2, "remove_at")) {
                 if (node.operands[0].type.kind != TypeKind::List) {
@@ -656,8 +668,9 @@ private:
         }
         const auto& op = node.text;
         const bool numeric = left.kind == TypeKind::Integer || left.kind == TypeKind::Float;
-        if (op == "+" || op == "-" || op == "*" || op == "/") {
-            if (!numeric && !(op == "+" && left.kind == TypeKind::String)) {
+        if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
+            if ((op == "%" && left.kind != TypeKind::Integer) ||
+                (!numeric && !(op == "+" && left.kind == TypeKind::String))) {
                 report(node.span, "operator '" + op + "' is not defined for " + describe(left));
             } else if (node.type != left) {
                 report(node.span, "operator '" + op + "' produces " + describe(node.type) +

@@ -2,8 +2,10 @@
 
 #include "block_synth.hpp"
 #include "circuit.hpp"
+#include "float_circuit.hpp"
 #include "ir-optimization/analysis.hpp"
 #include "ir-optimization/optimizer.hpp"
+#include "neura-ir/float.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvr/format.hpp"
@@ -115,12 +117,16 @@ private:
     std::vector<Operand> sequence_of(const std::vector<const IrNode*>& nodes);
     std::vector<Operand> sequence(const std::vector<IrNode>& nodes, std::size_t first = 0);
     bool graph_only(const IrNode& node) const;
+    static bool may_isolate(const IrNode& node);
     Operand integer_literal(const IrNode& node);
     Operand load(const IrNode& node);
     Operand unary(const IrNode& node);
     Operand binary(const IrNode& node);
     Operand isolated_arithmetic(const IrNode& node, Operand left, Operand right, IntegerFormat format);
     Operand short_circuit(const IrNode& node);
+    Operand convert(const IrNode& node);
+    Operand float_binary(const IrNode& node, Operand left, Operand right);
+    FloatFormat float_of(const IrType& type) const;
     Operand call(const IrNode& node);
     Operand virtual_call(const IrNode& node);
     Operand external_call(const IrNode& node);
@@ -285,9 +291,13 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
     }
     case TypeKind::String:
         return scalar(nvr::TypeKind::Text);
-    case TypeKind::Float:
-        throw Diagnostic(where, "floating-point semantics are not specified; '" + type.name +
-                                    "' cannot be converted to neuron graphs");
+    case TypeKind::Float: {
+        const auto format = float_format(type);
+        if (!format) {
+            throw Diagnostic(where, "'" + type.name + "' is not a floating-point format");
+        }
+        return scalar(*format == bfloat16 ? nvr::TypeKind::BFloat : nvr::TypeKind::Float, format->width());
+    }
     case TypeKind::Array:
     case TypeKind::List: {
         const auto element = type_of(type.arguments.front(), where);
@@ -383,6 +393,13 @@ std::optional<std::uint64_t> Converter::literal(const IrNode& node, std::uint32_
             return 0;
         }
         return std::nullopt;
+    case IrOp::Float: {
+        const auto parsed = parse_float_literal(node.text, float_format(node.type).value());
+        if (parsed.error) {
+            throw Diagnostic(node.span, "float literal '" + node.text + "' does not fit " + node.type.name);
+        }
+        return parsed.bits;
+    }
     default:
         return std::nullopt;
     }
@@ -1268,6 +1285,7 @@ bool FunctionCompiler::graph_only(const IrNode& node) const {
     switch (node.op) {
     case IrOp::Boolean:
     case IrOp::Integer:
+    case IrOp::Float:
     case IrOp::String:
     case IrOp::Receiver:
     case IrOp::Reference:
@@ -1290,13 +1308,38 @@ bool FunctionCompiler::graph_only(const IrNode& node) const {
     }
 }
 
+// True when evaluating `node` can move arithmetic into a block of its own:
+// an integer multiplication, division, or remainder, or floating-point
+// arithmetic, whose operands are not both known to be immediates. Such an
+// evaluation closes the current block.
+bool FunctionCompiler::may_isolate(const IrNode& node) {
+    const auto literal = [](const IrNode& operand) {
+        return operand.op == IrOp::Integer || operand.op == IrOp::Float;
+    };
+    if (node.op == IrOp::Binary && node.operands.size() == 2 && !literal(node.operands[0]) &&
+        !literal(node.operands[1])) {
+        const bool floating = node.operands[0].type.kind == TypeKind::Float && !is_comparison(node.text);
+        if (floating || node.text == "*" || node.text == "/" || node.text == "%") {
+            return true;
+        }
+    }
+    for (const auto* region : {&node.operands, &node.body}) {
+        for (const auto& child : *region) {
+            if (may_isolate(child)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 std::vector<Operand> FunctionCompiler::sequence_of(const std::vector<const IrNode*>& nodes) {
     // Operands are evaluated left to right. A graph value that must outlive
     // a later operand's block is spilled to a temporary slot first.
     std::vector<Operand> result;
     result.reserve(nodes.size());
     for (const auto* node : nodes) {
-        if (!graph_only(*node)) {
+        if (!graph_only(*node) || may_isolate(*node)) {
             for (auto& held : result) {
                 spill(held);
             }
@@ -1343,9 +1386,10 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         result.index = c_.text_constant(node.text, node.span);
         return result;
     }
-    case IrOp::Float:
-        c_.type_of(node.type, node.span);
-        break;
+    case IrOp::Float: {
+        const auto type = c_.type_of(node.type, node.span);
+        return immediate(type, c_.literal(node, type).value());
+    }
     case IrOp::Load:
         return load(node);
     case IrOp::Field: {
@@ -1384,8 +1428,19 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         auto index = to_index(operands[1], node.operands[1].type, node.span);
         return state(nvr::StateOp::ReadElement, 0, {operands[0], index}, c_.type_of(node.type, node.span), node.span);
     }
-    case IrOp::Length:
-        throw Diagnostic(node.span, "length has type 'int', whose width is not specified");
+    case IrOp::Length: {
+        // ReadLength yields uint64; `length` is int32. Lengths beyond int32
+        // cannot occur within NVM's heap limits, but the narrowing is still
+        // checked.
+        auto collection = expression(node.operands.front());
+        const auto u64 = c_.scalar(nvr::TypeKind::Unsigned, 64);
+        const auto length = state(nvr::StateOp::ReadLength, 0, {collection}, u64, node.span);
+        auto narrowed = convert_integer(current().synth.circuit(), lanes(length), false, 32, true);
+        fail_when(narrowed.failure, arithmetic_failure, node.span);
+        return bits(c_.type_of(node.type, node.span), std::move(narrowed.value));
+    }
+    case IrOp::Convert:
+        return convert(node);
     case IrOp::Append: {
         auto operands = sequence(node.operands);
         return state(nvr::StateOp::AppendElement, 0, std::move(operands), c_.scalar(nvr::TypeKind::Void), node.span);
@@ -1454,6 +1509,9 @@ Operand FunctionCompiler::unary(const IrNode& node) {
     if (node.text == "!") {
         return bits(c_.scalar(nvr::TypeKind::Bool), {Circuit::logical_not(lanes(operand).front())});
     }
+    if (node.type.kind == TypeKind::Float) {
+        return bits(c_.type_of(node.type, node.span), float_negate(lanes(operand)));
+    }
     const auto format = integer_format(node.type, node.span);
     const auto input = lanes(operand);
     auto result = negate(current().synth.circuit(), input, format.is_signed);
@@ -1470,7 +1528,10 @@ Operand FunctionCompiler::binary(const IrNode& node) {
                       c_.scalar(nvr::TypeKind::Text), node.span);
     }
     auto operands = sequence(node.operands);
-    if ((op == "*" || op == "/") && operands[0].kind != Operand::Kind::Immediate &&
+    if (operand_type.kind == TypeKind::Float) {
+        return float_binary(node, operands[0], operands[1]);
+    }
+    if ((op == "*" || op == "/" || op == "%") && operands[0].kind != Operand::Kind::Immediate &&
         operands[1].kind != Operand::Kind::Immediate) {
         return isolated_arithmetic(node, operands[0], operands[1], integer_format(operand_type, node.span));
     }
@@ -1509,6 +1570,8 @@ Operand FunctionCompiler::binary(const IrNode& node) {
         result = multiply(circuit, a, b, format.is_signed);
     } else if (op == "/") {
         result = divide(circuit, a, b, format.is_signed);
+    } else if (op == "%") {
+        result = remainder(circuit, a, b, format.is_signed);
     } else {
         throw Diagnostic(node.span, "operator '" + op + "' is not supported");
     }
@@ -1529,8 +1592,10 @@ Operand FunctionCompiler::isolated_arithmetic(const IrNode& node, Operand left, 
     begin(own, node.span);
     const auto a = lanes(left);
     const auto b = lanes(right);
-    auto result = node.text == "*" ? multiply(current().synth.circuit(), a, b, format.is_signed)
-                                   : divide(current().synth.circuit(), a, b, format.is_signed);
+    auto& circuit = current().synth.circuit();
+    auto result = node.text == "*"   ? multiply(circuit, a, b, format.is_signed)
+                  : node.text == "/" ? divide(circuit, a, b, format.is_signed)
+                                     : remainder(circuit, a, b, format.is_signed);
     fail_when(result.failure, arithmetic_failure, node.span);
     auto value = bits(c_.type_of(node.type, node.span), std::move(result.value));
     spill(value);
@@ -1538,6 +1603,78 @@ Operand FunctionCompiler::isolated_arithmetic(const IrNode& node, Operand left, 
     jump(next);
     begin(next, node.span);
     return resolve(value);
+}
+
+FloatFormat FunctionCompiler::float_of(const IrType& type) const {
+    return float_format(type).value();
+}
+
+Operand FunctionCompiler::float_binary(const IrNode& node, Operand left, Operand right) {
+    // Arithmetic between two variables gets a block of its own, like integer
+    // multiplication: the circuits are large and every site with the same
+    // operation and format shares one graph. Comparisons stay inline.
+    const auto& op = node.text;
+    const auto format = float_of(node.operands.front().type);
+    const auto compute = [&](Circuit& circuit, const Word& a, const Word& b) {
+        if (op == "+") return float_add(circuit, a, b, format);
+        if (op == "-") return float_subtract(circuit, a, b, format);
+        if (op == "*") return float_multiply(circuit, a, b, format);
+        return float_divide(circuit, a, b, format);
+    };
+    if (is_comparison(op)) {
+        const auto comparison = op == "==" ? FloatComparison::Equal
+                              : op == "!=" ? FloatComparison::NotEqual
+                              : op == "<"  ? FloatComparison::Less
+                              : op == "<=" ? FloatComparison::LessEqual
+                              : op == ">"  ? FloatComparison::Greater
+                                           : FloatComparison::GreaterEqual;
+        const auto a = lanes(left);
+        const auto b = lanes(right);
+        return bits(c_.scalar(nvr::TypeKind::Bool), {float_compare(current().synth.circuit(), a, b, format, comparison)});
+    }
+    const auto type = c_.type_of(node.type, node.span);
+    if (left.kind == Operand::Kind::Immediate || right.kind == Operand::Kind::Immediate) {
+        const auto a = lanes(left);
+        const auto b = lanes(right);
+        return bits(type, compute(current().synth.circuit(), a, b));
+    }
+    spill(left);
+    spill(right);
+    const auto own = new_block();
+    jump(own);
+    begin(own, node.span);
+    const auto a = lanes(left);
+    const auto b = lanes(right);
+    auto value = bits(type, compute(current().synth.circuit(), a, b));
+    spill(value);
+    const auto next = new_block();
+    jump(next);
+    begin(next, node.span);
+    return resolve(value);
+}
+
+Operand FunctionCompiler::convert(const IrNode& node) {
+    const auto& source = node.operands.front();
+    const auto operand = expression(source);
+    auto& circuit = current().synth.circuit();
+    const auto type = c_.type_of(node.type, node.span);
+    if (source.type.kind == TypeKind::Float && node.type.kind == TypeKind::Float) {
+        return bits(type, float_convert(circuit, lanes(operand), float_of(source.type), float_of(node.type)));
+    }
+    if (node.type.kind == TypeKind::Float) {
+        const auto from = integer_format(source.type, source.span);
+        return bits(type, float_from_integer(circuit, lanes(operand), from.is_signed, float_of(node.type)));
+    }
+    const auto to = integer_format(node.type, node.span);
+    Checked result;
+    if (source.type.kind == TypeKind::Float) {
+        result = float_to_integer(circuit, lanes(operand), float_of(source.type), to.bits, to.is_signed);
+    } else {
+        const auto from = integer_format(source.type, source.span);
+        result = convert_integer(circuit, lanes(operand), from.is_signed, to.bits, to.is_signed);
+    }
+    fail_when(result.failure, arithmetic_failure, node.span);
+    return bits(type, std::move(result.value));
 }
 
 Operand FunctionCompiler::short_circuit(const IrNode& node) {

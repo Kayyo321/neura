@@ -107,9 +107,17 @@ Checked add(Circuit& circuit, const Word& a, const Word& b, bool is_signed);
 Checked subtract(Circuit& circuit, const Word& a, const Word& b, bool is_signed);
 Checked negate(Circuit& circuit, const Word& a, bool is_signed);
 Checked multiply(Circuit& circuit, const Word& a, const Word& b, bool is_signed);
-// The quotient of an exact division. `failure` is set when the divisor is
-// zero, the quotient is out of range, or the remainder is nonzero.
+// The quotient rounded toward zero. `failure` is set when the divisor is zero
+// or the quotient is out of range (MIN / -1).
 Checked divide(Circuit& circuit, const Word& a, const Word& b, bool is_signed);
+// The remainder of truncating division, with the dividend's sign. `failure`
+// is set when the divisor is zero. MIN % -1 is 0.
+Checked remainder(Circuit& circuit, const Word& a, const Word& b, bool is_signed);
+// `a` converted from a `from_signed` integer of a.size() bits to a `to_signed`
+// integer of `width` bits. `failure` is set when the value is outside the
+// target range.
+Checked convert_integer(Circuit& circuit, const Word& a, bool from_signed, unsigned width, bool to_signed);
+
 // a + b + carry on unsigned words of equal width. `failure` is the carry out
 // of the top lane.
 Checked add_with_carry(Circuit& circuit, const Word& a, const Word& b, const Signal& carry);

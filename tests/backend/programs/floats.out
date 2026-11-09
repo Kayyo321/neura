@@ -1,0 +1,16 @@
+0.1 + 0.2 rounds like IEEE binary64
+0.1 + 0.2 is not 0.3
+1 / 3 in float32
+float16 ties round to even
+float16 rounds 2051 to 2052
+float16 overflows to infinity
+float16 subnormals
+bfloat16 multiplies
+-0 equals +0
+1 / -0 is -infinity
+NaN is unordered
+conversion truncates toward zero
+int32 to float32 rounds to even
+float32 narrowing loses precision
+300.75 is exact in float16
+float64 to float32 overflows to infinity

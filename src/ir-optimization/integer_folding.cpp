@@ -56,10 +56,15 @@ std::optional<Signed> signed_result(IntegerOperation op, Signed a, Signed b) {
         }
         return a * b;
     case IntegerOperation::Divide:
-        // Division by zero is unspecified. signed_min / -1 is not representable.
-        // A nonzero remainder would depend on the unspecified rounding rule.
-        if (b == 0 || (a == signed_min && b == -1) || a % b != 0) return {};
+        // Division by zero traps, and signed_min / -1 is not representable.
+        // C++ division truncates toward zero, as Neura's does.
+        if (b == 0 || (a == signed_min && b == -1)) return {};
         return a / b;
+    case IntegerOperation::Remainder:
+        // signed_min % -1 is 0 in Neura but undefined in C++.
+        if (b == 0) return {};
+        if (b == -1) return Signed{0};
+        return a % b;
     }
     return {};
 }
@@ -76,8 +81,11 @@ std::optional<Unsigned> unsigned_result(IntegerOperation op, Unsigned a, Unsigne
         if (a != 0 && b > unsigned_max / a) return {};
         return a * b;
     case IntegerOperation::Divide:
-        if (b == 0 || a % b != 0) return {};
+        if (b == 0) return {};
         return a / b;
+    case IntegerOperation::Remainder:
+        if (b == 0) return {};
+        return a % b;
     }
     return {};
 }
@@ -114,6 +122,19 @@ std::optional<IntegerConstant> fold(IntegerOperation op, const IntegerConstant& 
     }
     const auto result = unsigned_result(op, left.unsigned_value, right.unsigned_value);
     return result ? make_unsigned(left.format, *result) : std::nullopt;
+}
+
+std::optional<IntegerConstant> convert(const IntegerConstant& value, IntegerFormat target) {
+    if (value.format.is_signed && value.signed_value < 0) {
+        return target.is_signed ? make_signed(target, value.signed_value) : std::nullopt;
+    }
+    const auto magnitude = value.format.is_signed ? static_cast<Unsigned>(value.signed_value) : value.unsigned_value;
+    if (target.is_signed) {
+        return magnitude > static_cast<Unsigned>(signed_upper(target))
+                   ? std::nullopt
+                   : make_signed(target, static_cast<Signed>(magnitude));
+    }
+    return make_unsigned(target, magnitude);
 }
 
 std::optional<IntegerConstant> negate(const IntegerConstant& value) {

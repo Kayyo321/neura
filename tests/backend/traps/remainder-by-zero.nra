@@ -1,0 +1,17 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) .* at remainder-by-zero\.nra:7:16
+let io = import:SysIo;
+
+let Remainder = module:io.Entry (
+    let rest = func(int32 a, int32 b) -> int32 {
+        return a % b;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        io.println("before");
+        if (rest(5, 0) == 0) {
+            io.println("unreachable");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

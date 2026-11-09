@@ -14,7 +14,21 @@ constexpr std::uint32_t absent = 0xffffffffU;
 constexpr std::size_t max_depth = 1024;
 constexpr std::uint8_t max_type_kind = static_cast<std::uint8_t>(TypeKind::Callable);
 constexpr std::uint8_t max_symbol_kind = static_cast<std::uint8_t>(SymbolKind::Variant);
-constexpr std::uint8_t max_op = static_cast<std::uint8_t>(IrOp::Discard);
+// The last operation tag of each minor version.
+constexpr std::uint8_t max_op_1_0 = static_cast<std::uint8_t>(IrOp::Discard);
+constexpr std::uint8_t max_op_1_1 = static_cast<std::uint8_t>(IrOp::Fail);
+
+// Whether `nodes` use a feature introduced in 1.1: an operation after
+// Discard or a loop latch.
+bool needs_1_1(const std::vector<IrNode>& nodes) {
+    for (const auto& node : nodes) {
+        if (static_cast<std::uint8_t>(node.op) > max_op_1_0 || (node.op == IrOp::Loop && !node.alternative.empty()) ||
+            needs_1_1(node.operands) || needs_1_1(node.body) || needs_1_1(node.alternative)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 enum Flag : std::uint8_t { Exported = 1, Constant = 2, External = 4, HasBody = 8 };
 
@@ -37,7 +51,11 @@ public:
             u8(static_cast<std::uint8_t>(c));
         }
         u16(nir_major_version);
-        u16(nir_minor_version);
+        bool newer = false;
+        for (const auto& body : program.bodies) {
+            newer = newer || needs_1_1(body.instructions);
+        }
+        u16(newer ? 1 : 0);
         count(files_.size());
         for (const auto& file : files_) {
             text(file);
@@ -186,10 +204,12 @@ public:
         position_ = magic.size();
         const auto major = u16();
         const auto minor = u16();
-        if (major != nir_major_version || minor != nir_minor_version) {
+        if (major != nir_major_version || minor > nir_minor_version) {
             fail("NeuraIR format " + std::to_string(major) + "." + std::to_string(minor) +
-                 " is not supported; this reader accepts 1.0");
+                 " is not supported; this reader accepts 1.0 and 1.1");
         }
+        max_op_ = minor == 0 ? max_op_1_0 : max_op_1_1;
+        latches_ = minor > 0;
         const auto file_count = count(4);
         files_.reserve(file_count);
         for (std::uint32_t i = 0; i < file_count; ++i) {
@@ -386,7 +406,7 @@ private:
 
     IrNode node(std::size_t depth) {
         IrNode value{};
-        value.op = static_cast<IrOp>(tag(max_op, "operation"));
+        value.op = static_cast<IrOp>(tag(max_op_, "operation"));
         value.type = type(depth + 1);
         value.span = span();
         value.symbol = reference();
@@ -394,6 +414,9 @@ private:
         value.operands = nodes(depth + 1);
         value.body = nodes(depth + 1);
         value.alternative = nodes(depth + 1);
+        if (value.op == IrOp::Loop && !value.alternative.empty() && !latches_) {
+            fail("a loop latch requires NeuraIR format 1.1");
+        }
         value.type_arguments = types(depth + 1);
         return value;
     }
@@ -403,6 +426,8 @@ private:
     std::string origin_;
     std::vector<std::string> files_;
     std::uint32_t symbol_count_ = 0;
+    std::uint8_t max_op_ = max_op_1_0;
+    bool latches_ = false;
 };
 
 } // namespace

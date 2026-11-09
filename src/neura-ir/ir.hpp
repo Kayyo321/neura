@@ -54,7 +54,9 @@ enum class IrOp {
     Initialize, Store, Load, Reference, Receiver, Field, Index, Collection,
     Integer, Float, String, Boolean, Unary, Binary, ShortCircuit,
     Call, VirtualCall, ExternalCall, BaseInitialize, Allocate, Length, Append, RemoveAt,
-    Return, Block, Branch, Loop, Break, Continue, Destroy, Discard
+    Return, Block, Branch, Loop, Break, Continue, Destroy, Discard,
+    // NeuraIR 1.1.
+    Convert, CollectionVersion, Fail
 };
 
 struct IrNode {
@@ -65,6 +67,11 @@ struct IrNode {
     std::string text;
     // Operands are evaluated left to right. Store uses its first operand as a
     // destination. ShortCircuit evaluates its right operand in body lazily.
+    // A Loop keeps its condition as its operand, its statements in body, and
+    // an optional latch in alternative: the latch runs after the body
+    // completes and when the body continues, before the condition is tested
+    // again. Convert changes its operand to the node's numeric type. Fail
+    // ends the run with the failure its text names.
     std::vector<IrNode> operands;
     std::vector<IrNode> body;
     std::vector<IrNode> alternative;

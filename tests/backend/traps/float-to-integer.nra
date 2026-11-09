@@ -1,0 +1,20 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) .* at float-to-integer\.nra:7:16
+let io = import:SysIo;
+
+let Truncate = module:io.Entry (
+    let whole = func(float64 value) -> int8 {
+        return value as int8;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (whole(-128.9) == -128) {
+            io.println("-128.9 truncates to -128");
+        }
+        let zero: float64 = 0.0;
+        if (whole(zero / zero) == 0) {
+            io.println("unreachable: NaN has no integer value");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);

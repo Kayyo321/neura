@@ -1,0 +1,57 @@
+// Floating-point semantics: rounding to nearest even, signed zeros,
+// subnormals, infinities, NaN comparisons, conversions in every direction,
+// and each format. Each check prints its label when it holds.
+let io = import:SysIo;
+
+let Floats = module:io.Entry (
+    let report = func(bool holds, string label) -> void {
+        if (holds) {
+            io.println(label);
+        } else {
+            io.println("FAILED: " + label);
+        }
+    };
+
+    let add = func(float64 a, float64 b) -> float64 {
+        return a + b;
+    };
+
+    let divide = func(float32 a, float32 b) -> float32 {
+        return a / b;
+    };
+
+    let half_sum = func(float16 a, float16 b) -> float16 {
+        return a + b;
+    };
+
+    let brain = func(bfloat16 a, bfloat16 b) -> bfloat16 {
+        return a * b;
+    };
+
+    let reciprocal = func(float64 x) -> float64 {
+        return 1.0 / x;
+    };
+
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        report(add(0.1, 0.2) == 0.30000000000000004, "0.1 + 0.2 rounds like IEEE binary64");
+        report(add(0.1, 0.2) != 0.3, "0.1 + 0.2 is not 0.3");
+        report(divide(1.0, 3.0) == 0.33333334, "1 / 3 in float32");
+        report(half_sum(2048.0, 1.0) == 2048.0, "float16 ties round to even");
+        report(half_sum(2048.0, 3.0) == 2052.0, "float16 rounds 2051 to 2052");
+        report(half_sum(65504.0, 16.0) > 65504.0, "float16 overflows to infinity");
+        report(half_sum(0.00006103515625, -0.00000005960464477539063) > 0.0, "float16 subnormals");
+        report(brain(3.0, 3.0) == 9.0, "bfloat16 multiplies");
+        let positive_zero: float64 = 0.0;
+        let negative_zero: float64 = -0.0;
+        report(positive_zero == negative_zero, "-0 equals +0");
+        report(reciprocal(negative_zero) < 0.0 && reciprocal(positive_zero) > 0.0, "1 / -0 is -infinity");
+        let nan: float64 = positive_zero / positive_zero;
+        report(nan != nan && !(nan < 1.0) && !(nan >= 1.0), "NaN is unordered");
+        report((2.5 as int32) == 2 && (-2.5 as int32) == -2, "conversion truncates toward zero");
+        report((16777217 as float32) == 16777216.0, "int32 to float32 rounds to even");
+        report(((0.1 as float32) as float64) != 0.1, "float32 narrowing loses precision");
+        report((300.75 as float16) == 300.75, "300.75 is exact in float16");
+        report((1e300 as float32) > 3.4e38, "float64 to float32 overflows to infinity");
+        return Entry.ExitCode.Ok;
+    }
+);

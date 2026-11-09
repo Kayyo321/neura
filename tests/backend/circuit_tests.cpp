@@ -17,7 +17,7 @@ using backend::Circuit;
 using backend::Signal;
 using backend::Word;
 
-enum class Op { Add, Subtract, Multiply, Divide, Negate, Equal, Less };
+enum class Op { Add, Subtract, Multiply, Divide, Remainder, Negate, Equal, Less };
 
 const char* name(Op op) {
     switch (op) {
@@ -25,6 +25,7 @@ const char* name(Op op) {
     case Op::Subtract: return "-";
     case Op::Multiply: return "*";
     case Op::Divide: return "/";
+    case Op::Remainder: return "%";
     case Op::Negate: return "neg";
     case Op::Equal: return "==";
     case Op::Less: return "<";
@@ -59,8 +60,9 @@ Expected signed_result(std::int64_t value, unsigned width, bool overflowed) {
     return {false, static_cast<std::uint64_t>(value) & mask(width)};
 }
 
-// The exact result of `op`, or a failure when the language leaves it
-// undefined: overflow, division by zero, or a nonzero remainder.
+// The result of `op`, or a failure where the operation traps: overflow, a
+// zero divisor, or MIN / -1. Division truncates toward zero and the remainder
+// takes the dividend's sign, as C++ defines them.
 Expected reference(Op op, std::uint64_t a, std::uint64_t b, unsigned width, bool is_signed) {
     if (op == Op::Equal) {
         return {false, a == b ? 1U : 0U};
@@ -101,10 +103,16 @@ Expected reference(Op op, std::uint64_t a, std::uint64_t b, unsigned width, bool
             return {false, (negative ? std::uint64_t{0} - product : product) & mask(width)};
         }
         case Op::Divide:
-            if (y == 0 || (x == signed_min(width) && y == -1) || x % y != 0) {
+            if (y == 0 || (x == signed_min(width) && y == -1)) {
                 return {true, 0};
             }
             return {false, static_cast<std::uint64_t>(x / y) & mask(width)};
+        case Op::Remainder:
+            if (y == 0) {
+                return {true, 0};
+            }
+            // MIN % -1 is 0; the C++ expression would overflow.
+            return {false, y == -1 ? 0 : static_cast<std::uint64_t>(x % y) & mask(width)};
         default:
             break;
         }
@@ -121,10 +129,9 @@ Expected reference(Op op, std::uint64_t a, std::uint64_t b, unsigned width, bool
             }
             return {false, a * b};
         case Op::Divide:
-            if (b == 0 || a % b != 0) {
-                return {true, 0};
-            }
-            return {false, a / b};
+            return b == 0 ? Expected{true, 0} : Expected{false, a / b};
+        case Op::Remainder:
+            return b == 0 ? Expected{true, 0} : Expected{false, a % b};
         default:
             break;
         }
@@ -152,6 +159,7 @@ nvr::Graph circuit_for(Op op, unsigned width, bool is_signed) {
     case Op::Subtract: result = backend::subtract(circuit, a, b, is_signed); break;
     case Op::Multiply: result = backend::multiply(circuit, a, b, is_signed); break;
     case Op::Divide: result = backend::divide(circuit, a, b, is_signed); break;
+    case Op::Remainder: result = backend::remainder(circuit, a, b, is_signed); break;
     case Op::Negate: result = backend::negate(circuit, a, is_signed); break;
     case Op::Equal: result = {{backend::equal(circuit, a, b)}, Signal::of(0)}; break;
     case Op::Less: result = {{backend::less(circuit, a, b, is_signed)}, Signal::of(0)}; break;
@@ -216,7 +224,8 @@ private:
     std::size_t checked_ = 0;
 };
 
-constexpr Op all_ops[] = {Op::Add, Op::Subtract, Op::Multiply, Op::Divide, Op::Negate, Op::Equal, Op::Less};
+constexpr Op all_ops[] = {Op::Add, Op::Subtract, Op::Multiply, Op::Divide, Op::Remainder,
+                          Op::Negate, Op::Equal, Op::Less};
 
 // Boundary values and deterministic pseudo-random values for a width.
 std::vector<std::uint64_t> samples(unsigned width, std::size_t random_count, unsigned bit_step) {
@@ -271,6 +280,70 @@ NEURA_TEST(circuits, wide_operations_on_boundary_and_random_operands) {
             }
         }
     }
+}
+
+NEURA_TEST(circuits, integer_conversions_between_every_format) {
+    // Every source value of the 8- and 16-bit formats, and boundary and random
+    // values of the wider ones, converted to every format. The value fits when
+    // it lies in the target range; otherwise the conversion traps.
+    const auto value_of = [](std::uint64_t bits, unsigned width, bool is_signed) -> std::pair<bool, std::uint64_t> {
+        if (is_signed && ((bits >> (width - 1)) & 1U) != 0) {
+            return {true, (~bits & mask(width)) + 1};  // magnitude of a negative value
+        }
+        return {false, bits};
+    };
+    std::size_t checked = 0;
+    for (const unsigned from : {8U, 16U, 32U, 64U}) {
+        for (const bool from_signed : {false, true}) {
+            const auto sources = from <= 16 ? std::vector<std::uint64_t>{} : samples(from, 64, 1);
+            std::vector<std::uint64_t> values = sources;
+            if (from <= 16) {
+                for (std::uint64_t v = 0; v <= mask(from); ++v) {
+                    values.push_back(v);
+                }
+            }
+            for (const unsigned to : {8U, 16U, 32U, 64U}) {
+                for (const bool to_signed : {false, true}) {
+                    Circuit circuit;
+                    Word a;
+                    for (unsigned i = 0; i < from; ++i) {
+                        a.push_back(circuit.input());
+                    }
+                    const auto result = backend::convert_integer(circuit, a, from_signed, to, to_signed);
+                    for (const auto& lane : result.value) {
+                        circuit.output(lane);
+                    }
+                    circuit.output(result.failure);
+                    const auto graph = circuit.finish();
+                    std::vector<std::int64_t> wires;
+                    for (const auto bits : values) {
+                        wires.assign(graph.input_lanes, 0);
+                        for (unsigned i = 0; i < from; ++i) {
+                            wires[i] = static_cast<std::int64_t>((bits >> i) & 1U);
+                        }
+                        check(!nvm::evaluate_graph(graph, wires), "conversion graph overflowed");
+                        std::uint64_t out = 0;
+                        for (unsigned i = 0; i < to; ++i) {
+                            out |= static_cast<std::uint64_t>(wires[graph.outputs[i]]) << i;
+                        }
+                        const bool fails = wires[graph.outputs.back()] == 1;
+                        const auto [negative, magnitude] = value_of(bits, from, from_signed);
+                        const bool fits = negative ? to_signed && magnitude <= (std::uint64_t{1} << (to - 1))
+                                                   : magnitude <= (to_signed ? mask(to - 1) : mask(to));
+                        const auto expected = (negative ? std::uint64_t{0} - magnitude : magnitude) & mask(to);
+                        if (fails != !fits || (fits && out != expected)) {
+                            fail(std::string(from_signed ? "int" : "uint") + std::to_string(from) + " " +
+                                 std::to_string(bits) + " as " + (to_signed ? "int" : "uint") + std::to_string(to) +
+                                 ": circuit gives " + (fails ? "failure" : std::to_string(out)));
+                            return;
+                        }
+                        ++checked;
+                    }
+                }
+            }
+        }
+    }
+    check(checked > 1'000'000, "conversion checks ran");
 }
 
 NEURA_TEST(circuits, gadgets_fold_constant_operands) {

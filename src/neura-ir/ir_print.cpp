@@ -76,6 +76,9 @@ std::string_view spelling(IrOp op) {
     case IrOp::Continue: return "continue";
     case IrOp::Destroy: return "destroy";
     case IrOp::Discard: return "discard";
+    case IrOp::Convert: return "convert";
+    case IrOp::CollectionVersion: return "collection_version";
+    case IrOp::Fail: return "fail";
     }
     return "<invalid>";
 }
@@ -219,7 +222,7 @@ void print_nodes(std::ostream& output, const std::vector<IrNode>& nodes, std::si
         output << '\n';
         print_region(output, "operands", node.operands, depth + 1);
         print_region(output, "body", node.body, depth + 1);
-        print_region(output, "else", node.alternative, depth + 1);
+        print_region(output, node.op == IrOp::Loop ? "latch" : "else", node.alternative, depth + 1);
     }
 }
 
