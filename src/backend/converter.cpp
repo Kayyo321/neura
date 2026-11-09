@@ -10,6 +10,7 @@
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvr/format.hpp"
+#include "nvr/names.hpp"
 
 #include <algorithm>
 #include <deque>
@@ -220,6 +221,7 @@ public:
     void add_dispatch(Dispatch dispatch) { dispatches_.push_back(std::move(dispatch)); }
     void set_function(std::uint32_t index, nvr::Function function, std::vector<std::optional<Span>> spans,
                       std::vector<std::uint32_t> placeholders);
+    void name_slots(std::uint32_t index, std::vector<std::string> names) { slot_names_[index] = std::move(names); }
     const nvr::Function& converted(std::uint32_t index) const { return image_.functions.at(index); }
     const nvr::Type& type_at(std::uint32_t index) const { return image_.types.at(index); }
     const nvr::Global& global_at(std::uint32_t index) const { return image_.globals.at(index); }
@@ -233,6 +235,8 @@ private:
     void build_dispatch(const Dispatch& dispatch);
     void remove_unreachable_blocks();
     void source_map();
+    void names();
+    std::string qualified(SymbolId id) const;
     std::string label(const std::string& file) const;
 
     const IrProgram& program_;
@@ -254,6 +258,7 @@ private:
     std::size_t next_function_ = 0;
     std::vector<std::vector<std::optional<Span>>> spans_;
     std::vector<std::vector<std::uint32_t>> placeholders_;
+    std::map<std::uint32_t, std::vector<std::string>> slot_names_;
 
     std::map<std::pair<SymbolId, std::string>, SymbolId> members_;
     std::map<SymbolId, const std::vector<IrNode>*> bodies_;
@@ -779,6 +784,7 @@ Conversion Converter::run() {
     remove_unreachable_blocks();
     if (options_.source_map) {
         source_map();
+        names();
     }
     image_.entry = 0;
     return {std::move(image_), std::move(origins_)};
@@ -980,6 +986,51 @@ std::string Converter::label(const std::string& file) const {
     return path.lexically_relative(*root).generic_string();
 }
 
+std::string Converter::qualified(SymbolId id) const {
+    std::string name = symbol(id).name;
+    for (auto owner = symbol(id).owner; owner != no_symbol && symbol(owner).kind != SymbolKind::File;
+         owner = symbol(owner).owner) {
+        name = symbol(owner).name + "." + name;
+    }
+    return name;
+}
+
+void Converter::names() {
+    // Provenance for tools: the NAME section, emitted with the source map.
+    nvr::Names names;
+    for (const auto& origin : origins_) {
+        switch (origin.role) {
+        case Role::Function: names.functions.push_back(qualified(origin.symbol)); break;
+        case Role::Constructor: names.functions.push_back(qualified(origin.symbol) + ".init"); break;
+        case Role::Destructor: names.functions.push_back(qualified(origin.symbol) + ".deinit"); break;
+        case Role::Concatenate: names.functions.push_back("string +"); break;
+        case Role::Start: names.functions.push_back("start " + qualified(origin.symbol)); break;
+        }
+    }
+    names.layouts.resize(image_.layouts.size());
+    names.fields.resize(image_.layouts.size());
+    for (const auto& [cls, layout] : layouts_) {
+        names.layouts[layout] = qualified(cls);
+        names.fields[layout].resize(image_.layouts[layout].fields.size());
+        for (auto scope = cls; scope != no_symbol; scope = symbol(scope).base) {
+            for (const auto& [field, index] : fields_) {
+                if (symbol(field).owner == scope && index < names.fields[layout].size()) {
+                    names.fields[layout][index] = symbol(field).name;
+                }
+            }
+        }
+    }
+    names.globals.resize(image_.globals.size());
+    for (const auto& [global, index] : globals_) {
+        names.globals[index] = qualified(global);
+    }
+    names.slots.resize(image_.functions.size());
+    for (auto& [function, slots] : slot_names_) {
+        names.slots[function] = std::move(slots);
+    }
+    image_.other_sections.push_back(nvr::encode_names(names));
+}
+
 void Converter::source_map() {
     std::vector<nvr::SourceLocation> entries;
     std::map<std::string, std::string> labels;
@@ -1174,6 +1225,16 @@ void FunctionCompiler::finish() {
         }
         close({exit});
     }
+    std::vector<std::string> slot_names(function_.frame_types.size());
+    for (const auto& [symbol, slot] : slots_) {
+        if (slot < slot_names.size() && !c_.symbol(symbol).name.starts_with("$")) {
+            slot_names[slot] = c_.symbol(symbol).name;
+        }
+    }
+    if (self_slot_ != absent && self_slot_ < slot_names.size()) {
+        slot_names[self_slot_] = "this";
+    }
+    c_.name_slots(index_, std::move(slot_names));
     c_.set_function(index_, std::move(function_), std::move(spans_), std::move(placeholders_));
 }
 

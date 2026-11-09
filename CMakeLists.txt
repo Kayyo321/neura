@@ -14,6 +14,7 @@ endfunction()
 # The NVR image format: the model shared by the writer and the loader.
 add_library(neura_nvr STATIC
     src/nvr/loader.cpp
+    src/nvr/names.cpp
     src/nvr/writer.cpp
 )
 target_include_directories(neura_nvr PUBLIC src)
