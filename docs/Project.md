@@ -72,13 +72,13 @@ The execution contract defines initial state, how and when state commits, how co
 
 ### Runtime boundary
 
-The executor evaluates the neuron graph and provides the declared state and capability interfaces. A target may implement state transitions entirely in a recurrent graph or pair the graph with a small runtime for storage, scheduling, and effects. In either case, the compiled arithmetic, comparisons, and control decisions are represented by the circuit. Runtime services such as memory access and console I/O have explicit operations and documented failure behavior. An executor should be able to replay effect requests with recorded responses when deterministic comparison requires it.
+The [Neura Virtual Machine](runtime/NVM.md) evaluates feedforward neuron graphs and follows their selected exits. It owns frames, state storage, and host service dispatch. The compiled graph makes arithmetic, comparison, and branch decisions. Heap operations and host effects use explicit requests with typed inputs and continuations.
 
 ## Artifact and inspection
 
-The output format should identify the format version, neuron semantics, graph topology, weights and biases, and input and output encodings. Stateful artifacts also need state layout, initialization, transition and halt conventions, limits, and the signatures of required runtime capabilities. The loader should validate references, shapes, versions, and declared capabilities before execution. Canonical ordering and encoding should make repeated builds with identical inputs, compiler version, options, and target reproducible.
+The [NVR format](runtime/NVR.md) defines the versioned executable image emitted by the output stage. It carries the graphs, weights, constants, layouts, execution metadata, and host imports required to run independently of the source. A versioned `.nir` file carries typed NeuraIR across the earlier compiler boundary.
 
-Source maps, names, type names, and optimization provenance can be included as optional metadata. Inspection tools should show the structure and parameters of a circuit, the memory or effect ports it uses, and source or IR locations when available. One source operation can map to several neurons, and optimization can combine or remove source operations. The inspector should reflect those relationships. Editing weights produces a changed artifact whose behavior can be evaluated and checked again.
+Source maps are optional. Inspection tools expose graph topology and parameters, declared memory and effect operations, and source locations when available. Optimization can combine or remove source operations, and inspection can show the relationship where provenance survives. Editing weights creates a changed image whose behavior can be evaluated and checked again.
 
 ## Decompilation
 

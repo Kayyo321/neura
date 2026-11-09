@@ -21,9 +21,9 @@ build/neura check -I examples/guide examples/testing/math-tests.nra
 
 Both commands accept multiple input paths and resolve imports across the source roots. `check` succeeds silently on valid input. `emit-ir` writes a typed NeuraIR listing with resolved symbol references and explicit operations for control flow, state, and calls. The listing is for inspection. A source diagnostic reports the path, line, and column and returns a nonzero exit status.
 
-## Proposed execution workflow
+## Execution contract
 
-A future runner should execute an entry-point module, run explicitly listed test modules, and build reproducible artifacts for a specified target. The `run`, `test`, and `build` interfaces and package configuration remain open.
+The [NVM specification](../runtime/NVM.md#toolchain-and-distribution) defines how `neura build` produces an executable `.nvr` image from source or `.nir` and how `neura run` executes that image. The language test runner and package configuration are specified separately.
 
 Diagnostics should identify the source file, line and column, the offending span, a clear explanation and, where possible, a correction. For example, passing a `string` to a function expecting `int32` should report both types and the argument location. Diagnostics go to standard error and compilation fails on errors. Exact format, encoding of column offsets and warning policy remain open.
 
