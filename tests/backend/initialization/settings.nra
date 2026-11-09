@@ -1,0 +1,18 @@
+// Imported by main.nra, so its initialization runs first.
+let io = import:SysIo;
+
+io.println("settings: first statement");
+
+let Settings = module (
+    // A literal holds its value when the image is loaded.
+    export let greeting: string = "hello";
+    // Computed values are assigned in source order before main runs.
+    export let label: string = greeting + " world";
+    export let counter: int32 = answer();
+
+    let answer = func() -> int32 {
+        return 41 + 1;
+    };
+);
+
+io.println("settings: " + Settings.label);

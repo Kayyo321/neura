@@ -1,0 +1,6 @@
+settings: first statement
+settings: hello world
+main: top-level statement
+main: [hello world]
+main: the shared counter holds 42
+main: counter destroyed

@@ -1,0 +1,29 @@
+// Program initialization across two files: the imported file's statements and
+// initializers run first, each file in source order, then main.
+let io = import:SysIo;
+let settings = import:Settings;
+
+io.println("main: top-level statement");
+
+let banner: string = "[" + settings.label + "]";
+
+let Counter = class (
+    export let value: int32 = 0;
+    export let deinit = func() -> void {
+        io.println("main: counter destroyed");
+    }
+);
+
+let shared = new Counter();
+shared.value = settings.counter;
+
+let App = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        io.println("main: " + banner);
+        if (shared.value == 42) {
+            io.println("main: the shared counter holds 42");
+        }
+        destroy shared;
+        return Entry.ExitCode.Ok;
+    }
+);

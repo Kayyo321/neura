@@ -17,6 +17,12 @@ struct ConversionOptions {
     // point, for embedders and tests that call them directly. A module
     // function is specialized for the module that declares it.
     std::vector<SymbolId> extra_functions;
+    // When not empty, the image has one start function per listed function
+    // instead of one for the program's entry point: each runs the program's
+    // initialization, calls its function, and returns 0. `neura test` uses
+    // this with the test functions, which take no arguments and return void.
+    // The first start function is the image's entry.
+    std::vector<SymbolId> entries;
 };
 
 // What an image function implements.
@@ -32,6 +38,9 @@ struct FunctionOrigin {
         Destructor,
         // Text concatenation for string `+`.
         Concatenate,
+        // Program start: runs top-level statements and module initializers
+        // that are not literals, then calls the entry function `symbol`.
+        Start,
     };
 
     Role role = Role::Function;

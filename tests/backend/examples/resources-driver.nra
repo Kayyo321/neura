@@ -1,0 +1,10 @@
+// Built together with examples/guide/resources.nra, whose top-level
+// statements create, update, and destroy a counter before main runs.
+let io = import:SysIo;
+
+let ResourcesDriver = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        io.println("resources example finished");
+        return Entry.ExitCode.Ok;
+    }
+);

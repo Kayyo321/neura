@@ -1,0 +1,19 @@
+// status: 70
+// stderr: read of an uninitialized global: global [0-9]+ in function 0 block [0-9]+ at uninitialized-global\.nra:15:20
+let io = import:SysIo;
+
+let App = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        return Entry.ExitCode.Ok;
+    }
+);
+
+io.println("start");
+
+// Later's initializer runs after this one, in source order, so the read
+// faults. A literal initializer would already hold its value.
+let first: int32 = Later.value + 1;
+
+let Later = module (
+    export let value: int32 = 2 * 3;
+);

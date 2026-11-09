@@ -24,6 +24,16 @@ void post_order(std::vector<IrNode>& nodes, Rewrite& rewrite) {
     }
 }
 
+// Whether a module or file global's initializer is written as a literal
+// decides when the global gets its value: a literal one holds it when the
+// image loads, any other runs at program start in source order (Modules.md,
+// Initialization). Rewrites therefore never replace the root of a global's
+// initializer, only the expressions inside it.
+bool global_initializer(const IrProgram& program, const IrNode& node) {
+    return node.op == IrOp::Initialize && node.symbol < program.symbols.size() &&
+           program.symbols[node.symbol].kind == SymbolKind::Global && node.operands.size() == 1;
+}
+
 template <typename Rewrite>
 std::size_t rewrite_nodes(IrProgram& program, Rewrite rewrite) {
     std::size_t count = 0;
@@ -33,7 +43,19 @@ std::size_t rewrite_nodes(IrProgram& program, Rewrite rewrite) {
         }
     };
     for (auto& body : program.bodies) {
-        post_order(body.instructions, counted);
+        for (auto& instruction : body.instructions) {
+            if (global_initializer(program, instruction)) {
+                auto& value = instruction.operands.front();
+                post_order(value.operands, counted);
+                post_order(value.body, counted);
+                post_order(value.alternative, counted);
+                continue;
+            }
+            std::vector<IrNode> single;
+            single.push_back(std::move(instruction));
+            post_order(single, counted);
+            instruction = std::move(single.front());
+        }
     }
     return count;
 }

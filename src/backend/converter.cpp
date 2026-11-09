@@ -144,6 +144,7 @@ private:
     void compile_constructor();
     void compile_destructor();
     void compile_concatenate();
+    void compile_start();
     void field_initializers(SymbolId cls);
     void self_parameter(SymbolId cls);
     void parameters(SymbolId function);
@@ -202,9 +203,17 @@ public:
     bool is_println(SymbolId function) const;
     const std::vector<IrNode>& body(SymbolId owner) const;
     const std::vector<const IrNode*>& field_initializers(SymbolId cls) const;
+    std::optional<std::uint64_t> literal(const IrNode& node, std::uint32_t type);
+    // True for a global initializer that becomes an image constant.
+    bool constant_initializer(const IrNode& node) const;
+    struct Startup {
+        const IrNode* node;
+        // The module whose members the node refers to through receivers.
+        SymbolId module;
+    };
+    const std::vector<Startup>& startup() const { return startup_; }
     // Position of a variant among its enum's variants. ExitCode.Ok is 0.
     std::uint64_t ordinal(SymbolId variant) const;
-    std::optional<std::uint64_t> literal(const IrNode& node, std::uint32_t type);
 
     void instantiate(SymbolId cls) { instantiated_.insert(cls); }
     void add_dispatch(Dispatch dispatch) { dispatches_.push_back(std::move(dispatch)); }
@@ -216,7 +225,8 @@ public:
 
 private:
     void index_program();
-    void check_initializers();
+    void order_initialization();
+    SymbolId file_of(SymbolId id) const;
     FunctionOrigin entry_point() const;
     FunctionOrigin target(const Dispatch& dispatch, SymbolId cls) const;
     void build_dispatch(const Dispatch& dispatch);
@@ -248,6 +258,7 @@ private:
     std::map<SymbolId, const std::vector<IrNode>*> bodies_;
     std::map<SymbolId, std::vector<const IrNode*>> field_initializers_;
     std::map<SymbolId, const IrNode*> global_initializers_;
+    std::vector<Startup> startup_;
     std::set<SymbolId> instantiated_;
     std::vector<Dispatch> dispatches_;
 };
@@ -436,11 +447,13 @@ std::uint32_t Converter::global(SymbolId id, const Span& where) {
     const auto& node = *init->second;
     if (node.op == IrOp::String) {
         result.initializer = text_constant(node.text, node.span);
-    } else {
+    } else if (constant_initializer(node)) {
         const auto bits = literal(node, result.type);
         const auto& t = image_.types[result.type];
-        result.initializer = constant(result.type, immediate_payload(t, *bits));
+        result.initializer = constant(result.type, immediate_payload(t, bits.value()));
     }
+    // Any other global starts uninitialized; the start function assigns it,
+    // and a read before then is an NVM fault.
     const auto index = static_cast<std::uint32_t>(image_.globals.size());
     image_.globals.push_back(result);
     globals_.emplace(id, index);
@@ -590,30 +603,72 @@ void Converter::index_program() {
     }
 }
 
-void Converter::check_initializers() {
-    // Module and file initializers run before the entry function. Their
-    // relative order across modules and files is not specified, so only
-    // initializers without effects, which order cannot affect, are accepted.
-    for (const auto& body : program_.bodies) {
-        const auto kind = symbol(body.owner).kind;
-        if (kind != SymbolKind::File && kind != SymbolKind::Module) {
-            continue;
+bool Converter::constant_initializer(const IrNode& node) const {
+    return node.op == IrOp::Integer || node.op == IrOp::Boolean || node.op == IrOp::String || node.op == IrOp::Float ||
+           (node.op == IrOp::Reference && node.symbol != no_symbol && symbol(node.symbol).kind == SymbolKind::Variant);
+}
+
+SymbolId Converter::file_of(SymbolId id) const {
+    for (auto scope = id; scope != no_symbol; scope = symbol(scope).owner) {
+        if (symbol(scope).kind == SymbolKind::File) {
+            return scope;
         }
-        for (const auto& instruction : body.instructions) {
-            if (instruction.op != IrOp::Initialize) {
-                throw Diagnostic(instruction.span,
-                                 "top-level statements are not supported: program initialization order is not specified");
-            }
-            const auto& init = instruction.operands.front();
-            const bool constant = init.op == IrOp::Integer || init.op == IrOp::Boolean || init.op == IrOp::String ||
-                                  init.op == IrOp::Float ||
-                                  (init.op == IrOp::Reference && init.symbol != no_symbol &&
-                                   symbol(init.symbol).kind == SymbolKind::Variant);
-            if (!constant) {
-                throw Diagnostic(init.span, "initializer of '" + symbol(instruction.symbol).name +
-                                                "' is not a constant: module initialization order is not specified");
+    }
+    return no_symbol;
+}
+
+void Converter::order_initialization() {
+    // Program initialization (Modules.md, Initialization): globals with
+    // literal initializers hold their values when the image is loaded. Every
+    // other module or file initializer and every top-level statement runs
+    // before the entry function: files that a file imports run first, ties in
+    // the order the files were given, and each file runs in source order.
+    std::vector<SymbolId> files;
+    std::map<SymbolId, std::set<SymbolId>> imports;
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        const auto& item = program_.symbols[id];
+        if (item.kind == SymbolKind::File) {
+            files.push_back(id);
+        } else if (item.kind == SymbolKind::Import && item.type.symbol != no_symbol) {
+            const auto from = file_of(id);
+            const auto to = file_of(item.type.symbol);
+            if (from != no_symbol && to != no_symbol && from != to) {
+                imports[from].insert(to);
             }
         }
+    }
+    std::vector<SymbolId> order;
+    std::set<SymbolId> placed;
+    while (order.size() < files.size()) {
+        auto next = std::find_if(files.begin(), files.end(), [&](SymbolId file) {
+            return !placed.contains(file) &&
+                   std::ranges::all_of(imports[file], [&](SymbolId dependency) { return placed.contains(dependency); });
+        });
+        // Files that import each other run in the given order.
+        if (next == files.end()) {
+            next = std::find_if(files.begin(), files.end(), [&](SymbolId file) { return !placed.contains(file); });
+        }
+        placed.insert(*next);
+        order.push_back(*next);
+    }
+    for (const auto file : order) {
+        std::vector<Startup> items;
+        for (const auto& body : program_.bodies) {
+            const auto kind = symbol(body.owner).kind;
+            if ((kind != SymbolKind::File && kind != SymbolKind::Module) || file_of(body.owner) != file) {
+                continue;
+            }
+            for (const auto& instruction : body.instructions) {
+                if (instruction.op == IrOp::Initialize && constant_initializer(instruction.operands.front())) {
+                    continue;
+                }
+                items.push_back({&instruction, kind == SymbolKind::Module ? body.owner : no_symbol});
+            }
+        }
+        std::stable_sort(items.begin(), items.end(), [](const Startup& a, const Startup& b) {
+            return a.node->span.offset < b.node->span.offset;
+        });
+        startup_.insert(startup_.end(), items.begin(), items.end());
     }
 }
 
@@ -668,8 +723,17 @@ FunctionOrigin Converter::target(const Dispatch& dispatch, SymbolId cls) const {
 
 Conversion Converter::run() {
     index_program();
-    check_initializers();
-    function(entry_point());
+    order_initialization();
+    if (!options_.entries.empty()) {
+        for (const auto entry : options_.entries) {
+            const auto owner = symbol(entry).owner;
+            function({Role::Start, entry, symbol(owner).kind == SymbolKind::Module ? owner : no_symbol});
+        }
+    } else if (const auto entry = entry_point(); startup_.empty()) {
+        function(entry);
+    } else {
+        function({Role::Start, entry.symbol, entry.receiver});
+    }
     for (const auto extra : options_.extra_functions) {
         const auto owner = symbol(extra).owner;
         function({Role::Function, extra, symbol(owner).kind == SymbolKind::Module ? owner : no_symbol});
@@ -1149,6 +1213,12 @@ void FunctionCompiler::statement(const IrNode& node) {
     }
     switch (node.op) {
     case IrOp::Initialize: {
+        if (c_.symbol(node.symbol).kind == SymbolKind::Global && origin_.role == Role::Start) {
+            auto value = expression(node.operands.front());
+            state(nvr::StateOp::WriteGlobal, c_.global(node.symbol, node.span), {value},
+                  c_.scalar(nvr::TypeKind::Void), node.span);
+            return;
+        }
         if (c_.symbol(node.symbol).kind != SymbolKind::Local) {
             throw std::logic_error("function bodies initialize only locals");
         }
@@ -2026,12 +2096,49 @@ void FunctionCompiler::compile_concatenate() {
     finish();
 }
 
+void FunctionCompiler::compile_start() {
+    // start(args): the initialization sequence, then `return main(args)`,
+    // or for a test, the test's call and `return 0`.
+    const auto& main = c_.symbol(origin_.symbol);
+    const bool test = main.parameters.empty();
+    const auto text_array = c_.type_index({nvr::TypeKind::Array, 0, c_.scalar(nvr::TypeKind::Text)});
+    const auto arguments =
+        new_slot(test ? text_array : c_.type_of(c_.symbol(main.parameters.front()).type, main.span));
+    function_.parameter_count = 1;
+    function_.result_type = test ? c_.scalar(nvr::TypeKind::Signed, 32) : c_.type_of(main.type, main.span);
+    const auto& items = c_.startup();
+    begin(new_block(), items.empty() ? main.span : items.front().node->span);
+    for (const auto& item : items) {
+        if (!open()) {
+            break;
+        }
+        receiver_module_ = item.module;
+        statement(*item.node);
+    }
+    if (open()) {
+        receiver_module_ = no_symbol;
+        std::vector<Operand> passed;
+        if (!test) {
+            passed.push_back(slot_operand(arguments));
+        }
+        const auto result_type = test ? c_.scalar(nvr::TypeKind::Void) : function_.result_type;
+        const auto status = invoke({Role::Function, origin_.symbol, origin_.receiver}, std::move(passed),
+                                   result_type, main.span);
+        ExitSpec exit;
+        exit.kind = nvr::ExitKind::Return;
+        exit.arguments = {test ? immediate(function_.result_type, 0) : status};
+        close({exit});
+    }
+    finish();
+}
+
 void FunctionCompiler::compile() {
     switch (origin_.role) {
     case Role::Function: compile_function(); break;
     case Role::Constructor: compile_constructor(); break;
     case Role::Destructor: compile_destructor(); break;
     case Role::Concatenate: compile_concatenate(); break;
+    case Role::Start: compile_start(); break;
     }
 }
 
