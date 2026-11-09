@@ -1,21 +1,28 @@
 cmake_minimum_required(VERSION 3.20)
 project(Neura LANGUAGES CXX)
 
-add_executable(neura
-    src/cli/main.cpp
+function(neura_target_defaults target)
+    target_compile_features(${target} PUBLIC cxx_std_20)
+    set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+add_library(neura_compiler STATIC
     src/lexer/lexer.cpp
     src/parser/parser.cpp
     src/neura-ir/lowering.cpp
     src/neura-ir/ir_print.cpp
 )
-target_include_directories(neura PRIVATE src)
-target_compile_features(neura PRIVATE cxx_std_20)
-set_target_properties(neura PROPERTIES CXX_EXTENSIONS OFF)
-if(MSVC)
-    target_compile_options(neura PRIVATE /W4)
-else()
-    target_compile_options(neura PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+target_include_directories(neura_compiler PUBLIC src)
+neura_target_defaults(neura_compiler)
+
+add_executable(neura src/cli/main.cpp)
+target_link_libraries(neura PRIVATE neura_compiler)
+neura_target_defaults(neura)
 
 include(CTest)
 if(BUILD_TESTING)
