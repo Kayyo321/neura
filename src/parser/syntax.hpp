@@ -72,7 +72,8 @@ struct Statement {
 };
 
 struct Declaration {
-    enum class Kind { Binding, Function, Class, Module };
+    // An enum's variants are its members, as bindings with only a name.
+    enum class Kind { Binding, Function, Class, Module, Enum };
 
     Kind kind;
     Span span;

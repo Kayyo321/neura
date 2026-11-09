@@ -201,6 +201,8 @@ public:
     bool is_println(SymbolId function) const;
     const std::vector<IrNode>& body(SymbolId owner) const;
     const std::vector<const IrNode*>& field_initializers(SymbolId cls) const;
+    // Position of a variant among its enum's variants. ExitCode.Ok is 0.
+    std::uint64_t ordinal(SymbolId variant) const;
     std::optional<std::uint64_t> literal(const IrNode& node, std::uint32_t type);
 
     void instantiate(SymbolId cls) { instantiated_.insert(cls); }
@@ -312,10 +314,12 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         }
         return type_index({nvr::TypeKind::Object, 0, layout(type.symbol, where)});
     case TypeKind::Enum:
+        // ExitCode is the entry function's int32 status; every other enum is
+        // its variant ordinal (Types.md, Enums).
         if (is_exit_code(type.symbol)) {
             return scalar(nvr::TypeKind::Signed, 32);
         }
-        throw Diagnostic(where, "enum representation is not specified");
+        return scalar(nvr::TypeKind::Unsigned, 32);
     case TypeKind::TypeParameter:
         throw Diagnostic(where, "type parameter '" + type.name +
                                     "' is not supported: IRtoNeuronConversion does not specialize generics");
@@ -376,6 +380,17 @@ std::uint32_t Converter::field_index(SymbolId field, const Span& where) {
     return fields_.at(field);
 }
 
+std::uint64_t Converter::ordinal(SymbolId variant) const {
+    std::uint64_t position = 0;
+    for (SymbolId id = 0; id < variant; ++id) {
+        const auto& item = program_.symbols[id];
+        if (item.kind == SymbolKind::Variant && item.owner == symbol(variant).owner) {
+            ++position;
+        }
+    }
+    return position;
+}
+
 std::optional<std::uint64_t> Converter::literal(const IrNode& node, std::uint32_t type) {
     const auto& t = image_.types[type];
     switch (node.op) {
@@ -390,9 +405,8 @@ std::optional<std::uint64_t> Converter::literal(const IrNode& node, std::uint32_
         return bits & width_mask(t.width);
     }
     case IrOp::Reference:
-        if (node.symbol != no_symbol && symbol(node.symbol).kind == SymbolKind::Variant &&
-            is_exit_code(symbol(node.symbol).owner) && symbol(node.symbol).name == "Ok") {
-            return 0;
+        if (node.symbol != no_symbol && symbol(node.symbol).kind == SymbolKind::Variant) {
+            return ordinal(node.symbol);
         }
         return std::nullopt;
     case IrOp::Float: {

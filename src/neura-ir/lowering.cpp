@@ -185,6 +185,7 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     case DeclKind::Module: kind = SymbolKind::Module; break;
     case DeclKind::Class: kind = SymbolKind::Class; break;
     case DeclKind::Function: kind = SymbolKind::Function; break;
+    case DeclKind::Enum: kind = SymbolKind::Enum; break;
     case DeclKind::Binding: break;
     }
     auto id = add(kind, decl.name, decl.span, owner);
@@ -195,7 +196,9 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     symbol(id).constant = decl.constant;
     symbol(id).exported = decl.exported;
     symbol(id).has_body = decl.has_body;
-    auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field : SymbolKind::Global;
+    auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field
+                     : kind == SymbolKind::Enum ? SymbolKind::Variant
+                                                : SymbolKind::Global;
     for (const auto& child : decl.members) declare(child, id, member_kind);
     return id;
 }
@@ -507,6 +510,16 @@ void Lowering::resolve(SymbolId id) {
                 !decl.base->collections.empty())
                 throw Diagnostic(decl.base->span, "generic inheritance is not supported");
             symbol(id).base = base;
+        }
+    } else if (decl.kind == DeclKind::Enum) {
+        // Variants are values of the enum, visible wherever the enum is.
+        symbol(id).type = {TypeKind::Enum, decl.name, id, {}};
+        for (const auto& member : decl.members) {
+            auto variant = own_member(id, member.name);
+            symbol(variant).type = symbol(id).type;
+            symbol(variant).exported = true;
+            symbol(variant).constant = true;
+            entries_[variant].resolution = Resolution::Resolved;
         }
     } else if (decl.kind == DeclKind::Function) {
         resolve_generics(id, decl, ctx);

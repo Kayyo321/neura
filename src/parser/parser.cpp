@@ -164,6 +164,25 @@ private:
                 if (result.has_body) {
                     result.body = block();
                 }
+            } else if (match("enum")) {
+                definition_has_no_annotation(result);
+                result.kind = Declaration::Kind::Enum;
+                expect("(");
+                while (!at(")")) {
+                    const auto& variant = identifier();
+                    Declaration member{};
+                    member.kind = Declaration::Kind::Binding;
+                    member.name = variant.text;
+                    member.span = variant.span;
+                    result.members.push_back(std::move(member));
+                    if (!match(",")) {
+                        break;
+                    }
+                }
+                if (result.members.empty()) {
+                    throw Diagnostic(current().span, "an enum needs at least one variant");
+                }
+                expect(")");
             } else if (at("module") || at("class")) {
                 definition_has_no_annotation(result);
                 const bool class_definition = match("class");
