@@ -11,6 +11,14 @@ function(neura_target_defaults target)
     endif()
 endfunction()
 
+# The NVR image format: the model shared by the writer and the loader.
+add_library(neura_nvr STATIC
+    src/nvr/loader.cpp
+    src/nvr/writer.cpp
+)
+target_include_directories(neura_nvr PUBLIC src)
+neura_target_defaults(neura_nvr)
+
 add_library(neura_compiler STATIC
     src/cli/source_loader.cpp
     src/lexer/lexer.cpp
