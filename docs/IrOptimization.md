@@ -25,7 +25,8 @@ The listing is an inspection interface. The [NVM toolchain](runtime/NVM.md#toolc
 ## Stage contract
 
 - **Input.** The program must pass the verifier. Otherwise the stage reports `NeuraIR verification failed before optimization` at the offending node, which indicates a lowering defect rather than a source error.
-- **Observable behavior.** Return values, the order and arguments of calls and external effects, writes to locals and globals, and termination are preserved. Operations that can fail or whose result the language leaves open stay in place and keep their evaluation order. The optimizer never chooses an overflow, division-by-zero, rounding, or lifecycle rule.
+- **Observable behavior.** Return values, the order and arguments of calls and external effects, writes to locals and globals, and termination are preserved. Operations that trap or whose result the language leaves open stay in place and keep their evaluation order, so every specified trap still happens at run time. The optimizer never chooses an overflow, division-by-zero, rounding, or lifecycle rule.
+- **Global initializers.** A module or file global whose initializer is written as a literal is set when the image loads; any other runs at program start in source order ([Modules](lang/Modules.md#initialization)). Rewrites never replace the root of a global's initializer, only expressions inside it, so folding `2 * 3` cannot change when its global is set.
 - **Symbols and spans.** Symbols are unchanged. A folded literal takes the type and span of the expression it replaces. An operand that replaces a short-circuit operation keeps its own span. A branch region selected by a literal condition becomes a block with the branch's span.
 - **Validation.** The verifier runs before the first pass and after every pass that changes the program. A failure names the pass and round, for example `NeuraIR verification failed after pass 'fold-constants' in round 1: ...`.
 - **Determinism.** Enabled passes run in the fixed pipeline order below, whatever order they are requested in. Traversals follow program order, and no decision depends on hashing, addresses, or host integer widths. The same input and options produce the same IR.
@@ -33,19 +34,19 @@ The listing is an inspection interface. The [NVM toolchain](runtime/NVM.md#toolc
 
 ## Semantics the passes rely on
 
-The passes only evaluate operations whose results [Core language](lang/CoreLanguage.md), [Types](lang/Types.md), and [Status](lang/Status.md) define. Everything else is left for a later language decision.
+The passes only evaluate operations whose results [Numbers](lang/Numbers.md), [Core language](lang/CoreLanguage.md), and [Types](lang/Types.md) define and that do not trap.
 
 | Operation | Defined today | Treatment |
 | --- | --- | --- |
 | `!`, `==`, `!=` on `bool` literals | Yes | Folded |
-| `+`, `-`, `*`, unary `-` on `int8` to `int64` and `uint8` to `uint64` literals with an in-range result | Yes | Folded |
-| The same operations when the result is out of range | Overflow is unspecified | Left in place |
-| `/` with a zero divisor | Division by zero is unspecified | Left in place |
-| `/` with a nonzero remainder | Rounding direction is unspecified | Left in place |
-| `/` with no remainder and an in-range result | Every rounding rule gives the same result | Folded |
-| Comparisons of `int8` to `uint64` literals | Yes | Folded |
-| Any arithmetic or comparison on `int` or `byte` | `int` width and `byte` signedness are open | Left in place |
-| Floating-point operations | Rounding and representation are open | Left in place |
+| `+`, `-`, `*`, unary `-` on integer literals with an in-range result, including `int` and `byte`, which are `int32` and `uint8` | Yes | Folded |
+| The same operations when the result is out of range | Traps with reason 1 | Left in place |
+| `/` and `%` with a nonzero divisor | Truncating division; `MIN % -1` is 0 | Folded |
+| `/` and `%` with a zero divisor, `MIN / -1` | Traps | Left in place |
+| `as` between integer types with the value in range | Yes | Folded |
+| `as` out of range, and every conversion involving floats or enums | Traps, or not folded | Left in place |
+| Comparisons of integer literals | Yes | Folded |
+| Floating-point operations | Specified, but the optimizer does not implement IEEE arithmetic | Left in place; the circuits fold constant operands |
 | String concatenation | Encoding and allocation failure are open | Left in place |
 | Enum equality | Representation is open | Left in place |
 
@@ -128,7 +129,7 @@ The tests are in [`tests/ir-optimization/`](../tests/ir-optimization/). Run them
 | `ir-optimization-behavior` | Behavioral. Optimized and unoptimized IR are compared by an independent reference evaluator, and the folder is checked against arithmetic oracles. |
 | `ir-optimization-cli` | All examples, together and one at a time, are emitted twice with and twice without `--no-optimize`. Each mode must be byte-for-byte reproducible, and both must have the same symbol table. Option errors are also checked. |
 
-The reference evaluator in `tests/ir-optimization/evaluator.cpp` is written separately from the optimizer. It uses sign-and-magnitude integers with a 128-bit product, while the optimizer uses pre-checked 64-bit arithmetic. It models `bool`, fixed-width integers, string literals and concatenation, enum variants, locals, parameters, module globals, branches, loops, direct calls, calls on module receivers including module-interface dispatch, and external calls. It records external calls as effects whose response is `void`. When it reaches an operation the language leaves open, such as overflow, division by zero, inexact division, or `int` arithmetic, it stops with an *unspecified* outcome at that node. It stops with *unsupported* at objects, collections, and floating point. Two runs agree when they have the same status, result, stop reason and location, effect sequence, and final global state.
+The reference evaluator in `tests/ir-optimization/evaluator.cpp` is written separately from the optimizer. It uses sign-and-magnitude integers with a 128-bit product, while the optimizer uses pre-checked 64-bit arithmetic. It models `bool`, integers, floats through host IEEE arithmetic, conversions, string literals and concatenation, enums, locals, parameters, module globals, program initialization order, branches, loops with latches, direct calls, calls on module receivers including module-interface dispatch, objects with construction, fields, virtual dispatch, and destruction, and arrays and lists with versions. It records external calls as effects whose response is `void`. At a program trap it stops with a *trapped* outcome and the NVR reason code; at a fault NVM detects, such as an index past the end or a read of an uninitialized field, with a *faulted* outcome. Two runs agree when they have the same status, result, stop reason and location, effect sequence, and final global state.
 
 The evidence covers the following:
 
@@ -140,7 +141,7 @@ The evidence covers the following:
 These checks establish observed agreement over the stated domains. Only the 8-bit folding check is exhaustive. None of them is a proof of equivalence. In particular:
 
 - Nonterminating runs are compared up to a budget of 100,000 loop iterations and calls and a call depth of 64. Agreement at the budget is bounded evidence, not a proof that both versions diverge. The passes never add or remove an executed iteration or call, so both versions reach the budget at the same point.
-- Behavior outside the evaluator's subset, such as objects, collections, floating point, and dispatch on objects, is compared only up to the first unsupported operation. Structural tests and the conservative purity predicate cover the passes' treatment of those constructs.
+- The evaluator and the compiler follow the same written rules, so a misreading of a rule that both share would not be caught; the circuit tests check arithmetic against independent C++ and hardware references.
 - The evaluator makes its own assumptions where the language is silent: one storage location per module global, dispatch on module receivers by override chain, and `void` responses from external calls. Both versions run under the same assumptions, so these choices do not favor either one, but they are not language rules.
 
 ## Adding a pass

@@ -6,21 +6,26 @@ This page describes the implemented back half of the toolchain: `IRtoNeuronConve
 
 ```text
 hello.nra --lower--------+
-                         +--> verify --> optimize --> convert --> encode --> load (self-check) --> hello.nvr
+                         +--> verify --> specialize --> optimize --> convert --> encode --> load (self-check) --> hello.nvr
 hello.nir --read_nir-----+
 
 hello.nvr --> load --> bind imports --> Execution
 ```
 
-`neura build` takes either route into the same function, `backend::build`, so both routes produce identical bytes from identical NeuraIR. `--no-optimize` replaces optimization with verification alone. Before writing the image, the build loads the encoded bytes through the full validating loader, so the converter or writer cannot publish an image that the runtime rejects. The output is written to a temporary file and renamed, so a failed build leaves no output file.
+`neura build` takes either route into the same function, `backend::build`, so both routes produce identical bytes from identical NeuraIR. Specialization ([generics](#generics)) runs on verified IR and is always applied. `--no-optimize` replaces optimization with a second verification. Before writing the image, the build loads the encoded bytes through the full validating loader, so the converter or writer cannot publish an image that the runtime rejects. The output is written to a temporary file and renamed, so a failed build leaves no output file.
 
 | Directory | Library | Contents |
 | --- | --- | --- |
 | `src/neura-ir/nir_format.*` | `neura_compiler` | The `.nir` reader and writer. [NeuraIR file format](NirFormat.md) specifies the encoding. |
+| `src/neura-ir/specialize.*` | `neura_compiler` | Generic specialization. |
+| `src/neura-ir/float.*` | `neura_compiler` | Float formats and exact decimal literal conversion. |
 | `src/backend/circuit.*` | `neura_compiler` | Neuron circuits for bits and fixed-width integers. |
+| `src/backend/float_circuit.*` | `neura_compiler` | Neuron circuits for IEEE floating point in any exponent and fraction width. |
+| `src/backend/block_synth.*` | `neura_compiler` | Block assembly: inputs, checks, pending assignments, exits, and the selector. The converter and the decompiler share it. |
 | `src/backend/converter.*` | `neura_compiler` | `IRtoNeuronConversion` and the build pipeline shared by both routes. |
 | `src/nvr/` | `neura_nvr` | The image model, the writer, and the validating loader. |
-| `src/nvm/` | `neura_nvm` | Execution, host services, and the console sink. |
+| `src/nvm/` | `neura_nvm` | Execution, host services, the console sink, and host traces. |
+| `src/decompiler/` | `neura_decompiler` | Assembly, lifting, and the reconstruction form ([Decompiler](Decompiler.md)). |
 
 `neura_nvm` links only `neura_nvr`, so a runtime-only distribution needs no compiler code. The `neura` executable links both and provides `neura run`.
 
@@ -35,15 +40,19 @@ Conversion lowers an operation only where the language defines its result. Where
 | `load`, `store`, `initialize` of locals and parameters | Typed frame slots. Assignments become parallel slot assignments on the block's exits. |
 | `load`, `store` of module globals | `ReadGlobal` and `WriteGlobal` state operations. |
 | `unary !`, `binary == !=` on `bool` | Graph gadgets. |
-| `unary -`, `binary + - * /` on `int8` to `uint64` | Checked integer circuits with trap exits for undefined results. |
-| Comparisons on `int8` to `uint64` and on `Entry.ExitCode` | Graph circuits. |
+| `unary -`, `binary + - * / %` on `int8` to `uint64` | Checked integer circuits with trap exits for overflow, a zero divisor, and `MIN / -1`. |
+| `float` literals, `unary -`, `binary + - * /` on the four float formats | Float circuits; negation only flips the sign lane. |
+| Comparisons on integers, floats, enums, and `bool` | Graph circuits. |
+| `convert` | Integer range checks, float rounding, and truncation circuits, with trap exits where [Numbers](lang/Numbers.md#conversions) specifies them. |
+| `length` | `ReadLength`, then a checked narrowing of the `uint64` count to `int32`. |
+| `collection_version`, `fail` | `ReadVersion` and a reason-5 `Trap` exit, for for-each loops. |
 | `binary +` on `string` | A call to a generated concatenation function. |
 | `short_circuit` | One graph neuron when the right operand is pure and total. Otherwise the left operand selects a block that evaluates the right operand or a block that skips it. |
-| `branch`, `loop`, `break`, `continue`, `block`, `return` | Blocks connected by `Continue` exits that the graph selects, and `Return` exits. |
+| `branch`, `loop`, `break`, `continue`, `block`, `return` | Blocks connected by `Continue` exits that the graph selects, and `Return` exits. A loop's latch gets its own block, which `continue` reaches. |
 | `call` | A `Call` exit. Module functions are specialized for their module. |
 | `virtual_call` on a module | Resolved statically: the most derived implementation in the concrete module, specialized for that module. |
 | `virtual_call` on an object | `ReadTag`, then a dispatch block whose graph compares the tag with each instantiated class that can reach the call site. |
-| `external_call` to `SysIo.println` | A `Host` exit to `neura.console.write_line` version 1. |
+| `external_call` to `SysIo.println`, `Test.assert`, `Test.assert_equal_int32` | A `Host` exit to `neura.console.write_line`, `neura.test.assert`, or `neura.test.assert_equal_int32`, version 1. The error continuation traps with reason 3. |
 | `allocate`, `base_initialize` | `AllocateObject`, then a generated constructor function. |
 | `field` | `ReadField` and `WriteField` with the field's index in its declaring class's layout. |
 | `collection`, `index`, `append`, `remove_at` | `AllocateCollection`, `ReadElement`, `WriteElement`, `AppendElement`, and `RemoveElement`. |
@@ -52,14 +61,21 @@ Conversion lowers an operation only where the language defines its result. Where
 
 The build stops with a source diagnostic, before any output is written, for:
 
-- `int` and `byte`, whose width and signedness are open. This includes `length`, whose type is `int`.
-- Floating-point types and literals.
-- Type parameters, generic functions, and generic classes. The converter does not specialize generics.
-- Enums other than `SysIo.Entry.ExitCode`, whose representation is open.
-- External functions other than `SysIo.println`, including the `Test` module, which needs the unspecified test runner.
-- Top-level statements, and module or file initializers that are not literals.
 - Programs with no function overriding `SysIo.Entry.main`, or more than one.
 - A module call that resolves to an interface function without a body.
+- Generic specialization that does not terminate ([Polymorphism](lang/Polymorphism.md#type-arguments-and-specialization)).
+
+## Generics
+
+Specialization (`src/neura-ir/specialize.cpp`) is a NeuraIR-to-NeuraIR rewrite that runs on verified IR in both build routes. It walks every non-generic body and symbol type. Each concrete generic class type it meets, such as `Box<int32>`, becomes a class instance: a new class symbol named after its arguments, with copies of the generic class's fields and non-generic methods, and its field initializers. Each call to a generic function or method becomes a call to a function instance, a copy with its type parameters substituted. Copies are appended to the symbol table and keep their declarations' spans. A map from declaration and canonical argument types to the instance makes each combination one copy, and argument types are canonical because `int` and `byte` lower to `int32` and `uint8`. Field, call, allocation, receiver, and destroy references inside copies and in the rest of the program are rewritten to the instances' members. Afterward no reachable body or symbol mentions a type parameter, and the converter sees only concrete types. The generic declarations stay in the program, unreachable. The verifier rechecks bounds, because a `.nir` file reaches the backend without lowering.
+
+## Loops
+
+A three-part `for` lowers to a block holding the initializer and a NeuraIR loop whose latch region holds the step. The converter gives the latch its own block: the body's end and every `continue` jump to it, and it jumps to the loop head. A for-each lowers to hidden locals for the collection, its version (for a list), and an `int32` index, and a `while (true)` loop whose body checks the version, compares the index with the length, binds the element, advances the index, and then runs the user's statements. `continue` therefore re-enters the check and the advance, and `break` and `return` leave without them. NVM keeps each list's version and `ReadVersion` reads it.
+
+## Initialization
+
+When the program has top-level statements or initializers that are not literals, the image's entry is a generated start function instead of `main`. It runs each initialization statement in the [documented order](lang/Modules.md#initialization), writing globals with `WriteGlobal`, then calls `main` with the arguments and returns its status. Literal initializers stay image constants, so their globals are initialized at load. A program without such statements has no start function, and its image is unchanged from earlier releases. Under `neura test`, each test gets a start function that runs the same initialization, calls the test, and returns 0.
 
 ## Semantic decisions
 
@@ -67,16 +83,21 @@ These choices follow the existing contracts where they apply. Where the language
 
 | Area | Language status | Backend behavior |
 | --- | --- | --- |
-| Integer overflow | Open | `+`, `-`, `*`, and unary `-` trap with reason 1 when the exact result is outside the type. Nothing wraps or saturates. |
-| Division | Division by zero and rounding are open | `/` returns the quotient only when the division is exact. A zero divisor, a nonzero remainder, or an unrepresentable quotient (`MIN / -1`) traps with reason 1. This matches the optimizer's folding rule. |
+| Integer overflow | [Specified](lang/Numbers.md) | `+`, `-`, `*`, and unary `-` trap with reason 1 when the exact result is outside the type. Nothing wraps or saturates. |
+| Division | Specified | `/` truncates toward zero and `%` takes the dividend's sign. A zero divisor and `MIN / -1` trap with reason 1; `MIN % -1` is 0. Before this release an inexact quotient trapped; it now truncates. |
+| Floating point | Specified | IEEE 754 with ties-to-even rounding, subnormals, and no traps. Every NaN result is the canonical quiet NaN. The optimizer does not fold float arithmetic. |
+| Conversions | Specified | Checked: out-of-range integer results and float-to-integer conversions of NaN, infinities, and out-of-range values trap with reason 1. |
 | Negative index | Bounds error | A signed index is checked for a negative value in the graph, which traps with reason 2 before the value is converted to the `uint64` index of the state operation. NVM reports an index at or beyond the length as a bounds fault. |
 | Entry point | Discovery is open | The unique function that overrides `SysIo.Entry.main`. `Entry.ExitCode` is `int32`, and `Ok` is 0. |
 | Module receivers | Dispatch by override chain | Static. A module function is converted once for each concrete module through which it is called. Inside it, calls and global accesses on the module receiver resolve in that module's chain. |
 | Module globals | Storage is open | One storage location per declared global. An inherited global that is not overridden is the same storage through the base and the derived module. An override has its own storage. The IR reference evaluator uses the same rule. |
-| Initialization order | Open across modules | Module and file initializers must be literals and become NVR global initializers, so their order cannot be observed. Other initializers and top-level statements are rejected. |
+| Initialization order | [Specified](lang/Modules.md#initialization) | Literal initializers become NVR global initializers. Other initializers and top-level statements run in a generated start function, files after their imports and each file in source order. A read before initialization is an NVM fault. Optimization keeps the root form of every global initializer, so `2 * 3` is not folded into a literal that would change when its global is set. |
+| Enums | [Specified](lang/Types.md#enums) | `uint32` ordinals in declaration order. `ExitCode` stays `int32` with `Ok` = 0. |
 | Construction | Proposed in [Object lifecycle](lang/ObjectLifecycle.md) | The base constructor runs, then this class's field initializers, then the rest of the declared `init`. Fields without an initializer start uninitialized; reading one before a store traps. |
 | Destruction | Proposed | Cleanup dispatches on the runtime class and runs each `deinit` from the most derived class toward the bases. Then the object is freed. A later use of the handle traps. |
 | `println` failure | Open | After a failed or partial write, the run traps with reason 3. The language has no error result for `println` yet. |
+| Assertions | [Specified](lang/Testing.md) | A failed `Test` assertion traps with reason 3 after the test service records the failure. |
+| For-each modification | [Specified](lang/CoreLanguage.md#loops) | A changed list version traps with reason 5 at the `for` statement. |
 | Short-circuit operands | Specified | The right operand is speculated in the graph only when the optimizer's `pure_and_total` predicate holds: it cannot fail, change state, or request an effect. Otherwise it gets a block of its own, reached only when the left operand does not decide the result. |
 
 ## Circuits
@@ -99,7 +120,10 @@ Arithmetic uses these gadgets:
 - Addition and subtraction use a ripple-carry adder: two ReLU neurons per bit for the carry, plus an identity neuron when the sum bit's terms are compacted. Signed overflow is `carry into the top bit ⊕ carry out`. Unsigned overflow is the carry out, or the borrow for subtraction.
 - `a < b` is the borrow of `a - b`. It needs the carry chain only, with the sign bits inverted for signed order. Equality uses one neuron per bit pair plus one conjunction.
 - Multiplication sums partial products by column. One identity neuron sums each column, and thresholds split the sum into the result bit and an integer carry. Overflow is any partial product at or above the type's width, or a carry out of the top column. Signed multiplication multiplies magnitudes and checks the result against `2^(w-1) - 1`, or against `2^(w-1)` for a negative result.
-- Division uses restoring division, one quotient bit per column. Signed division divides magnitudes, and the remainder decides exactness.
+- Division uses restoring division, one quotient bit per column; the remainder comes out of the same circuit. Signed division divides magnitudes and applies the result's sign; the remainder takes the dividend's sign.
+- Integer conversions extend or truncate lanes and check that every dropped lane equals the sign the target needs.
+
+Float circuits (`src/backend/float_circuit.cpp`) are written once for any exponent and fraction width and instantiated for the four formats. An operand is unpacked into sign, exponent, and significand with an explicit leading bit, and flags for NaN, infinity, and zero. Addition aligns the smaller operand with a barrel shifter that keeps a sticky bit, adds or subtracts with three extra lanes (guard, round, sticky), and normalizes. Multiplication forms the full product of the significands with the column multiplier. Division normalizes both significands and runs restoring division for `fraction + 3` quotient bits, with the remainder as sticky. Every operation and conversion ends in one shared round-and-pack step: a leading-zero normalization limited by the exponent, a right shift into the subnormal range, round to nearest even, and overflow to infinity. Special cases select the canonical NaN, an infinity, or a signed zero last.
 
 Measured cost of one signed operation on two variable operands, in neurons and edges:
 
@@ -111,7 +135,21 @@ Measured cost of one signed operation on two variable operands, in neurons and e
 | `a < b` | 17 / 58 | 65 / 250 | 129 / 506 |
 | `a == b` | 10 / 40 | 34 / 160 | 66 / 320 |
 
-`*` and `/` between two variables get a block of their own whose graph reads only the two operands. Every site with the same operation and type then shares one graph record. Graphs are deduplicated by content in general. [`docs/Project.md`](Project.md#example-from-source-to-circuit) gives `left && right` on two Boolean parameters as an example. It converts to a block whose graph is that single neuron, `relu(left + right - 1)`, and the conversion tests check the neuron and its truth table.
+Float operations on two variable operands, in neurons and edges:
+
+| Operation | float16 | bfloat16 | float32 | float64 |
+| --- | --- | --- | --- | --- |
+| `a + b` | 755 / 2,595 | 732 / 2,598 | 1,536 / 5,330 | 3,287 / 11,293 |
+| `a * b` | 958 / 3,161 | 731 / 2,440 | 2,558 / 8,838 | 7,591 / 26,945 |
+| `a / b` | 1,455 / 5,846 | 1,124 / 4,384 | 4,689 / 20,403 | 17,994 / 83,128 |
+| `a < b` | 78 / 295 | 78 / 301 | 142 / 589 | 270 / 1,171 |
+| `a == b` | 31 / 136 | 31 / 142 | 47 / 254 | 79 / 484 |
+| `int32 as` the format | 857 / 2,583 | 832 / 2,589 | 880 / 2,710 | 1,200 / 3,547 |
+| the format `as int32` | 314 / 1,191 | 301 / 1,212 | 493 / 2,108 | 898 / 3,429 |
+
+Signed `%` costs about as much as `/`: 363 / 1,490 neurons and edges for `int8`, 5,307 / 22,874 for `int32`, and 20,859 / 90,810 for `int64`.
+
+Integer `*`, `/`, and `%` and float arithmetic between two variables get a block of their own whose graph reads only the two operands. Every site with the same operation and type then shares one graph record. Graphs are deduplicated by content in general. An operand computed in the graph before such an operation is first assigned to a temporary slot, because the isolated operation ends the block. [`docs/Project.md`](Project.md#example-from-source-to-circuit) gives `left && right` on two Boolean parameters as an example. It converts to a block whose graph is that single neuron, `relu(left + right - 1)`, and the conversion tests check the neuron and its truth table.
 
 ## Blocks, frames, and exits
 
@@ -134,40 +172,36 @@ Each of these decisions holds in both the writer and the loader and is recorded 
 - **References in lanes.** A reference decoded from lanes must name a live handle whose runtime type is compatible with the descriptor type. Otherwise the run traps.
 - **Handle order.** Handles are assigned to text and bytes constants in table order, then to each launch argument's text in order, then to the argument array, then to allocations in execution order.
 - **Graph inputs.** A constant can supply graph inputs. A text constant supplies its 64-bit handle.
+- **Minimal versions.** The writer emits NVR 1.0 unless the image uses a 1.1 feature: a float type, `ReadVersion`, or trap reason 5. Images of programs that use none of them are 1.0.
+- **Optional sections.** The loader keeps unknown optional sections as raw bytes and the writer writes them back in tag order, so decoding and re-encoding any valid image reproduces its bytes. With the source map, the compiler writes the optional `NAME` section for tools.
 
 The loader validates every rule in NVR's "Writer and loader requirements" before execution. Each count is bounded by the bytes that remain, using the smallest encoding of one element, and by `LoadLimits`, before storage is reserved.
 
 ## Running an image
 
-`neura run image.nvr -- args...` loads the image, binds `neura.console.write_line` to standard output, and runs it. The process status is the entry function's `int32` result; POSIX keeps its low 8 bits. A trap prints a diagnostic and exits with status 70. A load, bind, or usage error exits with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` set run limits. The defaults are 100,000,000 steps, 10,000 frames, and 2²⁶ heap cells. A heap cell is one heap entry, object field, collection element, or text byte.
+`neura run image.nvr -- args...` loads the image, binds `neura.console.write_line` to standard output and the test assertions to services that record failures, and runs it. The process status is the entry function's `int32` result; POSIX keeps its low 8 bits. A trap prints a diagnostic and exits with status 70. A load, bind, or usage error exits with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` set run limits. The defaults are 100,000,000 steps, 10,000 frames, and 2²⁶ heap cells. A heap cell is one heap entry, object field, collection element, or text byte.
 
 The embedding API is `nvm::Execution`. `advance()` runs until the run completes, traps, or issues a host request. `complete()` supplies the response to a pending request, so a host can suspend the run between them. `nvm::run` drives a run with bound services synchronously. `nvm::bind` matches imports to an `nvm::HostRegistry` by name, version, and signature. Console output goes through an injectable `nvm::ConsoleSink`. `nvm::StringSink` captures exact bytes and can be given a capacity to simulate a failed or partial write. Traps report a kind, such as a program trap with its reason, a bounds fault, an invalid handle, or a limit, along with the function and block, and the source location when the image has a source map.
 
 ## Tests and the limits of the evidence
 
+The [release checklist](Release.md) maps each feature to its tests and states which checks are exhaustive, sampled, or structural. In summary:
+
 | CTest | Evidence |
 | --- | --- |
-| `backend-circuits` | Every circuit for `+ - * /`, unary `-`, `==`, and `<` is evaluated by NVM's checked graph evaluator. The check is exhaustive over all 8-bit signed and unsigned operands, and covers boundary and pseudo-random operands for 16, 32, and 64 bits. Each result must equal a guarded C++ reference, a failure must be flagged exactly when the result is undefined, every output lane must be 0 or 1, and no neuron may overflow. |
-| `backend-format` | Two hand-assembled images, written from the specification tables with a byte assembler that shares no code with the writer, must decode to hand-written models. The writer must reproduce their bytes exactly. Every prefix of each image is rejected, as is every truncated section, plus header, directory, flag, encoding, limit, and semantic validation errors (references, types, layouts, graphs, selectors, exits, state operations, imports, entry signature, and source map). |
-| `backend-vm` | Selectors, non-binary lanes, graph overflow, uninitialized slots, fields, and globals, freed handles, import binding, host error continuations with partial output, suspension, request sequence numbers, ill-typed completions, the step, frame, heap, and handle limits, argument passing, and repeated runs. |
-| `backend-nir` | Every example, optimization fixture, and backend program round-trips through `.nir` with every field and span intact, and encodes deterministically. Both build routes give byte-identical images. Every prefix of a `.nir` file is rejected, along with corrupt headers, references, operations, and nesting. |
-| `backend-conversion` | Sixteen fixture functions are called directly in the image and compared with the IR reference evaluator: exhaustively over 8-bit operand pairs for six of them and on sampled operands for the rest. Each call must give an equal result, or a reason-1 trap where the evaluator reports an unspecified result. Whole-program stdout is compared with the evaluator's effect list. Optimized and unoptimized images must produce the same output. Further tests check the single-neuron conjunction, the shared multiplier, deterministic conversion, the optional source map, and a diagnostic and location for each unsupported case. |
-| `backend-cli` | Hello World is built from `.nra` and from `.nir`, twice each, and compared byte for byte. The image is copied into a directory that holds only the image and run there, and stdout and the exit status are compared exactly. The test also checks that no build-machine path is in the image, that arguments reach the program, the runnable examples, example drivers, programs in three build variants, nine trap programs (stdout, status, and diagnostic), unsupported builds that leave no output, and option errors. |
-| `backend-install` | `cmake --install` into a fresh prefix, then the installed `neura` builds Hello World and runs the image from a directory without sources. |
+| `backend-circuits` | Integer circuits, including `%` and conversions between every pair of formats, are evaluated by NVM's checked graph evaluator: exhaustively over 8-bit operands (and every 8- and 16-bit source value for conversions), on boundary and pseudo-random operands for wider types. |
+| `backend-floats` | Float circuits against two independent references: exhaustively over every pair of the 6- and 8-lane formats e3m2 and e4m3 against a brute-force exact rational reference and a hardware double reference; exhaustively over every float16 and bfloat16 value for negation, conversions to and from wider formats and integers; on special and pseudo-random operands for float16, bfloat16, float32, and float64 arithmetic and comparisons against hardware float and double; literal conversion against `strtod` and `strtof`. |
+| `backend-format` | Hand-assembled 1.0 and 1.1 images decode to their models and the writer reproduces their bytes; malformed images, version mismatches, and 1.1 features in 1.0 images are rejected. |
+| `backend-vm` | Execution semantics of NVM. |
+| `backend-nir` | `.nir` round trips, deterministic encoding, both build routes give identical images, corrupt files are rejected. |
+| `backend-conversion` | Compiled functions against the IR reference evaluator: integer, structure, and float fixtures, exhaustively over 8-bit domains where the parameters allow and on sampled float operands; whole-program stdout and initialization order against the evaluator. |
+| `backend-generics` | Instance caching, determinism, the specialization limits, and specialized functions against the evaluator exhaustively over 8-bit inputs. |
+| `backend-cli` | End-to-end builds and runs, reproducibility, isolated execution, every runnable example and driver, trap programs, unsupported builds, the test runner, and option errors. |
+| `backend-install` | The installed toolchain builds and runs Hello World from a directory without sources. |
+| `decompiler-*` | See [Decompiler](Decompiler.md#evidence). |
 
-These are observed agreements over the stated domains. Only the 8-bit circuit and differential checks are exhaustive, and nothing here is a proof. The differential tests rely on the IR evaluator's assumptions about module globals, module dispatch, and `void` external responses. The evaluator does not model objects or collections, so their behavior is checked against hand-derived expected output, not against an independent evaluator. Runs that reach the evaluator's budget or depth limit are skipped. MSVC builds have not been verified.
+These are observed agreements over the stated domains; the exhaustive checks are exhaustive only over the stated domains, and nothing here is a proof beyond them. The IR evaluator models objects, collections, floats, and initialization independently of the converter, but it shares the language rules as written in these pages, so a misreading common to both would not be caught. MSVC builds have not been verified.
 
 ## Example status
 
-| Example | Status |
-| --- | --- |
-| `hello-world/hello-world.nra` | Compiles and runs: `Hello, World!`. |
-| `modules/module-interface.nra` | Compiles and runs. It assigns fields after `new`, which relies on the open field-initialization rule; the runtime traps if a field is read before it is assigned. |
-| `modules/multi-file/main.nra` | Compiles and runs with `-I examples/modules/multi-file`: `Hello, Neura!`. |
-| `modules/multi-file/acme/greetings.nra`, `…/punctuation.nra` | Libraries, compiled and run as part of `main.nra`. |
-| `guide/core.nra`, `types/overlay.nra`, `types/classes.nra` | Libraries without an entry point. Drivers in `tests/backend/examples/` import them, compile, and run with checked output. |
-| `types/collections.nra` | Depends on an unresolved rule: `length` has type `int`, whose width is open. |
-| `types/polymorphism.nra` | Generic functions and classes are not supported by the converter. |
-| `testing/math-tests.nra` | Needs the `Test` module and its runner, which are not specified. |
-| `guide/resources.nra` | Uses a top-level statement and a nonconstant module initializer, and program initialization order is open. |
-| `guide/errors.nra` | Design sketch with no code. |
+[Feature status](lang/Status.md#examples) lists every example. All runnable examples run, and every library example has a driver in `tests/backend/examples/` that builds and runs it.

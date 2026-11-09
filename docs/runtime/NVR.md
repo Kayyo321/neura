@@ -14,14 +14,20 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 | --- | --- | --- |
 | Magic | 4 bytes | ASCII `NEUR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0 |
+| Minor | u16 | 0 or 1 |
 | Graph profile | u32 | 1 for checked integer identity and ReLU graphs |
 | Section count | u32 | Number of directory records |
 | File size | u64 | Total size in bytes, including the header and directory |
 
 The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four printable ASCII characters and compare bytewise. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
 
-A 1.0 loader accepts major version 1 and minor version 0. Future revisions can define broader compatibility rules. An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections, which the loader skips by length. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
+### Versions 1.0 and 1.1
+
+Minor version 1 adds three features, marked "1.1" below: the float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Nothing else changes, and a 1.0 image is a valid 1.1 image.
+
+- A writer emits the lowest minor version whose features the image uses, so an image that uses none of the 1.1 features is a 1.0 image byte for byte. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
+- A loader of this version accepts major version 1 with minor version 0 or 1, and rejects any other version as unsupported, naming the versions it accepts. An image that declares 1.0 but uses a 1.1 feature is malformed.
+- An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
 | --- | --- | --- |
@@ -32,6 +38,7 @@ A 1.0 loader accepts major version 1 and minor version 0. Future revisions can d
 | `IMPT` | Host import declarations | Yes |
 | `LAYO` | Object layout records | Yes |
 | `META` | Entry function index as one `u32` | Yes |
+| `NAME` | Source names for tools (provenance; not interpreted by the loader) | Optional |
 | `SMAP` | Source locations for function blocks | Optional |
 | `TYPE` | Type records | Yes |
 
@@ -52,10 +59,12 @@ A type record starts with `kind:u8`. Its remaining fields depend on that tag.
 | Object reference | 6 | `layout:u32` | 64 |
 | Array reference | 7 | `element_type:u32` | 64 |
 | List reference | 8 | `element_type:u32` | 64 |
+| Float (1.1) | 9 | `width:u8`, one of 16, 32, 64: IEEE 754 binary16, binary32, binary64 | Width |
+| BFloat (1.1) | 10 | `width:u8`, which is 16: an 8-bit exponent and a 7-bit fraction | 16 |
 
-Void is valid as a result type and has no slot, constant, or value descriptor. Signedness and width are part of the type. Assignments and calls require structural type equality, or a declared object subtype where a base type is expected. Arrays and lists are invariant in their element type. Object inheritance follows layout parent links. Profile 1 uses bit vectors at graph ports, including for opaque handles. Additional numeric encodings require a profile or type-format revision with explicit evaluation rules.
+Void is valid as a result type and has no slot, constant, or value descriptor. Signedness and width are part of the type. Assignments and calls require structural type equality, or a declared object subtype where a base type is expected. Arrays and lists are invariant in their element type. Object inheritance follows layout parent links. Profile 1 uses bit vectors at graph ports, including for opaque handles. A float value's lanes are its IEEE encoding, least significant bit first, so graphs compute float arithmetic bit by bit and the graph profile is unchanged ([Numbers](../lang/Numbers.md)). Additional numeric encodings require a profile or type-format revision with explicit evaluation rules.
 
-A constant record contains `type:u32, payload:bytes`. A Boolean payload contains one byte, zero or one. An integer payload contains exactly its declared width in bytes divided by eight. Text and bytes use their literal contents. Object and collection handles cannot occur in constant payloads. Text and byte constants are exposed as immutable runtime values.
+A constant record contains `type:u32, payload:bytes`. A Boolean payload contains one byte, zero or one. An integer or float payload contains exactly its declared width in bits divided by eight, little-endian; every float bit pattern, including any NaN, is a valid payload. Text and bytes use their literal contents. Object and collection handles cannot occur in constant payloads. Text and byte constants are exposed as immutable runtime values.
 
 A layout record contains `parent:u32 optional, field_types:vector<u32>`. The field vector includes inherited fields as a prefix with identical types and indices. The layout index is its runtime type tag. A global record contains `type:u32, initializer:u32 optional`. An initializer names a matching constant. A global without one begins uninitialized. Compiler-generated entry blocks perform nonconstant program initialization before invoking application logic.
 
@@ -82,7 +91,7 @@ An exit begins with `kind:u8, assignments:vector<Assignment>`. An assignment is 
 | Host call | 4 | `import:u32, arguments:vector<Value>, success_slot:u32 optional, success_block:u32, error_slot:u32 optional, error_block:u32` |
 | Trap | 5 | `reason:u32` |
 
-Resume blocks belong to the current function. For every exit that produces a result (a call, a state operation, and both continuations of a host call), a void result requires an absent slot, and a nonvoid result requires a slot to which the result is assignable. Return values and arguments must be assignable to their declared types. A trap exit has no assignments. Reason codes 1 through 4 designate source arithmetic failure, source bounds failure, explicit program failure, and invalid dispatch. Other codes require a format revision. Loader and runtime faults have separate diagnostics.
+Resume blocks belong to the current function. For every exit that produces a result (a call, a state operation, and both continuations of a host call), a void result requires an absent slot, and a nonvoid result requires a slot to which the result is assignable. Return values and arguments must be assignable to their declared types. A trap exit has no assignments. Reason codes 1 through 4 designate source arithmetic failure, source bounds failure, explicit program failure, and invalid dispatch. Reason 5 (1.1) designates a list modified during for-each. Other codes require a format revision. Loader and runtime faults have separate diagnostics.
 
 ## State operations
 
@@ -104,14 +113,29 @@ The state-operation exit provides checked storage primitives. Its immediate is z
 | 11 | Append element | Zero | List reference, element value | Void |
 | 12 | Remove element | Zero | List reference, index | Void |
 | 13 | Construct text or bytes | Text or bytes type ID | Array or list of unsigned 8-bit values | Immutable copy of the selected type |
+| 14 (1.1) | Read version | Zero | List reference | Unsigned 64-bit structural version |
 
-Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a list because operation 7 takes its elements as exit arguments, so a list is the only way to collect bytes whose number is known only at run time. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Freeing an object invalidates its handle after language cleanup has completed.
+Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a list because operation 7 takes its elements as exit arguments, so a list is the only way to collect bytes whose number is known only at run time. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Every list carries a structural version that starts at zero when the list is allocated and grows by one, modulo 2^64, with each successful append or removal; writing an element does not change it. A for-each loop compares versions to detect modification. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Freeing an object invalidates its handle after language cleanup has completed.
 
 ## Imports and optional source maps
 
 An import record contains `name:text, interface_version:u32, parameter_types:vector<u32>, success_type:u32, error_type:u32`. The tuple of name and interface version is unique within an image. Import names are matched byte for byte. A runner rejects a missing import, an unavailable capability, or a signature mismatch before entry. The standard stdout import is defined in the [NVM specification](NVM.md#host-calls-and-standard-output).
 
 A source map record contains `function:u32, block:u32, path:text, line:u32, column:u32`. Lines and columns start at one. Entries are sorted by function and block and are unique for each block. Paths are display labels. NVM does not open them. Source maps can be omitted without affecting execution.
+
+### Names
+
+The optional `NAME` section gives tools the source names of image entities. It is provenance only: a runtime ignores it, the loader keeps it as raw bytes without interpreting it, and no tool may infer behavior from it. `neura build` writes it together with the source map and `--no-source-map` omits both. It contains a `u32` count and that many records `kind:u8, index:u32, sub:u32, name:text`:
+
+| Kind | Entity | `index` | `sub` |
+| --- | --- | --- | --- |
+| 0 | Function | Function | Zero |
+| 1 | Layout | Layout | Zero |
+| 2 | Field | Layout | Field index |
+| 3 | Global | Global | Zero |
+| 4 | Frame slot | Function | Slot |
+
+Names are qualified source names, such as `Objects.Counter.bump`, or descriptions of generated functions, such as `Counter.init` and `string +`.
 
 ## Writer and loader requirements
 

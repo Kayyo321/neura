@@ -73,11 +73,21 @@ A request contains the import, resolved arguments, and an execution-local sequen
 
 The standard console service is `neura.console.write_line` version 1. It takes a UTF-8 string and returns either success with no payload or an unsigned 32-bit error code. Error code 1 denotes a failed write. It emits the string's bytes followed by a single LF byte, independent of platform newline conventions. A host write can partially succeed before reporting failure. The runtime reports the failure without retrying. The language library determines how that result appears to source code.
 
+### Host services
+
+| Service | Version | Parameters | Success | Error | Behavior |
+| --- | --- | --- | --- | --- | --- |
+| `neura.console.write_line` | 1 | text | void | uint32 | Writes the text and an LF; error 1 when the write fails |
+| `neura.test.assert` | 1 | bool | void | uint32 | Succeeds for true; for false, records "assertion failed" and returns error 1 |
+| `neura.test.assert_equal_int32` | 1 | int32 expected, int32 actual | void | uint32 | Succeeds when equal; otherwise records the expected and actual values and returns error 1 |
+
+The compiler binds `SysIo.println`, `Test.assert`, and `Test.assert_equal_int32` to these imports. Each call's error continuation traps with reason 3, so a failed write ends the run and a failed assertion ends the test. `neura run` and `neura test` both register all three services; the test services report the recorded failure with the trap.
+
 For `io.println("Hello, World!")`, the image stores the string in its constant pool. The entry graph selects a host-call exit whose argument names that constant. The bound console handler writes the line and NVM resumes at the exit's success block. The entry function returns a signed 32-bit status. The launcher maps that status to the platform process result. A trap yields a diagnostic and a nonzero process result. The embedding API exposes the full status or structured trap independently of the platform's exit-code range.
 
 ## Determinism, limits, and observability
 
-Given the same validated image, initial inputs, resource limits, and host completion trace, a run yields the same exit selections, effects, state updates, and terminal outcome. Clock readings, file contents, and similar external responses enter through the host boundary. Tests can supply those responses from a trace and verify the emitted request sequence. The reference executor runs one block at a time and waits for each selected host call before resuming. A faster executor must preserve that order where it is observable.
+Given the same validated image, initial inputs, resource limits, and host completion trace, a run yields the same exit selections, effects, state updates, and terminal outcome. Clock readings, file contents, and similar external responses enter through the host boundary. Tests can supply those responses from a trace and verify the emitted request sequence. `nvm::record` runs an image with bound services and records each request, as the import's name and version with its arguments, together with the response and the terminal outcome. `nvm::replay` runs an image, answering each request from a recorded trace instead of real services, and reports whether the image made the same requests in the same order and ended the same way. Requests match by import name and version, not table index, so two images that number their imports differently can be compared. The decompiler tests use this to compare an image with one regenerated from its decompilation. The reference executor runs one block at a time and waits for each selected host call before resuming. A faster executor must preserve that order where it is observable.
 
 The loader applies size and count limits before allocating image structures. The runner enforces declared bounds on frame depth, live heap storage, and execution steps. Exhaustion traps at the operation that exceeds the configured limit. Limit checks occur before the affected allocation or state mutation. A trap stops further program execution and leaves any completed external effects visible.
 
