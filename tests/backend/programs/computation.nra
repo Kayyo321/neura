@@ -20,8 +20,7 @@ let Computation = module:io.Entry (
         return n * factorial(n - 1);
     };
 
-    // Euclid's algorithm by subtraction. Division is avoided because the
-    // result of an inexact division is not specified.
+    // Euclid's algorithm by subtraction.
     let gcd = func(uint32 a, uint32 b) -> uint32 {
         while (a != b) {
             if (a > b) {

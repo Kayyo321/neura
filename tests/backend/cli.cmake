@@ -110,6 +110,12 @@ same_bytes("repeated source builds" "${TEST_DIR}/hello.nvr" "${TEST_DIR}/hello-a
 build_image("${TEST_DIR}/hello-from-nir-again.nvr" "${TEST_DIR}/hello.nir")
 same_bytes("repeated .nir builds" "${TEST_DIR}/hello.nvr" "${TEST_DIR}/hello-from-nir-again.nvr")
 
+# Programs that use no NVR 1.1 feature are still NVR 1.0 images.
+file(READ "${TEST_DIR}/hello.nvr" hello_version OFFSET 4 LIMIT 4 HEX)
+if(NOT hello_version STREQUAL "01000000")
+    message(FATAL_ERROR "Hello World should be an NVR 1.0 image, found version bytes ${hello_version}")
+endif()
+
 file(MAKE_DIRECTORY "${TEST_DIR}/isolated")
 file(COPY "${TEST_DIR}/hello.nvr" DESTINATION "${TEST_DIR}/isolated")
 file(GLOB isolated_files "${TEST_DIR}/isolated/*")
@@ -153,21 +159,45 @@ build_image("${TEST_DIR}/multi-file.nvr" -I "${SOURCE_DIR}/examples/modules/mult
 expect_run("multi-file" "${TEST_DIR}/multi-file.nvr" "Hello, Neura!\n" 0 "")
 
 # Library examples run through drivers that import them.
-foreach(driver IN ITEMS core overlay classes)
+foreach(driver IN ITEMS core overlay classes collections polymorphism)
     build_image("${TEST_DIR}/${driver}-driver.nvr" ${roots} "${tests}/examples/${driver}-driver.nra")
     file(READ "${tests}/examples/${driver}-driver.out" expected)
     expect_run("${driver} driver" "${TEST_DIR}/${driver}-driver.nvr" "${expected}" 0 "")
 endforeach()
 
 # Examples whose builds stop at a documented limitation.
-expect_build_failure("collections" "collections[.]nra:6:9: error: the width of 'int' is not specified"
-    "${TEST_DIR}/collections.nvr" ${roots} "${tests}/examples/collections-driver.nra")
-expect_build_failure("polymorphism" "polymorphism[.]nra:[0-9]+:[0-9]+: error: generic function 'identity' is not supported"
-    "${TEST_DIR}/polymorphism.nvr" ${roots} "${tests}/examples/polymorphism-driver.nra")
-expect_build_failure("math-tests" "error: external function 'Test[.]assert_equal_int32' has no runtime binding"
-    "${TEST_DIR}/math-tests.nvr" ${roots} "${tests}/examples/math-tests-driver.nra")
-expect_build_failure("resources" "resources[.]nra:8:15: error: initializer of 'counter' is not a constant"
-    "${TEST_DIR}/resources.nvr" "${SOURCE_DIR}/examples/guide/resources.nra")
+
+# The test runner: the math-tests example, and a suite with failures, a trap,
+# and module state that each test starts fresh.
+function(expect_tests label expected expected_status)
+    neura(result "${TEST_DIR}" test ${ARGN})
+    if(NOT result_status STREQUAL "${expected_status}")
+        message(FATAL_ERROR "${label}: expected status ${expected_status}, got ${result_status}\n${result_stderr}")
+    endif()
+    if(NOT result_stdout STREQUAL expected)
+        message(FATAL_ERROR "${label}: stdout differs\nexpected:\n${expected}\nactual:\n${result_stdout}")
+    endif()
+endfunction()
+expect_tests("math-tests" "PASS MathTests.test_sum_to\n1 test(s), 1 passed, 0 failed\n" 0
+    -I "${SOURCE_DIR}/examples/guide" "${SOURCE_DIR}/examples/testing/math-tests.nra")
+file(READ "${tests}/testing/suite.out" expected)
+expect_tests("test suite" "${expected}" 1 "${tests}/testing/suite.nra")
+expect_tests("test suite unoptimized" "${expected}" 1 --no-optimize "${tests}/testing/suite.nra")
+expect_failure("no tests" "no tests found" test "${hello}")
+build_image("${TEST_DIR}/resources-driver.nvr" "${SOURCE_DIR}/examples/guide/resources.nra"
+    "${tests}/examples/resources-driver.nra")
+file(READ "${tests}/examples/resources-driver.out" expected)
+expect_run("resources driver" "${TEST_DIR}/resources-driver.nvr" "${expected}" 0 "")
+
+# Program initialization across files, with both build routes.
+build_image("${TEST_DIR}/initialization.nvr" "${tests}/initialization/main.nra")
+file(READ "${tests}/initialization/main.out" expected)
+expect_run("initialization" "${TEST_DIR}/initialization.nvr" "${expected}" 0 "")
+build_image("${TEST_DIR}/initialization-unoptimized.nvr" --no-optimize "${tests}/initialization/main.nra")
+expect_run("initialization unoptimized" "${TEST_DIR}/initialization-unoptimized.nvr" "${expected}" 0 "")
+neura(emit "${TEST_DIR}" emit-ir "${tests}/initialization/main.nra" -o "${TEST_DIR}/initialization.nir")
+build_image("${TEST_DIR}/initialization-from-nir.nvr" "${TEST_DIR}/initialization.nir")
+same_bytes("initialization from .nir" "${TEST_DIR}/initialization.nvr" "${TEST_DIR}/initialization-from-nir.nvr")
 foreach(library IN ITEMS guide/core guide/errors testing/math-tests types/classes types/collections
                          types/overlay types/polymorphism modules/multi-file/acme/greetings
                          modules/multi-file/acme/greetings/punctuation)

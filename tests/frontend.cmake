@@ -105,3 +105,154 @@ let Derived = class:Base (
     }
 );
 ]=] "6:[1-9][0-9]*" "super.init must be the first statement")
+
+# Loops, conversions, and remainders lower to existing control flow plus the
+# NeuraIR 1.1 operations; a for loop's step is a latch.
+set(loops "${TEST_DIR}/loops.nra")
+file(WRITE "${loops}" [=[
+let count = func(int32[list] values, int limit) -> int {
+    let total: int = 0;
+    for (let i: int = 0; i < limit; i = i + 1) {
+        total = total + i % 3;
+    }
+    for (let value in values) {
+        total = total + value;
+    }
+    return total + (limit as int8) as int32;
+};
+]=])
+run_success(loop_ir emit-ir --no-optimize "${loops}")
+foreach(operation IN ITEMS loop latch convert collection_version fail length index)
+    if(NOT loop_ir MATCHES "\n +${operation}")
+        message(FATAL_ERROR "Expected ${operation} in the lowered loops\n${loop_ir}")
+    endif()
+endforeach()
+if(loop_ir MATCHES "[:<, ]int[^0-9a-z_]" OR loop_ir MATCHES "byte")
+    message(FATAL_ERROR "int and byte should lower to int32 and uint8\n${loop_ir}")
+endif()
+
+check_rejection(float-remainder "let r: float64 = 1.5 % 2.0;" "2:[1-9][0-9]*" "operator '%' is not defined for float64")
+check_rejection(bool-conversion "let n: int32 = true as int32;" "2:[1-9][0-9]*" "cannot convert bool to int32")
+check_rejection(string-conversion [=[
+let n = func(string text) -> int32 {
+    return text as int32;
+};
+]=] "3:[1-9][0-9]*" "cannot convert string to int32")
+check_rejection(for-each-scalar [=[
+let f = func(int32 value) -> void {
+    for (let item in value) {
+    }
+};
+]=] "3:22" "for-each requires an array or list, got int32")
+check_rejection(for-each-element-type [=[
+let f = func(int32[] values) -> void {
+    for (let item: string in values) {
+    }
+};
+]=] "3:20" "expected string, got int32")
+check_rejection(for-step-break [=[
+let f = func() -> void {
+    for (let i: int32 = 0; i < 3; break) {
+    }
+};
+]=] "3:35" "a for loop step must be an assignment or an expression")
+check_rejection(for-scope [=[
+let f = func() -> int32 {
+    for (let i: int32 = 0; i < 3; i = i + 1) {
+    }
+    return i;
+};
+]=] "5:12" "unknown name 'i'")
+check_rejection(element-scope [=[
+let f = func(int32[] values) -> int32 {
+    for (let value in values) {
+    }
+    return value;
+};
+]=] "5:12" "unknown name 'value'")
+check_rejection(for-each-const [=[
+let f = func(int32[] values) -> void {
+    for (const value in values) {
+        value = 1;
+    }
+};
+]=] "4:9" "cannot assign to const 'value'")
+check_rejection(in-keyword "let in = 3;" "2:5" "expected an identifier")
+
+# Generic rules: bounds are checked at the type argument, generic inheritance
+# is not part of the language, and generic methods do not override.
+check_rejection(unsatisfied-bound [=[
+let Shape = class (
+    export let sides = func() -> int32 {
+        return 0;
+    };
+);
+let count = func<T:Shape>(T item) -> int32 {
+    return item.sides();
+};
+let use = func() -> int32 {
+    return count<int32>(3);
+};
+]=] "11:18" "type argument int32 does not satisfy the bound Shape of type parameter 'T'")
+check_rejection(generic-inheritance [=[
+let Box = class<T> (
+    export let value: T;
+);
+let Labeled = class:Box (
+);
+]=] "5:21" "generic inheritance is not supported")
+check_rejection(generic-override [=[
+let Base = class (
+    export let make = func() -> int32 {
+        return 0;
+    };
+);
+let Derived = class:Base (
+    export let.override make = func<T>() -> int32 {
+        return 1;
+    };
+);
+]=] "8:5" "override does not match inherited member 'make'")
+check_rejection(missing-type-arguments [=[
+let identity = func<T>(T value) -> T {
+    return value;
+};
+let use = func() -> int32 {
+    return identity(3);
+};
+]=] "6:12" "expected 1 type argument")
+
+# Enums: variants are qualified values of their enum; only equality and
+# conversion to an integer apply.
+check_rejection(unknown-variant [=[
+let Light = enum (Red, Green);
+let pick = func() -> Light {
+    return Light.Blue;
+};
+]=] "4:12" "unknown or inaccessible name 'Light.Blue'|unknown or inaccessible member 'Blue'")
+check_rejection(empty-enum "let Nothing = enum ();" "2:21" "an enum needs at least one variant")
+check_rejection(enum-ordering [=[
+let Light = enum (Red, Green);
+let before = func(Light a, Light b) -> bool {
+    return a < b;
+};
+]=] "4:12" "operator '<' is not defined for Light")
+check_rejection(integer-to-enum [=[
+let Light = enum (Red, Green);
+let pick = func() -> Light {
+    return 0 as Light;
+};
+]=] "4:12" "cannot convert int32 to Light")
+check_rejection(duplicate-variant "let Light = enum (Red, Red);" "2:24" "duplicate declaration of 'Red'")
+
+# Float literals convert directly to their format; values that do not fit are
+# compile-time errors.
+check_rejection(float16-overflow "let big: float16 = 65520.0;" "2:20" "float literal is outside the range of float16")
+check_rejection(float64-overflow "let big: float64 = 1e309;" "2:20" "float literal is outside the range of float64")
+check_rejection(float32-underflow "let tiny: float32 = 1e-50;" "2:21" "nonzero float literal rounds to zero in float32")
+check_rejection(mixed-float "let x: float32 = 1.0; let y: float64 = x;" "2:40" "expected float64, got float32")
+check_rejection(float-int-mix [=[
+let f = func(float32 x, int32 n) -> float32 {
+    return x * n;
+};
+]=] "3:16" "expected float32, got int32")

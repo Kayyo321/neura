@@ -1,11 +1,12 @@
-// Calls examples/types/collections.nra. Its `length` has type int, whose
-// width is not specified, so the build stops with a diagnostic.
+// Calls examples/types/collections.nra, which exercises arrays, lists, and
+// nested collections without printing.
 let io = import:SysIo;
 let collections = import:Collections;
 
 let CollectionsDriver = module:io.Entry (
     export let.override main = func(string[] args) -> Entry.ExitCode {
         collections.example();
+        io.println("collections example finished");
         return Entry.ExitCode.Ok;
     }
 );
