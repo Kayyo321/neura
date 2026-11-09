@@ -1,7 +1,7 @@
 let io = import:SysIo;
 
 let HelloWorld = module:io.Entry { // HelloWorld module inherits from SysIo.Entry (main)
-    export let main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> Entry.ExitCode {
         io.println("Hello, World!");
         return Entry.ExitCode.Ok; // Enum ExitCode
     }
