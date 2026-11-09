@@ -1,0 +1,39 @@
+let Classes = module (
+    // A class groups fields and methods into a type.
+    export let Animal = class (
+        export let name: string = "Animal";
+
+        export let speak = func() -> string {
+            return name + " makes a sound";
+        }
+    );
+
+    // A derived class inherits fields and can override methods.
+    export let Dog = class:Animal (
+        export let.override speak = func() -> string {
+            return name + " barks";
+        }
+    );
+
+    export let Cat = class:Animal (
+        export let.override speak = func() -> string {
+            return name + " meows";
+        }
+    );
+
+    // A base-typed parameter accepts instances of derived classes.
+    // The call dispatches to the method of the actual instance.
+    export let describe = func(Animal animal) -> string {
+        return animal.speak();
+    };
+
+    export let example = func() -> void {
+        let dog = new Dog();
+        dog.name = "Rover";
+        let cat = new Cat();
+        cat.name = "Mittens";
+
+        let dog_description: string = describe(dog); // "Rover barks"
+        let cat_description: string = describe(cat); // "Mittens meows"
+    };
+);
