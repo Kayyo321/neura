@@ -1,0 +1,108 @@
+// Functions compared against the NeuraIR reference evaluator on the same
+// inputs. Results the language leaves undefined, such as overflow or an
+// inexact division, must trap with reason 1 in the compiled image.
+let io = import:SysIo;
+
+let Arithmetic = module (
+    export let add_i8 = func(int8 a, int8 b) -> int8 {
+        return a + b;
+    };
+
+    export let sub_u8 = func(uint8 a, uint8 b) -> uint8 {
+        return a - b;
+    };
+
+    export let mul_i8 = func(int8 a, int8 b) -> int8 {
+        return a * b;
+    };
+
+    export let div_i8 = func(int8 a, int8 b) -> int8 {
+        return a / b;
+    };
+
+    export let div_u8 = func(uint8 a, uint8 b) -> uint8 {
+        return a / b;
+    };
+
+    export let negate_i8 = func(int8 a) -> int8 {
+        return -a;
+    };
+
+    export let mixed_i8 = func(int8 a, int8 b) -> int8 {
+        return (a - b) * 2 + a / 1 - -b;
+    };
+
+    export let guarded_i8 = func(int8 a, int8 b) -> bool {
+        return a != 0 && b / a > 1 || a == 0 && b + a == b;
+    };
+
+    export let compare_i16 = func(int16 a, int16 b) -> bool {
+        return a < b && b != 0 || a >= b && !(a == b);
+    };
+
+    export let poly_i32 = func(int32 x) -> int32 {
+        return x * x - 3 * x + 2;
+    };
+
+    export let clamp_i64 = func(int64 x, int64 low, int64 high) -> int64 {
+        if (x < low) {
+            return low;
+        }
+        if (x > high) {
+            return high;
+        }
+        return x;
+    };
+
+    export let triangle_u64 = func(uint64 n) -> uint64 {
+        return n * (n + 1) / 2;
+    };
+
+    export let sum_to_u16 = func(uint16 limit) -> uint16 {
+        let total: uint16 = 0;
+        let current: uint16 = 0;
+        while (current < limit) {
+            current = current + 1;
+            total = total + current;
+        }
+        return total;
+    };
+
+    export let first_root_above_i32 = func(int32 n) -> int32 {
+        let i: int32 = 0;
+        let found: int32 = -1;
+        while (i < 100) {
+            if (i * i > n) {
+                found = i;
+                break;
+            }
+            i = i + 1;
+            if (i == 50) {
+                continue;
+            }
+        }
+        return found;
+    };
+
+    export let recursive_sum_u8 = func(uint8 n) -> uint8 {
+        if (n == 0) {
+            return 0;
+        }
+        return n + recursive_sum_u8(n - 1);
+    };
+
+    export let swap_difference_u32 = func(uint32 a, uint32 b) -> uint32 {
+        if (a < b) {
+            let t: uint32 = a;
+            a = b;
+            b = t;
+        }
+        return a - b;
+    };
+);
+
+let Main = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        return Entry.ExitCode.Ok;
+    }
+);

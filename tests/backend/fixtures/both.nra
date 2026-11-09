@@ -1,0 +1,17 @@
+// The conjunction from docs/Project.md, "Example from source to circuit".
+let io = import:SysIo;
+
+let Logic = module (
+    export let both = func(bool left, bool right) -> bool {
+        return left && right;
+    };
+);
+
+let Main = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        if (Logic.both(true, true)) {
+            io.println("both");
+        }
+        return Entry.ExitCode.Ok;
+    }
+);
