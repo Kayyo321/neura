@@ -29,6 +29,8 @@ const std::vector<RegisteredPass>& registry() {
          simplify_control_flow},
         {{"remove-unreachable", "remove statements after a statement that never completes"},
          remove_unreachable},
+        {{"remove-pure-discards", "remove discarded expressions that have no effect and cannot fail"},
+         remove_pure_discards},
     };
     return passes;
 }

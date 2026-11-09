@@ -240,4 +240,13 @@ std::size_t remove_unreachable(IrProgram& program) {
     });
 }
 
+std::size_t remove_pure_discards(IrProgram& program) {
+    return rewrite_regions(program, [&program](std::vector<IrNode>& region) -> std::size_t {
+        return std::erase_if(region, [&program](const IrNode& statement) {
+            return statement.op == IrOp::Discard && statement.operands.size() == 1 &&
+                   pure_and_total(program, statement.operands.front());
+        });
+    });
+}
+
 } // namespace neura::optimization
