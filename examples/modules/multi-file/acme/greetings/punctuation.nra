@@ -1,0 +1,3 @@
+let Punctuation = module (
+    export let exclamation: string = "!";
+);

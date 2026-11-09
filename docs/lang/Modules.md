@@ -20,6 +20,8 @@ let io = import:SysIo;
 io.println("Hello");
 ```
 
+For project-local modules, the proposed qualified-name and file layout convention is described in [Project structure](ProjectStructure.md). The [multi-file example](../../examples/modules/multi-file/main.nra) shows a project module importing another project module. This convention is not yet backed by a compiler in this repository.
+
 ## Interfaces and inheritance
 
 A module can inherit another module with `module:Base`. Its interface includes the inherited exports as well as its own. The derived module can implement inherited function signatures and use inherited implementations.

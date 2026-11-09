@@ -1,0 +1,9 @@
+let io = import:SysIo;
+let greetings = import:Acme.Greetings;
+
+let App = module:io.Entry (
+    export let.override main = func(string[] args) -> Entry.ExitCode {
+        io.println(greetings.message("Neura"));
+        return Entry.ExitCode.Ok;
+    }
+);
