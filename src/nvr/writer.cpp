@@ -1,7 +1,10 @@
 #include "format.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -12,7 +15,9 @@ unsigned lane_count(const Type& type) {
     case TypeKind::Void: return 0;
     case TypeKind::Bool: return 1;
     case TypeKind::Unsigned:
-    case TypeKind::Signed: return type.width;
+    case TypeKind::Signed:
+    case TypeKind::Float:
+    case TypeKind::BFloat: return type.width;
     case TypeKind::Text:
     case TypeKind::Bytes:
     case TypeKind::Object:
@@ -222,12 +227,22 @@ std::vector<Section> sections(const Image& image) {
             });
         });
     }
+    for (const auto& raw : image.other_sections) {
+        for (char c : raw.tag) {
+            if (c < 0x20 || c > 0x7e) {
+                throw std::invalid_argument("an optional section tag is not printable ASCII");
+            }
+        }
+        result.push_back({raw.tag, false, raw.data});
+    }
     add("TYPE", true, [&](Output& out) {
         vector(out, image.types, [](Output& o, const Type& type) {
             o.u8(static_cast<std::uint8_t>(type.kind));
             switch (type.kind) {
             case TypeKind::Unsigned:
-            case TypeKind::Signed: o.u8(type.width); break;
+            case TypeKind::Signed:
+            case TypeKind::Float:
+            case TypeKind::BFloat: o.u8(type.width); break;
             case TypeKind::Object:
             case TypeKind::Array:
             case TypeKind::List: o.u32(type.reference); break;
@@ -235,12 +250,43 @@ std::vector<Section> sections(const Image& image) {
             }
         });
     });
+    std::stable_sort(result.begin(), result.end(),
+                     [](const Section& a, const Section& b) { return a.tag < b.tag; });
+    for (std::size_t i = 1; i < result.size(); ++i) {
+        if (result[i - 1].tag == result[i].tag) {
+            throw std::invalid_argument("two sections share the tag " +
+                                        std::string(result[i].tag.begin(), result[i].tag.end()));
+        }
+    }
     return result;
 }
 
 } // namespace
 
+std::uint16_t required_minor_version(const Image& image) {
+    for (const auto& type : image.types) {
+        if (type.kind == TypeKind::Float || type.kind == TypeKind::BFloat) {
+            return 1;
+        }
+    }
+    for (const auto& function : image.functions) {
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if ((exit.kind == ExitKind::State && exit.operation == StateOp::ReadVersion) ||
+                    (exit.kind == ExitKind::Trap && exit.reason == static_cast<std::uint32_t>(
+                                                                      TrapReason::ModifiedDuringIteration))) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 std::vector<std::uint8_t> encode(const Image& image) {
+    if (image.minor_version > minor_version) {
+        throw std::invalid_argument("the image records an unsupported minor version");
+    }
     const auto parts = sections(image);
     constexpr std::uint64_t header_size = 24;
     constexpr std::uint64_t directory_record_size = 24;
@@ -255,7 +301,7 @@ std::vector<std::uint8_t> encode(const Image& image) {
         out.u8(static_cast<std::uint8_t>(c));
     }
     out.u16(major_version);
-    out.u16(minor_version);
+    out.u16(std::max(image.minor_version, required_minor_version(image)));
     out.u32(graph_profile);
     out.u32(static_cast<std::uint32_t>(parts.size()));
     out.u64(file_size);

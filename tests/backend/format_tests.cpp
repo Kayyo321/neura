@@ -6,6 +6,7 @@
 #include "fixtures.hpp"
 
 #include <functional>
+#include <stdexcept>
 
 namespace neura::testing {
 namespace {
@@ -48,6 +49,77 @@ void mutate_logic(const std::function<void(nvr::Image&)>& change, std::string_vi
 }
 
 } // namespace
+
+NEURA_TEST(format, version_1_1_features) {
+    // A hand-assembled 1.1 image decodes to its model, and the writer emits
+    // the same bytes: it raises the minor version only for 1.1 features.
+    const auto bytes = version_bytes(1);
+    check(nvr::load(bytes) == version_model(), "the 1.1 fixture decodes to its model");
+    auto model = version_model();
+    model.minor_version = 0;
+    check(nvr::encode(model) == bytes, "a ReadVersion exit makes the writer emit 1.1");
+    check_equal(nvr::encode(logic_model())[6], std::uint8_t{0}, "an image without 1.1 features is written as 1.0");
+    auto recorded = logic_model();
+    recorded.minor_version = 1;
+    check_equal(nvr::encode(recorded)[6], std::uint8_t{1}, "a loaded 1.1 header is preserved");
+    check(nvr::load(nvr::encode(recorded)).minor_version == 1, "the loader records the minor version");
+
+    expect_rejected(version_bytes(0), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
+    expect_rejected(version_bytes(2), Kind::Unsupported, "format version 1.2 is not supported");
+    auto reason_only = version_model();
+    reason_only.functions[0].blocks[1] = reason_only.functions[0].blocks[2];
+    reason_only.minor_version = 0;
+    auto reason_bytes = nvr::encode(reason_only);
+    check_equal(reason_bytes[6], std::uint8_t{1}, "trap reason 5 makes the writer emit 1.1");
+    reason_bytes[6] = 0;
+    expect_rejected(reason_bytes, Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
+
+    auto on_array = version_model();
+    on_array.functions[0].blocks[1].exits[0].arguments = {{nvr::ValueKind::Slot, 4, 0}};
+    expect_invalid(on_array, "argument 0 has the wrong type");
+    auto wrong_slot = version_model();
+    wrong_slot.functions[0].frame_types[2] = 2;
+    expect_invalid(wrong_slot, "result slot must have type uint64");
+}
+
+NEURA_TEST(format, float_types_and_constants) {
+    // NVR 1.1 float types: kind 9 with width 16, 32, or 64, and kind 10 with
+    // width 16, encoded like integer types; constants hold the encoding.
+    const auto with_floats = [](std::uint8_t float_width, std::uint8_t bfloat_width, std::size_t payload) {
+        auto sections = hello_sections();
+        Out types;
+        types.u32(8).u8(0).u8(1).u8(3).u8(32).u8(4).u8(7).u32(3).u8(2).u8(32).u8(9).u8(float_width).u8(10).u8(bfloat_width);
+        replace(sections, "TYPE", types.bytes);
+        Out constants;
+        constants.u32(3);
+        constants.u32(2).u32(4).u8(0).u8(0).u8(0).u8(0);
+        constants.u32(3).text("hi");
+        constants.u32(6).u32(static_cast<std::uint32_t>(payload));
+        for (std::size_t i = 0; i < payload; ++i) {
+            constants.u8(i == payload - 1 ? 0x3f : 0);
+        }
+        replace(sections, "CONS", constants.bytes);
+        return sections;
+    };
+    Header newer;
+    newer.minor = 1;
+    const auto bytes = assemble(with_floats(32, 16, 4), newer);
+    auto expected = hello_model();
+    expected.minor_version = 1;
+    expected.types.push_back({nvr::TypeKind::Float, 32, 0});
+    expected.types.push_back({nvr::TypeKind::BFloat, 16, 0});
+    expected.constants.push_back({6, {0, 0, 0, 0x3f}});
+    check(nvr::load(bytes) == expected, "float types and a float constant decode to their model");
+    auto unversioned = expected;
+    unversioned.minor_version = 0;
+    check(nvr::encode(unversioned) == bytes, "a float type makes the writer emit 1.1");
+    expect_rejected(assemble(with_floats(32, 16, 4)), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
+    expect_rejected(assemble(with_floats(8, 16, 1), newer), Kind::Malformed, "invalid float width 8");
+    expect_rejected(assemble(with_floats(32, 32, 4), newer), Kind::Malformed, "invalid bfloat width 32");
+    expect_rejected(assemble(with_floats(32, 16, 2), newer), Kind::Invalid, "a floating-point payload has 4 bytes");
+    check_equal(nvr::lane_count({nvr::TypeKind::Float, 64, 0}), 64U, "float64 lanes");
+    check_equal(nvr::lane_count({nvr::TypeKind::BFloat, 16, 0}), 16U, "bfloat16 lanes");
+}
 
 NEURA_TEST(format, assembled_fixtures_decode_to_their_models) {
     const auto hello = assemble(hello_sections());
@@ -136,8 +208,9 @@ NEURA_TEST(format, header_errors) {
     bad_magic.magic = "NEUX";
     expect_rejected(assemble(sections, bad_magic), Kind::Malformed, "not an NVR image");
     Header newer_minor;
-    newer_minor.minor = 1;
-    expect_rejected(assemble(sections, newer_minor), Kind::Unsupported, "format version 1.1");
+    newer_minor.minor = 2;
+    expect_rejected(assemble(sections, newer_minor), Kind::Unsupported,
+                    "format version 1.2 is not supported; this loader accepts 1.0 through 1.1");
     Header newer_major;
     newer_major.major = 2;
     expect_rejected(assemble(sections, newer_major), Kind::Unsupported, "format version 2.0");
@@ -215,7 +288,25 @@ NEURA_TEST(format, directory_errors) {
 NEURA_TEST(format, unknown_and_misflagged_sections) {
     auto sections = hello_sections();
     sections.push_back({"XTRA", 0, {1, 2, 3}});
-    check(nvr::load(assemble(sections)) == hello_model(), "an unknown optional section is skipped by length");
+    {
+        // An unknown optional section does not affect execution. The loader
+        // keeps its bytes so that re-encoding reproduces the image.
+        const auto bytes = assemble(sections);
+        auto expected = hello_model();
+        expected.other_sections.push_back({{'X', 'T', 'R', 'A'}, {1, 2, 3}});
+        const auto loaded = nvr::load(bytes);
+        check(loaded == expected, "an unknown optional section is kept raw");
+        check(nvr::encode(loaded) == bytes, "re-encoding keeps the unknown optional section in tag order");
+        auto colliding = expected;
+        colliding.other_sections.push_back({{'T', 'Y', 'P', 'E'}, {}});
+        bool rejected = false;
+        try {
+            nvr::encode(colliding);
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        check(rejected, "the writer rejects a raw section that reuses a known tag");
+    }
     sections.back() = {"ZZZZ", 1, {}};
     expect_rejected(assemble(sections), Kind::Unsupported, "unknown required section ZZZZ");
 
@@ -235,8 +326,8 @@ NEURA_TEST(format, record_encoding_errors) {
     }
     {
         auto sections = hello_sections();
-        replace(sections, "TYPE", Out().u32(1).u8(9).bytes);
-        expect_rejected(assemble(sections), Kind::Malformed, "invalid type kind 9");
+        replace(sections, "TYPE", Out().u32(1).u8(11).bytes);
+        expect_rejected(assemble(sections), Kind::Malformed, "invalid type kind 11");
     }
     {
         auto sections = hello_sections();
@@ -269,8 +360,8 @@ NEURA_TEST(format, record_encoding_errors) {
         data[exit_kind] = 6;
         expect_rejected(assemble(sections), Kind::Malformed, "invalid exit kind 6");
         data[exit_kind] = 3;  // a state operation needs more bytes than remain valid
-        data[exit_kind + 5] = 14;
-        expect_rejected(assemble(sections), Kind::Malformed, "invalid state operation 14");
+        data[exit_kind + 5] = 15;
+        expect_rejected(assemble(sections), Kind::Malformed, "invalid state operation 15");
     }
 }
 
@@ -350,7 +441,7 @@ NEURA_TEST(format, exit_validation) {
     mutate_logic([](nvr::Image& i) { i.functions[0].blocks[1].exits[0].assignments.push_back({1, {ValueKind::Constant, 1, 0}}); },
                  "a trap exit has no assignments");
     mutate_logic([](nvr::Image& i) { i.functions[0].blocks[1].exits[0].reason = 0; }, "trap reason 0 is not defined");
-    mutate_logic([](nvr::Image& i) { i.functions[0].blocks[1].exits[0].reason = 5; }, "trap reason 5 is not defined");
+    mutate_logic([](nvr::Image& i) { i.functions[0].blocks[1].exits[0].reason = 6; }, "trap reason 6 is not defined");
     mutate_logic([](nvr::Image& i) {
         auto& exit = i.functions[0].blocks[1].exits[1];
         exit.assignments = {{1, {ValueKind::Constant, 1, 0}}, {1, {ValueKind::Slot, 1, 1}}};

@@ -140,6 +140,56 @@ Image logic_model() {
     return image;
 }
 
+// Types: 0 void, 1 bool, 2 int32, 3 text, 4 text[], 5 int32[list], 6 uint64.
+Image version_model() {
+    Image image;
+    image.minor_version = 1;
+    image.types = {{TypeKind::Void}, {TypeKind::Bool}, {TypeKind::Signed, 32}, {TypeKind::Text},
+                   {TypeKind::Array, 0, 3}, {TypeKind::List, 0, 2}, {TypeKind::Unsigned, 64}};
+    image.graphs = {Graph{}};
+    Function entry;
+    entry.parameter_count = 1;
+    entry.result_type = 2;
+    entry.frame_types = {4, 5, 6};
+    entry.blocks = {
+        block({state_exit(StateOp::AllocateCollection, 5, {}, 1, 1)}),
+        block({state_exit(StateOp::ReadVersion, 0, {{ValueKind::Slot, 5, 1}}, 2, 2)}),
+        block({trap_exit(5)}),
+    };
+    image.functions = {entry};
+    return image;
+}
+
+std::vector<std::uint8_t> version_bytes(std::uint16_t minor) {
+    using namespace nvr_bytes;
+    Out functions;
+    functions.u32(1);
+    functions.u32(1).u32(2);
+    functions.u32(3).u32(4).u32(5).u32(6);
+    functions.u32(3);
+    // Block 0: allocate an int32 list (type 5) into slot 1, resume 1.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(3).u32(0).u8(7).u32(5).u32(0).u32(1).u32(1);
+    // Block 1: read the version of slot 1 into slot 2, resume 2.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(3).u32(0).u8(14).u32(0).raw(vector_of({nvr_bytes::value(0, 5, 1)})).u32(2).u32(2);
+    // Block 2: trap with reason 5.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(5).u32(0).u32(5);
+
+    Out graphs;
+    graphs.u32(1).u32(0).u32(0).u32(0);
+    Out types;
+    types.u32(7).u8(0).u8(1).u8(3).u8(32).u8(4).u8(7).u32(3).u8(8).u32(2).u8(2).u8(64);
+    Header header;
+    header.minor = minor;
+    return assemble({
+        {"CONS", 1, Out().u32(0).bytes}, {"FUNC", 1, functions.bytes}, {"GLOB", 1, Out().u32(0).bytes},
+        {"GRPH", 1, graphs.bytes},       {"IMPT", 1, Out().u32(0).bytes}, {"LAYO", 1, Out().u32(0).bytes},
+        {"META", 1, Out().u32(0).bytes}, {"TYPE", 1, types.bytes},
+    }, header);
+}
+
 std::vector<std::uint8_t> logic_bytes() {
     using namespace nvr_bytes;
     constexpr std::uint32_t none = 0xffffffffU;

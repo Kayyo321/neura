@@ -40,6 +40,7 @@ std::string_view reason_text(std::uint32_t reason) {
     case 2: return "source bounds failure";
     case 3: return "explicit program failure";
     case 4: return "invalid dispatch";
+    case 5: return "collection modified during iteration";
     default: return "undefined trap reason";
     }
 }
@@ -161,7 +162,8 @@ public:
         for (std::size_t i = 0; i < arguments.size(); ++i) {
             const auto& t = image.types[callee.frame_types[i]];
             const bool scalar = t.kind == nvr::TypeKind::Bool || t.kind == nvr::TypeKind::Signed ||
-                                t.kind == nvr::TypeKind::Unsigned;
+                                t.kind == nvr::TypeKind::Unsigned || t.kind == nvr::TypeKind::Float ||
+                                t.kind == nvr::TypeKind::BFloat;
             const auto width = t.kind == nvr::TypeKind::Bool ? 1U : t.width;
             if (!scalar || (arguments[i] & ~mask(width)) != 0) {
                 throw std::invalid_argument("argument " + std::to_string(i) + " does not match its parameter");
@@ -234,6 +236,9 @@ private:
         std::vector<std::uint64_t> cells;
         std::vector<std::uint8_t> initialized;
         std::string bytes;
+        // Structural version of a list: incremented by every successful
+        // append or removal, modulo 2^64.
+        std::uint64_t version = 0;
     };
 
     struct Frame {
@@ -671,6 +676,7 @@ private:
             auto& item = typed_entry(args[0], types[0].type);
             reserve_cells(1);
             item.cells.push_back(args[1]);
+            ++item.version;
             return 0;
         }
         case nvr::StateOp::RemoveElement: {
@@ -678,8 +684,11 @@ private:
             const auto index = checked_index(item, args[1]);
             item.cells.erase(item.cells.begin() + static_cast<std::ptrdiff_t>(index));
             --live_cells_;
+            ++item.version;
             return 0;
         }
+        case nvr::StateOp::ReadVersion:
+            return typed_entry(args[0], types[0].type).version;
         case nvr::StateOp::ConstructText: {
             const auto& source = typed_entry(args[0], types[0].type);
             HeapEntry item;

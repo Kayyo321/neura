@@ -4,6 +4,7 @@
 // loader decodes and validates it, so both sides share one definition of the
 // records in docs/runtime/NVR.md.
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -13,16 +14,22 @@ namespace neura::nvr {
 
 inline constexpr std::uint32_t absent = 0xffffffffU;
 inline constexpr std::uint16_t major_version = 1;
-inline constexpr std::uint16_t minor_version = 0;
+// The highest minor version of major version 1 that this code reads and
+// writes. The writer emits the lowest minor version whose features the image
+// uses, so images that need nothing newer stay byte-identical to 1.0.
+inline constexpr std::uint16_t minor_version = 1;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
-    Void = 0, Bool = 1, Unsigned = 2, Signed = 3, Text = 4, Bytes = 5, Object = 6, Array = 7, List = 8
+    Void = 0, Bool = 1, Unsigned = 2, Signed = 3, Text = 4, Bytes = 5, Object = 6, Array = 7, List = 8,
+    // NVR 1.1: IEEE 754 binary16, binary32, or binary64 by width, and
+    // bfloat16 (width 16).
+    Float = 9, BFloat = 10
 };
 
 struct Type {
     TypeKind kind = TypeKind::Void;
-    // Width in bits for Unsigned and Signed; zero otherwise.
+    // Width in bits for Unsigned, Signed, Float, and BFloat; zero otherwise.
     std::uint8_t width = 0;
     // Layout for Object, element type for Array and List; zero otherwise.
     std::uint32_t reference = 0;
@@ -98,13 +105,17 @@ enum class ExitKind : std::uint8_t { Continue = 0, Call = 1, Return = 2, State =
 enum class StateOp : std::uint8_t {
     AllocateObject = 0, ReadTag = 1, ReadField = 2, WriteField = 3, FreeObject = 4,
     ReadGlobal = 5, WriteGlobal = 6, AllocateCollection = 7, ReadLength = 8, ReadElement = 9,
-    WriteElement = 10, AppendElement = 11, RemoveElement = 12, ConstructText = 13
+    WriteElement = 10, AppendElement = 11, RemoveElement = 12, ConstructText = 13,
+    // NVR 1.1.
+    ReadVersion = 14
 };
 
-inline constexpr std::uint8_t state_op_count = 14;
+inline constexpr std::uint8_t state_op_count = 15;
 
 enum class TrapReason : std::uint32_t {
-    Arithmetic = 1, Bounds = 2, ProgramFailure = 3, InvalidDispatch = 4
+    Arithmetic = 1, Bounds = 2, ProgramFailure = 3, InvalidDispatch = 4,
+    // NVR 1.1.
+    ModifiedDuringIteration = 5
 };
 
 // One record for every exit kind. Fields that a kind does not use keep their
@@ -171,7 +182,19 @@ struct SourceLocation {
     bool operator==(const SourceLocation&) const = default;
 };
 
+// An optional section this code does not interpret, kept so that decoding
+// and re-encoding an image preserves it.
+struct RawSection {
+    std::array<char, 4> tag{};
+    std::vector<std::uint8_t> data;
+
+    bool operator==(const RawSection&) const = default;
+};
+
 struct Image {
+    // The minor version recorded in the header. The writer emits at least
+    // this version and raises it when the image uses a newer feature.
+    std::uint16_t minor_version = 0;
     std::vector<Type> types;
     std::vector<Constant> constants;
     std::vector<Layout> layouts;
@@ -182,9 +205,14 @@ struct Image {
     std::uint32_t entry = 0;
     // The optional SMAP section. Absent when the image carries no source map.
     std::optional<std::vector<SourceLocation>> source_map;
+    // Unknown optional sections in ascending tag order.
+    std::vector<RawSection> other_sections;
 
     bool operator==(const Image&) const = default;
 };
+
+// The lowest minor version that can represent `image`.
+std::uint16_t required_minor_version(const Image& image);
 
 // Number of graph lanes a value of `type` occupies at the graph boundary.
 unsigned lane_count(const Type& type);

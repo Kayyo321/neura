@@ -20,6 +20,11 @@ nvr::Image hello_model();
 // A second fixture with graphs, a call, a selector, state operations, a
 // global, a layout, and a source map. Its entry function returns 7.
 nvr::Image logic_model();
+// An NVR 1.1 image: allocates a list, reads its structural version, and
+// traps with reason 5. version_bytes assembles it with the given header minor
+// version.
+nvr::Image version_model();
+std::vector<std::uint8_t> version_bytes(std::uint16_t minor);
 std::vector<std::uint8_t> logic_bytes();
 
 struct Captured {

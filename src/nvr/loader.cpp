@@ -207,7 +207,7 @@ std::vector<Type> read_types(Reader& in) {
     return in.vector(1, "type table", [](Reader& r) {
         Type type;
         const auto kind = r.u8();
-        if (kind > static_cast<std::uint8_t>(TypeKind::List)) {
+        if (kind > static_cast<std::uint8_t>(TypeKind::BFloat)) {
             fail(Kind::Malformed, "TYPE: invalid type kind " + std::to_string(kind));
         }
         type.kind = static_cast<TypeKind>(kind);
@@ -217,6 +217,18 @@ std::vector<Type> read_types(Reader& in) {
             type.width = r.u8();
             if (type.width != 8 && type.width != 16 && type.width != 32 && type.width != 64) {
                 fail(Kind::Malformed, "TYPE: invalid integer width " + std::to_string(type.width));
+            }
+            break;
+        case TypeKind::Float:
+            type.width = r.u8();
+            if (type.width != 16 && type.width != 32 && type.width != 64) {
+                fail(Kind::Malformed, "TYPE: invalid float width " + std::to_string(type.width));
+            }
+            break;
+        case TypeKind::BFloat:
+            type.width = r.u8();
+            if (type.width != 16) {
+                fail(Kind::Malformed, "TYPE: invalid bfloat width " + std::to_string(type.width));
             }
             break;
         case TypeKind::Object:
@@ -517,6 +529,13 @@ void Validator::constants() {
                 invalid(where + ": an integer payload has " + std::to_string(t.width / 8U) + " bytes");
             }
             break;
+        case TypeKind::Float:
+        case TypeKind::BFloat:
+            // Every bit pattern is a value, including NaN payloads.
+            if (size != t.width / 8U) {
+                invalid(where + ": a floating-point payload has " + std::to_string(t.width / 8U) + " bytes");
+            }
+            break;
         case TypeKind::Text:
             if (!valid_utf8(std::string(constant.payload.begin(), constant.payload.end()))) {
                 invalid(where + ": text payload is not valid UTF-8");
@@ -805,6 +824,12 @@ void Validator::state(const Function& function, const Exit& exit,
         require_index(1);
         no_result();
         break;
+    case StateOp::ReadVersion:
+        arity(1);
+        zero_immediate();
+        require_kind(0, {TypeKind::List});
+        require_slot_type([&](std::uint32_t slot) { return is_unsigned(slot, 64); }, "uint64");
+        break;
     case StateOp::ConstructText: {
         arity(1);
         if (exit.immediate >= image_.types.size()) {
@@ -925,7 +950,7 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
             break;
         }
         case ExitKind::Trap:
-            if (exit.reason < 1 || exit.reason > 4) {
+            if (exit.reason < 1 || exit.reason > 5) {
                 invalid(exit_where + ": trap reason " + std::to_string(exit.reason) + " is not defined");
             }
             break;
@@ -1057,9 +1082,10 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
     }
     const auto major = header.u16();
     const auto minor = header.u16();
-    if (major != major_version || minor != minor_version) {
+    if (major != major_version || minor > minor_version) {
         fail(Kind::Unsupported, "header: format version " + std::to_string(major) + "." + std::to_string(minor) +
-                                    " is not supported; this loader accepts 1.0");
+                                    " is not supported; this loader accepts 1.0 through 1." +
+                                    std::to_string(minor_version));
     }
     const auto profile = header.u32();
     if (profile != graph_profile) {
@@ -1104,6 +1130,7 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
 
     std::uint64_t expected = header_size + std::uint64_t{directory_record_size} * section_count;
     std::map<std::string, std::span<const std::uint8_t>> sections;
+    std::vector<RawSection> other_sections;
     for (const auto& entry : directory) {
         const auto name = tag_name(entry.tag);
         if (entry.offset != expected) {
@@ -1120,6 +1147,8 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
             if (required) {
                 fail(Kind::Unsupported, "directory: unknown required section " + name);
             }
+            const auto data = bytes.subspan(static_cast<std::size_t>(entry.offset), static_cast<std::size_t>(entry.size));
+            other_sections.push_back({entry.tag, {data.begin(), data.end()}});
             continue;
         }
         if (section->required != required) {
@@ -1139,6 +1168,8 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
     }
 
     Image image;
+    image.minor_version = minor;
+    image.other_sections = std::move(other_sections);
     auto section = [&](const char* tag, auto read) {
         Reader in(sections.at(tag), tag, limits);
         read(in);
@@ -1204,6 +1235,10 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
         });
     }
 
+    if (required_minor_version(image) > minor) {
+        fail(Kind::Malformed, "header: the image uses NVR 1." + std::to_string(required_minor_version(image)) +
+                                  " features but declares 1." + std::to_string(minor));
+    }
     Validator(image).run();
     return image;
 }
