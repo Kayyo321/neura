@@ -41,6 +41,7 @@ if(BUILD_TESTING)
     )
 
     add_executable(neura_ir_tests
+        tests/ir-optimization/behavior_tests.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/main.cpp
         tests/ir-optimization/structure_tests.cpp
@@ -53,7 +54,7 @@ if(BUILD_TESTING)
 
     # Each suite is a separate test, so a failure names the kind of evidence
     # that broke.
-    foreach(suite IN ITEMS structure verifier)
+    foreach(suite IN ITEMS structure verifier behavior)
         add_test(NAME ir-optimization-${suite}
             COMMAND neura_ir_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
