@@ -41,6 +41,7 @@ add_library(neura_compiler STATIC
     src/ir-optimization/integer_folding.cpp
     src/ir-optimization/optimizer.cpp
     src/ir-optimization/passes.cpp
+    src/backend/block_synth.cpp
     src/backend/circuit.cpp
     src/backend/converter.cpp
 )

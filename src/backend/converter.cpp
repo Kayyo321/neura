@@ -1,5 +1,6 @@
 #include "converter.hpp"
 
+#include "block_synth.hpp"
 #include "circuit.hpp"
 #include "ir-optimization/analysis.hpp"
 #include "ir-optimization/optimizer.hpp"
@@ -24,54 +25,11 @@ namespace {
 using nvr::absent;
 using Role = FunctionOrigin::Role;
 
-// A value during conversion. Immediates and constants never need a block;
-// slot operands name committed frame state; bit operands live in the graph
-// of the block that computed them.
-struct Operand {
-    enum class Kind { Void, Immediate, Constant, Slot, Bits };
-
-    Kind kind = Kind::Void;
-    std::uint32_t type = 0;
-    // Constant or slot index.
-    std::uint32_t index = 0;
-    // Value of an immediate Boolean or integer.
-    std::uint64_t bits = 0;
-    Word word;
-    // Block generation that computed a Bits operand, and the temporary slot
-    // that holds it once that block has closed.
-    std::uint64_t generation = 0;
-    std::uint32_t home = absent;
-};
-
-struct ExitSpec {
-    nvr::ExitKind kind = nvr::ExitKind::Continue;
-    // Bit that selects this exit. The indicators of a block's exits are
-    // mutually exclusive and cover every case in which no check fails.
-    Signal when = Signal::of(1);
-    // Assignments made only by this exit, after the block's pending ones.
-    std::vector<std::pair<std::uint32_t, Operand>> assignments;
-    std::uint32_t target = 0;
-    nvr::StateOp operation = nvr::StateOp::AllocateObject;
-    std::uint32_t immediate = 0;
-    std::vector<Operand> arguments;
-    std::uint32_t result_slot = absent;
-    std::uint32_t resume = 0;
-    std::uint32_t error_slot = absent;
-    std::uint32_t error_resume = 0;
-    std::uint32_t reason = 0;
-};
-
 struct OpenBlock {
+    explicit OpenBlock(BlockTables& tables) : synth(tables) {}
+
     std::uint32_t index = 0;
-    Circuit circuit;
-    std::vector<nvr::Value> inputs;
-    std::map<std::pair<nvr::ValueKind, std::uint32_t>, Word> input_lanes;
-    std::map<std::vector<WireId>, std::uint32_t> output_lanes;
-    // Slot assignments made by the block's statements, committed in
-    // parallel by whichever exit is taken.
-    std::map<std::uint32_t, Operand> pending;
-    // Checks in evaluation order. The first failing check selects a trap.
-    std::vector<std::pair<std::uint32_t, Signal>> failures;
+    BlockSynthesizer synth;
     // Candidates for the block's source location, in order of preference:
     // its first check that can fail, the operation that ends it, and its
     // first statement. A runtime fault in a block comes from one of these.
@@ -100,14 +58,6 @@ constexpr std::uint32_t arithmetic_failure = static_cast<std::uint32_t>(nvr::Tra
 constexpr std::uint32_t bounds_failure = static_cast<std::uint32_t>(nvr::TrapReason::Bounds);
 constexpr std::uint32_t program_failure = static_cast<std::uint32_t>(nvr::TrapReason::ProgramFailure);
 constexpr std::uint32_t dispatch_failure = static_cast<std::uint32_t>(nvr::TrapReason::InvalidDispatch);
-
-std::vector<std::uint8_t> little_endian(std::uint64_t bits, unsigned bytes) {
-    std::vector<std::uint8_t> result;
-    for (unsigned i = 0; i < bytes; ++i) {
-        result.push_back(static_cast<std::uint8_t>(bits >> (8 * i)));
-    }
-    return result;
-}
 
 std::uint64_t width_mask(unsigned width) {
     return width >= 64 ? ~std::uint64_t{0} : (std::uint64_t{1} << width) - 1;
@@ -143,7 +93,6 @@ private:
     Operand immediate(std::uint32_t type, std::uint64_t bits) const;
     Operand bits(std::uint32_t type, Word word) const;
     Word lanes(const Operand& operand);
-    nvr::Value value(const Operand& operand);
     void spill(Operand& operand);
     void assign(std::uint32_t slot, Operand operand);
     void fail_when(const Signal& condition, std::uint32_t reason, const Span& span);
@@ -212,7 +161,7 @@ private:
     friend class Converter;
 };
 
-class Converter {
+class Converter : public BlockTables {
 public:
     Converter(const IrProgram& program, const ConversionOptions& options) : program_(program), options_(options) {}
 
@@ -226,7 +175,8 @@ public:
     std::uint32_t scalar(nvr::TypeKind kind, unsigned width = 0) {
         return type_index({kind, static_cast<std::uint8_t>(width), 0});
     }
-    std::uint32_t constant(std::uint32_t type, std::vector<std::uint8_t> payload);
+    const nvr::Type& type(std::uint32_t index) const override { return image_.types.at(index); }
+    std::uint32_t constant(std::uint32_t type, std::vector<std::uint8_t> payload) override;
     std::uint32_t text_constant(const std::string& text, const Span& where);
     std::uint32_t layout(SymbolId cls, const Span& where);
     std::uint32_t field_index(SymbolId field, const Span& where);
@@ -455,7 +405,7 @@ std::uint32_t Converter::global(SymbolId id, const Span& where) {
     } else {
         const auto bits = literal(node, result.type);
         const auto& t = image_.types[result.type];
-        result.initializer = constant(result.type, little_endian(*bits, t.kind == nvr::TypeKind::Bool ? 1 : t.width / 8U));
+        result.initializer = constant(result.type, immediate_payload(t, *bits));
     }
     const auto index = static_cast<std::uint32_t>(image_.globals.size());
     image_.globals.push_back(result);
@@ -801,8 +751,7 @@ void Converter::build_dispatch(const Dispatch& dispatch) {
                 if (argument.kind == Operand::Kind::Immediate) {
                     const auto& t = image_.types[argument.type];
                     exit.arguments.push_back({nvr::ValueKind::Constant, argument.type,
-                                              constant(argument.type, little_endian(argument.bits,
-                                                  t.kind == nvr::TypeKind::Bool ? 1 : t.width / 8U))});
+                                              constant(argument.type, immediate_payload(t, argument.bits))});
                 } else {
                     const auto kind = argument.kind == Operand::Kind::Slot ? nvr::ValueKind::Slot
                                                                            : nvr::ValueKind::Constant;
@@ -955,7 +904,7 @@ void FunctionCompiler::begin(std::uint32_t index, const Span& span) {
     if (block_) {
         throw std::logic_error("a block is already open");
     }
-    block_.emplace();
+    block_.emplace(c_);
     current().index = index;
     ++generation_;
     if (!span.file.empty()) {
@@ -993,7 +942,7 @@ Operand FunctionCompiler::slot_operand(std::uint32_t slot) const {
     if (!block_) {
         throw std::logic_error("no block is open");
     }
-    if (const auto it = block_->pending.find(slot); it != block_->pending.end()) {
+    if (const auto it = block_->synth.pending().find(slot); it != block_->synth.pending().end()) {
         return it->second;
     }
     Operand result;
@@ -1025,65 +974,7 @@ Operand FunctionCompiler::bits(std::uint32_t type, Word word) const {
 }
 
 Word FunctionCompiler::lanes(const Operand& original) {
-    const auto operand = resolve(original);
-    const auto count = nvr::lane_count(c_.type_at(operand.type));
-    switch (operand.kind) {
-    case Operand::Kind::Immediate:
-        return constant_word(operand.bits, count);
-    case Operand::Kind::Bits:
-        return operand.word;
-    case Operand::Kind::Slot:
-    case Operand::Kind::Constant: {
-        const auto kind = operand.kind == Operand::Kind::Slot ? nvr::ValueKind::Slot : nvr::ValueKind::Constant;
-        const auto key = std::make_pair(kind, operand.index);
-        if (const auto it = current().input_lanes.find(key); it != current().input_lanes.end()) {
-            return it->second;
-        }
-        current().inputs.push_back({kind, operand.type, operand.index});
-        Word word;
-        for (unsigned i = 0; i < count; ++i) {
-            word.push_back(current().circuit.input());
-        }
-        current().input_lanes.emplace(key, word);
-        return word;
-    }
-    case Operand::Kind::Void:
-        break;
-    }
-    throw std::logic_error("a void operand has no lanes");
-}
-
-nvr::Value FunctionCompiler::value(const Operand& original) {
-    const auto operand = resolve(original);
-    switch (operand.kind) {
-    case Operand::Kind::Immediate: {
-        const auto& t = c_.type_at(operand.type);
-        const auto bytes = t.kind == nvr::TypeKind::Bool ? 1U : t.width / 8U;
-        return {nvr::ValueKind::Constant, operand.type, c_.constant(operand.type, little_endian(operand.bits, bytes))};
-    }
-    case Operand::Kind::Constant:
-        return {nvr::ValueKind::Constant, operand.type, operand.index};
-    case Operand::Kind::Slot:
-        return {nvr::ValueKind::Slot, operand.type, operand.index};
-    case Operand::Kind::Bits: {
-        auto& circuit = current().circuit;
-        std::vector<WireId> wires;
-        wires.reserve(operand.word.size());
-        for (const auto& lane : operand.word) {
-            wires.push_back(circuit.materialize(lane));
-        }
-        auto [it, inserted] = current().output_lanes.emplace(wires, circuit.output_count());
-        if (inserted) {
-            for (const auto wire : wires) {
-                circuit.output(Signal::wire(wire));
-            }
-        }
-        return {nvr::ValueKind::Lanes, operand.type, it->second};
-    }
-    case Operand::Kind::Void:
-        break;
-    }
-    throw std::logic_error("a void operand has no value");
+    return current().synth.lanes(resolve(original));
 }
 
 void FunctionCompiler::spill(Operand& operand) {
@@ -1091,7 +982,7 @@ void FunctionCompiler::spill(Operand& operand) {
         return;
     }
     operand.home = new_slot(operand.type);
-    current().pending[operand.home] = operand;
+    current().synth.pending()[operand.home] = operand;
 }
 
 void FunctionCompiler::assign(std::uint32_t slot, Operand operand) {
@@ -1099,7 +990,7 @@ void FunctionCompiler::assign(std::uint32_t slot, Operand operand) {
     if (operand.kind == Operand::Kind::Void) {
         throw std::logic_error("cannot assign a void value");
     }
-    current().pending[slot] = std::move(operand);
+    current().synth.pending()[slot] = std::move(operand);
 }
 
 void FunctionCompiler::operation_at(const Span& span) {
@@ -1107,101 +998,22 @@ void FunctionCompiler::operation_at(const Span& span) {
 }
 
 void FunctionCompiler::fail_when(const Signal& condition, std::uint32_t reason, const Span& span) {
-    if (condition.is_constant(0)) {
-        return;
-    }
-    if (!current().failure_span) {
+    if (current().synth.fail_when(condition, reason) && !current().failure_span) {
         current().failure_span = span;
-    }
-    auto& failures = current().failures;
-    if (!failures.empty() && failures.back().first == reason) {
-        failures.back().second = current().circuit.logical_or(failures.back().second, condition);
-    } else {
-        failures.emplace_back(reason, condition);
     }
 }
 
 void FunctionCompiler::close(std::vector<ExitSpec> exits) {
     auto& open_block = current();
-    auto& circuit = open_block.circuit;
-
-    // The first failing check, in evaluation order, selects its trap. The
-    // block's own exits apply only when no check fails.
-    Signal clear = Signal::of(1);
-    std::vector<std::pair<std::uint32_t, Signal>> traps;
-    for (const auto& [reason, condition] : open_block.failures) {
-        const auto first = circuit.logical_and(condition, clear);
-        const auto it = std::find_if(traps.begin(), traps.end(), [&](const auto& trap) { return trap.first == reason; });
-        if (it == traps.end()) {
-            traps.emplace_back(reason, first);
-        } else {
-            it->second = it->second + first;
-        }
-        clear = circuit.logical_and(clear, Circuit::logical_not(condition));
-    }
-    std::vector<ExitSpec> selected;
     for (auto& exit : exits) {
-        exit.when = circuit.logical_and(exit.when, clear);
-        if (!exit.when.is_constant(0)) {
-            selected.push_back(std::move(exit));
+        for (auto& [slot, operand] : exit.assignments) {
+            operand = resolve(operand);
+        }
+        for (auto& argument : exit.arguments) {
+            argument = resolve(argument);
         }
     }
-    for (const auto& [reason, when] : traps) {
-        if (!when.is_constant(0)) {
-            ExitSpec trap;
-            trap.kind = nvr::ExitKind::Trap;
-            trap.reason = reason;
-            trap.when = when;
-            selected.push_back(std::move(trap));
-        }
-    }
-    if (selected.empty()) {
-        throw std::logic_error("a block has no reachable exit");
-    }
-
-    nvr::Block block;
-    if (selected.size() > 1) {
-        block.selector_start = circuit.output_count();
-        const auto lanes = nvr::selector_lanes(selected.size());
-        for (unsigned j = 0; j < lanes; ++j) {
-            Signal bit;
-            for (std::size_t e = 0; e < selected.size(); ++e) {
-                if ((e >> j) & 1U) {
-                    bit = bit + selected[e].when;
-                }
-            }
-            circuit.output(bit);
-        }
-    }
-    for (const auto& spec : selected) {
-        nvr::Exit exit;
-        exit.kind = spec.kind;
-        if (spec.kind != nvr::ExitKind::Trap && spec.kind != nvr::ExitKind::Return) {
-            for (const auto& [slot, operand] : open_block.pending) {
-                if (operand.kind == Operand::Kind::Slot && operand.index == slot) {
-                    continue;
-                }
-                exit.assignments.push_back({slot, value(operand)});
-            }
-            for (const auto& [slot, operand] : spec.assignments) {
-                exit.assignments.push_back({slot, value(operand)});
-            }
-        }
-        for (const auto& argument : spec.arguments) {
-            exit.arguments.push_back(value(argument));
-        }
-        exit.target = spec.target;
-        exit.operation = spec.operation;
-        exit.immediate = spec.immediate;
-        exit.result_slot = spec.result_slot;
-        exit.resume = spec.resume;
-        exit.error_slot = spec.error_slot;
-        exit.error_resume = spec.error_resume;
-        exit.reason = spec.reason;
-        block.exits.push_back(std::move(exit));
-    }
-    block.inputs = open_block.inputs;
-    block.graph = c_.graph(circuit.finish());
+    auto block = open_block.synth.close(std::move(exits));
     for (const auto* candidate : {&open_block.failure_span, &open_block.operation_span, &open_block.statement_span}) {
         if (*candidate && !(*candidate)->file.empty()) {
             spans_[open_block.index] = **candidate;
@@ -1644,7 +1456,7 @@ Operand FunctionCompiler::unary(const IrNode& node) {
     }
     const auto format = integer_format(node.type, node.span);
     const auto input = lanes(operand);
-    auto result = negate(current().circuit, input, format.is_signed);
+    auto result = negate(current().synth.circuit(), input, format.is_signed);
     fail_when(result.failure, arithmetic_failure, node.span);
     return bits(c_.type_of(node.type, node.span), std::move(result.value));
 }
@@ -1664,7 +1476,7 @@ Operand FunctionCompiler::binary(const IrNode& node) {
     }
     const auto a = lanes(operands[0]);
     const auto b = lanes(operands[1]);
-    auto& circuit = current().circuit;
+    auto& circuit = current().synth.circuit();
     const auto boolean = c_.scalar(nvr::TypeKind::Bool);
     if (operand_type.kind == TypeKind::Bool) {
         const auto same = Circuit::logical_not(circuit.logical_xor(a.front(), b.front()));
@@ -1717,8 +1529,8 @@ Operand FunctionCompiler::isolated_arithmetic(const IrNode& node, Operand left, 
     begin(own, node.span);
     const auto a = lanes(left);
     const auto b = lanes(right);
-    auto result = node.text == "*" ? multiply(current().circuit, a, b, format.is_signed)
-                                   : divide(current().circuit, a, b, format.is_signed);
+    auto result = node.text == "*" ? multiply(current().synth.circuit(), a, b, format.is_signed)
+                                   : divide(current().synth.circuit(), a, b, format.is_signed);
     fail_when(result.failure, arithmetic_failure, node.span);
     auto value = bits(c_.type_of(node.type, node.span), std::move(result.value));
     spill(value);
@@ -1737,7 +1549,7 @@ Operand FunctionCompiler::short_circuit(const IrNode& node) {
         // graph may compute both operands.
         const auto a = lanes(expression(node.operands.front())).front();
         const auto b = lanes(expression(right)).front();
-        auto& circuit = current().circuit;
+        auto& circuit = current().synth.circuit();
         return bits(boolean, {conjunction ? circuit.logical_and(a, b) : circuit.logical_or(a, b)});
     }
     const auto left = expression(node.operands.front());
@@ -2016,14 +1828,14 @@ void FunctionCompiler::compile_concatenate() {
         const auto head = new_block();
         jump(head);
         begin(head, none);
-        const auto more = less(current().circuit, lanes(slot_operand(position)), lanes(length), false);
+        const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
         const auto body = new_block();
         const auto next = new_block();
         branch(bits(boolean, {more}), body, next);
         begin(body, none);
         const auto byte = state(nvr::StateOp::ReadElement, 0, {slot_operand(source), slot_operand(position)}, u8, none);
         // position < length <= 2^64 - 1, so the increment cannot wrap.
-        auto incremented = add(current().circuit, lanes(slot_operand(position)), constant_word(1, 64), false);
+        auto incremented = add(current().synth.circuit(), lanes(slot_operand(position)), constant_word(1, 64), false);
         assign(position, bits(u64, std::move(incremented.value)));
         state(nvr::StateOp::AppendElement, 0, {buffer, byte}, void_type, none);
         jump(head);
