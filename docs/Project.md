@@ -31,6 +31,8 @@ A transformation preserves observable behavior for the inputs, initial state, an
 
 Constant folding, dead code elimination, and branch simplification are useful when their preconditions hold. Folding arithmetic requires the defined width, overflow, rounding, and failure rules. Removing an unused value is safe only when computing it has no observable effect, including a possible failure or divergence. Speculating both sides of a branch can be valid for total, effect-free computations. A branch that might divide by zero or write to memory requires gating that preserves the language's evaluation order.
 
+The implemented optimization stage verifies NeuraIR before its first pass and after each pass that changes the program, and runs a fixed sequence of passes until they reach a fixed point. It evaluates only operations whose results the language defines. An operation whose result depends on an open decision, such as integer overflow, division by zero, or division rounding, stays at its original position in the evaluation order. [NeuraIR optimization](IrOptimization.md) describes the passes, their preconditions, the verifier's invariants, and the scope of the tests.
+
 Measure an optimization using relevant circuit costs such as neuron and edge count, graph depth, state size, execution steps, or artifact size. State the target and workload so a reduction in one cost can be evaluated alongside changes in the others.
 
 ## Neuron representation

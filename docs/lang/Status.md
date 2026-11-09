@@ -1,6 +1,6 @@
 # Feature status and implementation decisions
 
-The C++ frontend implements lexing, parsing, and semantic lowering to typed NeuraIR for the existing examples. It handles their functions, control flow, modules, classes, generic declarations and calls, overlays, and nested collections. The I/O and testing modules provide frontend signatures. Circuit generation, execution, and the language-level test runner are future stages. See [Tooling](Tooling.md) for the frontend commands.
+The C++ frontend implements lexing, parsing, and semantic lowering to typed NeuraIR for the existing examples. It handles their functions, control flow, modules, classes, generic declarations and calls, overlays, and nested collections. The I/O and testing modules provide frontend signatures. The IR optimization stage verifies NeuraIR and applies the passes described in [NeuraIR optimization](../IrOptimization.md). It folds only operations that have defined semantics and leaves the open decisions below in place. Circuit generation, execution, and the language-level test runner are future stages. See [Tooling](Tooling.md) for the frontend commands.
 
 | Area | Current design | Open decisions |
 | --- | --- | --- |
