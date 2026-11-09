@@ -76,6 +76,8 @@ The execution contract defines initial state, how and when state commits, how co
 
 The [Neura Virtual Machine](runtime/NVM.md) evaluates feedforward neuron graphs and follows their selected exits. It owns frames, state storage, and host service dispatch. The compiled graph makes arithmetic, comparison, and branch decisions. Heap operations and host effects use explicit requests with typed inputs and continuations.
 
+IRtoNeuronConversion, the NVR writer and loader, and a reference NVM are implemented for a subset of NeuraIR: Booleans and fixed-width integers, control flow, calls, module dispatch, classes with dynamic dispatch, arrays, lists, text, and console output. [Neuron conversion and execution](Backend.md) lists the supported operations. It also describes the circuits and their measured costs, the semantics the compiler fixes where the language is open, and the tests that compare compiled graphs with the IR reference evaluator.
+
 ## Artifact and inspection
 
 The [NVR format](runtime/NVR.md) defines the versioned executable image emitted by the output stage. It carries the graphs, weights, constants, layouts, execution metadata, and host imports required to run independently of the source. A versioned `.nir` file carries typed NeuraIR across the earlier compiler boundary.

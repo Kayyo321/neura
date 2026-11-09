@@ -20,7 +20,7 @@ diff before.ir after.ir
 
 Both modes print the same listing format. The symbol table is identical in both because no pass adds, removes, or renumbers symbols, and bodies stay in the same order. A diff therefore shows only rewritten instructions. `--no-optimize` also skips verification, so IR from a faulty lowering can still be inspected. `check` validates source and never runs the optimizer.
 
-The listing is an inspection interface. The [NVM toolchain](runtime/NVM.md#toolchain-and-distribution) separately defines a versioned `.nir` file that holds NeuraIR before optimization, with `neura build` applying the optimization pipeline. Neither `.nir` output nor `build` is implemented yet. When they are, `.nir` output should stay unoptimized regardless of the listing's default.
+The listing is an inspection interface. The [NVM toolchain](runtime/NVM.md#toolchain-and-distribution) separately defines a versioned `.nir` file that holds NeuraIR before optimization. `neura emit-ir -o` writes one, whatever the listing's default, and `neura build` applies the optimization pipeline to source or `.nir` input. See [NeuraIR file format](NirFormat.md).
 
 ## Stage contract
 

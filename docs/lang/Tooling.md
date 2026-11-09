@@ -1,6 +1,6 @@
 # Tooling and project workflow
 
-## Build and use the frontend
+## Build the compiler
 
 Build with CMake 3.20 or newer and a C++20 compiler.
 
@@ -30,6 +30,21 @@ diff before.ir after.ir
 ```
 
 The two listings share the same format and symbol table, so the diff shows only rewritten instructions. The listing is for inspection and is separate from the versioned `.nir` file described below, which holds NeuraIR before optimization. See [NeuraIR optimization](../IrOptimization.md) for the passes and their preconditions.
+
+## Build and run executables
+
+```sh
+build/neura emit-ir examples/hello-world/hello-world.nra -o hello.nir
+build/neura build hello.nir -o hello.nvr
+build/neura build examples/hello-world/hello-world.nra -o hello.nvr
+build/neura run hello.nvr -- arg1 arg2
+```
+
+`emit-ir -o` writes the program as lowered, before optimization, to a versioned [`.nir` file](../NirFormat.md). `emit-ir` also accepts one `.nir` file in place of sources and prints its listing. `build` takes sources or one `.nir` file. It verifies and optimizes the IR, converts it to neuron graphs, and writes the `.nvr` image only when every step succeeds. Both routes produce the same bytes for the same program and options, and repeating a build reproduces them. `--no-optimize` converts the verified IR without optimizing it. `--no-source-map` omits the optional source map, which otherwise labels blocks with paths relative to the sources' common directory.
+
+`run` loads and validates an image, binds `neura.console.write_line` to standard output, and passes the arguments after `--` to the entry function as UTF-8 text. The image needs no source files. The exit status is the entry function's result. A runtime trap prints its reason and source location, when the image has a source map, to standard error and exits with status 70. Load, bind, and usage errors exit with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` bound a run. `cmake --install build --prefix <dir>` installs the `neura` executable, which contains both the compiler and the runner.
+
+[Neuron conversion and execution](../Backend.md) lists the supported operations and the build diagnostics for unsupported ones. The status of each example is in [Feature status](Status.md).
 
 ## Execution contract
 
