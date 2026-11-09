@@ -19,7 +19,17 @@ build/neura check examples/modules/multi-file/main.nra
 build/neura check -I examples/guide examples/testing/math-tests.nra
 ```
 
-Both commands accept multiple input paths and resolve imports across the source roots. `check` succeeds silently on valid input. `emit-ir` writes a typed NeuraIR listing with resolved symbol references and explicit operations for control flow, state, and calls. The listing is for inspection. A source diagnostic reports the path, line, and column and returns a nonzero exit status.
+Both commands accept multiple input paths and resolve imports across the source roots. `check` validates the source and succeeds silently on valid input. It does not run the optimizer. `emit-ir` writes a typed NeuraIR listing with resolved symbol references and explicit operations for control flow, state, and calls. The listing is for inspection. A source diagnostic reports the path, line, and column and returns a nonzero exit status.
+
+`emit-ir` prints optimized IR by default. Pass `--no-optimize` to print the IR exactly as lowered. To see what the optimizer changed, compare the two listings:
+
+```sh
+build/neura emit-ir --no-optimize tests/ir-optimization/fixtures/folding.nra > before.ir
+build/neura emit-ir tests/ir-optimization/fixtures/folding.nra > after.ir
+diff before.ir after.ir
+```
+
+The two listings share the same format and symbol table, so the diff shows only rewritten instructions. The listing is for inspection and is separate from the versioned `.nir` file described below, which holds NeuraIR before optimization. See [NeuraIR optimization](../IrOptimization.md) for the passes and their preconditions.
 
 ## Execution contract
 
