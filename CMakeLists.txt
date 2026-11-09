@@ -42,6 +42,7 @@ add_library(neura_compiler STATIC
     src/ir-optimization/optimizer.cpp
     src/ir-optimization/passes.cpp
     src/backend/circuit.cpp
+    src/backend/converter.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
 target_link_libraries(neura_compiler PUBLIC neura_nvr)
