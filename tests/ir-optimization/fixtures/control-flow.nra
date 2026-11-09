@@ -1,0 +1,92 @@
+// Branches, loops, loop control, and unreachable statements.
+let test = import:Test;
+
+let ControlFlow = module (
+    export let select_then = func(int32 value) -> int32 {
+        if (1 < 2) {
+            let doubled: int32 = value * 2;
+            return doubled;
+        } else {
+            return 0;
+        }
+    };
+
+    export let select_else = func(int32 value) -> int32 {
+        if (2 < 1) {
+            return 0;
+        }
+        return value;
+    };
+
+    export let skip_loop = func(int32 value) -> int32 {
+        while (false) {
+            value = value + 1;
+        }
+        return value;
+    };
+
+    export let after_return = func(int32 value) -> int32 {
+        return value;
+        value = value + 1;
+        return 0;
+    };
+
+    export let both_arms_return = func(bool flag) -> int32 {
+        if (flag) {
+            return 1;
+        } else {
+            return 2;
+        }
+        test.assert(flag);
+    };
+
+    export let loop_control = func(int8 limit) -> int8 {
+        let total: int8 = 0;
+        let index: int8 = 0;
+        while (index < limit) {
+            index = index + 1;
+            if (index == 2) {
+                continue;
+                total = total + 100;
+            }
+            if (index > 5) {
+                break;
+                total = total + 100;
+            }
+            total = total + index;
+        }
+        return total;
+    };
+
+    export let exposed_infinite_loop = func() -> int32 {
+        while (true) {
+            if (false) {
+                break;
+            }
+        }
+        return 0;
+    };
+
+    export let keep_loop_exit = func(bool stop) -> int32 {
+        while (true) {
+            if (stop) {
+                break;
+            }
+        }
+        return 1;
+    };
+
+    export let nested_loops = func(int8 limit) -> int8 {
+        let count: int8 = 0;
+        while (true) {
+            while (true) {
+                break;
+            }
+            count = count + 1;
+            if (count >= limit) {
+                return count;
+            }
+        }
+        return 0;
+    };
+);

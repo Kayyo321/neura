@@ -1,0 +1,58 @@
+// Short-circuit operations with literal, pure, effectful, and failing operands.
+let test = import:Test;
+
+let ShortCircuit = module (
+    // Requests an external effect, then returns its argument.
+    export let observe = func(bool value) -> bool {
+        test.assert(value);
+        return value;
+    };
+
+    export let skip_right = func(bool value) -> bool {
+        return false && observe(value);
+    };
+
+    export let always_right = func(bool value) -> bool {
+        return true && observe(value);
+    };
+
+    export let either_skips = func(bool value) -> bool {
+        return true || observe(value);
+    };
+
+    export let either_right = func(bool value) -> bool {
+        return false || observe(value);
+    };
+
+    export let identity_right = func(bool value) -> bool {
+        return observe(value) && true;
+    };
+
+    export let keep_effect = func(bool value) -> bool {
+        return observe(value) && false;
+    };
+
+    export let keep_effect_or = func(bool value) -> bool {
+        return observe(value) || true;
+    };
+
+    export let pure_absorbed = func(bool value) -> bool {
+        return value && false;
+    };
+
+    export let keep_lazy = func(bool value) -> bool {
+        return value && observe(value);
+    };
+
+    export let skip_failure = func() -> bool {
+        return false && 1 / 0 == 1;
+    };
+
+    export let keep_failure = func(int32 value) -> bool {
+        return value / 0 == 1 && false;
+    };
+
+    export let nested = func(bool value) -> bool {
+        return (1 < 2 && value) || (observe(value) && 2 < 1);
+    };
+);

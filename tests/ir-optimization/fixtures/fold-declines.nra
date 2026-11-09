@@ -1,0 +1,79 @@
+// Constant expressions whose results depend on unspecified semantics. The
+// optimizer must leave each operation in place.
+let FoldDeclines = module (
+    export let int8_overflow = func() -> int8 {
+        return 127 + 1;
+    };
+
+    export let int8_underflow = func() -> int8 {
+        return -128 - 1;
+    };
+
+    export let int8_negated_minimum = func() -> int8 {
+        return -(-128);
+    };
+
+    export let int8_division_overflow = func() -> int8 {
+        return -128 / -1;
+    };
+
+    export let uint8_negative = func() -> uint8 {
+        return 3 - 5;
+    };
+
+    export let int32_overflow = func() -> int32 {
+        return 2147483647 + 1;
+    };
+
+    export let int64_overflow = func() -> int64 {
+        return 9223372036854775807 + 1;
+    };
+
+    export let int64_product_overflow = func() -> int64 {
+        return 4294967296 * 2147483648;
+    };
+
+    export let int64_division_overflow = func() -> int64 {
+        return -9223372036854775808 / -1;
+    };
+
+    export let uint64_overflow = func() -> uint64 {
+        return 18446744073709551615 + 1;
+    };
+
+    export let division_by_zero = func() -> int32 {
+        return 1 / 0;
+    };
+
+    export let inexact_division = func() -> int32 {
+        return 7 / 2;
+    };
+
+    export let negative_inexact_division = func() -> int32 {
+        return -7 / 2;
+    };
+
+    export let unspecified_width = func() -> int {
+        return 1 + 2;
+    };
+
+    export let unspecified_byte = func() -> byte {
+        return 1 + 2;
+    };
+
+    export let floating_point = func() -> float64 {
+        return 0.5 + 0.25;
+    };
+
+    export let concatenation = func() -> string {
+        return "a" + "b";
+    };
+
+    export let partially_folded = func() -> int8 {
+        return (100 + 27) + 1;
+    };
+
+    export let parameter_overflow = func(int8 value) -> int8 {
+        return value + (100 + 27);
+    };
+);

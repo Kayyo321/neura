@@ -1,0 +1,33 @@
+// Module state, discarded expressions, and effects.
+let test = import:Test;
+
+let State = module (
+    export let counter: int32 = 2 + 3;
+
+    export let bump = func(int32 amount) -> int32 {
+        counter = counter + amount;
+        return counter;
+    };
+
+    export let discards = func(int8 value) -> int8 {
+        value < 3;
+        true;
+        !(value == 1);
+        bump(1);
+        test.assert(1 < 2);
+        value + 1;
+        return value;
+    };
+
+    export let failing_discard = func(int8 value) -> int8 {
+        value / 0;
+        return value;
+    };
+
+    export let reset_then_read = func(bool flag) -> int32 {
+        if (flag || false) {
+            counter = 0;
+        }
+        return counter;
+    };
+);
