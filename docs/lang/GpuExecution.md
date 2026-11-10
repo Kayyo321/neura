@@ -124,6 +124,12 @@ The pair with all eight cores available took 17.719397 s on CPU and 19.431556 s 
 gpu: auto, device "NVIDIA GeForce RTX 5080", eligible graphs 48 of 50, evaluated 942829, kept on cpu 32171285, ineligible 0, escaped 0, failed 0, dispatches 435, correction 1.19
 ```
 
+The review reran the pinned pair with the expanded verification and driver checks. Before the prepared-input change, it took 15.879288 s off and 18.076411 s in auto (1.138364). Reusing the checks from preparation gave 16.445611 s off and 17.812238 s in auto (1.083100). Both pairs matched the oracle and each other's non-GPU statistics. Phase 5(c) remains **NOT MET** against the 1.0 bound. The placement rules and constants are unchanged.
+
+```text
+gpu: auto, device "NVIDIA GeForce RTX 5080", eligible graphs 48 of 50, evaluated 925423, kept on cpu 32188691, ineligible 0, escaped 0, failed 0, dispatches 421, correction 1.02
+```
+
 ### 4.6 Calibration and fixed model fixtures
 
 A release-device calibration run on the RTX 5080 reported these coefficients. The calibration test checked every probe output against reference evaluation.

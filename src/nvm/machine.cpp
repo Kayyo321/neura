@@ -278,7 +278,7 @@ public:
     }
 
     std::optional<Event> begin_step(GraphStep& step) {
-        if (auto event = begin_active_step(false)) return event;
+        if (auto event = begin_active_step<false>()) return event;
         const auto& graph = image_.graphs[active_block_->graph];
         step = GraphStep{active_block_->graph, std::span(inputs_).first(graph.input_lanes), graph.outputs.size()};
         return std::nullopt;
@@ -812,23 +812,36 @@ private:
         return index;
     }
 
-    std::optional<Event> begin_active_step(bool defer_inputs) {
+    template <bool Prepared>
+    std::optional<Event> begin_active_step() {
         if (finished_) return *finished_;
-        if (pending_) throw std::logic_error("begin_step() called while a host request is pending");
-        if (active_block_) throw std::logic_error("begin_step() called while a step is already begun");
+        if constexpr (!Prepared) {
+            if (pending_) throw std::logic_error("begin_step() called while a host request is pending");
+            if (active_block_) throw std::logic_error("begin_step() called while a step is already begun");
+        }
         try {
-            if (!started_) start();
-            prepare_step(defer_inputs);
+            if constexpr (!Prepared) {
+                if (!started_) start();
+            }
+            prepare_step(Prepared);
             return std::nullopt;
         } catch (const Fault& failure) {
             return trap(failure);
         }
     }
 
+    template <bool Prepared = false>
     void write_inputs(const nvr::Block& block, const Frame& frame, std::span<std::int64_t> inputs) {
         std::size_t lane = 0;
         for (const auto& input : block.inputs) {
-            const auto value = read(input, frame);
+            std::uint64_t value;
+            if constexpr (Prepared) {
+                // A fleet has already checked each read. Its validated input
+                // descriptors address only slots and constants, both frozen.
+                value = input.kind == nvr::ValueKind::Slot ? frame.slots[input.index] : const_values_[input.index];
+            } else {
+                value = read(input, frame);
+            }
             const auto count = nvr::lane_count(type(input.type));
             for (unsigned bit = 0; bit < count; ++bit) {
                 inputs[lane++] = static_cast<std::int64_t>((value >> bit) & 1U);
@@ -866,7 +879,7 @@ private:
     std::span<const std::int64_t> materialize_inputs() {
         const auto count = image_.graphs[active_block_->graph].input_lanes;
         auto inputs = lanes(inputs_, count);
-        write_inputs(*active_block_, frames_.back(), inputs);
+        write_inputs<true>(*active_block_, frames_.back(), inputs);
         return inputs;
     }
 
@@ -889,7 +902,7 @@ private:
         std::optional<std::size_t> failed;
         if (deferred_inputs) {
             auto wires = lanes(scratch, std::size_t{graph.input_lanes} + graph.nodes.size());
-            write_inputs(*active_block_, frames_.back(), wires.first(graph.input_lanes));
+            write_inputs<true>(*active_block_, frames_.back(), wires.first(graph.input_lanes));
             failed = evaluate_loaded_outputs(graph, wires, outputs);
         } else {
             failed = evaluate_outputs(graph, std::span(inputs_).first(graph.input_lanes), scratch, outputs);
@@ -1413,7 +1426,8 @@ std::optional<Event> Execution::step_with_scratch(std::vector<std::int64_t>& scr
 }
 
 std::optional<Event> Execution::begin_prepared_step(std::uint32_t& graph) {
-    if (auto event = state_->begin_active_step(true)) return event;
+    // The fleet calls only for an admitted, runnable member with no open step.
+    if (auto event = state_->begin_active_step<true>()) return event;
     graph = state_->active_block_->graph;
     return std::nullopt;
 }
