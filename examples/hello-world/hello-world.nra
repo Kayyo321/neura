@@ -1,8 +1,9 @@
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let HelloWorld = module:io.Entry ( // HelloWorld module inherits from SysIo.Entry (main)
-    export let.override main = func(string[] args) -> Entry.ExitCode {
-        io.println("Hello, World!");
-        return Entry.ExitCode.Ok; // Enum ExitCode
+let HelloWorld = module:program.Entry ( // HelloWorld inherits Std.Program.Entry (main)
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("Hello, World!");
+        return program.ExitCode.Ok; // Enum ExitCode
     }
 );

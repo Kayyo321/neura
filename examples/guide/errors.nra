@@ -1,6 +1,32 @@
-// Design sketch only: no file, parsing, or result API is specified yet.
-// read configuration file
-// if reading fails: report the path and the error, then stop
-// parse the requested count from its contents
-// if parsing fails: report that the count is invalid, then stop
-// otherwise use the parsed count
+// Expected failures are returned values. Reading a configuration file can
+// fail in the outside world, and parsing its count can fail on bad text; each
+// step returns a Result that the caller reads with match. Passing an error up
+// is an explicit arm that returns it, here with a Context error that says
+// what was being attempted.
+let error = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
+let int32s = import:Std.Core.Int32;
+let path = import:Std.Fs.Path;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+export let Errors = module (
+    export let read_count = func(string location) -> result.Result<int32> {
+        match (fs.read_text(path.of(location))) {
+            result.Result.Ok(text) => {
+                return result.with_context<int32>(int32s.parse(strings.trim(text)), "reading the count");
+            },
+            result.Result.Err(failure) => {
+                return result.Result<int32>.Err(error.context(failure, "reading " + location));
+            },
+        }
+    };
+
+    // The message a program shows for any failure: every Error has one.
+    export let describe = func(result.Result<int32> outcome) -> string {
+        return match (outcome) {
+            result.Result.Ok(count) => "count " + count.to_string(),
+            result.Result.Err(failure) => error.message(failure),
+        };
+    };
+);

@@ -1,6 +1,6 @@
 // Tests for guide/core.nra. Run them with:
 //     neura test -I examples/guide examples/testing/math-tests.nra
-let test = import:Test;
+let test = import:Std.Test;
 let core = import:Core;
 
 let MathTests = module (
