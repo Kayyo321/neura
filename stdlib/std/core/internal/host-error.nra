@@ -1,0 +1,28 @@
+let error = import:Std.Core.Error;
+
+// Maps a host service's uint32 error code to an Io error (Stdlib.md section
+// 4.5). Codes 1 through 14 are the first fourteen IoErrorKind values in
+// order; every other code is Other.
+export let HostError = module (
+    export let kind_of = func(uint32 code) -> error.IoErrorKind {
+        if (code == 1) { return error.IoErrorKind.NotFound; }
+        if (code == 2) { return error.IoErrorKind.PermissionDenied; }
+        if (code == 3) { return error.IoErrorKind.AlreadyExists; }
+        if (code == 4) { return error.IoErrorKind.InvalidInput; }
+        if (code == 5) { return error.IoErrorKind.Interrupted; }
+        if (code == 6) { return error.IoErrorKind.UnexpectedEnd; }
+        if (code == 7) { return error.IoErrorKind.NotADirectory; }
+        if (code == 8) { return error.IoErrorKind.IsADirectory; }
+        if (code == 9) { return error.IoErrorKind.DirectoryNotEmpty; }
+        if (code == 10) { return error.IoErrorKind.ConnectionRefused; }
+        if (code == 11) { return error.IoErrorKind.ConnectionReset; }
+        if (code == 12) { return error.IoErrorKind.TimedOut; }
+        if (code == 13) { return error.IoErrorKind.Unsupported; }
+        if (code == 14) { return error.IoErrorKind.CapabilityDenied; }
+        return error.IoErrorKind.Other;
+    };
+
+    export let io = func(uint32 code, string message, string path) -> error.Error {
+        return error.Error.Io { kind: kind_of(code), message: message, path: path };
+    };
+);

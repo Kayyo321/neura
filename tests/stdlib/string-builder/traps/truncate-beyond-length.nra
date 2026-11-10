@@ -1,0 +1,17 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: byte length out of range
+let builders = import:Std.Core.StringBuilder;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let b = builders.create();
+        b.append("abc");
+        b.truncate(3);
+        console.print_line(b.to_string());
+        b.truncate(4);
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

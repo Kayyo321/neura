@@ -1,0 +1,70 @@
+let bools = import:Std.Core.Bool;
+let error = import:Std.Core.Error;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+let BoolTests = module (
+    let check_error = func(result.Result<bool> parsed, error.ParseErrorKind expected_kind, int expected_offset,
+                           string expected_message) -> void {
+        let failure = test.assert_err<bool>(parsed);
+        match (failure) {
+            error.Error.Parse { kind, offset, message } => {
+                test.assert(kind == expected_kind);
+                test.assert_equal_int32(expected_offset, offset);
+                test.assert_equal_string(expected_message, message);
+            },
+            _ => {
+                test.fail("expected a parse error");
+            },
+        }
+    };
+
+    export let test_to_int = func() -> void {
+        test.assert_equal_int32(1, bools.to_int(true));
+        test.assert_equal_int32(0, bools.to_int(false));
+    };
+
+    export let test_xor = func() -> void {
+        test.assert(!bools.xor(false, false));
+        test.assert(bools.xor(false, true));
+        test.assert(bools.xor(true, false));
+        test.assert(!bools.xor(true, true));
+    };
+
+    export let test_compare = func() -> void {
+        test.assert(bools.compare(false, true) == ordering.Ordering.Less);
+        test.assert(bools.compare(true, false) == ordering.Ordering.Greater);
+        test.assert(bools.compare(true, true) == ordering.Ordering.Equal);
+        test.assert(bools.compare(false, false) == ordering.Ordering.Equal);
+    };
+
+    export let test_hash_and_text = func() -> void {
+        test.assert(bools.hash(true) == 1231);
+        test.assert(bools.hash(false) == 1237);
+        test.assert_equal_string("true", bools.to_string(true));
+        test.assert_equal_string("false", bools.to_string(false));
+    };
+
+    export let test_parse = func() -> void {
+        test.assert(test.assert_ok<bool>(bools.parse("true")));
+        test.assert(!test.assert_ok<bool>(bools.parse("false")));
+        test.assert(test.assert_ok<bool>(bools.parse(bools.to_string(true))));
+    };
+
+    export let test_parse_errors = func() -> void {
+        check_error(bools.parse(""), error.ParseErrorKind.Empty, 0, "empty input");
+        check_error(bools.parse("t"), error.ParseErrorKind.UnexpectedEnd, 1, "expected true or false");
+        check_error(bools.parse("fals"), error.ParseErrorKind.UnexpectedEnd, 4, "expected true or false");
+        check_error(bools.parse("True"), error.ParseErrorKind.InvalidCharacter, 0, "invalid character");
+        check_error(bools.parse("FALSE"), error.ParseErrorKind.InvalidCharacter, 0, "invalid character");
+        check_error(bools.parse("trUe"), error.ParseErrorKind.InvalidCharacter, 2, "invalid character");
+        check_error(bools.parse("truex"), error.ParseErrorKind.InvalidCharacter, 4, "invalid character");
+        check_error(bools.parse("false "), error.ParseErrorKind.InvalidCharacter, 5, "invalid character");
+        check_error(bools.parse(" true"), error.ParseErrorKind.InvalidCharacter, 0, "invalid character");
+        check_error(bools.parse("1"), error.ParseErrorKind.InvalidCharacter, 0, "invalid character");
+        check_error(bools.parse("fé"), error.ParseErrorKind.InvalidCharacter, 1, "invalid character");
+        let failure = test.assert_err<bool>(bools.parse("yes"));
+        test.assert_equal_string("parse error at 0: invalid character", error.message(failure));
+    };
+);

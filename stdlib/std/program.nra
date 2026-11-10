@@ -1,0 +1,59 @@
+let error = import:Std.Core.Error;
+let host_error = import:Std.Core.Internal.HostError;
+
+// The program entry contract (Stdlib.md section 11.3). A program's entry
+// module inherits Entry and overrides main; arguments arrive only through
+// its parameter.
+export let Program = module (
+    // Ok is status 0, Failure is 1, and Status gives 0 through 255; any
+    // other Status traps with "invalid argument: exit status".
+    export let ExitCode = enum (Ok, Failure, Status(int));
+
+    export let Entry = module (
+        export let main = func(string[] args) -> ExitCode;
+    );
+
+    export let Environment = module (
+        export let Lookup = enum (Found(string), Missing, Failed(error.Error));
+
+        let GetOutcome = enum (Ok([bool, string]), Error(uint32));
+        let get_variable = func(string name) -> GetOutcome host("neura.env.get", 1);
+
+        // The value of an environment variable. Needs the env capability;
+        // without it the lookup fails with CapabilityDenied.
+        export let get = func(string name) -> Lookup {
+            return match (get_variable(name)) {
+                GetOutcome.Ok(found) => lookup_of(found),
+                GetOutcome.Error(code) => Lookup.Failed(host_error.io(code, "environment lookup failed", "")),
+            };
+        };
+
+        let lookup_of = func([bool, string] found) -> Lookup {
+            if (found[0]) {
+                return Lookup.Found(found[1]);
+            }
+            return Lookup.Missing;
+        };
+    );
+
+    export let Process = module (
+        let ExitOutcome = enum (Ok, Error(uint32));
+        let exit_process = func(int status) -> ExitOutcome host("neura.process.exit", 1);
+
+        // Ends the run with `status` (0 through 255) and does not return.
+        // Returning from main is preferred.
+        export let exit = func(int status) -> void {
+            if (status < 0 || status > 255) {
+                trap_with_message("invalid argument: exit status");
+            }
+            match (exit_process(status)) {
+                ExitOutcome.Ok => {
+                    trap_with_message("invalid state: process exit returned");
+                },
+                ExitOutcome.Error(_) => {
+                    trap_with_message("invalid state: process exit failed");
+                },
+            }
+        };
+    );
+);

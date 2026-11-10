@@ -1,0 +1,85 @@
+let cell = import:Std.Core.Cell;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+let ResultTests = module (
+    let ok = func(int value) -> result.Result<int> {
+        return result.Result<int>.Ok(value);
+    };
+
+    let err = func(string text) -> result.Result<int> {
+        return result.Result<int>.Err(error.custom("test.failure", text));
+    };
+
+    export let test_cases = func() -> void {
+        test.assert(result.is_ok<int>(ok(1)));
+        test.assert(!result.is_ok<int>(err("x")));
+        test.assert(result.is_err<int>(err("x")));
+        test.assert(!result.is_err<int>(ok(1)));
+    };
+
+    export let test_value_or_and_expect = func() -> void {
+        test.assert_equal_int32(3, result.value_or<int>(ok(3), 9));
+        test.assert_equal_int32(9, result.value_or<int>(err("x"), 9));
+        test.assert_equal_int32(4, result.expect<int>(ok(4), "present"));
+    };
+
+    export let test_to_optional_discards_the_error = func() -> void {
+        test.assert_equal_int32(5, test.assert_some<int>(result.to_optional<int>(ok(5))));
+        test.assert_none<int>(result.to_optional<int>(err("x")));
+    };
+
+    export let test_with_context = func() -> void {
+        test.assert_equal_int32(6, test.assert_ok<int>(result.with_context<int>(ok(6), "reading")));
+        let e = test.assert_err<int>(result.with_context<int>(err("disk full"), "saving"));
+        test.assert_equal_string("saving: disk full", error.message(e));
+        match (e) {
+            error.Error.Context { message: text, cause } => {
+                test.assert_equal_string("saving", text);
+                test.assert_equal_string("disk full", error.message(cause));
+            },
+            _ => { test.fail("expected a Context error"); },
+        }
+    };
+
+    export let test_map_and_then_map_error = func() -> void {
+        let double = func(int v) -> int { return v * 2; };
+        test.assert_equal_int32(8, test.assert_ok<int>(result.map<int, int>(ok(4), double)));
+        let calls = cell.of<int>(0);
+        let counted = func(int v) -> int {
+            calls.value = calls.value + 1;
+            return v;
+        };
+        test.assert(result.is_err<int>(result.map<int, int>(err("x"), counted)));
+        test.assert_equal_int32(0, calls.value);
+        let checked = func(int v) -> result.Result<string> {
+            if (v > 0) {
+                return result.Result<string>.Ok(v.to_string());
+            }
+            return result.Result<string>.Err(error.custom("test.negative", "not positive"));
+        };
+        test.assert_equal_string("7", test.assert_ok<string>(result.and_then<int, string>(ok(7), checked)));
+        let e = test.assert_err<string>(result.and_then<int, string>(ok(-1), checked));
+        test.assert_equal_string("not positive", error.message(e));
+        let first = test.assert_err<string>(result.and_then<int, string>(err("early"), checked));
+        test.assert_equal_string("early", error.message(first));
+        let wrap = func(error.Error e) -> error.Error { return error.context(e, "wrapped"); };
+        let mapped = test.assert_err<int>(result.map_error<int>(err("inner"), wrap));
+        test.assert_equal_string("wrapped: inner", error.message(mapped));
+        test.assert_equal_int32(2, test.assert_ok<int>(result.map_error<int>(ok(2), wrap)));
+    };
+
+    export let test_value_members = func() -> void {
+        test.assert(result.equals<int>(ok(1), ok(1)));
+        test.assert(!result.equals<int>(ok(1), ok(2)));
+        test.assert(!result.equals<int>(ok(1), err("x")));
+        test.assert(result.equals<int>(err("x"), err("x")));
+        test.assert(!result.equals<int>(err("x"), err("y")));
+        test.assert_equal_string("Ok(3)", result.to_string<int>(ok(3)));
+        test.assert_equal_string("Err(broken)", result.to_string<int>(err("broken")));
+        test.assert_equal_uint64(34, result.hash<int>(ok(3)) as uint64);
+        test.assert(result.hash<int>(err("x")) == result.hash<int>(err("x")));
+    };
+);

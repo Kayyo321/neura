@@ -1,0 +1,951 @@
+let error = import:Std.Core.Error;
+let ints = import:Std.Core.Int8;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// Int8 against reference vectors computed with Python's unbounded integers
+// (generated; the operands are the boundary values of Stdlib.md section 17:
+// zero, one, the largest value, the sign boundary, and operands whose exact
+// product needs the full double width).
+let Int8Tests = module (
+    let values: int8[] = [
+        0, 1, 2, 127, 126, -128, 16, 15, 17, -1, -2, -127,
+        -16, -91
+    ];
+    let checked_add_present: bool[] = [
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, false, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, false, false, true, true, true,
+        true, true, true, true, true, true, true, false, false, false, false, true,
+        false, false, false, true, true, true, true, true, true, true, false, false,
+        false, true, false, false, false, true, true, true, true, true, true, true,
+        true, true, true, false, true, true, true, false, false, false, false, false,
+        true, true, true, false, false, true, true, true, true, true, true, true,
+        true, true, true, true, true, false, false, true, true, true, true, true,
+        true, true, true, true, true, true, true, false, false, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, false,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, false, true, true, true, true, true, false, true, true, true, true,
+        true, true, true, false, true, true, true, true, false, false, false, false,
+        true, true, true, true, true, false, true, true, true, true, true, false,
+        true, true, true, true, true, true, true, false, true, true, true, true,
+        true, false, true, false
+    ];
+    let checked_add_values: int8[] = [
+        0, 1, 2, 127, 126, -128, 16, 15, 17, -1, -2, -127,
+        -16, -91, 1, 2, 3, 0, 127, -127, 17, 16, 18, 0,
+        -1, -126, -15, -90, 2, 3, 4, 0, 0, -126, 18, 17,
+        19, 1, 0, -125, -14, -89, 127, 0, 0, 0, 0, -1,
+        0, 0, 0, 126, 125, 0, 111, 36, 126, 127, 0, 0,
+        0, -2, 0, 0, 0, 125, 124, -1, 110, 35, -128, -127,
+        -126, -1, -2, 0, -112, -113, -111, 0, 0, 0, 0, 0,
+        16, 17, 18, 0, 0, -112, 32, 31, 33, 15, 14, -111,
+        0, -75, 15, 16, 17, 0, 0, -113, 31, 30, 32, 14,
+        13, -112, -1, -76, 17, 18, 19, 0, 0, -111, 33, 32,
+        34, 16, 15, -110, 1, -74, -1, 0, 1, 126, 125, 0,
+        15, 14, 16, -2, -3, -128, -17, -92, -2, -1, 0, 125,
+        124, 0, 14, 13, 15, -3, -4, 0, -18, -93, -127, -126,
+        -125, 0, -1, 0, -111, -112, -110, -128, 0, 0, 0, 0,
+        -16, -15, -14, 111, 110, 0, 0, -1, 1, -17, -18, 0,
+        -32, -107, -91, -90, -89, 36, 35, 0, -75, -76, -74, -92,
+        -93, 0, -107, 0
+    ];
+    let checked_sub_present: bool[] = [
+        true, true, true, true, true, false, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, false, true, true, true, true,
+        true, false, true, true, true, true, true, true, true, false, true, true,
+        true, true, true, false, true, true, true, true, true, true, true, false,
+        true, true, true, false, false, false, false, false, true, true, true, true,
+        true, false, true, true, true, true, false, false, false, false, true, false,
+        false, false, false, true, false, false, false, true, true, true, true, true,
+        true, true, true, true, true, false, true, true, true, true, true, false,
+        true, true, true, true, true, true, true, false, true, true, true, true,
+        true, false, true, true, true, true, true, true, true, false, true, true,
+        true, true, true, false, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, false,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        false, false, false, true, false, false, false, true, true, true, true, true,
+        true, true, true, false, false, true, true, true, true, true, true, true,
+        true, true, true, true, true, false, false, true, true, true, true, true,
+        true, true, true, true
+    ];
+    let checked_sub_values: int8[] = [
+        0, -1, -2, -127, -126, 0, -16, -15, -17, 1, 2, 127,
+        16, 91, 1, 0, -1, -126, -125, 0, -15, -14, -16, 2,
+        3, 0, 17, 92, 2, 1, 0, -125, -124, 0, -14, -13,
+        -15, 3, 4, 0, 18, 93, 127, 126, 125, 0, 1, 0,
+        111, 112, 110, 0, 0, 0, 0, 0, 126, 125, 124, -1,
+        0, 0, 110, 111, 109, 127, 0, 0, 0, 0, -128, 0,
+        0, 0, 0, 0, 0, 0, 0, -127, -126, -1, -112, -37,
+        16, 15, 14, -111, -110, 0, 0, 1, -1, 17, 18, 0,
+        32, 107, 15, 14, 13, -112, -111, 0, -1, 0, -2, 16,
+        17, 0, 31, 106, 17, 16, 15, -110, -109, 0, 1, 2,
+        0, 18, 19, 0, 33, 108, -1, -2, -3, -128, -127, 127,
+        -17, -16, -18, 0, 1, 126, 15, 90, -2, -3, -4, 0,
+        -128, 126, -18, -17, -19, -1, 0, 125, 14, 89, -127, -128,
+        0, 0, 0, 1, 0, 0, 0, -126, -125, 0, -111, -36,
+        -16, -17, -18, 0, 0, 112, -32, -31, -33, -15, -14, 111,
+        0, 75, -91, -92, -93, 0, 0, 37, -107, -106, -108, -90,
+        -89, 36, -75, 0
+    ];
+    let checked_mul_present: bool[] = [
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, false, false, false, true, true,
+        true, true, true, false, true, false, true, true, false, false, false, false,
+        false, false, false, true, false, false, false, false, true, true, false, false,
+        false, false, false, false, false, true, false, false, false, false, true, true,
+        false, false, false, false, false, false, false, false, false, false, false, false,
+        true, true, true, false, false, false, false, false, false, true, true, false,
+        false, false, true, true, true, false, false, false, false, false, false, true,
+        true, false, false, false, true, true, true, false, false, false, false, false,
+        false, true, true, false, false, false, true, true, true, true, true, false,
+        true, true, true, true, true, true, true, true, true, true, true, false,
+        false, false, true, true, true, true, true, false, true, false, true, true,
+        false, false, false, false, false, false, false, true, false, false, false, false,
+        true, true, true, false, false, false, false, false, false, true, true, false,
+        false, false, true, true, false, false, false, false, false, false, false, true,
+        false, false, false, false
+    ];
+    let checked_mul_values: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 1, 2, 127, 126, -128, 16, 15, 17, -1,
+        -2, -127, -16, -91, 0, 2, 4, 0, 0, 0, 32, 30,
+        34, -2, -4, 0, -32, 0, 0, 127, 0, 0, 0, 0,
+        0, 0, 0, -127, 0, 0, 0, 0, 0, 126, 0, 0,
+        0, 0, 0, 0, 0, -126, 0, 0, 0, 0, 0, -128,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 16, 32, 0, 0, 0, 0, 0, 0, -16, -32, 0,
+        0, 0, 0, 15, 30, 0, 0, 0, 0, 0, 0, -15,
+        -30, 0, 0, 0, 0, 17, 34, 0, 0, 0, 0, 0,
+        0, -17, -34, 0, 0, 0, 0, -1, -2, -127, -126, 0,
+        -16, -15, -17, 1, 2, 127, 16, 91, 0, -2, -4, 0,
+        0, 0, -32, -30, -34, 2, 4, 0, 32, 0, 0, -127,
+        0, 0, 0, 0, 0, 0, 0, 127, 0, 0, 0, 0,
+        0, -16, -32, 0, 0, 0, 0, 0, 0, 16, 32, 0,
+        0, 0, 0, -91, 0, 0, 0, 0, 0, 0, 0, 91,
+        0, 0, 0, 0
+    ];
+    let checked_div_present: bool[] = [
+        false, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, false, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, false, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, true, true, true, true, false, true, true, true, true,
+        false, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, false, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, false, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        false, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true
+    ];
+    let checked_div_values: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1,
+        0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0,
+        0, -2, -1, 0, 0, 0, 0, 127, 63, 1, 1, 0,
+        7, 8, 7, -127, -63, -1, -7, -1, 0, 126, 63, 0,
+        1, 0, 7, 8, 7, -126, -63, 0, -7, -1, 0, -128,
+        -64, -1, -1, 1, -8, -8, -7, 0, 64, 1, 8, 1,
+        0, 16, 8, 0, 0, 0, 1, 1, 0, -16, -8, 0,
+        -1, 0, 0, 15, 7, 0, 0, 0, 0, 1, 0, -15,
+        -7, 0, 0, 0, 0, 17, 8, 0, 0, 0, 1, 1,
+        1, -17, -8, 0, -1, 0, 0, -1, 0, 0, 0, 0,
+        0, 0, 0, 1, 0, 0, 0, 0, 0, -2, -1, 0,
+        0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, -127,
+        -63, -1, -1, 0, -7, -8, -7, 127, 63, 1, 7, 1,
+        0, -16, -8, 0, 0, 0, -1, -1, 0, 16, 8, 0,
+        1, 0, 0, -91, -45, 0, 0, 0, -5, -6, -5, 91,
+        45, 0, 5, 1
+    ];
+    let checked_rem_present: bool[] = [
+        false, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, false, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, false, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        false, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, false, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, false, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        false, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true
+    ];
+    let checked_rem_values: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0,
+        1, 1, 1, 1, 0, 0, 0, 2, 2, 2, 2, 2,
+        2, 0, 0, 2, 2, 2, 0, 0, 1, 0, 1, 127,
+        15, 7, 8, 0, 1, 0, 15, 36, 0, 0, 0, 126,
+        0, 126, 14, 6, 7, 0, 0, 126, 14, 35, 0, 0,
+        0, -1, -2, 0, 0, -8, -9, 0, 0, -1, 0, -37,
+        0, 0, 0, 16, 16, 16, 0, 1, 16, 0, 0, 16,
+        0, 16, 0, 0, 1, 15, 15, 15, 15, 0, 15, 0,
+        1, 15, 15, 15, 0, 0, 1, 17, 17, 17, 1, 2,
+        0, 0, 1, 17, 1, 17, 0, 0, -1, -1, -1, -1,
+        -1, -1, -1, 0, -1, -1, -1, -1, 0, 0, 0, -2,
+        -2, -2, -2, -2, -2, 0, 0, -2, -2, -2, 0, 0,
+        -1, 0, -1, -127, -15, -7, -8, 0, -1, 0, -15, -36,
+        0, 0, 0, -16, -16, -16, 0, -1, -16, 0, 0, -16,
+        0, -16, 0, 0, -1, -91, -91, -91, -11, -1, -6, 0,
+        -1, -91, -11, 0
+    ];
+    let wrapping_add_values: int8[] = [
+        0, 1, 2, 127, 126, -128, 16, 15, 17, -1, -2, -127,
+        -16, -91, 1, 2, 3, -128, 127, -127, 17, 16, 18, 0,
+        -1, -126, -15, -90, 2, 3, 4, -127, -128, -126, 18, 17,
+        19, 1, 0, -125, -14, -89, 127, -128, -127, -2, -3, -1,
+        -113, -114, -112, 126, 125, 0, 111, 36, 126, 127, -128, -3,
+        -4, -2, -114, -115, -113, 125, 124, -1, 110, 35, -128, -127,
+        -126, -1, -2, 0, -112, -113, -111, 127, 126, 1, 112, 37,
+        16, 17, 18, -113, -114, -112, 32, 31, 33, 15, 14, -111,
+        0, -75, 15, 16, 17, -114, -115, -113, 31, 30, 32, 14,
+        13, -112, -1, -76, 17, 18, 19, -112, -113, -111, 33, 32,
+        34, 16, 15, -110, 1, -74, -1, 0, 1, 126, 125, 127,
+        15, 14, 16, -2, -3, -128, -17, -92, -2, -1, 0, 125,
+        124, 126, 14, 13, 15, -3, -4, 127, -18, -93, -127, -126,
+        -125, 0, -1, 1, -111, -112, -110, -128, 127, 2, 113, 38,
+        -16, -15, -14, 111, 110, 112, 0, -1, 1, -17, -18, 113,
+        -32, -107, -91, -90, -89, 36, 35, 37, -75, -76, -74, -92,
+        -93, 38, -107, 74
+    ];
+    let wrapping_sub_values: int8[] = [
+        0, -1, -2, -127, -126, -128, -16, -15, -17, 1, 2, 127,
+        16, 91, 1, 0, -1, -126, -125, -127, -15, -14, -16, 2,
+        3, -128, 17, 92, 2, 1, 0, -125, -124, -126, -14, -13,
+        -15, 3, 4, -127, 18, 93, 127, 126, 125, 0, 1, -1,
+        111, 112, 110, -128, -127, -2, -113, -38, 126, 125, 124, -1,
+        0, -2, 110, 111, 109, 127, -128, -3, -114, -39, -128, 127,
+        126, 1, 2, 0, 112, 113, 111, -127, -126, -1, -112, -37,
+        16, 15, 14, -111, -110, -112, 0, 1, -1, 17, 18, -113,
+        32, 107, 15, 14, 13, -112, -111, -113, -1, 0, -2, 16,
+        17, -114, 31, 106, 17, 16, 15, -110, -109, -111, 1, 2,
+        0, 18, 19, -112, 33, 108, -1, -2, -3, -128, -127, 127,
+        -17, -16, -18, 0, 1, 126, 15, 90, -2, -3, -4, 127,
+        -128, 126, -18, -17, -19, -1, 0, 125, 14, 89, -127, -128,
+        127, 2, 3, 1, 113, 114, 112, -126, -125, 0, -111, -36,
+        -16, -17, -18, 113, 114, 112, -32, -31, -33, -15, -14, 111,
+        0, 75, -91, -92, -93, 38, 39, 37, -107, -106, -108, -90,
+        -89, 36, -75, 0
+    ];
+    let wrapping_mul_values: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 1, 2, 127, 126, -128, 16, 15, 17, -1,
+        -2, -127, -16, -91, 0, 2, 4, -2, -4, 0, 32, 30,
+        34, -2, -4, 2, -32, 74, 0, 127, -2, 1, -126, -128,
+        -16, 113, 111, -127, 2, -1, 16, -37, 0, 126, -4, -126,
+        4, 0, -32, 98, 94, -126, 4, 126, 32, 54, 0, -128,
+        0, -128, 0, 0, 0, -128, -128, -128, 0, -128, 0, -128,
+        0, 16, 32, -16, -32, 0, 0, -16, 16, -16, -32, 16,
+        0, 80, 0, 15, 30, 113, 98, -128, -16, -31, -1, -15,
+        -30, -113, 16, -85, 0, 17, 34, 111, 94, -128, 16, -1,
+        33, -17, -34, -111, -16, -11, 0, -1, -2, -127, -126, -128,
+        -16, -15, -17, 1, 2, 127, 16, 91, 0, -2, -4, 2,
+        4, 0, -32, -30, -34, 2, 4, -2, 32, -74, 0, -127,
+        2, -1, 126, -128, 16, -113, -111, 127, -2, 1, -16, 37,
+        0, -16, -32, 16, 32, 0, 0, 16, -16, 16, 32, -16,
+        0, -80, 0, -91, 74, -37, 54, -128, 80, -85, -11, 91,
+        -74, 37, -80, 89
+    ];
+    let saturating_add_values: int8[] = [
+        0, 1, 2, 127, 126, -128, 16, 15, 17, -1, -2, -127,
+        -16, -91, 1, 2, 3, 127, 127, -127, 17, 16, 18, 0,
+        -1, -126, -15, -90, 2, 3, 4, 127, 127, -126, 18, 17,
+        19, 1, 0, -125, -14, -89, 127, 127, 127, 127, 127, -1,
+        127, 127, 127, 126, 125, 0, 111, 36, 126, 127, 127, 127,
+        127, -2, 127, 127, 127, 125, 124, -1, 110, 35, -128, -127,
+        -126, -1, -2, -128, -112, -113, -111, -128, -128, -128, -128, -128,
+        16, 17, 18, 127, 127, -112, 32, 31, 33, 15, 14, -111,
+        0, -75, 15, 16, 17, 127, 127, -113, 31, 30, 32, 14,
+        13, -112, -1, -76, 17, 18, 19, 127, 127, -111, 33, 32,
+        34, 16, 15, -110, 1, -74, -1, 0, 1, 126, 125, -128,
+        15, 14, 16, -2, -3, -128, -17, -92, -2, -1, 0, 125,
+        124, -128, 14, 13, 15, -3, -4, -128, -18, -93, -127, -126,
+        -125, 0, -1, -128, -111, -112, -110, -128, -128, -128, -128, -128,
+        -16, -15, -14, 111, 110, -128, 0, -1, 1, -17, -18, -128,
+        -32, -107, -91, -90, -89, 36, 35, -128, -75, -76, -74, -92,
+        -93, -128, -107, -128
+    ];
+    let saturating_sub_values: int8[] = [
+        0, -1, -2, -127, -126, 127, -16, -15, -17, 1, 2, 127,
+        16, 91, 1, 0, -1, -126, -125, 127, -15, -14, -16, 2,
+        3, 127, 17, 92, 2, 1, 0, -125, -124, 127, -14, -13,
+        -15, 3, 4, 127, 18, 93, 127, 126, 125, 0, 1, 127,
+        111, 112, 110, 127, 127, 127, 127, 127, 126, 125, 124, -1,
+        0, 127, 110, 111, 109, 127, 127, 127, 127, 127, -128, -128,
+        -128, -128, -128, 0, -128, -128, -128, -127, -126, -1, -112, -37,
+        16, 15, 14, -111, -110, 127, 0, 1, -1, 17, 18, 127,
+        32, 107, 15, 14, 13, -112, -111, 127, -1, 0, -2, 16,
+        17, 127, 31, 106, 17, 16, 15, -110, -109, 127, 1, 2,
+        0, 18, 19, 127, 33, 108, -1, -2, -3, -128, -127, 127,
+        -17, -16, -18, 0, 1, 126, 15, 90, -2, -3, -4, -128,
+        -128, 126, -18, -17, -19, -1, 0, 125, 14, 89, -127, -128,
+        -128, -128, -128, 1, -128, -128, -128, -126, -125, 0, -111, -36,
+        -16, -17, -18, -128, -128, 112, -32, -31, -33, -15, -14, 111,
+        0, 75, -91, -92, -93, -128, -128, 37, -107, -106, -108, -90,
+        -89, 36, -75, 0
+    ];
+    let saturating_mul_values: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 1, 2, 127, 126, -128, 16, 15, 17, -1,
+        -2, -127, -16, -91, 0, 2, 4, 127, 127, -128, 32, 30,
+        34, -2, -4, -128, -32, -128, 0, 127, 127, 127, 127, -128,
+        127, 127, 127, -127, -128, -128, -128, -128, 0, 126, 127, 127,
+        127, -128, 127, 127, 127, -126, -128, -128, -128, -128, 0, -128,
+        -128, -128, -128, 127, -128, -128, -128, 127, 127, 127, 127, 127,
+        0, 16, 32, 127, 127, -128, 127, 127, 127, -16, -32, -128,
+        -128, -128, 0, 15, 30, 127, 127, -128, 127, 127, 127, -15,
+        -30, -128, -128, -128, 0, 17, 34, 127, 127, -128, 127, 127,
+        127, -17, -34, -128, -128, -128, 0, -1, -2, -127, -126, 127,
+        -16, -15, -17, 1, 2, 127, 16, 91, 0, -2, -4, -128,
+        -128, 127, -32, -30, -34, 2, 4, 127, 32, 127, 0, -127,
+        -128, -128, -128, 127, -128, -128, -128, 127, 127, 127, 127, 127,
+        0, -16, -32, -128, -128, 127, -128, -128, -128, 16, 32, 127,
+        127, 127, 0, -91, -128, -128, -128, 127, -128, -128, -128, 91,
+        127, 127, 127, 127
+    ];
+    let floor_valid: bool[] = [
+        false, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, false, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, false, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, true, true, true, true, false, true, true, true, true,
+        false, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, false, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, false, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        false, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true
+    ];
+    let floor_div_values: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0, -1,
+        -1, -1, -1, -1, 0, 2, 1, 0, 0, -1, 0, 0,
+        0, -2, -1, -1, -1, -1, 0, 127, 63, 1, 1, -1,
+        7, 8, 7, -127, -64, -1, -8, -2, 0, 126, 63, 0,
+        1, -1, 7, 8, 7, -126, -63, -1, -8, -2, 0, -128,
+        -64, -2, -2, 1, -8, -9, -8, 0, 64, 1, 8, 1,
+        0, 16, 8, 0, 0, -1, 1, 1, 0, -16, -8, -1,
+        -1, -1, 0, 15, 7, 0, 0, -1, 0, 1, 0, -15,
+        -8, -1, -1, -1, 0, 17, 8, 0, 0, -1, 1, 1,
+        1, -17, -9, -1, -2, -1, 0, -1, -1, -1, -1, 0,
+        -1, -1, -1, 1, 0, 0, 0, 0, 0, -2, -1, -1,
+        -1, 0, -1, -1, -1, 2, 1, 0, 0, 0, 0, -127,
+        -64, -1, -2, 0, -8, -9, -8, 127, 63, 1, 7, 1,
+        0, -16, -8, -1, -1, 0, -1, -2, -1, 16, 8, 0,
+        1, 0, 0, -91, -46, -1, -1, 0, -6, -7, -6, 91,
+        45, 0, 5, 1
+    ];
+    let floor_mod_values: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 1, 1, 1, -127, 1, 1, 1, 0,
+        -1, -126, -15, -90, 0, 0, 0, 2, 2, -126, 2, 2,
+        2, 0, 0, -125, -14, -89, 0, 0, 1, 0, 1, -1,
+        15, 7, 8, 0, -1, 0, -1, -55, 0, 0, 0, 126,
+        0, -2, 14, 6, 7, 0, 0, -1, -2, -56, 0, 0,
+        0, 126, 124, 0, 0, 7, 8, 0, 0, -1, 0, -37,
+        0, 0, 0, 16, 16, -112, 0, 1, 16, 0, 0, -111,
+        0, -75, 0, 0, 1, 15, 15, -113, 15, 0, 15, 0,
+        -1, -112, -1, -76, 0, 0, 1, 17, 17, -111, 1, 2,
+        0, 0, -1, -110, -15, -74, 0, 0, 1, 126, 125, -1,
+        15, 14, 16, 0, -1, -1, -1, -1, 0, 0, 0, 125,
+        124, -2, 14, 13, 15, 0, 0, -2, -2, -2, 0, 0,
+        1, 0, 125, -127, 1, 8, 9, 0, -1, 0, -15, -36,
+        0, 0, 0, 111, 110, -16, 0, 14, 1, 0, 0, -16,
+        0, -16, 0, 0, 1, 36, 35, -91, 5, 14, 11, 0,
+        -1, -91, -11, 0
+    ];
+    let gcd_valid: bool[] = [
+        true, true, true, true, true, false, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, false, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true
+    ];
+    let gcd_values: int8[] = [
+        0, 1, 2, 127, 126, 0, 16, 15, 17, 1, 2, 127,
+        16, 91, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 2, 1, 2, 1, 2, 2, 2, 1,
+        1, 1, 2, 1, 2, 1, 127, 1, 1, 127, 1, 1,
+        1, 1, 1, 1, 1, 127, 1, 1, 126, 1, 2, 1,
+        126, 2, 2, 3, 1, 1, 2, 1, 2, 7, 0, 1,
+        2, 1, 2, 0, 16, 1, 1, 1, 2, 1, 16, 1,
+        16, 1, 2, 1, 2, 16, 16, 1, 1, 1, 2, 1,
+        16, 1, 15, 1, 1, 1, 3, 1, 1, 15, 1, 1,
+        1, 1, 1, 1, 17, 1, 1, 1, 1, 1, 1, 1,
+        17, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2, 1,
+        2, 2, 2, 1, 1, 1, 2, 1, 2, 1, 127, 1,
+        1, 127, 1, 1, 1, 1, 1, 1, 1, 127, 1, 1,
+        16, 1, 2, 1, 2, 16, 16, 1, 1, 1, 2, 1,
+        16, 1, 91, 1, 1, 1, 7, 1, 1, 1, 1, 1,
+        1, 1, 1, 91
+    ];
+    let compare_values: int[] = [
+        1, 0, 0, 0, 0, 2, 0, 0, 0, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 2, 0, 0, 0, 2,
+        2, 2, 2, 2, 2, 2, 1, 0, 0, 2, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2,
+        2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0,
+        0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 2, 1, 2, 0, 2, 2, 2,
+        2, 2, 2, 2, 2, 0, 0, 2, 0, 1, 0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 2, 2, 2,
+        1, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 2, 2, 2, 2, 0, 0, 0, 0,
+        0, 2, 0, 0, 0, 0, 1, 2, 2, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 2, 1, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0,
+        0, 2, 0, 1
+    ];
+    let count_ones_values: int[] = [
+        0, 1, 1, 7, 6, 1, 1, 4, 2, 8, 7, 2,
+        4, 4
+    ];
+    let leading_zeros_values: int[] = [
+        8, 7, 6, 1, 1, 0, 3, 4, 3, 0, 0, 0,
+        0, 0
+    ];
+    let trailing_zeros_values: int[] = [
+        8, 0, 1, 0, 1, 7, 4, 0, 0, 0, 1, 0,
+        4, 0
+    ];
+    let rotation_counts: int[] = [
+        0, 1, 3, 7, 8, 9, 21, -1, -8, -11, -2147483648, 2147483647
+    ];
+    let rotate_left_values: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 2, 8, -128, 1, 2, 32, -128, 1, 32, 1, -128,
+        2, 4, 16, 1, 2, 4, 64, 1, 2, 64, 2, 1,
+        127, -2, -5, -65, 127, -2, -17, -65, 127, -17, 127, -65,
+        126, -4, -13, 63, 126, -4, -49, 63, 126, -49, 126, 63,
+        -128, 1, 4, 64, -128, 1, 16, 64, -128, 16, -128, 64,
+        16, 32, -128, 8, 16, 32, 2, 8, 16, 2, 16, 8,
+        15, 30, 120, -121, 15, 30, -31, -121, 15, -31, 15, -121,
+        17, 34, -120, -120, 17, 34, 34, -120, 17, 34, 17, -120,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -2, -3, -9, 127, -2, -3, -33, 127, -2, -33, -2, 127,
+        -127, 3, 12, -64, -127, 3, 48, -64, -127, 48, -127, -64,
+        -16, -31, -121, 120, -16, -31, 30, 120, -16, 30, -16, 120,
+        -91, 75, 45, -46, -91, 75, -76, -46, -91, -76, -91, -46
+    ];
+    let rotate_right_values: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, -128, 32, 2, 1, -128, 8, 2, 1, 8, 1, 2,
+        2, 1, 64, 4, 2, 1, 16, 4, 2, 16, 2, 4,
+        127, -65, -17, -2, 127, -65, -5, -2, 127, -5, 127, -2,
+        126, 63, -49, -4, 126, 63, -13, -4, 126, -13, 126, -4,
+        -128, 64, 16, 1, -128, 64, 4, 1, -128, 4, -128, 1,
+        16, 8, 2, 32, 16, 8, -128, 32, 16, -128, 16, 32,
+        15, -121, -31, 30, 15, -121, 120, 30, 15, 120, 15, 30,
+        17, -120, 34, 34, 17, -120, -120, 34, 17, -120, 17, 34,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -2, 127, -33, -3, -2, 127, -9, -3, -2, -9, -2, -3,
+        -127, -64, 48, 3, -127, -64, 12, 3, -127, 12, -127, 3,
+        -16, 120, 30, -31, -16, 120, -121, -31, -16, -121, -16, -31,
+        -91, -46, -76, 75, -91, -46, 45, 75, -91, 45, -91, 75
+    ];
+    let unsigned_values: uint8[] = [
+        0, 1, 2, 127, 126, 128, 16, 15, 17, 255, 254, 129,
+        240, 165
+    ];
+    let signed_values: int8[] = [
+        0, 1, 2, 127, 126, -128, 16, 15, 17, -1, -2, -127,
+        -16, -91
+    ];
+    let hash_values: uint32[] = [
+        0, 1, 2, 127, 126, 4294967168, 16, 15, 17, 4294967295, 4294967294, 4294967169,
+        4294967280, 4294967205
+    ];
+    let decimal_texts: string[] = [
+        "0", "1", "2", "127", "126", "-128",
+        "16", "15", "17", "-1", "-2", "-127",
+        "-16", "-91"
+    ];
+    let radixes: int[] = [
+        2, 3, 8, 10, 16, 36
+    ];
+    let radix_texts: string[] = [
+        "0", "0", "0", "0",
+        "0", "0", "1", "1",
+        "1", "1", "1", "1",
+        "10", "2", "2", "2",
+        "2", "2", "1111111", "11201",
+        "177", "127", "7f", "3j",
+        "1111110", "11200", "176", "126",
+        "7e", "3i", "-10000000", "-11202",
+        "-200", "-128", "-80", "-3k",
+        "10000", "121", "20", "16",
+        "10", "g", "1111", "120",
+        "17", "15", "f", "f",
+        "10001", "122", "21", "17",
+        "11", "h", "-1", "-1",
+        "-1", "-1", "-1", "-1",
+        "-10", "-2", "-2", "-2",
+        "-2", "-2", "-1111111", "-11201",
+        "-177", "-127", "-7f", "-3j",
+        "-10000", "-121", "-20", "-16",
+        "-10", "-g", "-1011011", "-10101",
+        "-133", "-91", "-5b", "-2j"
+    ];
+    let format_radixes: int[] = [
+        10, 10, 16, 2, 10, 10, 36
+    ];
+    let format_widths: int[] = [
+        0, 6, 7, 12, 5, -3, 4
+    ];
+    let format_pads: string[] = [
+        " ", "0", "0", " ", "é", "*", "_"
+    ];
+    let format_texts: string[] = [
+        "0", "000000", "0000000", "           0",
+        "éééé0", "0", "___0", "1",
+        "000001", "0000001", "           1", "éééé1",
+        "1", "___1", "2", "000002",
+        "0000002", "          10", "éééé2", "2",
+        "___2", "127", "000127", "000007f",
+        "     1111111", "éé127", "127", "__3j",
+        "126", "000126", "000007e", "     1111110",
+        "éé126", "126", "__3i", "-128",
+        "-00128", "-000080", "   -10000000", "é-128",
+        "-128", "_-3k", "16", "000016",
+        "0000010", "       10000", "ééé16", "16",
+        "___g", "15", "000015", "000000f",
+        "        1111", "ééé15", "15", "___f",
+        "17", "000017", "0000011", "       10001",
+        "ééé17", "17", "___h", "-1",
+        "-00001", "-000001", "          -1", "ééé-1",
+        "-1", "__-1", "-2", "-00002",
+        "-000002", "         -10", "ééé-2", "-2",
+        "__-2", "-127", "-00127", "-00007f",
+        "    -1111111", "é-127", "-127", "_-3j",
+        "-16", "-00016", "-000010", "      -10000",
+        "éé-16", "-16", "__-g", "-91",
+        "-00091", "-00005b", "    -1011011", "éé-91",
+        "-91", "_-2j"
+    ];
+    let parse_inputs: string[] = [
+        "0", "+0", "1", "+1",
+        "2", "+2", "127", "+127",
+        "126", "+126", "-128", "-128",
+        "16", "+16", "15", "+15",
+        "17", "+17", "-1", "-1",
+        "-2", "-2", "-127", "-127",
+        "-16", "-16", "-91", "-91",
+        "128", "-129", "-0", "+0",
+        "000", "-000", "0000000000000000000000000000000000000000017", "",
+        "-", "+", "1a", " 1",
+        "1 ", "+-1", "--1", "0x10",
+        "é", "1é", "9999999999999999999999999999999999999999", "-9999999999999999999999999999999999999999",
+        "9999999999999999999999999999999999999999x", "-1", "-5", "-127",
+        "1_000", "1.0", "1111111", "-10000000",
+        "7f", "7F", "-80", "3j",
+        "3J", "-3k", "80", "-81",
+        "2", "z", "Z", "Zz",
+        "g", "G", "fF", "-",
+        "", "777", "8", "+11",
+        "12"
+    ];
+    let parse_radixes: int[] = [
+        10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+        10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+        10, 10, 10, 10, 10, 10, 2, 2, 16, 16, 16, 36, 36, 36, 16, 16, 2, 35, 36, 36, 16, 16, 16, 16,
+        2, 8, 8, 3, 3
+    ];
+    let parse_ok: bool[] = [
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, false, false, true, true, true, true, true, false,
+        false, false, false, false, false, false, false, false, false, false, false, false,
+        false, true, true, true, false, false, true, true, true, true, true, true,
+        true, true, false, false, false, false, true, false, false, false, false, false,
+        false, false, false, true, true
+    ];
+    let parse_values: int8[] = [
+        0, 0, 1, 1, 2, 2, 127, 127, 126, 126, -128, -128,
+        16, 16, 15, 15, 17, 17, -1, -1, -2, -2, -127, -127,
+        -16, -16, -91, -91, 0, 0, 0, 0, 0, 0, 17, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, -1, -5, -127, 0, 0, 127, -128, 127, 127, -128, 127,
+        127, -128, 0, 0, 0, 0, 35, 0, 0, 0, 0, 0,
+        0, 0, 0, 4, 5
+    ];
+    let parse_kinds: int[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2,
+        1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1, 1, 0, 2, 1, 1, 2, 3,
+        0, 2, 1, 0, 0
+    ];
+    let parse_offsets: int[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0,
+        40, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        0, 0, 0, 0, 0
+    ];
+    let parse_messages: string[] = [
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "value out of range for int8", "value out of range for int8",
+        "", "", "",
+        "", "", "empty input",
+        "expected a digit", "expected a digit", "invalid character",
+        "invalid character", "invalid character", "invalid character",
+        "invalid character", "invalid character", "invalid character",
+        "invalid character", "value out of range for int8", "value out of range for int8",
+        "invalid character", "", "",
+        "", "invalid character", "invalid character",
+        "", "", "",
+        "", "", "",
+        "", "", "value out of range for int8",
+        "value out of range for int8", "invalid character", "invalid character",
+        "", "value out of range for int8", "invalid character",
+        "invalid character", "value out of range for int8", "expected a digit",
+        "empty input", "value out of range for int8", "invalid character",
+        "", ""
+    ];
+    let clamp_inputs: int8[] = [
+        0, -128, 127, 0, 0, 0, 0, 1, 2, 0, -128, 0,
+        0, 0, 127, 0, 127, 127, 1, -128, 127, 1, 0, 0,
+        1, 1, 2, 1, -128, 0, 1, 0, 127, 1, 127, 127,
+        2, -128, 127, 2, 0, 0, 2, 1, 2, 2, -128, 0,
+        2, 0, 127, 2, 127, 127, 127, -128, 127, 127, 0, 0,
+        127, 1, 2, 127, -128, 0, 127, 0, 127, 127, 127, 127,
+        126, -128, 127, 126, 0, 0, 126, 1, 2, 126, -128, 0,
+        126, 0, 127, 126, 127, 127, -128, -128, 127, -128, 0, 0,
+        -128, 1, 2, -128, -128, 0, -128, 0, 127, -128, 127, 127,
+        16, -128, 127, 16, 0, 0, 16, 1, 2, 16, -128, 0,
+        16, 0, 127, 16, 127, 127, 15, -128, 127, 15, 0, 0,
+        15, 1, 2, 15, -128, 0, 15, 0, 127, 15, 127, 127,
+        17, -128, 127, 17, 0, 0, 17, 1, 2, 17, -128, 0,
+        17, 0, 127, 17, 127, 127, -1, -128, 127, -1, 0, 0,
+        -1, 1, 2, -1, -128, 0, -1, 0, 127, -1, 127, 127,
+        -2, -128, 127, -2, 0, 0, -2, 1, 2, -2, -128, 0,
+        -2, 0, 127, -2, 127, 127, -127, -128, 127, -127, 0, 0,
+        -127, 1, 2, -127, -128, 0, -127, 0, 127, -127, 127, 127,
+        -16, -128, 127, -16, 0, 0, -16, 1, 2, -16, -128, 0,
+        -16, 0, 127, -16, 127, 127, -91, -128, 127, -91, 0, 0,
+        -91, 1, 2, -91, -128, 0, -91, 0, 127, -91, 127, 127
+    ];
+    let clamp_values: int8[] = [
+        0, 0, 1, 0, 0, 127, 1, 0, 1, 0, 1, 127,
+        2, 0, 2, 0, 2, 127, 127, 0, 2, 0, 127, 127,
+        126, 0, 2, 0, 126, 127, -128, 0, 1, -128, 0, 127,
+        16, 0, 2, 0, 16, 127, 15, 0, 2, 0, 15, 127,
+        17, 0, 2, 0, 17, 127, -1, 0, 1, -1, 0, 127,
+        -2, 0, 1, -2, 0, 127, -127, 0, 1, -127, 0, 127,
+        -16, 0, 1, -16, 0, 127, -91, 0, 1, -91, 0, 127
+    ];
+    let pow_bases: int8[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2,
+        2, 127, 127, 126, 126, -128, -128, 16, 16, 15, 15, 17,
+        17, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2,
+        -2, -2, -2, -2, -2, -2, -127, -127, -16, -16, -91, -91,
+        -3, -3, -3, -3, 3, 3, 3, 3, 10, 10, 10
+    ];
+    let pow_exponents: int[] = [
+        0, 1, 2, 3, 5, 7, 7, 8, 16, 100, 0, 1,
+        2, 3, 5, 7, 7, 8, 16, 100, 0, 1, 2, 3,
+        5, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
+        1, 0, 1, 2, 3, 5, 7, 7, 8, 16, 100, 0,
+        1, 2, 3, 5, 7, 7, 0, 1, 0, 1, 0, 1,
+        0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2
+    ];
+    let pow_values: int8[] = [
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 4, 8,
+        32, 1, 127, 1, 126, 1, -128, 1, 16, 1, 15, 1,
+        17, 1, -1, 1, -1, -1, -1, -1, 1, 1, 1, 1,
+        -2, 4, -8, -32, -128, -128, 1, -127, 1, -16, 1, -91,
+        1, -3, 9, -27, 1, 3, 9, 27, 1, 10, 100
+    ];
+
+    let check = func(bool holds, string what, int index) -> void {
+        if (!holds) {
+            test.fail(what + " differs from the reference for case " + index.to_string());
+        }
+    };
+
+    let check_optional = func(optional.Optional<int8> actual, bool present, int8 expected, string what, int index) -> void {
+        match (actual) {
+            optional.Optional.None => {
+                check(!present, what, index);
+            },
+            optional.Optional.Some(value) => {
+                check(present && value == expected, what, index);
+            },
+        }
+    };
+
+    let check_parse = func(result.Result<int8> actual, int index) -> void {
+        match (actual) {
+            result.Result.Ok(value) => {
+                check(parse_ok[index] && value == parse_values[index], "parse value", index);
+            },
+            result.Result.Err(failure) => {
+                check(!parse_ok[index], "parse success", index);
+                match (failure) {
+                    error.Error.Parse { kind, offset, message } => {
+                        check((kind as int) == parse_kinds[index], "parse error kind", index);
+                        check(offset == parse_offsets[index], "parse error offset", index);
+                        check(message == parse_messages[index], "parse error message", index);
+                    },
+                    _ => {
+                        check(false, "parse error variant", index);
+                    },
+                }
+            },
+        }
+    };
+
+    export let test_constants = func() -> void {
+        test.assert(ints.Min == -128);
+        test.assert(ints.Max == 127);
+        test.assert_equal_int32(8, ints.Bits);
+    };
+
+    export let test_sign_min_max_compare = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            let expected_sign = 0;
+            if (a < 0) {
+                expected_sign = -1;
+            } else if (a > 0) {
+                expected_sign = 1;
+            }
+            check(ints.sign(a) == expected_sign, "sign", k);
+            k = k + 1;
+        }
+        k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                let smaller = a;
+                let larger = b;
+                if (b < a) {
+                    smaller = b;
+                    larger = a;
+                }
+                check(ints.min(a, b) == smaller && ints.max(a, b) == larger, "min/max", k);
+                check((ints.compare(a, b) as int) == compare_values[k], "compare", k);
+                k = k + 1;
+            }
+        }
+        test.assert(ints.compare(ints.Min, ints.Max) == ordering.Ordering.Less);
+    };
+
+    export let test_clamp = func() -> void {
+        for (let k = 0; k < clamp_values.length; k = k + 1) {
+            let v = clamp_inputs[3 * k];
+            let low = clamp_inputs[3 * k + 1];
+            let high = clamp_inputs[3 * k + 2];
+            check(ints.clamp(v, low, high) == clamp_values[k], "clamp", k);
+        }
+    };
+
+    export let test_pow = func() -> void {
+        for (let k = 0; k < pow_values.length; k = k + 1) {
+            check(ints.pow(pow_bases[k], pow_exponents[k]) == pow_values[k], "pow", k);
+        }
+        test.assert(ints.pow(0, 0) == 1);
+    };
+
+    export let test_gcd = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                if (gcd_valid[k]) {
+                    check(ints.gcd(a, b) == gcd_values[k], "gcd", k);
+                }
+                k = k + 1;
+            }
+        }
+        test.assert(ints.gcd(0, 0) == 0);
+        test.assert(ints.gcd(12, 18) == 6);
+    };
+
+    export let test_checked = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                check_optional(ints.checked_add(a, b), checked_add_present[k], checked_add_values[k], "checked_add", k);
+                check_optional(ints.checked_sub(a, b), checked_sub_present[k], checked_sub_values[k], "checked_sub", k);
+                check_optional(ints.checked_mul(a, b), checked_mul_present[k], checked_mul_values[k], "checked_mul", k);
+                check_optional(ints.checked_div(a, b), checked_div_present[k], checked_div_values[k], "checked_div", k);
+                check_optional(ints.checked_rem(a, b), checked_rem_present[k], checked_rem_values[k], "checked_rem", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_wrapping = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                check(ints.wrapping_add(a, b) == wrapping_add_values[k], "wrapping_add", k);
+                check(ints.wrapping_sub(a, b) == wrapping_sub_values[k], "wrapping_sub", k);
+                check(ints.wrapping_mul(a, b) == wrapping_mul_values[k], "wrapping_mul", k);
+                k = k + 1;
+            }
+        }
+        let i = 0;
+        for (let a in values) {
+            // wrapping_neg(a) is 0 - a modulo 2^Bits; values[0] is 0.
+            check(ints.wrapping_neg(a) == wrapping_sub_values[i], "wrapping_neg", i);
+            i = i + 1;
+        }
+    };
+
+    export let test_saturating = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                check(ints.saturating_add(a, b) == saturating_add_values[k], "saturating_add", k);
+                check(ints.saturating_sub(a, b) == saturating_sub_values[k], "saturating_sub", k);
+                check(ints.saturating_mul(a, b) == saturating_mul_values[k], "saturating_mul", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_floor_div_mod = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                if (floor_valid[k]) {
+                    check(ints.floor_div(a, b) == floor_div_values[k], "floor_div", k);
+                }
+                if (b != 0) {
+                    check(ints.floor_mod(a, b) == floor_mod_values[k], "floor_mod", k);
+                }
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_bit_counts = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            check(ints.count_ones(v) == count_ones_values[k], "count_ones", k);
+            check(ints.leading_zeros(v) == leading_zeros_values[k], "leading_zeros", k);
+            check(ints.trailing_zeros(v) == trailing_zeros_values[k], "trailing_zeros", k);
+            k = k + 1;
+        }
+    };
+
+    export let test_rotations = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            for (let n in rotation_counts) {
+                check(ints.rotate_left(v, n) == rotate_left_values[k], "rotate_left", k);
+                check(ints.rotate_right(v, n) == rotate_right_values[k], "rotate_right", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_conversions = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            check(ints.to_unsigned(v) == unsigned_values[k], "to_unsigned", k);
+            check(ints.to_signed(v) == signed_values[k], "to_signed", k);
+            k = k + 1;
+        }
+    };
+
+    export let test_hash_and_to_string = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            check(ints.hash(v) == hash_values[k], "hash", k);
+            check(ints.to_string(v) == decimal_texts[k], "to_string", k);
+            k = k + 1;
+        }
+    };
+
+    export let test_to_string_radix = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            for (let radix in radixes) {
+                check(ints.to_string_radix(v, radix) == radix_texts[k], "to_string_radix", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_format = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            for (let f = 0; f < format_radixes.length; f = f + 1) {
+                let text = ints.format(v, format_radixes[f], format_widths[f], format_pads[f]);
+                check(text == format_texts[k], "format", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_parse = func() -> void {
+        for (let k = 0; k < parse_inputs.length; k = k + 1) {
+            if (parse_radixes[k] == 10) {
+                check_parse(ints.parse(parse_inputs[k]), k);
+            }
+            check_parse(ints.parse_radix(parse_inputs[k], parse_radixes[k]), k);
+        }
+        let failure = test.assert_err<int8>(ints.parse("1x"));
+        test.assert_equal_string("parse error at 1: invalid character", error.message(failure));
+    };
+
+    export let test_round_trip_text = func() -> void {
+        for (let v in values) {
+            for (let radix in radixes) {
+                let back = test.assert_ok<int8>(ints.parse_radix(ints.to_string_radix(v, radix), radix));
+                test.assert(back == v);
+            }
+        }
+    };
+
+    export let test_abs = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            if (v != ints.Min) {
+                let expected = v;
+                if (v < 0) {
+                    expected = -v;
+                }
+                check(ints.abs(v) == expected, "abs", k);
+            }
+            k = k + 1;
+        }
+    };
+);

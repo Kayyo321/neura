@@ -1,0 +1,351 @@
+let integer_text = import:Std.Core.Internal.IntegerText;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+let unsigned = import:Std.Core.UInt8;
+
+// Companion functions for int8 (Stdlib.md section 7.1). Every operation uses
+// checked arithmetic; the wrapping forms follow the recipes of section 7.2, so
+// no intermediate value leaves its type.
+export let Int8 = module (
+    export const Min: int8 = -128;
+    export const Max: int8 = 127;
+    export const Bits: int = 8;
+
+    // Traps (reason 1) for Min, from the negation.
+    export let abs = func(int8 v) -> int8 {
+        if (v < 0) {
+            return -v;
+        }
+        return v;
+    };
+
+    export let sign = func(int8 v) -> int {
+        if (v < 0) {
+            return -1;
+        }
+        if (v > 0) {
+            return 1;
+        }
+        return 0;
+    };
+
+    export let min = func(int8 a, int8 b) -> int8 {
+        if (b < a) {
+            return b;
+        }
+        return a;
+    };
+
+    export let max = func(int8 a, int8 b) -> int8 {
+        if (b > a) {
+            return b;
+        }
+        return a;
+    };
+
+    // Traps with "invalid argument: low exceeds high".
+    export let clamp = func(int8 v, int8 low, int8 high) -> int8 {
+        if (low > high) {
+            trap_with_message("invalid argument: low exceeds high");
+        }
+        if (v < low) {
+            return low;
+        }
+        if (v > high) {
+            return high;
+        }
+        return v;
+    };
+
+    // The natural order; usable as a comparator.
+    export let compare = func(int8 a, int8 b) -> ordering.Ordering {
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        if (a > b) {
+            return ordering.Ordering.Greater;
+        }
+        return ordering.Ordering.Equal;
+    };
+
+    // Square-and-multiply with checked multiplication (an overflow traps
+    // with reason 1). The factor is squared only while exponent bits remain,
+    // so each intermediate divides the result. A negative exponent traps;
+    // pow(0, 0) is 1.
+    export let pow = func(int8 base, int exponent) -> int8 {
+        if (exponent < 0) {
+            trap_with_message("invalid argument: negative exponent");
+        }
+        let product: int8 = 1;
+        let factor = base;
+        let remaining = exponent;
+        while (remaining > 0) {
+            if ((remaining & 1) == 1) {
+                product = product * factor;
+            }
+            remaining = remaining >> 1;
+            if (remaining > 0) {
+                factor = factor * factor;
+            }
+        }
+        return product;
+    };
+
+    // Euclid's algorithm in the negative range, where every magnitude fits.
+    // gcd(0, 0) is 0. Traps (reason 1) when the result, 2^(Bits - 1), does
+    // not fit.
+    export let gcd = func(int8 a, int8 b) -> int8 {
+        let x = a;
+        if (x > 0) {
+            x = -x;
+        }
+        let y = b;
+        if (y > 0) {
+            y = -y;
+        }
+        while (y != 0) {
+            let remainder = x % y;
+            x = y;
+            y = remainder;
+        }
+        return -x;
+    };
+
+    // None where the operator would trap. Each test runs before the
+    // operation, so nothing overflows.
+    export let checked_add = func(int8 a, int8 b) -> optional.Optional<int8> {
+        if ((b > 0 && a > Max - b) || (b < 0 && a < Min - b)) {
+            return optional.Optional<int8>.None;
+        }
+        return optional.Optional<int8>.Some(a + b);
+    };
+
+    export let checked_sub = func(int8 a, int8 b) -> optional.Optional<int8> {
+        if ((b < 0 && a > Max + b) || (b > 0 && a < Min + b)) {
+            return optional.Optional<int8>.None;
+        }
+        return optional.Optional<int8>.Some(a - b);
+    };
+
+    export let checked_mul = func(int8 a, int8 b) -> optional.Optional<int8> {
+        if (multiply_overflows(a, b)) {
+            return optional.Optional<int8>.None;
+        }
+        return optional.Optional<int8>.Some(a * b);
+    };
+
+    // None for a zero divisor and for Min / -1.
+    export let checked_div = func(int8 a, int8 b) -> optional.Optional<int8> {
+        if (b == 0 || (a == Min && b == -1)) {
+            return optional.Optional<int8>.None;
+        }
+        return optional.Optional<int8>.Some(a / b);
+    };
+
+    // None for a zero divisor. Min % -1 is 0, as for the operator.
+    export let checked_rem = func(int8 a, int8 b) -> optional.Optional<int8> {
+        if (b == 0) {
+            return optional.Optional<int8>.None;
+        }
+        return optional.Optional<int8>.Some(a % b);
+    };
+
+    // The result modulo 2^Bits: the operation runs on the unsigned pattern
+    // and converts back (section 7.2).
+    export let wrapping_add = func(int8 a, int8 b) -> int8 {
+        return unsigned.to_signed(unsigned.wrapping_add(to_unsigned(a), to_unsigned(b)));
+    };
+
+    export let wrapping_sub = func(int8 a, int8 b) -> int8 {
+        return unsigned.to_signed(unsigned.wrapping_sub(to_unsigned(a), to_unsigned(b)));
+    };
+
+    export let wrapping_mul = func(int8 a, int8 b) -> int8 {
+        return unsigned.to_signed(unsigned.wrapping_mul(to_unsigned(a), to_unsigned(b)));
+    };
+
+    // Min wraps to itself.
+    export let wrapping_neg = func(int8 a) -> int8 {
+        return unsigned.to_signed(unsigned.wrapping_neg(to_unsigned(a)));
+    };
+
+    // Clamp to Min or Max instead of overflowing.
+    export let saturating_add = func(int8 a, int8 b) -> int8 {
+        if (b > 0 && a > Max - b) {
+            return Max;
+        }
+        if (b < 0 && a < Min - b) {
+            return Min;
+        }
+        return a + b;
+    };
+
+    export let saturating_sub = func(int8 a, int8 b) -> int8 {
+        if (b < 0 && a > Max + b) {
+            return Max;
+        }
+        if (b > 0 && a < Min + b) {
+            return Min;
+        }
+        return a - b;
+    };
+
+    export let saturating_mul = func(int8 a, int8 b) -> int8 {
+        if (multiply_overflows(a, b)) {
+            if ((a < 0) != (b < 0)) {
+                return Min;
+            }
+            return Max;
+        }
+        return a * b;
+    };
+
+    // The quotient rounded toward negative infinity. A zero divisor and
+    // Min / -1 trap (reason 1) in the division.
+    export let floor_div = func(int8 a, int8 b) -> int8 {
+        let quotient = a / b;
+        if (a % b != 0 && (a < 0) != (b < 0)) {
+            return quotient - 1;
+        }
+        return quotient;
+    };
+
+    // The remainder with the divisor's sign. A zero divisor traps (reason 1).
+    export let floor_mod = func(int8 a, int8 b) -> int8 {
+        let remainder = a % b;
+        if (remainder != 0 && (remainder < 0) != (b < 0)) {
+            return remainder + b;
+        }
+        return remainder;
+    };
+
+    // Bit counts and rotations over the two's complement pattern.
+    export let count_ones = func(int8 v) -> int {
+        return unsigned.count_ones(to_unsigned(v));
+    };
+
+    export let leading_zeros = func(int8 v) -> int {
+        return unsigned.leading_zeros(to_unsigned(v));
+    };
+
+    export let trailing_zeros = func(int8 v) -> int {
+        return unsigned.trailing_zeros(to_unsigned(v));
+    };
+
+    export let rotate_left = func(int8 v, int n) -> int8 {
+        return unsigned.to_signed(unsigned.rotate_left(to_unsigned(v), n));
+    };
+
+    export let rotate_right = func(int8 v, int n) -> int8 {
+        return unsigned.to_signed(unsigned.rotate_right(to_unsigned(v), n));
+    };
+
+    // The same-width unsigned type with the same bit pattern (section 7.2).
+    export let to_unsigned = func(int8 v) -> uint8 {
+        if (v >= 0) {
+            return v as uint8;
+        }
+        // A negative value is at least -2^7, so v + 2^8 is
+        // between 2^7 and 2^8 - 1.
+        return ((v as int64) + 256) as uint8;
+    };
+
+    // The identity: every integer module has both conversions.
+    export let to_signed = func(int8 v) -> int8 {
+        return v;
+    };
+
+    // Section 5.2: the two's complement pattern as a uint32; the 64-bit types
+    // fold the high half into the low half.
+    export let hash = func(int8 v) -> uint32 {
+        return v.hash_code();
+    };
+
+    // Decimal, with `-` for negative values (section 5.2).
+    export let to_string = func(int8 v) -> string {
+        return v.to_string();
+    };
+
+    // Lowercase digits. The digits are produced in the negative range, so
+    // Min needs no negation. A radix outside 2 through 36 traps.
+    export let to_string_radix = func(int8 v, int radix) -> string {
+        integer_text.check_radix(radix);
+        if (radix == 10) {
+            return v.to_string();
+        }
+        let base = radix as int8;
+        let rest = v;
+        if (rest > 0) {
+            rest = -rest;
+        }
+        let digits: uint8[list] = [];
+        while (true) {
+            digits.append(integer_text.digit_byte(-(rest % base) as int));
+            rest = rest / base;
+            if (rest == 0) {
+                break;
+            }
+        }
+        return integer_text.digits_text(digits, v < 0);
+    };
+
+    // to_string_radix, left-padded with copies of `pad` to `min_width`
+    // characters, sign included. A `0` pad goes after the sign. `pad` must be
+    // one scalar value.
+    export let format = func(int8 v, int radix, int min_width, string pad) -> string {
+        return integer_text.pad_number(to_string_radix(v, radix), min_width, pad);
+    };
+
+    export let parse = func(string text) -> result.Result<int8> {
+        return parse_radix(text, 10);
+    };
+
+    // An optional `+` or `-`, then one or more digits of the radix in either
+    // case. Syntax errors are reported first (Empty, UnexpectedEnd at the
+    // end, InvalidCharacter at the offending byte); a well-formed value
+    // outside the type fails with OutOfRange at offset 0. The digits
+    // accumulate in the negative range, so Min parses without overflow. A
+    // radix outside 2 through 36 traps.
+    export let parse_radix = func(string text, int radix) -> result.Result<int8> {
+        integer_text.check_radix(radix);
+        match (integer_text.syntax_error(text, radix)) {
+            optional.Optional.Some(failure) => {
+                return result.Result<int8>.Err(failure);
+            },
+            optional.Optional.None => {},
+        }
+        let start = integer_text.sign_length(text);
+        let negative = start == 1 && text.byte_at(0) == 45;
+        let limit = -Max;
+        if (negative) {
+            limit = Min;
+        }
+        let base = radix as int8;
+        let multiple_limit = limit / base;
+        let value: int8 = 0;
+        let length = text.byte_length;
+        for (let i = start; i < length; i = i + 1) {
+            let digit = integer_text.digit_value(text.byte_at(i)) as int8;
+            if (value < multiple_limit) {
+                return result.Result<int8>.Err(integer_text.out_of_range("int8"));
+            }
+            value = value * base;
+            if (value < limit + digit) {
+                return result.Result<int8>.Err(integer_text.out_of_range("int8"));
+            }
+            value = value - digit;
+        }
+        if (negative) {
+            return result.Result<int8>.Ok(value);
+        }
+        return result.Result<int8>.Ok(-value);
+    };
+
+    // Whether a * b leaves the type. The int64 product of two values of at
+    // most 32 bits cannot overflow.
+    let multiply_overflows = func(int8 a, int8 b) -> bool {
+        let product = (a as int64) * (b as int64);
+        return product < (Min as int64) || product > (Max as int64);
+    };
+);

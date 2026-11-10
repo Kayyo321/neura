@@ -1,0 +1,14 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) in function [0-9]+ block [0-9]+ at std/core/u-int16[.]nra
+let console = import:Std.Io.Console;
+let uint16s = import:Std.Core.UInt16;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(uint16s.pow(2, 15).to_string());
+        console.print_line(uint16s.pow(2, 16).to_string());
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

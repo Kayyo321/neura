@@ -1,0 +1,161 @@
+let cell = import:Std.Core.Cell;
+
+// Accumulates UTF-8 text (Stdlib.md section 8.2). The layout is one built-in
+// uint8 list that always holds valid UTF-8: every append adds whole
+// characters and truncate cuts only at a character boundary.
+//
+// The language has no expression for a method's own receiver, so a builder
+// returns itself through a link that its factory fills in. Builders are made
+// with the module function `create`; the constructor takes a token that only
+// this module can name.
+export let StringBuilder = module (
+    let Seal = enum (Token);
+
+    export let StringBuilder = class (
+        let bytes: uint8[list] = [];
+        let link: cell.Cell<StringBuilder>;
+
+        export let init = func(Seal seal, cell.Cell<StringBuilder> owner) -> void {
+            link = owner;
+        };
+
+        // Appends the bytes of `s` and returns this builder.
+        export let append = func(string s) -> StringBuilder {
+            let count = s.byte_length;
+            for (let i = 0; i < count; i = i + 1) {
+                bytes.append(s.byte_at(i));
+            }
+            return link.value;
+        };
+
+        // Appends the UTF-8 encoding of a Unicode scalar value. Traps for a
+        // surrogate or a value above 0x10FFFF.
+        export let append_scalar = func(uint32 scalar) -> StringBuilder {
+            if (scalar < 128) {
+                bytes.append(scalar as uint8);
+            } else if (scalar < 2048) {
+                bytes.append((192 | (scalar >> 6)) as uint8);
+                bytes.append((128 | (scalar & 63)) as uint8);
+            } else if (scalar < 65536) {
+                if (scalar >= 55296 && scalar <= 57343) {
+                    trap_with_message("invalid argument: not a Unicode scalar value");
+                }
+                bytes.append((224 | (scalar >> 12)) as uint8);
+                bytes.append((128 | ((scalar >> 6) & 63)) as uint8);
+                bytes.append((128 | (scalar & 63)) as uint8);
+            } else {
+                if (scalar > 1114111) {
+                    trap_with_message("invalid argument: not a Unicode scalar value");
+                }
+                bytes.append((240 | (scalar >> 18)) as uint8);
+                bytes.append((128 | ((scalar >> 12) & 63)) as uint8);
+                bytes.append((128 | ((scalar >> 6) & 63)) as uint8);
+                bytes.append((128 | (scalar & 63)) as uint8);
+            }
+            return link.value;
+        };
+
+        // Appends `s` and one LF.
+        export let append_line = func(string s) -> StringBuilder {
+            append(s);
+            bytes.append(10);
+            return link.value;
+        };
+
+        // Appends `count` copies of `s`. A negative count traps.
+        export let append_repeated = func(string s, int count) -> StringBuilder {
+            if (count < 0) {
+                trap_with_message("invalid argument: negative count");
+            }
+            for (let i = 0; i < count; i = i + 1) {
+                append(s);
+            }
+            return link.value;
+        };
+
+        // The scalar appends use the built-in decimal and float text
+        // (Stdlib.md sections 5.2 and 7.5).
+        export let append_int = func(int64 v) -> StringBuilder {
+            return append(v.to_string());
+        };
+
+        export let append_uint = func(uint64 v) -> StringBuilder {
+            return append(v.to_string());
+        };
+
+        export let append_float = func(float64 v) -> StringBuilder {
+            return append(v.to_string());
+        };
+
+        export let append_bool = func(bool v) -> StringBuilder {
+            if (v) {
+                return append("true");
+            }
+            return append("false");
+        };
+
+        // Appends `value.to_string()`.
+        export let append_value = func<T>(T value) -> StringBuilder {
+            return append(value.to_string());
+        };
+
+        export let byte_length = func() -> int {
+            return bytes.length;
+        };
+
+        export let is_empty = func() -> bool {
+            return bytes.length == 0;
+        };
+
+        // Keeps the first `new_length` bytes. The length must be between 0
+        // and the current byte length and fall on a character boundary.
+        export let truncate = func(int new_length) -> void {
+            let length = bytes.length;
+            if (new_length < 0 || new_length > length) {
+                trap_with_message("invalid argument: byte length out of range");
+            }
+            if (new_length == length) {
+                return;
+            }
+            if ((bytes[new_length] & 192) == 128) {
+                trap_with_message("invalid argument: not a character boundary");
+            }
+            if (new_length < length - new_length) {
+                bytes = copy_prefix(new_length);
+                return;
+            }
+            for (let last = length - 1; last >= new_length; last = last - 1) {
+                bytes.remove_at(last);
+            }
+        };
+
+        export let clear = func() -> void {
+            bytes = [];
+        };
+
+        // The accumulated text. The builder stays usable.
+        export let.override to_string = func() -> string {
+            let [valid, text] = string.from_utf8(bytes);
+            if (!valid) {
+                trap_with_message("invalid state: string builder holds invalid UTF-8");
+            }
+            return text;
+        };
+
+        let copy_prefix = func(int count) -> uint8[list] {
+            let kept: uint8[list] = [];
+            for (let i = 0; i < count; i = i + 1) {
+                kept.append(bytes[i]);
+            }
+            return kept;
+        };
+    );
+
+    // A new, empty builder.
+    export let create = func() -> StringBuilder {
+        let owner = cell.of<StringBuilder>(nil);
+        let builder = new StringBuilder(Seal.Token, owner);
+        owner.value = builder;
+        return builder;
+    };
+);

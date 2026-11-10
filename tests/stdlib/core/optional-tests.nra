@@ -1,0 +1,102 @@
+let cell = import:Std.Core.Cell;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+let OptionalTests = module (
+    let Node = class (
+        export let label: string = "node";
+    );
+
+    let some = func(int value) -> optional.Optional<int> {
+        return optional.Optional<int>.Some(value);
+    };
+
+    let none = func() -> optional.Optional<int> {
+        return optional.Optional<int>.None;
+    };
+
+    export let test_presence = func() -> void {
+        test.assert(optional.is_some<int>(some(1)));
+        test.assert(!optional.is_some<int>(none()));
+        test.assert(optional.is_none<int>(none()));
+        test.assert(!optional.is_none<int>(some(1)));
+    };
+
+    export let test_value_or = func() -> void {
+        test.assert_equal_int32(4, optional.value_or<int>(some(4), 9));
+        test.assert_equal_int32(9, optional.value_or<int>(none(), 9));
+        test.assert_equal_int32(5, optional.expect<int>(some(5), "present"));
+    };
+
+    export let test_value_or_else_calls_only_for_none = func() -> void {
+        let calls = cell.of<int>(0);
+        let make = func() -> int {
+            calls.value = calls.value + 1;
+            return 7;
+        };
+        test.assert_equal_int32(3, optional.value_or_else<int>(some(3), make));
+        test.assert_equal_int32(0, calls.value);
+        test.assert_equal_int32(7, optional.value_or_else<int>(none(), make));
+        test.assert_equal_int32(1, calls.value);
+    };
+
+    export let test_map_and_then_filter = func() -> void {
+        let text = optional.map<int, string>(some(12), func(int v) -> string { return v.to_string(); });
+        test.assert_equal_string("12", optional.value_or<string>(text, ""));
+        let missing = optional.map<int, string>(none(), func(int v) -> string { return "called"; });
+        test.assert(optional.is_none<string>(missing));
+        let halve = func(int v) -> optional.Optional<int> {
+            if (v % 2 == 0) {
+                return optional.Optional<int>.Some(v / 2);
+            }
+            return optional.Optional<int>.None;
+        };
+        test.assert_equal_int32(3, optional.value_or<int>(optional.and_then<int, int>(some(6), halve), 0));
+        test.assert(optional.is_none<int>(optional.and_then<int, int>(some(5), halve)));
+        test.assert(optional.is_none<int>(optional.and_then<int, int>(none(), halve)));
+        let positive = func(int v) -> bool { return v > 0; };
+        test.assert(optional.is_some<int>(optional.filter<int>(some(2), positive)));
+        test.assert(optional.is_none<int>(optional.filter<int>(some(-2), positive)));
+        test.assert(optional.is_none<int>(optional.filter<int>(none(), positive)));
+    };
+
+    export let test_or_else = func() -> void {
+        let other = func() -> optional.Optional<int> { return optional.Optional<int>.Some(8); };
+        test.assert_equal_int32(1, optional.value_or<int>(optional.or_else<int>(some(1), other), 0));
+        test.assert_equal_int32(8, optional.value_or<int>(optional.or_else<int>(none(), other), 0));
+    };
+
+    export let test_to_result = func() -> void {
+        let failure = error.custom("probe.missing", "missing value");
+        test.assert_equal_int32(2, test.assert_ok<int>(optional.to_result<int>(some(2), failure)));
+        let e = test.assert_err<int>(optional.to_result<int>(none(), failure));
+        test.assert_equal_string("missing value", error.message(e));
+    };
+
+    export let test_value_members = func() -> void {
+        test.assert(optional.equals<int>(some(1), some(1)));
+        test.assert(!optional.equals<int>(some(1), some(2)));
+        test.assert(!optional.equals<int>(some(1), none()));
+        test.assert(optional.equals<int>(none(), none()));
+        test.assert_equal_int32(0, optional.hash<int>(none()) as int);
+        test.assert_equal_uint64(32, optional.hash<int>(some(1)) as uint64);
+        test.assert_equal_string("Some(42)", optional.to_string<int>(some(42)));
+        test.assert_equal_string("None", optional.to_string<int>(none()));
+        test.assert_equal_string("Some(hi)", optional.to_string<string>(optional.Optional<string>.Some("hi")));
+    };
+
+    // None and Some(nil) are distinct values.
+    export let test_some_nil_is_not_none = func() -> void {
+        let absent: Node = nil;
+        let held = optional.Optional<Node>.Some(absent);
+        let empty = optional.Optional<Node>.None;
+        test.assert(optional.is_some<Node>(held));
+        test.assert(!optional.equals<Node>(held, empty));
+        test.assert(optional.equals<Node>(held, optional.Optional<Node>.Some(nil)));
+        test.assert_equal_string("Some(nil)", optional.to_string<Node>(held));
+        test.assert_equal_uint64(31, optional.hash<Node>(held) as uint64);
+        test.assert(test.assert_some<Node>(held) == nil);
+    };
+);

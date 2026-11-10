@@ -1,0 +1,17 @@
+// status: 42
+// args: first second
+let program = import:Std.Program;
+let console = import:Std.Io.Console;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        for (let argument in args) {
+            console.print_line(argument);
+        }
+        if (args.length == 2) {
+            return program.ExitCode.Status(42);
+        }
+
+        return program.ExitCode.Ok;
+    };
+);

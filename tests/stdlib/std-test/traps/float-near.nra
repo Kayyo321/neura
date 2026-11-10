@@ -1,0 +1,15 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): expected <1[.]0>, got <1[.]25>
+let program = import:Std.Program;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        test.assert_float_near(1.0, 1.25, 0.125);
+
+        return program.ExitCode.Ok;
+    };
+);

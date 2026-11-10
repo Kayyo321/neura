@@ -1,0 +1,88 @@
+let error = import:Std.Core.Error;
+let test = import:Std.Test;
+
+let ErrorTests = module (
+    let Declined = class:error.ErrorDetail (
+        export let amount: int;
+        export let init = func(int value) -> void {
+            super.init();
+            amount = value;
+        };
+        export let.override code = func() -> string {
+            return "billing.card_declined";
+        };
+        export let.override message = func() -> string {
+            return "card declined for " + amount.to_string();
+        };
+    );
+
+    let io_error = func(error.IoErrorKind kind, string text, string path) -> error.Error {
+        return error.Error.Io { kind: kind, message: text, path: path };
+    };
+
+    export let test_messages = func() -> void {
+        test.assert_equal_string("NotFound: no file (a.txt)",
+            error.message(io_error(error.IoErrorKind.NotFound, "no file", "a.txt")));
+        test.assert_equal_string("Closed: stream closed",
+            error.message(io_error(error.IoErrorKind.Closed, "stream closed", "")));
+        test.assert_equal_string("parse error at 3: bad digit", error.message(
+            error.Error.Parse { kind: error.ParseErrorKind.InvalidCharacter, offset: 3, message: "bad digit" }));
+        test.assert_equal_string("invalid encoding at 0: bad byte",
+            error.message(error.Error.Encoding { offset: 0, message: "bad byte" }));
+        test.assert_equal_string("card declined for 5", error.message(error.Error.Custom(new Declined(5))));
+        test.assert_equal_string("plain", error.message(error.custom("x.y", "plain")));
+        let wrapped = error.context(error.context(error.custom("x.y", "root"), "middle"), "outer");
+        test.assert_equal_string("outer: middle: root", error.message(wrapped));
+        test.assert_equal_string("outer: middle: root", error.to_string(wrapped));
+    };
+
+    export let test_custom_detail = func() -> void {
+        match (error.custom("app.code", "text")) {
+            error.Error.Custom(detail) => {
+                test.assert_equal_string("app.code", detail.code());
+                test.assert_equal_string("text", detail.message());
+                test.assert(detail is error.SimpleDetail);
+            },
+            _ => { test.fail("expected Custom"); },
+        }
+    };
+
+    export let test_root_cause_and_chain = func() -> void {
+        let root = error.custom("x.root", "root");
+        let wrapped = error.context(error.context(root, "middle"), "outer");
+        test.assert_equal_string("root", error.message(error.root_cause(wrapped)));
+        test.assert_equal_string("root", error.message(error.root_cause(root)));
+        let links = error.chain(wrapped);
+        test.assert_equal_int32(3, links.length);
+        test.assert_equal_string("outer: middle: root", error.message(links[0]));
+        test.assert_equal_string("middle: root", error.message(links[1]));
+        test.assert_equal_string("root", error.message(links[2]));
+        test.assert_equal_int32(1, error.chain(root).length);
+    };
+
+    export let test_kind_names = func() -> void {
+        test.assert_equal_string("CapabilityDenied", error.io_kind_name(error.IoErrorKind.CapabilityDenied));
+        test.assert_equal_string("InvalidData", error.io_kind_name(error.IoErrorKind.InvalidData));
+        test.assert_equal_string("Other", error.io_kind_name(error.IoErrorKind.Other));
+        test.assert_equal_string("UnexpectedEnd", error.parse_kind_name(error.ParseErrorKind.UnexpectedEnd));
+        test.assert_equal_int32(13, error.IoErrorKind.CapabilityDenied as int);
+        test.assert_equal_int32(16, error.IoErrorKind.Other as int);
+        test.assert_equal_int32(4, error.ParseErrorKind.Syntax as int);
+    };
+
+    export let test_equality_and_hash = func() -> void {
+        let a = io_error(error.IoErrorKind.NotFound, "missing", "p");
+        let b = io_error(error.IoErrorKind.NotFound, "missing", "p");
+        let c = io_error(error.IoErrorKind.NotFound, "missing", "q");
+        test.assert(error.equals(a, b));
+        test.assert(!error.equals(a, c));
+        test.assert(error.hash(a) == error.hash(b));
+        let parse = error.Error.Parse { kind: error.ParseErrorKind.Empty, offset: 0, message: "empty" };
+        test.assert(!error.equals(a, parse));
+        test.assert(error.equals(error.context(a, "x"), error.context(b, "x")));
+        test.assert(!error.equals(error.context(a, "x"), error.context(c, "x")));
+        let detail = new Declined(1);
+        test.assert(error.equals(error.Error.Custom(detail), error.Error.Custom(detail)));
+        test.assert(!error.equals(error.Error.Custom(detail), error.Error.Custom(new Declined(1))));
+    };
+);

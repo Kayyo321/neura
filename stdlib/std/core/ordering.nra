@@ -1,0 +1,39 @@
+// Comparison results (Stdlib.md section 5.3). Comparators return Ordering,
+// never an integer, so the overflowing subtraction idiom cannot be written.
+export let Ordering = module (
+    export let Ordering = enum (Less, Equal, Greater);
+
+    export let reverse = func(Ordering o) -> Ordering {
+        if (o == Ordering.Less) {
+            return Ordering.Greater;
+        }
+        if (o == Ordering.Greater) {
+            return Ordering.Less;
+        }
+        return Ordering.Equal;
+    };
+
+    // `first` unless it is Equal, for comparing by several keys.
+    export let then = func(Ordering first, Ordering second) -> Ordering {
+        if (first == Ordering.Equal) {
+            return second;
+        }
+        return first;
+    };
+
+    export let is_less = func(Ordering o) -> bool {
+        return o == Ordering.Less;
+    };
+
+    export let is_at_most = func(Ordering o) -> bool {
+        return o != Ordering.Greater;
+    };
+
+    export let is_greater = func(Ordering o) -> bool {
+        return o == Ordering.Greater;
+    };
+
+    export let is_at_least = func(Ordering o) -> bool {
+        return o != Ordering.Less;
+    };
+);

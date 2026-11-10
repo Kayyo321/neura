@@ -1,0 +1,107 @@
+// An immutable arithmetic progression of int values (Stdlib.md section 6.5):
+// `start` inclusive, `end` exclusive, and a nonzero `step`. A negative step
+// counts down while the value is greater than `end`. Positions and sizes are
+// computed in int64, so no intermediate overflows.
+export let IntRange = module (
+    export let IntRange = class (
+        let first: int;
+        let limit: int;
+        let increment: int;
+
+        export let init = func(int start_value, int end_value, int step_value) -> void {
+            if (step_value == 0) {
+                trap_with_message("invalid argument: zero step");
+            }
+            first = start_value;
+            limit = end_value;
+            increment = step_value;
+        };
+
+        export let start = func() -> int {
+            return first;
+        };
+
+        export let end = func() -> int {
+            return limit;
+        };
+
+        export let step = func() -> int {
+            return increment;
+        };
+
+        // The number of values. Computed in int64; a range with more than
+        // Int32.Max values traps (reason 1) in the conversion to int.
+        export let size = func() -> int {
+            return count() as int;
+        };
+
+        export let is_empty = func() -> bool {
+            if (increment > 0) {
+                return first >= limit;
+            }
+            return first <= limit;
+        };
+
+        export let contains = func(int value) -> bool {
+            let offset = (value as int64) - (first as int64);
+            let stride = increment as int64;
+            if (increment > 0) {
+                return value >= first && value < limit && offset % stride == 0;
+            }
+            return value <= first && value > limit && offset % stride == 0;
+        };
+
+        // The value at `index`. An index outside 0 through size() - 1 traps
+        // with "invalid argument: index out of range".
+        export let get = func(int index) -> int {
+            if (index < 0 || (index as int64) >= count()) {
+                trap_with_message("invalid argument: index out of range");
+            }
+            return ((first as int64) + (index as int64) * (increment as int64)) as int;
+        };
+
+        // A new built-in list of the values in order.
+        export let to_list = func() -> int[list] {
+            let values: int[list] = [];
+            let current = first as int64;
+            let stop = limit as int64;
+            let stride = increment as int64;
+            if (increment > 0) {
+                while (current < stop) {
+                    values.append(current as int);
+                    current = current + stride;
+                }
+            } else {
+                while (current > stop) {
+                    values.append(current as int);
+                    current = current + stride;
+                }
+            }
+            return values;
+        };
+
+        // The exact number of values as an int64.
+        let count = func() -> int64 {
+            if (is_empty()) {
+                return 0;
+            }
+            let distance = (limit as int64) - (first as int64);
+            let stride = increment as int64;
+            if (increment < 0) {
+                distance = -distance;
+                stride = -stride;
+            }
+            return (distance + stride - 1) / stride;
+        };
+    );
+
+    // The values from `start` up to, but not including, `end`.
+    export let of = func(int start, int end) -> IntRange {
+        return new IntRange(start, end, 1);
+    };
+
+    // A zero step traps with "invalid argument: zero step".
+    export let stepped = func(int start, int end, int step) -> IntRange {
+        return new IntRange(start, end, step);
+    };
+);

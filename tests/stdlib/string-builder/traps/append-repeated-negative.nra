@@ -1,0 +1,16 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: negative count
+let builders = import:Std.Core.StringBuilder;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let b = builders.create();
+        b.append_repeated("ab", 0);
+        console.print_line("[" + b.to_string() + "]");
+        b.append_repeated("ab", -1);
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

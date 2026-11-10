@@ -1,0 +1,82 @@
+let ranges = import:Std.Core.IntRange;
+let test = import:Std.Test;
+
+let IntRangeTests = module (
+    let check_values = func(ranges.IntRange r, string expected) -> void {
+        let values = r.to_list();
+        test.assert_equal_string(expected, values.to_string());
+        test.assert_equal_int32(values.length, r.size());
+        test.assert_equal_bool(values.length == 0, r.is_empty());
+        for (let i = 0; i < values.length; i = i + 1) {
+            test.assert_equal_int32(values[i], r.get(i));
+            test.assert(r.contains(values[i]));
+        }
+    };
+
+    export let test_accessors = func() -> void {
+        let r = ranges.stepped(1, 10, 3);
+        test.assert_equal_int32(1, r.start());
+        test.assert_equal_int32(10, r.end());
+        test.assert_equal_int32(3, r.step());
+        let s = ranges.of(-2, 2);
+        test.assert_equal_int32(-2, s.start());
+        test.assert_equal_int32(2, s.end());
+        test.assert_equal_int32(1, s.step());
+    };
+
+    export let test_of = func() -> void {
+        check_values(ranges.of(0, 5), "[0, 1, 2, 3, 4]");
+        check_values(ranges.of(-3, 0), "[-3, -2, -1]");
+        check_values(ranges.of(4, 4), "[]");
+        check_values(ranges.of(5, 1), "[]");
+    };
+
+    export let test_stepped_up = func() -> void {
+        check_values(ranges.stepped(1, 10, 3), "[1, 4, 7]");
+        check_values(ranges.stepped(1, 11, 3), "[1, 4, 7, 10]");
+        check_values(ranges.stepped(0, 1, 100), "[0]");
+        check_values(ranges.stepped(3, 3, 2), "[]");
+    };
+
+    export let test_stepped_down = func() -> void {
+        check_values(ranges.stepped(10, 0, -3), "[10, 7, 4, 1]");
+        check_values(ranges.stepped(10, 1, -3), "[10, 7, 4]");
+        check_values(ranges.stepped(0, -5, -1), "[0, -1, -2, -3, -4]");
+        check_values(ranges.stepped(0, 0, -1), "[]");
+        check_values(ranges.stepped(0, 5, -1), "[]");
+    };
+
+    export let test_contains = func() -> void {
+        let r = ranges.stepped(1, 10, 3);
+        test.assert(r.contains(1) && r.contains(7));
+        test.assert(!r.contains(10) && !r.contains(2) && !r.contains(-2) && !r.contains(0));
+        let down = ranges.stepped(10, 0, -3);
+        test.assert(down.contains(10) && down.contains(1));
+        test.assert(!down.contains(0) && !down.contains(13) && !down.contains(9) && !down.contains(-2));
+        test.assert(!ranges.of(3, 3).contains(3));
+    };
+
+    export let test_extremes = func() -> void {
+        let min = -2147483648;
+        let max = 2147483647;
+        // The last value is near the end of int: no intermediate overflows.
+        check_values(ranges.stepped(max - 5, max, 2), "[2147483642, 2147483644, 2147483646]");
+        check_values(ranges.stepped(min + 5, min, -2), "[-2147483643, -2147483645, -2147483647]");
+        let wide = ranges.stepped(min, max, 1073741824);
+        check_values(wide, "[-2147483648, -1073741824, 0, 1073741824]");
+        // 1,431,655,765 values: min + 3k up to 2,147,483,644.
+        let thirds = ranges.stepped(min, max, 3);
+        test.assert_equal_int32(1431655765, thirds.size());
+        test.assert(!thirds.is_empty());
+        test.assert(thirds.contains(2147483644) && !thirds.contains(max) && thirds.contains(min));
+        test.assert(!thirds.contains(0) && thirds.contains(1));
+        test.assert_equal_int32(2147483644, thirds.get(thirds.size() - 1));
+        test.assert_equal_int32(min + 3, thirds.get(1));
+        let down = ranges.stepped(max, min, -max);
+        check_values(down, "[2147483647, 0, -2147483647]");
+        let huge_step = ranges.stepped(0, max, max);
+        check_values(huge_step, "[0]");
+        let negative_huge = ranges.stepped(max, min, min);
+        check_values(negative_huge, "[2147483647, -1]");
+    };
+);

@@ -1,0 +1,15 @@
+neura-trace 1
+# Recorded with: env NEURA_GREETING='grüße' NEURA_EMPTY= neura run --allow-env --record replayed-lookups.trace replayed-lookups.nvr
+request neura.env.get 1 ["NEURA_GREETING"]
+ok [1, "gr\xc3\xbc\xc3\x9fe"]
+request neura.console.write_line 1 ["NEURA_GREETING = [gr\xc3\xbc\xc3\x9fe]"]
+ok 0
+request neura.env.get 1 ["NEURA_EMPTY"]
+ok [1, 0]
+request neura.console.write_line 1 ["NEURA_EMPTY = []"]
+ok 0
+request neura.env.get 1 ["NEURA_UNSET"]
+ok [0, 0]
+request neura.console.write_line 1 ["NEURA_UNSET is missing"]
+ok 0
+outcome completed 0

@@ -1,0 +1,12 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): no such element: config value
+let program = import:Std.Program;
+let optional = import:Std.Core.Optional;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let value = optional.expect<int>(optional.Optional<int>.None, "config value");
+
+        return program.ExitCode.Ok;
+    };
+);

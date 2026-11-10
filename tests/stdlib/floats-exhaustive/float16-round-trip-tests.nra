@@ -1,0 +1,95 @@
+let floats = import:Std.Core.Float16;
+let hashing = import:Std.Core.Hash;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// Every float16 bit pattern (Stdlib.md sections 7.5 and 17): to_string then
+// parse returns the same value (every NaN parses to NaN), and the digest of
+// each chunk's to_string texts equals the digest of texts from an exact
+// Fraction reference (generated with Python; digest = 31 * digest + the
+// text's hash, wrapping, as Hash.combine).
+let Float16RoundTripTests = module (
+    let check_range = func(int start, int end, uint32 expected_digest) -> void {
+        let digest: uint32 = 0;
+        for (let i = start; i < end; i = i + 1) {
+            let v = floats.from_bits(i as uint16);
+            let text = floats.to_string(v);
+            digest = hashing.combine(digest, text.hash_code());
+            match (floats.parse(text)) {
+                result.Result.Ok(back) => {
+                    if (!floats.equals(back, v)) {
+                        test.fail("pattern " + i.to_string() + " (" + text + ") parsed to " + floats.to_string(back));
+                    }
+                },
+                result.Result.Err(failure) => {
+                    test.fail("pattern " + i.to_string() + " (" + text + ") did not parse");
+                },
+            }
+        }
+        test.assert_with(digest == expected_digest, "to_string digest differs from the reference");
+    };
+
+    export let test_patterns_0_to_4095 = func() -> void {
+        check_range(0, 4096, 2617939346);
+    };
+
+    export let test_patterns_4096_to_8191 = func() -> void {
+        check_range(4096, 8192, 2340135299);
+    };
+
+    export let test_patterns_8192_to_12287 = func() -> void {
+        check_range(8192, 12288, 1611234295);
+    };
+
+    export let test_patterns_12288_to_16383 = func() -> void {
+        check_range(12288, 16384, 698813984);
+    };
+
+    export let test_patterns_16384_to_20479 = func() -> void {
+        check_range(16384, 20480, 501955280);
+    };
+
+    export let test_patterns_20480_to_24575 = func() -> void {
+        check_range(20480, 24576, 557376304);
+    };
+
+    export let test_patterns_24576_to_28671 = func() -> void {
+        check_range(24576, 28672, 2790764941);
+    };
+
+    export let test_patterns_28672_to_32767 = func() -> void {
+        check_range(28672, 32768, 287926454);
+    };
+
+    export let test_patterns_32768_to_36863 = func() -> void {
+        check_range(32768, 36864, 703719884);
+    };
+
+    export let test_patterns_36864_to_40959 = func() -> void {
+        check_range(36864, 40960, 4181530531);
+    };
+
+    export let test_patterns_40960_to_45055 = func() -> void {
+        check_range(40960, 45056, 740271799);
+    };
+
+    export let test_patterns_45056_to_49151 = func() -> void {
+        check_range(45056, 49152, 572331096);
+    };
+
+    export let test_patterns_49152_to_53247 = func() -> void {
+        check_range(49152, 53248, 185281960);
+    };
+
+    export let test_patterns_53248_to_57343 = func() -> void {
+        check_range(53248, 57344, 1373742864);
+    };
+
+    export let test_patterns_57344_to_61439 = func() -> void {
+        check_range(57344, 61440, 2231459725);
+    };
+
+    export let test_patterns_61440_to_65535 = func() -> void {
+        check_range(61440, 65536, 2907860777);
+    };
+);

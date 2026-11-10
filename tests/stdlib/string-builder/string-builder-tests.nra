@@ -1,0 +1,194 @@
+let builders = import:Std.Core.StringBuilder;
+let test = import:Std.Test;
+
+let StringBuilderTests = module (
+    let Point = class (
+        export let x: int = 3;
+        export let.override to_string = func() -> string {
+            return "Point(" + x.to_string() + ")";
+        };
+    );
+
+    let bytes_of = func(builders.StringBuilder b) -> string {
+        return b.to_string();
+    };
+
+    export let test_empty = func() -> void {
+        let b = builders.create();
+        test.assert(b.is_empty());
+        test.assert_equal_int32(0, b.byte_length());
+        test.assert_equal_string("", b.to_string());
+    };
+
+    export let test_append_returns_the_builder = func() -> void {
+        let b = builders.create();
+        let same = b.append("ab").append("").append("cd");
+        test.assert(same == b);
+        test.assert_equal_string("abcd", b.to_string());
+        test.assert_equal_int32(4, b.byte_length());
+        test.assert(!b.is_empty());
+        test.assert(b.append_scalar(33) == b);
+        test.assert(b.append_line("x") == b);
+        test.assert(b.append_repeated("y", 2) == b);
+        test.assert(b.append_int(1) == b);
+        test.assert(b.append_uint(2) == b);
+        test.assert(b.append_float(0.5) == b);
+        test.assert(b.append_bool(true) == b);
+        test.assert(b.append_value<int>(7) == b);
+        test.assert_equal_string("abcd!x\nyy120.5true7", b.to_string());
+    };
+
+    export let test_builders_are_independent = func() -> void {
+        let a = builders.create();
+        let b = builders.create();
+        a.append("left");
+        b.append("right");
+        test.assert(a != b);
+        test.assert_equal_string("left", a.to_string());
+        test.assert_equal_string("right", b.to_string());
+    };
+
+    export let test_append_multibyte = func() -> void {
+        let b = builders.create();
+        b.append("Aé").append("🙂");
+        test.assert_equal_int32(7, b.byte_length());
+        test.assert_equal_string("Aé🙂", b.to_string());
+    };
+
+    let utf8 = func(uint8[list] bytes) -> string {
+        let [valid, text] = string.from_utf8(bytes);
+        test.assert(valid);
+        return text;
+    };
+
+    export let test_append_scalar_boundaries = func() -> void {
+        let b = builders.create();
+        b.append_scalar(0);
+        test.assert_equal_int32(1, b.byte_length());
+        test.assert_equal_string(utf8([0]), b.to_string());
+        b.clear();
+        // The last scalar of each encoded length and the first of the next.
+        b.append_scalar(127).append_scalar(128);
+        test.assert_equal_string(utf8([127, 194, 128]), b.to_string());
+        b.clear();
+        b.append_scalar(2047).append_scalar(2048);
+        test.assert_equal_string(utf8([223, 191, 224, 160, 128]), b.to_string());
+        b.clear();
+        // Around the surrogate range.
+        b.append_scalar(55295).append_scalar(57344);
+        test.assert_equal_string(utf8([237, 159, 191, 238, 128, 128]), b.to_string());
+        b.clear();
+        b.append_scalar(65535).append_scalar(65536).append_scalar(1114111);
+        test.assert_equal_string(utf8([239, 191, 191, 240, 144, 128, 128, 244, 143, 191, 191]), b.to_string());
+        b.clear();
+        b.append_scalar(65).append_scalar(233).append_scalar(128578);
+        test.assert_equal_string("Aé🙂", b.to_string());
+    };
+
+    export let test_append_line = func() -> void {
+        let b = builders.create();
+        b.append_line("one").append_line("").append_line("two");
+        test.assert_equal_string("one\n\ntwo\n", b.to_string());
+    };
+
+    export let test_append_repeated = func() -> void {
+        let b = builders.create();
+        b.append_repeated("ab", 3);
+        test.assert_equal_string("ababab", b.to_string());
+        b.append_repeated("zz", 0);
+        b.append_repeated("", 5);
+        test.assert_equal_string("ababab", b.to_string());
+        b.append_repeated("é", 2);
+        test.assert_equal_string("abababéé", b.to_string());
+    };
+
+    export let test_append_numbers = func() -> void {
+        let b = builders.create();
+        b.append_int(-9223372036854775808).append(" ").append_int(0).append(" ").append_int(9223372036854775807);
+        test.assert_equal_string("-9223372036854775808 0 9223372036854775807", b.to_string());
+        b.clear();
+        b.append_uint(0).append(" ").append_uint(18446744073709551615);
+        test.assert_equal_string("0 18446744073709551615", b.to_string());
+        b.clear();
+        b.append_float(1.0).append(" ").append_float(-0.0).append(" ").append_float(1.0e16);
+        b.append(" ").append_float(0.1).append(" ").append_float(2.5e-7).append(" ").append_float(123456.7);
+        test.assert_equal_string("1.0 -0.0 1.0e16 0.1 2.5e-7 123456.7", b.to_string());
+        b.clear();
+        b.append_float(1.0 / 0.0).append(" ").append_float(-1.0 / 0.0).append(" ").append_float(0.0 / 0.0);
+        test.assert_equal_string("Infinity -Infinity NaN", b.to_string());
+        b.clear();
+        b.append_bool(true).append(",").append_bool(false);
+        test.assert_equal_string("true,false", b.to_string());
+    };
+
+    export let test_append_value = func() -> void {
+        let b = builders.create();
+        b.append_value<int>(-12).append_value<string>("|").append_value<[int, bool]>([1, true]);
+        b.append_value<float32>(0.1).append_value<uint8>(255);
+        test.assert_equal_string("-12|[1, true]0.1255", b.to_string());
+        b.clear();
+        b.append_value<Point>(new Point());
+        test.assert_equal_string("Point(3)", b.to_string());
+        let names: string[list] = ["a", "b"];
+        b.clear();
+        b.append_value<string[list]>(names);
+        test.assert_equal_string("[a, b]", b.to_string());
+    };
+
+    export let test_truncate = func() -> void {
+        let b = builders.create();
+        b.append("Aé🙂z");
+        // Every boundary: 0, 1, 3, 7, 8.
+        b.truncate(8);
+        test.assert_equal_string("Aé🙂z", b.to_string());
+        b.truncate(7);
+        test.assert_equal_string("Aé🙂", b.to_string());
+        b.truncate(3);
+        test.assert_equal_string("Aé", b.to_string());
+        b.truncate(1);
+        test.assert_equal_string("A", b.to_string());
+        b.truncate(0);
+        test.assert(b.is_empty());
+        test.assert_equal_string("", b.to_string());
+        // A short prefix of a long text is copied; a long one is cut in place.
+        b.append("abcdefghij");
+        b.truncate(2);
+        test.assert_equal_string("ab", b.to_string());
+        b.append("cdefghij");
+        b.truncate(9);
+        test.assert_equal_string("abcdefghi", b.to_string());
+        b.append("xyz");
+        test.assert_equal_string("abcdefghixyz", b.to_string());
+    };
+
+    export let test_clear_keeps_the_builder_usable = func() -> void {
+        let b = builders.create();
+        b.append("text");
+        let before = b.to_string();
+        b.clear();
+        test.assert(b.is_empty());
+        test.assert_equal_string("text", before);
+        b.append("again");
+        test.assert_equal_string("again", b.to_string());
+    };
+
+    export let test_to_string_leaves_the_builder_usable = func() -> void {
+        let b = builders.create();
+        b.append("a");
+        let first = b.to_string();
+        b.append("b");
+        test.assert_equal_string("a", first);
+        test.assert_equal_string("ab", b.to_string());
+        test.assert_equal_string("ab", bytes_of(b));
+    };
+
+    export let test_identity_equality = func() -> void {
+        let a = builders.create();
+        let b = builders.create();
+        a.append("same");
+        b.append("same");
+        test.assert(a.equals(a));
+        test.assert(!a.equals(b));
+        test.assert_equal_string("same", a.to_string());
+    };
+);

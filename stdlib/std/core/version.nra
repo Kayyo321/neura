@@ -1,0 +1,7 @@
+// The library version. It equals the compiler's and changes its major
+// number whenever a contract text, hash, order, or format changes.
+export let Version = module (
+    export const Major: int = 0;
+    export const Minor: int = 1;
+    export const Patch: int = 0;
+);

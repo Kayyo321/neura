@@ -1,0 +1,16 @@
+let program = import:Std.Program;
+let console = import:Std.Io.Console;
+let unit = import:Std.Core.Unit;
+let result = import:Std.Core.Result;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("");
+        console.print_line("héllo 🙂");
+        if (!result.is_ok<unit.Unit>(console.try_print_line("tried"))) {
+            return program.ExitCode.Failure;
+        }
+
+        return program.ExitCode.Ok;
+    };
+);

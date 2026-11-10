@@ -1,0 +1,7 @@
+neura-trace 1
+# Recorded with: neura run --record replayed-exit.trace replayed-exit.nvr
+request neura.console.write_line 1 ["exiting"]
+ok 0
+request neura.process.exit 1 [9]
+exit 9
+outcome completed 9

@@ -1,0 +1,201 @@
+let float_text = import:Std.Core.Internal.FloatText;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+
+// Companion functions for float16 (Stdlib.md section 7.3).
+// Format: IEEE 754 binary16, 10 fraction bits and 5 exponent bits.
+// Bit-level operations use the exact encoding (N1); text conversion follows
+// section 7.5.
+export let Float16 = module (
+    // The largest finite value.
+    export const Max: float16 = float16.from_bits(31743);
+    // The smallest positive (subnormal) value.
+    export const MinPositive: float16 = float16.from_bits(1);
+    // The smallest positive normal value.
+    export const MinNormal: float16 = float16.from_bits(1024);
+    // The difference between 1.0 and the next larger value.
+    export const Epsilon: float16 = float16.from_bits(5120);
+    export const Infinity: float16 = float16.from_bits(31744);
+    export const NegativeInfinity: float16 = float16.from_bits(64512);
+    // The canonical quiet NaN.
+    export const NaN: float16 = float16.from_bits(32256);
+
+    const SignBit: uint16 = 32768;
+    const Magnitude: uint16 = 32767;
+
+    export let is_nan = func(float16 v) -> bool {
+        return v != v;
+    };
+
+    export let is_infinite = func(float16 v) -> bool {
+        return (v.to_bits() & Magnitude) == 31744;
+    };
+
+    export let is_finite = func(float16 v) -> bool {
+        return (v.to_bits() & 31744) != 31744;
+    };
+
+    // Reads the sign bit, so it is true for -0.0 and for a NaN with the sign
+    // bit set.
+    export let is_negative = func(float16 v) -> bool {
+        return (v.to_bits() & SignBit) != 0;
+    };
+
+    // Clears the sign bit; never rounds.
+    export let abs = func(float16 v) -> float16 {
+        return float16.from_bits(v.to_bits() & Magnitude);
+    };
+
+    // The magnitude of `magnitude` with the sign bit of `sign`.
+    export let copy_sign = func(float16 magnitude, float16 sign) -> float16 {
+        return float16.from_bits((magnitude.to_bits() & Magnitude) | (sign.to_bits() & SignBit));
+    };
+
+    // NaN (canonical) if either operand is NaN; -0.0 is less than 0.0.
+    export let min = func(float16 a, float16 b) -> float16 {
+        if (a != a || b != b) {
+            return NaN;
+        }
+        if (a < b) {
+            return a;
+        }
+        if (b < a) {
+            return b;
+        }
+        if (is_negative(a)) {
+            return a;
+        }
+        return b;
+    };
+
+    export let max = func(float16 a, float16 b) -> float16 {
+        if (a != a || b != b) {
+            return NaN;
+        }
+        if (a > b) {
+            return a;
+        }
+        if (b > a) {
+            return b;
+        }
+        if (is_negative(a)) {
+            return b;
+        }
+        return a;
+    };
+
+    // max(v, low), then min with high, so a NaN `v` gives NaN. Traps when
+    // either bound is NaN or `low` exceeds `high` (-0.0 is below 0.0).
+    export let clamp = func(float16 v, float16 low, float16 high) -> float16 {
+        if (low != low || high != high) {
+            trap_with_message("invalid argument: NaN bound");
+        }
+        if (total_compare(low, high) == ordering.Ordering.Greater) {
+            trap_with_message("invalid argument: low exceeds high");
+        }
+        return min(max(v, low), high);
+    };
+
+    // Rounding to an integral value. All keep the sign of zero (ceil(-0.5)
+    // is -0.0); infinities are unchanged and a NaN becomes the canonical NaN.
+    export let floor = func(float16 v) -> float16 {
+        return round_with(v, 0);
+    };
+
+    export let ceil = func(float16 v) -> float16 {
+        return round_with(v, 1);
+    };
+
+    export let trunc = func(float16 v) -> float16 {
+        return round_with(v, 2);
+    };
+
+    // Halves round away from zero.
+    export let round = func(float16 v) -> float16 {
+        return round_with(v, 3);
+    };
+
+    // Halves round to the even neighbour.
+    export let round_even = func(float16 v) -> float16 {
+        return round_with(v, 4);
+    };
+
+    export let to_bits = func(float16 v) -> uint16 {
+        return v.to_bits();
+    };
+
+    export let from_bits = func(uint16 bits) -> float16 {
+        return float16.from_bits(bits);
+    };
+
+    // The total order of section 5.3: -Infinity, negative values, -0.0,
+    // 0.0, positive values, Infinity, then every NaN (all NaNs equal).
+    export let total_compare = func(float16 a, float16 b) -> ordering.Ordering {
+        let a_nan = a != a;
+        let b_nan = b != b;
+        if (a_nan || b_nan) {
+            if (a_nan && b_nan) {
+                return ordering.Ordering.Equal;
+            }
+            if (a_nan) {
+                return ordering.Ordering.Greater;
+            }
+            return ordering.Ordering.Less;
+        }
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        if (a > b) {
+            return ordering.Ordering.Greater;
+        }
+        let a_negative = is_negative(a);
+        if (a_negative == is_negative(b)) {
+            return ordering.Ordering.Equal;
+        }
+        if (a_negative) {
+            return ordering.Ordering.Less;
+        }
+        return ordering.Ordering.Greater;
+    };
+
+    // Same bit pattern, except that every NaN equals every NaN; 0.0 and
+    // -0.0 differ (section 5.2).
+    export let equals = func(float16 a, float16 b) -> bool {
+        return a.equals(b);
+    };
+
+    export let hash = func(float16 v) -> uint32 {
+        return v.hash_code();
+    };
+
+    // The shortest text that parses back to the same value (section 7.5).
+    export let to_string = func(float16 v) -> string {
+        return v.to_string();
+    };
+
+    // Exactly `digits` fraction digits (0 through 100; no point for 0),
+    // correctly rounded, ties to even. Other digit counts trap.
+    export let to_fixed = func(float16 v, int digits) -> string {
+        return float_text.to_fixed(v.to_bits() as uint64, 10, 5, digits);
+    };
+
+    // `d.ddd` with `digits` fraction digits (0 through 100), `e`, and the
+    // decimal exponent; correctly rounded, ties to even.
+    export let to_exponential = func(float16 v, int digits) -> string {
+        return float_text.to_exponential(v.to_bits() as uint64, 10, 5, digits);
+    };
+
+    // The grammar of section 7.5, converted exactly and rounded once, ties
+    // to even. Too large becomes an infinity and too small a signed zero.
+    export let parse = func(string text) -> result.Result<float16> {
+        return match (float_text.parse(text, 10, 5)) {
+            float_text.Parsed.Failure(failure) => result.Result<float16>.Err(failure),
+            float_text.Parsed.Bits(bits) => result.Result<float16>.Ok(float16.from_bits(bits as uint16)),
+            float_text.Parsed.Near(near) => result.Result<float16>.Ok(near as float16),
+        };
+    };
+
+    let round_with = func(float16 v, int mode) -> float16 {
+        return float16.from_bits(float_text.round_bits(v.to_bits() as uint64, 10, 5, mode) as uint16);
+    };
+);

@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: negative exponent
+let console = import:Std.Io.Console;
+let int64s = import:Std.Core.Int64;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(int64s.pow(3, 0).to_string());
+        console.print_line(int64s.pow(3, -1).to_string());
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

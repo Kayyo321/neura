@@ -1,0 +1,614 @@
+let error = import:Std.Core.Error;
+let wide = import:Std.Core.Internal.WideUint;
+
+// Float text conversion and bit-level helpers shared by the float companion
+// modules (Stdlib.md sections 7.3 and 7.5). A format is given by its fraction
+// width `f` and exponent width `w`; bit patterns travel as uint64. Every
+// conversion is defined by exact integer arithmetic on the significand and
+// powers of 2 and 10 (WideUint). Library files only.
+export let FloatText = module (
+    // At most this many significant digits take part in exact parsing. Every
+    // midpoint between two float64 values has at most 767 significant
+    // digits, so the digits after the first 800 only decide, through a sticky
+    // flag, that the value lies above the truncated one.
+    const MaxDigits: int = 800;
+
+    // A parse outcome. `Bits` is a final bit pattern of the format. `Near`
+    // is a float64 that rounds to the correct result with one conversion:
+    // either the exact value, or a value no midpoint of the format separates
+    // from the exact value.
+    export let Parsed = enum (Failure(error.Error), Bits(uint64), Near(float64));
+
+    // Powers of ten that float64 holds exactly.
+    let exact_powers: float64[] = [
+        1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0, 100000000.0,
+        1000000000.0, 10000000000.0, 100000000000.0, 1000000000000.0, 10000000000000.0,
+        100000000000000.0, 1000000000000000.0, 10000000000000000.0, 100000000000000000.0,
+        1000000000000000000.0, 10000000000000000000.0, 100000000000000000000.0,
+        1000000000000000000000.0, 10000000000000000000000.0
+    ];
+
+    // Bit-level classification. -------------------------------------------
+
+    export let sign_mask = func(int f, int w) -> uint64 {
+        let one: uint64 = 1;
+        return one << (f + w);
+    };
+
+    export let exponent_mask = func(int f, int w) -> uint64 {
+        let one: uint64 = 1;
+        return ((one << w) - 1) << f;
+    };
+
+    export let fraction_mask = func(int f) -> uint64 {
+        let one: uint64 = 1;
+        return (one << f) - 1;
+    };
+
+    export let is_nan_bits = func(uint64 bits, int f, int w) -> bool {
+        let exponent = exponent_mask(f, w);
+        return (bits & exponent) == exponent && (bits & fraction_mask(f)) != 0;
+    };
+
+    // The format's canonical quiet NaN: sign 0, every exponent bit, and only
+    // the top fraction bit.
+    export let nan_bits = func(int f, int w) -> uint64 {
+        let one: uint64 = 1;
+        return exponent_mask(f, w) | (one << (f - 1));
+    };
+
+    // floor (0), ceil (1), trunc (2), round half away from zero (3), and
+    // round half to even (4) on a bit pattern. The sign of zero is kept; a
+    // NaN becomes the canonical NaN.
+    export let round_bits = func(uint64 bits, int f, int w, int mode) -> uint64 {
+        let exponent_field = ((bits & exponent_mask(f, w)) >> f) as int;
+        let bias = (1 << (w - 1)) - 1;
+        let fraction = bits & fraction_mask(f);
+        if (exponent_field == (1 << w) - 1) {
+            if (fraction != 0) {
+                return nan_bits(f, w);
+            }
+            return bits;
+        }
+        let sign = bits & sign_mask(f, w);
+        let negative = sign != 0;
+        if (exponent_field == 0 && fraction == 0) {
+            return bits;
+        }
+        let exponent = exponent_field - bias;
+        if (exponent >= f) {
+            return bits;
+        }
+        let one: uint64 = 1;
+        if (exponent < 0) {
+            // |v| < 1: the result is a signed zero or a signed one.
+            let up = false;
+            if (mode == 0) {
+                up = negative;
+            } else if (mode == 1) {
+                up = !negative;
+            } else if (mode == 3) {
+                up = exponent == -1;
+            } else if (mode == 4) {
+                up = exponent == -1 && fraction != 0;
+            }
+            if (up) {
+                return sign | ((bias as uint64) << f);
+            }
+            return sign;
+        }
+        let count = f - exponent;
+        let unit = one << count;
+        let fractional = bits & (unit - 1);
+        if (fractional == 0) {
+            return bits;
+        }
+        let truncated = bits - fractional;
+        let half = unit >> 1;
+        let up = false;
+        if (mode == 0) {
+            up = negative;
+        } else if (mode == 1) {
+            up = !negative;
+        } else if (mode == 3) {
+            up = fractional >= half;
+        } else if (mode == 4) {
+            up = fractional > half || (fractional == half && (truncated & unit) != 0);
+        }
+        if (up) {
+            // A carry out of the fraction raises the exponent field, which is
+            // the next binade's encoding.
+            return truncated + unit;
+        }
+        return truncated;
+    };
+
+    // Fixed and exponential text. ------------------------------------------
+
+    // `digits` fraction digits, correctly rounded, ties to even. NaN and the
+    // infinities print as in to_string; a negative value keeps its `-` even
+    // when it rounds to zero.
+    export let to_fixed = func(uint64 bits, int f, int w, int digits) -> string {
+        check_digits(digits);
+        let special = special_text(bits, f, w);
+        if (special != "") {
+            return special;
+        }
+        let significand = significand_of(bits, f, w);
+        let exponent = exponent_of(bits, f, w);
+        let scaled = wide.of(significand);
+        scaled.multiply_pow10(digits);
+        if (exponent >= 0) {
+            scaled.shift_left(exponent);
+        } else {
+            round_shift_right(scaled, -exponent);
+        }
+        let text = scaled.to_decimal();
+        if (digits > 0) {
+            while (text.byte_length <= digits) {
+                text = "0" + text;
+            }
+            let split = text.byte_length - digits;
+            text = text.slice(0, split) + "." + text.slice(split, text.byte_length);
+        }
+        return sign_text(bits, f, w) + text;
+    };
+
+    // One digit, a point and `digits` more digits (no point when `digits` is
+    // 0), `e`, and the decimal exponent with `-` when negative. Correctly
+    // rounded, ties to even.
+    export let to_exponential = func(uint64 bits, int f, int w, int digits) -> string {
+        check_digits(digits);
+        let special = special_text(bits, f, w);
+        if (special != "") {
+            return special;
+        }
+        let significand = significand_of(bits, f, w);
+        let sign = sign_text(bits, f, w);
+        if (significand == 0) {
+            return sign + with_point("0" + zeros(digits)) + "e0";
+        }
+        let exponent = exponent_of(bits, f, w);
+        let length = wide.of(significand).bit_length();
+        // 10^k <= v < 10^(k+1). The estimate from the leading bit is within
+        // one of k; the loop below corrects it with exact comparisons.
+        let k = floor_div((length - 1 + exponent) * 30103, 100000);
+        let lower = wide.of(1);
+        lower.multiply_pow10(digits);
+        let upper = lower.copy();
+        upper.multiply_small(10);
+        while (true) {
+            // Twice the value times 10^(digits - k), rounded down, and
+            // whether that division was exact.
+            let [doubled, exact] = scale_doubled(significand, exponent, digits - k);
+            let floor_value = doubled.copy();
+            floor_value.shift_right(1);
+            if (floor_value.compare(lower) < 0) {
+                k = k - 1;
+                continue;
+            }
+            if (floor_value.compare(upper) >= 0) {
+                k = k + 1;
+                continue;
+            }
+            if (doubled.is_odd() && (!exact || floor_value.is_odd())) {
+                floor_value.add_small(1);
+            }
+            if (floor_value.compare(upper) == 0) {
+                floor_value = lower.copy();
+                k = k + 1;
+            }
+            return sign + with_point(floor_value.to_decimal()) + "e" + k.to_string();
+        }
+    };
+
+    // Parsing. --------------------------------------------------------------
+
+    // `NaN`, `Infinity`, `+Infinity`, `-Infinity`, or an optional sign,
+    // digits with an optional point (at least one digit), and an optional
+    // exponent (`e` or `E`, an optional sign, and digits). The value is
+    // rounded once, ties to even; too large becomes an infinity and too
+    // small a signed zero.
+    export let parse = func(string text, int f, int w) -> Parsed {
+        let length = text.byte_length;
+        if (length == 0) {
+            return Parsed.Failure(parse_error(error.ParseErrorKind.Empty, 0, "empty input"));
+        }
+        if (text == "NaN") {
+            return Parsed.Bits(nan_bits(f, w));
+        }
+        if (text == "Infinity" || text == "+Infinity") {
+            return Parsed.Bits(exponent_mask(f, w));
+        }
+        if (text == "-Infinity") {
+            return Parsed.Bits(exponent_mask(f, w) | sign_mask(f, w));
+        }
+        let position = 0;
+        let negative = false;
+        let first = text.byte_at(0);
+        if (first == 43 || first == 45) {
+            negative = first == 45;
+            position = 1;
+        }
+        // value = digits * 10^scale, plus a nonzero tail when `sticky`.
+        let digits: uint8[list] = [];
+        let scale: int64 = 0;
+        let sticky = false;
+        let seen_digit = false;
+        let seen_point = false;
+        while (position < length) {
+            let b = text.byte_at(position);
+            if (b >= 48 && b <= 57) {
+                let digit = b - 48;
+                seen_digit = true;
+                if (digits.length == 0 && digit == 0) {
+                    if (seen_point) {
+                        scale = scale - 1;
+                    }
+                } else if (digits.length < MaxDigits) {
+                    digits.append(digit);
+                    if (seen_point) {
+                        scale = scale - 1;
+                    }
+                } else {
+                    if (digit != 0) {
+                        sticky = true;
+                    }
+                    if (!seen_point) {
+                        scale = scale + 1;
+                    }
+                }
+            } else if (b == 46 && !seen_point) {
+                seen_point = true;
+            } else if ((b == 101 || b == 69) && seen_digit) {
+                break;
+            } else {
+                return Parsed.Failure(
+                    parse_error(error.ParseErrorKind.InvalidCharacter, position, "invalid character"));
+            }
+            position = position + 1;
+        }
+        if (!seen_digit) {
+            return Parsed.Failure(parse_error(error.ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
+        }
+        if (position < length) {
+            // The exponent. Its magnitude saturates far beyond every format's
+            // range, so it cannot overflow.
+            position = position + 1;
+            let exponent_negative = false;
+            if (position < length && (text.byte_at(position) == 43 || text.byte_at(position) == 45)) {
+                exponent_negative = text.byte_at(position) == 45;
+                position = position + 1;
+            }
+            if (position == length) {
+                return Parsed.Failure(parse_error(error.ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
+            }
+            let exponent_value: int64 = 0;
+            while (position < length) {
+                let b = text.byte_at(position);
+                if (b < 48 || b > 57) {
+                    return Parsed.Failure(
+                        parse_error(error.ParseErrorKind.InvalidCharacter, position, "invalid character"));
+                }
+                if (exponent_value < 1000000000000) {
+                    exponent_value = exponent_value * 10 + ((b - 48) as int64);
+                }
+                position = position + 1;
+            }
+            if (exponent_negative) {
+                scale = scale - exponent_value;
+            } else {
+                scale = scale + exponent_value;
+            }
+        }
+        let sign: uint64 = 0;
+        if (negative) {
+            sign = sign_mask(f, w);
+        }
+        if (digits.length == 0) {
+            return Parsed.Bits(sign);
+        }
+        // Trailing zeros move into the exponent.
+        while (digits[digits.length - 1] == 0) {
+            digits.remove_at(digits.length - 1);
+            scale = scale + 1;
+        }
+        let near = fast_path(digits, scale, sticky, f, w);
+        if (near > 0.0) {
+            if (negative) {
+                return Parsed.Near(-near);
+            }
+            return Parsed.Near(near);
+        }
+        return Parsed.Bits(sign | exact_bits(digits, scale, sticky, f, w));
+    };
+
+    // A positive float64 that rounds to the correct result, or 0.0 when the
+    // exact path must decide. For float64 the result is Clinger's: both
+    // operands are exact and one operation rounds once. For narrower formats
+    // the float64 result is within 3 units in its last place of the exact
+    // value (at most three roundings), so when no midpoint of the format lies
+    // within 16 units, both round to the same value.
+    let fast_path = func(uint8[list] digits, int64 scale, bool sticky, int f, int w) -> float64 {
+        if (sticky || digits.length > 15) {
+            return 0.0;
+        }
+        let value: uint64 = 0;
+        for (let digit in digits) {
+            value = value * 10 + (digit as uint64);
+        }
+        let mantissa = value as float64;
+        if (f == 52) {
+            if (scale >= 0 && scale <= 22) {
+                return mantissa * exact_powers[scale as int];
+            }
+            if (scale < 0 && scale >= -22) {
+                return mantissa / exact_powers[(-scale) as int];
+            }
+            return 0.0;
+        }
+        let magnitude = scale;
+        if (magnitude < 0) {
+            magnitude = -magnitude;
+        }
+        if (magnitude > 66) {
+            return 0.0;
+        }
+        let power = 1.0;
+        let remaining = magnitude as int;
+        while (remaining > 22) {
+            power = power * exact_powers[22];
+            remaining = remaining - 22;
+        }
+        power = power * exact_powers[remaining];
+        let near = mantissa * power;
+        if (scale < 0) {
+            near = mantissa / power;
+        }
+        if (near_midpoint(near, f, w)) {
+            return 0.0;
+        }
+        return near;
+    };
+
+    // Whether a midpoint between two values of the format lies within 16
+    // float64 units of `near`, a positive normal float64.
+    let near_midpoint = func(float64 near, int f, int w) -> bool {
+        let bits = near.to_bits();
+        let one: uint64 = 1;
+        let leading = (((bits >> 52) & 2047) as int) - 1023;
+        let significand = (bits & 4503599627370495) | 4503599627370496;
+        let minimum_exponent = 2 - (1 << (w - 1));
+        let kept = leading;
+        if (kept < minimum_exponent) {
+            kept = minimum_exponent;
+        }
+        // The number of low float64 significand bits below the format's
+        // last kept bit.
+        let dropped_count = (kept - f) - (leading - 52);
+        if (dropped_count >= 62) {
+            // Below a 2^-9 fraction of the smallest step: both round to zero.
+            return false;
+        }
+        let unit = one << dropped_count;
+        let dropped = significand & (unit - 1);
+        let half = unit >> 1;
+        if (dropped >= half) {
+            return dropped - half <= 16;
+        }
+        return half - dropped <= 16;
+    };
+
+    // The magnitude bits of digits * 10^scale (plus a positive tail when
+    // `sticky`), rounded once to the format, ties to even.
+    let exact_bits = func(uint8[list] digits, int64 scale, bool sticky, int f, int w) -> uint64 {
+        let bias = (1 << (w - 1)) - 1;
+        let precision = f + 1;
+        let count = digits.length as int64;
+        // The value lies in [10^(count - 1 + scale), 10^(count + scale)).
+        // These bounds use log10(2) < 0.30103 and only skip values that are
+        // certainly beyond the largest finite value or below half the
+        // smallest subnormal.
+        if ((count - 1 + scale) * 100000 >= ((bias + 1) as int64) * 30103 + 100000) {
+            return exponent_mask(f, w);
+        }
+        if ((count + scale) * 100000 <= ((1 - bias - precision) as int64) * 30103 - 100000) {
+            return 0;
+        }
+        let value = wide.zero();
+        let group: uint32 = 0;
+        let group_size = 0;
+        let group_scale: uint32 = 1;
+        for (let digit in digits) {
+            group = group * 10 + (digit as uint32);
+            group_scale = group_scale * 10;
+            group_size = group_size + 1;
+            if (group_size == 9) {
+                value.multiply_small(group_scale);
+                value.add_small(group);
+                group = 0;
+                group_size = 0;
+                group_scale = 1;
+            }
+        }
+        if (group_size > 0) {
+            value.multiply_small(group_scale);
+            value.add_small(group);
+        }
+        if (scale >= 0) {
+            value.multiply_pow10(scale as int);
+            return round_to_bits(value, sticky, 0, f, w);
+        }
+        // digits / 10^t = (digits * 2^shift / 5^t) * 2^(-shift - t). Only the
+        // power of five needs a division.
+        let divisor_exponent = (-scale) as int;
+        // An upper bound of the bit length of 5^t (log2(5) < 2.32193), so
+        // that the quotient keeps at least precision + 3 bits.
+        let divisor_bits = divisor_exponent * 232193 / 100000 + 2;
+        let shift = precision + 3 + divisor_bits - value.bit_length();
+        if (shift < 0) {
+            shift = 0;
+        }
+        value.shift_left(shift);
+        let inexact = value.divide_pow5(divisor_exponent);
+        return round_to_bits(value, sticky || inexact, -shift - divisor_exponent, f, w);
+    };
+
+    // Rounds (value + tail) * 2^scale to the format, where the tail is in
+    // [0, 1) and positive when `sticky`. The value has enough bits that the
+    // tail lies below the rounding position.
+    let round_to_bits = func(wide.WideUint value, bool sticky, int scale, int f, int w) -> uint64 {
+        let bias = (1 << (w - 1)) - 1;
+        let one: uint64 = 1;
+        let leading = value.bit_length() - 1 + scale;
+        let kept = leading;
+        if (kept < 1 - bias) {
+            kept = 1 - bias;
+        }
+        let lowest = kept - f;
+        let dropped = lowest - scale;
+        let mantissa: uint64 = 0;
+        if (dropped <= 0) {
+            if (sticky) {
+                trap_with_message("invalid state: float parse kept too few bits");
+            }
+            mantissa = value.to_uint64() << (-dropped);
+        } else {
+            let versus = value.low_bits_versus_half(dropped);
+            value.shift_right(dropped);
+            mantissa = value.to_uint64();
+            if (versus > 0 || (versus == 0 && (sticky || (mantissa & 1) == 1))) {
+                mantissa = mantissa + 1;
+            }
+        }
+        if (mantissa == one << (f + 1)) {
+            mantissa = mantissa >> 1;
+            lowest = lowest + 1;
+        }
+        if (mantissa == 0) {
+            return 0;
+        }
+        if (mantissa >= one << f) {
+            let biased = lowest + f + bias;
+            if (biased >= (1 << w) - 1) {
+                return exponent_mask(f, w);
+            }
+            return ((biased as uint64) << f) | (mantissa - (one << f));
+        }
+        return mantissa;
+    };
+
+    // Helpers. --------------------------------------------------------------
+
+    let check_digits = func(int digits) -> void {
+        if (digits < 0 || digits > 100) {
+            trap_with_message("invalid argument: digits outside 0 through 100");
+        }
+    };
+
+    // "NaN", "Infinity", "-Infinity", or "" for a finite value.
+    let special_text = func(uint64 bits, int f, int w) -> string {
+        let exponent = exponent_mask(f, w);
+        if ((bits & exponent) != exponent) {
+            return "";
+        }
+        if ((bits & fraction_mask(f)) != 0) {
+            return "NaN";
+        }
+        return sign_text(bits, f, w) + "Infinity";
+    };
+
+    let sign_text = func(uint64 bits, int f, int w) -> string {
+        if ((bits & sign_mask(f, w)) != 0) {
+            return "-";
+        }
+        return "";
+    };
+
+    // The integer significand of a finite value: value = significand *
+    // 2^exponent_of.
+    let significand_of = func(uint64 bits, int f, int w) -> uint64 {
+        let fraction = bits & fraction_mask(f);
+        if ((bits & exponent_mask(f, w)) == 0) {
+            return fraction;
+        }
+        let one: uint64 = 1;
+        return fraction | (one << f);
+    };
+
+    let exponent_of = func(uint64 bits, int f, int w) -> int {
+        let field = ((bits & exponent_mask(f, w)) >> f) as int;
+        let bias = (1 << (w - 1)) - 1;
+        if (field == 0) {
+            return 1 - bias - f;
+        }
+        return field - bias - f;
+    };
+
+    // floor(2 * significand * 2^exponent * 10^power) and whether it is exact.
+    let scale_doubled = func(uint64 significand, int exponent, int power) -> [wide.WideUint, bool] {
+        let value = wide.of(significand);
+        value.shift_left(1);
+        if (exponent > 0) {
+            value.shift_left(exponent);
+        }
+        if (power > 0) {
+            value.multiply_pow10(power);
+        }
+        let exact = true;
+        if (exponent < 0) {
+            if (!value.low_bits_zero(-exponent)) {
+                exact = false;
+            }
+            value.shift_right(-exponent);
+        }
+        if (power < 0) {
+            // 10^t = 2^t * 5^t: shift first, then divide by the power of five.
+            if (!value.low_bits_zero(-power)) {
+                exact = false;
+            }
+            value.shift_right(-power);
+            if (value.divide_pow5(-power)) {
+                exact = false;
+            }
+        }
+        return [value, exact];
+    };
+
+    // Shifts right by `count` bits, rounding half to even.
+    let round_shift_right = func(wide.WideUint value, int count) -> void {
+        let versus = value.low_bits_versus_half(count);
+        value.shift_right(count);
+        if (versus > 0 || (versus == 0 && value.is_odd())) {
+            value.add_small(1);
+        }
+    };
+
+    // The first digit, then a point and the rest when there is a rest.
+    let with_point = func(string digits) -> string {
+        if (digits.byte_length == 1) {
+            return digits;
+        }
+        return digits.slice(0, 1) + "." + digits.slice(1, digits.byte_length);
+    };
+
+    let zeros = func(int count) -> string {
+        let text = "";
+        for (let i = 0; i < count; i = i + 1) {
+            text = text + "0";
+        }
+        return text;
+    };
+
+    let floor_div = func(int a, int b) -> int {
+        let quotient = a / b;
+        if (a % b != 0 && (a < 0) != (b < 0)) {
+            return quotient - 1;
+        }
+        return quotient;
+    };
+
+    let parse_error = func(error.ParseErrorKind kind, int offset, string message) -> error.Error {
+        return error.Error.Parse { kind: kind, offset: offset, message: message };
+    };
+);

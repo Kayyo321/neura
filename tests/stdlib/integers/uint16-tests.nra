@@ -1,0 +1,768 @@
+let error = import:Std.Core.Error;
+let ints = import:Std.Core.UInt16;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// UInt16 against reference vectors computed with Python's unbounded integers
+// (generated; the operands are the boundary values of Stdlib.md section 17:
+// zero, one, the largest value, the sign boundary, and operands whose exact
+// product needs the full double width).
+let UInt16Tests = module (
+    let values: uint16[] = [
+        0, 1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405
+    ];
+    let checked_add_present: bool[] = [
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true, false, false, true, true, true, true, true, true, true, false, false,
+        false, false, false, false, false, false, false, false, true, true, false, false,
+        false, false, false, false, false, false, false, true, true, true, false, false,
+        true, true, true, true, true, true, true, true, true, false, false, true,
+        true, true, true, true, true, true, true, true, false, false, true, true,
+        true, true, true, true, true, true, true, false, false, true, true, true,
+        false, true, false, true, true, true, false, false, true, true, true, true,
+        true, false, true, true, true, false, false, true, true, true, false, false,
+        false
+    ];
+    let checked_add_values: uint16[] = [
+        0, 1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405, 1,
+        2, 3, 0, 65535, 257, 256, 258, 32769, 32768, 42406, 2, 3,
+        4, 0, 0, 258, 257, 259, 32770, 32769, 42407, 65535, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 65534, 65535, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 256, 257, 258, 0, 0,
+        512, 511, 513, 33024, 33023, 42661, 255, 256, 257, 0, 0, 511,
+        510, 512, 33023, 33022, 42660, 257, 258, 259, 0, 0, 513, 512,
+        514, 33025, 33024, 42662, 32768, 32769, 32770, 0, 0, 33024, 33023, 33025,
+        0, 65535, 0, 32767, 32768, 32769, 0, 0, 33023, 33022, 33024, 65535,
+        65534, 0, 42405, 42406, 42407, 0, 0, 42661, 42660, 42662, 0, 0,
+        0
+    ];
+    let checked_sub_present: bool[] = [
+        true, false, false, false, false, false, false, false, false, false, false, true,
+        true, false, false, false, false, false, false, false, false, false, true, true,
+        true, false, false, false, false, false, false, false, false, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, false,
+        true, true, true, true, true, true, true, true, true, true, false, false,
+        true, true, false, false, false, false, true, true, true, false, false, false,
+        true, false, false, false, false, true, true, true, false, false, true, true,
+        true, false, false, false, true, true, true, false, false, true, true, true,
+        true, true, false, true, true, true, false, false, true, true, true, false,
+        true, false, true, true, true, false, false, true, true, true, true, true,
+        true
+    ];
+    let checked_sub_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 65535, 65534, 65533,
+        0, 1, 65279, 65280, 65278, 32767, 32768, 23130, 65534, 65533, 65532, 0,
+        0, 65278, 65279, 65277, 32766, 32767, 23129, 256, 255, 254, 0, 0,
+        0, 1, 0, 0, 0, 0, 255, 254, 253, 0, 0, 0,
+        0, 0, 0, 0, 0, 257, 256, 255, 0, 0, 1, 2,
+        0, 0, 0, 0, 32768, 32767, 32766, 0, 0, 32512, 32513, 32511,
+        0, 1, 0, 32767, 32766, 32765, 0, 0, 32511, 32512, 32510, 0,
+        0, 0, 42405, 42404, 42403, 0, 0, 42149, 42150, 42148, 9637, 9638,
+        0
+    ];
+    let checked_mul_present: bool[] = [
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, false, false, true, true, true, false, true, false, true, true, false,
+        false, false, false, false, false, false, false, false, true, true, false, false,
+        false, false, false, false, false, false, false, true, true, true, false, false,
+        false, true, false, false, false, false, true, true, true, false, false, true,
+        true, true, false, false, false, true, true, true, false, false, false, true,
+        false, false, false, false, true, true, false, false, false, false, false, false,
+        false, false, false, true, true, true, false, false, false, false, false, false,
+        false, false, true, true, false, false, false, false, false, false, false, false,
+        false
+    ];
+    let checked_mul_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405, 0, 2,
+        4, 0, 0, 512, 510, 514, 0, 65534, 0, 0, 65535, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 65534, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 256, 512, 0, 0,
+        0, 65280, 0, 0, 0, 0, 0, 255, 510, 0, 0, 65280,
+        65025, 65535, 0, 0, 0, 0, 257, 514, 0, 0, 0, 65535,
+        0, 0, 0, 0, 0, 32768, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 32767, 65534, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 42405, 0, 0, 0, 0, 0, 0, 0, 0,
+        0
+    ];
+    let checked_div_present: bool[] = [
+        false, true, true, true, true, true, true, true, true, true, true, false,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, true, true, true, true, true, true, false, true, true,
+        true, true, true, true, true, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, true, false, true, true, true, true,
+        true, true, true, true, true, true, false, true, true, true, true, true,
+        true, true, true, true, true, false, true, true, true, true, true, true,
+        true, true, true, true, false, true, true, true, true, true, true, true,
+        true, true, true, false, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true
+    ];
+    let checked_div_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65535, 32767,
+        1, 1, 255, 257, 255, 1, 2, 1, 0, 65534, 32767, 0,
+        1, 255, 256, 254, 1, 2, 1, 0, 256, 128, 0, 0,
+        1, 1, 0, 0, 0, 0, 0, 255, 127, 0, 0, 0,
+        1, 0, 0, 0, 0, 0, 257, 128, 0, 0, 1, 1,
+        1, 0, 0, 0, 0, 32768, 16384, 0, 0, 128, 128, 127,
+        1, 1, 0, 0, 32767, 16383, 0, 0, 127, 128, 127, 0,
+        1, 0, 0, 42405, 21202, 0, 0, 165, 166, 165, 1, 1,
+        1
+    ];
+    let checked_rem_present: bool[] = [
+        false, true, true, true, true, true, true, true, true, true, true, false,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, true, true, true, true, true, true, false, true, true,
+        true, true, true, true, true, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, true, false, true, true, true, true,
+        true, true, true, true, true, true, false, true, true, true, true, true,
+        true, true, true, true, true, false, true, true, true, true, true, true,
+        true, true, true, true, false, true, true, true, true, true, true, true,
+        true, true, true, false, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true
+    ];
+    let checked_rem_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+        0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 1,
+        0, 1, 255, 0, 0, 32767, 1, 23130, 0, 0, 0, 65534,
+        0, 254, 254, 256, 32766, 0, 23129, 0, 0, 0, 256, 256,
+        0, 1, 256, 256, 256, 256, 0, 0, 1, 255, 255, 255,
+        0, 255, 255, 255, 255, 0, 0, 1, 257, 257, 1, 2,
+        0, 257, 257, 257, 0, 0, 0, 32768, 32768, 0, 128, 129,
+        0, 1, 32768, 0, 0, 1, 32767, 32767, 255, 127, 128, 32767,
+        0, 32767, 0, 0, 1, 42405, 42405, 165, 75, 0, 9637, 9638,
+        0
+    ];
+    let wrapping_add_values: uint16[] = [
+        0, 1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405, 1,
+        2, 3, 0, 65535, 257, 256, 258, 32769, 32768, 42406, 2, 3,
+        4, 1, 0, 258, 257, 259, 32770, 32769, 42407, 65535, 0, 1,
+        65534, 65533, 255, 254, 256, 32767, 32766, 42404, 65534, 65535, 0, 65533,
+        65532, 254, 253, 255, 32766, 32765, 42403, 256, 257, 258, 255, 254,
+        512, 511, 513, 33024, 33023, 42661, 255, 256, 257, 254, 253, 511,
+        510, 512, 33023, 33022, 42660, 257, 258, 259, 256, 255, 513, 512,
+        514, 33025, 33024, 42662, 32768, 32769, 32770, 32767, 32766, 33024, 33023, 33025,
+        0, 65535, 9637, 32767, 32768, 32769, 32766, 32765, 33023, 33022, 33024, 65535,
+        65534, 9636, 42405, 42406, 42407, 42404, 42403, 42661, 42660, 42662, 9637, 9636,
+        19274
+    ];
+    let wrapping_sub_values: uint16[] = [
+        0, 65535, 65534, 1, 2, 65280, 65281, 65279, 32768, 32769, 23131, 1,
+        0, 65535, 2, 3, 65281, 65282, 65280, 32769, 32770, 23132, 2, 1,
+        0, 3, 4, 65282, 65283, 65281, 32770, 32771, 23133, 65535, 65534, 65533,
+        0, 1, 65279, 65280, 65278, 32767, 32768, 23130, 65534, 65533, 65532, 65535,
+        0, 65278, 65279, 65277, 32766, 32767, 23129, 256, 255, 254, 257, 258,
+        0, 1, 65535, 33024, 33025, 23387, 255, 254, 253, 256, 257, 65535,
+        0, 65534, 33023, 33024, 23386, 257, 256, 255, 258, 259, 1, 2,
+        0, 33025, 33026, 23388, 32768, 32767, 32766, 32769, 32770, 32512, 32513, 32511,
+        0, 1, 55899, 32767, 32766, 32765, 32768, 32769, 32511, 32512, 32510, 65535,
+        0, 55898, 42405, 42404, 42403, 42406, 42407, 42149, 42150, 42148, 9637, 9638,
+        0
+    ];
+    let wrapping_mul_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405, 0, 2,
+        4, 65534, 65532, 512, 510, 514, 0, 65534, 19274, 0, 65535, 65534,
+        1, 2, 65280, 65281, 65279, 32768, 32769, 23131, 0, 65534, 65532, 2,
+        4, 65024, 65026, 65022, 0, 2, 46262, 0, 256, 512, 65280, 65024,
+        0, 65280, 256, 0, 65280, 42240, 0, 255, 510, 65281, 65026, 65280,
+        65025, 65535, 32768, 32513, 65371, 0, 257, 514, 65279, 65022, 256, 65535,
+        513, 32768, 32511, 19109, 0, 32768, 0, 32768, 0, 0, 32768, 32768,
+        0, 32768, 32768, 0, 32767, 65534, 32769, 2, 65280, 32513, 32511, 32768,
+        1, 55899, 0, 42405, 19274, 23131, 46262, 42240, 65371, 19109, 32768, 55899,
+        7257
+    ];
+    let saturating_add_values: uint16[] = [
+        0, 1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405, 1,
+        2, 3, 65535, 65535, 257, 256, 258, 32769, 32768, 42406, 2, 3,
+        4, 65535, 65535, 258, 257, 259, 32770, 32769, 42407, 65535, 65535, 65535,
+        65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65534, 65535, 65535, 65535,
+        65535, 65535, 65535, 65535, 65535, 65535, 65535, 256, 257, 258, 65535, 65535,
+        512, 511, 513, 33024, 33023, 42661, 255, 256, 257, 65535, 65535, 511,
+        510, 512, 33023, 33022, 42660, 257, 258, 259, 65535, 65535, 513, 512,
+        514, 33025, 33024, 42662, 32768, 32769, 32770, 65535, 65535, 33024, 33023, 33025,
+        65535, 65535, 65535, 32767, 32768, 32769, 65535, 65535, 33023, 33022, 33024, 65535,
+        65534, 65535, 42405, 42406, 42407, 65535, 65535, 42661, 42660, 42662, 65535, 65535,
+        65535
+    ];
+    let saturating_sub_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 65535, 65534, 65533,
+        0, 1, 65279, 65280, 65278, 32767, 32768, 23130, 65534, 65533, 65532, 0,
+        0, 65278, 65279, 65277, 32766, 32767, 23129, 256, 255, 254, 0, 0,
+        0, 1, 0, 0, 0, 0, 255, 254, 253, 0, 0, 0,
+        0, 0, 0, 0, 0, 257, 256, 255, 0, 0, 1, 2,
+        0, 0, 0, 0, 32768, 32767, 32766, 0, 0, 32512, 32513, 32511,
+        0, 1, 0, 32767, 32766, 32765, 0, 0, 32511, 32512, 32510, 0,
+        0, 0, 42405, 42404, 42403, 0, 0, 42149, 42150, 42148, 9637, 9638,
+        0
+    ];
+    let saturating_mul_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405, 0, 2,
+        4, 65535, 65535, 512, 510, 514, 65535, 65534, 65535, 0, 65535, 65535,
+        65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 0, 65534, 65535, 65535,
+        65535, 65535, 65535, 65535, 65535, 65535, 65535, 0, 256, 512, 65535, 65535,
+        65535, 65280, 65535, 65535, 65535, 65535, 0, 255, 510, 65535, 65535, 65280,
+        65025, 65535, 65535, 65535, 65535, 0, 257, 514, 65535, 65535, 65535, 65535,
+        65535, 65535, 65535, 65535, 0, 32768, 65535, 65535, 65535, 65535, 65535, 65535,
+        65535, 65535, 65535, 0, 32767, 65534, 65535, 65535, 65535, 65535, 65535, 65535,
+        65535, 65535, 0, 42405, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535,
+        65535
+    ];
+    let floor_valid: bool[] = [
+        false, true, true, true, true, true, true, true, true, true, true, false,
+        true, true, true, true, true, true, true, true, true, true, false, true,
+        true, true, true, true, true, true, true, true, true, false, true, true,
+        true, true, true, true, true, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, true, false, true, true, true, true,
+        true, true, true, true, true, true, false, true, true, true, true, true,
+        true, true, true, true, true, false, true, true, true, true, true, true,
+        true, true, true, true, false, true, true, true, true, true, true, true,
+        true, true, true, false, true, true, true, true, true, true, true, true,
+        true, true, false, true, true, true, true, true, true, true, true, true,
+        true
+    ];
+    let floor_div_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65535, 32767,
+        1, 1, 255, 257, 255, 1, 2, 1, 0, 65534, 32767, 0,
+        1, 255, 256, 254, 1, 2, 1, 0, 256, 128, 0, 0,
+        1, 1, 0, 0, 0, 0, 0, 255, 127, 0, 0, 0,
+        1, 0, 0, 0, 0, 0, 257, 128, 0, 0, 1, 1,
+        1, 0, 0, 0, 0, 32768, 16384, 0, 0, 128, 128, 127,
+        1, 1, 0, 0, 32767, 16383, 0, 0, 127, 128, 127, 0,
+        1, 0, 0, 42405, 21202, 0, 0, 165, 166, 165, 1, 1,
+        1
+    ];
+    let floor_mod_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+        0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 1,
+        0, 1, 255, 0, 0, 32767, 1, 23130, 0, 0, 0, 65534,
+        0, 254, 254, 256, 32766, 0, 23129, 0, 0, 0, 256, 256,
+        0, 1, 256, 256, 256, 256, 0, 0, 1, 255, 255, 255,
+        0, 255, 255, 255, 255, 0, 0, 1, 257, 257, 1, 2,
+        0, 257, 257, 257, 0, 0, 0, 32768, 32768, 0, 128, 129,
+        0, 1, 32768, 0, 0, 1, 32767, 32767, 255, 127, 128, 32767,
+        0, 32767, 0, 0, 1, 42405, 42405, 165, 75, 0, 9637, 9638,
+        0
+    ];
+    let gcd_valid: bool[] = [
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true
+    ];
+    let gcd_values: uint16[] = [
+        0, 1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1,
+        2, 1, 2, 2, 1, 1, 2, 1, 1, 65535, 1, 1,
+        65535, 1, 1, 255, 257, 1, 1, 3855, 65534, 1, 2, 1,
+        65534, 2, 1, 1, 2, 32767, 1, 256, 1, 2, 1, 2,
+        256, 1, 1, 256, 1, 1, 255, 1, 1, 255, 1, 1,
+        255, 1, 1, 1, 15, 257, 1, 1, 257, 1, 1, 1,
+        257, 1, 1, 257, 32768, 1, 2, 1, 2, 256, 1, 1,
+        32768, 1, 1, 32767, 1, 1, 1, 32767, 1, 1, 1, 1,
+        32767, 1, 42405, 1, 1, 3855, 1, 1, 15, 257, 1, 1,
+        42405
+    ];
+    let compare_values: int[] = [
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2,
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0,
+        1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 1, 2, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0,
+        1, 0, 0, 0, 0, 2, 2, 2, 0, 0, 2, 2, 1, 0, 0, 0, 2, 2, 2, 0, 0, 2, 2, 2,
+        1, 2, 0, 2, 2, 2, 0, 0, 2, 2, 2, 0, 1, 0, 2, 2, 2, 0, 0, 2, 2, 2, 2, 2,
+        1
+    ];
+    let count_ones_values: int[] = [
+        0, 1, 1, 16, 15, 1, 8, 2, 1, 15, 8
+    ];
+    let leading_zeros_values: int[] = [
+        16, 15, 14, 0, 0, 7, 8, 7, 0, 1, 0
+    ];
+    let trailing_zeros_values: int[] = [
+        16, 0, 1, 0, 1, 8, 0, 0, 15, 0, 0
+    ];
+    let rotation_counts: int[] = [
+        0, 1, 3, 15, 16, 17, 37, -1, -16, -19, -2147483648, 2147483647
+    ];
+    let rotate_left_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 2, 8, 32768, 1, 2, 32, 32768, 1, 8192, 1, 32768,
+        2, 4, 16, 1, 2, 4, 64, 1, 2, 16384, 2, 1,
+        65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535,
+        65534, 65533, 65527, 32767, 65534, 65533, 65503, 32767, 65534, 57343, 65534, 32767,
+        256, 512, 2048, 128, 256, 512, 8192, 128, 256, 32, 256, 128,
+        255, 510, 2040, 32895, 255, 510, 8160, 32895, 255, 57375, 255, 32895,
+        257, 514, 2056, 32896, 257, 514, 8224, 32896, 257, 8224, 257, 32896,
+        32768, 1, 4, 16384, 32768, 1, 16, 16384, 32768, 4096, 32768, 16384,
+        32767, 65534, 65531, 49151, 32767, 65534, 65519, 49151, 32767, 61439, 32767, 49151,
+        42405, 19275, 11565, 53970, 42405, 19275, 46260, 53970, 42405, 46260, 42405, 53970
+    ];
+    let rotate_right_values: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 32768, 8192, 2, 1, 32768, 2048, 2, 1, 8, 1, 2,
+        2, 1, 16384, 4, 2, 1, 4096, 4, 2, 16, 2, 4,
+        65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535,
+        65534, 32767, 57343, 65533, 65534, 32767, 63487, 65533, 65534, 65527, 65534, 65533,
+        256, 128, 32, 512, 256, 128, 8, 512, 256, 2048, 256, 512,
+        255, 32895, 57375, 510, 255, 32895, 63495, 510, 255, 2040, 255, 510,
+        257, 32896, 8224, 514, 257, 32896, 2056, 514, 257, 2056, 257, 514,
+        32768, 16384, 4096, 1, 32768, 16384, 1024, 1, 32768, 4, 32768, 1,
+        32767, 49151, 61439, 65534, 32767, 49151, 64511, 65534, 32767, 65531, 32767, 65534,
+        42405, 53970, 46260, 19275, 42405, 53970, 11565, 19275, 42405, 11565, 42405, 19275
+    ];
+    let unsigned_values: uint16[] = [
+        0, 1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405
+    ];
+    let signed_values: int16[] = [
+        0, 1, 2, -1, -2, 256, 255, 257, -32768, 32767, -23131
+    ];
+    let hash_values: uint32[] = [
+        0, 1, 2, 65535, 65534, 256, 255, 257, 32768, 32767, 42405
+    ];
+    let decimal_texts: string[] = [
+        "0", "1", "2", "65535", "65534", "256",
+        "255", "257", "32768", "32767", "42405"
+    ];
+    let radixes: int[] = [
+        2, 3, 8, 10, 16, 36
+    ];
+    let radix_texts: string[] = [
+        "0", "0", "0", "0",
+        "0", "0", "1", "1",
+        "1", "1", "1", "1",
+        "10", "2", "2", "2",
+        "2", "2", "1111111111111111", "10022220020",
+        "177777", "65535", "ffff", "1ekf",
+        "1111111111111110", "10022220012", "177776", "65534",
+        "fffe", "1eke", "100000000", "100111",
+        "400", "256", "100", "74",
+        "11111111", "100110", "377", "255",
+        "ff", "73", "100000001", "100112",
+        "401", "257", "101", "75",
+        "1000000000000000", "1122221122", "100000", "32768",
+        "8000", "pa8", "111111111111111", "1122221121",
+        "77777", "32767", "7fff", "pa7",
+        "1010010110100101", "2011011120", "122645", "42405",
+        "a5a5", "wpx"
+    ];
+    let format_radixes: int[] = [
+        10, 10, 16, 2, 10, 10, 36
+    ];
+    let format_widths: int[] = [
+        0, 6, 11, 12, 5, -3, 4
+    ];
+    let format_pads: string[] = [
+        " ", "0", "0", " ", "é", "*", "_"
+    ];
+    let format_texts: string[] = [
+        "0", "000000", "00000000000", "           0",
+        "éééé0", "0", "___0", "1",
+        "000001", "00000000001", "           1", "éééé1",
+        "1", "___1", "2", "000002",
+        "00000000002", "          10", "éééé2", "2",
+        "___2", "65535", "065535", "0000000ffff",
+        "1111111111111111", "65535", "65535", "1ekf",
+        "65534", "065534", "0000000fffe", "1111111111111110",
+        "65534", "65534", "1eke", "256",
+        "000256", "00000000100", "   100000000", "éé256",
+        "256", "__74", "255", "000255",
+        "000000000ff", "    11111111", "éé255", "255",
+        "__73", "257", "000257", "00000000101",
+        "   100000001", "éé257", "257", "__75",
+        "32768", "032768", "00000008000", "1000000000000000",
+        "32768", "32768", "_pa8", "32767",
+        "032767", "00000007fff", "111111111111111", "32767",
+        "32767", "_pa7", "42405", "042405",
+        "0000000a5a5", "1010010110100101", "42405", "42405",
+        "_wpx"
+    ];
+    let parse_inputs: string[] = [
+        "0", "+0", "1", "+1",
+        "2", "+2", "65535", "+65535",
+        "65534", "+65534", "256", "+256",
+        "255", "+255", "257", "+257",
+        "32768", "+32768", "32767", "+32767",
+        "42405", "+42405", "65536", "-1",
+        "-0", "+0", "000", "-000",
+        "0000000000000000000000000000000000000000017", "", "-", "+",
+        "1a", " 1", "1 ", "+-1",
+        "--1", "0x10", "é", "1é",
+        "9999999999999999999999999999999999999999", "-9999999999999999999999999999999999999999", "9999999999999999999999999999999999999999x", "-1",
+        "-5", "-65535", "1_000", "1.0",
+        "1111111111111111", "0", "ffff", "FFFF",
+        "0", "1ekf", "1EKF", "0",
+        "10000", "-1", "2", "z",
+        "Z", "Zz", "g", "G",
+        "fF", "-", "", "777",
+        "8", "+11", "12"
+    ];
+    let parse_radixes: int[] = [
+        10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+        10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+        2, 2, 16, 16, 16, 36, 36, 36, 16, 16, 2, 35, 36, 36, 16, 16, 16, 16, 2, 8, 8, 3, 3
+    ];
+    let parse_ok: bool[] = [
+        true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, false, false,
+        true, true, true, true, true, false, false, false, false, false, false, false,
+        false, false, false, false, false, false, false, false, false, false, false, false,
+        true, true, true, true, true, true, true, true, false, false, false, false,
+        true, true, false, false, true, false, false, true, false, true, true
+    ];
+    let parse_values: uint16[] = [
+        0, 0, 1, 1, 2, 2, 65535, 65535, 65534, 65534, 256, 256,
+        255, 255, 257, 257, 32768, 32768, 32767, 32767, 42405, 42405, 0, 0,
+        0, 0, 0, 0, 17, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        65535, 0, 65535, 65535, 0, 65535, 65535, 0, 0, 0, 0, 0,
+        35, 1295, 0, 0, 255, 0, 0, 511, 0, 4, 5
+    ];
+    let parse_kinds: int[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2,
+        0, 0, 0, 0, 0, 0, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 1, 2, 2, 2, 1, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1, 1, 0, 0, 1, 1, 0, 3, 0, 0, 1, 0, 0
+    ];
+    let parse_offsets: int[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 40, 0, 0, 0, 1, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0
+    ];
+    let parse_messages: string[] = [
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "", "",
+        "", "value out of range for uint16", "value out of range for uint16",
+        "", "", "",
+        "", "", "empty input",
+        "expected a digit", "expected a digit", "invalid character",
+        "invalid character", "invalid character", "invalid character",
+        "invalid character", "invalid character", "invalid character",
+        "invalid character", "value out of range for uint16", "value out of range for uint16",
+        "invalid character", "value out of range for uint16", "value out of range for uint16",
+        "value out of range for uint16", "invalid character", "invalid character",
+        "", "", "",
+        "", "", "",
+        "", "", "value out of range for uint16",
+        "value out of range for uint16", "invalid character", "invalid character",
+        "", "", "invalid character",
+        "invalid character", "", "expected a digit",
+        "empty input", "", "invalid character",
+        "", ""
+    ];
+    let clamp_inputs: uint16[] = [
+        0, 0, 65535, 0, 0, 0, 0, 1, 2, 0, 0, 0,
+        0, 0, 65535, 0, 65535, 65535, 1, 0, 65535, 1, 0, 0,
+        1, 1, 2, 1, 0, 0, 1, 0, 65535, 1, 65535, 65535,
+        2, 0, 65535, 2, 0, 0, 2, 1, 2, 2, 0, 0,
+        2, 0, 65535, 2, 65535, 65535, 65535, 0, 65535, 65535, 0, 0,
+        65535, 1, 2, 65535, 0, 0, 65535, 0, 65535, 65535, 65535, 65535,
+        65534, 0, 65535, 65534, 0, 0, 65534, 1, 2, 65534, 0, 0,
+        65534, 0, 65535, 65534, 65535, 65535, 256, 0, 65535, 256, 0, 0,
+        256, 1, 2, 256, 0, 0, 256, 0, 65535, 256, 65535, 65535,
+        255, 0, 65535, 255, 0, 0, 255, 1, 2, 255, 0, 0,
+        255, 0, 65535, 255, 65535, 65535, 257, 0, 65535, 257, 0, 0,
+        257, 1, 2, 257, 0, 0, 257, 0, 65535, 257, 65535, 65535,
+        32768, 0, 65535, 32768, 0, 0, 32768, 1, 2, 32768, 0, 0,
+        32768, 0, 65535, 32768, 65535, 65535, 32767, 0, 65535, 32767, 0, 0,
+        32767, 1, 2, 32767, 0, 0, 32767, 0, 65535, 32767, 65535, 65535,
+        42405, 0, 65535, 42405, 0, 0, 42405, 1, 2, 42405, 0, 0,
+        42405, 0, 65535, 42405, 65535, 65535
+    ];
+    let clamp_values: uint16[] = [
+        0, 0, 1, 0, 0, 65535, 1, 0, 1, 0, 1, 65535,
+        2, 0, 2, 0, 2, 65535, 65535, 0, 2, 0, 65535, 65535,
+        65534, 0, 2, 0, 65534, 65535, 256, 0, 2, 0, 256, 65535,
+        255, 0, 2, 0, 255, 65535, 257, 0, 2, 0, 257, 65535,
+        32768, 0, 2, 0, 32768, 65535, 32767, 0, 2, 0, 32767, 65535,
+        42405, 0, 2, 0, 42405, 65535
+    ];
+    let pow_bases: uint16[] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2,
+        2, 2, 2, 65535, 65535, 65534, 65534, 256, 256, 255, 255, 255,
+        257, 257, 32768, 32768, 32767, 32767, 42405, 42405, 3, 3, 3, 3,
+        3, 3, 10, 10, 10, 10
+    ];
+    let pow_exponents: int[] = [
+        0, 1, 2, 3, 5, 7, 15, 16, 32, 100, 0, 1,
+        2, 3, 5, 7, 15, 16, 32, 100, 0, 1, 2, 3,
+        5, 7, 15, 0, 1, 0, 1, 0, 1, 0, 1, 2,
+        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 2, 3,
+        5, 7, 0, 1, 2, 3
+    ];
+    let pow_values: uint16[] = [
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 4, 8,
+        32, 128, 32768, 1, 65535, 1, 65534, 1, 256, 1, 255, 65025,
+        1, 257, 1, 32768, 1, 32767, 1, 42405, 1, 3, 9, 27,
+        243, 2187, 1, 10, 100, 1000
+    ];
+
+    let check = func(bool holds, string what, int index) -> void {
+        if (!holds) {
+            test.fail(what + " differs from the reference for case " + index.to_string());
+        }
+    };
+
+    let check_optional = func(optional.Optional<uint16> actual, bool present, uint16 expected, string what, int index) -> void {
+        match (actual) {
+            optional.Optional.None => {
+                check(!present, what, index);
+            },
+            optional.Optional.Some(value) => {
+                check(present && value == expected, what, index);
+            },
+        }
+    };
+
+    let check_parse = func(result.Result<uint16> actual, int index) -> void {
+        match (actual) {
+            result.Result.Ok(value) => {
+                check(parse_ok[index] && value == parse_values[index], "parse value", index);
+            },
+            result.Result.Err(failure) => {
+                check(!parse_ok[index], "parse success", index);
+                match (failure) {
+                    error.Error.Parse { kind, offset, message } => {
+                        check((kind as int) == parse_kinds[index], "parse error kind", index);
+                        check(offset == parse_offsets[index], "parse error offset", index);
+                        check(message == parse_messages[index], "parse error message", index);
+                    },
+                    _ => {
+                        check(false, "parse error variant", index);
+                    },
+                }
+            },
+        }
+    };
+
+    export let test_constants = func() -> void {
+        test.assert(ints.Min == 0);
+        test.assert(ints.Max == 65535);
+        test.assert_equal_int32(16, ints.Bits);
+    };
+
+    export let test_sign_min_max_compare = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            let expected_sign = 0;
+            if (a < 0) {
+                expected_sign = -1;
+            } else if (a > 0) {
+                expected_sign = 1;
+            }
+            check(ints.sign(a) == expected_sign, "sign", k);
+            k = k + 1;
+        }
+        k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                let smaller = a;
+                let larger = b;
+                if (b < a) {
+                    smaller = b;
+                    larger = a;
+                }
+                check(ints.min(a, b) == smaller && ints.max(a, b) == larger, "min/max", k);
+                check((ints.compare(a, b) as int) == compare_values[k], "compare", k);
+                k = k + 1;
+            }
+        }
+        test.assert(ints.compare(ints.Min, ints.Max) == ordering.Ordering.Less);
+    };
+
+    export let test_clamp = func() -> void {
+        for (let k = 0; k < clamp_values.length; k = k + 1) {
+            let v = clamp_inputs[3 * k];
+            let low = clamp_inputs[3 * k + 1];
+            let high = clamp_inputs[3 * k + 2];
+            check(ints.clamp(v, low, high) == clamp_values[k], "clamp", k);
+        }
+    };
+
+    export let test_pow = func() -> void {
+        for (let k = 0; k < pow_values.length; k = k + 1) {
+            check(ints.pow(pow_bases[k], pow_exponents[k]) == pow_values[k], "pow", k);
+        }
+        test.assert(ints.pow(0, 0) == 1);
+    };
+
+    export let test_gcd = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                if (gcd_valid[k]) {
+                    check(ints.gcd(a, b) == gcd_values[k], "gcd", k);
+                }
+                k = k + 1;
+            }
+        }
+        test.assert(ints.gcd(0, 0) == 0);
+        test.assert(ints.gcd(12, 18) == 6);
+    };
+
+    export let test_checked = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                check_optional(ints.checked_add(a, b), checked_add_present[k], checked_add_values[k], "checked_add", k);
+                check_optional(ints.checked_sub(a, b), checked_sub_present[k], checked_sub_values[k], "checked_sub", k);
+                check_optional(ints.checked_mul(a, b), checked_mul_present[k], checked_mul_values[k], "checked_mul", k);
+                check_optional(ints.checked_div(a, b), checked_div_present[k], checked_div_values[k], "checked_div", k);
+                check_optional(ints.checked_rem(a, b), checked_rem_present[k], checked_rem_values[k], "checked_rem", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_wrapping = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                check(ints.wrapping_add(a, b) == wrapping_add_values[k], "wrapping_add", k);
+                check(ints.wrapping_sub(a, b) == wrapping_sub_values[k], "wrapping_sub", k);
+                check(ints.wrapping_mul(a, b) == wrapping_mul_values[k], "wrapping_mul", k);
+                k = k + 1;
+            }
+        }
+        let i = 0;
+        for (let a in values) {
+            // wrapping_neg(a) is 0 - a modulo 2^Bits; values[0] is 0.
+            check(ints.wrapping_neg(a) == wrapping_sub_values[i], "wrapping_neg", i);
+            i = i + 1;
+        }
+    };
+
+    export let test_saturating = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                check(ints.saturating_add(a, b) == saturating_add_values[k], "saturating_add", k);
+                check(ints.saturating_sub(a, b) == saturating_sub_values[k], "saturating_sub", k);
+                check(ints.saturating_mul(a, b) == saturating_mul_values[k], "saturating_mul", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_floor_div_mod = func() -> void {
+        let k = 0;
+        for (let a in values) {
+            for (let b in values) {
+                if (floor_valid[k]) {
+                    check(ints.floor_div(a, b) == floor_div_values[k], "floor_div", k);
+                }
+                if (b != 0) {
+                    check(ints.floor_mod(a, b) == floor_mod_values[k], "floor_mod", k);
+                }
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_bit_counts = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            check(ints.count_ones(v) == count_ones_values[k], "count_ones", k);
+            check(ints.leading_zeros(v) == leading_zeros_values[k], "leading_zeros", k);
+            check(ints.trailing_zeros(v) == trailing_zeros_values[k], "trailing_zeros", k);
+            k = k + 1;
+        }
+    };
+
+    export let test_rotations = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            for (let n in rotation_counts) {
+                check(ints.rotate_left(v, n) == rotate_left_values[k], "rotate_left", k);
+                check(ints.rotate_right(v, n) == rotate_right_values[k], "rotate_right", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_conversions = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            check(ints.to_unsigned(v) == unsigned_values[k], "to_unsigned", k);
+            check(ints.to_signed(v) == signed_values[k], "to_signed", k);
+            k = k + 1;
+        }
+    };
+
+    export let test_hash_and_to_string = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            check(ints.hash(v) == hash_values[k], "hash", k);
+            check(ints.to_string(v) == decimal_texts[k], "to_string", k);
+            k = k + 1;
+        }
+    };
+
+    export let test_to_string_radix = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            for (let radix in radixes) {
+                check(ints.to_string_radix(v, radix) == radix_texts[k], "to_string_radix", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_format = func() -> void {
+        let k = 0;
+        for (let v in values) {
+            for (let f = 0; f < format_radixes.length; f = f + 1) {
+                let text = ints.format(v, format_radixes[f], format_widths[f], format_pads[f]);
+                check(text == format_texts[k], "format", k);
+                k = k + 1;
+            }
+        }
+    };
+
+    export let test_parse = func() -> void {
+        for (let k = 0; k < parse_inputs.length; k = k + 1) {
+            if (parse_radixes[k] == 10) {
+                check_parse(ints.parse(parse_inputs[k]), k);
+            }
+            check_parse(ints.parse_radix(parse_inputs[k], parse_radixes[k]), k);
+        }
+        let failure = test.assert_err<uint16>(ints.parse("1x"));
+        test.assert_equal_string("parse error at 1: invalid character", error.message(failure));
+    };
+
+    export let test_round_trip_text = func() -> void {
+        for (let v in values) {
+            for (let radix in radixes) {
+                let back = test.assert_ok<uint16>(ints.parse_radix(ints.to_string_radix(v, radix), radix));
+                test.assert(back == v);
+            }
+        }
+    };
+);

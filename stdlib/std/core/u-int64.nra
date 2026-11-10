@@ -1,0 +1,393 @@
+let integer_text = import:Std.Core.Internal.IntegerText;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+
+// Companion functions for uint64 (Stdlib.md section 7.1). Every operation uses
+// checked arithmetic; the wrapping forms follow the recipes of section 7.2, so
+// no intermediate value leaves its type.
+export let UInt64 = module (
+    export const Min: uint64 = 0;
+    export const Max: uint64 = 18446744073709551615;
+    export const Bits: int = 64;
+
+    export let sign = func(uint64 v) -> int {
+        if (v == 0) {
+            return 0;
+        }
+        return 1;
+    };
+
+    export let min = func(uint64 a, uint64 b) -> uint64 {
+        if (b < a) {
+            return b;
+        }
+        return a;
+    };
+
+    export let max = func(uint64 a, uint64 b) -> uint64 {
+        if (b > a) {
+            return b;
+        }
+        return a;
+    };
+
+    // Traps with "invalid argument: low exceeds high".
+    export let clamp = func(uint64 v, uint64 low, uint64 high) -> uint64 {
+        if (low > high) {
+            trap_with_message("invalid argument: low exceeds high");
+        }
+        if (v < low) {
+            return low;
+        }
+        if (v > high) {
+            return high;
+        }
+        return v;
+    };
+
+    // The natural order; usable as a comparator.
+    export let compare = func(uint64 a, uint64 b) -> ordering.Ordering {
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        if (a > b) {
+            return ordering.Ordering.Greater;
+        }
+        return ordering.Ordering.Equal;
+    };
+
+    // Square-and-multiply with checked multiplication (an overflow traps
+    // with reason 1). The factor is squared only while exponent bits remain,
+    // so each intermediate divides the result. A negative exponent traps;
+    // pow(0, 0) is 1.
+    export let pow = func(uint64 base, int exponent) -> uint64 {
+        if (exponent < 0) {
+            trap_with_message("invalid argument: negative exponent");
+        }
+        let product: uint64 = 1;
+        let factor = base;
+        let remaining = exponent;
+        while (remaining > 0) {
+            if ((remaining & 1) == 1) {
+                product = product * factor;
+            }
+            remaining = remaining >> 1;
+            if (remaining > 0) {
+                factor = factor * factor;
+            }
+        }
+        return product;
+    };
+
+    // Euclid's algorithm. gcd(0, 0) is 0.
+    export let gcd = func(uint64 a, uint64 b) -> uint64 {
+        let x = a;
+        let y = b;
+        while (y != 0) {
+            let remainder = x % y;
+            x = y;
+            y = remainder;
+        }
+        return x;
+    };
+
+    // None where the operator would trap. Each test runs before the
+    // operation, so nothing overflows.
+    export let checked_add = func(uint64 a, uint64 b) -> optional.Optional<uint64> {
+        if (b > Max - a) {
+            return optional.Optional<uint64>.None;
+        }
+        return optional.Optional<uint64>.Some(a + b);
+    };
+
+    export let checked_sub = func(uint64 a, uint64 b) -> optional.Optional<uint64> {
+        if (a < b) {
+            return optional.Optional<uint64>.None;
+        }
+        return optional.Optional<uint64>.Some(a - b);
+    };
+
+    export let checked_mul = func(uint64 a, uint64 b) -> optional.Optional<uint64> {
+        if (a != 0 && b > Max / a) {
+            return optional.Optional<uint64>.None;
+        }
+        return optional.Optional<uint64>.Some(a * b);
+    };
+
+    export let checked_div = func(uint64 a, uint64 b) -> optional.Optional<uint64> {
+        if (b == 0) {
+            return optional.Optional<uint64>.None;
+        }
+        return optional.Optional<uint64>.Some(a / b);
+    };
+
+    export let checked_rem = func(uint64 a, uint64 b) -> optional.Optional<uint64> {
+        if (b == 0) {
+            return optional.Optional<uint64>.None;
+        }
+        return optional.Optional<uint64>.Some(a % b);
+    };
+
+    // The result modulo 2^64 (section 7.2). `room` is Max - a, which cannot
+    // underflow; when b exceeds it, b - room - 1 is the wrapped sum.
+    export let wrapping_add = func(uint64 a, uint64 b) -> uint64 {
+        let room = Max - a;
+        if (b > room) {
+            return b - room - 1;
+        }
+        return a + b;
+    };
+
+    // When a < b, b - a is between 1 and Max, so Max - (b - a) + 1 fits.
+    export let wrapping_sub = func(uint64 a, uint64 b) -> uint64 {
+        if (a >= b) {
+            return a - b;
+        }
+        return Max - (b - a) + 1;
+    };
+
+    // Low and high 32-bit halves: every partial product has two factors
+    // below 2^32, the cross products are masked to 32 bits before they are
+    // added (their sum is below 2^33), and the shift discards the bits above
+    // 64.
+    export let wrapping_mul = func(uint64 a, uint64 b) -> uint64 {
+        let a_low = a & 4294967295;
+        let a_high = a >> 32;
+        let b_low = b & 4294967295;
+        let b_high = b >> 32;
+        let cross = ((a_high * b_low) & 4294967295) + ((a_low * b_high) & 4294967295);
+        return wrapping_add(a_low * b_low, cross << 32);
+    };
+
+    export let wrapping_neg = func(uint64 a) -> uint64 {
+        return wrapping_sub(0, a);
+    };
+
+    // Clamp to Min or Max instead of overflowing.
+    export let saturating_add = func(uint64 a, uint64 b) -> uint64 {
+        if (b > Max - a) {
+            return Max;
+        }
+        return a + b;
+    };
+
+    export let saturating_sub = func(uint64 a, uint64 b) -> uint64 {
+        if (a < b) {
+            return Min;
+        }
+        return a - b;
+    };
+
+    export let saturating_mul = func(uint64 a, uint64 b) -> uint64 {
+        if (a != 0 && b > Max / a) {
+            return Max;
+        }
+        return a * b;
+    };
+
+    // For unsigned operands these are the ordinary quotient and remainder.
+    // A zero divisor traps (reason 1).
+    export let floor_div = func(uint64 a, uint64 b) -> uint64 {
+        return a / b;
+    };
+
+    export let floor_mod = func(uint64 a, uint64 b) -> uint64 {
+        return a % b;
+    };
+
+    // Bit counts over Bits bits by masks and shifts. Each step adds
+    // neighbouring fields whose sums fit in the wider field, so nothing
+    // overflows.
+    export let count_ones = func(uint64 v) -> int {
+        let x = v;
+        x = (x & 6148914691236517205) + ((x >> 1) & 6148914691236517205);
+        x = (x & 3689348814741910323) + ((x >> 2) & 3689348814741910323);
+        x = (x & 1085102592571150095) + ((x >> 4) & 1085102592571150095);
+        x = (x & 71777214294589695) + ((x >> 8) & 71777214294589695);
+        x = (x & 281470681808895) + ((x >> 16) & 281470681808895);
+        x = (x & 4294967295) + ((x >> 32) & 4294967295);
+        return x as int;
+    };
+
+    // A binary search for the highest set bit: a left shift only discards
+    // bits already known to be zero.
+    export let leading_zeros = func(uint64 v) -> int {
+        if (v == 0) {
+            return Bits;
+        }
+        let x = v;
+        let count = 0;
+        if ((x >> 32) == 0) {
+            count = count + 32;
+            x = x << 32;
+        }
+        if ((x >> 48) == 0) {
+            count = count + 16;
+            x = x << 16;
+        }
+        if ((x >> 56) == 0) {
+            count = count + 8;
+            x = x << 8;
+        }
+        if ((x >> 60) == 0) {
+            count = count + 4;
+            x = x << 4;
+        }
+        if ((x >> 62) == 0) {
+            count = count + 2;
+            x = x << 2;
+        }
+        if ((x >> 63) == 0) {
+            count = count + 1;
+            x = x << 1;
+        }
+        return count;
+    };
+
+    export let trailing_zeros = func(uint64 v) -> int {
+        if (v == 0) {
+            return Bits;
+        }
+        let x = v;
+        let count = 0;
+        if ((x & 4294967295) == 0) {
+            count = count + 32;
+            x = x >> 32;
+        }
+        if ((x & 65535) == 0) {
+            count = count + 16;
+            x = x >> 16;
+        }
+        if ((x & 255) == 0) {
+            count = count + 8;
+            x = x >> 8;
+        }
+        if ((x & 15) == 0) {
+            count = count + 4;
+            x = x >> 4;
+        }
+        if ((x & 3) == 0) {
+            count = count + 2;
+            x = x >> 2;
+        }
+        if ((x & 1) == 0) {
+            count = count + 1;
+            x = x >> 1;
+        }
+        return count;
+    };
+
+    // `n` is reduced to 0 through Bits - 1 first. A rotation by 0 returns
+    // `v`; otherwise both shift counts are between 1 and Bits - 1.
+    export let rotate_left = func(uint64 v, int n) -> uint64 {
+        let count = rotation(n);
+        if (count == 0) {
+            return v;
+        }
+        return (v << count) | (v >> (Bits - count));
+    };
+
+    export let rotate_right = func(uint64 v, int n) -> uint64 {
+        let count = rotation(n);
+        if (count == 0) {
+            return v;
+        }
+        return (v >> count) | (v << (Bits - count));
+    };
+
+    // The identity: every integer module has both conversions.
+    export let to_unsigned = func(uint64 v) -> uint64 {
+        return v;
+    };
+
+    // The same-width signed type with the same bit pattern (section 7.2).
+    export let to_signed = func(uint64 v) -> int64 {
+        if (v < 9223372036854775808) {
+            return v as int64;
+        }
+        // v - 2^63 is below 2^63; adding Int64.Min gives Min through -1.
+        return ((v - 9223372036854775808) as int64) - 9223372036854775807 - 1;
+    };
+
+    // Section 5.2: the two's complement pattern as a uint32; the 64-bit types
+    // fold the high half into the low half.
+    export let hash = func(uint64 v) -> uint32 {
+        return v.hash_code();
+    };
+
+    // Decimal, with `-` for negative values (section 5.2).
+    export let to_string = func(uint64 v) -> string {
+        return v.to_string();
+    };
+
+    // Lowercase digits. A radix outside 2 through 36 traps.
+    export let to_string_radix = func(uint64 v, int radix) -> string {
+        integer_text.check_radix(radix);
+        if (radix == 10) {
+            return v.to_string();
+        }
+        let base = radix as uint64;
+        let rest = v;
+        let digits: uint8[list] = [];
+        while (true) {
+            digits.append(integer_text.digit_byte((rest % base) as int));
+            rest = rest / base;
+            if (rest == 0) {
+                break;
+            }
+        }
+        return integer_text.digits_text(digits, false);
+    };
+
+    // to_string_radix, left-padded with copies of `pad` to `min_width`
+    // characters, sign included. A `0` pad goes after the sign. `pad` must be
+    // one scalar value.
+    export let format = func(uint64 v, int radix, int min_width, string pad) -> string {
+        return integer_text.pad_number(to_string_radix(v, radix), min_width, pad);
+    };
+
+    export let parse = func(string text) -> result.Result<uint64> {
+        return parse_radix(text, 10);
+    };
+
+    // An optional `+` or `-`, then one or more digits of the radix in either
+    // case. Syntax errors are reported first (Empty, UnexpectedEnd at the
+    // end, InvalidCharacter at the offending byte); a well-formed value
+    // outside the type fails with OutOfRange at offset 0. A `-` is accepted
+    // only for zero. A radix outside 2 through 36 traps.
+    export let parse_radix = func(string text, int radix) -> result.Result<uint64> {
+        integer_text.check_radix(radix);
+        match (integer_text.syntax_error(text, radix)) {
+            optional.Optional.Some(failure) => {
+                return result.Result<uint64>.Err(failure);
+            },
+            optional.Optional.None => {},
+        }
+        let start = integer_text.sign_length(text);
+        let negative = start == 1 && text.byte_at(0) == 45;
+        let base = radix as uint64;
+        let value: uint64 = 0;
+        let length = text.byte_length;
+        for (let i = start; i < length; i = i + 1) {
+            let digit = integer_text.digit_value(text.byte_at(i)) as uint64;
+            if (value > (Max - digit) / base) {
+                return result.Result<uint64>.Err(integer_text.out_of_range("uint64"));
+            }
+            value = value * base + digit;
+        }
+        if (negative && value != 0) {
+            return result.Result<uint64>.Err(integer_text.out_of_range("uint64"));
+        }
+        return result.Result<uint64>.Ok(value);
+    };
+
+    // `n` modulo Bits, between 0 and Bits - 1.
+    let rotation = func(int n) -> int {
+        let count = n % Bits;
+        if (count < 0) {
+            return count + Bits;
+        }
+        return count;
+    };
+);

@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: digits outside 0 through 100
+let console = import:Std.Io.Console;
+let floats = import:Std.Core.BFloat16;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(floats.to_fixed(floats.Max, 100).byte_length.to_string());
+        console.print_line(floats.to_fixed(1.0, 101));
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

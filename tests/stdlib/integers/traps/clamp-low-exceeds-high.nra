@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: low exceeds high
+let console = import:Std.Io.Console;
+let uint32s = import:Std.Core.UInt32;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(uint32s.clamp(5, 7, 7).to_string());
+        console.print_line(uint32s.clamp(5, 8, 7).to_string());
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

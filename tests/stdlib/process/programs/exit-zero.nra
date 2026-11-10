@@ -1,0 +1,9 @@
+// status: 0
+let program = import:Std.Program;
+
+export let ExitZero = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        program.Process.exit(0);
+        return program.ExitCode.Failure;
+    };
+);

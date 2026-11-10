@@ -1,0 +1,29 @@
+// run-options: --replay @AREA_DIR@/programs/replayed-lookups.trace
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let program = import:Std.Program;
+
+// Lookups answered from a recorded trace: a set variable with non-ASCII
+// text, an empty value, and an unset variable.
+export let ReplayedLookups = module:program.Entry (
+    let show = func(string name) -> void {
+        match (program.Environment.get(name)) {
+            program.Environment.Lookup.Found(value) => {
+                console.print_line(name + " = [" + value + "]");
+            },
+            program.Environment.Lookup.Missing => {
+                console.print_line(name + " is missing");
+            },
+            program.Environment.Lookup.Failed(failure) => {
+                console.print_line(name + ": " + error.message(failure));
+            },
+        }
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        show("NEURA_GREETING");
+        show("NEURA_EMPTY");
+        show("NEURA_UNSET");
+        return program.ExitCode.Ok;
+    };
+);

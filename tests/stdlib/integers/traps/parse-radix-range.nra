@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: radix outside 2 through 36
+let console = import:Std.Io.Console;
+let uint8s = import:Std.Core.UInt8;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("radix 1");
+        let parsed = uint8s.parse_radix("0", 1);
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

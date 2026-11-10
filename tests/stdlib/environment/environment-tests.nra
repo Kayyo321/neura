@@ -1,0 +1,55 @@
+// test-options: --allow-env
+let error = import:Std.Core.Error;
+let program = import:Std.Program;
+let test = import:Std.Test;
+
+// Environment.get against the real environment of the test run.
+let EnvironmentTests = module (
+    let failure_kind = func(program.Environment.Lookup lookup) -> error.IoErrorKind {
+        match (lookup) {
+            program.Environment.Lookup.Failed(failure) => {
+                return match (failure) {
+                    error.Error.Io { kind, message, path } => kind,
+                    _ => error.IoErrorKind.Other,
+                };
+            },
+            _ => {
+                test.fail("expected Failed");
+                return error.IoErrorKind.Other;
+            },
+        }
+    };
+
+    export let test_found = func() -> void {
+        match (program.Environment.get("PATH")) {
+            program.Environment.Lookup.Found(value) => {
+                test.assert(value.byte_length > 0);
+            },
+            _ => {
+                test.fail("PATH is set in every test environment");
+            },
+        }
+    };
+
+    export let test_missing = func() -> void {
+        match (program.Environment.get("NEURA_STDLIB_TEST_UNSET_VARIABLE")) {
+            program.Environment.Lookup.Missing => {},
+            _ => {
+                test.fail("expected Missing");
+            },
+        }
+    };
+
+    export let test_invalid_names = func() -> void {
+        test.assert(failure_kind(program.Environment.get("")) == error.IoErrorKind.InvalidInput);
+        test.assert(failure_kind(program.Environment.get("A=B")) == error.IoErrorKind.InvalidInput);
+        match (program.Environment.get("")) {
+            program.Environment.Lookup.Failed(failure) => {
+                test.assert_equal_string("InvalidInput: environment lookup failed", error.message(failure));
+            },
+            _ => {
+                test.fail("expected Failed");
+            },
+        }
+    };
+);

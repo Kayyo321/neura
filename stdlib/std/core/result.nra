@@ -1,0 +1,113 @@
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let optional = import:Std.Core.Optional;
+
+// The one representation of a fallible outcome (Stdlib.md section 6.2). An
+// operation with no value returns Result<Unit>.
+export let Result = module (
+    export let Result = enum<T> (Ok(T), Err(error.Error));
+
+    export let is_ok = func<T>(Result<T> r) -> bool {
+        return match (r) {
+            Result.Ok(_) => true,
+            Result.Err(_) => false,
+        };
+    };
+
+    export let is_err = func<T>(Result<T> r) -> bool {
+        return match (r) {
+            Result.Ok(_) => false,
+            Result.Err(_) => true,
+        };
+    };
+
+    export let value_or = func<T>(Result<T> r, T fallback) -> T {
+        return match (r) {
+            Result.Ok(value) => value,
+            Result.Err(_) => fallback,
+        };
+    };
+
+    // The value, or a trap whose message is the detail, ": ", and the
+    // error's message.
+    export let expect = func<T>(Result<T> r, string detail) -> T {
+        match (r) {
+            Result.Ok(value) => {
+                return value;
+            },
+            Result.Err(failure) => {
+                trap_with_message(detail + ": " + error.message(failure));
+            },
+        }
+    };
+
+    export let to_optional = func<T>(Result<T> r) -> optional.Optional<T> {
+        return match (r) {
+            Result.Ok(value) => optional.Optional<T>.Some(value),
+            Result.Err(_) => optional.Optional<T>.None,
+        };
+    };
+
+    // Wraps an Err in a Context error; returns an Ok unchanged.
+    export let with_context = func<T>(Result<T> r, string message) -> Result<T> {
+        return match (r) {
+            Result.Ok(_) => r,
+            Result.Err(failure) => Result<T>.Err(error.context(failure, message)),
+        };
+    };
+
+    export let map = func<T, U>(Result<T> r, func(T) -> U f) -> Result<U> {
+        return match (r) {
+            Result.Ok(value) => Result<U>.Ok(f(value)),
+            Result.Err(failure) => Result<U>.Err(failure),
+        };
+    };
+
+    export let and_then = func<T, U>(Result<T> r, func(T) -> Result<U> f) -> Result<U> {
+        return match (r) {
+            Result.Ok(value) => f(value),
+            Result.Err(failure) => Result<U>.Err(failure),
+        };
+    };
+
+    export let map_error = func<T>(Result<T> r, func(error.Error) -> error.Error f) -> Result<T> {
+        return match (r) {
+            Result.Ok(_) => r,
+            Result.Err(failure) => Result<T>.Err(f(failure)),
+        };
+    };
+
+    // Both Ok with equal values, or both Err with structurally equal errors.
+    export let equals = func<T>(Result<T> a, Result<T> b) -> bool {
+        match (a) {
+            Result.Ok(value) => {
+                return match (b) {
+                    Result.Ok(other) => value.equals(other),
+                    Result.Err(_) => false,
+                };
+            },
+            Result.Err(failure) => {
+                return match (b) {
+                    Result.Ok(_) => false,
+                    Result.Err(other) => error.equals(failure, other),
+                };
+            },
+        }
+    };
+
+    // Hash.combine(1, the value's hash) for Ok and Hash.combine(2, the
+    // error's hash) for Err.
+    export let hash = func<T>(Result<T> r) -> uint32 {
+        return match (r) {
+            Result.Ok(value) => hashing.combine(1, value.hash_code()),
+            Result.Err(failure) => hashing.combine(2, error.hash(failure)),
+        };
+    };
+
+    export let to_string = func<T>(Result<T> r) -> string {
+        return match (r) {
+            Result.Ok(value) => "Ok(" + value.to_string() + ")",
+            Result.Err(failure) => "Err(" + error.message(failure) + ")",
+        };
+    };
+);

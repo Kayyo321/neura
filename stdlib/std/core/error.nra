@@ -1,0 +1,199 @@
+let hashing = import:Std.Core.Hash;
+
+// Returned failures (Stdlib.md section 6.3). An Error is an ordinary value
+// read with match; adding a variant is a major-version change.
+export let Error = module (
+    // Host error codes 1 through 14 map to the first fourteen kinds in
+    // order. The library produces Closed and InvalidData itself.
+    export let IoErrorKind = enum (
+        NotFound, PermissionDenied, AlreadyExists, InvalidInput, Interrupted, UnexpectedEnd, NotADirectory,
+        IsADirectory, DirectoryNotEmpty, ConnectionRefused, ConnectionReset, TimedOut, Unsupported,
+        CapabilityDenied, Closed, InvalidData, Other
+    );
+
+    export let ParseErrorKind = enum (Empty, InvalidCharacter, OutOfRange, UnexpectedEnd, Syntax);
+
+    // The base of errors defined outside the library. `code` is a stable
+    // identifier such as billing.card_declined.
+    export let ErrorDetail = class (
+        export let code = func() -> string;
+        export let message = func() -> string;
+    );
+
+    export let SimpleDetail = class:ErrorDetail (
+        let code_text: string;
+        let message_text: string;
+
+        export let init = func(string code_value, string message_value) -> void {
+            super.init();
+            code_text = code_value;
+            message_text = message_value;
+        };
+
+        export let.override code = func() -> string {
+            return code_text;
+        };
+
+        export let.override message = func() -> string {
+            return message_text;
+        };
+
+        // Two simple details are equal when their code and message are.
+        export let.override equals = func(class other) -> bool {
+            if (!(other is SimpleDetail)) {
+                return false;
+            }
+            let detail = other as SimpleDetail;
+            return code_text == detail.code() && message_text == detail.message();
+        };
+
+        export let.override hash_code = func() -> uint32 {
+            return hashing.combine(hashing.combine(17, code_text.hash_code()), message_text.hash_code());
+        };
+
+        export let.override to_string = func() -> string {
+            return code_text + ": " + message_text;
+        };
+    );
+
+    export let Error = enum (
+        Io { kind: IoErrorKind, message: string, path: string },
+        Parse { kind: ParseErrorKind, offset: int, message: string },
+        Encoding { offset: int, message: string },
+        Custom(ErrorDetail),
+        Context { message: string, cause: Error }
+    );
+
+    // A Custom error holding a SimpleDetail.
+    export let custom = func(string code, string text) -> Error {
+        return Error.Custom(new SimpleDetail(code, text));
+    };
+
+    export let context = func(Error cause, string text) -> Error {
+        return Error.Context { message: text, cause: cause };
+    };
+
+    export let io_kind_name = func(IoErrorKind kind) -> string {
+        return kind.to_string();
+    };
+
+    export let parse_kind_name = func(ParseErrorKind kind) -> string {
+        return kind.to_string();
+    };
+
+    export let message = func(Error e) -> string {
+        return match (e) {
+            Error.Io { kind, message: text, path } => io_text(kind, text, path),
+            Error.Parse { kind: _, offset, message: text } => "parse error at " + offset.to_string() + ": " + text,
+            Error.Encoding { offset, message: text } => "invalid encoding at " + offset.to_string() + ": " + text,
+            Error.Custom(detail) => detail.message(),
+            Error.Context { message: text, cause } => text + ": " + message(cause),
+        };
+    };
+
+    let io_text = func(IoErrorKind kind, string text, string path) -> string {
+        if (path == "") {
+            return io_kind_name(kind) + ": " + text;
+        }
+        return io_kind_name(kind) + ": " + text + " (" + path + ")";
+    };
+
+    // Follows Context causes to the end.
+    export let root_cause = func(Error e) -> Error {
+        let current = e;
+        while (true) {
+            match (current) {
+                Error.Context { message: _, cause } => {
+                    current = cause;
+                },
+                _ => {
+                    return current;
+                },
+            }
+        }
+        return current;
+    };
+
+    // The error, then each cause in order.
+    export let chain = func(Error e) -> Error[list] {
+        let result: Error[list] = [];
+        let current = e;
+        let more = true;
+        while (more) {
+            result.append(current);
+            match (current) {
+                Error.Context { message: _, cause } => {
+                    current = cause;
+                },
+                _ => {
+                    more = false;
+                },
+            }
+        }
+        return result;
+    };
+
+    // Structural equality. Custom details compare with their equals member.
+    export let equals = func(Error a, Error b) -> bool {
+        match (a) {
+            Error.Io { kind, message: text, path } => {
+                match (b) {
+                    Error.Io { kind: other_kind, message: other_text, path: other_path } => {
+                        return kind == other_kind && text == other_text && path == other_path;
+                    },
+                    _ => { return false; },
+                }
+            },
+            Error.Parse { kind, offset, message: text } => {
+                match (b) {
+                    Error.Parse { kind: other_kind, offset: other_offset, message: other_text } => {
+                        return kind == other_kind && offset == other_offset && text == other_text;
+                    },
+                    _ => { return false; },
+                }
+            },
+            Error.Encoding { offset, message: text } => {
+                match (b) {
+                    Error.Encoding { offset: other_offset, message: other_text } => {
+                        return offset == other_offset && text == other_text;
+                    },
+                    _ => { return false; },
+                }
+            },
+            Error.Custom(detail) => {
+                match (b) {
+                    Error.Custom(other_detail) => { return detail.equals(other_detail); },
+                    _ => { return false; },
+                }
+            },
+            Error.Context { message: text, cause } => {
+                match (b) {
+                    Error.Context { message: other_text, cause: other_cause } => {
+                        return text == other_text && equals(cause, other_cause);
+                    },
+                    _ => { return false; },
+                }
+            },
+        }
+    };
+
+    // Starts from the variant's position and combines each field's hash.
+    export let hash = func(Error e) -> uint32 {
+        return match (e) {
+            Error.Io { kind, message: text, path } =>
+                hashing.combine(hashing.combine(hashing.combine(0, kind.hash_code()), text.hash_code()), path.hash_code()),
+            Error.Parse { kind, offset, message: text } =>
+                hashing.combine(hashing.combine(hashing.combine(1, kind.hash_code()), offset.hash_code()), text.hash_code()),
+            Error.Encoding { offset, message: text } =>
+                hashing.combine(hashing.combine(2, offset.hash_code()), text.hash_code()),
+            Error.Custom(detail) => hashing.combine(3, detail.hash_code()),
+            Error.Context { message: text, cause } =>
+                hashing.combine(hashing.combine(4, text.hash_code()), hash(cause)),
+        };
+    };
+
+    // The same text as message.
+    export let to_string = func(Error e) -> string {
+        return message(e);
+    };
+);

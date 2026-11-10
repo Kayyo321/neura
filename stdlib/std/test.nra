@@ -1,0 +1,130 @@
+let error = import:Std.Core.Error;
+let failure = import:Std.Core.Failure;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+
+// Assertions for `neura test` (Stdlib.md section 14.2). Each builds its
+// message in Neura and traps through Failure.trap; the runner reports the
+// message at the failing assertion's call site in the test file.
+export let Test = module (
+    export let assert = func(bool condition) -> void {
+        if (!condition) {
+            failure.trap("assertion failed");
+        }
+    };
+
+    export let assert_with = func(bool condition, string message) -> void {
+        if (!condition) {
+            failure.trap(message);
+        }
+    };
+
+    export let fail = func(string message) -> void {
+        failure.trap(message);
+    };
+
+    let mismatch = func(string expected, string actual) -> void {
+        failure.trap("expected <" + expected + ">, got <" + actual + ">");
+    };
+
+    export let assert_equal_int32 = func(int32 expected, int32 actual) -> void {
+        if (expected != actual) {
+            mismatch(expected.to_string(), actual.to_string());
+        }
+    };
+
+    export let assert_equal_int64 = func(int64 expected, int64 actual) -> void {
+        if (expected != actual) {
+            mismatch(expected.to_string(), actual.to_string());
+        }
+    };
+
+    export let assert_equal_uint64 = func(uint64 expected, uint64 actual) -> void {
+        if (expected != actual) {
+            mismatch(expected.to_string(), actual.to_string());
+        }
+    };
+
+    export let assert_equal_bool = func(bool expected, bool actual) -> void {
+        if (expected != actual) {
+            mismatch(expected.to_string(), actual.to_string());
+        }
+    };
+
+    export let assert_equal_string = func(string expected, string actual) -> void {
+        if (expected != actual) {
+            mismatch(expected, actual);
+        }
+    };
+
+    // Equal bit patterns, except that every NaN equals every NaN; 0.0 and
+    // -0.0 differ (Stdlib.md section 5.2).
+    export let assert_equal_float64 = func(float64 expected, float64 actual) -> void {
+        if (!expected.equals(actual)) {
+            mismatch(expected.to_string(), actual.to_string());
+        }
+    };
+
+    // Fails when the absolute difference exceeds the tolerance or either
+    // value is NaN.
+    export let assert_float_near = func(float64 expected, float64 actual, float64 tolerance) -> void {
+        let difference = expected - actual;
+        if (difference < 0.0) {
+            difference = -difference;
+        }
+        if (!(difference <= tolerance)) {
+            mismatch(expected.to_string(), actual.to_string());
+        }
+    };
+
+    export let assert_equal = func<T>(T expected, T actual) -> void {
+        if (!expected.equals(actual)) {
+            mismatch(expected.to_string(), actual.to_string());
+        }
+    };
+
+    export let assert_not_equal = func<T>(T unexpected, T actual) -> void {
+        if (unexpected.equals(actual)) {
+            failure.trap("expected a value other than <" + unexpected.to_string() + ">");
+        }
+    };
+
+    export let assert_some = func<T>(optional.Optional<T> o) -> T {
+        match (o) {
+            optional.Optional.Some(value) => {
+                return value;
+            },
+            optional.Optional.None => {
+                trap_with_message("expected Some, got None");
+            },
+        }
+    };
+
+    export let assert_none = func<T>(optional.Optional<T> o) -> void {
+        if (optional.is_some<T>(o)) {
+            failure.trap("expected None, got Some");
+        }
+    };
+
+    export let assert_ok = func<T>(result.Result<T> r) -> T {
+        match (r) {
+            result.Result.Ok(value) => {
+                return value;
+            },
+            result.Result.Err(e) => {
+                trap_with_message("expected Ok, got Err: " + error.message(e));
+            },
+        }
+    };
+
+    export let assert_err = func<T>(result.Result<T> r) -> error.Error {
+        match (r) {
+            result.Result.Ok(_) => {
+                trap_with_message("expected Err, got Ok");
+            },
+            result.Result.Err(e) => {
+                return e;
+            },
+        }
+    };
+);

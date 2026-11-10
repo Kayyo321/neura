@@ -1,0 +1,66 @@
+let cell = import:Std.Core.Cell;
+let hash = import:Std.Core.Hash;
+let ordering = import:Std.Core.Ordering;
+let unit = import:Std.Core.Unit;
+let version = import:Std.Core.Version;
+let test = import:Std.Test;
+
+let ValuesTests = module (
+    export let test_ordering = func() -> void {
+        test.assert(ordering.reverse(ordering.Ordering.Less) == ordering.Ordering.Greater);
+        test.assert(ordering.reverse(ordering.Ordering.Greater) == ordering.Ordering.Less);
+        test.assert(ordering.reverse(ordering.Ordering.Equal) == ordering.Ordering.Equal);
+        test.assert(ordering.then(ordering.Ordering.Equal, ordering.Ordering.Less) == ordering.Ordering.Less);
+        test.assert(ordering.then(ordering.Ordering.Greater, ordering.Ordering.Less) == ordering.Ordering.Greater);
+        test.assert(ordering.is_less(ordering.Ordering.Less) && !ordering.is_less(ordering.Ordering.Equal));
+        test.assert(ordering.is_at_most(ordering.Ordering.Equal) && !ordering.is_at_most(ordering.Ordering.Greater));
+        test.assert(ordering.is_greater(ordering.Ordering.Greater) && !ordering.is_greater(ordering.Ordering.Equal));
+        test.assert(ordering.is_at_least(ordering.Ordering.Equal) && !ordering.is_at_least(ordering.Ordering.Less));
+        test.assert_equal_string("Greater", ordering.Ordering.Greater.to_string());
+    };
+
+    export let test_hash_combine_wraps = func() -> void {
+        test.assert_equal_uint64(31, hash.combine(1, 0) as uint64);
+        test.assert_equal_uint64(2081, hash.combine(hash.combine(0, 65), 66) as uint64);
+        test.assert_equal_uint64(4294967264, hash.combine(4294967295, 4294967295) as uint64);
+        test.assert_equal_uint64(4294967295, hash.combine(0, 4294967295) as uint64);
+    };
+
+    export let test_hash_spread_and_scalars = func() -> void {
+        test.assert_equal_uint64(65537, hash.spread(65536) as uint64);
+        test.assert_equal_uint64(4294901760, hash.spread(4294967295) as uint64);
+        test.assert_equal_uint64(1231, hash.of_bool(true) as uint64);
+        test.assert_equal_uint64(1237, hash.of_bool(false) as uint64);
+        test.assert_equal_uint64(0, hash.of_int64(-1) as uint64);
+        test.assert_equal_uint64(1, hash.of_int64(-2) as uint64);
+        test.assert_equal_uint64(5, hash.of_int64(5) as uint64);
+        test.assert_equal_uint64(2147483648, hash.of_int64(-9223372036854775808) as uint64);
+        test.assert_equal_uint64(0, hash.of_uint64(18446744073709551615) as uint64);
+        test.assert_equal_uint64(3, hash.of_uint64(4294967298) as uint64);
+        // The library functions agree with the built-in value members.
+        test.assert(hash.of_bool(true) == true.hash_code());
+        let wide: uint64 = 4294967298;
+        test.assert(hash.of_uint64(wide) == wide.hash_code());
+    };
+
+    export let test_cell_shares_state_with_closures = func() -> void {
+        let total = cell.of<int64>(0);
+        let add = func(int64 value) -> void {
+            total.value = total.value + value;
+        };
+        add(2);
+        add(40);
+        test.assert_equal_int64(42, total.value);
+        let names = new cell.Cell<string>("first");
+        names.value = "second";
+        test.assert_equal_string("second", names.value);
+    };
+
+    export let test_unit_and_version = func() -> void {
+        test.assert(unit.Unit.Value == unit.Unit.Value);
+        test.assert_equal_string("Value", unit.Unit.Value.to_string());
+        test.assert_equal_int32(0, version.Major);
+        test.assert_equal_int32(1, version.Minor);
+        test.assert_equal_int32(0, version.Patch);
+    };
+);

@@ -1,0 +1,10 @@
+// status: 255
+let program = import:Std.Program;
+
+// The largest status.
+export let ExitBounds = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        program.Process.exit(255);
+        return program.ExitCode.Ok;
+    };
+);

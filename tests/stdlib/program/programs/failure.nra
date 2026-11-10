@@ -1,0 +1,12 @@
+// status: 1
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        if (args.length == 0) {
+            return program.ExitCode.Failure;
+        }
+
+        return program.ExitCode.Ok;
+    };
+);

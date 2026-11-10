@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: index out of range
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let ranges = import:Std.Core.IntRange;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(ranges.stepped(5, 0, -2).get(0).to_string());
+        console.print_line(ranges.stepped(5, 0, -2).get(-1).to_string());
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

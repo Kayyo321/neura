@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: pad is not one scalar value
+let console = import:Std.Io.Console;
+let int16s = import:Std.Core.Int16;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(int16s.format(-5, 10, 4, "é"));
+        console.print_line(int16s.format(-5, 10, 4, "ab"));
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

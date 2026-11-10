@@ -1,0 +1,122 @@
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let result = import:Std.Core.Result;
+
+// A generic value that may be absent (Stdlib.md section 6.1). Read it with
+// match; None and Some(nil) are different values.
+export let Optional = module (
+    export let Optional = enum<T> (None, Some(T));
+
+    export let is_some = func<T>(Optional<T> o) -> bool {
+        return match (o) {
+            Optional.None => false,
+            Optional.Some(_) => true,
+        };
+    };
+
+    export let is_none = func<T>(Optional<T> o) -> bool {
+        return match (o) {
+            Optional.None => true,
+            Optional.Some(_) => false,
+        };
+    };
+
+    export let value_or = func<T>(Optional<T> o, T fallback) -> T {
+        return match (o) {
+            Optional.None => fallback,
+            Optional.Some(value) => value,
+        };
+    };
+
+    // The value, or a trap with "no such element: " and the detail.
+    export let expect = func<T>(Optional<T> o, string detail) -> T {
+        match (o) {
+            Optional.None => {
+                trap_with_message("no such element: " + detail);
+            },
+            Optional.Some(value) => {
+                return value;
+            },
+        }
+    };
+
+    export let to_result = func<T>(Optional<T> o, error.Error failure) -> result.Result<T> {
+        return match (o) {
+            Optional.None => result.Result<T>.Err(failure),
+            Optional.Some(value) => result.Result<T>.Ok(value),
+        };
+    };
+
+    export let map = func<T, U>(Optional<T> o, func(T) -> U f) -> Optional<U> {
+        return match (o) {
+            Optional.None => Optional<U>.None,
+            Optional.Some(value) => Optional<U>.Some(f(value)),
+        };
+    };
+
+    export let and_then = func<T, U>(Optional<T> o, func(T) -> Optional<U> f) -> Optional<U> {
+        return match (o) {
+            Optional.None => Optional<U>.None,
+            Optional.Some(value) => f(value),
+        };
+    };
+
+    export let filter = func<T>(Optional<T> o, func(T) -> bool keep) -> Optional<T> {
+        match (o) {
+            Optional.None => {
+                return o;
+            },
+            Optional.Some(value) => {
+                if (keep(value)) {
+                    return o;
+                }
+                return Optional<T>.None;
+            },
+        }
+    };
+
+    // Calls `make` only for None.
+    export let value_or_else = func<T>(Optional<T> o, func() -> T make) -> T {
+        return match (o) {
+            Optional.None => make(),
+            Optional.Some(value) => value,
+        };
+    };
+
+    export let or_else = func<T>(Optional<T> o, func() -> Optional<T> other) -> Optional<T> {
+        return match (o) {
+            Optional.None => other(),
+            Optional.Some(_) => o,
+        };
+    };
+
+    // Both None, or both Some with equal values.
+    export let equals = func<T>(Optional<T> a, Optional<T> b) -> bool {
+        match (a) {
+            Optional.None => {
+                return is_none<T>(b);
+            },
+            Optional.Some(value) => {
+                return match (b) {
+                    Optional.None => false,
+                    Optional.Some(other) => value.equals(other),
+                };
+            },
+        }
+    };
+
+    // 0 for None, otherwise Hash.combine(1, the value's hash).
+    export let hash = func<T>(Optional<T> o) -> uint32 {
+        return match (o) {
+            Optional.None => 0,
+            Optional.Some(value) => hashing.combine(1, value.hash_code()),
+        };
+    };
+
+    export let to_string = func<T>(Optional<T> o) -> string {
+        return match (o) {
+            Optional.None => "None",
+            Optional.Some(value) => "Some(" + value.to_string() + ")",
+        };
+    };
+);

@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: radix outside 2 through 36
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(int32s.to_string_radix(35, 36));
+        console.print_line(int32s.to_string_radix(35, 37));
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

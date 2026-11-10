@@ -1,0 +1,15 @@
+// A mutable box. Closures capture locals by value, so a callback that needs
+// to count or accumulate captures a Cell and updates its value.
+export let Cell = module (
+    export let Cell = class<T> (
+        export let value: T;
+
+        export let init = func(T initial) -> void {
+            value = initial;
+        };
+    );
+
+    export let of = func<T>(T value) -> Cell<T> {
+        return new Cell<T>(value);
+    };
+);

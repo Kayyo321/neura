@@ -1,0 +1,14 @@
+// status: 9
+// run-options: --replay @AREA_DIR@/programs/replayed-exit.trace
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// Replay returns the recorded terminal completion without ending the
+// process through a service.
+export let ReplayedExit = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("exiting");
+        program.Process.exit(9);
+        return program.ExitCode.Ok;
+    };
+);

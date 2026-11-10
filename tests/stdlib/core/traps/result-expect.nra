@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): loading: disk gone
+let program = import:Std.Program;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let failed = result.Result<int>.Err(error.custom("io.gone", "disk gone"));
+        let value = result.expect<int>(failed, "loading");
+
+        return program.ExitCode.Ok;
+    };
+);

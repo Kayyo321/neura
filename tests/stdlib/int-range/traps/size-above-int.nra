@@ -1,0 +1,14 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) in function [0-9]+ block [0-9]+ at std/core/int-range[.]nra
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let ranges = import:Std.Core.IntRange;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(ranges.of(-2147483648, 2147483647).is_empty().to_string());
+        console.print_line(ranges.of(-2147483648, 2147483647).size().to_string());
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

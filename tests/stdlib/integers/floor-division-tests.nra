@@ -1,0 +1,47 @@
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let test = import:Std.Test;
+
+// floor_div recovers the remainder by multiplication and floor_mod uses the
+// quotient, so both share one divider circuit. These cases pin the results
+// at the sign boundaries and the -1 divisor, where Min % -1 is 0 although
+// Min / -1 traps.
+let FloorDivisionTests = module (
+    export let test_int64_signs = func() -> void {
+        test.assert_equal_int64(-4, int64s.floor_div(-7, 2));
+        test.assert_equal_int64(1, int64s.floor_mod(-7, 2));
+        test.assert_equal_int64(-4, int64s.floor_div(7, -2));
+        test.assert_equal_int64(-1, int64s.floor_mod(7, -2));
+        test.assert_equal_int64(3, int64s.floor_div(-7, -2));
+        test.assert_equal_int64(-1, int64s.floor_mod(-7, -2));
+        test.assert_equal_int64(-3, int64s.floor_div(-6, 2));
+        test.assert_equal_int64(0, int64s.floor_mod(-6, 2));
+        test.assert_equal_int64(0, int64s.floor_div(0, -5));
+        test.assert_equal_int64(0, int64s.floor_mod(0, -5));
+    };
+
+    export let test_int64_extremes = func() -> void {
+        test.assert_equal_int64(0, int64s.floor_mod(int64s.Min, -1));
+        test.assert_equal_int64(0, int64s.floor_mod(int64s.Max, -1));
+        test.assert_equal_int64(0, int64s.floor_mod(-7, -1));
+        test.assert_equal_int64(int64s.Min, int64s.floor_div(int64s.Min, 1));
+        test.assert_equal_int64(-int64s.Max, int64s.floor_div(int64s.Max, -1));
+        test.assert_equal_int64(-2, int64s.floor_div(int64s.Min, int64s.Max));
+        test.assert_equal_int64(int64s.Max - 1, int64s.floor_mod(int64s.Min, int64s.Max));
+        test.assert_equal_int64(-1, int64s.floor_div(int64s.Max, int64s.Min));
+        test.assert_equal_int64(-1, int64s.floor_mod(int64s.Max, int64s.Min));
+        test.assert_equal_int64(-4611686018427387904, int64s.floor_div(int64s.Min, 2));
+        test.assert_equal_int64(146096, int64s.floor_mod(-1, 146097));
+        test.assert_equal_int64(-1, int64s.floor_div(-1, 146097));
+    };
+
+    export let test_int32_extremes = func() -> void {
+        test.assert_equal_int32(0, int32s.floor_mod(int32s.Min, -1));
+        test.assert_equal_int32(int32s.Min, int32s.floor_div(int32s.Min, 1));
+        test.assert_equal_int32(-2, int32s.floor_div(int32s.Min, int32s.Max));
+        test.assert_equal_int32(int32s.Max - 1, int32s.floor_mod(int32s.Min, int32s.Max));
+        test.assert_equal_int32(-4, int32s.floor_div(-7, 2));
+        test.assert_equal_int32(1, int32s.floor_mod(-7, 2));
+        test.assert_equal_int32(-1, int32s.floor_mod(7, -2));
+    };
+);

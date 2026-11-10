@@ -1,0 +1,4 @@
+// The result of an operation that succeeds without a value: Result<Unit>.
+export let Unit = module (
+    export let Unit = enum (Value);
+);
