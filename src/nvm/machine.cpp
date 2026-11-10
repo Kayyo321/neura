@@ -1,5 +1,6 @@
 #include "machine.hpp"
 
+#include "scalar_text.hpp"
 #include "nvr/format.hpp"
 
 #include <algorithm>
@@ -23,6 +24,8 @@ std::string_view describe(TrapKind kind) {
     case TrapKind::UninitializedField: return "read of an uninitialized field";
     case TrapKind::UninitializedGlobal: return "read of an uninitialized global";
     case TrapKind::InvalidHandle: return "invalid reference handle";
+    case TrapKind::NilReference: return "nil class reference";
+    case TrapKind::InvalidCast: return "invalid class cast";
     case TrapKind::ReferenceType: return "reference has an incompatible runtime type";
     case TrapKind::IndexOutOfBounds: return "index out of bounds";
     case TrapKind::InvalidText: return "text is not valid UTF-8";
@@ -37,6 +40,8 @@ std::string_view describe(TrapKind kind) {
 
 namespace {
 
+constexpr auto max_text_bytes = static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
+
 std::string_view reason_text(std::uint32_t reason) {
     switch (reason) {
     case 1: return "source arithmetic failure";
@@ -50,17 +55,31 @@ std::string_view reason_text(std::uint32_t reason) {
 
 } // namespace
 
-std::string describe(const Trap& trap, const nvr::Image& image) {
+std::string describe(const Trap& trap, const nvr::Image& image, bool include_indices) {
     std::string text = trap.kind == TrapKind::Program
         ? std::string(reason_text(trap.reason)) + " (trap reason " + std::to_string(trap.reason) + ")"
         : std::string(describe(trap.kind));
     if (!trap.detail.empty()) {
-        text += ": " + trap.detail;
+        text += ": ";
+        constexpr std::string_view hex = "0123456789abcdef";
+        for (const auto c : trap.detail) {
+            const auto byte = static_cast<unsigned char>(c);
+            if (c == '\n') text += "\\n";
+            else if (c == '\r') text += "\\r";
+            else if (c == '\0') text += "\\0";
+            else if (byte < 0x20U || byte == 0x7fU) {
+                text += "\\x";
+                text += hex[byte >> 4];
+                text += hex[byte & 0xfU];
+            }
+            else text += c;
+        }
     }
     if (trap.function == nvr::absent) {
         return text + " before entry";
     }
-    text += " in function " + std::to_string(trap.function) + " block " + std::to_string(trap.block);
+    if (include_indices)
+        text += " in function " + std::to_string(trap.function) + " block " + std::to_string(trap.block);
     if (image.source_map) {
         const auto& entries = *image.source_map;
         const auto it = std::lower_bound(entries.begin(), entries.end(), std::make_pair(trap.function, trap.block),
@@ -210,10 +229,28 @@ public:
         pending_.reset();
         try {
             const auto& import = image_.imports[pending.import];
+            if (completion.exit_status) {
+                const auto status = *completion.exit_status;
+                using Kind = nvr::TypeKind;
+                if (!completion.success || import.name != "neura.process.exit" || import.interface_version != 1 ||
+                    import.parameter_types.size() != 1 || type(import.parameter_types.front()) != nvr::Type{Kind::Signed, 32} ||
+                    type(import.success_type).kind != Kind::Void || type(import.error_type) != nvr::Type{Kind::Unsigned, 32} ||
+                    status < 0 || status > 255) {
+                    fault(TrapKind::InvalidCompletion, "invalid process exit completion");
+                }
+                Event event;
+                event.kind = Event::Kind::Completed;
+                event.status = status;
+                event.result = static_cast<std::uint64_t>(status);
+                finished_ = std::move(event);
+                return;
+            }
             const auto type = completion.success ? import.success_type : import.error_type;
             const auto slot = completion.success ? pending.success_slot : pending.error_slot;
             if (image_.types[type].kind != nvr::TypeKind::Void) {
-                const auto value = host_to_value(completion.value, type);
+                std::vector<std::uint64_t> temporary_roots;
+                auto remaining = limits_.max_heap_cells;
+                const auto value = host_to_value(completion.value, type, temporary_roots, remaining, 0);
                 auto& frame = frames_.back();
                 frame.slots[slot] = value;
                 frame.initialized[slot] = 1;
@@ -228,6 +265,8 @@ public:
     }
 
     std::uint64_t steps() const { return steps_; }
+    std::uint64_t peak_heap_cells() const { return peak_cells_; }
+    const std::vector<std::uint64_t>& function_steps() const { return function_steps_; }
 
 private:
     enum class EntryKind : std::uint8_t { Object, Array, List, Text, Bytes };
@@ -243,6 +282,7 @@ private:
         // Structural version of a list: incremented by every successful
         // append or removal, modulo 2^64.
         std::uint64_t version = 0;
+        std::uint64_t identity = 0;
     };
 
     struct Frame {
@@ -271,6 +311,9 @@ private:
         if (!frames_.empty()) {
             trap.function = frames_.back().function;
             trap.block = frames_.back().block;
+            for (auto frame = frames_.rbegin() + 1; frame != frames_.rend(); ++frame) {
+                trap.callers.emplace_back(frame->function, frame->block);
+            }
         }
         throw Fault{std::move(trap)};
     }
@@ -392,6 +435,9 @@ private:
     }
 
     std::uint64_t allocate(HeapEntry entry, std::span<const std::uint64_t> temporary_roots = {}) {
+        if (entry.kind == EntryKind::Text && entry.bytes.size() > max_text_bytes) {
+            fault(TrapKind::InvalidText, "text exceeds the int32 byte length limit");
+        }
         if (last_handle_ >= limits_.max_handles) {
             fault(TrapKind::HandleLimit);
         }
@@ -401,6 +447,7 @@ private:
         heap_.emplace(handle, std::move(entry));
         last_handle_ = handle;
         live_cells_ += cells;
+        peak_cells_ = std::max(peak_cells_, live_cells_);
         return handle;
     }
 
@@ -414,6 +461,10 @@ private:
 
     // The entry for a reference whose static type is `type_index`.
     HeapEntry& typed_entry(std::uint64_t handle, std::uint32_t type_index) {
+        if (handle == 0 && type(type_index).kind == nvr::TypeKind::Object &&
+            image_.minor_version >= 2) {
+            fault(TrapKind::NilReference, {});
+        }
         auto& result = entry(handle);
         if (!compatible(result, type_index)) {
             fault(TrapKind::ReferenceType, "handle " + std::to_string(handle));
@@ -532,7 +583,9 @@ private:
                 }
                 bits |= static_cast<std::uint64_t>(lane) << i;
             }
-            if (nvr::is_reference(type(value.type).kind)) {
+            const auto kind = type(value.type).kind;
+            if (nvr::is_reference(kind) &&
+                !(kind == nvr::TypeKind::Object && bits == 0 && image_.minor_version >= 2)) {
                 typed_entry(bits, value.type);
             }
             return bits;
@@ -588,6 +641,10 @@ private:
         }
         ++steps_;
         auto& frame = frames_.back();
+        if (limits_.profile) {
+            if (function_steps_.size() != image_.functions.size()) function_steps_.resize(image_.functions.size());
+            ++function_steps_[frame.function];
+        }
         const auto& function = image_.functions[frame.function];
         const auto& block = function.blocks[frame.block];
         const auto& graph = image_.graphs[block.graph];
@@ -652,30 +709,79 @@ private:
             event.kind = Event::Kind::HostRequest;
             event.request.sequence = sequence_++;
             event.request.import = exit.target;
+            auto remaining = limits_.max_heap_cells;
             for (std::size_t i = 0; i < arguments.size(); ++i) {
-                event.request.arguments.push_back(value_to_host(arguments[i], import.parameter_types[i]));
+                event.request.arguments.push_back(value_to_host(arguments[i], import.parameter_types[i], remaining, 0));
             }
             pending_ = Pending{exit.target, exit.result_slot, exit.resume, exit.error_slot, exit.error_resume};
             return event;
         }
         case nvr::ExitKind::Trap:
             fault(TrapKind::Program, {}, exit.reason);
+        case nvr::ExitKind::MessageTrap:
+            fault(TrapKind::Program, typed_entry(arguments.front(), exit.arguments.front().type).bytes,
+                  static_cast<std::uint32_t>(nvr::TrapReason::ProgramFailure));
         }
         return std::nullopt;
     }
 
-    HostValue value_to_host(std::uint64_t bits, std::uint32_t type_index) {
+    void consume_host_cells(std::size_t cells, std::uint64_t& remaining) {
+        if (cells > remaining) fault(TrapKind::HeapLimit, "host value exceeds the copy budget");
+        remaining -= cells;
+    }
+
+    bool byte_element(std::uint32_t type_index) const {
+        const auto& element = type(type_index);
+        return element.kind == nvr::TypeKind::Unsigned && element.width == 8;
+    }
+
+    HostValue value_to_host(std::uint64_t bits, std::uint32_t type_index, std::uint64_t& remaining, unsigned depth) {
+        if (depth > 128) fault(TrapKind::ReferenceType, "host value nesting exceeds 128");
         HostValue value;
-        const auto kind = type(type_index).kind;
-        if (kind == nvr::TypeKind::Text || kind == nvr::TypeKind::Bytes) {
-            value.bytes = typed_entry(bits, type_index).bytes;
-        } else {
+        const auto& t = type(type_index);
+        switch (t.kind) {
+        case nvr::TypeKind::Text:
+        case nvr::TypeKind::Bytes: {
+            const auto& bytes = typed_entry(bits, type_index).bytes;
+            consume_host_cells(bytes.size(), remaining);
+            value.bytes = bytes;
+            break;
+        }
+        case nvr::TypeKind::Object: {
+            const auto& item = typed_entry(bits, type_index);
+            const auto& fields = image_.layouts[t.reference].fields;
+            consume_host_cells(fields.size(), remaining);
+            value.elements.reserve(fields.size());
+            for (std::size_t i = 0; i < fields.size(); ++i) {
+                if (!item.initialized[i]) fault(TrapKind::UninitializedField, "host tuple field " + std::to_string(i));
+                value.elements.push_back(value_to_host(item.cells[i], fields[i], remaining, depth + 1));
+            }
+            break;
+        }
+        case nvr::TypeKind::Array:
+        case nvr::TypeKind::List: {
+            const auto& cells = typed_entry(bits, type_index).cells;
+            consume_host_cells(cells.size(), remaining);
+            if (byte_element(t.reference)) {
+                value.bytes.reserve(cells.size());
+                for (auto cell : cells) value.bytes.push_back(static_cast<char>(static_cast<unsigned char>(cell)));
+            } else {
+                value.elements.reserve(cells.size());
+                for (auto cell : cells) value.elements.push_back(value_to_host(cell, t.reference, remaining, depth + 1));
+            }
+            break;
+        }
+        default:
             value.bits = bits;
+            break;
         }
         return value;
     }
 
-    std::uint64_t host_to_value(const HostValue& value, std::uint32_t type_index) {
+    std::uint64_t host_to_value(const HostValue& value, std::uint32_t type_index,
+                                std::vector<std::uint64_t>& temporary_roots, std::uint64_t& remaining,
+                                unsigned depth) {
+        if (depth > 128) fault(TrapKind::InvalidCompletion, "host value nesting exceeds 128");
         const auto& t = type(type_index);
         switch (t.kind) {
         case nvr::TypeKind::Bool:
@@ -685,8 +791,10 @@ private:
             return value.bits;
         case nvr::TypeKind::Unsigned:
         case nvr::TypeKind::Signed:
+        case nvr::TypeKind::Float:
+        case nvr::TypeKind::BFloat:
             if ((value.bits & ~mask(t.width)) != 0) {
-                fault(TrapKind::InvalidCompletion, "integer completion exceeds its width");
+                fault(TrapKind::InvalidCompletion, "numeric completion exceeds its width");
             }
             return value.bits;
         case nvr::TypeKind::Text:
@@ -694,11 +802,43 @@ private:
             if (t.kind == nvr::TypeKind::Text && !nvr::valid_utf8(value.bytes)) {
                 fault(TrapKind::InvalidCompletion, "text completion is not valid UTF-8");
             }
+            consume_host_cells(value.bytes.size(), remaining);
             HeapEntry item;
             item.kind = t.kind == nvr::TypeKind::Text ? EntryKind::Text : EntryKind::Bytes;
             item.type = type_index;
             item.bytes = value.bytes;
-            return allocate(std::move(item));
+            return allocate(std::move(item), temporary_roots);
+        }
+        case nvr::TypeKind::Object:
+        case nvr::TypeKind::Array:
+        case nvr::TypeKind::List: {
+            HeapEntry item;
+            const bool tuple = t.kind == nvr::TypeKind::Object;
+            const bool bytes = !tuple && byte_element(t.reference);
+            const auto count = bytes ? value.bytes.size() : value.elements.size();
+            consume_host_cells(count, remaining);
+            if (tuple && image_.layouts[t.reference].fields.size() != count)
+                fault(TrapKind::InvalidCompletion, "host tuple completion has the wrong number of elements");
+            if ((bytes && !value.elements.empty()) || (!bytes && !value.bytes.empty()))
+                fault(TrapKind::InvalidCompletion, "host completion uses the wrong collection representation");
+            item.kind = tuple ? EntryKind::Object : t.kind == nvr::TypeKind::Array ? EntryKind::Array : EntryKind::List;
+            item.type = tuple ? t.reference : type_index;
+            item.cells.reserve(count);
+            const auto root_start = temporary_roots.size();
+            for (std::size_t i = 0; i < count; ++i) {
+                if (bytes) {
+                    item.cells.push_back(static_cast<unsigned char>(value.bytes[i]));
+                    continue;
+                }
+                const auto element_type = tuple ? image_.layouts[t.reference].fields[i] : t.reference;
+                const auto cell = host_to_value(value.elements[i], element_type, temporary_roots, remaining, depth + 1);
+                item.cells.push_back(cell);
+                if (nvr::is_reference(type(element_type).kind)) temporary_roots.push_back(cell);
+            }
+            if (tuple) item.initialized.assign(count, 1);
+            const auto result = allocate(std::move(item), temporary_roots);
+            temporary_roots.resize(root_start);
+            return result;
         }
         default:
             fault(TrapKind::InvalidCompletion, "host results cannot have this type");
@@ -720,6 +860,28 @@ private:
     std::uint64_t state(const nvr::Exit& exit, const std::vector<std::uint64_t>& args) {
         const auto& types = exit.arguments;
         switch (exit.operation) {
+        case nvr::StateOp::ClassHash:
+        case nvr::StateOp::ClassText: {
+            auto& item = typed_entry(args[0], types[0].type);
+            if (item.identity == 0) item.identity = ++last_identity_;
+            if (exit.operation == nvr::StateOp::ClassHash)
+                return static_cast<std::uint32_t>(item.identity) * std::uint32_t{2654435761U};
+            HeapEntry text;
+            text.kind = EntryKind::Text;
+            text.type = types[1].type;
+            text.bytes = typed_entry(args[1], types[1].type).bytes + "#" + std::to_string(item.identity);
+            return allocate(std::move(text));
+        }
+        case nvr::StateOp::ClassIs:
+        case nvr::StateOp::ClassCast: {
+            const bool test = exit.operation == nvr::StateOp::ClassIs;
+            if (args[0] == 0) return 0;
+            const auto& item = typed_entry(args[0], types[0].type);
+            const bool matches = types_.derives(item.type, exit.immediate);
+            if (test) return matches;
+            if (!matches) fault(TrapKind::InvalidCast, {});
+            return args[0];
+        }
         case nvr::StateOp::AllocateObject: {
             HeapEntry item;
             item.kind = EntryKind::Object;
@@ -787,6 +949,7 @@ private:
             ensure_heap_cells(1, "growth by ", roots);
             item.cells.push_back(args[1]);
             ++live_cells_;
+            peak_cells_ = std::max(peak_cells_, live_cells_);
             ++item.version;
             return 0;
         }
@@ -814,6 +977,66 @@ private:
             }
             return allocate(std::move(item));
         }
+        case nvr::StateOp::TextSlice: {
+            const auto& source = typed_entry(args[0], types[0].type).bytes;
+            const auto start = args[1];
+            const auto end = args[2];
+            if (start > end || end > source.size()) {
+                fault(TrapKind::IndexOutOfBounds, "text range [" + std::to_string(start) + ", " +
+                      std::to_string(end) + ") for length " + std::to_string(source.size()));
+            }
+            const auto boundary = [&](std::uint64_t offset) {
+                return offset == source.size() || (static_cast<unsigned char>(source[offset]) & 0xc0U) != 0x80U;
+            };
+            if (!boundary(start) || !boundary(end)) {
+                fault(TrapKind::InvalidText, "text slice endpoints must be on UTF-8 boundaries");
+            }
+            HeapEntry text;
+            text.kind = EntryKind::Text;
+            text.type = types[0].type;
+            text.bytes = source.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
+            return allocate(std::move(text));
+        }
+        case nvr::StateOp::TextFromUtf8: {
+            const auto& source = typed_entry(args[0], types[0].type);
+            HeapEntry text;
+            text.kind = EntryKind::Text;
+            text.type = image_.layouts[exit.immediate].fields[1];
+            bool valid = source.cells.size() <= max_text_bytes;
+            if (valid) {
+                text.bytes.reserve(source.cells.size());
+                for (const auto cell : source.cells)
+                    text.bytes.push_back(static_cast<char>(static_cast<unsigned char>(cell)));
+                valid = nvr::valid_utf8(text.bytes);
+                if (!valid) std::string{}.swap(text.bytes);
+            }
+            const auto handle = allocate(std::move(text));
+            HeapEntry result;
+            result.kind = EntryKind::Object;
+            result.type = exit.immediate;
+            result.cells = {static_cast<std::uint64_t>(valid), handle};
+            result.initialized = {1, 1};
+            return allocate(std::move(result));
+        }
+        case nvr::StateOp::TextEqual: {
+            const auto& left = typed_entry(args[0], types[0].type).bytes;
+            const auto& right = typed_entry(args[1], types[1].type).bytes;
+            return left == right;
+        }
+        case nvr::StateOp::ScalarText: {
+            if (args.size() > 1) {
+                const auto ordinal = args[0];
+                if (ordinal >= args.size() - 1) {
+                    fault(TrapKind::IndexOutOfBounds, "enum ordinal " + std::to_string(ordinal));
+                }
+                return args[static_cast<std::size_t>(ordinal) + 1];
+            }
+            HeapEntry text;
+            text.kind = EntryKind::Text;
+            text.type = image_.functions[frames_.back().function].frame_types[exit.result_slot];
+            text.bytes = scalar_text(type(types[0].type), args[0]);
+            return allocate(std::move(text));
+        }
         }
         return 0;
     }
@@ -833,7 +1056,11 @@ private:
     TracePlans frame_traces_;
     std::vector<HeapEntry*> mark_work_;
     std::uint64_t last_handle_ = 0;
+    std::uint64_t last_identity_ = 0;
     std::uint64_t live_cells_ = 0;
+    // The largest live heap size the run reached, in cells.
+    std::uint64_t peak_cells_ = 0;
+    std::vector<std::uint64_t> function_steps_;
     std::uint64_t next_collection_ = std::min<std::uint64_t>(256, limits_.max_heap_cells);
     std::vector<std::uint64_t> const_values_;
     std::vector<std::uint64_t> globals_;
@@ -860,6 +1087,8 @@ Event Execution::advance() { return state_->advance(); }
 void Execution::complete(const HostCompletion& completion) { state_->complete(completion); }
 
 std::uint64_t Execution::steps() const { return state_->steps(); }
+std::uint64_t Execution::peak_heap_cells() const { return state_->peak_heap_cells(); }
+const std::vector<std::uint64_t>& Execution::function_steps() const { return state_->function_steps(); }
 
 RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const std::string> arguments,
               RunLimits limits) {
@@ -876,10 +1105,14 @@ RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const
             result.completed = true;
             result.status = event.status;
             result.steps = execution.steps();
+            result.peak_heap_cells = execution.peak_heap_cells();
+            result.function_steps = execution.function_steps();
             return result;
         case Event::Kind::Trapped:
             result.trap = event.trap;
             result.steps = execution.steps();
+            result.peak_heap_cells = execution.peak_heap_cells();
+            result.function_steps = execution.function_steps();
             return result;
         }
     }

@@ -8,6 +8,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace neura::nvm {
@@ -24,6 +25,9 @@ struct RunLimits {
     std::uint64_t max_heap_cells = std::uint64_t{1} << 26;
     // Reference handles assigned during the run. Handles are never reused.
     std::uint64_t max_handles = std::uint64_t{1} << 32;
+    // Count the steps of each function, for `neura run --profile`. Counting
+    // does not change execution.
+    bool profile = false;
 };
 
 enum class TrapKind {
@@ -37,6 +41,8 @@ enum class TrapKind {
     UninitializedField,
     UninitializedGlobal,
     InvalidHandle,
+    NilReference,
+    InvalidCast,
     ReferenceType,
     IndexOutOfBounds,
     InvalidText,
@@ -56,12 +62,15 @@ struct Trap {
     std::uint32_t function = nvr::absent;
     std::uint32_t block = nvr::absent;
     std::string detail;
+    // The calling frames below the trapping one, innermost first, each as
+    // its function and the block that made the call.
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> callers{};
 };
 
 std::string_view describe(TrapKind kind);
-// A one-line diagnostic for `trap`, with the source location from the image's
-// source map when it has one.
-std::string describe(const Trap& trap, const nvr::Image& image);
+// A one-line diagnostic for `trap`, with a source location when available.
+// Test reports omit internal function and block numbers.
+std::string describe(const Trap& trap, const nvr::Image& image, bool include_indices = true);
 
 // Evaluates `graph` with the checked arithmetic of graph profile 1. `wires`
 // holds the input lanes on entry and every wire on return. Returns the index
@@ -107,6 +116,12 @@ public:
     void complete(const HostCompletion& completion);
 
     std::uint64_t steps() const;
+    // The largest live heap size reached so far, in the cells of
+    // RunLimits::max_heap_cells.
+    std::uint64_t peak_heap_cells() const;
+    // Steps per image function, in function table order, when
+    // RunLimits::profile is set; otherwise empty.
+    const std::vector<std::uint64_t>& function_steps() const;
 
 private:
     class State;
@@ -119,6 +134,9 @@ struct RunResult {
     Trap trap;
     std::uint64_t steps = 0;
     std::uint64_t host_requests = 0;
+    std::uint64_t peak_heap_cells = 0;
+    // Steps per image function when RunLimits::profile is set.
+    std::vector<std::uint64_t> function_steps{};
 };
 
 // Runs `image` to completion, issuing each host request to its bound service

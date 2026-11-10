@@ -14,25 +14,37 @@
 
 namespace neura::nvm {
 
-// A value crossing the host boundary. Booleans and integers use `bits` with
-// the same encoding as frame slots: the low bits hold the value, two's
-// complement for signed types. Text and bytes use `bytes`.
+// A copied value crossing the host boundary. Numeric and Boolean values use
+// the same bit encoding as frame slots. Text and uint8 sequences use bytes.
+// Tuples and other sequences use elements in declaration or index order.
 struct HostValue {
     std::uint64_t bits = 0;
     std::string bytes;
+    std::vector<HostValue> elements{};
 
     bool operator==(const HostValue&) const = default;
 };
 
-// The typed interface of a host service. Host signatures use only Boolean,
-// integer, text, and bytes types, so they are compared structurally with an
-// image's import declaration.
+// Host types describe shape without referring to any specific NVR image.
+// Object describes a tuple, Array and List each take one element type.
+struct HostType {
+    nvr::TypeKind kind = nvr::TypeKind::Void;
+    std::uint8_t width = 0;
+    std::vector<HostType> components;
+
+    HostType() = default;
+    HostType(nvr::TypeKind kind, std::uint8_t width = 0, std::uint32_t = 0) : kind(kind), width(width) {}
+    HostType(nvr::Type type) : HostType(type.kind, type.width) {}
+    HostType(nvr::TypeKind kind, std::vector<HostType> components)
+        : kind(kind), components(std::move(components)) {}
+};
+
 struct HostSignature {
     std::string name;
     std::uint32_t version = 0;
-    std::vector<nvr::Type> parameters;
-    nvr::Type success;
-    nvr::Type error;
+    std::vector<HostType> parameters;
+    HostType success;
+    HostType error;
 };
 
 struct HostRequest {
@@ -46,9 +58,12 @@ struct HostCompletion {
     bool success = true;
     // Payload of the success or error type; ignored when that type is void.
     HostValue value;
+    // A successful neura.process.exit completion ends this execution.
+    std::optional<std::int32_t> exit_status{};
 
     static HostCompletion ok(HostValue value = {}) { return {true, std::move(value)}; }
     static HostCompletion failed(HostValue value = {}) { return {false, std::move(value)}; }
+    static HostCompletion terminate(std::int32_t status) { return {true, {}, status}; }
 };
 
 class HostService {
@@ -83,6 +98,14 @@ struct Bindings {
 // is missing or whose signature differs.
 Bindings bind(const nvr::Image& image, const HostRegistry& registry);
 
+// The result of a write that may store only a prefix of its bytes.
+struct SinkWrite {
+    // Bytes stored, from the start of the request.
+    std::size_t written = 0;
+    // True when the sink failed before storing every byte.
+    bool failed = false;
+};
+
 // Destination for console output. The console service hands each line,
 // including its LF, to one write call.
 class ConsoleSink {
@@ -91,6 +114,9 @@ public:
     // Writes `bytes` and returns true when all of them were written. A sink
     // may write a prefix before returning false.
     virtual bool write(std::string_view bytes) = 0;
+    // Writes `bytes` and reports how many were stored. The default treats a
+    // failed write() as storing nothing.
+    virtual SinkWrite write_some(std::string_view bytes);
 };
 
 // Writes to a C stream and flushes after each line.
@@ -98,6 +124,7 @@ class StreamSink final : public ConsoleSink {
 public:
     explicit StreamSink(std::FILE* stream) : stream_(stream) {}
     bool write(std::string_view bytes) override;
+    SinkWrite write_some(std::string_view bytes) override;
 
 private:
     std::FILE* stream_;
@@ -110,6 +137,7 @@ public:
     StringSink() = default;
     explicit StringSink(std::size_t capacity) : capacity_(capacity) {}
     bool write(std::string_view bytes) override;
+    SinkWrite write_some(std::string_view bytes) override;
     const std::string& contents() const { return contents_; }
 
 private:
@@ -132,40 +160,5 @@ private:
 };
 
 inline constexpr std::uint32_t console_write_failed = 1;
-
-// The assertion services of the Test module (Testing.md). Each records the
-// first failure of a run in a TestLog and answers with the uint32 error code
-// 1, whose error continuation ends the test.
-struct TestLog {
-    // Description of the first failed assertion, if any.
-    std::optional<std::string> failure;
-};
-
-inline constexpr std::uint32_t assertion_failed = 1;
-
-// neura.test.assert version 1: takes a Boolean; succeeds when it is true.
-class TestAssert final : public HostService {
-public:
-    explicit TestAssert(TestLog& log);
-    const HostSignature& signature() const override { return signature_; }
-    HostCompletion invoke(const HostRequest& request) override;
-
-private:
-    TestLog& log_;
-    HostSignature signature_;
-};
-
-// neura.test.assert_equal_int32 version 1: takes the expected and the actual
-// int32; succeeds when they are equal.
-class TestAssertEqualInt32 final : public HostService {
-public:
-    explicit TestAssertEqualInt32(TestLog& log);
-    const HostSignature& signature() const override { return signature_; }
-    HostCompletion invoke(const HostRequest& request) override;
-
-private:
-    TestLog& log_;
-    HostSignature signature_;
-};
 
 } // namespace neura::nvm

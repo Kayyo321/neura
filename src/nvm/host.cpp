@@ -16,20 +16,27 @@ HostService* HostRegistry::find(std::string_view name, std::uint32_t version) co
 
 namespace {
 
-// Host signatures name types structurally; image types also refer to other
-// table entries, which host signatures do not support.
-bool same_host_type(const nvr::Image& image, std::uint32_t index, const nvr::Type& expected) {
+// Image-local layout IDs and type indices do not cross the host boundary.
+bool same_host_type(const nvr::Image& image, std::uint32_t index, const HostType& expected) {
     const auto& actual = image.types[index];
     if (actual.kind != expected.kind || actual.width != expected.width) {
         return false;
     }
     switch (actual.kind) {
-    case nvr::TypeKind::Object:
+    case nvr::TypeKind::Object: {
+        const auto& layout = image.layouts[actual.reference];
+        if (layout.parent != nvr::absent || layout.fields.size() != expected.components.size()) return false;
+        for (std::size_t i = 0; i < layout.fields.size(); ++i) {
+            if (!same_host_type(image, layout.fields[i], expected.components[i])) return false;
+        }
+        return true;
+    }
     case nvr::TypeKind::Array:
     case nvr::TypeKind::List:
-        return false;
+        return expected.components.size() == 1 &&
+               same_host_type(image, actual.reference, expected.components.front());
     default:
-        return true;
+        return expected.components.empty();
     }
 }
 
@@ -65,6 +72,23 @@ bool StreamSink::write(std::string_view bytes) {
     return written == bytes.size() && std::fflush(stream_) == 0;
 }
 
+SinkWrite ConsoleSink::write_some(std::string_view bytes) {
+    if (write(bytes)) return {bytes.size(), false};
+    return {0, true};
+}
+
+SinkWrite StreamSink::write_some(std::string_view bytes) {
+    const auto written = std::fwrite(bytes.data(), 1, bytes.size(), stream_);
+    const bool flushed = std::fflush(stream_) == 0;
+    return {written, written != bytes.size() || !flushed};
+}
+
+SinkWrite StringSink::write_some(std::string_view bytes) {
+    const auto before = contents_.size();
+    const bool complete = write(bytes);
+    return {contents_.size() - before, !complete};
+}
+
 bool StringSink::write(std::string_view bytes) {
     if (capacity_) {
         const auto room = *capacity_ - std::min(*capacity_, contents_.size());
@@ -90,47 +114,6 @@ HostCompletion ConsoleWriteLine::invoke(const HostRequest& request) {
         return HostCompletion::ok();
     }
     return HostCompletion::failed(HostValue{console_write_failed, {}});
-}
-
-TestAssert::TestAssert(TestLog& log) : log_(log) {
-    signature_.name = "neura.test.assert";
-    signature_.version = 1;
-    signature_.parameters = {nvr::Type{nvr::TypeKind::Bool, 0, 0}};
-    signature_.success = nvr::Type{nvr::TypeKind::Void, 0, 0};
-    signature_.error = nvr::Type{nvr::TypeKind::Unsigned, 32, 0};
-}
-
-HostCompletion TestAssert::invoke(const HostRequest& request) {
-    if (request.arguments.at(0).bits != 0) {
-        return HostCompletion::ok();
-    }
-    if (!log_.failure) {
-        log_.failure = "assertion failed";
-    }
-    return HostCompletion::failed(HostValue{assertion_failed, {}});
-}
-
-TestAssertEqualInt32::TestAssertEqualInt32(TestLog& log) : log_(log) {
-    signature_.name = "neura.test.assert_equal_int32";
-    signature_.version = 1;
-    signature_.parameters = {nvr::Type{nvr::TypeKind::Signed, 32, 0}, nvr::Type{nvr::TypeKind::Signed, 32, 0}};
-    signature_.success = nvr::Type{nvr::TypeKind::Void, 0, 0};
-    signature_.error = nvr::Type{nvr::TypeKind::Unsigned, 32, 0};
-}
-
-HostCompletion TestAssertEqualInt32::invoke(const HostRequest& request) {
-    const auto value = [&](std::size_t i) {
-        return static_cast<std::int32_t>(static_cast<std::uint32_t>(request.arguments.at(i).bits));
-    };
-    const auto expected = value(0);
-    const auto actual = value(1);
-    if (expected == actual) {
-        return HostCompletion::ok();
-    }
-    if (!log_.failure) {
-        log_.failure = "expected " + std::to_string(expected) + ", got " + std::to_string(actual);
-    }
-    return HostCompletion::failed(HostValue{assertion_failed, {}});
 }
 
 } // namespace neura::nvm
