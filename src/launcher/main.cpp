@@ -46,7 +46,9 @@ constexpr std::string_view toolchain_version = "development";
 
 // Reads NEURA_RUN_OPTIONS. The variable can only restrict or observe: a
 // --deny option removes a group from `capabilities`, which starts as the
-// policy's grant, and no option adds one.
+// policy's grant, and no option adds one; a limit is the smaller of the
+// policy's and the variable's. The task quantum is the policy's alone,
+// because it decides how tasks interleave.
 neura::runner::RunOptions run_options(const neura::launcher::Policy& policy, neura::nvm::Capabilities& capabilities) {
     neura::runner::RunOptions options;
     options.limits = policy.limits;
@@ -82,6 +84,25 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy, neu
             options.limits.max_heap_cells = std::min(options.limits.max_heap_cells, limit(flag));
         } else if (flag == "--max-tasks") {
             options.limits.max_tasks = std::min(options.limits.max_tasks, limit(flag));
+        } else if (flag == "--max-queued-messages") {
+            options.limits.max_queued_messages = std::min(options.limits.max_queued_messages, limit(flag));
+        } else if (flag == "--max-pending-requests") {
+            options.limits.max_pending_requests = std::min(options.limits.max_pending_requests, limit(flag));
+        } else if (flag == "--parallel-workers") {
+            // Fewer workers change wall time only: a parallel map means the
+            // same under any number of them.
+            options.limits.parallel_workers = static_cast<std::uint32_t>(
+                std::min<std::uint64_t>(options.limits.parallel_workers, limit(flag)));
+        } else if (flag == "--task-dump" || flag == "--task-dump=text") {
+            options.task_dump = neura::nvm::TaskDumpFormat::Text;
+        } else if (flag == "--task-dump=json") {
+            options.task_dump = neura::nvm::TaskDumpFormat::Json;
+        } else if (flag == "--trace-events") {
+            const auto path = next();
+            if (path.empty()) throw std::runtime_error("NEURA_RUN_OPTIONS: expected a value after --trace-events");
+            options.trace_events = std::filesystem::path(path);
+        } else if (flag == "--trace-wall-time") {
+            options.trace_wall_time = true;
         } else if (flag == "--deny-fs") {
             capabilities.fs = false;
             capabilities.fs_prefixes.clear();

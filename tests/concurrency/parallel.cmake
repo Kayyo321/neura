@@ -99,8 +99,9 @@ foreach(value IN ITEMS 0 -1 x 1025)
         message(FATAL_ERROR "--parallel-workers ${value} was accepted")
     endif()
 endforeach()
-neura(bad build --parallel-workers 2 "${programs}/map.nra")
-if(bad_status STREQUAL "0" OR NOT bad_stderr MATCHES "applies only to run and test")
+# build records the worker count only in a native executable's policy.
+neura(bad build --parallel-workers 2 "${programs}/map.nra" -o map-workers.nvr)
+if(bad_status STREQUAL "0" OR NOT bad_stderr MATCHES "--parallel-workers applies only with --native")
     message(FATAL_ERROR "build accepted --parallel-workers")
 endif()
 

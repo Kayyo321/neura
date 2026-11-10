@@ -150,6 +150,58 @@ if(SUITE STREQUAL "build")
             "max-tasks: ${tasks_allowed_status}\n${tasks_allowed_stdout}${tasks_allowed_stderr}\n"
             "limit: ${tasks_limit_status}\n${tasks_limit_stdout}${tasks_limit_stderr}")
     endif()
+    # The policy records the task settings (container version 2). A baked
+    # quantum of 1 gives the interleaving neura run --task-quantum 1 gives,
+    # and inspect reads every setting back.
+    success("${NEURA}" build --native --task-quantum 1 --max-tasks 8 --max-queued-messages 16
+        --max-pending-requests 4 --parallel-workers 3 tasks.nvr -o tasks-baked)
+    invoke(baked "${TEST_DIR}/tasks-baked")
+    invoke(baked_inspect "${NEURA}" inspect tasks-baked)
+    # The variable lowers a baked limit and never raises one.
+    invoke(baked_raised "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--max-tasks 1000 --max-queued-messages 1000 --max-pending-requests 1000 --parallel-workers 1000 --stats"
+        "${TEST_DIR}/tasks-baked")
+    invoke(baked_lowered "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--max-tasks 1" "${TEST_DIR}/tasks-baked")
+    success("${NEURA}" build --native --max-tasks 1 tasks.nvr -o tasks-one)
+    invoke(baked_one "${TEST_DIR}/tasks-one")
+    success("${NEURA}" build --native --sealed --max-tasks 1 tasks.nvr -o tasks-one-sealed)
+    invoke(baked_sealed "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--max-tasks 1000" "${TEST_DIR}/tasks-one-sealed")
+    if(NOT baked_status STREQUAL "0" OR NOT baked_stdout STREQUAL "child\nroot\n" OR NOT baked_stderr STREQUAL "" OR
+       NOT baked_inspect_stdout MATCHES "\ntasks: at most 8, quantum 1, queued messages 16, pending requests 4, parallel workers 3\n" OR
+       NOT baked_raised_status STREQUAL "0" OR NOT baked_raised_stdout STREQUAL "child\nroot\n" OR
+       NOT baked_lowered_status STREQUAL "137" OR NOT baked_lowered_stderr MATCHES "trap: task limit exceeded" OR
+       NOT baked_one_status STREQUAL "137" OR NOT baked_one_stderr MATCHES "trap: task limit exceeded" OR
+       NOT baked_sealed_status STREQUAL "137" OR NOT baked_sealed_stderr MATCHES "trap: task limit exceeded")
+        message(FATAL_ERROR "unexpected baked task settings\n"
+            "baked: ${baked_status}\n${baked_stdout}${baked_stderr}\ninspect: ${baked_inspect_stdout}\n"
+            "raised: ${baked_raised_status}\n${baked_raised_stdout}${baked_raised_stderr}\n"
+            "lowered: ${baked_lowered_status}\n${baked_lowered_stderr}\n"
+            "one: ${baked_one_status}\n${baked_one_stderr}\nsealed: ${baked_sealed_status}\n${baked_sealed_stderr}")
+    endif()
+    # The observing options: a task dump on a trap and scheduler events.
+    invoke(observed "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--max-tasks 1 --task-dump=json" "${TEST_DIR}/tasks")
+    invoke(traced "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--trace-events launcher.events --trace-wall-time"
+        "${TEST_DIR}/tasks")
+    file(READ "${TEST_DIR}/launcher.events" launcher_events)
+    if(NOT observed_status STREQUAL "137" OR NOT observed_stderr MATCHES "^{\"tasks\":\\[{\"id\":0," OR
+       NOT traced_status STREQUAL "0" OR NOT traced_stdout STREQUAL "root\nchild\n" OR
+       NOT launcher_events MATCHES "^{\"event\":\"spawn\",[^\n]*\"wall_ns\":[0-9]+}\n")
+        message(FATAL_ERROR "unexpected observed launcher run (status ${observed_status}, ${traced_status})\n${observed_stderr}\n${launcher_events}")
+    endif()
+    invoke(events_value "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--trace-events" "${TEST_DIR}/tasks")
+    invoke(dump_form "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--task-dump=xml" "${TEST_DIR}/tasks")
+    invoke(virtual_refused "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--virtual-time" "${TEST_DIR}/tasks")
+    if(NOT events_value_status STREQUAL "1" OR
+       NOT events_value_stderr MATCHES "NEURA_RUN_OPTIONS: expected a value after --trace-events" OR
+       NOT dump_form_status STREQUAL "1" OR
+       NOT dump_form_stderr MATCHES "NEURA_RUN_OPTIONS: --task-dump=xml is not accepted by a native executable" OR
+       NOT virtual_refused_status STREQUAL "1" OR
+       NOT virtual_refused_stderr MATCHES "NEURA_RUN_OPTIONS: --virtual-time is not accepted by a native executable")
+        message(FATAL_ERROR "unexpected option refusals\n${events_value_stderr}\n${dump_form_stderr}\n${virtual_refused_stderr}")
+    endif()
+    build_error("--task-quantum applies only with --native" --task-quantum 4 "${hello}")
+    build_error("--max-tasks applies only with --native" --max-tasks 4 "${hello}")
+    build_error("expected a positive integer after --task-quantum" --native --task-quantum 0 tasks.nvr)
+    build_error("--parallel-workers is at most 1024" --native --parallel-workers 1025 tasks.nvr)
     success(truncate -s 4294967296 "${TEST_DIR}/oversize.nvr")
     build_error("native executable: image must be smaller than 4 GiB" --native oversize.nvr)
     file(REMOVE "${TEST_DIR}/oversize.nvr")
@@ -217,7 +269,7 @@ if(SUITE STREQUAL "build")
     endif()
     invoke(inspect "${NEURA}" inspect source -o extracted.nvr)
     if(NOT inspect_status STREQUAL "0" OR NOT inspect_stderr STREQUAL "" OR
-       NOT inspect_stdout MATCHES "^native executable: source\nlauncher: neura development, [^,]+, default, runs NVR up to 1[.]5\ncapabilities: console, process exit, files, network, environment, clock, entropy, native\nlimits: steps 100000000, frames 10000, heap cells 67108864\nrun options: accepted\nimage: ${image_size} bytes, NVR 1[.]2, [0-9]+ graphs, source map present, native library absent\n$")
+       NOT inspect_stdout MATCHES "^native executable: source\nlauncher: neura development, [^,]+, default, runs NVR up to 1[.]5\ncapabilities: console, process exit, files, network, environment, clock, entropy, native\nlimits: steps 100000000, frames 10000, heap cells 67108864\ntasks: at most 65536, quantum 1024, queued messages 1048576, pending requests 4096, parallel workers 1\nrun options: accepted\nimage: ${image_size} bytes, NVR 1[.]2, [0-9]+ graphs, source map present, native library absent\n$")
         message(FATAL_ERROR "unexpected inspect output\n${inspect_stdout}${inspect_stderr}")
     endif()
     equal_files("${TEST_DIR}/hello.nvr" "${TEST_DIR}/extracted.nvr")

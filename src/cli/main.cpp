@@ -438,7 +438,9 @@ Options read_options(int argc, char** argv) {
             options.limits.profile = true;
         } else if (arg == "--max-tasks" || arg == "--task-quantum" || arg == "--max-queued-messages" ||
                    arg == "--max-pending-requests" || arg == "--parallel-workers") {
-            if (!runs) throw std::runtime_error(std::string(arg) + " applies only to run and test");
+            // build --native records these in the executable's policy.
+            if (!runs && !builds) throw std::runtime_error(std::string(arg) + " applies only to run and test");
+            if (builds && !first_policy_flag) first_policy_flag = arg;
             const auto value = parse_limit(arg, next());
             if (arg == "--max-tasks") options.limits.max_tasks = value;
             else if (arg == "--task-quantum") options.limits.task_quantum = value;
@@ -856,6 +858,10 @@ int inspect(const Options& options) {
     if (caps.native) std::cout << ", native";
     std::cout << "\nlimits: steps " << policy.limits.max_steps << ", frames " << policy.limits.max_frames
               << ", heap cells " << policy.limits.max_heap_cells
+              << "\ntasks: at most " << policy.limits.max_tasks << ", quantum " << policy.limits.task_quantum
+              << ", queued messages " << policy.limits.max_queued_messages << ", pending requests "
+              << policy.limits.max_pending_requests << ", parallel workers " << policy.limits.parallel_workers
+              << (executable.version < 2 ? " (defaults: container version 1 records none)" : "")
               << "\nrun options: " << (policy.sealed ? "sealed" : "accepted")
               << "\nimage: " << executable.image.size() << " bytes, NVR 1." << image.minor_version
               << ", " << image.graphs.size() << " graphs, source map " << (image.source_map ? "present" : "absent")
