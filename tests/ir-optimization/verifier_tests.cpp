@@ -352,9 +352,15 @@ NEURA_TEST(verifier, rejects_malformed_task_scopes) {
         check(file != no_symbol, "the fixture has a file symbol");
         program.bodies.push_back({file, {scope}});
     });
-    expect_issue(environment, task_fixture, "a task scope names a handle", [](IrProgram& program) {
+    // With a symbol, a task scope receives its identity in a uint64 local
+    // (`scope (name)`). Any other symbol is rejected.
+    expect_issue(environment, task_fixture, "a task scope's identity is a uint64 local", [](IrProgram& program) {
         auto& scope = first(body_of(program, "Main.main"), IrOp::TaskScope);
-        scope.symbol = static_cast<SymbolId>(program.symbols.size() - 1);
+        SymbolId function = no_symbol;
+        for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+            if (program.symbols[id].kind == SymbolKind::Function) function = id;
+        }
+        scope.symbol = function;
     });
 }
 
@@ -392,9 +398,11 @@ NEURA_TEST(verifier, rejects_malformed_scheduler_calls) {
     expect_issue(environment, task_fixture, "a scheduler call names its operation in text only", [](IrProgram& program) {
         scheduler_call(program, "join").symbol = 0;
     });
-    expect_issue(environment, task_fixture, "a scheduler call names its operation in text only", [](IrProgram& program) {
-        scheduler_call(program, "join").type_arguments.push_back(type_named(TypeKind::Integer, "int32"));
-    });
+    // Only a typed operation, such as opening a channel, takes a type argument.
+    expect_issue(environment, task_fixture, "scheduler operation 'join' has the wrong number of type arguments",
+                 [](IrProgram& program) {
+                     scheduler_call(program, "join").type_arguments.push_back(type_named(TypeKind::Integer, "int32"));
+                 });
 }
 
 NEURA_TEST(verifier, rejects_a_poll_on_an_operation_that_is_neither_a_loop_nor_a_call) {
