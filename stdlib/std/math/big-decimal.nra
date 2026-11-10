@@ -1,0 +1,511 @@
+let big_integer = import:Std.Math.BigInteger;
+let comparable = import:Std.Core.Comparable;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+let rounding = import:Std.Math.Internal.FloatRounding;
+
+// An immutable decimal number: an unscaled BigInteger and an int scale,
+// representing unscaled * 10^(-scale) (Stdlib.md section 10.3).
+//
+// add, subtract, and multiply are exact. Division takes an explicit result
+// scale and RoundingMode. equals and compare_to are numeric, so 2.0 equals
+// 2.00; hash_code is computed on the form with trailing zeros stripped. A
+// scale that leaves the int range traps (reason 1), from checked int
+// arithmetic or conversion.
+export let BigDecimal = module (
+    // Java's rounding modes: Up and Down round away from and toward zero,
+    // Ceiling and Floor toward positive and negative infinity, and the Half
+    // modes round to the nearest neighbour with ties away from zero, toward
+    // zero, or to the even neighbour.
+    export let RoundingMode = enum (Up, Down, Ceiling, Floor, HalfUp, HalfDown, HalfEven);
+
+    export let BigDecimal = class implements comparable.Comparable<BigDecimal> (
+        let unscaled_value: big_integer.BigInteger = nil;
+        let scale_value: int = 0;
+
+        // The value unscaled * 10^(-scale). A nil unscaled value traps.
+        export let init = func(big_integer.BigInteger unscaled_part, int scale_part) -> void {
+            if (unscaled_part == nil) {
+                trap_with_message("invalid argument: unscaled value is nil");
+            }
+            unscaled_value = unscaled_part;
+            scale_value = scale_part;
+        };
+
+        // The unscaled value.
+        export let unscaled = func() -> big_integer.BigInteger {
+            return unscaled_value;
+        };
+
+        // The number of digits after the decimal point; negative for a
+        // multiple of a power of ten.
+        export let scale = func() -> int {
+            return scale_value;
+        };
+
+        export let sign = func() -> int {
+            return unscaled_value.sign();
+        };
+
+        export let negate = func() -> BigDecimal {
+            return new BigDecimal(unscaled_value.negate(), scale_value);
+        };
+
+        export let abs = func() -> BigDecimal {
+            return new BigDecimal(unscaled_value.abs(), scale_value);
+        };
+
+        // Exact; the result has the larger scale.
+        export let add = func(BigDecimal other) -> BigDecimal {
+            if (scale_value == other.scale_value) {
+                return new BigDecimal(unscaled_value.add(other.unscaled_value), scale_value);
+            }
+            if (scale_value > other.scale_value) {
+                let aligned = times_power_of_ten(other.unscaled_value, (scale_value as int64) - (other.scale_value as int64));
+                return new BigDecimal(unscaled_value.add(aligned), scale_value);
+            }
+            let aligned = times_power_of_ten(unscaled_value, (other.scale_value as int64) - (scale_value as int64));
+            return new BigDecimal(aligned.add(other.unscaled_value), other.scale_value);
+        };
+
+        // Exact; the result has the larger scale.
+        export let subtract = func(BigDecimal other) -> BigDecimal {
+            return add(other.negate());
+        };
+
+        // Exact; the result's scale is the sum of the scales.
+        export let multiply = func(BigDecimal other) -> BigDecimal {
+            return new BigDecimal(unscaled_value.multiply(other.unscaled_value), scale_value + other.scale_value);
+        };
+
+        // this / other rounded to `result_scale` digits after the point with
+        // `mode`. A zero divisor traps (reason 1) in the BigInteger division.
+        export let divide = func(BigDecimal other, int result_scale, RoundingMode mode) -> BigDecimal {
+            if (other.unscaled_value.is_zero()) {
+                let checked = unscaled_value.divide(other.unscaled_value);
+            }
+            // this / other = (u / v) * 10^(other.scale - scale), so the
+            // result's unscaled value is u * 10^e / v.
+            let e = (result_scale as int64) - (scale_value as int64) + (other.scale_value as int64);
+            let numerator = unscaled_value;
+            let denominator = other.unscaled_value;
+            if (e >= 0) {
+                numerator = times_power_of_ten(numerator, e);
+            } else {
+                denominator = times_power_of_ten(denominator, -e);
+            }
+            return new BigDecimal(divide_rounded(numerator, denominator, mode), result_scale);
+        };
+
+        // The same value with `new_scale` digits after the point, rounded
+        // with `mode` when digits are dropped.
+        export let set_scale = func(int new_scale, RoundingMode mode) -> BigDecimal {
+            if (new_scale >= scale_value) {
+                return new BigDecimal(times_power_of_ten(unscaled_value, (new_scale as int64) - (scale_value as int64)), new_scale);
+            }
+            let dropped = (scale_value as int64) - (new_scale as int64);
+            return new BigDecimal(divide_by_power_of_ten(unscaled_value, dropped, mode), new_scale);
+        };
+
+        // The value rounded to `precision` significant digits with `mode`. A
+        // precision of 0 returns the value unchanged; a negative precision
+        // traps.
+        export let round = func(int precision, RoundingMode mode) -> BigDecimal {
+            if (precision < 0) {
+                trap_with_message("invalid argument: negative precision");
+            }
+            let digits = digit_count(unscaled_value);
+            if (precision == 0 || digits <= precision) {
+                return new BigDecimal(unscaled_value, scale_value);
+            }
+            let dropped = (digits - precision) as int64;
+            let rounded = divide_by_power_of_ten(unscaled_value, dropped, mode);
+            let new_scale = (scale_value as int64) - dropped;
+            if (digit_count(rounded) > precision) {
+                // A carry such as 999 -> 1000: drop the extra zero.
+                rounded = rounded.divide(big_integer.Ten);
+                new_scale = new_scale - 1;
+            }
+            return new BigDecimal(rounded, new_scale as int);
+        };
+
+        // The numerically equal value with no trailing zeros in the unscaled
+        // value; zero has scale 0.
+        export let strip_trailing_zeros = func() -> BigDecimal {
+            if (unscaled_value.is_zero()) {
+                return new BigDecimal(big_integer.Zero, 0);
+            }
+            let value = unscaled_value;
+            let new_scale = scale_value as int64;
+            let billion = big_integer.of_int64(1000000000);
+            let searching = true;
+            while (searching) {
+                let [quotient, rest] = value.divide_and_remainder(billion);
+                if (rest.is_zero()) {
+                    value = quotient;
+                    new_scale = new_scale - 9;
+                } else {
+                    searching = false;
+                }
+            }
+            searching = true;
+            while (searching) {
+                let [quotient, rest] = value.divide_and_remainder(big_integer.Ten);
+                if (rest.is_zero()) {
+                    value = quotient;
+                    new_scale = new_scale - 1;
+                } else {
+                    searching = false;
+                }
+            }
+            return new BigDecimal(value, new_scale as int);
+        };
+
+        // this^exponent exactly, with scale * exponent. pow(0) is 1 with
+        // scale 0; a negative exponent traps.
+        export let pow = func(int exponent) -> BigDecimal {
+            if (exponent < 0) {
+                trap_with_message("invalid argument: negative exponent");
+            }
+            return new BigDecimal(unscaled_value.pow(exponent), scale_value * exponent);
+        };
+
+        // The integer part rounded with `mode`.
+        export let to_big_integer = func(RoundingMode mode) -> big_integer.BigInteger {
+            return set_scale(0, mode).unscaled_value;
+        };
+
+        // The nearest float64, ties to even; infinities beyond the range and
+        // signed zeros below it.
+        export let to_float64 = func() -> float64 {
+            let s = unscaled_value.sign();
+            if (s == 0) {
+                return 0.0;
+            }
+            let negative = s < 0;
+            if (scale_value <= 0) {
+                if (scale_value < -400) { // at least 10^401
+                    return rounding.compose(negative, 1, 2000, false);
+                }
+                return times_power_of_ten(unscaled_value, -(scale_value as int64)).to_float64();
+            }
+            let m = unscaled_value.abs();
+            let bits = m.bit_length() as int64;
+            if ((scale_value as int64) * 3 > bits + 1100) { // below 2^-1100
+                return rounding.compose(negative, 1, -2000, false);
+            }
+            // q = floor(m * 2^shift / 10^scale) lies in [2^61, 2^63).
+            let d = power_of_ten(scale_value);
+            let shift = 62 + d.bit_length() - (bits as int);
+            let numerator = m;
+            let denominator = d;
+            if (shift >= 0) {
+                numerator = m.shift_left(shift);
+            } else {
+                denominator = d.shift_left(-shift);
+            }
+            let [quotient, rest] = numerator.divide_and_remainder(denominator);
+            let top = optional.expect<int64>(quotient.to_int64(), "quotient below 2^63") as uint64;
+            return rounding.compose(negative, top, -shift, !rest.is_zero());
+        };
+
+        export let compare_to = func(BigDecimal other) -> ordering.Ordering {
+            let sa = unscaled_value.sign();
+            let sb = other.unscaled_value.sign();
+            if (sa != sb) {
+                if (sa < sb) {
+                    return ordering.Ordering.Less;
+                }
+                return ordering.Ordering.Greater;
+            }
+            if (sa == 0) {
+                return ordering.Ordering.Equal;
+            }
+            let gap = (scale_value as int64) - (other.scale_value as int64);
+            if (gap > 18 || gap < -18) {
+                // Compare the decimal exponents of the leading digits first,
+                // so a large scale difference never builds a large power.
+                let ea = (digit_count(unscaled_value) as int64) - (scale_value as int64);
+                let eb = (digit_count(other.unscaled_value) as int64) - (other.scale_value as int64);
+                if (ea != eb) {
+                    if ((ea < eb) == (sa > 0)) {
+                        return ordering.Ordering.Less;
+                    }
+                    return ordering.Ordering.Greater;
+                }
+            }
+            if (gap >= 0) {
+                return unscaled_value.compare_to(times_power_of_ten(other.unscaled_value, gap));
+            }
+            return times_power_of_ten(unscaled_value, -gap).compare_to(other.unscaled_value);
+        };
+
+        // Numeric equality: 2.0 equals 2.00.
+        export let.override equals = func(class other) -> bool {
+            if (!(other is BigDecimal)) {
+                return false;
+            }
+            return compare_to(other as BigDecimal) == ordering.Ordering.Equal;
+        };
+
+        // From 17, combines the hashes of the stripped form's unscaled value
+        // and scale.
+        export let.override hash_code = func() -> uint32 {
+            let stripped = strip_trailing_zeros();
+            let h = hashing.combine(17, stripped.unscaled_value.hash_code());
+            return hashing.combine(h, stripped.scale_value.hash_code());
+        };
+
+        // Plain notation: exactly `scale` digits after the point when the
+        // scale is positive, and -scale appended zeros when it is negative.
+        // Zero with a negative scale prints as 0.
+        export let.override to_string = func() -> string {
+            let digits = unscaled_value.abs().to_string();
+            let text = "";
+            if (unscaled_value.sign() < 0) {
+                text = "-";
+            }
+            if (scale_value <= 0) {
+                if (unscaled_value.is_zero()) {
+                    return "0";
+                }
+                return text + digits + zeros_text(-(scale_value as int64));
+            }
+            let length = digits.byte_length;
+            if (length > scale_value) {
+                return text + digits.slice(0, length - scale_value) + "." + digits.slice(length - scale_value, length);
+            }
+            return text + "0." + zeros_text((scale_value - length) as int64) + digits;
+        };
+    );
+
+    export let of_int64 = func(int64 value) -> BigDecimal {
+        return new BigDecimal(big_integer.of_int64(value), 0);
+    };
+
+    export let of_big_integer = func(big_integer.BigInteger value, int scale) -> BigDecimal {
+        return new BigDecimal(value, scale);
+    };
+
+    // The exact binary value of v with the smallest scale that holds it:
+    // 0.5 has scale 1 and 2.0 has scale 0. NaN and the infinities trap.
+    export let of_float64 = func(float64 v) -> BigDecimal {
+        let bits = v.to_bits();
+        let field = ((bits >> 52) & 2047) as int;
+        if (field == 2047) {
+            trap_with_message("invalid argument: not a finite value");
+        }
+        let fraction = bits & 4503599627370495;
+        if (field == 0 && fraction == 0) {
+            return new BigDecimal(big_integer.Zero, 0);
+        }
+        // v = m * 2^e
+        let m = fraction;
+        let e = -1074;
+        if (field != 0) {
+            m = fraction | 4503599627370496;
+            e = field - 1075;
+        }
+        while ((m & 1) == 0 && e < 0) {
+            m = m >> 1;
+            e = e + 1;
+        }
+        let unscaled_part = big_integer.of_uint64(m);
+        if ((bits >> 63) != 0) {
+            unscaled_part = unscaled_part.negate();
+        }
+        if (e >= 0) {
+            return new BigDecimal(unscaled_part.shift_left(e), 0);
+        }
+        // m / 2^-e = m * 5^-e / 10^-e
+        return new BigDecimal(unscaled_part.multiply(big_integer.of_int64(5).pow(-e)), -e);
+    };
+
+    // An optional sign, digits with an optional point (at least one digit
+    // overall), and an optional exponent: `e` or `E`, an optional sign, and
+    // digits. The scale is the number of fraction digits minus the
+    // exponent; one outside the int range fails with OutOfRange.
+    export let parse = func(string text) -> result.Result<BigDecimal> {
+        let length = text.byte_length;
+        if (length == 0) {
+            return failed(error.ParseErrorKind.Empty, 0, "empty input");
+        }
+        let i = 0;
+        let negative = false;
+        if (text.byte_at(0) == 43 || text.byte_at(0) == 45) {
+            negative = text.byte_at(0) == 45;
+            i = 1;
+        }
+        let integer_start = i;
+        while (i < length && is_digit(text.byte_at(i))) {
+            i = i + 1;
+        }
+        let integer_end = i;
+        let fraction_start = i;
+        let fraction_end = i;
+        if (i < length && text.byte_at(i) == 46) {
+            i = i + 1;
+            fraction_start = i;
+            while (i < length && is_digit(text.byte_at(i))) {
+                i = i + 1;
+            }
+            fraction_end = i;
+        }
+        if (integer_end == integer_start && fraction_end == fraction_start) {
+            return digit_expected(text, i);
+        }
+        let exponent: int64 = 0;
+        if (i < length && (text.byte_at(i) == 101 || text.byte_at(i) == 69)) {
+            i = i + 1;
+            let exponent_negative = false;
+            if (i < length && (text.byte_at(i) == 43 || text.byte_at(i) == 45)) {
+                exponent_negative = text.byte_at(i) == 45;
+                i = i + 1;
+            }
+            let exponent_start = i;
+            while (i < length && is_digit(text.byte_at(i))) {
+                if (exponent < 10000000000) {
+                    exponent = exponent * 10 + ((text.byte_at(i) - 48) as int64);
+                }
+                i = i + 1;
+            }
+            if (i == exponent_start) {
+                return digit_expected(text, i);
+            }
+            if (exponent_negative) {
+                exponent = -exponent;
+            }
+        }
+        if (i < length) {
+            return failed(error.ParseErrorKind.InvalidCharacter, i, "invalid character");
+        }
+        let new_scale = ((fraction_end - fraction_start) as int64) - exponent;
+        if (new_scale < -2147483648 || new_scale > 2147483647) {
+            return failed(error.ParseErrorKind.OutOfRange, 0, "scale out of range for BigDecimal");
+        }
+        let digits = text.slice(integer_start, integer_end) + text.slice(fraction_start, fraction_end);
+        if (negative) {
+            digits = "-" + digits;
+        }
+        let unscaled_part = result.expect<big_integer.BigInteger>(big_integer.parse(digits), "digits");
+        return result.Result<BigDecimal>.Ok(new BigDecimal(unscaled_part, new_scale as int));
+    };
+
+    let failed = func(error.ParseErrorKind kind, int offset, string message) -> result.Result<BigDecimal> {
+        return result.Result<BigDecimal>.Err(error.Error.Parse { kind: kind, offset: offset, message: message });
+    };
+
+    // UnexpectedEnd at the end of the text, otherwise InvalidCharacter.
+    let digit_expected = func(string text, int offset) -> result.Result<BigDecimal> {
+        if (offset == text.byte_length) {
+            return failed(error.ParseErrorKind.UnexpectedEnd, offset, "expected a digit");
+        }
+        return failed(error.ParseErrorKind.InvalidCharacter, offset, "invalid character");
+    };
+
+    let is_digit = func(uint8 b) -> bool {
+        return b >= 48 && b <= 57;
+    };
+
+    // 10^k for k >= 0.
+    let power_of_ten = func(int k) -> big_integer.BigInteger {
+        if (k <= 18) {
+            let value: int64 = 1;
+            for (let i = 0; i < k; i = i + 1) {
+                value = value * 10;
+            }
+            return big_integer.of_int64(value);
+        }
+        return big_integer.Ten.pow(k);
+    };
+
+    // value * 10^k for k >= 0; k beyond the int range traps (reason 1).
+    let times_power_of_ten = func(big_integer.BigInteger value, int64 k) -> big_integer.BigInteger {
+        if (k == 0 || value.is_zero()) {
+            return value;
+        }
+        return value.multiply(power_of_ten(k as int));
+    };
+
+    // The number of decimal digits of |value|; 1 for zero.
+    let digit_count = func(big_integer.BigInteger value) -> int {
+        let text = value.to_string();
+        if (value.sign() < 0) {
+            return text.byte_length - 1;
+        }
+        return text.byte_length;
+    };
+
+    // value / 10^k rounded with mode, for k >= 0. When 10^k has more digits
+    // than value the quotient is 0 and only the rounding decides.
+    let divide_by_power_of_ten = func(big_integer.BigInteger value, int64 k, RoundingMode mode) -> big_integer.BigInteger {
+        if (k == 0 || value.is_zero()) {
+            return value;
+        }
+        if (k > (digit_count(value) as int64) + 1) {
+            // 0 < |value| < 10^k / 2.
+            return rounded_quotient(big_integer.Zero, value.sign() < 0, ordering.Ordering.Less, mode);
+        }
+        return divide_rounded(value, power_of_ten(k as int), mode);
+    };
+
+    // numerator / denominator rounded with mode; the denominator is nonzero.
+    let divide_rounded = func(big_integer.BigInteger numerator, big_integer.BigInteger denominator, RoundingMode mode) -> big_integer.BigInteger {
+        let [quotient, rest] = numerator.divide_and_remainder(denominator);
+        if (rest.is_zero()) {
+            return quotient;
+        }
+        let negative = numerator.sign() * denominator.sign() < 0;
+        let half = rest.abs().shift_left(1).compare_to(denominator.abs());
+        return rounded_quotient(quotient, negative, half, mode);
+    };
+
+    // A quotient truncated toward zero, rounded with mode, given the sign of
+    // the exact quotient and how twice the dropped remainder compares with
+    // the divisor (Less: below half, Equal: a tie, Greater: above half).
+    let rounded_quotient = func(big_integer.BigInteger truncated, bool negative, ordering.Ordering half, RoundingMode mode) -> big_integer.BigInteger {
+        let away = false;
+        if (mode == RoundingMode.Up) {
+            away = true;
+        } else if (mode == RoundingMode.Down) {
+            away = false;
+        } else if (mode == RoundingMode.Ceiling) {
+            away = !negative;
+        } else if (mode == RoundingMode.Floor) {
+            away = negative;
+        } else if (mode == RoundingMode.HalfUp) {
+            away = half != ordering.Ordering.Less;
+        } else if (mode == RoundingMode.HalfDown) {
+            away = half == ordering.Ordering.Greater;
+        } else {
+            away = half == ordering.Ordering.Greater || (half == ordering.Ordering.Equal && !truncated.is_even());
+        }
+        if (!away) {
+            return truncated;
+        }
+        if (negative) {
+            return truncated.subtract(big_integer.One);
+        }
+        return truncated.add(big_integer.One);
+    };
+
+    // count zeros, by doubling.
+    let zeros_text = func(int64 count) -> string {
+        let text = "";
+        let block = "0";
+        let n = count;
+        while (n > 0) {
+            if ((n & 1) != 0) {
+                text = text + block;
+            }
+            n = n >> 1;
+            if (n > 0) {
+                block = block + block;
+            }
+        }
+        return text;
+    };
+);

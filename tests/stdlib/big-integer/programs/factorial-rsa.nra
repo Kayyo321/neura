@@ -1,0 +1,29 @@
+let big = import:Std.Math.BigInteger;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// BigInteger end to end: 100!, a toy RSA round trip with mod_pow and
+// mod_inverse, and text in two radices.
+export let FactorialRsa = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let factorial = big.One;
+        for (let i: int64 = 2; i <= 100; i = i + 1) {
+            factorial = factorial.multiply(big.of_int64(i));
+        }
+        console.print_line(factorial.to_string());
+        console.print_line(factorial.bit_length().to_string());
+        let p = big.of_int64(1000000007);
+        let q = big.of_int64(998244353);
+        let n = p.multiply(q);
+        let phi = p.subtract(big.One).multiply(q.subtract(big.One));
+        let e = big.of_int64(65537);
+        let d = e.mod_inverse(phi);
+        let message = big.of_int64(123456789);
+        let cipher = message.mod_pow(e, n);
+        console.print_line(cipher.to_string());
+        console.print_line(cipher.mod_pow(d, n).to_string());
+        console.print_line(factorial.divide(big.Ten.pow(150)).to_string_radix(36));
+        console.print_line(factorial.negate().shift_right(500).to_string_radix(16));
+        return program.ExitCode.Ok;
+    };
+);

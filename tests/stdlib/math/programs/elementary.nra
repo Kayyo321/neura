@@ -1,0 +1,19 @@
+let console = import:Std.Io.Console;
+let math = import:Std.Math.Math;
+let program = import:Std.Program;
+
+// A program using Std.Math end to end: the image runs optimized and
+// unoptimized and round-trips through disassemble and assemble.
+export let Elementary = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let x = 0.5;
+        console.print_line(math.sqrt(2.0).to_string());
+        console.print_line(math.exp(x).to_string());
+        console.print_line(math.log(10.0).to_string());
+        console.print_line(math.sin(x).to_string());
+        console.print_line(math.cos(1.0e22).to_string());
+        console.print_line(math.pow(1.0001, 10000.0).to_string());
+        console.print_line(math.atan2(1.0, -1.0).to_string());
+        return program.ExitCode.Ok;
+    };
+);

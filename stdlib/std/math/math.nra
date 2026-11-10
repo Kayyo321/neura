@@ -1,0 +1,1397 @@
+// Elementary functions on float64 (Stdlib.md section 10.1).
+//
+// sqrt is computed exactly by an integer square root of the significand.
+// cbrt, hypot, exp, expm1, log, log1p, log10, pow, sin, cos, tan, asin,
+// acos, atan, atan2, sinh, cosh, and tanh are a port of fdlibm 5.3
+// (s_cbrt.c, e_hypot.c, e_exp.c, s_expm1.c, e_log.c, s_log1p.c, e_log10.c,
+// e_pow.c, s_sin.c, s_cos.c, s_tan.c, e_asin.c, e_acos.c, s_atan.c,
+// e_atan2.c, e_sinh.c, e_cosh.c, s_tanh.c), operation for operation, with
+// the kernels in Std.Math.Internal.Trig. Constants are the bit patterns of
+// fdlibm's constants; comments give fdlibm's hexadecimal and decimal
+// spellings. Where fdlibm evaluates an expression only to raise the inexact
+// flag (huge+x>one and similar tests that are always true), the port keeps
+// the branch's result and omits the flag computation: Neura has no floating
+// point flags. Every NaN result is the canonical NaN, because every NaN
+// result comes from an arithmetic operation.
+//
+// log2 is not part of fdlibm 5.3. It follows e_log10.c: for x = 2^k * m it
+// returns (k + i) + (1/ln 2) * log(m'), where m' is m or m/2 so that the
+// logarithm is taken near 1, and it returns k exactly for a power of two.
+//
+// ====================================================
+// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+// Developed at SunSoft, a Sun Microsystems, Inc. business.
+// Permission to use, copy, modify, and distribute this
+// software is freely granted, provided that this notice
+// is preserved.
+// ====================================================
+//
+// e_pow.c: Copyright (C) 2004 by Sun Microsystems, Inc. All rights reserved.
+// Permission to use, copy, modify, and distribute this software is freely
+// granted, provided that this notice is preserved.
+let trig = import:Std.Math.Internal.Trig;
+let words = import:Std.Math.Internal.Words;
+
+export let Math = module (
+    export const Pi: float64 = float64.from_bits(4614256656552045848); // 0x400921FB54442D18 3.141592653589793
+    export const Tau: float64 = float64.from_bits(4618760256179416344); // 0x401921FB54442D18 6.283185307179586
+    export const E: float64 = float64.from_bits(4613303445314885481); // 0x4005BF0A8B145769 2.718281828459045
+    export const Ln2: float64 = float64.from_bits(4604418534313441775); // 0x3FE62E42FEFA39EF 0.6931471805599453
+    export const Ln10: float64 = float64.from_bits(4612367379483415830); // 0x40026BB1BBB55516 2.302585092994046
+    export const Sqrt2: float64 = float64.from_bits(4609047870845172685); // 0x3FF6A09E667F3BCD 1.4142135623730951
+
+    // Correctly rounded square root: the integer square root of the
+    // significand, shifted to an even exponent and extended by 54 zero bits,
+    // one result bit per step with a running remainder; then round to
+    // nearest, ties to even. sqrt(-0.0) is -0.0; other negatives give NaN.
+    export let sqrt = func(float64 x) -> float64 {
+        if (x != x) {
+            return x + x;
+        }
+        if (x == 0.0) {
+            return x;
+        }
+        let b = x.to_bits();
+        if (b >= 9223372036854775808) { // 0x8000000000000000
+            return (x - x) / (x - x);
+        }
+        let e = ((b >> 52) & 2047) as int;
+        if (e == 2047) {
+            return x;
+        }
+        let m = b & 4503599627370495; // 0xFFFFFFFFFFFFF
+        if (e == 0) { // subnormal: normalize the significand
+            e = 1;
+            while ((m & 4503599627370496) == 0) { // 0x10000000000000
+                m = m << 1;
+                e = e - 1;
+            }
+        } else {
+            m = m | 4503599627370496; // 0x10000000000000
+        }
+        e = e - 1023; // x = m * 2^(e - 52)
+        if ((e & 1) != 0) {
+            m = m << 1;
+            e = e - 1;
+        }
+        // q = floor(sqrt(m * 2^54)), 54 bits; r = m * 2^54 - q^2.
+        let q: uint64 = 0;
+        let r: uint64 = 0;
+        for (let i = 0; i < 27; i = i + 1) {
+            r = (r << 2) | ((m >> (52 - 2 * i)) & 3);
+            let t = (q << 2) | 1;
+            if (r >= t) {
+                r = r - t;
+                q = (q << 1) | 1;
+            } else {
+                q = q << 1;
+            }
+        }
+        for (let i = 0; i < 27; i = i + 1) {
+            r = r << 2;
+            let t = (q << 2) | 1;
+            if (r >= t) {
+                r = r - t;
+                q = (q << 1) | 1;
+            } else {
+                q = q << 1;
+            }
+        }
+        let significand = q >> 1;
+        if ((q & 1) != 0 && (r != 0 || (significand & 1) != 0)) {
+            significand = significand + 1;
+        }
+        let exponent = (e / 2 + 1023) as uint64;
+        return float64.from_bits((exponent << 52) + (significand - 4503599627370496)); // 0x10000000000000
+    };
+
+    // s_cbrt.c
+    export let cbrt = func(float64 x) -> float64 {
+        let B1 = 715094163; // B1 = (682-0.03306235651)*2**20
+        let B2 = 696219795; // B2 = (664-0.03306235651)*2**20
+        let c0 = float64.from_bits(4603064841997850097); // 0x3FE15F15F15F15F1 19/35 5.42857142857142815906e-01
+        let d0 = float64.from_bits(13827900089180538932); // 0xBFE691DE2532C834 -864/1225 -7.05306122448979611050e-01
+        let e0 = float64.from_bits(4609048195788499471); // 0x3FF6A0EA0EA0EA0F 99/70 1.41428571428571436819e+00
+        let f0 = float64.from_bits(4609916747145206638); // 0x3FF9B6DB6DB6DB6E 45/28 1.60714285714285720630e+00
+        let g0 = float64.from_bits(4600105333671292343); // 0x3FD6DB6DB6DB6DB7 5/14 3.57142857142857150787e-01
+        let hx = words.high(x);
+        let negative = hx < 0;
+        hx = hx & 2147483647; // 0x7fffffff
+        if (hx >= 2146435072) { // 0x7ff00000 cbrt(NaN,INF) is itself
+            return x + x;
+        }
+        if (hx == 0 && words.low(x) == 0) { // cbrt(0) is itself
+            return x;
+        }
+        x = words.with_high(x, hx); // x <- |x|
+        // rough cbrt to 5 bits
+        let t = 0.0;
+        if (hx < 1048576) { // 0x00100000 subnormal number
+            t = words.from_words(1129316352, 0); // 0x43500000 set t= 2**54
+            t = t * x;
+            t = words.with_high(t, words.high(t) / 3 + B2);
+        } else {
+            t = words.from_words(hx / 3 + B1, 0);
+        }
+        // new cbrt to 23 bits, may be implemented in single precision
+        let r = t * t / x;
+        let s = c0 + r * t;
+        t = t * (g0 + f0 / (s + e0 + d0 / s));
+        // chopped to 20 bits and make it larger than cbrt(x)
+        t = words.from_words(words.high(t) + 1, 0); // 0x00000001
+        // one step newton iteration to 53 bits with error less than 0.667 ulps
+        s = t * t; // t*t is exact
+        r = x / s;
+        let w = t + t;
+        r = (r - t) / (w + r); // r-s is exact
+        t = t + t * r;
+        // restore the sign bit
+        if (negative) {
+            return -t;
+        }
+        return t;
+    };
+
+    // e_hypot.c: sqrt(x*x + y*y) without undue overflow or underflow.
+    export let hypot = func(float64 x, float64 y) -> float64 {
+        let ha = words.high(x) & 2147483647; // 0x7fffffff high word of x
+        let hb = words.high(y) & 2147483647; // 0x7fffffff high word of y
+        let a = x;
+        let b = y;
+        if (hb > ha) {
+            a = y;
+            b = x;
+            let j = ha;
+            ha = hb;
+            hb = j;
+        }
+        a = words.with_high(a, ha); // a <- |a|
+        b = words.with_high(b, hb); // b <- |b|
+        if ((ha - hb) > 62914560) { // 0x3c00000 x/y > 2**60
+            return a + b;
+        }
+        let k = 0;
+        if (ha > 1596981248) { // 0x5f300000 a>2**500
+            if (ha >= 2146435072) { // 0x7ff00000 Inf or NaN
+                let w = a + b;
+                if ((ha & 1048575) == 0 && words.low(a) == 0) { // 0xfffff
+                    w = a;
+                }
+                if (hb == 2146435072 && words.low(b) == 0) { // 0x7ff00000
+                    w = b;
+                }
+                return w;
+            }
+            // scale a and b by 2**-600
+            ha = ha - 629145600; // 0x25800000
+            hb = hb - 629145600; // 0x25800000
+            k = k + 600;
+            a = words.with_high(a, ha);
+            b = words.with_high(b, hb);
+        }
+        if (hb < 548405248) { // 0x20b00000 b < 2**-500
+            if (hb <= 1048575) { // 0x000fffff subnormal b or 0
+                if (hb == 0 && words.low(b) == 0) {
+                    return a;
+                }
+                let t1 = words.from_words(2144337920, 0); // 0x7fd00000 t1=2^1022
+                b = b * t1;
+                a = a * t1;
+                k = k - 1022;
+            } else { // scale a and b by 2^600
+                ha = ha + 629145600; // 0x25800000 a *= 2^600
+                hb = hb + 629145600; // 0x25800000 b *= 2^600
+                k = k - 600;
+                a = words.with_high(a, ha);
+                b = words.with_high(b, hb);
+            }
+        }
+        // medium size a and b
+        let w = a - b;
+        if (w > b) {
+            let t1 = words.from_words(ha, 0);
+            let t2 = a - t1;
+            w = sqrt(t1 * t1 - (b * (-b) - t2 * (t1 + a)));
+        } else {
+            a = a + a;
+            let y1 = words.from_words(hb, 0);
+            let y2 = b - y1;
+            let t1 = words.from_words(ha + 1048576, 0); // 0x00100000
+            let t2 = a - t1;
+            w = sqrt(t1 * y1 - (w * (-w) - (t1 * y2 + t2 * b)));
+        }
+        if (k != 0) {
+            let t1 = words.from_words(1072693248 + (k << 20), 0); // 0x3ff00000
+            return t1 * w;
+        }
+        return w;
+    };
+
+    // e_exp.c
+    export let exp = func(float64 x) -> float64 {
+        let one = 1.0;
+        let huge = 1.0e300;
+        let twom1000 = float64.from_bits(103582791429521408); // 0x0170000000000000 2**-1000 9.33263618503218878990e-302
+        let o_threshold = float64.from_bits(4649454530587146735); // 0x40862E42FEFA39EF 7.09782712893383973096e+02
+        let u_threshold = float64.from_bits(13873137513782915153); // 0xC0874910D52D3051 -7.45133219101941108420e+02
+        let ln2_hi = float64.from_bits(4604418534311723008); // 0x3FE62E42FEE00000 6.93147180369123816490e-01
+        let ln2_lo = float64.from_bits(4461442080421002358); // 0x3DEA39EF35793C76 1.90821492927058770002e-10
+        let invln2 = float64.from_bits(4609176140021203710); // 0x3FF71547652B82FE 1.44269504088896338700e+00
+        let P1 = float64.from_bits(4595172819793696062); // 0x3FC555555555553E 1.66666666666666019037e-01
+        let P2 = float64.from_bits(13791923578850950547); // 0xBF66C16C16BEBD93 -2.77777777770155933842e-03
+        let P3 = float64.from_bits(4544508515198557740); // 0x3F11566AAF25DE2C 6.61375632143793436117e-05
+        let P4 = float64.from_bits(13743786778040626161); // 0xBEBBBD41C5D26BF1 -1.65339022054652515390e-06
+        let P5 = float64.from_bits(4496342204012209360); // 0x3E66376972BEA4D0 4.13813679705723846039e-08
+        let hx = words.high(x);
+        let xsb = (hx >> 31) & 1; // sign bit of x
+        hx = hx & 2147483647; // 0x7fffffff high word of |x|
+        // filter out non-finite argument
+        if (hx >= 1082535490) { // 0x40862E42 if |x|>=709.78...
+            if (hx >= 2146435072) { // 0x7ff00000
+                if ((hx & 1048575) != 0 || words.low(x) != 0) { // 0xfffff NaN
+                    return x + x;
+                }
+                if (xsb == 0) { // exp(+-inf)={inf,0}
+                    return x;
+                }
+                return 0.0;
+            }
+            if (x > o_threshold) { // overflow
+                return huge * huge;
+            }
+            if (x < u_threshold) { // underflow
+                return twom1000 * twom1000;
+            }
+        }
+        // argument reduction
+        let hi = 0.0;
+        let lo = 0.0;
+        let k = 0;
+        if (hx > 1071001154) { // 0x3fd62e42 if |x| > 0.5 ln2
+            if (hx < 1072734898) { // 0x3FF0A2B2 and |x| < 1.5 ln2
+                if (xsb == 0) {
+                    hi = x - ln2_hi;
+                    lo = ln2_lo;
+                    k = 1;
+                } else {
+                    hi = x + ln2_hi;
+                    lo = -ln2_lo;
+                    k = -1;
+                }
+            } else {
+                if (xsb == 0) {
+                    k = (invln2 * x + 0.5) as int;
+                } else {
+                    k = (invln2 * x - 0.5) as int;
+                }
+                let t = k as float64;
+                hi = x - t * ln2_hi; // t*ln2HI is exact here
+                lo = t * ln2_lo;
+            }
+            x = hi - lo;
+        } else if (hx < 1043333120) { // 0x3e300000 when |x|<2**-28
+            return one + x;
+        }
+        // x is now in primary range
+        let t = x * x;
+        let c = x - t * (P1 + t * (P2 + t * (P3 + t * (P4 + t * P5))));
+        if (k == 0) {
+            return one - ((x * c) / (c - 2.0) - x);
+        }
+        let y = one - ((lo - (x * c) / (2.0 - c)) - hi);
+        if (k >= -1021) {
+            return words.with_high(y, words.high(y) + (k << 20)); // add k to y's exponent
+        }
+        y = words.with_high(y, words.high(y) + ((k + 1000) << 20)); // add k to y's exponent
+        return y * twom1000;
+    };
+
+    // s_expm1.c: exp(x) - 1, accurate near zero.
+    export let expm1 = func(float64 x) -> float64 {
+        let one = 1.0;
+        let huge = 1.0e300;
+        let tiny = 1.0e-300;
+        let o_threshold = float64.from_bits(4649454530587146735); // 0x40862E42FEFA39EF 7.09782712893383973096e+02
+        let ln2_hi = float64.from_bits(4604418534311723008); // 0x3FE62E42FEE00000 6.93147180369123816490e-01
+        let ln2_lo = float64.from_bits(4461442080421002358); // 0x3DEA39EF35793C76 1.90821492927058770002e-10
+        let invln2 = float64.from_bits(4609176140021203710); // 0x3FF71547652B82FE 1.44269504088896338700e+00
+        let Q1 = float64.from_bits(13808336697493098740); // 0xBFA11111111110F4 -3.33333333333331316428e-02
+        let Q2 = float64.from_bits(4564962959435912581); // 0x3F5A01A019FE5585 1.58730158725481460165e-03
+        let Q3 = float64.from_bits(13768856570209950647); // 0xBF14CE199EAADBB7 -7.93650757867487942473e-05
+        let Q4 = float64.from_bits(4526346094260933177); // 0x3ED0CFCA86E65239 4.00821782732936239552e-06
+        let Q5 = float64.from_bits(13730065378259354413); // 0xBE8AFDB76E09C32D -2.01099218183624371326e-07
+        let hx = words.high(x);
+        let negative = hx < 0; // sign bit of x
+        hx = hx & 2147483647; // 0x7fffffff high word of |x|
+        // filter out huge and non-finite argument
+        if (hx >= 1078159482) { // 0x4043687A if |x|>=56*ln2
+            if (hx >= 1082535490) { // 0x40862E42 if |x|>=709.78...
+                if (hx >= 2146435072) { // 0x7ff00000
+                    if ((hx & 1048575) != 0 || words.low(x) != 0) { // 0xfffff NaN
+                        return x + x;
+                    }
+                    if (!negative) { // exp(+-inf)={inf,-1}
+                        return x;
+                    }
+                    return -1.0;
+                }
+                if (x > o_threshold) { // overflow
+                    return huge * huge;
+                }
+            }
+            if (negative) { // x < -56*ln2, return -1.0 with inexact
+                return tiny - one;
+            }
+        }
+        // argument reduction
+        let k = 0;
+        let c = 0.0;
+        if (hx > 1071001154) { // 0x3fd62e42 if  |x| > 0.5 ln2
+            let hi = 0.0;
+            let lo = 0.0;
+            if (hx < 1072734898) { // 0x3FF0A2B2 and |x| < 1.5 ln2
+                if (!negative) {
+                    hi = x - ln2_hi;
+                    lo = ln2_lo;
+                    k = 1;
+                } else {
+                    hi = x + ln2_hi;
+                    lo = -ln2_lo;
+                    k = -1;
+                }
+            } else {
+                if (!negative) {
+                    k = (invln2 * x + 0.5) as int;
+                } else {
+                    k = (invln2 * x - 0.5) as int;
+                }
+                let t = k as float64;
+                hi = x - t * ln2_hi; // t*ln2_hi is exact here
+                lo = t * ln2_lo;
+            }
+            x = hi - lo;
+            c = (hi - x) - lo;
+        } else if (hx < 1016070144) { // 0x3c900000 when |x|<2**-54, return x
+            let t = huge + x; // return x with inexact flags when x!=0
+            return x - (t - (huge + x));
+        }
+        // x is now in primary range
+        let hfx = 0.5 * x;
+        let hxs = x * hfx;
+        let r1 = one + hxs * (Q1 + hxs * (Q2 + hxs * (Q3 + hxs * (Q4 + hxs * Q5))));
+        let t = 3.0 - r1 * hfx;
+        let e = hxs * ((r1 - t) / (6.0 - x * t));
+        if (k == 0) { // c is 0
+            return x - (x * e - hxs);
+        }
+        e = (x * (e - c) - c);
+        e = e - hxs;
+        if (k == -1) {
+            return 0.5 * (x - e) - 0.5;
+        }
+        if (k == 1) {
+            if (x < -0.25) {
+                return -2.0 * (e - (x + 0.5));
+            }
+            return one + 2.0 * (x - e);
+        }
+        if (k <= -2 || k > 56) { // suffice to return exp(x)-1
+            let y = one - (e - x);
+            y = words.with_high(y, words.high(y) + (k << 20)); // add k to y's exponent
+            return y - one;
+        }
+        let y = 0.0;
+        if (k < 20) {
+            t = words.from_words(1072693248 - (2097152 >> k), 0); // 0x3ff00000 0x200000 t=1-2^-k
+            y = t - (e - x);
+            y = words.with_high(y, words.high(y) + (k << 20)); // add k to y's exponent
+        } else {
+            t = words.from_words((1023 - k) << 20, 0); // 0x3ff 2^-k
+            y = x - (e + t);
+            y = y + one;
+            y = words.with_high(y, words.high(y) + (k << 20)); // add k to y's exponent
+        }
+        return y;
+    };
+
+    // e_log.c
+    export let log = func(float64 x) -> float64 {
+        let ln2_hi = float64.from_bits(4604418534311723008); // 0x3FE62E42FEE00000 6.93147180369123816490e-01
+        let ln2_lo = float64.from_bits(4461442080421002358); // 0x3DEA39EF35793C76 1.90821492927058770002e-10
+        let two54 = float64.from_bits(4850376798678024192); // 0x4350000000000000 1.80143985094819840000e+16
+        let Lg1 = float64.from_bits(4604180019048437139); // 0x3FE5555555555593 6.666666666666735130e-01
+        let Lg2 = float64.from_bits(4600877379321592324); // 0x3FD999999997FA04 3.999999999940941908e-01
+        let Lg3 = float64.from_bits(4598818590951641945); // 0x3FD2492494229359 2.857142874366239149e-01
+        let Lg4 = float64.from_bits(4597174411056806063); // 0x3FCC71C51D8E78AF 2.222219843214978396e-01
+        let Lg5 = float64.from_bits(4595719342595441630); // 0x3FC7466496CB03DE 1.818357216161805012e-01
+        let Lg6 = float64.from_bits(4594685411790997151); // 0x3FC39A09D078C69F 1.531383769920937332e-01
+        let Lg7 = float64.from_bits(4594499633228436036); // 0x3FC2F112DF3E5244 1.479819860511658591e-01
+        let third = float64.from_bits(4599676419421066581); // 0x3FD5555555555555 0.33333333333333333
+        let zero = 0.0;
+        let hx = words.high(x);
+        let k = 0;
+        if (hx < 1048576) { // 0x00100000 x < 2**-1022
+            if ((hx & 2147483647) == 0 && words.low(x) == 0) { // 0x7fffffff log(+-0)=-inf
+                return -two54 / zero;
+            }
+            if (hx < 0) { // log(-#) = NaN
+                return (x - x) / zero;
+            }
+            k = k - 54;
+            x = x * two54; // subnormal number, scale up x
+            hx = words.high(x);
+        }
+        if (hx >= 2146435072) { // 0x7ff00000
+            return x + x;
+        }
+        k = k + (hx >> 20) - 1023;
+        hx = hx & 1048575; // 0x000fffff
+        let i = (hx + 614244) & 1048576; // 0x95f64 0x100000
+        x = words.with_high(x, hx | (i ^ 1072693248)); // 0x3ff00000 normalize x or x/2
+        k = k + (i >> 20);
+        let f = x - 1.0;
+        if ((1048575 & (2 + hx)) < 3) { // 0x000fffff |f| < 2**-20
+            if (f == zero) {
+                if (k == 0) {
+                    return zero;
+                }
+                let dk = k as float64;
+                return dk * ln2_hi + dk * ln2_lo;
+            }
+            let R = f * f * (0.5 - third * f);
+            if (k == 0) {
+                return f - R;
+            }
+            let dk = k as float64;
+            return dk * ln2_hi - ((R - dk * ln2_lo) - f);
+        }
+        let s = f / (2.0 + f);
+        let dk = k as float64;
+        let z = s * s;
+        i = hx - 398458; // 0x6147a
+        let w = z * z;
+        let j = 440401 - hx; // 0x6b851
+        let t1 = w * (Lg2 + w * (Lg4 + w * Lg6));
+        let t2 = z * (Lg1 + w * (Lg3 + w * (Lg5 + w * Lg7)));
+        i = i | j;
+        let R = t2 + t1;
+        if (i > 0) {
+            let hfsq = 0.5 * f * f;
+            if (k == 0) {
+                return f - (hfsq - s * (hfsq + R));
+            }
+            return dk * ln2_hi - ((hfsq - (s * (hfsq + R) + dk * ln2_lo)) - f);
+        }
+        if (k == 0) {
+            return f - s * (f - R);
+        }
+        return dk * ln2_hi - ((s * (f - R) - dk * ln2_lo) - f);
+    };
+
+    // s_log1p.c: log(1 + x), accurate near zero.
+    export let log1p = func(float64 x) -> float64 {
+        let ln2_hi = float64.from_bits(4604418534311723008); // 0x3FE62E42FEE00000 6.93147180369123816490e-01
+        let ln2_lo = float64.from_bits(4461442080421002358); // 0x3DEA39EF35793C76 1.90821492927058770002e-10
+        let two54 = float64.from_bits(4850376798678024192); // 0x4350000000000000 1.80143985094819840000e+16
+        let Lp1 = float64.from_bits(4604180019048437139); // 0x3FE5555555555593 6.666666666666735130e-01
+        let Lp2 = float64.from_bits(4600877379321592324); // 0x3FD999999997FA04 3.999999999940941908e-01
+        let Lp3 = float64.from_bits(4598818590951641945); // 0x3FD2492494229359 2.857142874366239149e-01
+        let Lp4 = float64.from_bits(4597174411056806063); // 0x3FCC71C51D8E78AF 2.222219843214978396e-01
+        let Lp5 = float64.from_bits(4595719342595441630); // 0x3FC7466496CB03DE 1.818357216161805012e-01
+        let Lp6 = float64.from_bits(4594685411790997151); // 0x3FC39A09D078C69F 1.531383769920937332e-01
+        let Lp7 = float64.from_bits(4594499633228436036); // 0x3FC2F112DF3E5244 1.479819860511658591e-01
+        let two_thirds = float64.from_bits(4604180019048437077); // 0x3FE5555555555555 0.66666666666666666
+        let zero = 0.0;
+        let hx = words.high(x);
+        let ax = hx & 2147483647; // 0x7fffffff
+        let k = 1;
+        let f = 0.0;
+        let hu = 0;
+        if (hx < 1071284858) { // 0x3FDA827A x < 0.41422
+            if (ax >= 1072693248) { // 0x3ff00000 x <= -1.0
+                if (x == -1.0) { // log1p(-1)=+inf
+                    return -two54 / zero;
+                }
+                return (x - x) / (x - x); // log1p(x<-1)=NaN
+            }
+            if (ax < 1042284544) { // 0x3e200000 |x| < 2**-29
+                if (ax < 1016070144) { // 0x3c900000 |x| < 2**-54
+                    return x;
+                }
+                return x - x * x * 0.5;
+            }
+            if (hx > 0 || hx <= -1076707645) { // 0xbfd2bec3 -0.2929<x<0.41422
+                k = 0;
+                f = x;
+                hu = 1;
+            }
+        }
+        if (hx >= 2146435072) { // 0x7ff00000
+            return x + x;
+        }
+        let c = 0.0;
+        if (k != 0) {
+            let u = 0.0;
+            if (hx < 1128267776) { // 0x43400000
+                u = 1.0 + x;
+                hu = words.high(u);
+                k = (hu >> 20) - 1023;
+                if (k > 0) { // correction term
+                    c = 1.0 - (u - x);
+                } else {
+                    c = x - (u - 1.0);
+                }
+                c = c / u;
+            } else {
+                u = x;
+                hu = words.high(u);
+                k = (hu >> 20) - 1023;
+                c = 0.0;
+            }
+            hu = hu & 1048575; // 0x000fffff
+            if (hu < 434334) { // 0x6a09e
+                u = words.with_high(u, hu | 1072693248); // 0x3ff00000 normalize u
+            } else {
+                k = k + 1;
+                u = words.with_high(u, hu | 1071644672); // 0x3fe00000 normalize u/2
+                hu = (1048576 - hu) >> 2; // 0x00100000
+            }
+            f = u - 1.0;
+        }
+        let hfsq = 0.5 * f * f;
+        let dk = k as float64;
+        if (hu == 0) { // |f| < 2**-20
+            if (f == zero) {
+                if (k == 0) {
+                    return zero;
+                }
+                c = c + dk * ln2_lo;
+                return dk * ln2_hi + c;
+            }
+            let R = hfsq * (1.0 - two_thirds * f);
+            if (k == 0) {
+                return f - R;
+            }
+            return dk * ln2_hi - ((R - (dk * ln2_lo + c)) - f);
+        }
+        let s = f / (2.0 + f);
+        let z = s * s;
+        let R = z * (Lp1 + z * (Lp2 + z * (Lp3 + z * (Lp4 + z * (Lp5 + z * (Lp6 + z * Lp7))))));
+        if (k == 0) {
+            return f - (hfsq - s * (hfsq + R));
+        }
+        return dk * ln2_hi - ((hfsq - (s * (hfsq + R) + (dk * ln2_lo + c))) - f);
+    };
+
+    // e_log10.c
+    export let log10 = func(float64 x) -> float64 {
+        let two54 = float64.from_bits(4850376798678024192); // 0x4350000000000000 1.80143985094819840000e+16
+        let ivln10 = float64.from_bits(4601495173785380110); // 0x3FDBCB7B1526E50E 4.34294481903251816668e-01
+        let log10_2hi = float64.from_bits(4599094494223097856); // 0x3FD34413509F6000 3.01029995663611771306e-01
+        let log10_2lo = float64.from_bits(4420844829172378422); // 0x3D59FEF311F12B36 3.69423907715893078616e-13
+        let zero = 0.0;
+        let hx = words.high(x);
+        let k = 0;
+        if (hx < 1048576) { // 0x00100000 x < 2**-1022
+            if ((hx & 2147483647) == 0 && words.low(x) == 0) { // 0x7fffffff log(+-0)=-inf
+                return -two54 / zero;
+            }
+            if (hx < 0) { // log(-#) = NaN
+                return (x - x) / zero;
+            }
+            k = k - 54;
+            x = x * two54; // subnormal number, scale up x
+            hx = words.high(x);
+        }
+        if (hx >= 2146435072) { // 0x7ff00000
+            return x + x;
+        }
+        k = k + (hx >> 20) - 1023;
+        let i = 0;
+        if (k < 0) {
+            i = 1;
+        }
+        hx = (hx & 1048575) | ((1023 - i) << 20); // 0x000fffff 0x3ff
+        let y = (k + i) as float64;
+        x = words.with_high(x, hx);
+        let z = y * log10_2lo + ivln10 * log(x);
+        return z + y * log10_2hi;
+    };
+
+    // Base-2 logarithm, shaped like e_log10.c (see the file comment).
+    export let log2 = func(float64 x) -> float64 {
+        let two54 = float64.from_bits(4850376798678024192); // 0x4350000000000000 1.80143985094819840000e+16
+        let ivln2 = float64.from_bits(4609176140021203710); // 0x3FF71547652B82FE 1.44269504088896338700e+00
+        let zero = 0.0;
+        let hx = words.high(x);
+        let k = 0;
+        if (hx < 1048576) { // 0x00100000 x < 2**-1022
+            if ((hx & 2147483647) == 0 && words.low(x) == 0) { // 0x7fffffff log(+-0)=-inf
+                return -two54 / zero;
+            }
+            if (hx < 0) { // log(-#) = NaN
+                return (x - x) / zero;
+            }
+            k = k - 54;
+            x = x * two54; // subnormal number, scale up x
+            hx = words.high(x);
+        }
+        if (hx >= 2146435072) { // 0x7ff00000
+            return x + x;
+        }
+        k = k + (hx >> 20) - 1023;
+        if ((hx & 1048575) == 0 && words.low(x) == 0) { // 0x000fffff exact power of two
+            return k as float64;
+        }
+        let i = 0;
+        if (k < 0) {
+            i = 1;
+        }
+        hx = (hx & 1048575) | ((1023 - i) << 20); // 0x000fffff 0x3ff
+        let y = (k + i) as float64;
+        x = words.with_high(x, hx);
+        let z = ivln2 * log(x);
+        return z + y;
+    };
+
+    // e_pow.c: x raised to y.
+    export let pow = func(float64 x, float64 y) -> float64 {
+        let zero = 0.0;
+        let one = 1.0;
+        let two = 2.0;
+        let two53 = float64.from_bits(4845873199050653696); // 0x4340000000000000 9007199254740992.0
+        let huge = 1.0e300;
+        let tiny = 1.0e-300;
+        // poly coefs for (3/2)*(log(x)-2s-2/3*s**3
+        let L1 = float64.from_bits(4603579539098120963); // 0x3FE3333333333303 5.99999999999994648725e-01
+        let L2 = float64.from_bits(4601392076422097919); // 0x3FDB6DB6DB6FABFF 4.28571428578550184252e-01
+        let L3 = float64.from_bits(4599676419357746765); // 0x3FD55555518F264D 3.33333329818377432918e-01
+        let L4 = float64.from_bits(4598584653024936193); // 0x3FD17460A91D4101 2.72728123808534006489e-01
+        let L5 = float64.from_bits(4597478449480325989); // 0x3FCD864A93C9DB65 2.30660745775561754067e-01
+        let L6 = float64.from_bits(4596625081194860271); // 0x3FCA7E284A454EEF 2.06975017800338417784e-01
+        let P1 = float64.from_bits(4595172819793696062); // 0x3FC555555555553E 1.66666666666666019037e-01
+        let P2 = float64.from_bits(13791923578850950547); // 0xBF66C16C16BEBD93 -2.77777777770155933842e-03
+        let P3 = float64.from_bits(4544508515198557740); // 0x3F11566AAF25DE2C 6.61375632143793436117e-05
+        let P4 = float64.from_bits(13743786778040626161); // 0xBEBBBD41C5D26BF1 -1.65339022054652515390e-06
+        let P5 = float64.from_bits(4496342204012209360); // 0x3E66376972BEA4D0 4.13813679705723846039e-08
+        let lg2 = float64.from_bits(4604418534313441775); // 0x3FE62E42FEFA39EF 6.93147180559945286227e-01
+        let lg2_h = float64.from_bits(4604418534330597376); // 0x3FE62E4300000000 6.93147182464599609375e-01
+        let lg2_l = float64.from_bits(13700051638354996281); // 0xBE205C610CA86C39 -1.90465429995776804525e-09
+        let ovt = float64.from_bits(4365981760143196926); // 0x3C971547652B82FE 8.0085662595372944372e-0017 -(1024-log2(ovfl+.5ulp))
+        let cp = float64.from_bits(4606838314010018813); // 0x3FEEC709DC3A03FD 9.61796693925975554329e-01 =2/(3ln2)
+        let cp_h = float64.from_bits(4606838314073325568); // 0x3FEEC709E0000000 9.61796700954437255859e-01 =(float)cp
+        let cp_l = float64.from_bits(13708446955223056885); // 0xBE3E2FE0145B01F5 -7.02846165095275826516e-09 =tail of cp_h
+        let ivln2 = float64.from_bits(4609176140021203710); // 0x3FF71547652B82FE 1.44269504088896338700e+00 =1/ln2
+        let ivln2_h = float64.from_bits(4609176139934466048); // 0x3FF7154760000000 1.44269502162933349609e+00 =24b 1/ln2
+        let ivln2_l = float64.from_bits(4491406094830001988); // 0x3E54AE0BF85DDF44 1.92596299112661746887e-08 =1/ln2 tail
+        let third = float64.from_bits(4599676419421066581); // 0x3FD5555555555555 0.3333333333333333333333
+        let hx = words.high(x);
+        let lx = words.low(x);
+        let hy = words.high(y);
+        let ly = words.low(y);
+        let ix = hx & 2147483647; // 0x7fffffff
+        let iy = hy & 2147483647; // 0x7fffffff
+        // y==zero: x**0 = 1
+        if (iy == 0 && ly == 0) {
+            return one;
+        }
+        // +-NaN return x+y
+        if (ix > 2146435072 || (ix == 2146435072 && lx != 0) || iy > 2146435072 || (iy == 2146435072 && ly != 0)) { // 0x7ff00000 0x7ff00000 0x7ff00000 0x7ff00000
+            return x + y;
+        }
+        // determine if y is an odd int when x < 0
+        // yisint = 0 ... y is not an integer
+        // yisint = 1 ... y is an odd int
+        // yisint = 2 ... y is an even int
+        let yisint = 0;
+        if (hx < 0) {
+            if (iy >= 1128267776) { // 0x43400000 even integer y
+                yisint = 2;
+            } else if (iy >= 1072693248) { // 0x3ff00000
+                let k = (iy >> 20) - 1023; // 0x3ff exponent
+                if (k > 20) {
+                    let j = ly >> (52 - k);
+                    if ((j << (52 - k)) == ly) {
+                        yisint = 2 - ((j & 1) as int);
+                    }
+                } else if (ly == 0) {
+                    let j = iy >> (20 - k);
+                    if ((j << (20 - k)) == iy) {
+                        yisint = 2 - (j & 1);
+                    }
+                }
+            }
+        }
+        // special value of y
+        if (ly == 0) {
+            if (iy == 2146435072) { // 0x7ff00000 y is +-inf
+                if (ix == 1072693248 && lx == 0) { // 0x3ff00000 inf**+-1 is NaN
+                    return y - y;
+                }
+                if (ix >= 1072693248) { // 0x3ff00000 (|x|>1)**+-inf = inf,0
+                    if (hy >= 0) {
+                        return y;
+                    }
+                    return zero;
+                }
+                if (hy < 0) { // (|x|<1)**-,+inf = inf,0
+                    return -y;
+                }
+                return zero;
+            }
+            if (iy == 1072693248) { // 0x3ff00000 y is  +-1
+                if (hy < 0) {
+                    return one / x;
+                }
+                return x;
+            }
+            if (hy == 1073741824) { // 0x40000000 y is  2
+                return x * x;
+            }
+            if (hy == 1071644672) { // 0x3fe00000 y is  0.5
+                if (hx >= 0) { // x >= +0
+                    return sqrt(x);
+                }
+            }
+        }
+        let ax = words.abs(x);
+        // special value of x
+        if (lx == 0) {
+            if (ix == 2146435072 || ix == 0 || ix == 1072693248) { // 0x7ff00000 0x3ff00000
+                let z = ax; // x is +-0,+-inf,+-1
+                if (hy < 0) { // z = (1/|x|)
+                    z = one / z;
+                }
+                if (hx < 0) {
+                    if (ix == 1072693248 && yisint == 0) { // 0x3ff00000 (-1)**non-int is NaN
+                        z = (z - z) / (z - z);
+                    } else if (yisint == 1) { // (x<0)**odd = -(|x|**odd)
+                        z = -z;
+                    }
+                }
+                return z;
+            }
+        }
+        let n = (hx >> 31) + 1;
+        // (x<0)**(non-int) is NaN
+        if (n == 0 && yisint == 0) {
+            return (x - x) / (x - x);
+        }
+        let s = one; // s (sign of result -ve**odd) = -1 else = 1
+        if (n == 0 && yisint == 1) { // (-ve)**(odd int)
+            s = -one;
+        }
+        let t1 = 0.0;
+        let t2 = 0.0;
+        // |y| is huge
+        if (iy > 1105199104) { // 0x41e00000 if |y| > 2**31
+            if (iy > 1139802112) { // 0x43f00000 if |y| > 2**64, must o/uflow
+                if (ix <= 1072693247) { // 0x3fefffff
+                    if (hy < 0) {
+                        return huge * huge;
+                    }
+                    return tiny * tiny;
+                }
+                if (ix >= 1072693248) { // 0x3ff00000
+                    if (hy > 0) {
+                        return huge * huge;
+                    }
+                    return tiny * tiny;
+                }
+            }
+            // over/underflow if x is not close to one
+            if (ix < 1072693247) { // 0x3fefffff
+                if (hy < 0) {
+                    return s * huge * huge;
+                }
+                return s * tiny * tiny;
+            }
+            if (ix > 1072693248) { // 0x3ff00000
+                if (hy > 0) {
+                    return s * huge * huge;
+                }
+                return s * tiny * tiny;
+            }
+            // now |1-x| is tiny <= 2**-20, suffice to compute
+            // log(x) by x-x^2/2+x^3/3-x^4/4
+            let t = ax - one; // t has 20 trailing zeros
+            let w = (t * t) * (0.5 - t * (third - t * 0.25));
+            let u = ivln2_h * t; // ivln2_h has 21 sig. bits
+            let v = t * ivln2_l - w * ivln2;
+            t1 = words.with_low(u + v, 0);
+            t2 = v - (t1 - u);
+        } else {
+            n = 0;
+            // take care subnormal number
+            if (ix < 1048576) { // 0x00100000
+                ax = ax * two53;
+                n = n - 53;
+                ix = words.high(ax);
+            }
+            n = n + (ix >> 20) - 1023; // 0x3ff
+            let j = ix & 1048575; // 0x000fffff
+            // determine interval
+            ix = j | 1072693248; // 0x3ff00000 normalize ix
+            let k = 0;
+            if (j <= 235662) { // 0x3988E |x|<sqrt(3/2)
+                k = 0;
+            } else if (j < 767610) { // 0xBB67A |x|<sqrt(3)
+                k = 1;
+            } else {
+                k = 0;
+                n = n + 1;
+                ix = ix - 1048576; // 0x00100000
+            }
+            ax = words.with_high(ax, ix);
+            let bp = 1.0; // bp[0]=1.0, bp[1]=1.5
+            let dp_h = 0.0;
+            let dp_l = 0.0;
+            if (k == 1) {
+                bp = 1.5;
+                dp_h = float64.from_bits(4603444093224222720); // 0x3FE2B80340000000 5.84962487220764160156e-01
+                dp_l = float64.from_bits(4489242115478376454); // 0x3E4CFDEB43CFD006 1.35003920212974897128e-08
+            }
+            // compute ss = s_h+s_l = (x-1)/(x+1) or (x-1.5)/(x+1.5)
+            let u = ax - bp;
+            let v = one / (ax + bp);
+            let ss = u * v;
+            let s_h = words.with_low(ss, 0);
+            // t_h=ax+bp[k] High
+            let t_h = words.from_words(((ix >> 1) | 536870912) + 524288 + (k << 18), 0); // 0x20000000 0x00080000
+            let t_l = ax - (t_h - bp);
+            let s_l = v * ((u - s_h * t_h) - s_h * t_l);
+            // compute log(ax)
+            let s2 = ss * ss;
+            let r = s2 * s2 * (L1 + s2 * (L2 + s2 * (L3 + s2 * (L4 + s2 * (L5 + s2 * L6)))));
+            r = r + s_l * (s_h + ss);
+            s2 = s_h * s_h;
+            t_h = words.with_low(3.0 + s2 + r, 0);
+            t_l = r - ((t_h - 3.0) - s2);
+            // u+v = ss*(1+...)
+            u = s_h * t_h;
+            v = s_l * t_h + t_l * ss;
+            // 2/(3log2)*(ss+...)
+            let p_h = words.with_low(u + v, 0);
+            let p_l = v - (p_h - u);
+            let z_h = cp_h * p_h; // cp_h+cp_l = 2/(3*log2)
+            let z_l = cp_l * p_h + p_l * cp + dp_l;
+            // log2(ax) = (ss+..)*2/(3*log2) = n + dp_h + z_h + z_l
+            let t = n as float64;
+            t1 = words.with_low(((z_h + z_l) + dp_h) + t, 0);
+            t2 = z_l - (((t1 - t) - dp_h) - z_h);
+        }
+        // split up y into y1+y2 and compute (y1+y2)*(t1+t2)
+        let y1 = words.with_low(y, 0);
+        let p_l = (y - y1) * t1 + y * t2;
+        let p_h = y1 * t1;
+        let z = p_l + p_h;
+        let j = words.high(z);
+        let i = words.low(z);
+        if (j >= 1083179008) { // 0x40900000 z >= 1024
+            if (j != 1083179008 || i != 0) { // 0x40900000 if z > 1024
+                return s * huge * huge; // overflow
+            }
+            if (p_l + ovt > z - p_h) { // overflow
+                return s * huge * huge;
+            }
+        } else if ((j & 2147483647) >= 1083231232) { // 0x7fffffff 0x4090cc00 z <= -1075
+            if (j != -1064252416 || i != 0) { // 0xc090cc00 z < -1075
+                return s * tiny * tiny; // underflow
+            }
+            if (p_l <= z - p_h) { // underflow
+                return s * tiny * tiny;
+            }
+        }
+        // compute 2**(p_h+p_l)
+        let a = j & 2147483647; // 0x7fffffff
+        let k = (a >> 20) - 1023; // 0x3ff
+        n = 0;
+        if (a > 1071644672) { // 0x3fe00000 if |z| > 0.5, set n = [z+0.5]
+            n = j + (1048576 >> (k + 1)); // 0x00100000
+            k = ((n & 2147483647) >> 20) - 1023; // 0x7fffffff 0x3ff new k for n
+            let t = words.from_words(n & ~(1048575 >> k), 0); // 0x000fffff
+            n = ((n & 1048575) | 1048576) >> (20 - k); // 0x000fffff 0x00100000
+            if (j < 0) {
+                n = -n;
+            }
+            p_h = p_h - t;
+        }
+        let t = words.with_low(p_l + p_h, 0);
+        let u = t * lg2_h;
+        let v = (p_l - (t - p_h)) * lg2 + t * lg2_l;
+        z = u + v;
+        let w = v - (z - u);
+        t = z * z;
+        t1 = z - t * (P1 + t * (P2 + t * (P3 + t * (P4 + t * P5))));
+        let r = (z * t1) / (t1 - two) - (w + z * w);
+        z = one - (r - z);
+        j = words.high(z);
+        j = j + (n << 20);
+        if ((j >> 20) <= 0) { // subnormal output
+            z = words.scalbn(z, n);
+        } else {
+            z = words.with_high(z, words.high(z) + (n << 20));
+        }
+        return s * z;
+    };
+
+    // s_sin.c
+    export let sin = func(float64 x) -> float64 {
+        let ix = words.high(x) & 2147483647; // 0x7fffffff
+        if (ix <= 1072243195) { // 0x3fe921fb |x| ~< pi/4
+            return trig.sin_kernel(x, 0.0, 0);
+        }
+        if (ix >= 2146435072) { // 0x7ff00000 sin(Inf or NaN) is NaN
+            return x - x;
+        }
+        // argument reduction needed
+        let [n, y0, y1] = trig.rem_pio2(x);
+        let quadrant = n & 3;
+        if (quadrant == 0) {
+            return trig.sin_kernel(y0, y1, 1);
+        }
+        if (quadrant == 1) {
+            return trig.cos_kernel(y0, y1);
+        }
+        if (quadrant == 2) {
+            return -trig.sin_kernel(y0, y1, 1);
+        }
+        return -trig.cos_kernel(y0, y1);
+    };
+
+    // s_cos.c
+    export let cos = func(float64 x) -> float64 {
+        let ix = words.high(x) & 2147483647; // 0x7fffffff
+        if (ix <= 1072243195) { // 0x3fe921fb |x| ~< pi/4
+            return trig.cos_kernel(x, 0.0);
+        }
+        if (ix >= 2146435072) { // 0x7ff00000 cos(Inf or NaN) is NaN
+            return x - x;
+        }
+        // argument reduction needed
+        let [n, y0, y1] = trig.rem_pio2(x);
+        let quadrant = n & 3;
+        if (quadrant == 0) {
+            return trig.cos_kernel(y0, y1);
+        }
+        if (quadrant == 1) {
+            return -trig.sin_kernel(y0, y1, 1);
+        }
+        if (quadrant == 2) {
+            return -trig.cos_kernel(y0, y1);
+        }
+        return trig.sin_kernel(y0, y1, 1);
+    };
+
+    // s_tan.c
+    export let tan = func(float64 x) -> float64 {
+        let ix = words.high(x) & 2147483647; // 0x7fffffff
+        if (ix <= 1072243195) { // 0x3fe921fb |x| ~< pi/4
+            return trig.tan_kernel(x, 0.0, 1);
+        }
+        if (ix >= 2146435072) { // 0x7ff00000 tan(Inf or NaN) is NaN
+            return x - x;
+        }
+        // argument reduction needed
+        let [n, y0, y1] = trig.rem_pio2(x);
+        return trig.tan_kernel(y0, y1, 1 - ((n & 1) << 1)); // 1 -- n even, -1 -- n odd
+    };
+
+    // R(x^2) of e_asin.c and e_acos.c: p/q.
+    let asin_ratio = func(float64 t) -> float64 {
+        let pS0 = float64.from_bits(4595172819793696085); // 0x3FC5555555555555 1.66666666666666657415e-01
+        let pS1 = float64.from_bits(13822908529170411389); // 0xBFD4D61203EB6F7D -3.25565818622400915405e-01
+        let pS2 = float64.from_bits(4596417465768494165); // 0x3FC9C1550E884455 2.01212532134862925881e-01
+        let pS3 = float64.from_bits(13809305468778614587); // 0xBFA48228B5688F3B -4.00555345006794114027e-02
+        let pS4 = float64.from_bits(4560439845004096136); // 0x3F49EFE07501B288 7.91534994289814532176e-04
+        let pS5 = float64.from_bits(4540259411154564873); // 0x3F023DE10DFDF709 3.47933107596021167570e-05
+        let qS1 = float64.from_bits(13835966419869248843); // 0xC0033A271C8A2D4B -2.40339491173441421878e+00
+        let qS2 = float64.from_bits(4611733184086379208); // 0x40002AE59C598AC8 2.02094576023350569471e+00
+        let qS3 = float64.from_bits(13827746767276147033); // 0xBFE6066C1B8D0159 -6.88283971605453293030e-01
+        let qS4 = float64.from_bits(4590215604441354882); // 0x3FB3B8C5B12E9282 7.70381505559019352791e-02
+        let p = t * (pS0 + t * (pS1 + t * (pS2 + t * (pS3 + t * (pS4 + t * pS5)))));
+        let q = 1.0 + t * (qS1 + t * (qS2 + t * (qS3 + t * qS4)));
+        return p / q;
+    };
+
+    // e_asin.c
+    export let asin = func(float64 x) -> float64 {
+        let pio2_hi = float64.from_bits(4609753056924675352); // 0x3FF921FB54442D18 1.57079632679489655800e+00
+        let pio2_lo = float64.from_bits(4364452196894661639); // 0x3C91A62633145C07 6.12323399573676603587e-17
+        let pio4_hi = float64.from_bits(4605249457297304856); // 0x3FE921FB54442D18 7.85398163397448278999e-01
+        let hx = words.high(x);
+        let ix = hx & 2147483647; // 0x7fffffff
+        if (ix >= 1072693248) { // 0x3ff00000 |x|>= 1
+            if (ix == 1072693248 && words.low(x) == 0) { // 0x3ff00000 asin(1)=+-pi/2 with inexact
+                return x * pio2_hi + x * pio2_lo;
+            }
+            return (x - x) / (x - x); // asin(|x|>1) is NaN
+        }
+        if (ix < 1071644672) { // 0x3fe00000 |x|<0.5
+            if (ix < 1044381696) { // 0x3e400000 if |x| < 2**-27
+                return x;
+            }
+            let t = x * x;
+            let w = asin_ratio(t);
+            return x + x * w;
+        }
+        // 1> |x|>= 0.5
+        let w = 1.0 - words.abs(x);
+        let t = w * 0.5;
+        let r = asin_ratio(t);
+        let s = sqrt(t);
+        if (ix >= 1072640819) { // 0x3FEF3333 if |x| > 0.975
+            t = pio2_hi - (2.0 * (s + s * r) - pio2_lo);
+        } else {
+            w = words.with_low(s, 0);
+            let c = (t - w * w) / (s + w);
+            let p = 2.0 * s * r - (pio2_lo - 2.0 * c);
+            let q = pio4_hi - 2.0 * w;
+            t = pio4_hi - (p - q);
+        }
+        if (hx > 0) {
+            return t;
+        }
+        return -t;
+    };
+
+    // e_acos.c
+    export let acos = func(float64 x) -> float64 {
+        let pi = float64.from_bits(4614256656552045848); // 0x400921FB54442D18 3.14159265358979311600e+00
+        let pio2_hi = float64.from_bits(4609753056924675352); // 0x3FF921FB54442D18 1.57079632679489655800e+00
+        let pio2_lo = float64.from_bits(4364452196894661639); // 0x3C91A62633145C07 6.12323399573676603587e-17
+        let hx = words.high(x);
+        let ix = hx & 2147483647; // 0x7fffffff
+        if (ix >= 1072693248) { // 0x3ff00000 |x| >= 1
+            if (ix == 1072693248 && words.low(x) == 0) { // 0x3ff00000 |x|==1
+                if (hx > 0) { // acos(1) = 0
+                    return 0.0;
+                }
+                return pi + 2.0 * pio2_lo; // acos(-1)= pi
+            }
+            return (x - x) / (x - x); // acos(|x|>1) is NaN
+        }
+        if (ix < 1071644672) { // 0x3fe00000 |x| < 0.5
+            if (ix <= 1012924416) { // 0x3c600000 if|x|<2**-57
+                return pio2_hi + pio2_lo;
+            }
+            let z = x * x;
+            let r = asin_ratio(z);
+            return pio2_hi - (x - (pio2_lo - x * r));
+        }
+        if (hx < 0) { // x < -0.5
+            let z = (1.0 + x) * 0.5;
+            let s = sqrt(z);
+            let r = asin_ratio(z);
+            let w = r * s - pio2_lo;
+            return pi - 2.0 * (s + w);
+        }
+        // x > 0.5
+        let z = (1.0 - x) * 0.5;
+        let s = sqrt(z);
+        let df = words.with_low(s, 0);
+        let c = (z - df * df) / (s + df);
+        let r = asin_ratio(z);
+        let w = r * s + c;
+        return 2.0 * (df + w);
+    };
+
+    // s_atan.c
+    export let atan = func(float64 x) -> float64 {
+        let aT0 = float64.from_bits(4599676419421066509); // 0x3FD555555555550D 3.33333333333329318027e-01
+        let aT1 = float64.from_bits(13819745816549059524); // 0xBFC999999998EBC4 -1.99999999998764832476e-01
+        let aT2 = float64.from_bits(4594314991288484863); // 0x3FC24924920083FF 1.42857142725034663711e-01
+        let aT3 = float64.from_bits(13816042856347014769); // 0xBFBC71C6FE231671 -1.11111104054623557880e-01
+        let aT4 = float64.from_bits(4591215095208222830); // 0x3FB745CDC54C206E 9.09088713343650656196e-02
+        let aT5 = float64.from_bits(13813579038447671917); // 0xBFB3B0F2AF749A6D -7.69187620504482999495e-02
+        let aT6 = float64.from_bits(4589464229703073105); // 0x3FB10D66A0D03D51 6.66107313738753120669e-02
+        let aT7 = float64.from_bits(13811939918460419482); // 0xBFADDE2D52DEFD9A -5.83357013379057348645e-02
+        let aT8 = float64.from_bits(4587333258118041067); // 0x3FA97B4B24760DEB 4.97687799461593236017e-02
+        let aT9 = float64.from_bits(13808797612367309871); // 0xBFA2B4442C6A6C2F -3.65315727442169155270e-02
+        let aT10 = float64.from_bits(4580351289466214929); // 0x3F90AD3AE322DA11 1.62858201153657823623e-02
+        let one = 1.0;
+        let hx = words.high(x);
+        let ix = hx & 2147483647; // 0x7fffffff
+        if (ix >= 1141899264) { // 0x44100000 if |x| >= 2^66
+            if (ix > 2146435072 || (ix == 2146435072 && words.low(x) != 0)) { // 0x7ff00000 0x7ff00000 NaN
+                return x + x;
+            }
+            let hi = float64.from_bits(4609753056924675352); // 0x3FF921FB54442D18 atan(inf)hi 1.57079632679489655800e+00
+            let lo = float64.from_bits(4364452196894661639); // 0x3C91A62633145C07 atan(inf)lo 6.12323399573676603587e-17
+            if (hx > 0) {
+                return hi + lo;
+            }
+            return -hi - lo;
+        }
+        let id = -1;
+        if (ix < 1071382528) { // 0x3fdc0000 |x| < 0.4375
+            if (ix < 1042284544) { // 0x3e200000 |x| < 2^-29
+                return x;
+            }
+        } else {
+            x = words.abs(x);
+            if (ix < 1072889856) { // 0x3ff30000 |x| < 1.1875
+                if (ix < 1072037888) { // 0x3fe60000 7/16 <=|x|<11/16
+                    id = 0;
+                    x = (2.0 * x - one) / (2.0 + x);
+                } else { // 11/16<=|x|< 19/16
+                    id = 1;
+                    x = (x - one) / (x + one);
+                }
+            } else {
+                if (ix < 1073971200) { // 0x40038000 |x| < 2.4375
+                    id = 2;
+                    x = (x - 1.5) / (one + 1.5 * x);
+                } else { // 2.4375 <= |x| < 2^66
+                    id = 3;
+                    x = -1.0 / x;
+                }
+            }
+        }
+        // end of argument reduction
+        let z = x * x;
+        let w = z * z;
+        // break sum from i=0 to 10 aT[i]z**(i+1) into odd and even poly
+        let s1 = z * (aT0 + w * (aT2 + w * (aT4 + w * (aT6 + w * (aT8 + w * aT10)))));
+        let s2 = w * (aT1 + w * (aT3 + w * (aT5 + w * (aT7 + w * aT9))));
+        if (id < 0) {
+            return x - x * (s1 + s2);
+        }
+        let hi = 0.0;
+        let lo = 0.0;
+        if (id == 0) {
+            hi = float64.from_bits(4602023952714414927); // 0x3FDDAC670561BB4F atan(0.5)hi 4.63647609000806093515e-01
+            lo = float64.from_bits(4357843414468748770); // 0x3C7A2B7F222F65E2 atan(0.5)lo 2.26987774529616870924e-17
+        } else if (id == 1) {
+            hi = float64.from_bits(4605249457297304856); // 0x3FE921FB54442D18 atan(1.0)hi 7.85398163397448278999e-01
+            lo = float64.from_bits(4359948597267291143); // 0x3C81A62633145C07 atan(1.0)lo 3.06161699786838301793e-17
+        } else if (id == 2) {
+            hi = float64.from_bits(4607027438436873883); // 0x3FEF730BD281F69B atan(1.5)hi 9.82793723247329054082e-01
+            lo = float64.from_bits(4354989122426817469); // 0x3C7007887AF0CBBD atan(1.5)lo 1.39033110312309984516e-17
+        } else {
+            hi = float64.from_bits(4609753056924675352); // 0x3FF921FB54442D18 atan(inf)hi 1.57079632679489655800e+00
+            lo = float64.from_bits(4364452196894661639); // 0x3C91A62633145C07 atan(inf)lo 6.12323399573676603587e-17
+        }
+        z = hi - ((x * (s1 + s2) - lo) - x);
+        if (hx < 0) {
+            return -z;
+        }
+        return z;
+    };
+
+    // e_atan2.c: the angle of the point (x, y).
+    export let atan2 = func(float64 y, float64 x) -> float64 {
+        let tiny = 1.0e-300;
+        let pi_o_4 = float64.from_bits(4605249457297304856); // 0x3FE921FB54442D18 7.8539816339744827900E-01
+        let pi_o_2 = float64.from_bits(4609753056924675352); // 0x3FF921FB54442D18 1.5707963267948965580E+00
+        let pi = float64.from_bits(4614256656552045848); // 0x400921FB54442D18 3.1415926535897931160E+00
+        let pi_lo = float64.from_bits(4368955796522032135); // 0x3CA1A62633145C07 1.2246467991473531772E-16
+        let hx = words.high(x);
+        let ix = hx & 2147483647; // 0x7fffffff
+        let lx = words.low(x);
+        let hy = words.high(y);
+        let iy = hy & 2147483647; // 0x7fffffff
+        let ly = words.low(y);
+        if (ix > 2146435072 || (ix == 2146435072 && lx != 0) || iy > 2146435072 || (iy == 2146435072 && ly != 0)) { // 0x7ff00000 0x7ff00000 0x7ff00000 0x7ff00000
+            return x + y; // x or y is NaN
+        }
+        if (hx == 1072693248 && lx == 0) { // 0x3ff00000 x=1.0
+            return atan(y);
+        }
+        let m = ((hy >> 31) & 1) | ((hx >> 30) & 2); // 2*sign(x)+sign(y)
+        // when y = 0
+        if (iy == 0 && ly == 0) {
+            if (m == 0 || m == 1) { // atan(+-0,+anything)=+-0
+                return y;
+            }
+            if (m == 2) { // atan(+0,-anything) = pi
+                return pi + tiny;
+            }
+            return -pi - tiny; // atan(-0,-anything) =-pi
+        }
+        // when x = 0
+        if (ix == 0 && lx == 0) {
+            if (hy < 0) {
+                return -pi_o_2 - tiny;
+            }
+            return pi_o_2 + tiny;
+        }
+        // when x is INF
+        if (ix == 2146435072) { // 0x7ff00000
+            if (iy == 2146435072) { // 0x7ff00000
+                if (m == 0) { // atan(+INF,+INF)
+                    return pi_o_4 + tiny;
+                }
+                if (m == 1) { // atan(-INF,+INF)
+                    return -pi_o_4 - tiny;
+                }
+                if (m == 2) { // atan(+INF,-INF)
+                    return 3.0 * pi_o_4 + tiny;
+                }
+                return -3.0 * pi_o_4 - tiny; // atan(-INF,-INF)
+            }
+            if (m == 0) { // atan(+...,+INF)
+                return 0.0;
+            }
+            if (m == 1) { // atan(-...,+INF)
+                return -0.0;
+            }
+            if (m == 2) { // atan(+...,-INF)
+                return pi + tiny;
+            }
+            return -pi - tiny; // atan(-...,-INF)
+        }
+        // when y is INF
+        if (iy == 2146435072) { // 0x7ff00000
+            if (hy < 0) {
+                return -pi_o_2 - tiny;
+            }
+            return pi_o_2 + tiny;
+        }
+        // compute y/x
+        let k = (iy - ix) >> 20;
+        let z = 0.0;
+        if (k > 60) { // |y/x| >  2**60
+            z = pi_o_2 + 0.5 * pi_lo;
+        } else if (hx < 0 && k < -60) { // |y|/x < -2**60
+            z = 0.0;
+        } else { // safe to do y/x
+            z = atan(words.abs(y / x));
+        }
+        if (m == 0) { // atan(+,+)
+            return z;
+        }
+        if (m == 1) { // atan(-,+)
+            return -z;
+        }
+        if (m == 2) { // atan(+,-)
+            return pi - (z - pi_lo);
+        }
+        return (z - pi_lo) - pi; // atan(-,-)
+    };
+
+    // e_sinh.c
+    export let sinh = func(float64 x) -> float64 {
+        let one = 1.0;
+        let shuge = 1.0e307;
+        let jx = words.high(x);
+        let ix = jx & 2147483647; // 0x7fffffff
+        // x is INF or NaN
+        if (ix >= 2146435072) { // 0x7ff00000
+            return x + x;
+        }
+        let h = 0.5;
+        if (jx < 0) {
+            h = -h;
+        }
+        // |x| in [0,22], return sign(x)*0.5*(E+E/(E+1)))
+        if (ix < 1077280768) { // 0x40360000 |x|<22
+            if (ix < 1043333120) { // 0x3e300000 |x|<2**-28; sinh(tiny) = tiny with inexact
+                return x;
+            }
+            let t = expm1(words.abs(x));
+            if (ix < 1072693248) { // 0x3ff00000
+                return h * (2.0 * t - t * t / (t + one));
+            }
+            return h * (t + t / (t + one));
+        }
+        // |x| in [22, log(maxdouble)] return 0.5*exp(|x|)
+        if (ix < 1082535490) { // 0x40862E42
+            return h * exp(words.abs(x));
+        }
+        // |x| in [log(maxdouble), overflowthresold]
+        let lx = words.low(x);
+        if (ix < 1082536910 || (ix == 1082536910 && lx <= 2411329661)) { // 0x408633CE 0x408633ce 0x8fb9f87d
+            let w = exp(0.5 * words.abs(x));
+            let t = h * w;
+            return t * w;
+        }
+        // |x| > overflowthresold, sinh(x) overflow
+        return x * shuge;
+    };
+
+    // e_cosh.c
+    export let cosh = func(float64 x) -> float64 {
+        let one = 1.0;
+        let half = 0.5;
+        let huge = 1.0e300;
+        let ix = words.high(x) & 2147483647; // 0x7fffffff
+        // x is INF or NaN
+        if (ix >= 2146435072) { // 0x7ff00000
+            return x * x;
+        }
+        // |x| in [0,0.5*ln2], return 1+expm1(|x|)^2/(2*exp(|x|))
+        if (ix < 1071001155) { // 0x3fd62e43
+            let t = expm1(words.abs(x));
+            let w = one + t;
+            if (ix < 1015021568) { // 0x3c800000 cosh(tiny) = 1
+                return w;
+            }
+            return one + (t * t) / (w + w);
+        }
+        // |x| in [0.5*ln2,22], return (exp(|x|)+1/exp(|x|)/2;
+        if (ix < 1077280768) { // 0x40360000
+            let t = exp(words.abs(x));
+            return half * t + half / t;
+        }
+        // |x| in [22, log(maxdouble)] return half*exp(|x|)
+        if (ix < 1082535490) { // 0x40862E42
+            return half * exp(words.abs(x));
+        }
+        // |x| in [log(maxdouble), overflowthresold]
+        let lx = words.low(x);
+        if (ix < 1082536910 || (ix == 1082536910 && lx <= 2411329661)) { // 0x408633CE 0x408633ce 0x8fb9f87d
+            let w = exp(half * words.abs(x));
+            let t = half * w;
+            return t * w;
+        }
+        // |x| > overflowthresold, cosh(x) overflow
+        return huge * huge;
+    };
+
+    // s_tanh.c
+    export let tanh = func(float64 x) -> float64 {
+        let one = 1.0;
+        let two = 2.0;
+        let tiny = 1.0e-300;
+        let jx = words.high(x);
+        let ix = jx & 2147483647; // 0x7fffffff
+        // x is INF or NaN
+        if (ix >= 2146435072) { // 0x7ff00000
+            if (jx >= 0) { // tanh(+-inf)=+-1
+                return one / x + one;
+            }
+            return one / x - one; // tanh(NaN) = NaN
+        }
+        let z = 0.0;
+        if (ix < 1077280768) { // 0x40360000 |x|<22
+            if (ix < 1015021568) { // 0x3c800000 |x|<2**-55
+                return x * (one + x); // tanh(small) = small
+            }
+            if (ix >= 1072693248) { // 0x3ff00000 |x|>=1
+                let t = expm1(two * words.abs(x));
+                z = one - two / (t + two);
+            } else {
+                let t = expm1(-two * words.abs(x));
+                z = -t / (t + two);
+            }
+        } else { // |x| > 22, return +-1
+            z = one - tiny; // raised inexact flag
+        }
+        if (jx >= 0) {
+            return z;
+        }
+        return -z;
+    };
+
+    // Degrees to radians: x times the nearest float64 to pi/180.
+    export let to_radians = func(float64 degrees) -> float64 {
+        return degrees * float64.from_bits(4580687790476533049); // 0x3F91DF46A2529D39 0.017453292519943295
+    };
+
+    // Radians to degrees: x times the nearest float64 to 180/pi.
+    export let to_degrees = func(float64 radians) -> float64 {
+        return radians * float64.from_bits(4633260481411531256); // 0x404CA5DC1A63C1F8 57.29577951308232
+    };
+);

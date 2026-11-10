@@ -1,0 +1,26 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: modulus not positive
+let big = import:Std.Math.BigInteger;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Main = module:program.Entry (
+    let test_bit_probe: int64 = 5;
+
+    let parse_probe = func(int radix) -> big.BigInteger {
+        return result.value_or<big.BigInteger>(big.parse_radix("1", radix), big.Zero);
+    };
+
+    let digits_probe = func() -> uint32[list] {
+        let limbs: uint32[list] = [5];
+        return limbs;
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("before");
+        console.print_line(big.Ten.mod_inverse(big.Zero).to_string());
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

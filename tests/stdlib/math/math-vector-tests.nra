@@ -1,0 +1,155 @@
+let math = import:Std.Math.Math;
+let test = import:Std.Test;
+let vectors = import:MathVectors;
+
+// Std.Math.Math against checked-in vectors (support/math-vectors.nra): every
+// result must have exactly the bit pattern of the fdlibm 5.3 reference, and
+// lie within the recorded distance of the platform libm result.
+let MathVectorTests = module (
+    let NaN: uint64 = 9221120237041090560;
+    let SignMask: uint64 = 9223372036854775807;
+
+    // Distance in ulps between two float64 bit patterns, with -0.0 and 0.0
+    // at distance 0; a NaN differs from everything but itself.
+    let distance = func(uint64 a, uint64 b) -> uint64 {
+        if (a == b) {
+            return 0;
+        }
+        if (a == NaN || b == NaN) {
+            return 18446744073709551615;
+        }
+        let ma = a & SignMask;
+        let mb = b & SignMask;
+        if ((a >> 63) == (b >> 63)) {
+            if (ma > mb) {
+                return ma - mb;
+            }
+            return mb - ma;
+        }
+        return ma + mb;
+    };
+
+    let check = func(string name, uint64 x, uint64 got, uint64 expected, uint64 libm, uint64 libm_ulps, bool compare_libm) -> void {
+        if (got != expected) {
+            test.fail(name + " of bits " + x.to_string() + ": expected bits " + expected.to_string() + " ("
+                + float64.from_bits(expected).to_string() + "), got " + got.to_string() + " ("
+                + float64.from_bits(got).to_string() + ")");
+        }
+        if (compare_libm && distance(got, libm) > libm_ulps) {
+            test.fail(name + " of bits " + x.to_string() + ": " + distance(got, libm).to_string()
+                + " ulps from libm");
+        }
+    };
+
+    let check_unary = func(string name, func(float64) -> float64 f, uint64[list] cases, uint64 libm_ulps) -> void {
+        test.assert(cases.length > 0);
+        let i = 0;
+        while (i < cases.length) {
+            let got = f(float64.from_bits(cases[i])).to_bits();
+            check(name, cases[i], got, cases[i + 1], cases[i + 2], libm_ulps, true);
+            i = i + 3;
+        }
+    };
+
+    let check_binary = func(string name, func(float64, float64) -> float64 f, uint64[list] cases, uint64 libm_ulps) -> void {
+        test.assert(cases.length > 0);
+        let i = 0;
+        while (i < cases.length) {
+            let x = float64.from_bits(cases[i]);
+            let y = float64.from_bits(cases[i + 1]);
+            let got = f(x, y).to_bits();
+            // pow(+-1, +-inf) and pow(+-1, NaN): fdlibm gives NaN, C99 gives 1.
+            let documented = name == "pow" && (x == 1.0 || x == -1.0) && (y != y || y - y != 0.0);
+            check(name, cases[i], got, cases[i + 2], cases[i + 3], libm_ulps, !documented);
+            i = i + 4;
+        }
+    };
+
+    export let test_sqrt = func() -> void {
+        check_unary("sqrt", math.sqrt, vectors.sqrt_cases(), vectors.sqrt_libm_ulps());
+    };
+
+    export let test_cbrt = func() -> void {
+        check_unary("cbrt", math.cbrt, vectors.cbrt_cases(), vectors.cbrt_libm_ulps());
+    };
+
+    export let test_exp = func() -> void {
+        check_unary("exp", math.exp, vectors.exp_cases(), vectors.exp_libm_ulps());
+    };
+
+    export let test_expm1 = func() -> void {
+        check_unary("expm1", math.expm1, vectors.expm1_cases(), vectors.expm1_libm_ulps());
+    };
+
+    export let test_log = func() -> void {
+        check_unary("log", math.log, vectors.log_cases(), vectors.log_libm_ulps());
+    };
+
+    export let test_log1p = func() -> void {
+        check_unary("log1p", math.log1p, vectors.log1p_cases(), vectors.log1p_libm_ulps());
+    };
+
+    export let test_log10 = func() -> void {
+        check_unary("log10", math.log10, vectors.log10_cases(), vectors.log10_libm_ulps());
+    };
+
+    export let test_log2 = func() -> void {
+        check_unary("log2", math.log2, vectors.log2_cases(), vectors.log2_libm_ulps());
+    };
+
+    export let test_sin = func() -> void {
+        check_unary("sin", math.sin, vectors.sin_cases(), vectors.sin_libm_ulps());
+    };
+
+    export let test_cos = func() -> void {
+        check_unary("cos", math.cos, vectors.cos_cases(), vectors.cos_libm_ulps());
+    };
+
+    export let test_tan = func() -> void {
+        check_unary("tan", math.tan, vectors.tan_cases(), vectors.tan_libm_ulps());
+    };
+
+    export let test_asin = func() -> void {
+        check_unary("asin", math.asin, vectors.asin_cases(), vectors.asin_libm_ulps());
+    };
+
+    export let test_acos = func() -> void {
+        check_unary("acos", math.acos, vectors.acos_cases(), vectors.acos_libm_ulps());
+    };
+
+    export let test_atan = func() -> void {
+        check_unary("atan", math.atan, vectors.atan_cases(), vectors.atan_libm_ulps());
+    };
+
+    export let test_sinh = func() -> void {
+        check_unary("sinh", math.sinh, vectors.sinh_cases(), vectors.sinh_libm_ulps());
+    };
+
+    export let test_cosh = func() -> void {
+        check_unary("cosh", math.cosh, vectors.cosh_cases(), vectors.cosh_libm_ulps());
+    };
+
+    export let test_tanh = func() -> void {
+        check_unary("tanh", math.tanh, vectors.tanh_cases(), vectors.tanh_libm_ulps());
+    };
+
+    export let test_to_radians = func() -> void {
+        check_unary("to_radians", math.to_radians, vectors.to_radians_cases(), vectors.to_radians_libm_ulps());
+    };
+
+    export let test_to_degrees = func() -> void {
+        check_unary("to_degrees", math.to_degrees, vectors.to_degrees_cases(), vectors.to_degrees_libm_ulps());
+    };
+
+    export let test_pow = func() -> void {
+        check_binary("pow", math.pow, vectors.pow_cases(), vectors.pow_libm_ulps());
+    };
+
+    export let test_atan2 = func() -> void {
+        check_binary("atan2", math.atan2, vectors.atan2_cases(), vectors.atan2_libm_ulps());
+    };
+
+    export let test_hypot = func() -> void {
+        check_binary("hypot", math.hypot, vectors.hypot_cases(), vectors.hypot_libm_ulps());
+    };
+);

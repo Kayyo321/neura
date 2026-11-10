@@ -1,0 +1,178 @@
+let math = import:Std.Math.Math;
+let test = import:Std.Test;
+
+// Std.Math.Math constants and fdlibm's documented special values
+// (Stdlib.md section 10.1). Exact comparisons: assert_equal_float64
+// distinguishes 0.0 from -0.0, and NaN results must be the canonical NaN.
+let MathTests = module (
+    let NaN: uint64 = 9221120237041090560;
+
+    let zero = func() -> float64 {
+        return 0.0;
+    };
+
+    let infinity = func() -> float64 {
+        return 1.0 / zero();
+    };
+
+    let nan = func() -> float64 {
+        return zero() / zero();
+    };
+
+    let exact = func(float64 expected, float64 actual) -> void {
+        test.assert_equal_float64(expected, actual);
+    };
+
+    let canonical_nan = func(float64 actual) -> void {
+        test.assert_equal_uint64(NaN, actual.to_bits());
+    };
+
+    export let test_constants = func() -> void {
+        test.assert_equal_uint64(4614256656552045848, math.Pi.to_bits());
+        test.assert_equal_uint64(4618760256179416344, math.Tau.to_bits());
+        test.assert_equal_uint64(4613303445314885481, math.E.to_bits());
+        test.assert_equal_uint64(4604418534313441775, math.Ln2.to_bits());
+        test.assert_equal_uint64(4612367379483415830, math.Ln10.to_bits());
+        test.assert_equal_uint64(4609047870845172685, math.Sqrt2.to_bits());
+        exact(3.141592653589793, math.Pi);
+        exact(2.718281828459045, math.E);
+    };
+
+    export let test_sqrt = func() -> void {
+        exact(-0.0, math.sqrt(-0.0));
+        exact(0.0, math.sqrt(0.0));
+        exact(2.0, math.sqrt(4.0));
+        exact(math.Sqrt2, math.sqrt(2.0));
+        exact(infinity(), math.sqrt(infinity()));
+        canonical_nan(math.sqrt(-1.0));
+        canonical_nan(math.sqrt(-infinity()));
+        canonical_nan(math.sqrt(-nan()));
+        // The smallest subnormal 2^-1074 has the exact root 2^-537.
+        exact(float64.from_bits(2188749418902061056), math.sqrt(float64.from_bits(1)));
+        exact(1.0000000000000002, math.sqrt(1.0000000000000004));
+    };
+
+    export let test_exp_and_log_special_values = func() -> void {
+        exact(1.0, math.exp(0.0));
+        exact(1.0, math.exp(-0.0));
+        exact(0.0, math.exp(-infinity()));
+        exact(infinity(), math.exp(infinity()));
+        exact(infinity(), math.exp(710.0));
+        exact(0.0, math.exp(-746.0));
+        canonical_nan(math.exp(-nan()));
+        exact(-1.0, math.expm1(-infinity()));
+        exact(-0.0, math.expm1(-0.0));
+        exact(0.0, math.log(1.0));
+        exact(-infinity(), math.log(0.0));
+        exact(-infinity(), math.log(-0.0));
+        canonical_nan(math.log(-1.0));
+        canonical_nan(math.log(-nan()));
+        exact(infinity(), math.log(infinity()));
+        exact(-infinity(), math.log1p(-1.0));
+        exact(-0.0, math.log1p(-0.0));
+        canonical_nan(math.log1p(-2.0));
+        exact(-infinity(), math.log10(0.0));
+        exact(-infinity(), math.log2(-0.0));
+        canonical_nan(math.log2(-1.0));
+    };
+
+    export let test_exact_logarithms = func() -> void {
+        // log10(10^n) = n for n = 0 through 22 (fdlibm e_log10.c), and
+        // log2(2^k) = k.
+        let power = 1.0;
+        for (let n = 0; n <= 22; n = n + 1) {
+            exact(n as float64, math.log10(power));
+            power = power * 10.0;
+        }
+        let two = 1.0;
+        for (let k = 0; k < 1024; k = k + 1) {
+            exact(k as float64, math.log2(two));
+            if (k > 0) {
+                exact(-(k as float64), math.log2(1.0 / two));
+            }
+            two = two * 2.0;
+        }
+        exact(-1074.0, math.log2(float64.from_bits(1)));
+    };
+
+    export let test_pow_special_values = func() -> void {
+        exact(1.0, math.pow(nan(), 0.0));
+        exact(1.0, math.pow(0.0, -0.0));
+        canonical_nan(math.pow(1.0, infinity()));
+        canonical_nan(math.pow(-1.0, -infinity()));
+        canonical_nan(math.pow(1.0, nan()));
+        canonical_nan(math.pow(nan(), 1.0));
+        canonical_nan(math.pow(-8.0, 1.0 / 3.0));
+        exact(-8.0, math.pow(-2.0, 3.0));
+        exact(16.0, math.pow(-2.0, 4.0));
+        exact(-infinity(), math.pow(-0.0, -3.0));
+        exact(infinity(), math.pow(-0.0, -4.0));
+        exact(-0.0, math.pow(-0.0, 3.0));
+        exact(infinity(), math.pow(0.0, -2.0));
+        exact(0.0, math.pow(0.5, infinity()));
+        exact(infinity(), math.pow(0.5, -infinity()));
+        exact(infinity(), math.pow(2.0, infinity()));
+        exact(-infinity(), math.pow(-infinity(), 3.0));
+        exact(float64.from_bits(1), math.pow(2.0, -1074.0));
+        exact(0.0, math.pow(2.0, -1076.0));
+        exact(infinity(), math.pow(2.0, 1024.0));
+        exact(8.98846567431158e307, math.pow(2.0, 1023.0));
+        exact(2.0, math.pow(4.0, 0.5));
+        exact(0.25, math.pow(2.0, -2.0));
+    };
+
+    export let test_trigonometric_special_values = func() -> void {
+        exact(-0.0, math.sin(-0.0));
+        exact(1.0, math.cos(-0.0));
+        exact(-0.0, math.tan(-0.0));
+        canonical_nan(math.sin(infinity()));
+        canonical_nan(math.cos(-infinity()));
+        canonical_nan(math.tan(nan()));
+        exact(-0.0, math.asin(-0.0));
+        exact(math.Pi / 2.0, math.asin(1.0));
+        exact(-math.Pi / 2.0, math.asin(-1.0));
+        canonical_nan(math.asin(2.0));
+        exact(0.0, math.acos(1.0));
+        exact(math.Pi, math.acos(-1.0));
+        canonical_nan(math.acos(-1.5));
+        exact(math.Pi / 2.0, math.atan(infinity()));
+        exact(-0.0, math.atan(-0.0));
+        exact(math.Pi / 4.0, math.atan(1.0));
+    };
+
+    export let test_atan2_quadrants = func() -> void {
+        exact(0.0, math.atan2(0.0, 0.0));
+        exact(-0.0, math.atan2(-0.0, 0.0));
+        exact(math.Pi, math.atan2(0.0, -0.0));
+        exact(-math.Pi, math.atan2(-0.0, -0.0));
+        exact(math.Pi / 2.0, math.atan2(1.0, 0.0));
+        exact(-math.Pi / 2.0, math.atan2(-1.0, -0.0));
+        exact(math.Pi / 4.0, math.atan2(infinity(), infinity()));
+        exact(3.0 * math.Pi / 4.0, math.atan2(infinity(), -infinity()));
+        exact(-0.0, math.atan2(-1.0, infinity()));
+        exact(math.Pi, math.atan2(1.0, -infinity()));
+        exact(math.Pi / 4.0, math.atan2(2.0, 2.0));
+        canonical_nan(math.atan2(nan(), 1.0));
+    };
+
+    export let test_hyperbolic_and_others = func() -> void {
+        exact(-0.0, math.sinh(-0.0));
+        exact(-infinity(), math.sinh(-infinity()));
+        exact(1.0, math.cosh(-0.0));
+        exact(infinity(), math.cosh(-infinity()));
+        exact(1.0, math.tanh(infinity()));
+        exact(-1.0, math.tanh(-infinity()));
+        exact(-0.0, math.tanh(-0.0));
+        canonical_nan(math.tanh(-nan()));
+        exact(3.0, math.cbrt(27.0));
+        exact(-2.0, math.cbrt(-8.0));
+        exact(-0.0, math.cbrt(-0.0));
+        exact(5.0, math.hypot(3.0, -4.0));
+        exact(infinity(), math.hypot(infinity(), nan()));
+        exact(infinity(), math.hypot(nan(), -infinity()));
+        canonical_nan(math.hypot(nan(), 1.0));
+        exact(math.Pi, math.to_radians(180.0));
+        exact(180.0, math.to_degrees(math.Pi));
+        exact(-0.0, math.to_radians(-0.0));
+    };
+);

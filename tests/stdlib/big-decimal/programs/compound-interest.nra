@@ -1,0 +1,29 @@
+let console = import:Std.Io.Console;
+let decimals = import:Std.Math.BigDecimal;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+// BigDecimal end to end: monthly compound interest rounded to cents each
+// month, a ratio at fixed scale, and conversions to float64 and back.
+export let CompoundInterest = module:program.Entry (
+    let of = func(string text) -> decimals.BigDecimal {
+        return result.expect<decimals.BigDecimal>(decimals.parse(text), text);
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let balance = of("1000.00");
+        let monthly = of("0.05").divide(of("12"), 10, decimals.RoundingMode.HalfEven);
+        console.print_line(monthly.to_string());
+        for (let month = 1; month <= 24; month = month + 1) {
+            let interest = balance.multiply(monthly).set_scale(2, decimals.RoundingMode.HalfEven);
+            balance = balance.add(interest);
+        }
+        console.print_line(balance.to_string());
+        console.print_line(balance.subtract(of("1000")).round(3, decimals.RoundingMode.Down).to_string());
+        console.print_line(of("1").divide(of("7"), 30, decimals.RoundingMode.HalfUp).to_string());
+        console.print_line(balance.to_float64().to_string());
+        console.print_line(decimals.of_float64(balance.to_float64()).set_scale(20, decimals.RoundingMode.HalfEven).to_string());
+        console.print_line(of("12.3400").strip_trailing_zeros().pow(3).to_string());
+        return program.ExitCode.Ok;
+    };
+);

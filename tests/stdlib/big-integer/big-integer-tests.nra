@@ -1,0 +1,216 @@
+let big = import:Std.Math.BigInteger;
+let comparable = import:Std.Core.Comparable;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// BigInteger members with literal expectations (Stdlib.md section 10.2).
+let BigIntegerTests = module (
+    let of = func(string text) -> big.BigInteger {
+        return result.expect<big.BigInteger>(big.parse(text), text);
+    };
+
+    let check = func(string expected, big.BigInteger actual) -> void {
+        test.assert_equal_string(expected, actual.to_string());
+    };
+
+    let parse_failure = func(string text, int radix, error.ParseErrorKind kind, int offset) -> void {
+        let failure = test.assert_err<big.BigInteger>(big.parse_radix(text, radix));
+        match (failure) {
+            error.Error.Parse { kind: actual_kind, offset: actual_offset, message: _ } => {
+                test.assert_equal_string(kind.to_string(), actual_kind.to_string());
+                test.assert_equal_int32(offset, actual_offset);
+            },
+            _ => {
+                test.fail("expected a parse error");
+            },
+        }
+    };
+
+    let larger = func<T: comparable.Comparable<T>>(T a, T b) -> T {
+        if (a.compare_to(b) == ordering.Ordering.Less) {
+            return b;
+        }
+        return a;
+    };
+
+    export let test_constants_and_factories = func() -> void {
+        check("0", big.Zero);
+        check("1", big.One);
+        check("10", big.Ten);
+        test.assert_equal_int32(0, big.Zero.sign());
+        check("-9223372036854775808", big.of_int64(-9223372036854775808));
+        check("9223372036854775807", big.of_int64(9223372036854775807));
+        check("-1", big.of_int64(-1));
+        check("0", big.of_int64(0));
+        check("18446744073709551615", big.of_uint64(18446744073709551615));
+        check("4294967296", big.of_uint64(4294967296));
+        let limbs: uint32[list] = [1, 2, 0, 0];
+        let built = new big.BigInteger(-7, limbs);
+        check("-8589934593", built);
+        test.assert_equal_int32(-1, built.sign());
+        let empty: uint32[list] = [0, 0];
+        test.assert(new big.BigInteger(1, empty).is_zero());
+    };
+
+    export let test_parse = func() -> void {
+        check("123", of("+123"));
+        check("0", of("-0"));
+        check("123", of("000123"));
+        check("-42", of("-42"));
+        let huge = "1" + "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        check(huge, of(huge));
+        check("255", result.expect<big.BigInteger>(big.parse_radix("fF", 16), "ff"));
+        check("-35", result.expect<big.BigInteger>(big.parse_radix("-Z", 36), "z"));
+        check("5", result.expect<big.BigInteger>(big.parse_radix("101", 2), "101"));
+        check("340282366920938463463374607431768211456", result.expect<big.BigInteger>(
+            big.parse_radix("100000000000000000000000000000000", 16), "2^128"));
+    };
+
+    export let test_parse_errors = func() -> void {
+        parse_failure("", 10, error.ParseErrorKind.Empty, 0);
+        parse_failure("-", 10, error.ParseErrorKind.UnexpectedEnd, 1);
+        parse_failure("+", 16, error.ParseErrorKind.UnexpectedEnd, 1);
+        parse_failure("12x3", 10, error.ParseErrorKind.InvalidCharacter, 2);
+        parse_failure(" 1", 10, error.ParseErrorKind.InvalidCharacter, 0);
+        parse_failure("1 ", 10, error.ParseErrorKind.InvalidCharacter, 1);
+        parse_failure("1_000", 10, error.ParseErrorKind.InvalidCharacter, 1);
+        parse_failure("12", 2, error.ParseErrorKind.InvalidCharacter, 1);
+        parse_failure("0x10", 16, error.ParseErrorKind.InvalidCharacter, 1);
+        parse_failure("--1", 10, error.ParseErrorKind.InvalidCharacter, 1);
+        test.assert_equal_string("parse error at 2: invalid character",
+            error.message(test.assert_err<big.BigInteger>(big.parse("12a"))));
+    };
+
+    export let test_arithmetic_signs = func() -> void {
+        let a = of("-7");
+        let b = of("2");
+        check("-5", a.add(b));
+        check("-9", a.subtract(b));
+        check("-14", a.multiply(b));
+        check("-3", a.divide(b));
+        check("-1", a.remainder(b));
+        check("2", a.floor_mod(of("3")));
+        check("-2", of("7").floor_mod(of("-3")));
+        check("0", of("6").floor_mod(of("-3")));
+        check("-3", of("7").divide(of("-2")));
+        check("1", of("7").remainder(of("-2")));
+        let [q, r] = of("-7").divide_and_remainder(of("-2"));
+        check("3", q);
+        check("-1", r);
+        check("0", a.add(of("7")));
+        check("0", big.Zero.multiply(a));
+        check("0", big.Zero.divide(a));
+        // Operands are unchanged.
+        check("-7", a);
+        check("2", b);
+    };
+
+    export let test_pow_gcd_mod = func() -> void {
+        check("1", big.Zero.pow(0));
+        check("0", big.Zero.pow(3));
+        check("-8", of("-2").pow(3));
+        check("16", of("-2").pow(4));
+        check("1267650600228229401496703205376", of("2").pow(100));
+        check("0", big.Zero.gcd(big.Zero));
+        check("6", of("-12").gcd(of("18")));
+        check("7", of("7").gcd(big.Zero));
+        check("445", of("4").mod_pow(of("13"), of("497")));
+        check("0", of("4").mod_pow(of("13"), big.One));
+        check("1", of("4").mod_pow(big.Zero, of("497")));
+        check("6", of("-1").mod_pow(of("3"), of("7")));
+        check("5", of("3").mod_inverse(of("7")));
+        check("2", of("-3").mod_inverse(of("7")));
+        check("0", of("3").mod_inverse(big.One));
+        test.assert(of("2").mod_inverse(of("4")) == nil);
+        test.assert(big.Zero.mod_inverse(of("5")) == nil);
+    };
+
+    export let test_sign_queries = func() -> void {
+        let n = of("-12");
+        check("12", n.negate());
+        check("12", n.abs());
+        check("0", big.Zero.negate());
+        test.assert_equal_int32(-1, n.sign());
+        test.assert_equal_int32(1, n.abs().sign());
+        test.assert(!n.is_zero());
+        test.assert(big.Zero.is_zero());
+        test.assert(n.is_even());
+        test.assert(big.Zero.is_even());
+        test.assert(!of("-3").is_even());
+    };
+
+    export let test_shifts_and_bits = func() -> void {
+        check("-1", of("-1").shift_right(1));
+        check("-3", of("-5").shift_right(1));
+        check("-1", of("-5").shift_right(100));
+        check("0", of("5").shift_right(100));
+        check("-2", of("-4").shift_right(1));
+        check("2", of("5").shift_right(1));
+        check("0", big.Zero.shift_left(100));
+        check("-40", of("-5").shift_left(3));
+        check("5", of("5").shift_left(0));
+        check("36893488147419103232", big.One.shift_left(65));
+        test.assert_equal_int32(0, big.Zero.bit_length());
+        test.assert_equal_int32(8, of("255").bit_length());
+        test.assert_equal_int32(9, of("-256").bit_length());
+        test.assert_equal_int32(33, of("4294967296").bit_length());
+        test.assert(of("-5").test_bit(0));
+        test.assert(!of("-5").test_bit(1));
+        test.assert(of("4294967296").test_bit(32));
+        test.assert(!of("4294967296").test_bit(1000));
+    };
+
+    export let test_compare_equals_hash = func() -> void {
+        test.assert(of("-3").compare_to(of("2")) == ordering.Ordering.Less);
+        test.assert(of("-3").compare_to(of("-4")) == ordering.Ordering.Greater);
+        test.assert(of("10").compare_to(big.Ten) == ordering.Ordering.Equal);
+        test.assert(of("4294967296").compare_to(of("4294967295")) == ordering.Ordering.Greater);
+        test.assert(of("10").equals(big.Ten));
+        test.assert(!of("10").equals(of("-10")));
+        test.assert(!big.Ten.equals(nil));
+        let other: class = big.Ten;
+        test.assert(of("10").equals(other));
+        test.assert_equal_uint64(0, big.Zero.hash_code() as uint64);
+        test.assert_equal_uint64(1, big.One.hash_code() as uint64);
+        test.assert_equal_uint64(4294967295, of("-1").hash_code() as uint64);
+        // limbs [1, 2]: combine(combine(0, 2), 1) = 63
+        test.assert_equal_uint64(63, of("8589934593").hash_code() as uint64);
+        test.assert_equal_uint64(4294967233, of("-8589934593").hash_code() as uint64);
+        test.assert_equal_uint64(of("123456789123456789").hash_code() as uint64,
+            of("123456789123456789").hash_code() as uint64);
+        check("7", larger<big.BigInteger>(of("-9"), of("7")));
+    };
+
+    export let test_conversions = func() -> void {
+        test.assert_equal_int64(-9223372036854775808, optional.expect<int64>(of("-9223372036854775808").to_int64(), "min"));
+        test.assert_equal_int64(9223372036854775807, optional.expect<int64>(of("9223372036854775807").to_int64(), "max"));
+        test.assert_equal_int64(0, optional.expect<int64>(big.Zero.to_int64(), "zero"));
+        test.assert_none<int64>(of("9223372036854775808").to_int64());
+        test.assert_none<int64>(of("-9223372036854775809").to_int64());
+        test.assert_none<int64>(of("100000000000000000000000").to_int64());
+        test.assert_equal_float64(0.0, big.Zero.to_float64());
+        test.assert_equal_float64(-1.0, of("-1").to_float64());
+        test.assert_equal_float64(9007199254740992.0, of("9007199254740993").to_float64());
+        test.assert_equal_float64(9007199254740996.0, of("9007199254740995").to_float64());
+        test.assert_equal_float64(1.0e30, of("1000000000000000000000000000000").to_float64());
+        let infinity = big.One.shift_left(1024).to_float64();
+        test.assert(infinity > 1.0e308 && infinity == infinity * 2.0);
+        test.assert(big.One.shift_left(1024).negate().to_float64() < -1.0e308);
+        test.assert_equal_float64(1.7976931348623157e308, big.One.shift_left(1024).subtract(big.One.shift_left(971)).to_float64());
+    };
+
+    export let test_text = func() -> void {
+        check("0", big.Zero);
+        test.assert_equal_string("-1000000000", of("-1000000000").to_string());
+        test.assert_equal_string("1000000000000000000", of("1000000000000000000").to_string());
+        test.assert_equal_string("-1010", of("-10").to_string_radix(2));
+        test.assert_equal_string("ff", of("255").to_string_radix(16));
+        test.assert_equal_string("-zz", of("-1295").to_string_radix(36));
+        test.assert_equal_string("0", big.Zero.to_string_radix(7));
+        test.assert_equal_string("100000000", of("4294967296").to_string_radix(16));
+        test.assert_equal_string("10", big.Ten.to_string_radix(10));
+    };
+);

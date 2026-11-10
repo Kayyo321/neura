@@ -1,0 +1,26 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) in function [0-9]+ block [0-9]+ at std/math/big-decimal[.]nra
+let big = import:Std.Math.BigInteger;
+let console = import:Std.Io.Console;
+let decimals = import:Std.Math.BigDecimal;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Main = module:program.Entry (
+    let zero: float64 = 0.0;
+
+    let of = func(string text) -> decimals.BigDecimal {
+        return result.expect<decimals.BigDecimal>(decimals.parse(text), text);
+    };
+
+    let missing = func() -> big.BigInteger {
+        return nil;
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("before");
+        console.print_line(decimals.of_big_integer(big.One, 2147483647).multiply(of("0.1")).to_string());
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);
