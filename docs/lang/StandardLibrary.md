@@ -40,6 +40,8 @@ export let App = module:program.Entry (
 
 Expected failures are `Result<T>` values whose error is the `Error` enum; absent values are `Optional<T>`. A violated precondition traps with one of the messages of [section 5.1](Stdlib.md#51-failure-model).
 
+`RegexFlags` compares and hashes its three option values. A compiled `Regex` uses its pattern and the options recorded at compilation, and its text is the pattern. A `RegexMatch` uses its input, capture offsets, and group names, and its text is the whole match. `FileMetadata` uses the entry kind, size, and modification time for equality and hashing. Its text is `Kind(size, modified)`, with `nil` when the modification time is absent. Mutating flags or metadata can change their hashes.
+
 ## Console formatting
 
 `Console.format(pattern, args...)` and the static `Console.Formatter.format` return a UTF-8 string. `print` and `println` format to stdout, and `eprint` and `eprintln` format to stderr. The two newline forms append one LF. The module functions have `try_` counterparts that return a `Result` containing the string or `Unit`. For an existing `Std.Core.Variadic.Argument[]`, use `vformat` or `try_vformat`. Use `write`, `print_line`, or `error_line` for already-formatted text that may contain literal braces.

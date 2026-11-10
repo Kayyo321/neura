@@ -35,6 +35,7 @@ export let RegexMachine = module (
     // searches. `first_bytes` lists the bytes that can begin a match when
     // `can_skip` holds; `anchored` means a match can only start at offset 0.
     export let Program = class (
+        export let options: int = 0;
         export let insts: Inst[list] = [];
         export let slot_count: int = 2;
         export let first_bytes: bool[list] = [];
@@ -54,6 +55,7 @@ export let RegexMachine = module (
         compiler.emit(Inst.Save(1));
         compiler.emit(Inst.Match);
         let program = new Program();
+        program.options = (ignore_case ? 1 : 0) | (multi_line ? 2 : 0) | (dot_all ? 4 : 0);
         program.insts = compiler.insts;
         program.slot_count = compiler.next_slot;
         let k = 0;

@@ -55,6 +55,30 @@ let RegexTests = module (
         return values;
     };
 
+    export let test_value_members = func {
+        let first = compiled("(?<part>a)");
+        let second = compiled("(?<part>a)");
+        test.assert(first === second);
+        test.assert(first.hash_code() == second.hash_code());
+        test.assert_equal_string("(?<part>a)", first.to_string());
+        test.assert(!(first === regex_check.compile_flags("(?<part>a)", 1)));
+
+        let a = first.find("ab");
+        let b = second.find("ab");
+        test.assert(a === b);
+        test.assert(a.hash_code() == b.hash_code());
+        test.assert_equal_string("a", a.to_string());
+        test.assert(!(a === second.find("ba")));
+
+        let flags = new regex.RegexFlags();
+        let copy = new regex.RegexFlags();
+        test.assert(flags === copy);
+        test.assert(flags.hash_code() == copy.hash_code());
+        copy.dot_all = true;
+        test.assert(!(flags === copy));
+        test.assert_equal_string("RegexFlags(ignore_ascii_case=false, multi_line=false, dot_all=true)", copy.to_string());
+    };
+
     export let test_syntax_errors = func() -> void {
         syntax("a)", 1, "unbalanced parenthesis");
         syntax("())", 2, "unbalanced parenthesis");

@@ -113,6 +113,12 @@ let FsTests = module (
         let file_data = test.assert_ok<fs.FileMetadata>(fs.metadata(f));
         test.assert(file_data.kind == fs.FileKind.File);
         test.assert_equal_int64(12, file_data.size);
+        let copy = new fs.FileMetadata(fs.FileKind.File, 12, file_data.modified);
+        test.assert(file_data === copy);
+        test.assert(file_data.hash_code() == copy.hash_code());
+        let unknown = new fs.FileMetadata(fs.FileKind.Other, 0, nil);
+        test.assert(!(file_data === unknown));
+        test.assert_equal_string("Other(0, nil)", unknown.to_string());
         // Modified after 2020-01-01 and before 2200-01-01.
         test.assert(file_data.modified.epoch_seconds() > 1577836800);
         test.assert(file_data.modified.epoch_seconds() < 7258118400);

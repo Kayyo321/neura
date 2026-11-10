@@ -1,6 +1,7 @@
 let bytes = import:Std.Io.Internal.Bytes;
 let errors = import:Std.Core.Error;
 let files = import:Std.Fs.File;
+let hashing = import:Std.Core.Hash;
 let host_error = import:Std.Core.Internal.HostError;
 let instant = import:Std.Time.Instant;
 let paths = import:Std.Fs.Path;
@@ -20,11 +21,28 @@ export let Fs = module (
         export let size: int64 = 0;
         export let modified: instant.Instant = nil;
 
-        export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant) -> void {
+        export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant) {
             kind = entry_kind;
             size = byte_size;
             modified = modified_at;
         };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is FileMetadata)) {
+                return false;
+            }
+            let metadata = other as FileMetadata;
+            return kind == metadata.kind && size == metadata.size &&
+                (modified == nil ? metadata.modified == nil : modified === metadata.modified);
+        };
+
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(kind.hash_code(), size.hash_code()),
+                modified == nil ? 0 : modified.hash_code());
+
+        export let.override to_string = func -> string =>
+            kind.to_string() + "(" + size.to_string() + ", " +
+                (modified == nil ? "nil" : modified.to_string()) + ")";
     );
 
     let StatOutcome = enum (Ok([int, int64, int64, int]), Error(uint32));

@@ -393,7 +393,9 @@ These are the intended source-module contracts. Compiler support for the operati
 | `HashSet`, `TreeSet`, `BitSet` | As sets | No | Yes | `MutableSet`; `TreeSet` also `SortedSet` |
 | `HashMap`, `TreeMap`, `OrdinalMap` | As maps | No | Yes, of `[K, V]` | `MutableMap`; `TreeMap` also `SortedMap` |
 | `BigInteger`, `BigDecimal`, `Duration`, `Instant`, the calendar types, `Path`, `Uuid` | Yes, by value | `compare_to` member | No | `Comparable` |
-| `Sequence`, `StringBuilder`, `Regex`, `Random`, `Logger`, streams, files, sockets | Identity | No | `Sequence` once | Streams: [section 11.1](#111-stdio) |
+| `RegexFlags`, `RegexMatch`, `Regex` | By value | No | No | |
+| `StringBuilder`, `ByteBuffer` | Current byte sequence | No | No | |
+| `Sequence`, `Random`, `Logger`, stream adapters, files, sockets | Identity | No | `Sequence` once | Streams: [section 11.1](#111-stdio) |
 
 ## 6. `Std.Core` types
 
@@ -642,6 +644,7 @@ A class in `Std.Core` that accumulates text. Needs T1. The module function `crea
 | `byte_length() → int`, `is_empty() → bool` | |
 | `truncate(byte_length: int)`, `clear()` | `truncate` requires a character boundary. |
 | `to_string() → string` | Constructs a string from the bytes. The builder stays usable. |
+| `equals(other: class) → bool`, `hash_code() → uint32` | Compare and hash the current UTF-8 bytes. The hash changes with the contents, so a builder used as a hash key must stay unchanged while stored. |
 
 ### 8.3 `Scalars`
 
@@ -1262,7 +1265,6 @@ This module replaces the built-in `Test` as described in [section 4.6](#46-retir
 | Scoped cleanup, recovery from traps | Excluded | The runtime has neither, and the library is designed not to need them. |
 | Time zones, locales, localized formatting, collation | Deferred | They need large versioned data tables. |
 | Unicode normalization, non-ASCII case mapping and classification | Deferred to `Std.Text.Unicode` | Same reason. |
-| Pattern formatting (`printf`-style) | Excluded | Needs variadic or heterogeneous arguments. `StringBuilder` covers the use. |
 | Ciphers, signatures, TLS, secure random, HTTP | Deferred | They need review beyond this plan. |
 | `BigInteger` bitwise operations, UDP | Deferred | Not needed for the first version. |
 
@@ -1365,7 +1367,7 @@ The library follows this plan. Where the plan left a choice open, or where the l
 - **Integer modules.** Every module has `to_unsigned` and `to_signed` (the same-signedness one is the identity). `format` counts the sign in the width; a width at or below the text length pads nothing. `parse` reports a syntax error before a range error and accepts leading zeros. `floor_div` and `floor_mod` share one divider circuit.
 - **Trap details.** `low exceeds high`, `negative exponent`, `radix outside 2 through 36`, `pad is not one scalar value`, `negative count`, `not a Unicode scalar value`, `byte length out of range`, `not a character boundary`, `zero step`, `index out of range`, `NaN bound`, and `digits outside 0 through 100`, each after `invalid argument: `.
 - **Floats.** `min`, `max`, and the rounding functions return the canonical NaN for a NaN operand; `clamp` orders `-0.0` below `0.0`. `to_fixed` and `to_exponential` print `NaN` and the infinities as `to_string` does, keep the sign of a negative value that rounds to zero, and take 0 through 100 digits. `parse` accepts `e` and `E`, rejects `+NaN` and `-NaN`, and treats digits beyond 800 significant digits as a sticky bit. Fast paths (Clinger's for `float64`, a guarded `float64` path for narrower formats) are used only where they are exact; exhaustive tests check every `float16` and `bfloat16` pattern.
-- **IntRange** exposes `start()`, `end()`, and `step()` as methods; `size()` traps (reason 1) beyond `Int32.Max`.
+- **IntRange** exposes `start()`, `end()`, and `step()` as methods. Equality and hashing use those three values in that order. The text is `start..end:step`. `size()` traps with reason 1 beyond `Int32.Max`.
 
 ### 18.4 Text
 
