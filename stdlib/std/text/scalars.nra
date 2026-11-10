@@ -1,0 +1,134 @@
+// Unicode scalar values (Stdlib.md section 8.3). There is no char type: a
+// code point is a uint32 holding a Unicode scalar value, that is, a value up
+// to 0x10FFFF that is not a surrogate. Classification and case mapping cover
+// ASCII only; each function is a range comparison.
+export let Scalars = module (
+    // U+FFFD REPLACEMENT CHARACTER.
+    export const Replacement: uint32 = 65533;
+
+    // At most 0x10FFFF and outside the surrogates 0xD800 through 0xDFFF.
+    export let is_valid = func(uint32 scalar) -> bool {
+        return scalar <= 1114111 && (scalar < 55296 || scalar > 57343);
+    };
+
+    // The number of UTF-8 bytes that encode the scalar value, 1 through 4.
+    // Traps with "invalid argument: not a Unicode scalar value" for a
+    // surrogate or a value above 0x10FFFF.
+    export let utf8_length = func(uint32 scalar) -> int {
+        if (!is_valid(scalar)) {
+            trap_with_message("invalid argument: not a Unicode scalar value");
+        }
+        if (scalar < 128) {
+            return 1;
+        }
+        if (scalar < 2048) {
+            return 2;
+        }
+        if (scalar < 65536) {
+            return 3;
+        }
+        return 4;
+    };
+
+    export let is_ascii = func(uint32 scalar) -> bool {
+        return scalar < 128;
+    };
+
+    // 0 through 9.
+    export let is_ascii_digit = func(uint32 scalar) -> bool {
+        return scalar >= 48 && scalar <= 57;
+    };
+
+    // 0 through 9, A through F, and a through f.
+    export let is_ascii_hex_digit = func(uint32 scalar) -> bool {
+        return (scalar >= 48 && scalar <= 57) || (scalar >= 65 && scalar <= 70) || (scalar >= 97 && scalar <= 102);
+    };
+
+    export let is_ascii_alphabetic = func(uint32 scalar) -> bool {
+        return (scalar >= 65 && scalar <= 90) || (scalar >= 97 && scalar <= 122);
+    };
+
+    export let is_ascii_alphanumeric = func(uint32 scalar) -> bool {
+        return (scalar >= 48 && scalar <= 57) || (scalar >= 65 && scalar <= 90) || (scalar >= 97 && scalar <= 122);
+    };
+
+    export let is_ascii_uppercase = func(uint32 scalar) -> bool {
+        return scalar >= 65 && scalar <= 90;
+    };
+
+    export let is_ascii_lowercase = func(uint32 scalar) -> bool {
+        return scalar >= 97 && scalar <= 122;
+    };
+
+    // Space, tab, LF, vertical tab, form feed, and CR: the set that
+    // Strings.trim removes and that the Regex class \s matches.
+    export let is_ascii_whitespace = func(uint32 scalar) -> bool {
+        return scalar == 32 || (scalar >= 9 && scalar <= 13);
+    };
+
+    // The 32 graphic ASCII characters that are not letters or digits.
+    export let is_ascii_punctuation = func(uint32 scalar) -> bool {
+        return (scalar >= 33 && scalar <= 47) || (scalar >= 58 && scalar <= 64) || (scalar >= 91 && scalar <= 96)
+            || (scalar >= 123 && scalar <= 126);
+    };
+
+    // U+0000 through U+001F and U+007F.
+    export let is_ascii_control = func(uint32 scalar) -> bool {
+        return scalar < 32 || scalar == 127;
+    };
+
+    // a through z become A through Z; every other value is returned as is.
+    export let to_ascii_upper = func(uint32 scalar) -> uint32 {
+        if (scalar >= 97 && scalar <= 122) {
+            return scalar - 32;
+        }
+        return scalar;
+    };
+
+    // A through Z become a through z; every other value is returned as is.
+    export let to_ascii_lower = func(uint32 scalar) -> uint32 {
+        if (scalar >= 65 && scalar <= 90) {
+            return scalar + 32;
+        }
+        return scalar;
+    };
+
+    // The digit's value in the radix, letters in either case, or -1 when the
+    // scalar is not a digit of the radix. A radix outside 2 through 36 traps
+    // with "invalid argument: radix outside 2 through 36".
+    export let digit_value = func(uint32 scalar, int radix) -> int {
+        check_radix(radix);
+        let value = 36;
+        if (scalar >= 48 && scalar <= 57) {
+            value = (scalar - 48) as int;
+        } else if (scalar >= 97 && scalar <= 122) {
+            value = (scalar - 87) as int;
+        } else if (scalar >= 65 && scalar <= 90) {
+            value = (scalar - 55) as int;
+        }
+        if (value < radix) {
+            return value;
+        }
+        return -1;
+    };
+
+    // The lowercase digit for a value from 0 through radix - 1. A radix
+    // outside 2 through 36 traps as in digit_value; a value outside the
+    // radix traps with "invalid argument: digit out of range".
+    export let from_digit = func(int value, int radix) -> uint32 {
+        check_radix(radix);
+        if (value < 0 || value >= radix) {
+            trap_with_message("invalid argument: digit out of range");
+        }
+        if (value < 10) {
+            return (value + 48) as uint32;
+        }
+        return (value + 87) as uint32;
+    };
+
+    let check_radix = func(int radix) -> void {
+        if (radix < 2 || radix > 36) {
+            trap_with_message("invalid argument: radix outside 2 through 36");
+        }
+    };
+);

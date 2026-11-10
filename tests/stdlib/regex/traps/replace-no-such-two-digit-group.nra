@@ -1,0 +1,22 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: no such group
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let regex = import:Std.Text.Regex;
+let result = import:Std.Core.Result;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        match (regex.compile("(a)")) {
+            result.Result.Ok(r) => {
+                console.print_line("before");
+                let value = r.replace_all("aa", "$10");
+                console.print_line("after");
+            },
+            result.Result.Err(_) => {
+                console.print_line("compile failed");
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

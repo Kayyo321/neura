@@ -1,0 +1,239 @@
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+let StringsTests = module (
+    let check_list = func(string[list] expected, string[list] actual) -> void {
+        test.assert_equal<string[list]>(expected, actual);
+    };
+
+    export let test_length_and_emptiness = func() -> void {
+        test.assert_equal_int32(0, strings.byte_length(""));
+        test.assert_equal_int32(7, strings.byte_length("Aé🙂"));
+        test.assert_equal_int32(3, strings.scalar_count("Aé🙂"));
+        test.assert(strings.is_empty(""));
+        test.assert(!strings.is_empty(" "));
+    };
+
+    export let test_slice = func() -> void {
+        let text = "Aé🙂b";
+        test.assert_equal_string("é", strings.slice(text, 1, 3));
+        test.assert_equal_string("", strings.slice(text, 3, 3));
+        test.assert_equal_string("🙂b", strings.slice_from(text, 3));
+        test.assert_equal_string("", strings.slice_from(text, 8));
+        test.assert_equal_string(text, strings.slice_from(text, 0));
+    };
+
+    export let test_equals_hash_compare = func() -> void {
+        test.assert(strings.equals("abc", "ab" + "c"));
+        test.assert(!strings.equals("abc", "abd"));
+        test.assert(!strings.equals("é", "e"));
+        // Section 5.2: start with 0; 31 times the hash plus each byte.
+        test.assert(strings.hash("") == 0);
+        test.assert(strings.hash("AB") == 2081);
+        test.assert(strings.hash("é") == 6214);
+        test.assert(strings.hash("hello world") == 1794106052);
+        test.assert(strings.hash("hello world") == "hello world".hash_code());
+        test.assert(strings.compare("", "") == ordering.Ordering.Equal);
+        test.assert(strings.compare("abc", "abc") == ordering.Ordering.Equal);
+        test.assert(strings.compare("ab", "abc") == ordering.Ordering.Less);
+        test.assert(strings.compare("abc", "ab") == ordering.Ordering.Greater);
+        test.assert(strings.compare("", "a") == ordering.Ordering.Less);
+        test.assert(strings.compare("abd", "abc") == ordering.Ordering.Greater);
+        test.assert(strings.compare("B", "a") == ordering.Ordering.Less);
+        // Byte order equals scalar order: U+FFFF sorts before U+10000.
+        test.assert(strings.compare(strings.from_scalars([65535]), "🙂") == ordering.Ordering.Less);
+        test.assert(strings.compare("z", "é") == ordering.Ordering.Less);
+        test.assert(strings.compare("é", "ê") == ordering.Ordering.Less);
+    };
+
+    export let test_affixes = func() -> void {
+        test.assert(strings.starts_with("hello", ""));
+        test.assert(strings.starts_with("", ""));
+        test.assert(strings.starts_with("hello", "he"));
+        test.assert(strings.starts_with("hello", "hello"));
+        test.assert(!strings.starts_with("hello", "hello!"));
+        test.assert(!strings.starts_with("hello", "el"));
+        test.assert(strings.starts_with("éa", "é"));
+        test.assert(strings.ends_with("hello", ""));
+        test.assert(strings.ends_with("hello", "llo"));
+        test.assert(!strings.ends_with("hello", "ell"));
+        test.assert(!strings.ends_with("lo", "hello"));
+        test.assert(strings.ends_with("a🙂", "🙂"));
+        test.assert(strings.contains("hello", ""));
+        test.assert(strings.contains("", ""));
+        test.assert(strings.contains("hello", "ll"));
+        test.assert(!strings.contains("hello", "lll"));
+        test.assert(!strings.contains("", "a"));
+    };
+
+    export let test_index_of = func() -> void {
+        test.assert_equal_int32(0, strings.index_of("hello", ""));
+        test.assert_equal_int32(2, strings.index_of("hello", "l"));
+        test.assert_equal_int32(2, strings.index_of("hello", "ll"));
+        test.assert_equal_int32(-1, strings.index_of("hello", "x"));
+        test.assert_equal_int32(-1, strings.index_of("he", "hello"));
+        test.assert_equal_int32(3, strings.index_of("aaaab", "ab"));
+        test.assert_equal_int32(1, strings.index_of("aé🙂é", "é"));
+        test.assert_equal_int32(3, strings.index_of("aé🙂é", "🙂"));
+        test.assert_equal_int32(3, strings.index_of_from("hello", "l", 3));
+        test.assert_equal_int32(-1, strings.index_of_from("hello", "l", 4));
+        test.assert_equal_int32(4, strings.index_of_from("hello", "", 4));
+        test.assert_equal_int32(5, strings.index_of_from("hello", "", 5));
+        test.assert_equal_int32(-1, strings.index_of_from("hello", "o", 5));
+        test.assert_equal_int32(7, strings.index_of_from("aé🙂é", "é", 3));
+        test.assert_equal_int32(3, strings.last_index_of("hello", "l"));
+        test.assert_equal_int32(5, strings.last_index_of("hello", ""));
+        test.assert_equal_int32(-1, strings.last_index_of("hello", "z"));
+        test.assert_equal_int32(-1, strings.last_index_of("lo", "hello"));
+        test.assert_equal_int32(0, strings.last_index_of("hello", "hello"));
+        test.assert_equal_int32(3, strings.last_index_of("aaaa", "a"));
+        test.assert_equal_int32(2, strings.last_index_of("aaaa", "aa"));
+        test.assert_equal_int32(7, strings.last_index_of("aé🙂é", "é"));
+    };
+
+    export let test_split = func() -> void {
+        check_list(["a", "", "b", ""], strings.split("a,,b,", ","));
+        check_list([""], strings.split("", ","));
+        check_list(["abc"], strings.split("abc", ","));
+        check_list(["", ""], strings.split(",", ","));
+        check_list(["a", "b", "c"], strings.split("a::b::c", "::"));
+        check_list(["", "a"], strings.split("aaa", "aa"));
+        check_list(["x", "y"], strings.split("x🙂y", "🙂"));
+        check_list(["a,b,c"], strings.split_limit("a,b,c", ",", 1));
+        check_list(["a", "b,c"], strings.split_limit("a,b,c", ",", 2));
+        check_list(["a", "b", "c"], strings.split_limit("a,b,c", ",", 3));
+        check_list(["a", "b", "c"], strings.split_limit("a,b,c", ",", 10));
+        check_list([""], strings.split_limit("", ",", 3));
+        check_list(["", ","], strings.split_limit(",,", ",", 2));
+    };
+
+    export let test_lines = func() -> void {
+        check_list(["a", "b"], strings.lines("a\nb"));
+        check_list(["a", "b"], strings.lines("a\nb\n"));
+        check_list(["a", "b"], strings.lines("a\r\nb\r\n"));
+        check_list(["a", "", "b"], strings.lines("a\n\nb"));
+        check_list(["a", ""], strings.lines("a\n\n"));
+        check_list(["a\r", "b"], strings.lines("a\r\r\nb"));
+        check_list(["a\rb"], strings.lines("a\rb"));
+        check_list(["\r"], strings.lines("\r"));
+        check_list([""], strings.lines("\n"));
+        check_list([""], strings.lines("\r\n"));
+        check_list([""], strings.lines(""));
+        check_list(["only"], strings.lines("only"));
+    };
+
+    export let test_join_and_repeat = func() -> void {
+        let none: string[list] = [];
+        test.assert_equal_string("", strings.join(none, ","));
+        test.assert_equal_string("a", strings.join(["a"], ","));
+        test.assert_equal_string("a, b, c", strings.join(["a", "b", "c"], ", "));
+        test.assert_equal_string("abc", strings.join(["a", "b", "c"], ""));
+        test.assert_equal_string(",,", strings.join(["", "", ""], ","));
+        test.assert_equal_string("é🙂é", strings.join(["é", "é"], "🙂"));
+        test.assert_equal_string("", strings.repeat("ab", 0));
+        test.assert_equal_string("ab", strings.repeat("ab", 1));
+        test.assert_equal_string("ababab", strings.repeat("ab", 3));
+        test.assert_equal_string("", strings.repeat("", 5));
+        test.assert_equal_string("🙂🙂", strings.repeat("🙂", 2));
+        test.assert_equal_int32(5000, strings.byte_length(strings.repeat("abcde", 1000)));
+    };
+
+    export let test_trim = func() -> void {
+        let spaces = strings.from_scalars([32, 9, 10, 11, 12, 13]);
+        let padded = spaces + "a b" + spaces;
+        test.assert_equal_string("a b", strings.trim(padded));
+        test.assert_equal_string("a b" + spaces, strings.trim_start(padded));
+        test.assert_equal_string(spaces + "a b", strings.trim_end(padded));
+        test.assert_equal_string("", strings.trim(spaces));
+        test.assert_equal_string("", strings.trim_start(spaces));
+        test.assert_equal_string("", strings.trim_end(spaces));
+        test.assert_equal_string("", strings.trim(""));
+        test.assert_equal_string("x", strings.trim("x"));
+        // Only ASCII whitespace: U+00A0 and U+3000 stay.
+        let wide = strings.from_scalars([160, 120, 12288]);
+        test.assert_equal_string(wide, strings.trim(wide));
+    };
+
+    export let test_strip = func() -> void {
+        test.assert_equal_string("world", test.assert_some<string>(strings.strip_prefix("hello world", "hello ")));
+        test.assert_equal_string("abc", test.assert_some<string>(strings.strip_prefix("abc", "")));
+        test.assert_equal_string("", test.assert_some<string>(strings.strip_prefix("abc", "abc")));
+        test.assert_none<string>(strings.strip_prefix("abc", "b"));
+        test.assert_none<string>(strings.strip_prefix("ab", "abc"));
+        test.assert_equal_string("hello", test.assert_some<string>(strings.strip_suffix("hello.txt", ".txt")));
+        test.assert_equal_string("abc", test.assert_some<string>(strings.strip_suffix("abc", "")));
+        test.assert_none<string>(strings.strip_suffix("abc", "b"));
+        test.assert_none<string>(strings.strip_suffix("c", "abc"));
+        test.assert_equal_string("é", test.assert_some<string>(strings.strip_suffix("é🙂", "🙂")));
+    };
+
+    export let test_replace = func() -> void {
+        test.assert_equal_string("hexxo", strings.replace("hello", "l", "x"));
+        test.assert_equal_string("hexlo", strings.replace_first("hello", "l", "x"));
+        test.assert_equal_string("hello", strings.replace("hello", "z", "x"));
+        test.assert_equal_string("hello", strings.replace_first("hello", "z", "x"));
+        test.assert_equal_string("bba", strings.replace("aaaaa", "aa", "b"));
+        test.assert_equal_string("ba", strings.replace("aaa", "aa", "b"));
+        test.assert_equal_string("heo", strings.replace("hello", "l", ""));
+        test.assert_equal_string("<>a<>", strings.replace("-a-", "-", "<>"));
+        test.assert_equal_string("x", strings.replace("abc", "abc", "x"));
+        test.assert_equal_string("", strings.replace("", "a", "b"));
+        test.assert_equal_string("a🙂b🙂", strings.replace("a-b-", "-", "🙂"));
+        test.assert_equal_string("e", strings.replace("é", "é", "e"));
+    };
+
+    export let test_ascii_case = func() -> void {
+        test.assert_equal_string("HELLO, WORLD! 123", strings.to_ascii_upper("Hello, World! 123"));
+        test.assert_equal_string("hello, world! 123", strings.to_ascii_lower("Hello, World! 123"));
+        test.assert_equal_string("ÉTÉ", strings.to_ascii_upper("ÉtÉ"));
+        test.assert_equal_string("été", strings.to_ascii_lower("éTé"));
+        test.assert_equal_string("", strings.to_ascii_upper(""));
+        test.assert_equal_string("@[`{", strings.to_ascii_upper("@[`{"));
+        test.assert_equal_string("@[`{", strings.to_ascii_lower("@[`{"));
+        test.assert_equal_string("ZAZ", strings.to_ascii_upper("zAz"));
+        test.assert(strings.equals_ignore_ascii_case("Hello", "hELLO"));
+        test.assert(strings.equals_ignore_ascii_case("", ""));
+        test.assert(!strings.equals_ignore_ascii_case("Hello", "Hell"));
+        test.assert(!strings.equals_ignore_ascii_case("é", "É"));
+        test.assert(!strings.equals_ignore_ascii_case("@", "`"));
+        test.assert(!strings.equals_ignore_ascii_case("[", "{"));
+        test.assert(strings.equals_ignore_ascii_case("aZé", "Azé"));
+    };
+
+    export let test_pad = func() -> void {
+        test.assert_equal_string("007", strings.pad_start("7", 3, "0"));
+        test.assert_equal_string("7..", strings.pad_end("7", 3, "."));
+        test.assert_equal_string("abc", strings.pad_start("abc", 2, "0"));
+        test.assert_equal_string("abc", strings.pad_end("abc", 3, "0"));
+        test.assert_equal_string("abc", strings.pad_start("abc", -4, "0"));
+        test.assert_equal_string("··é", strings.pad_start("é", 3, "·"));
+        test.assert_equal_string("é🙂🙂", strings.pad_end("é", 3, "🙂"));
+        test.assert_equal_string("  ", strings.pad_end("", 2, " "));
+    };
+
+    export let test_reverse = func() -> void {
+        test.assert_equal_string("", strings.reverse(""));
+        test.assert_equal_string("a", strings.reverse("a"));
+        test.assert_equal_string("cba", strings.reverse("abc"));
+        test.assert_equal_string("b🙂éA", strings.reverse("Aé🙂b"));
+        test.assert_equal_string("Aé🙂b", strings.reverse(strings.reverse("Aé🙂b")));
+    };
+
+    export let test_large_text = func() -> void {
+        let line = "the quick brown fox jumps over the lazy dog\n";
+        let text = strings.repeat(line, 200);
+        test.assert_equal_int32(8800, strings.byte_length(text));
+        let lines = strings.lines(text);
+        test.assert_equal_int32(200, lines.length);
+        test.assert_equal_string("the quick brown fox jumps over the lazy dog", lines[199]);
+        let words = strings.split(text, " ");
+        test.assert_equal_int32(1601, words.length);
+        let replaced = strings.replace(text, "fox", "cat");
+        test.assert_equal_int32(-1, strings.index_of(replaced, "fox"));
+        test.assert_equal_int32(8800, strings.byte_length(replaced));
+        test.assert_equal_string(text, strings.join(strings.split(text, "o"), "o"));
+        test.assert_equal_int32(8800 - 44 + 16, strings.last_index_of(text, "fox"));
+    };
+);

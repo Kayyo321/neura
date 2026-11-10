@@ -1,0 +1,394 @@
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let regex = import:Std.Text.Regex;
+let regex_check = import:RegexCheck;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// Hand-written Regex tests: every compile error, the members of Regex and
+// RegexMatch, replacement and split rules, the limits, and the documented
+// differences from other engines. reference-tests.nra and random-tests.nra
+// compare matches with python3's re module, ecmascript-tests.nra with node.
+let RegexTests = module (
+    let compiled = func(string pattern) -> regex.Regex {
+        return regex_check.compile_flags(pattern, 0);
+    };
+
+    let check_error = func(string pattern, error.ParseErrorKind kind, int offset, string message) -> void {
+        match (regex.compile(pattern)) {
+            result.Result.Ok(_) => {
+                test.fail(pattern + ": expected a parse error");
+            },
+            result.Result.Err(e) => {
+                match (e) {
+                    error.Error.Parse { kind: actual_kind, offset: actual_offset, message: actual_message } => {
+                        test.assert_with(actual_kind == kind, pattern + ": kind " + actual_kind.to_string());
+                        test.assert_with(actual_offset == offset, pattern + ": offset " + actual_offset.to_string());
+                        test.assert_equal_string(message, actual_message);
+                    },
+                    _ => {
+                        test.fail(pattern + ": expected a Parse error");
+                    },
+                }
+            },
+        }
+    };
+
+    let syntax = func(string pattern, int offset, string message) -> void {
+        check_error(pattern, error.ParseErrorKind.Syntax, offset, message);
+    };
+
+    let unexpected_end = func(string pattern, string message) -> void {
+        check_error(pattern, error.ParseErrorKind.UnexpectedEnd, pattern.byte_length, message);
+    };
+
+    let out_of_range = func(string pattern, int offset, string message) -> void {
+        check_error(pattern, error.ParseErrorKind.OutOfRange, offset, message);
+    };
+
+    let texts = func(regex.RegexMatch[list] matches) -> string[list] {
+        let values: string[list] = [];
+        for (let m in matches) {
+            values.append(m.text());
+        }
+        return values;
+    };
+
+    export let test_syntax_errors = func() -> void {
+        syntax("a)", 1, "unbalanced parenthesis");
+        syntax("())", 2, "unbalanced parenthesis");
+        syntax("*a", 0, "nothing to repeat");
+        syntax("a|+", 2, "nothing to repeat");
+        syntax("(?)", 0, "unsupported group syntax");
+        syntax("{2}", 0, "nothing to repeat");
+        syntax("^*", 1, "nothing to repeat");
+        syntax("a$?", 2, "nothing to repeat");
+        syntax("\\b+", 2, "nothing to repeat");
+        syntax("\\B{2}", 2, "nothing to repeat");
+        syntax("a**", 2, "repeated quantifier");
+        syntax("a+?*", 3, "repeated quantifier");
+        syntax("a{2}{3}", 4, "repeated quantifier");
+        syntax("a?{2}", 2, "repeated quantifier");
+        syntax("a++", 2, "possessive quantifiers are not supported");
+        syntax("a*+", 2, "possessive quantifiers are not supported");
+        syntax("a?+", 2, "possessive quantifiers are not supported");
+        syntax("a{1,2}+", 6, "possessive quantifiers are not supported");
+        syntax("a{x}", 1, "invalid repetition");
+        syntax("a{,3}", 1, "invalid repetition");
+        syntax("a{2x}", 1, "invalid repetition");
+        syntax("a{2,x}", 1, "invalid repetition");
+        syntax("a{3,2}", 1, "repetition minimum exceeds maximum");
+        syntax("[z-a]", 1, "invalid class range");
+        syntax("[\\d-z]", 1, "invalid class range");
+        syntax("[a-\\d]", 1, "invalid class range");
+        syntax("[\\b]", 1, "invalid escape in a class");
+        syntax("[\\B]", 1, "invalid escape in a class");
+        syntax("\\q", 0, "invalid escape");
+        syntax("a\\0", 1, "invalid escape");
+        syntax("\\x41", 0, "invalid escape");
+        syntax("\\A", 0, "invalid escape");
+        syntax("\\z", 0, "invalid escape");
+        syntax("\\f", 0, "invalid escape");
+        syntax("[\\q]", 1, "invalid escape");
+        syntax("\\u41", 0, "invalid \\u escape");
+        syntax("\\u{}", 0, "invalid \\u escape");
+        syntax("\\u{xyz}", 0, "invalid \\u escape");
+        syntax("\\u{1234567}", 0, "invalid \\u escape");
+        syntax("a\\u{110000}", 1, "invalid scalar value");
+        syntax("\\u{D800}", 0, "invalid scalar value");
+        syntax("(?<1a>x)", 3, "invalid group name");
+        syntax("(?<>x)", 3, "invalid group name");
+        syntax("(?<a-b>x)", 3, "invalid group name");
+        syntax("(?<a>x)(?<a>y)", 10, "duplicate group name");
+        syntax("(?P<a>x)(?<a>y)", 11, "duplicate group name");
+        syntax("(?Px)", 0, "unsupported group syntax");
+        syntax("(?i)a", 0, "unsupported group syntax");
+        syntax("(?>a)", 0, "unsupported group syntax");
+        syntax("(?#c)", 0, "unsupported group syntax");
+    };
+
+    export let test_unsupported_constructs = func() -> void {
+        syntax("(a)\\1", 3, "backreferences are not supported");
+        syntax("\\9", 0, "backreferences are not supported");
+        syntax("(?<n>a)\\k<n>", 7, "backreferences are not supported");
+        syntax("(?P<n>a)(?P=n)", 8, "backreferences are not supported");
+        syntax("[\\1]", 1, "backreferences are not supported");
+        syntax("a(?=b)", 1, "lookahead is not supported");
+        syntax("a(?!b)", 1, "lookahead is not supported");
+        syntax("(?<=a)b", 0, "lookbehind is not supported");
+        syntax("(?<!a)b", 0, "lookbehind is not supported");
+        syntax("\\p{L}", 0, "Unicode property classes are not supported");
+        syntax("a\\P{L}", 1, "Unicode property classes are not supported");
+        syntax("[\\pL]", 1, "Unicode property classes are not supported");
+    };
+
+    export let test_unexpected_end = func() -> void {
+        unexpected_end("(a", "missing )");
+        unexpected_end("((a)", "missing )");
+        unexpected_end("(?", "missing )");
+        unexpected_end("(?:a|b", "missing )");
+        unexpected_end("(?P", "missing group name");
+        unexpected_end("(?<a", "missing group name terminator");
+        unexpected_end("(?P<", "missing group name terminator");
+        unexpected_end("a{", "unterminated repetition");
+        unexpected_end("a{2", "unterminated repetition");
+        unexpected_end("a{2,", "unterminated repetition");
+        unexpected_end("a{2,3", "unterminated repetition");
+        unexpected_end("[abc", "unterminated character class");
+        unexpected_end("[]", "unterminated character class");
+        unexpected_end("[^]", "unterminated character class");
+        unexpected_end("[a-", "unterminated character class");
+        unexpected_end("\\", "incomplete escape");
+        unexpected_end("[\\", "incomplete escape");
+        unexpected_end("\\u", "incomplete escape");
+        unexpected_end("\\u{12", "incomplete escape");
+        let e = test.assert_err<regex.Regex>(regex.compile("(a"));
+        test.assert_equal_string("parse error at 2: missing )", error.message(e));
+    };
+
+    export let test_limits = func() -> void {
+        // Matching costs the program size times the input length, so these
+        // checks use matches_fully, which starts one thread.
+        let thousand = compiled("a{1000}");
+        test.assert(thousand.matches_fully(strings.repeat("a", 1000)));
+        test.assert(!thousand.matches_fully(strings.repeat("a", 999)));
+        out_of_range("a{1001}", 2, "repetition count exceeds 1000");
+        out_of_range("a{0,1001}", 4, "repetition count exceeds 1000");
+        out_of_range("a{99999999999}", 2, "repetition count exceeds 1000");
+        out_of_range("a{1001,}", 2, "repetition count exceeds 1000");
+        // Programs add three instructions (two saves and the match) to the
+        // pattern's own: 9,990 + 7 + 3 is exactly the limit.
+        let full = compiled("(?:a{999}){10}a{7}");
+        test.assert(full.matches_fully(strings.repeat("a", 9997)));
+        test.assert(!full.matches_fully(strings.repeat("a", 9996)));
+        out_of_range("(?:a{999}){10}a{8}", 14, "pattern exceeds 10000 instructions");
+        out_of_range("(?:a{1000}){10}", 11, "pattern exceeds 10000 instructions");
+        out_of_range("(a{1000}){1000}", 9, "pattern exceeds 10000 instructions");
+        out_of_range("a{1000}|b{1000}|c{1000}|d{1000}|e{1000}|f{1000}|g{1000}|h{1000}|i{1000}|j{1000}", 0,
+            "pattern exceeds 10000 instructions");
+        out_of_range(strings.repeat("a", 9998), 9997, "pattern exceeds 10000 instructions");
+        test.assert(compiled(strings.repeat("a", 9997)).matches_fully(strings.repeat("a", 9997)));
+        // Group nesting: 250 levels compile, 251 do not.
+        let deep = strings.repeat("(", 250) + "a" + strings.repeat(")", 250);
+        let nested = compiled(deep);
+        test.assert_equal_int32(250, nested.group_count());
+        test.assert_equal_string("a", test.assert_some<string>(nested.find("xa").group(250)));
+        out_of_range(strings.repeat("(?:", 251) + "a" + strings.repeat(")", 251), 750, "group nesting exceeds 250");
+        out_of_range("(" + deep + ")", 250, "group nesting exceeds 250");
+        // Sibling groups do not nest.
+        test.assert_equal_int32(300, compiled(strings.repeat("(a)", 300)).group_count());
+    };
+
+    export let test_pattern_and_groups = func() -> void {
+        let r = compiled("(?<year>\\d{4})-(\\d\\d)(?:-(?P<day>\\d\\d))?");
+        test.assert_equal_string("(?<year>\\d{4})-(\\d\\d)(?:-(?P<day>\\d\\d))?", r.pattern());
+        test.assert_equal_int32(3, r.group_count());
+        test.assert_equal_int32(0, compiled("a(?:b)c").group_count());
+        let m = r.find("date: 2024-05, then 1999-12-31");
+        test.assert_equal_int32(6, m.start());
+        test.assert_equal_int32(13, m.end());
+        test.assert_equal_string("2024-05", m.text());
+        test.assert_equal_string("2024-05", test.assert_some<string>(m.group(0)));
+        test.assert_equal_string("2024", test.assert_some<string>(m.group(1)));
+        test.assert_equal_string("2024", test.assert_some<string>(m.named_group("year")));
+        test.assert_equal_string("05", test.assert_some<string>(m.group(2)));
+        test.assert_none<string>(m.group(3));
+        test.assert_none<string>(m.named_group("day"));
+        test.assert_equal_int32(6, m.group_start(0));
+        test.assert_equal_int32(6, m.group_start(1));
+        test.assert_equal_int32(11, m.group_start(2));
+        test.assert_equal_int32(-1, m.group_start(3));
+        let second = r.find_from("date: 2024-05, then 1999-12-31", m.end());
+        test.assert_equal_string("1999-12-31", second.text());
+        test.assert_equal_string("31", test.assert_some<string>(second.named_group("day")));
+        test.assert_equal_int32(28, second.group_start(3));
+        // A group that matched empty is Some(""), not None.
+        let empty = compiled("(a*)b").find("b");
+        test.assert_equal_string("", test.assert_some<string>(empty.group(1)));
+        test.assert_equal_int32(0, empty.group_start(1));
+    };
+
+    export let test_find_and_find_from = func() -> void {
+        let r = compiled("é+");
+        test.assert(r.find("abc") == nil);
+        test.assert(r.find("") == nil);
+        let m = r.find("aéé🙂é");
+        test.assert_equal_int32(1, m.start());
+        test.assert_equal_int32(5, m.end());
+        test.assert_equal_int32(9, r.find_from("aéé🙂é", 5).start());
+        test.assert_equal_int32(3, r.find_from("aéé🙂é", 3).start());
+        test.assert(r.find_from("aéé🙂é", 11) == nil);
+        // An empty match is a real object, including at the end.
+        let star = compiled("x*");
+        let at_end = star.find_from("ab", 2);
+        test.assert(at_end != nil);
+        test.assert_equal_int32(2, at_end.start());
+        test.assert_equal_string("", at_end.text());
+        // ^ and \b see the text before the offset.
+        test.assert(compiled("^b").find_from("ab", 1) == nil);
+        test.assert(compiled("\\bb").find_from("ab", 1) == nil);
+        test.assert_equal_int32(2, compiled("\\bb").find_from("a b", 1).start());
+        let lines = regex_check.compile_flags("^b", 2);
+        test.assert_equal_int32(2, lines.find_from("a\nb", 1).start());
+    };
+
+    export let test_is_match_and_matches_fully = func() -> void {
+        let r = compiled("a|ab");
+        test.assert(r.is_match("xab"));
+        test.assert(!r.is_match("xyz"));
+        // The preferred match of a|ab on "ab" is "a", but the whole input
+        // still matches the pattern.
+        test.assert_equal_string("a", r.find("ab").text());
+        test.assert(r.matches_fully("ab"));
+        test.assert(r.matches_fully("a"));
+        test.assert(!r.matches_fully("abc"));
+        test.assert(!r.matches_fully("xab"));
+        test.assert(compiled("").matches_fully(""));
+        test.assert(!compiled("").matches_fully("a"));
+        test.assert(compiled("").is_match("abc"));
+        test.assert(compiled("a*").matches_fully(""));
+        test.assert(compiled("(?:a|b)*c").matches_fully("abbac"));
+        test.assert(!compiled("^a$").matches_fully("a\n"));
+        test.assert(regex_check.compile_flags("a$", 2).matches_fully("a"));
+        test.assert(!regex_check.compile_flags("a$", 2).matches_fully("a\n"));
+    };
+
+    export let test_find_all = func() -> void {
+        let words = compiled("\\w+");
+        test.assert(texts(words.find_all("hi, you 2")).equals(["hi", "you", "2"]));
+        test.assert_equal_int32(0, words.find_all("").length);
+        test.assert_equal_int32(0, words.find_all(" ,.").length);
+        // After an empty match the search resumes one scalar later.
+        let starts: int[list] = [];
+        for (let m in compiled("").find_all("aé🙂")) {
+            starts.append(m.start());
+        }
+        test.assert(starts.equals([0, 1, 3, 7]));
+        test.assert(texts(compiled("\\w*").find_all("ab cd")).equals(["ab", "", "cd", ""]));
+        test.assert(texts(compiled("a|").find_all("aab")).equals(["a", "a", "", ""]));
+        // Non-overlapping, left to right.
+        test.assert(texts(compiled("aa").find_all("aaaaa")).equals(["aa", "aa"]));
+        test.assert(texts(compiled("aba").find_all("ababababa")).equals(["aba", "aba"]));
+    };
+
+    export let test_replace = func() -> void {
+        let pair = compiled("(\\w+)@(\\w+)");
+        test.assert_equal_string("host at me $ and there at you $",
+            pair.replace_all("me@host and you@there", "$2 at $1 $$"));
+        test.assert_equal_string("<me@host> and you@there", pair.replace_first("me@host and you@there", "<$0>"));
+        test.assert_equal_string("no match", pair.replace_all("no match", "$1"));
+        test.assert_equal_string("no match", pair.replace_first("no match", "$2"));
+        test.assert_equal_string("me0", pair.replace_all("me@x", "${1}0"));
+        let named = compiled("(?<key>\\w+)=(?<value>\\w*)");
+        test.assert_equal_string("b:a, :c", named.replace_all("a=b, c=", "${value}:${key}"));
+        test.assert_equal_string("[a] [c]", named.replace_all("a=b c=d", "[${1}]"));
+        // A group that did not participate inserts nothing.
+        test.assert_equal_string("<><a>", compiled("(a)?b|(a)").replace_all("ba", "<$1$2>"));
+        // Two digits are taken when present: $10 is group 10, $1 then 0 is ${1}0.
+        let many = compiled("(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)");
+        test.assert_equal_string("ka0", many.replace_all("abcdefghijk", "$11${1}0"));
+        test.assert_equal_string("j", many.replace_all("abcdefghijk", "$10"));
+        test.assert_equal_string("a", many.replace_all("abcdefghijk", "$01"));
+        // Empty matches are replaced too.
+        test.assert_equal_string("-a-b-c-", compiled("x*").replace_all("abc", "-"));
+        test.assert_equal_string("-abc", compiled("x*").replace_first("abc", "-"));
+        test.assert_equal_string("caf-e-", compiled("é").replace_all("café", "-e-"));
+        test.assert_equal_string("🙂🙂", compiled("a").replace_all("aa", "🙂"));
+        test.assert_equal_string("", compiled("a+").replace_all("aaa", ""));
+        test.assert_equal_string("$", compiled("a").replace_all("a", "$$"));
+    };
+
+    export let test_split = func() -> void {
+        let comma = compiled("\\s*,\\s*");
+        test.assert(comma.split("a , b,c").equals(["a", "b", "c"]));
+        test.assert(comma.split(",a,,b,").equals(["", "a", "", "b", ""]));
+        test.assert(comma.split("").equals([""]));
+        test.assert(comma.split("abc").equals(["abc"]));
+        test.assert(compiled("x*").split("ab").equals(["", "a", "b", ""]));
+        test.assert(compiled("x*").split("").equals(["", ""]));
+        test.assert(compiled("é").split("aébéc").equals(["a", "b", "c"]));
+    };
+
+    export let test_flags = func() -> void {
+        let flags = new regex.RegexFlags();
+        test.assert(!flags.ignore_ascii_case && !flags.multi_line && !flags.dot_all);
+        flags.ignore_ascii_case = true;
+        let r = test.assert_ok<regex.Regex>(regex.compile_with("hello", flags));
+        // The flags are read when compiling.
+        flags.ignore_ascii_case = false;
+        test.assert(r.is_match("HeLLo"));
+        test.assert(!test.assert_ok<regex.Regex>(regex.compile_with("hello", flags)).is_match("HeLLo"));
+        // Only ASCII letters fold.
+        let folded = regex_check.compile_flags("é[a-z]", 1);
+        test.assert(folded.is_match("éQ"));
+        test.assert(!folded.is_match("ÉQ"));
+        test.assert(!regex_check.compile_flags("k", 1).is_match(strings.from_scalars([8490])));
+        let dot = regex_check.compile_flags("a.b", 4);
+        test.assert(dot.is_match("a\nb"));
+        test.assert(!compiled("a.b").is_match("a\nb"));
+        test.assert(compiled("a.b").is_match("a\rb"));
+        let lines = regex_check.compile_flags("^\\w+$", 2);
+        test.assert(texts(lines.find_all("one\ntwo\n\nthree\n")).equals(["one", "two", "three"]));
+    };
+
+    export let test_escapes_and_classes = func() -> void {
+        test.assert(compiled("\\u{1F642}").matches_fully("🙂"));
+        test.assert(compiled("\\u{0}").matches_fully(strings.from_scalars([0])));
+        test.assert(compiled("[\\u{10FFFE}-\\u{10FFFF}]").matches_fully(strings.from_scalars([1114111])));
+        test.assert(compiled("\\t\\n\\r").matches_fully("\t\n\r"));
+        test.assert(compiled("\\s").matches_fully(strings.from_scalars([11])));
+        test.assert(compiled("\\s").matches_fully(strings.from_scalars([12])));
+        test.assert(!compiled("\\s").matches_fully(strings.from_scalars([160])));
+        test.assert(!compiled("\\d").matches_fully(strings.from_scalars([1635])));
+        test.assert(!compiled("\\w").matches_fully("é"));
+        test.assert(compiled("\\W").matches_fully("é"));
+        test.assert(compiled("[^a]").matches_fully("🙂"));
+        test.assert(compiled("[^\\w\\s]+").matches_fully("é!🙂"));
+        test.assert(compiled("[\\-\\]\\[\\\\^]+").matches_fully("-][\\^"));
+        test.assert(compiled("]}").matches_fully("]}"));
+        test.assert(compiled("[[a]+").matches_fully("[a["));
+        test.assert(compiled("\\/\\#").matches_fully("/#"));
+        test.assert(!compiled("[α-ω]+").matches_fully("λόγος"));
+        test.assert(compiled("[α-ω]+").matches_fully("λογος"));
+        test.assert(compiled(".").matches_fully(strings.from_scalars([1114111])));
+    };
+
+    // Where the library knowingly differs from python3's re or ECMAScript.
+    export let test_documented_differences = func() -> void {
+        // $ without multi_line is the end of the input only; Python's $ also
+        // matches before a final LF.
+        test.assert(!compiled("a$").is_match("a\n"));
+        // \B holds in the empty input (as in ECMAScript); Python's \B never
+        // matches an empty input.
+        test.assert(compiled("\\B").is_match(""));
+        // After an empty match find_all resumes one scalar later; Python
+        // also allows a non-empty match at the same position.
+        regex_check.check("|a", 0, "a", true, [0, 0, 1, 1]);
+        // An iteration beyond a quantifier's minimum that matches empty fails
+        // (ECMAScript's rule); Python accepts one such iteration.
+        regex_check.check("(a*)*", 0, "b", false, [0, 0, -1, -1, 1, 1, -1, -1]);
+        regex_check.check("(a?){1,3}", 0, "a", true, [0, 1, 0, 1, 1, 1, 1, 1]);
+        regex_check.check("(a*)+", 0, "b", false, [0, 0, 0, 0, 1, 1, 1, 1]);
+        regex_check.check("(a|b*)*", 0, "ab", true, [0, 2, 1, 2, 2, 2, -1, -1]);
+        // Captures inside a repeated group keep their last value (as in
+        // Python); ECMAScript resets them at each iteration.
+        regex_check.check("(?:(a)|b)*", 0, "ab", true, [0, 2, 0, 1, 2, 2, -1, -1]);
+        // With one thread per instruction and position, a new iteration of a
+        // loop whose body can match empty can merge with the unfinished
+        // previous iteration. Here ECMAScript finds [0, 2) and Python [0, 0).
+        regex_check.check("(?:a*?)*", 0, "aa", true, [0, 1, 1, 2, 2, 2]);
+    };
+
+    // A 10 KB input: the machine is linear in the input.
+    export let test_large_input = func() -> void {
+        let text = strings.repeat("The quick brown fox jumps over the lazy dog; 1234 times. ", 180);
+        test.assert_equal_int32(1980, compiled("\\w+").find_all(text).length);
+        test.assert_equal_int32(180, compiled("\\d+").find_all(text).length);
+        let r = compiled("(fox|dog)s?");
+        test.assert_equal_int32(360, r.find_all(text).length);
+        test.assert_equal_int32(1981, compiled("\\s+").split(text).length);
+        test.assert(compiled("^(?:[A-Za-z0-9;. ]+)$").matches_fully(text));
+        test.assert(!compiled("z{2}").is_match(text));
+    };
+);

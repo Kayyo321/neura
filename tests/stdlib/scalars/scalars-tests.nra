@@ -1,0 +1,120 @@
+let scalars = import:Std.Text.Scalars;
+let test = import:Std.Test;
+
+let ScalarsTests = module (
+    // A reference classification of one ASCII value, written as a table of
+    // the characters in each class rather than as ranges.
+    let in_text = func(uint32 value, string members) -> bool {
+        let i = 0;
+        while (i < members.byte_length) {
+            if ((members.byte_at(i) as uint32) == value) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    };
+
+    export let test_constants_and_validity = func() -> void {
+        test.assert(scalars.Replacement == 65533);
+        test.assert(scalars.is_valid(0));
+        test.assert(scalars.is_valid(55295));
+        test.assert(!scalars.is_valid(55296));
+        test.assert(!scalars.is_valid(56320));
+        test.assert(!scalars.is_valid(57343));
+        test.assert(scalars.is_valid(57344));
+        test.assert(scalars.is_valid(1114111));
+        test.assert(!scalars.is_valid(1114112));
+        test.assert(!scalars.is_valid(4294967295));
+    };
+
+    export let test_utf8_length = func() -> void {
+        test.assert_equal_int32(1, scalars.utf8_length(0));
+        test.assert_equal_int32(1, scalars.utf8_length(127));
+        test.assert_equal_int32(2, scalars.utf8_length(128));
+        test.assert_equal_int32(2, scalars.utf8_length(2047));
+        test.assert_equal_int32(3, scalars.utf8_length(2048));
+        test.assert_equal_int32(3, scalars.utf8_length(55295));
+        test.assert_equal_int32(3, scalars.utf8_length(65535));
+        test.assert_equal_int32(4, scalars.utf8_length(65536));
+        test.assert_equal_int32(4, scalars.utf8_length(1114111));
+    };
+
+    // Every value below 256, and a few above, against the character lists.
+    export let test_classification = func() -> void {
+        let digits = "0123456789";
+        let hex = "0123456789abcdefABCDEF";
+        let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let lower = "abcdefghijklmnopqrstuvwxyz";
+        let punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+        let value: uint32 = 0;
+        while (value < 300) {
+            let is_upper = in_text(value, upper);
+            let is_lower = in_text(value, lower);
+            let is_digit = in_text(value, digits);
+            test.assert_equal_bool(value < 128, scalars.is_ascii(value));
+            test.assert_equal_bool(is_digit, scalars.is_ascii_digit(value));
+            test.assert_equal_bool(in_text(value, hex), scalars.is_ascii_hex_digit(value));
+            test.assert_equal_bool(is_upper || is_lower, scalars.is_ascii_alphabetic(value));
+            test.assert_equal_bool(is_upper || is_lower || is_digit, scalars.is_ascii_alphanumeric(value));
+            test.assert_equal_bool(is_upper, scalars.is_ascii_uppercase(value));
+            test.assert_equal_bool(is_lower, scalars.is_ascii_lowercase(value));
+            test.assert_equal_bool(value == 32 || value == 9 || value == 10 || value == 11 || value == 12 || value == 13,
+                scalars.is_ascii_whitespace(value));
+            test.assert_equal_bool(in_text(value, punctuation), scalars.is_ascii_punctuation(value));
+            test.assert_equal_bool(value < 32 || value == 127, scalars.is_ascii_control(value));
+            let upper_value = value;
+            let lower_value = value;
+            if (is_lower) {
+                upper_value = upper.byte_at((value - 97) as int) as uint32;
+            }
+            if (is_upper) {
+                lower_value = lower.byte_at((value - 65) as int) as uint32;
+            }
+            test.assert(upper_value == scalars.to_ascii_upper(value));
+            test.assert(lower_value == scalars.to_ascii_lower(value));
+            value = value + 1;
+        }
+        test.assert_equal_int32(32, punctuation.byte_length);
+        test.assert(!scalars.is_ascii_alphabetic(233));
+        test.assert(scalars.to_ascii_upper(233) == 233);
+        test.assert(scalars.to_ascii_lower(201) == 201);
+        test.assert(!scalars.is_ascii_whitespace(160));
+        test.assert(!scalars.is_ascii_control(128));
+    };
+
+    export let test_digit_value = func() -> void {
+        test.assert_equal_int32(0, scalars.digit_value(48, 10));
+        test.assert_equal_int32(9, scalars.digit_value(57, 10));
+        test.assert_equal_int32(-1, scalars.digit_value(97, 10));
+        test.assert_equal_int32(1, scalars.digit_value(49, 2));
+        test.assert_equal_int32(-1, scalars.digit_value(50, 2));
+        test.assert_equal_int32(10, scalars.digit_value(97, 16));
+        test.assert_equal_int32(15, scalars.digit_value(70, 16));
+        test.assert_equal_int32(-1, scalars.digit_value(103, 16));
+        test.assert_equal_int32(35, scalars.digit_value(122, 36));
+        test.assert_equal_int32(35, scalars.digit_value(90, 36));
+        test.assert_equal_int32(-1, scalars.digit_value(47, 36));
+        test.assert_equal_int32(-1, scalars.digit_value(58, 36));
+        test.assert_equal_int32(-1, scalars.digit_value(64, 36));
+        test.assert_equal_int32(-1, scalars.digit_value(91, 36));
+        test.assert_equal_int32(-1, scalars.digit_value(96, 36));
+        test.assert_equal_int32(-1, scalars.digit_value(123, 36));
+        test.assert_equal_int32(-1, scalars.digit_value(65296, 36));
+    };
+
+    export let test_from_digit = func() -> void {
+        let expected = "0123456789abcdefghijklmnopqrstuvwxyz";
+        let radix = 2;
+        while (radix <= 36) {
+            let value = 0;
+            while (value < radix) {
+                let digit = scalars.from_digit(value, radix);
+                test.assert(digit == (expected.byte_at(value) as uint32));
+                test.assert_equal_int32(value, scalars.digit_value(digit, radix));
+                value = value + 1;
+            }
+            radix = radix + 1;
+        }
+    };
+);

@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: radix outside 2 through 36
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let scalars = import:Std.Text.Scalars;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("before");
+        let value = scalars.from_digit(0, 0);
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

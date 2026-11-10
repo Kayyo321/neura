@@ -1,0 +1,7 @@
+user -> [ada] at 0
+level -> [3] at 9
+tag -> [é🙂] at 17
+empty -> [] at 28
+ada:user 3:level é🙂:tag :empty
+a|b|c||d
+parse error at 1: lookahead is not supported

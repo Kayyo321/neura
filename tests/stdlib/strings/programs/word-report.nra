@@ -1,0 +1,32 @@
+let console = import:Std.Io.Console;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let strings = import:Std.Text.Strings;
+
+// Splits text into lines and words, then prints a padded report. Checks the
+// Strings path end to end, including the image round trip.
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let text = "  The quick brown fox\r\njumps over\n\nthe lazy dog é🙂\n";
+        let number = 0;
+        for (let line in strings.lines(text)) {
+            number = number + 1;
+            let words: string[list] = [];
+            for (let word in strings.split(strings.trim(line), " ")) {
+                if (!strings.is_empty(word)) {
+                    words.append(strings.to_ascii_upper(word));
+                }
+            }
+            let label = strings.pad_start(number.to_string(), 3, "0");
+            let count = strings.pad_end(words.length.to_string(), 2, ".");
+            console.print_line(label + " " + count + " " + strings.join(words, "|"));
+        }
+        let reversed = strings.reverse("é🙂ab");
+        console.print_line(reversed + " " + strings.scalar_count(reversed).to_string() + " "
+            + strings.byte_length(reversed).to_string());
+        console.print_line(strings.replace("a-b-c", "-", "+") + " " + strings.index_of("a-b-c", "c").to_string());
+        console.print_line(optional.value_or<string>(strings.strip_suffix("report.txt", ".txt"), "?"));
+        console.print_line(strings.from_bytes_lossy([65, 255, 66, 226, 130]));
+        return program.ExitCode.Ok;
+    };
+);

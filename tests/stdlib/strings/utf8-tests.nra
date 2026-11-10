@@ -1,0 +1,253 @@
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// UTF-8 decoding and encoding. The vectors and totals were generated with
+// python3 (generators/utf8-vectors.py): bytes.decode('utf-8', 'replace') for
+// the lossy decoding (Unicode's maximal subpart practice) and
+// UnicodeDecodeError.start and .reason for from_bytes.
+let Utf8Tests = module (
+    let check_bytes = func(uint8[list] bytes, uint32[list] lossy, int offset, string reason) -> void {
+        let text = strings.from_bytes_lossy(bytes);
+        test.assert_equal<uint32[list]>(lossy, strings.scalars(text));
+        let [valid, _] = string.from_utf8(bytes);
+        test.assert_equal_bool(offset < 0, valid);
+        match (strings.from_bytes(bytes)) {
+            result.Result.Ok(decoded) => {
+                test.assert_equal_int32(-1, offset);
+                test.assert_equal<uint8[list]>(bytes, strings.to_bytes(decoded));
+                test.assert_equal_string(decoded, text);
+            },
+            result.Result.Err(e) => {
+                match (e) {
+                    error.Error.Encoding { offset: at, message } => {
+                        test.assert_equal_int32(offset, at);
+                        test.assert_equal_string(reason, message);
+                    },
+                    _ => {
+                        test.fail("expected an Encoding error");
+                    },
+                }
+            },
+        }
+    };
+
+    export let test_python_vectors = func() -> void {
+        check_bytes([], [], -1, "");
+        check_bytes([65], [65], -1, "");
+        check_bytes([0], [0], -1, "");
+        check_bytes([127], [127], -1, "");
+        check_bytes([128], [65533], 0, "invalid start byte");
+        check_bytes([191], [65533], 0, "invalid start byte");
+        check_bytes([192], [65533], 0, "invalid start byte");
+        check_bytes([193], [65533], 0, "invalid start byte");
+        check_bytes([192, 128], [65533, 65533], 0, "invalid start byte");
+        check_bytes([193, 191], [65533, 65533], 0, "invalid start byte");
+        check_bytes([194], [65533], 0, "unexpected end of data");
+        check_bytes([194, 128], [128], -1, "");
+        check_bytes([194, 127], [65533, 127], 0, "invalid continuation byte");
+        check_bytes([223, 191], [2047], -1, "");
+        check_bytes([223, 192], [65533, 65533], 0, "invalid continuation byte");
+        check_bytes([224], [65533], 0, "unexpected end of data");
+        check_bytes([224, 128], [65533, 65533], 0, "invalid continuation byte");
+        check_bytes([224, 159, 191], [65533, 65533, 65533], 0, "invalid continuation byte");
+        check_bytes([224, 160], [65533], 0, "unexpected end of data");
+        check_bytes([224, 160, 128], [2048], -1, "");
+        check_bytes([224, 160, 127], [65533, 127], 0, "invalid continuation byte");
+        check_bytes([225, 128, 128], [4096], -1, "");
+        check_bytes([236, 191, 191], [53247], -1, "");
+        check_bytes([237, 128, 128], [53248], -1, "");
+        check_bytes([237, 159, 191], [55295], -1, "");
+        check_bytes([237, 160, 128], [65533, 65533, 65533], 0, "invalid continuation byte");
+        check_bytes([237, 191, 191], [65533, 65533, 65533], 0, "invalid continuation byte");
+        check_bytes([238, 128, 128], [57344], -1, "");
+        check_bytes([239, 191, 191], [65535], -1, "");
+        check_bytes([239, 191], [65533], 0, "unexpected end of data");
+        check_bytes([240], [65533], 0, "unexpected end of data");
+        check_bytes([240, 128, 128, 128], [65533, 65533, 65533, 65533], 0, "invalid continuation byte");
+        check_bytes([240, 143, 191, 191], [65533, 65533, 65533, 65533], 0, "invalid continuation byte");
+        check_bytes([240, 144], [65533], 0, "unexpected end of data");
+        check_bytes([240, 144, 128], [65533], 0, "unexpected end of data");
+        check_bytes([240, 144, 128, 128], [65536], -1, "");
+        check_bytes([240, 144, 128, 127], [65533, 127], 0, "invalid continuation byte");
+        check_bytes([241, 128, 128, 128], [262144], -1, "");
+        check_bytes([243, 191, 191, 191], [1048575], -1, "");
+        check_bytes([244, 143, 191, 191], [1114111], -1, "");
+        check_bytes([244, 144, 128, 128], [65533, 65533, 65533, 65533], 0, "invalid continuation byte");
+        check_bytes([245, 128, 128, 128], [65533, 65533, 65533, 65533], 0, "invalid start byte");
+        check_bytes([248, 136, 128, 128, 128], [65533, 65533, 65533, 65533, 65533], 0, "invalid start byte");
+        check_bytes([254], [65533], 0, "invalid start byte");
+        check_bytes([255], [65533], 0, "invalid start byte");
+        check_bytes([254, 255], [65533, 65533], 0, "invalid start byte");
+        check_bytes([97, 255, 98], [97, 65533, 98], 1, "invalid start byte");
+        check_bytes([97, 226, 130, 98], [97, 65533, 98], 1, "invalid continuation byte");
+        check_bytes([226, 130, 172, 226, 130], [8364, 65533], 3, "unexpected end of data");
+        check_bytes([226, 130, 172, 255, 226, 130, 172], [8364, 65533, 8364], 3, "invalid start byte");
+        check_bytes([240, 159, 153, 130, 240, 159, 153], [128578, 65533], 4, "unexpected end of data");
+        check_bytes([240, 159, 153, 65], [65533, 65], 0, "invalid continuation byte");
+        check_bytes([195, 169, 195], [233, 65533], 2, "unexpected end of data");
+        check_bytes([195, 169, 195, 195, 169], [233, 65533, 233], 2, "invalid continuation byte");
+        check_bytes([97, 241, 128, 128, 225, 128, 194, 98, 128, 99, 128, 191, 100], [97, 65533, 65533, 65533, 98, 65533, 99, 65533, 65533, 100], 1, "invalid continuation byte");
+        check_bytes([224, 128, 175], [65533, 65533, 65533], 0, "invalid continuation byte");
+        check_bytes([244, 145, 146, 147, 255, 65, 128, 191, 66], [65533, 65533, 65533, 65533, 65533, 65, 65533, 65533, 66], 0, "invalid continuation byte");
+        check_bytes([225, 128, 226, 240, 145, 146, 241, 191, 65], [65533, 65533, 65533, 65533, 65], 0, "invalid continuation byte");
+        check_bytes([237, 160, 128, 237, 191, 191], [65533, 65533, 65533, 65533, 65533, 65533], 0, "invalid continuation byte");
+        check_bytes([128, 128, 128], [65533, 65533, 65533], 0, "invalid start byte");
+        check_bytes([194, 194, 128], [65533, 128], 0, "invalid continuation byte");
+    };
+
+    export let test_error_message = func() -> void {
+        let e = test.assert_err<string>(strings.from_bytes([97, 98, 255]));
+        test.assert_equal_string("invalid encoding at 2: invalid start byte", error.message(e));
+    };
+
+    // The library's own validator must accept exactly what the NVM accepts.
+    // Each candidate is followed by 0xFF, which is never valid, so the NVM
+    // rejects the whole input and the library decodes the candidate itself:
+    // from_bytes must report the error at the candidate's end exactly when
+    // the NVM accepts the candidate alone. The lossy totals are python3's.
+    let check_candidate = func(uint8[list] candidate) -> void {
+        let [valid, _] = string.from_utf8(candidate);
+        let probe: uint8[list] = [];
+        for (let b in candidate) {
+            probe.append(b);
+        }
+        probe.append(255);
+        match (strings.from_bytes(probe)) {
+            result.Result.Ok(_) => {
+                test.fail("0xFF was accepted");
+            },
+            result.Result.Err(e) => {
+                match (e) {
+                    error.Error.Encoding { offset, message: _ } => {
+                        test.assert_equal_bool(valid, offset == candidate.length);
+                    },
+                    _ => {
+                        test.fail("expected an Encoding error");
+                    },
+                }
+            },
+        }
+    };
+
+    let add_lossy = func(uint8[list] candidate, int[] totals) -> void {
+        let probe: uint8[list] = [];
+        for (let b in candidate) {
+            probe.append(b);
+        }
+        probe.append(255);
+        for (let value in strings.scalars(strings.from_bytes_lossy(probe))) {
+            totals[0] = totals[0] + 1;
+            totals[1] = totals[1] + (value as int);
+        }
+    };
+
+    // Every two-byte sequence with a non-ASCII first byte.
+    export let test_two_byte_sequences = func() -> void {
+        let count = 0;
+        let total: int64 = 0;
+        let a = 128;
+        while (a < 256) {
+            let totals: int[] = [0, 0];
+            let b = 0;
+            while (b < 256) {
+                let candidate: uint8[list] = [a as uint8, b as uint8];
+                check_candidate(candidate);
+                add_lossy(candidate, totals);
+                b = b + 1;
+            }
+            count = count + totals[0];
+            total = total + (totals[1] as int64);
+            a = a + 1;
+        }
+        test.assert_equal_int32(95168, count);
+        test.assert_equal_int64(5040256896, total);
+    };
+
+    // Leads E0 through F7 with every second byte and a sample of later bytes.
+    export let test_long_sequences = func() -> void {
+        let count = 0;
+        let total: int64 = 0;
+        let thirds: uint8[] = [65, 128, 191];
+        let a = 224;
+        while (a < 248) {
+            let totals: int[] = [0, 0];
+            let b = 0;
+            while (b < 256) {
+                for (let c in thirds) {
+                    let candidate: uint8[list] = [a as uint8, b as uint8, c, 128];
+                    check_candidate(candidate);
+                    add_lossy(candidate, totals);
+                }
+                b = b + 1;
+            }
+            count = count + totals[0];
+            total = total + (totals[1] as int64);
+            a = a + 1;
+        }
+        test.assert_equal_int32(82304, count);
+        test.assert_equal_int64(4477842112, total);
+    };
+
+    export let test_scalars_and_offsets = func() -> void {
+        let text = "Aé€🙂";
+        let expected: uint32[list] = [65, 233, 8364, 128578];
+        test.assert_equal<uint32[list]>(expected, strings.scalars(text));
+        let offsets: [int, uint32][list] = [[0, 65], [1, 233], [3, 8364], [6, 128578]];
+        test.assert_equal<[int, uint32][list]>(offsets, strings.scalar_offsets(text));
+        let none: uint32[list] = [];
+        test.assert_equal<uint32[list]>(none, strings.scalars(""));
+        test.assert_equal_int32(0, strings.scalar_offsets("").length);
+        test.assert_equal_int32(4, strings.scalar_count(text));
+        test.assert_equal_int32(10, strings.byte_length(text));
+        test.assert_equal_int32(0, strings.scalar_count(""));
+    };
+
+    export let test_scalar_at = func() -> void {
+        let text = "Aé€🙂";
+        test.assert(strings.scalar_at(text, 0) == 65);
+        test.assert(strings.scalar_at(text, 1) == 233);
+        test.assert(strings.scalar_at(text, 3) == 8364);
+        test.assert(strings.scalar_at(text, 6) == 128578);
+        test.assert(strings.byte_at(text, 1) == 195);
+        test.assert(strings.byte_at(text, 9) == 130);
+    };
+
+    export let test_boundaries = func() -> void {
+        let text = "Aé🙂";
+        test.assert(strings.is_boundary(text, 0));
+        test.assert(strings.is_boundary(text, 1));
+        test.assert(!strings.is_boundary(text, 2));
+        test.assert(strings.is_boundary(text, 3));
+        test.assert(!strings.is_boundary(text, 4));
+        test.assert(!strings.is_boundary(text, 6));
+        test.assert(strings.is_boundary(text, 7));
+        test.assert(!strings.is_boundary(text, 8));
+        test.assert(!strings.is_boundary(text, -1));
+        test.assert(strings.is_boundary("", 0));
+        test.assert(!strings.is_boundary("", 1));
+    };
+
+    export let test_from_scalars = func() -> void {
+        let values: uint32[list] = [0, 127, 128, 2047, 2048, 55295, 57344, 65535, 65536, 1114111];
+        let text = strings.from_scalars(values);
+        test.assert_equal<uint32[list]>(values, strings.scalars(text));
+        let bytes: uint8[list] = [0, 127, 194, 128, 223, 191, 224, 160, 128, 237, 159, 191, 238, 128, 128, 239, 191, 191,
+            240, 144, 128, 128, 244, 143, 191, 191];
+        test.assert_equal<uint8[list]>(bytes, strings.to_bytes(text));
+        let empty: uint32[list] = [];
+        test.assert_equal_string("", strings.from_scalars(empty));
+        test.assert_equal_string("é🙂", strings.from_scalars([233, 128578]));
+    };
+
+    export let test_to_bytes_is_a_copy = func() -> void {
+        let text = "abcdefghé";
+        let bytes = strings.to_bytes(text);
+        test.assert_equal_int32(10, bytes.length);
+        bytes[0] = 65;
+        test.assert_equal_string("abcdefghé", text);
+        test.assert_equal_string("Abcdefghé", test.assert_ok<string>(strings.from_bytes(bytes)));
+        test.assert_equal_int32(0, strings.to_bytes("").length);
+    };
+);

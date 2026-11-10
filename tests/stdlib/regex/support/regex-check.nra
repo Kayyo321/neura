@@ -1,0 +1,73 @@
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let regex = import:Std.Text.Regex;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// Shared checks for the regex tests. `check` compares find_all with an
+// expected list holding, per match, the start and end byte offsets of group
+// 0 and of every group (-1, -1 when it did not participate), and checks
+// is_match, matches_fully, find, and split against the same matches.
+export let RegexCheck = module (
+    // Flags: 1 ignore_ascii_case, 2 multi_line, 4 dot_all.
+    export let compile_flags = func(string pattern, int flags) -> regex.Regex {
+        let options = new regex.RegexFlags();
+        options.ignore_ascii_case = (flags & 1) != 0;
+        options.multi_line = (flags & 2) != 0;
+        options.dot_all = (flags & 4) != 0;
+        match (regex.compile_with(pattern, options)) {
+            result.Result.Ok(compiled) => {
+                return compiled;
+            },
+            result.Result.Err(e) => {
+                trap_with_message(pattern + ": " + error.message(e));
+            },
+        }
+    };
+
+    export let spans = func(regex.Regex r, regex.RegexMatch m) -> int[list] {
+        let values: int[list] = [];
+        let g = 0;
+        while (g <= r.group_count()) {
+            let start = m.group_start(g);
+            match (m.group(g)) {
+                optional.Optional.Some(text) => {
+                    values.append(start);
+                    values.append(start + text.byte_length);
+                },
+                optional.Optional.None => {
+                    test.assert_equal_int32(-1, start);
+                    values.append(-1);
+                    values.append(-1);
+                },
+            }
+            g = g + 1;
+        }
+        return values;
+    };
+
+    export let check = func(string pattern, int flags, string input, bool full, int[list] expected) -> void {
+        let r = compile_flags(pattern, flags);
+        let actual: int[list] = [];
+        let all = r.find_all(input);
+        for (let m in all) {
+            for (let value in spans(r, m)) {
+                actual.append(value);
+            }
+            test.assert_equal_string(input.slice(m.start(), m.end()), m.text());
+        }
+        if (!expected.equals(actual)) {
+            test.fail(pattern + " on <" + input + ">: expected " + expected.to_string() + ", got " + actual.to_string());
+        }
+        test.assert_equal_bool(expected.length > 0, r.is_match(input));
+        test.assert_equal_bool(full, r.matches_fully(input));
+        let first = r.find(input);
+        if (all.length == 0) {
+            test.assert(first == nil);
+        } else {
+            test.assert(spans(r, first).equals(spans(r, all[0])));
+        }
+        let pieces = r.split(input);
+        test.assert_equal_int32(all.length + 1, pieces.length);
+    };
+);

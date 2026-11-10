@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: not a Unicode scalar value
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let scalars = import:Std.Text.Scalars;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("before");
+        let value = scalars.utf8_length(57343);
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

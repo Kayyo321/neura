@@ -1,0 +1,724 @@
+let parser = import:Std.Text.Internal.RegexParser;
+
+// The regular expression compiler and Pike machine (Stdlib.md section 8.4).
+// A program is a list of instructions; the machine advances every live
+// thread over the input one scalar value at a time, in priority order, with
+// at most one thread per instruction per position, so matching takes time
+// proportional to the program size times the input length and never
+// backtracks. Each thread carries its own capture slots; slot 2k is the
+// start and slot 2k + 1 the end of group k, -1 when unset. The slots after
+// the groups' slots hold the entry positions of optional copies of an item
+// that can match empty: Progress(slot) is an assertion that holds when the
+// position has moved since that save (see compile_repeat). A Class carries
+// its sorted ranges and, for ASCII scalars, a 128-bit membership set with the
+// negation already applied.
+export let RegexMachine = module (
+    export let Inst = enum (
+        Scalar(uint32),
+        Any,
+        Class { ranges: uint32[list], negated: bool, ascii: uint32[list] },
+        Split { first: int, second: int },
+        Jump(int),
+        Save(int),
+        Assert(parser.Anchor),
+        Progress(int),
+        Match
+    );
+
+    // Search modes: the leftmost match with backtracking priority; whether
+    // any match exists; a match of the whole input from the start offset.
+    export const Leftmost: int = 0;
+    export const Earliest: int = 1;
+    export const Whole: int = 2;
+
+    // A compiled program with the scratch state the machine reuses between
+    // searches. `first_bytes` lists the bytes that can begin a match when
+    // `can_skip` holds; `anchored` means a match can only start at offset 0.
+    export let Program = class (
+        export let insts: Inst[list] = [];
+        export let slot_count: int = 2;
+        export let first_bytes: bool[list] = [];
+        export let can_skip: bool = false;
+        export let anchored: bool = false;
+        export let marks: int[list] = [];
+        export let generation: int = 0;
+        export let stack_pcs: int[list] = [];
+        export let stack_caps: (int[list])[list] = [];
+    );
+
+    // Compiles a syntax tree with `groups` capturing groups.
+    export let compile = func(parser.Node root, int groups, bool ignore_case, bool multi_line, bool dot_all) -> Program {
+        let compiler = new Compiler(ignore_case, multi_line, dot_all, 2 * groups + 2);
+        compiler.emit(Inst.Save(0));
+        compiler.compile(root);
+        compiler.emit(Inst.Save(1));
+        compiler.emit(Inst.Match);
+        let program = new Program();
+        program.insts = compiler.insts;
+        program.slot_count = compiler.next_slot;
+        let k = 0;
+        while (k < program.insts.length) {
+            program.marks.append(-1);
+            k = k + 1;
+        }
+        analyze_start(program);
+        return program;
+    };
+
+    let Compiler = class (
+        export let insts: Inst[list] = [];
+        let fold_case: bool = false;
+        let line_anchors: bool = false;
+        let any_newline: bool = false;
+        export let next_slot: int = 2;
+
+        export let init = func(bool ignore_case, bool multi_line, bool dot_all, int first_free_slot) -> void {
+            fold_case = ignore_case;
+            line_anchors = multi_line;
+            any_newline = dot_all;
+            next_slot = first_free_slot;
+        };
+
+        export let emit = func(Inst inst) -> int {
+            insts.append(inst);
+            return insts.length - 1;
+        };
+
+        export let compile = func(parser.Node node) -> void {
+            match (node) {
+                parser.Node.Empty => {},
+                parser.Node.Literal(value) => {
+                    if (fold_case && ((value >= 65 && value <= 90) || (value >= 97 && value <= 122))) {
+                        let upper = value & 4294967263;
+                        emit(class_of([upper, upper, upper + 32, upper + 32], false));
+                    } else {
+                        emit(Inst.Scalar(value));
+                    }
+                },
+                parser.Node.Any => {
+                    if (any_newline) {
+                        emit(Inst.Any);
+                    } else {
+                        emit(class_of([10, 10], true));
+                    }
+                },
+                parser.Node.Class { ranges, negated } => {
+                    emit(class_of(normalize(ranges, fold_case), negated));
+                },
+                parser.Node.Concat(items) => {
+                    for (let item in items) {
+                        compile(item);
+                    }
+                },
+                parser.Node.Alternate(branches) => {
+                    let jumps: int[list] = [];
+                    let last = branches.length - 1;
+                    let k = 0;
+                    while (k < last) {
+                        let split = emit(Inst.Jump(0));
+                        compile(branches[k]);
+                        jumps.append(emit(Inst.Jump(0)));
+                        insts[split] = Inst.Split { first: split + 1, second: insts.length };
+                        k = k + 1;
+                    }
+                    compile(branches[last]);
+                    for (let jump in jumps) {
+                        insts[jump] = Inst.Jump(insts.length);
+                    }
+                },
+                parser.Node.Repeat { item, min, max, greedy } => {
+                    compile_repeat(item, min, max, greedy);
+                },
+                parser.Node.Group { item, index } => {
+                    emit(Inst.Save(2 * index));
+                    compile(item);
+                    emit(Inst.Save(2 * index + 1));
+                },
+                parser.Node.Assert(anchor) => {
+                    let kind = anchor;
+                    if (line_anchors && anchor == parser.Anchor.StartText) {
+                        kind = parser.Anchor.StartLine;
+                    } else if (line_anchors && anchor == parser.Anchor.EndText) {
+                        kind = parser.Anchor.EndLine;
+                    }
+                    emit(Inst.Assert(kind));
+                },
+            }
+        };
+
+        // x* is split, x, jump back; x+ (after min - 1 copies) is x then a
+        // split back; a bounded repetition is min copies followed by
+        // max - min optional copies that all exit to the same end.
+        //
+        // Empty iterations follow ECMAScript's backtracking rule: an
+        // iteration beyond the minimum that matches the empty string fails.
+        // In a loop the machine's one-thread-per-instruction rule already
+        // does this (the thread returning to the loop's split at the same
+        // position dies); an optional copy of an item that can match empty
+        // saves its entry position and ends with Progress.
+        let compile_repeat = func(parser.Node item, int min, int max, bool greedy) -> void {
+            let nullable = parser.nullable(item);
+            let copies = min;
+            if (max < 0 && min > 0 && !nullable) {
+                copies = min - 1;
+            }
+            let k = 0;
+            while (k < copies) {
+                compile(item);
+                k = k + 1;
+            }
+            if (max < 0 && copies == min) {
+                let split = emit(Inst.Jump(0));
+                compile(item);
+                emit(Inst.Jump(split));
+                insts[split] = choice(split + 1, insts.length, greedy);
+                return;
+            }
+            if (max < 0) {
+                let body = insts.length;
+                compile(item);
+                emit(choice(body, insts.length + 1, greedy));
+                return;
+            }
+            let guarded = nullable;
+            let slot = 0;
+            if (guarded && max > min) {
+                slot = next_slot;
+                next_slot = next_slot + 1;
+            }
+            let splits: int[list] = [];
+            k = min;
+            while (k < max) {
+                splits.append(emit(Inst.Jump(0)));
+                if (guarded) {
+                    emit(Inst.Save(slot));
+                    compile(item);
+                    emit(Inst.Progress(slot));
+                } else {
+                    compile(item);
+                }
+                k = k + 1;
+            }
+            let end = insts.length;
+            for (let split in splits) {
+                insts[split] = choice(split + 1, end, greedy);
+            }
+        };
+
+        let choice = func(int body, int exit, bool greedy) -> Inst {
+            if (greedy) {
+                return Inst.Split { first: body, second: exit };
+            }
+            return Inst.Split { first: exit, second: body };
+        };
+    );
+
+    // A class instruction with its ASCII members as a 128-bit set, so that
+    // matching an ASCII scalar is one read.
+    let class_of = func(uint32[list] ranges, bool negated) -> Inst {
+        let ascii: uint32[list] = [0, 0, 0, 0];
+        let c: uint32 = 0;
+        while (c < 128) {
+            if (in_ranges(ranges, c) != negated) {
+                let word = (c >> 5) as int;
+                ascii[word] = ascii[word] | ((1 as uint32) << (c & 31));
+            }
+            c = c + 1;
+        }
+        return Inst.Class { ranges: ranges, negated: negated, ascii: ascii };
+    };
+
+    // Sorted, merged ranges; with case folding, each ASCII letter range also
+    // adds the other case.
+    let normalize = func(uint32[list] ranges, bool fold_case) -> uint32[list] {
+        let pairs: uint32[list] = [];
+        let k = 0;
+        while (k < ranges.length) {
+            let low = ranges[k];
+            let high = ranges[k + 1];
+            pairs.append(low);
+            pairs.append(high);
+            if (fold_case) {
+                add_shifted(pairs, low, high, 65, 90, true);
+                add_shifted(pairs, low, high, 97, 122, false);
+            }
+            k = k + 2;
+        }
+        // Insertion sort of the pairs by their low ends.
+        let count = pairs.length / 2;
+        let i = 1;
+        while (i < count) {
+            let low = pairs[2 * i];
+            let high = pairs[2 * i + 1];
+            let j = i - 1;
+            while (j >= 0 && pairs[2 * j] > low) {
+                pairs[2 * j + 2] = pairs[2 * j];
+                pairs[2 * j + 3] = pairs[2 * j + 1];
+                j = j - 1;
+            }
+            pairs[2 * j + 2] = low;
+            pairs[2 * j + 3] = high;
+            i = i + 1;
+        }
+        let merged: uint32[list] = [];
+        i = 0;
+        while (i < count) {
+            let low = pairs[2 * i];
+            let high = pairs[2 * i + 1];
+            let last = merged.length - 1;
+            if (last > 0 && low <= merged[last] + 1) {
+                if (high > merged[last]) {
+                    merged[last] = high;
+                }
+            } else {
+                merged.append(low);
+                merged.append(high);
+            }
+            i = i + 1;
+        }
+        return merged;
+    };
+
+    // Adds the part of [low, high] inside [from, to] moved to the other case.
+    let add_shifted = func(uint32[list] pairs, uint32 low, uint32 high, uint32 from, uint32 to, bool up) -> void {
+        let a = low;
+        if (a < from) {
+            a = from;
+        }
+        let b = high;
+        if (b > to) {
+            b = to;
+        }
+        if (a > b) {
+            return;
+        }
+        if (up) {
+            pairs.append(a + 32);
+            pairs.append(b + 32);
+        } else {
+            pairs.append(a - 32);
+            pairs.append(b - 32);
+        }
+    };
+
+    // Finds the bytes that can begin a match, and whether every match must
+    // start at offset 0, by following the epsilon instructions from the
+    // start.
+    let analyze_start = func(Program program) -> void {
+        let first: bool[list] = [];
+        let k = 0;
+        while (k < 256) {
+            first.append(false);
+            k = k + 1;
+        }
+        let anchored = !reaches_input(program.insts, first, false);
+        let can_skip = !reaches_input(program.insts, first, true);
+        program.first_bytes = first;
+        program.can_skip = can_skip;
+        program.anchored = anchored;
+    };
+
+    // Follows the epsilon instructions from the start. Every assertion is
+    // passable, except that a text-start assertion stops the walk unless
+    // `through_start` is set. Marks the first bytes of the consuming
+    // instructions reached and returns true when a match instruction or an
+    // instruction consuming any scalar is reached (no byte can be ruled
+    // out), or, without `through_start`, when any consuming instruction is.
+    let reaches_input = func(Inst[list] insts, bool[list] first, bool through_start) -> bool {
+        let seen: bool[list] = [];
+        let k = 0;
+        while (k < insts.length) {
+            seen.append(false);
+            k = k + 1;
+        }
+        let open = false;
+        let stack: int[list] = [0];
+        while (stack.length > 0) {
+            let pc = stack[stack.length - 1];
+            stack.remove_at(stack.length - 1);
+            if (seen[pc]) {
+                continue;
+            }
+            seen[pc] = true;
+            match (insts[pc]) {
+                Inst.Jump(target) => {
+                    stack.append(target);
+                },
+                Inst.Split { first: a, second: b } => {
+                    stack.append(b);
+                    stack.append(a);
+                },
+                Inst.Save(_) => {
+                    stack.append(pc + 1);
+                },
+                Inst.Progress(_) => {
+                    stack.append(pc + 1);
+                },
+                Inst.Assert(kind) => {
+                    if (through_start || kind != parser.Anchor.StartText) {
+                        stack.append(pc + 1);
+                    }
+                },
+                Inst.Match => {
+                    open = true;
+                },
+                Inst.Any => {
+                    open = true;
+                },
+                Inst.Scalar(value) => {
+                    if (!through_start) {
+                        open = true;
+                    }
+                    mark_range(first, value, value);
+                },
+                Inst.Class { ranges, negated, ascii: _ } => {
+                    if (!through_start) {
+                        open = true;
+                    }
+                    if (negated) {
+                        mark_complement(first, ranges);
+                    } else {
+                        let r = 0;
+                        while (r < ranges.length) {
+                            mark_range(first, ranges[r], ranges[r + 1]);
+                            r = r + 2;
+                        }
+                    }
+                },
+            }
+        }
+        return open;
+    };
+
+    // Marks the first bytes of the UTF-8 encodings of [low, high]. The lead
+    // byte grows with the value, so the leads of the ends bound the rest.
+    let mark_range = func(bool[list] first, uint32 low, uint32 high) -> void {
+        let a = lead_byte(low);
+        let b = lead_byte(high);
+        while (a <= b) {
+            first[a] = true;
+            a = a + 1;
+        }
+    };
+
+    let mark_complement = func(bool[list] first, uint32[list] ranges) -> void {
+        let next: uint32 = 0;
+        let r = 0;
+        while (r < ranges.length) {
+            if (ranges[r] > next) {
+                mark_range(first, next, ranges[r] - 1);
+            }
+            if (ranges[r + 1] >= next) {
+                next = ranges[r + 1] + 1;
+            }
+            r = r + 2;
+        }
+        if (next <= 1114111) {
+            mark_range(first, next, 1114111);
+        }
+    };
+
+    let lead_byte = func(uint32 value) -> int {
+        if (value < 128) {
+            return value as int;
+        }
+        if (value < 2048) {
+            return (192 | (value >> 6)) as int;
+        }
+        if (value < 65536) {
+            return (224 | (value >> 12)) as int;
+        }
+        return (240 | (value >> 18)) as int;
+    };
+
+    // Runs the program over `input` from the byte offset `start`. Returns
+    // the capture slots of the match, or an empty list when there is none.
+    export let search = func(Program program, string input, int start, int mode) -> int[list] {
+        let none: int[list] = [];
+        if (program.anchored && start > 0) {
+            return none;
+        }
+        if (program.generation > 2000000000) {
+            reset_marks(program);
+        }
+        let insts = program.insts;
+        let marks = program.marks;
+        let stack_pcs = program.stack_pcs;
+        let stack_caps = program.stack_caps;
+        let anchored = program.anchored;
+        let skip = program.can_skip && mode != Whole;
+        let first = program.first_bytes;
+        let length = input.byte_length;
+        let initial: int[list] = [];
+        let k = 0;
+        while (k < program.slot_count) {
+            initial.append(-1);
+            k = k + 1;
+        }
+        let matched = none;
+        let found = false;
+        let current_pcs: int[list] = [];
+        let current_caps: (int[list])[list] = [];
+        let pos = start;
+        let generation = program.generation + 1;
+        while (true) {
+            if (!found && (pos == start || mode != Whole)) {
+                if (current_pcs.length == 0) {
+                    if (anchored && pos > 0) {
+                        break;
+                    }
+                    if (skip) {
+                        let skipped_from = pos;
+                        while (pos < length && !first[input.byte_at(pos) as int]) {
+                            pos = pos + 1;
+                        }
+                        if (pos == length) {
+                            break;
+                        }
+                        if (pos != skipped_from) {
+                            generation = generation + 1;
+                        }
+                    }
+                }
+                add_thread(insts, marks, generation, stack_pcs, stack_caps, current_pcs, current_caps, 0, initial,
+                    input, pos);
+            }
+            let count = current_pcs.length;
+            if (count == 0) {
+                // Every thread died; without a match, try the next start.
+                if (found || mode == Whole || pos >= length) {
+                    break;
+                }
+                pos = pos + scalar_width(input.byte_at(pos));
+                generation = generation + 1;
+                continue;
+            }
+            let value: uint32 = 0;
+            let next = pos;
+            if (pos < length) {
+                let lead = input.byte_at(pos);
+                if (lead < 128) {
+                    value = lead as uint32;
+                    next = pos + 1;
+                } else if (lead < 224) {
+                    value = (((lead as uint32) & 31) << 6) | ((input.byte_at(pos + 1) as uint32) & 63);
+                    next = pos + 2;
+                } else if (lead < 240) {
+                    value = (((lead as uint32) & 15) << 12) | (((input.byte_at(pos + 1) as uint32) & 63) << 6)
+                        | ((input.byte_at(pos + 2) as uint32) & 63);
+                    next = pos + 3;
+                } else {
+                    value = (((lead as uint32) & 7) << 18) | (((input.byte_at(pos + 1) as uint32) & 63) << 12)
+                        | (((input.byte_at(pos + 2) as uint32) & 63) << 6) | ((input.byte_at(pos + 3) as uint32) & 63);
+                    next = pos + 4;
+                }
+            }
+            generation = generation + 1;
+            let next_pcs: int[list] = [];
+            let next_caps: (int[list])[list] = [];
+            let at_end = pos >= length;
+            let i = 0;
+            while (i < count) {
+                let pc = current_pcs[i];
+                let advance = false;
+                match (insts[pc]) {
+                    Inst.Scalar(expected) => {
+                        advance = value == expected && !at_end;
+                    },
+                    Inst.Class { ranges, negated, ascii } => {
+                        if (value < 128) {
+                            advance = !at_end && ((ascii[(value >> 5) as int] >> (value & 31)) & 1) != 0;
+                        } else {
+                            advance = in_ranges(ranges, value) != negated;
+                        }
+                    },
+                    Inst.Any => {
+                        advance = !at_end;
+                    },
+                    Inst.Match => {
+                        if (mode != Whole || at_end) {
+                            matched = current_caps[i];
+                            found = true;
+                            if (mode == Earliest) {
+                                program.generation = generation;
+                                return matched;
+                            }
+                            break;
+                        }
+                    },
+                    _ => {},
+                }
+                if (advance) {
+                    add_thread(insts, marks, generation, stack_pcs, stack_caps, next_pcs, next_caps, pc + 1,
+                        current_caps[i], input, next);
+                }
+                i = i + 1;
+            }
+            if (at_end) {
+                break;
+            }
+            current_pcs = next_pcs;
+            current_caps = next_caps;
+            pos = next;
+        }
+        program.generation = generation;
+        return matched;
+    };
+
+    // Adds a thread at `pc` to the list, following jumps, splits (first
+    // target first), saves, and assertions that hold at `pos`. A pc already
+    // marked with this generation is skipped. The stacks are empty on entry
+    // and on return.
+    let add_thread = func(Inst[list] insts, int[list] marks, int generation, int[list] stack_pcs,
+                          (int[list])[list] stack_caps, int[list] pcs, (int[list])[list] caps_list, int start_pc,
+                          int[list] start_caps, string input, int pos) -> void {
+        let pc = start_pc;
+        let caps = start_caps;
+        while (true) {
+            let alive = false;
+            if (marks[pc] != generation) {
+                marks[pc] = generation;
+                match (insts[pc]) {
+                    Inst.Jump(target) => {
+                        pc = target;
+                        alive = true;
+                    },
+                    Inst.Split { first, second } => {
+                        stack_pcs.append(second);
+                        stack_caps.append(caps);
+                        pc = first;
+                        alive = true;
+                    },
+                    Inst.Save(slot) => {
+                        caps = copy_with(caps, slot, pos);
+                        pc = pc + 1;
+                        alive = true;
+                    },
+                    Inst.Assert(kind) => {
+                        if (holds(kind, input, pos)) {
+                            pc = pc + 1;
+                            alive = true;
+                        }
+                    },
+                    Inst.Progress(slot) => {
+                        if (caps[slot] != pos) {
+                            pc = pc + 1;
+                            alive = true;
+                        }
+                    },
+                    _ => {
+                        pcs.append(pc);
+                        caps_list.append(caps);
+                    },
+                }
+            }
+            if (!alive) {
+                let top = stack_pcs.length - 1;
+                if (top < 0) {
+                    return;
+                }
+                pc = stack_pcs[top];
+                caps = stack_caps[top];
+                stack_pcs.remove_at(top);
+                stack_caps.remove_at(top);
+            }
+        }
+    };
+
+    // A copy of the slots with one changed. Threads share slot lists, so a
+    // save never writes in place. Small counts use one list construction.
+    let copy_with = func(int[list] caps, int slot, int value) -> int[list] {
+        let count = caps.length;
+        if (count == 2) {
+            if (slot == 0) {
+                return [value, caps[1]];
+            }
+            return [caps[0], value];
+        }
+        let copy: int[list] = [];
+        if (count == 4) {
+            copy = [caps[0], caps[1], caps[2], caps[3]];
+        } else {
+            let k = 0;
+            while (k + 4 <= count) {
+                copy.append(caps[k]);
+                copy.append(caps[k + 1]);
+                copy.append(caps[k + 2]);
+                copy.append(caps[k + 3]);
+                k = k + 4;
+            }
+            while (k < count) {
+                copy.append(caps[k]);
+                k = k + 1;
+            }
+        }
+        copy[slot] = value;
+        return copy;
+    };
+
+    let holds = func(parser.Anchor kind, string input, int pos) -> bool {
+        let length = input.byte_length;
+        if (kind == parser.Anchor.StartText) {
+            return pos == 0;
+        }
+        if (kind == parser.Anchor.EndText) {
+            return pos == length;
+        }
+        if (kind == parser.Anchor.StartLine) {
+            return pos == 0 || input.byte_at(pos - 1) == 10;
+        }
+        if (kind == parser.Anchor.EndLine) {
+            return pos == length || input.byte_at(pos) == 10;
+        }
+        let before = pos > 0 && is_word_byte(input.byte_at(pos - 1));
+        let after = pos < length && is_word_byte(input.byte_at(pos));
+        if (kind == parser.Anchor.WordBoundary) {
+            return before != after;
+        }
+        return before == after;
+    };
+
+    // Word characters are ASCII letters, digits, and the underscore; a byte
+    // of a multi-byte character is never one.
+    let is_word_byte = func(uint8 b) -> bool {
+        return (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+    };
+
+    // Sorted ranges: stop at the first range above the value.
+    let in_ranges = func(uint32[list] ranges, uint32 value) -> bool {
+        let count = ranges.length;
+        let r = 0;
+        while (r < count) {
+            if (value < ranges[r]) {
+                return false;
+            }
+            if (value <= ranges[r + 1]) {
+                return true;
+            }
+            r = r + 2;
+        }
+        return false;
+    };
+
+    let scalar_width = func(uint8 lead) -> int {
+        if (lead < 128) {
+            return 1;
+        }
+        if (lead < 224) {
+            return 2;
+        }
+        if (lead < 240) {
+            return 3;
+        }
+        return 4;
+    };
+
+    let reset_marks = func(Program program) -> void {
+        let k = 0;
+        while (k < program.marks.length) {
+            program.marks[k] = -1;
+            k = k + 1;
+        }
+        program.generation = 0;
+    };
+);

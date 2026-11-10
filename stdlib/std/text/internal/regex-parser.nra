@@ -1,0 +1,709 @@
+let error = import:Std.Core.Error;
+let scalar_values = import:Std.Text.Scalars;
+let strings = import:Std.Text.Strings;
+
+// The regular expression parser (Stdlib.md section 8.4): a recursive-descent
+// parser from pattern text to a syntax tree. It reports the first error with
+// its byte offset; it does not recover.
+export let RegexParser = module (
+    // Zero-width assertions. The parser produces StartText and EndText for
+    // ^ and $; the compiler turns them into the line forms under multi_line.
+    export let Anchor = enum (StartText, EndText, StartLine, EndLine, WordBoundary, NotWordBoundary);
+
+    // The syntax tree. Class ranges are inclusive [low, high] pairs of
+    // scalar values; a Repeat's max is -1 when unbounded; Group is a
+    // capturing group (non-capturing groups leave only their contents).
+    export let Node = enum (
+        Empty,
+        Literal(uint32),
+        Any,
+        Class { ranges: uint32[list], negated: bool },
+        Concat(Node[list]),
+        Alternate(Node[list]),
+        Repeat { item: Node, min: int, max: int, greedy: bool },
+        Group { item: Node, index: int },
+        Assert(Anchor)
+    );
+
+    export const MaxRepetition: int = 1000;
+    export const MaxInstructions: int = 10000;
+    export const MaxNesting: int = 250;
+
+    // A body above this size cannot fit with the two saves and the match
+    // instruction that every program adds.
+    const MaxBody: int = 9997;
+    const MaxScalar: uint32 = 1114111;
+
+    // The state and outcome of one parse. After parse returns, `failed`
+    // says whether the pattern was rejected; otherwise `root` is the tree,
+    // `size` its instruction count, `groups` the number of capturing groups,
+    // and names[i] the name of group i + 1 or "".
+    export let Parser = class (
+        export let pattern: string = "";
+        export let position: int = 0;
+        export let failed: bool = false;
+        export let error_kind: error.ParseErrorKind = error.ParseErrorKind.Syntax;
+        export let error_offset: int = 0;
+        export let error_message: string = "";
+        export let root: Node = Node.Empty;
+        export let size: int = 0;
+        export let groups: int = 0;
+        export let names: string[list] = [];
+        let depth: int = 0;
+        let length: int = 0;
+        let last_was_assertion: bool = false;
+
+        export let init = func(string text) -> void {
+            pattern = text;
+            length = text.byte_length;
+        };
+
+        export let parse = func() -> void {
+            let [node, node_size] = parse_alternation();
+            if (failed) {
+                return;
+            }
+            if (position < length) {
+                fail_syntax(position, "unbalanced parenthesis");
+                return;
+            }
+            root = node;
+            size = node_size;
+        };
+
+        let fail = func(error.ParseErrorKind kind, int offset, string message) -> void {
+            if (!failed) {
+                failed = true;
+                error_kind = kind;
+                error_offset = offset;
+                error_message = message;
+            }
+        };
+
+        let fail_syntax = func(int offset, string message) -> void {
+            fail(error.ParseErrorKind.Syntax, offset, message);
+        };
+
+        let fail_end = func(string message) -> void {
+            fail(error.ParseErrorKind.UnexpectedEnd, length, message);
+        };
+
+        let peek = func() -> uint8 {
+            return pattern.byte_at(position);
+        };
+
+        let at_end = func() -> bool {
+            return position >= length;
+        };
+
+        // Fails when a node's instruction count leaves no room in a program.
+        let check_size = func(int node_size, int offset) -> void {
+            if (node_size > MaxBody) {
+                fail(error.ParseErrorKind.OutOfRange, offset, "pattern exceeds 10000 instructions");
+            }
+        };
+
+        let parse_alternation = func() -> [Node, int] {
+            let start = position;
+            let [first, first_size] = parse_concat();
+            if (failed) {
+                return [Node.Empty, 0];
+            }
+            if (at_end() || peek() != 124) {
+                return [first, first_size];
+            }
+            let branches: Node[list] = [first];
+            let total = first_size;
+            while (!at_end() && peek() == 124) {
+                position = position + 1;
+                let [branch, branch_size] = parse_concat();
+                if (failed) {
+                    return [Node.Empty, 0];
+                }
+                branches.append(branch);
+                total = total + branch_size + 2;
+                check_size(total, start);
+                if (failed) {
+                    return [Node.Empty, 0];
+                }
+            }
+            return [Node.Alternate(branches), total];
+        };
+
+        let parse_concat = func() -> [Node, int] {
+            let items: Node[list] = [];
+            let total = 0;
+            while (!at_end()) {
+                let b = peek();
+                if (b == 124 || b == 41) {
+                    break;
+                }
+                let item_start = position;
+                let [atom, atom_size] = parse_atom();
+                if (failed) {
+                    return [Node.Empty, 0];
+                }
+                let [item, item_size] = parse_quantifiers(atom, atom_size, item_start);
+                if (failed) {
+                    return [Node.Empty, 0];
+                }
+                items.append(item);
+                total = total + item_size;
+                check_size(total, item_start);
+                if (failed) {
+                    return [Node.Empty, 0];
+                }
+            }
+            if (items.length == 0) {
+                return [Node.Empty, 0];
+            }
+            if (items.length == 1) {
+                return [items[0], total];
+            }
+            return [Node.Concat(items), total];
+        };
+
+        let parse_atom = func() -> [Node, int] {
+            last_was_assertion = false;
+            let b = peek();
+            if (b == 40) {
+                return parse_group();
+            }
+            if (b == 91) {
+                return parse_class();
+            }
+            if (b == 46) {
+                position = position + 1;
+                return [Node.Any, 1];
+            }
+            if (b == 94) {
+                position = position + 1;
+                last_was_assertion = true;
+                return [Node.Assert(Anchor.StartText), 1];
+            }
+            if (b == 36) {
+                position = position + 1;
+                last_was_assertion = true;
+                return [Node.Assert(Anchor.EndText), 1];
+            }
+            if (b == 92) {
+                return parse_escape();
+            }
+            if (b == 42 || b == 43 || b == 63 || b == 123) {
+                fail_syntax(position, "nothing to repeat");
+                return [Node.Empty, 0];
+            }
+            let value = strings.scalar_at(pattern, position);
+            position = position + scalar_values.utf8_length(value);
+            return [Node.Literal(value), 1];
+        };
+
+        // A quantifier after an atom, with its lazy form. A second
+        // quantifier, a possessive +, or a quantified assertion fails.
+        let parse_quantifiers = func(Node atom, int atom_size, int atom_start) -> [Node, int] {
+            if (at_end()) {
+                return [atom, atom_size];
+            }
+            let quantifier_start = position;
+            let b = peek();
+            let min = 0;
+            let max = -1;
+            if (b == 42) {
+                position = position + 1;
+            } else if (b == 43) {
+                min = 1;
+                position = position + 1;
+            } else if (b == 63) {
+                max = 1;
+                position = position + 1;
+            } else if (b == 123) {
+                let [low, high] = parse_counts();
+                if (failed) {
+                    return [Node.Empty, 0];
+                }
+                min = low;
+                max = high;
+            } else {
+                return [atom, atom_size];
+            }
+            if (last_was_assertion) {
+                fail_syntax(quantifier_start, "nothing to repeat");
+                return [Node.Empty, 0];
+            }
+            let greedy = true;
+            if (!at_end() && peek() == 63) {
+                greedy = false;
+                position = position + 1;
+            }
+            if (!at_end()) {
+                let next = peek();
+                if (next == 43) {
+                    fail_syntax(position, "possessive quantifiers are not supported");
+                    return [Node.Empty, 0];
+                }
+                if (next == 42 || next == 63 || next == 123) {
+                    fail_syntax(position, "repeated quantifier");
+                    return [Node.Empty, 0];
+                }
+            }
+            let total = repeat_size(atom_size, min, max, nullable(atom));
+            check_size(total, quantifier_start);
+            if (failed) {
+                return [Node.Empty, 0];
+            }
+            return [Node.Repeat { item: atom, min: min, max: max, greedy: greedy }, total];
+        };
+
+        // {n}, {n,}, or {n,m} at the current position.
+        let parse_counts = func() -> [int, int] {
+            let open = position;
+            position = position + 1;
+            let low = parse_count();
+            if (failed) {
+                return [0, 0];
+            }
+            if (low < 0) {
+                if (at_end()) {
+                    fail_end("unterminated repetition");
+                } else {
+                    fail_syntax(open, "invalid repetition");
+                }
+                return [0, 0];
+            }
+            let high = low;
+            if (!at_end() && peek() == 44) {
+                position = position + 1;
+                high = -1;
+                if (!at_end() && peek() != 125) {
+                    high = parse_count();
+                    if (failed) {
+                        return [0, 0];
+                    }
+                    if (high < 0) {
+                        if (at_end()) {
+                            fail_end("unterminated repetition");
+                        } else {
+                            fail_syntax(open, "invalid repetition");
+                        }
+                        return [0, 0];
+                    }
+                }
+            }
+            if (at_end()) {
+                fail_end("unterminated repetition");
+                return [0, 0];
+            }
+            if (peek() != 125) {
+                fail_syntax(open, "invalid repetition");
+                return [0, 0];
+            }
+            position = position + 1;
+            if (high >= 0 && low > high) {
+                fail_syntax(open, "repetition minimum exceeds maximum");
+                return [0, 0];
+            }
+            return [low, high];
+        };
+
+        // Decimal digits, or -1 when there are none. A value above the
+        // repetition limit fails at its first digit.
+        let parse_count = func() -> int {
+            let start = position;
+            let value = 0;
+            while (!at_end() && peek() >= 48 && peek() <= 57) {
+                if (value <= MaxRepetition) {
+                    value = value * 10 + ((peek() - 48) as int);
+                }
+                position = position + 1;
+            }
+            if (position == start) {
+                return -1;
+            }
+            if (value > MaxRepetition) {
+                fail(error.ParseErrorKind.OutOfRange, start, "repetition count exceeds 1000");
+                return 0;
+            }
+            return value;
+        };
+
+        let parse_group = func() -> [Node, int] {
+            let open = position;
+            position = position + 1;
+            depth = depth + 1;
+            if (depth > MaxNesting) {
+                fail(error.ParseErrorKind.OutOfRange, open, "group nesting exceeds 250");
+                return [Node.Empty, 0];
+            }
+            let capturing = true;
+            let name = "";
+            if (!at_end() && peek() == 63) {
+                position = position + 1;
+                if (at_end()) {
+                    fail_end("missing )");
+                    return [Node.Empty, 0];
+                }
+                let kind = peek();
+                if (kind == 58) {
+                    capturing = false;
+                    position = position + 1;
+                } else if (kind == 80 || kind == 60) {
+                    position = position + 1;
+                    if (kind == 80) {
+                        if (at_end()) {
+                            fail_end("missing group name");
+                            return [Node.Empty, 0];
+                        }
+                        if (peek() == 61) {
+                            fail_syntax(open, "backreferences are not supported");
+                            return [Node.Empty, 0];
+                        }
+                        if (peek() != 60) {
+                            fail_syntax(open, "unsupported group syntax");
+                            return [Node.Empty, 0];
+                        }
+                        position = position + 1;
+                    } else if (!at_end() && (peek() == 61 || peek() == 33)) {
+                        fail_syntax(open, "lookbehind is not supported");
+                        return [Node.Empty, 0];
+                    }
+                    name = parse_group_name();
+                    if (failed) {
+                        return [Node.Empty, 0];
+                    }
+                } else if (kind == 61 || kind == 33) {
+                    fail_syntax(open, "lookahead is not supported");
+                    return [Node.Empty, 0];
+                } else {
+                    fail_syntax(open, "unsupported group syntax");
+                    return [Node.Empty, 0];
+                }
+            }
+            let index = 0;
+            if (capturing) {
+                groups = groups + 1;
+                index = groups;
+                names.append(name);
+            }
+            let [inner, inner_size] = parse_alternation();
+            if (failed) {
+                return [Node.Empty, 0];
+            }
+            if (at_end()) {
+                fail_end("missing )");
+                return [Node.Empty, 0];
+            }
+            position = position + 1;
+            depth = depth - 1;
+            last_was_assertion = false;
+            if (!capturing) {
+                return [inner, inner_size];
+            }
+            let total = inner_size + 2;
+            check_size(total, open);
+            return [Node.Group { item: inner, index: index }, total];
+        };
+
+        // An identifier ended by >, unique among the pattern's group names.
+        let parse_group_name = func() -> string {
+            let start = position;
+            while (!at_end() && peek() != 62) {
+                let b = peek();
+                let letter = (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+                let digit = b >= 48 && b <= 57;
+                if (!letter && !(digit && position > start)) {
+                    fail_syntax(start, "invalid group name");
+                    return "";
+                }
+                position = position + 1;
+            }
+            if (at_end()) {
+                fail_end("missing group name terminator");
+                return "";
+            }
+            if (position == start) {
+                fail_syntax(start, "invalid group name");
+                return "";
+            }
+            let name = pattern.slice(start, position);
+            position = position + 1;
+            for (let existing in names) {
+                if (existing == name) {
+                    fail_syntax(start, "duplicate group name");
+                    return "";
+                }
+            }
+            return name;
+        };
+
+        let parse_class = func() -> [Node, int] {
+            position = position + 1;
+            let negated = false;
+            if (!at_end() && peek() == 94) {
+                negated = true;
+                position = position + 1;
+            }
+            let ranges: uint32[list] = [];
+            let first = true;
+            while (true) {
+                if (at_end()) {
+                    fail_end("unterminated character class");
+                    return [Node.Empty, 0];
+                }
+                if (peek() == 93 && !first) {
+                    position = position + 1;
+                    break;
+                }
+                first = false;
+                let item_start = position;
+                let low = parse_class_atom(ranges);
+                if (failed) {
+                    return [Node.Empty, 0];
+                }
+                if (position + 1 < length && peek() == 45 && pattern.byte_at(position + 1) != 93) {
+                    if (low < 0) {
+                        fail_syntax(item_start, "invalid class range");
+                        return [Node.Empty, 0];
+                    }
+                    position = position + 1;
+                    let high = parse_class_atom(ranges);
+                    if (failed) {
+                        return [Node.Empty, 0];
+                    }
+                    if (high < low) {
+                        fail_syntax(item_start, "invalid class range");
+                        return [Node.Empty, 0];
+                    }
+                    ranges.append(low as uint32);
+                    ranges.append(high as uint32);
+                } else if (low >= 0) {
+                    ranges.append(low as uint32);
+                    ranges.append(low as uint32);
+                }
+            }
+            return [Node.Class { ranges: ranges, negated: negated }, 1];
+        };
+
+        // One class member: a scalar value, returned, or a shorthand class,
+        // whose ranges are appended and which returns -1.
+        let parse_class_atom = func(uint32[list] ranges) -> int {
+            if (peek() != 92) {
+                let value = strings.scalar_at(pattern, position);
+                position = position + scalar_values.utf8_length(value);
+                return value as int;
+            }
+            let escape_start = position;
+            position = position + 1;
+            if (at_end()) {
+                fail_end("incomplete escape");
+                return 0;
+            }
+            let b = peek();
+            if (b == 98 || b == 66) {
+                fail_syntax(escape_start, "invalid escape in a class");
+                return 0;
+            }
+            let shorthand = shorthand_ranges(b);
+            if (shorthand.length > 0) {
+                position = position + 1;
+                for (let bound in shorthand) {
+                    ranges.append(bound);
+                }
+                return -1;
+            }
+            return parse_escaped_scalar(escape_start);
+        };
+
+        let parse_escape = func() -> [Node, int] {
+            let escape_start = position;
+            position = position + 1;
+            if (at_end()) {
+                fail_end("incomplete escape");
+                return [Node.Empty, 0];
+            }
+            let b = peek();
+            if (b == 98 || b == 66) {
+                position = position + 1;
+                last_was_assertion = true;
+                if (b == 98) {
+                    return [Node.Assert(Anchor.WordBoundary), 1];
+                }
+                return [Node.Assert(Anchor.NotWordBoundary), 1];
+            }
+            if (b == 100 || b == 119 || b == 115) {
+                position = position + 1;
+                return [Node.Class { ranges: shorthand_ranges(b), negated: false }, 1];
+            }
+            if (b == 68 || b == 87 || b == 83) {
+                position = position + 1;
+                return [Node.Class { ranges: shorthand_ranges(b + 32), negated: true }, 1];
+            }
+            let value = parse_escaped_scalar(escape_start);
+            if (failed) {
+                return [Node.Empty, 0];
+            }
+            return [Node.Literal(value as uint32), 1];
+        };
+
+        // The scalar an escape denotes; the position is after the backslash.
+        let parse_escaped_scalar = func(int escape_start) -> int {
+            let b = peek();
+            if (b == 116) {
+                position = position + 1;
+                return 9;
+            }
+            if (b == 110) {
+                position = position + 1;
+                return 10;
+            }
+            if (b == 114) {
+                position = position + 1;
+                return 13;
+            }
+            if (b == 117) {
+                position = position + 1;
+                return parse_unicode_escape(escape_start);
+            }
+            if (b >= 49 && b <= 57 || b == 107) {
+                fail_syntax(escape_start, "backreferences are not supported");
+                return 0;
+            }
+            if (b == 112 || b == 80) {
+                fail_syntax(escape_start, "Unicode property classes are not supported");
+                return 0;
+            }
+            if (scalar_values.is_ascii_punctuation(b as uint32)) {
+                position = position + 1;
+                return b as int;
+            }
+            fail_syntax(escape_start, "invalid escape");
+            return 0;
+        };
+
+        // \u{X} with one through six hexadecimal digits naming a scalar value.
+        let parse_unicode_escape = func(int escape_start) -> int {
+            if (at_end()) {
+                fail_end("incomplete escape");
+                return 0;
+            }
+            if (peek() != 123) {
+                fail_syntax(escape_start, "invalid \\u escape");
+                return 0;
+            }
+            position = position + 1;
+            let value: uint32 = 0;
+            let digits = 0;
+            while (!at_end() && peek() != 125) {
+                let digit = scalar_values.digit_value(peek() as uint32, 16);
+                if (digit < 0 || digits == 6) {
+                    fail_syntax(escape_start, "invalid \\u escape");
+                    return 0;
+                }
+                value = value * 16 + (digit as uint32);
+                digits = digits + 1;
+                position = position + 1;
+            }
+            if (at_end()) {
+                fail_end("incomplete escape");
+                return 0;
+            }
+            position = position + 1;
+            if (digits == 0) {
+                fail_syntax(escape_start, "invalid \\u escape");
+                return 0;
+            }
+            if (!scalar_values.is_valid(value)) {
+                fail_syntax(escape_start, "invalid scalar value");
+                return 0;
+            }
+            return value as int;
+        };
+    );
+
+    // The ranges of \d, \w, and \s (by their lowercase letter) or of their
+    // negations (by the uppercase letter, as complements); empty otherwise.
+    export let shorthand_ranges = func(uint8 letter) -> uint32[list] {
+        if (letter == 100) {
+            return [48, 57];
+        }
+        if (letter == 119) {
+            return [48, 57, 65, 90, 95, 95, 97, 122];
+        }
+        if (letter == 115) {
+            return [9, 13, 32, 32];
+        }
+        if (letter == 68) {
+            return [0, 47, 58, MaxScalar];
+        }
+        if (letter == 87) {
+            return [0, 47, 58, 64, 91, 94, 96, 96, 123, MaxScalar];
+        }
+        if (letter == 83) {
+            return [0, 8, 14, 31, 33, MaxScalar];
+        }
+        let none: uint32[list] = [];
+        return none;
+    };
+
+    // The instruction count of a repetition, saturated above the limit.
+    // Each optional copy of an item that can match empty also saves its
+    // entry position and checks for progress (two more instructions).
+    export let repeat_size = func(int item, int min, int max, bool item_nullable) -> int {
+        let limit = MaxInstructions + 1;
+        if (max < 0) {
+            if (min == 0) {
+                return saturate(item + 2, limit);
+            }
+            if (item_nullable) {
+                return saturate(saturate(min * item, limit) + item + 2, limit);
+            }
+            return saturate(saturate(min * item, limit) + 1, limit);
+        }
+        let per_copy = item + 1;
+        if (item_nullable) {
+            per_copy = item + 3;
+        }
+        let required = saturate(min * item, limit);
+        let optional_part = saturate((max - min) * per_copy, limit);
+        return saturate(required + optional_part, limit);
+    };
+
+    // Whether the node can match the empty string.
+    export let nullable = func(Node node) -> bool {
+        return match (node) {
+            Node.Empty => true,
+            Node.Literal(_) => false,
+            Node.Any => false,
+            Node.Class { ranges: _, negated: _ } => false,
+            Node.Concat(items) => all_nullable(items),
+            Node.Alternate(branches) => any_nullable(branches),
+            Node.Repeat { item, min, max: _, greedy: _ } => min == 0 || nullable(item),
+            Node.Group { item, index: _ } => nullable(item),
+            Node.Assert(_) => true,
+        };
+    };
+
+    let all_nullable = func(Node[list] items) -> bool {
+        for (let item in items) {
+            if (!nullable(item)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let any_nullable = func(Node[list] items) -> bool {
+        for (let item in items) {
+            if (nullable(item)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    let saturate = func(int value, int limit) -> int {
+        if (value > limit) {
+            return limit;
+        }
+        return value;
+    };
+);

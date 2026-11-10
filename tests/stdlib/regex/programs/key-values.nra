@@ -1,0 +1,45 @@
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let regex = import:Std.Text.Regex;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+// Parses key=value fields with named groups, rewrites them, and splits a
+// list. Checks the Regex path end to end, including the image round trip.
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let line = "user=ada level=3 tag=é🙂 empty=";
+        match (regex.compile("(?<key>\\w+)=(?<value>\\S*)")) {
+            result.Result.Ok(field) => {
+                for (let m in field.find_all(line)) {
+                    console.print_line(optional.value_or<string>(m.named_group("key"), "?") + " -> ["
+                        + optional.value_or<string>(m.named_group("value"), "?") + "] at "
+                        + m.start().to_string());
+                }
+                console.print_line(field.replace_all(line, "${value}:$1"));
+            },
+            result.Result.Err(e) => {
+                console.print_line(error.message(e));
+            },
+        }
+        match (regex.compile("\\s*[,;]\\s*")) {
+            result.Result.Ok(separator) => {
+                console.print_line(strings.join(separator.split("a , b;c ,, d"), "|"));
+            },
+            result.Result.Err(e) => {
+                console.print_line(error.message(e));
+            },
+        }
+        match (regex.compile("a(?=b)")) {
+            result.Result.Ok(_) => {
+                console.print_line("unexpected");
+            },
+            result.Result.Err(e) => {
+                console.print_line(error.message(e));
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);
