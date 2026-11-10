@@ -124,4 +124,14 @@ if(NOT recorded_status STREQUAL "0" OR NOT replayed_status STREQUAL "0" OR NOT r
 endif()
 expect("virtual time with replay" 1 "--virtual-time cannot be combined with --replay" run --virtual-time --replay sleeper.trace sleeper.nvr)
 
-message(STATUS "concurrency schedules: exploration, reproduction, and virtual time passed")
+# The service fixture of the phase 3 gate (section 16): a bounded queue sheds
+# overload, a slow dependency is timed out, and shutdown drains what was
+# accepted, with the same answers under every schedule explored. Its 50 ms
+# budget and 200 ms dependency are virtual, so the run takes no real time.
+neura(service test --virtual-time --schedules 6 "${sources}/service-tests.nra")
+if(NOT service_status STREQUAL "0" OR
+   NOT service_stdout MATCHES "^PASS ServiceTests.test_a_slow_dependency_is_timed_out \\[6 schedules\\]\nPASS ServiceTests.test_overload_is_shed_and_shutdown_drains_the_queue \\[6 schedules\\]\nexplored 12 schedule\\(s\\) of 2 test\\(s\\), seed 0\n2 test\\(s\\), 2 passed, 0 failed\n$")
+    message(FATAL_ERROR "service fixture: status ${service_status}\n${service_stdout}\n${service_stderr}")
+endif()
+
+message(STATUS "concurrency schedules: exploration, reproduction, virtual time, and the service fixture passed")
