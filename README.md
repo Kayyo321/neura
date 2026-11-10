@@ -1,8 +1,22 @@
 <h1 align="center">
-  <img src="artwork/logo-mark.svg" alt="" width="160" height="128">
+  <img src="artwork/logo.png" alt="" width="200" height="160">
   <br>
   Neura
 </h1>
+
+<p align="center">
+  <a href="#getting-started"><img src="https://img.shields.io/badge/compiler-C%2B%2B20-bf2e70" alt="Compiler: C++20"></a>
+  <a href="docs/runtime/NVM.md"><img src="https://img.shields.io/badge/runtime-NVM-087c77" alt="Runtime: Neura Virtual Machine"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-965b0c" alt="License: Apache 2.0"></a>
+</p>
+
+<p align="center">
+  <a href="#getting-started">Quickstart</a>&nbsp;·
+  <a href="docs/lang/Overview.md">Language</a>&nbsp;·
+  <a href="docs/lang/StandardLibrary.md">Standard&nbsp;library</a>&nbsp;·
+  <a href="examples/">Examples</a>&nbsp;·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
 Neura is a statically typed programming language and a toolchain for compiling its programs into deterministic neuron circuits and decompiling those circuits into readable representations. The compiler derives the topology and weights from the program. The resulting circuits can be run, inspected, tested, and optimized against the behavior defined by the language.
 
