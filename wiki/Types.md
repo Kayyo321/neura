@@ -227,6 +227,18 @@ class and interface references to `nil`. A pending field of another type
 faults on a read until it receives a value. A trap during initialization
 ends the execution.
 
+Initialization runs on the root task, the task that runs `main`. A spawned
+call that could run a static initializer is therefore not
+[task-safe](#task-safe-calls): the compiler rejects it at the `spawn`. That
+covers constructing a class, calling a static function, and reading or
+assigning a static field of any type that has a run-time static initializer,
+or that inherits one from a base class or an interface with a default
+method. A type whose static fields are all compile-time constants has
+nothing to initialize, so a spawned call can use it. The rule follows the
+call graph and not the state of the run, so initializing the type earlier on
+the root task does not make the call acceptable; pass the value the task
+needs as an argument instead.
+
 ### Singletons
 
 A `singleton` declares a class with one instance. A singleton binding
@@ -351,6 +363,60 @@ the result type. A match statement uses a statement block in each arm.
 
 Patterns currently cover one variant level. Generic enum declarations, nested
 patterns, guards, and derives are open language decisions.
+
+## Scope-bound and transferable types
+
+[Tasks](https://github.com/Kayyo321/neura/wiki/CoreLanguage#tasks-scopes-and-select) are isolated: a task's mutable objects, arrays, and lists stay with it, and another task can affect them only by sending a message. Three rules of the type system enforce this. The compiler checks them on the whole linked program, including prebuilt NeuraIR modules, and reports a violation at the span of the offending expression. [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#5-isolation-between-tasks) specifies them with the runtime.
+
+### Scope-bound types
+
+`Std.Concurrent.Task<T>` and `Std.Concurrent.Scope` are *scope-bound*, and so is an array, list, or tuple with a scope-bound element. A scope-bound value must not be reachable after the `scope` block that created it exits.
+
+| A scope-bound value can | A scope-bound value cannot |
+| --- | --- |
+| Be held in a local declared inside the scope, including a local list or array of handles | Be returned from a function, or be the result of a spawned call |
+| Be passed as an argument to a call, and be the type of a parameter | Be stored in a field, a global, or an enum payload |
+| Be an element of an array, list, or tuple held in such a local | Be captured by a lambda |
+| | Be passed to `spawn`, or sent on a channel |
+| | Be a type argument, as in `Optional<Task<int>>` or a channel of tasks |
+| | Be assigned to a binding declared outside the innermost enclosing scope. A parameter is not a local of the scope, so a function cannot `append` a task it received to a list it received. |
+
+Each violation is reported with the form `a value of type Task<int32> cannot leave its scope: it cannot be returned from a function`, naming the rule that applies.
+
+### Transferable types
+
+A value given to another task through `spawn` (the callee value, a method's receiver, and each argument), through a channel, or to a parallel map must have a *transferable* type. The check is recursive and runs on the specialized program, so a generic function is checked at each specialization.
+
+| Type | Transferable |
+| --- | --- |
+| `bool`, integers, floating-point types, `string` | Yes |
+| A fieldless enum | Yes |
+| An enum with payloads | When every payload of every variant is transferable. `Optional<int>` is; `Result<int>` is not, because the `Custom` variant of `Std.Core.Error` holds an object. |
+| A tuple | When every element is |
+| A function value | When every closure of its type that the program creates has transferable captures. A named function has no captures. A closure that captures an object, array, or list is not transferable, because a copy of a closure shares what it captured. |
+| A `Std.Concurrent` handle: `Sender<T>`, `Receiver<T>`, `Closer<T>`, `Timer`, `AtomicInt64`, `Semaphore`, `Guarded<T>` | Yes, and its fields are transferable |
+| Any other class instance, including library collections, `StringBuilder`, and classes whose fields are all constant | No. Immutable classes are not transferable in this release. |
+| An array or a list | No. Its elements can be assigned, so a variadic call whose arguments are packed into an array cannot be spawned. |
+| A primitive reference, `MemorySegment`, and every native handle | No |
+| `Task<T>` and `Scope` | No; they are scope-bound |
+
+```neura
+let total = func(items: int[]) -> int => items.length;
+```
+
+`spawn total(items)` is rejected at `items` with `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A channel opened as `channels.open<result.Result<int>>(1)` is rejected with `a value of type Result<int32> is not transferable, so it cannot be a channel's element type`. A task returns its result to the task that joins it whatever the result's type, because nothing else can reach what the finished task built.
+
+### Task-safe calls
+
+A value check is not enough: a function can reach shared mutable state without being handed it. The call a `spawn` starts must be *task-safe*. Neither it nor anything it can call, transitively, may
+
+- read or write a module, file, or static binding that is reassignable or whose type is not transferable (reading a `const` of transferable type is allowed);
+- make an active use that could run a [static initializer](#static-initialization);
+- issue a request to a native library.
+
+For a virtual call or a call through a function value, the compiler takes the union over every override or function value of that type that the program can create, so it can reject a call because of an implementation that never runs. Narrow the type, or pass the needed value as an argument. The diagnostic lists the chain of calls from the `spawn` to the offending operation. `neura check --task-safety` prints the verdict for every function of the program. The task that runs `main` is not restricted.
+
+Under the last rule a program cannot both spawn a task and use `Std.DynamicForeign` or `import:c(...)`. A parallel map's worker must also issue no host request, use no scheduler operation, and not use an object's identity; [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#12-multicore-parallelmap) gives the rule.
 
 ## Inference, conversions, equality, and absence
 

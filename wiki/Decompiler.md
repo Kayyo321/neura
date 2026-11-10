@@ -93,6 +93,21 @@ function f1(s0: int32) -> int32  // provenance: Computation.sum_to
 
 The reconstruction form is a description of the image, not Neura source: slots, blocks, and parallel assignments appear as the image has them, and the text is not meant to be compiled.
 
+## Tasks and scheduler operations
+
+An image with scheduler exits or polls (NVR 1.5) decompiles like any other. A scheduler operation or a poll is an exit field, not something the graph computes, so its evidence class is the first one, `[decoded]`: it is read from the exit record and from nothing else.
+
+| Item | How it is shown | Evidence |
+| --- | --- | --- |
+| A scheduler exit | `s5 := spawn f4(s4) [decoded]; goto b6`, `s2 := join(s1) [decoded]`, `scope-enter [decoded]`, and the other operations by their assembly names | Decoded from the exit record |
+| A poll | `poll [decoded];` before the continue or call it marks | Decoded from the tag bit |
+| A scope pair | `[reconstructed: scope b0.e0]` on a `scope-enter` and its `scope-exit` | Structural inference from control flow: the pair is shown only when every path to a scope operation or return agrees on the stack of open scopes. Otherwise each operation says `[scope pair unresolved]` |
+| A block with a polling call or continue | Lifted as any other block | The poll does not change what the graph computes or which exit it selects |
+| A block with a scheduler exit | `[decoded]` when its graph computes nothing; otherwise `[circuit]` | The effect of the exit is outside the graph model, so the block's graph is shown as lanes and not lifted |
+| The `TRNS` table | `transferable-layouts [ ... ]` in the lossless form | Decoded; the loader has validated it |
+
+Names, spawn sites, and source locations come from optional metadata only. None of this needs the `SMAP` or `NAME` sections, and `--no-provenance` changes only the comments. The decompiler does not lift scheduling behavior, so it makes no claim about which task runs when. Regenerated images (`resynthesize`) keep scheduler exits and polls unchanged. Behavior comparison of an image with tasks by replay of a concurrent trace is in progress, because `nvm::record` does not accept such images yet; until then a task image is compared only by running both images, which is an observed match for the inputs and quantum used.
+
 ## Lifting
 
 Lifting works on one block at a time and uses only the block's graph, inputs, and exits:

@@ -67,12 +67,20 @@ Conversion lowers an operation only where the language defines its result. Where
 | `collection`, `index`, `append`, `remove_at` | `AllocateCollection`, `ReadElement`, `WriteElement`, `AppendElement`, and `RemoveElement`. |
 | `destroy` | `ReadTag`, dispatch to a generated destructor for the runtime class, then `FreeObject`. |
 | `discard` | Evaluates the operand, including its checks, and drops the value. |
+| `task_scope` | A `scope-enter` scheduler exit (its slot receives the scope identity when the scope has a handle), the body, and a `scope-exit` exit where control falls off the end. `return`, `break`, and `continue` inside the body first evaluate their value and then emit a `scope-exit` for each scope they leave. |
+| `spawn` | A `spawn` scheduler exit that targets the `$invoke` method of the function value's capture layout and passes that object. Its slot receives the task identity, and is absent for a spawn statement. |
+| `scheduler_call` | One scheduler exit whose operation code comes from the call's text (`join`, `scope.cancel`, `channel.send`, `select`, ...), with its operands evaluated left to right and spilled to slots; `channel.open` passes its element type as the target, `parallel.start` the item's `$invoke`, and `select` its default flag. `transfer.check` is checked at compile time and emits nothing. |
+| The `poll` flag on `call`, `virtual_call`, call-closure, and `loop` | The poll bit of the call or continue exit that makes the call or takes the back edge, including the call exits of a dispatch block. It adds no block. |
 
 The build stops with a source diagnostic, before any output is written, for:
 
 - Programs without a unique entry override from `Std.Program.Entry`.
 - A module call that resolves to an interface function without a body.
 - Generic specialization that does not terminate ([Polymorphism](Polymorphism#type-arguments-and-specialization)).
+
+## Tasks
+
+An image with tasks is NVR 1.5. The converter marks the image concurrent when it emits a scheduler exit or a poll, and then writes the `TRNS` table: the layouts of transferable classes (`Std.Concurrent` handles, capture layouts, and function signature layouts whose closures are all transferable), of payload enums, and of tuples, closed under parents. Task bodies are ordinary functions: a spawned task starts in the `$invoke` method of a generated capture layout, whose fields hold the callee value, receiver, and arguments the parent evaluated. A block that only polls and continues is kept, because the poll is an effect of its exit. Because the poll rides on the exit, the number of polls a task counts follows the language operations and is the same for optimized and unoptimized builds. The runtime part (queues, quantum, limits, statuses 137, 132, and 134) is in [NVR](NVR#scheduler-operations-15) and [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#10-runtime). The evidence is `backend-concurrency`, which builds every concurrent fixture with the real pipeline, optimized and not, runs it on the NVM, and requires the same host requests, exit status or trap class, and schedule as an independent evaluator extended with the same scheduler, a repeat on a clean state, and the same result for each member of a fleet.
 
 ## Generics
 
@@ -217,6 +225,7 @@ The [release checklist](Release) maps each feature to its tests and states which
 | `backend-placement` | Cost model fits, deterministic gate accounting, placement, timing correction, and fleet equivalence with fixed models. |
 | `gpu-device` | Vulkan graph outputs over the integer circuit domains, mixed and split batches, buffer growth, and calibration. |
 | `gpu-cli` | CPU and Vulkan runs, tests, fleets, and trace replay compared through the CLI. |
+| `backend-concurrency` | Concurrent fixtures from source to the NVM against an independent evaluator with the same scheduler: effects, status, and schedule, optimized and not, under several quanta and task limits; repeated runs; fleets; hand-assembled task images and their rejection. `concurrency-frontend`, `concurrency-programs`, and `concurrency-parallel` check the source forms, the build routes, and the parallel map through the CLI. |
 | `backend-nir` | `.nir` round trips, deterministic encoding, both build routes give identical images, corrupt files are rejected. |
 | `backend-conversion` | Compiled functions against the IR reference evaluator: integer, structure, and float fixtures, exhaustively over 8-bit domains where the parameters allow and on sampled float operands; whole-program stdout and initialization order against the evaluator. |
 | `backend-generics` | Instance caching, determinism, the specialization limits, and specialized functions against the evaluator exhaustively over 8-bit inputs. |
