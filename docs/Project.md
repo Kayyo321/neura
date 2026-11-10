@@ -21,6 +21,12 @@ Lexer -> Parser -> NeuraIR -> IR optimization -> IRtoNeuronConversion -> output
 
 Semantic analysis belongs at the boundary between the syntax tree and valid NeuraIR. By the time optimization starts, operations should have explicit types and effects. For example, the parser can represent `left && right` as a Boolean expression. NeuraIR must express that the right-hand side is evaluated only when the left-hand side is true if evaluating it could change state or fail.
 
+Lowering resolves function overloads and object cast targets from static types. Each call names a single function, and each explicit construction or base initialization names its selected constructor when one is declared. Conversion uses that constructor's symbol and emits its normal field initialization and body. Object casts and primitive companion calls use ordinary typed call operations, including their effects and evaluation order.
+
+When source imports prebuilt NeuraIR, the linker verifies each artifact and remaps its symbol and type references before source lowering. Compatible shared dependency files are merged. Source calls, initializers, and type references then resolve against the combined program. Linked classes keep their compiled layouts and initialization guards. Optimization, circuit conversion, and execution consume the same resolved operations as an all-source build.
+
+Primitive reference bindings name a mutable location in typed NeuraIR. After linkage and before specialization, the compiler moves address-taken storage into heap cells and rewrites ordinary accesses and aliases to use the same cell. Constructors prepare addressed fields and startup prepares addressed global storage. Calls and layout access use the existing object operations. The NVM traces the cell for as long as any alias can reach it.
+
 Range bounds, stride, checked length arithmetic, and element generation lower to explicit NeuraIR before conversion. The executable uses circuits for the arithmetic and control flow and a deterministic NVM state operation to allocate a collection of a computed length. Allocation checks the heap budget before reserving the backing storage.
 
 Class static fields lower to global slots in a class-owned scope. NeuraIR

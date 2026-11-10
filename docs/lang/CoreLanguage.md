@@ -14,9 +14,37 @@ count = count + 1;
 
 Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. Shadowing policy remains open. Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. More detailed visibility and inheritance rules remain open.
 
+### Documentation comments
+
+Start each line of a documentation comment with `///` and place it immediately above the definition it describes. Consecutive documentation lines form one block. An empty `///` line adds a paragraph break. A blank source line or an ordinary `//` comment ends the block. An inline comment after code has ordinary comment behavior.
+
+```neura
+/// @brief Doubles an integer.
+/// @param value The input to double.
+/// @return The result of adding the input to itself.
+let twice = func(value: int) -> int => value + value;
+```
+
+Documentation attaches to bindings, functions, modules, classes, interfaces, enums and their variants, and class casts. Place a separate block immediately above the `or` of an overload alternative to document that signature. Destructured bindings share the comment above the declaration. These comments have no effect on type checking or execution.
+
+`neura docs <file.nra>... [-o <index.json>]` exports a versioned JSON index for editor integrations. It parses the named sources, so imports can remain unresolved. Each file contains the documented symbols with their scope, signature, declaration range, selection range, and documentation. Ranges carry a one-based line and Unicode scalar column plus a zero-based UTF-8 byte offset and byte length. The index preserves raw comment text after stripping the `///` prefix and one following space. It also records line-start Doxygen commands beginning with `@` or `\`, including parameter subjects and directions. [Doxygen documentation blocks](https://www.doxygen.nl/manual/docblocks.html)
+
+To generate documentation with Doxygen itself, use `neura docs --doxygen <file.nra>` as its input filter. The filter emits declaration stubs at their original source lines and retains attached comments. The JSON index also includes function-local definitions and Neura-formatted signatures.
+
+```text
+FILE_PATTERNS     = *.nra
+EXTENSION_MAPPING = nra=C++
+INPUT_FILTER      = "neura docs --doxygen"
+EXTRACT_ALL       = YES
+```
+
+The filter represents modules as namespaces and uses named placeholders for Neura types such as arrays and lists. Use the original source or the JSON index for Neura-specific syntax and local definitions. [Doxygen input filters](https://www.doxygen.nl/manual/config.html#cfg_input_filter)
+
 ## Functions and control flow
 
 Function parameters use `name: Type`. Arguments are evaluated left to right. A function with no parameters may omit `()`, and a `void` function may omit `-> void`. A block body uses `return` to exit the function. A non-`void` function must return a value on every reachable path. A `void` function may fall through.
+
+A [primitive reference parameter](Types.md#primitive-references) such as `value: &int` receives an alias to the caller's storage. Its argument uses the ordinary expression spelling, such as `increment(count)`.
 
 ```neura
 let sum_to = func(limit: int32) -> int32 {
@@ -37,6 +65,32 @@ let reset = func {
 ```
 
 `=> expression` gives a function an expression body. The expression supplies the result of a non-`void` function. A `void` function evaluates the expression for its effects. A named declaration with an expression body ends with `;`.
+
+### Function overloads
+
+Join alternatives with `or func` in one file, module, or class declaration. Each alternative has its own parameters, result, and body. They share the binding name and visibility.
+
+```neura
+let write = func(text: string) {
+    write(text, text.byte_length);
+} or func(text: string, byte_count: int) {
+    console.print_line(text.slice(0, byte_count));
+}
+```
+
+An overload group can end at a block body. End an expression-bodied final alternative with `;`.
+
+The compiler first filters by argument count. With several candidates of the same arity, it ranks each argument's match in this order.
+
+1. An exact type match. Numeric literals prefer their default width when the value fits. An existing primitive reference is an exact match for its reference type.
+2. An assignable type, such as a class upcast. A more specific parameter type wins between assignable alternatives.
+3. Binding a primitive reference to an ordinary mutable place with the same primitive type.
+4. A contextual literal match. Numeric and nested collection literals must fit the candidate's types. For `nil`, a more specific reference type wins.
+5. One visible [object cast](Types.md#object-casts) to the parameter type.
+
+One candidate beats another if it ranks at least as high on every argument and higher on at least one. The compiler selects the unique candidate that no other candidate beats. A tie or conflicting preferences produce an ambiguity error. Declaration order and expected result type play no part. The receiver and arguments are evaluated in the usual order, with any selected cast run at its argument's position.
+
+Distinct alternatives must have distinct resolved parameter types or counts. For example, `func(value: int)` and `func(other: int32)` in one group are duplicates because `int` aliases `int32`. Alternatives require bodies and fixed arity and take no function type parameters. They may use the type parameters of an enclosing class. Call a group directly or use a lambda to select an alternative for a function value. [Constructor overloads](ObjectLifecycle.md#construction) use the same selection rules.
 
 ### Variadic parameters
 

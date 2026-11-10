@@ -1,0 +1,13 @@
+let test = import:Std.Test;
+
+let CompanionTests = module (
+    export let test_primitive_members = func {
+        test.assert_equal_string("é🙂", "Aé🙂".substring(1));
+        test.assert_equal_string("é", "Aé🙂".substring(1, 3));
+        test.assert_equal_string("text: 2", "{}: {}".formatted("text", 2));
+        test.assert_equal_int32(2, "é".transform<int>(func(value: string) -> int => value.byte_length));
+        test.assert("🙂".char_at(1) == 56898);
+        test.assert_equal_string("🙂", string.from_char_array([55357, 56898]));
+        test.assert_equal<string[list]>(["a", "b"], "a\rb".lines());
+    };
+);

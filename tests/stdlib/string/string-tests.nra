@@ -1,0 +1,138 @@
+let text = import:Std.Core.String;
+let test = import:Std.Test;
+let string_builder = import:Std.Core.StringBuilder;
+let variadic = import:Std.Core.Variadic;
+
+let StringTests = module (
+    export let test_utf8_search_and_slices = func {
+        let source = "Aé🙂é";
+        test.assert_equal_int32(9, text.byte_length(source));
+        test.assert(text.contains(source, "🙂"));
+        test.assert_equal_string("Aé🙂é!", text.concat(source, "!"));
+        test.assert_equal_string("é", text.substring(source, 7));
+        test.assert_equal_string("é🙂", text.substring(source, 1, 7));
+        test.assert_equal_string("🙂", text.sub_sequence(source, 3, 7));
+        test.assert(text.content_equals("é", "é"));
+        let builder = string_builder.create().append("é");
+        test.assert(text.content_equals("é", builder));
+        test.assert(!text.content_equals("e", builder));
+        test.assert(!text.content_equals("é", nil));
+        test.assert(text.starts_with_at(source, "é🙂", 1));
+        test.assert(!text.starts_with_at(source, "é", 2));
+        test.assert(!text.starts_with_at(source, "é", 9));
+        test.assert(text.region_matches(source, 1, "xé🙂", 1, 6));
+        test.assert(!text.region_matches(source, 1, "xé🙂", 1, 5));
+        test.assert(!text.region_matches(source, 1, "xé🙂", 1, -1));
+        test.assert(!text.region_matches(source, 1, "xé🙂", 1, 2147483647));
+        test.assert(text.region_matches_ignore_ascii_case(source, 0, "aéx", 0, 3));
+        test.assert(!text.region_matches_ignore_ascii_case("É", 0, "é", 0, 2));
+        test.assert_equal_int32(7, text.index_of_range(source, "é", 3, 9));
+        test.assert_equal_int32(-1, text.index_of_range(source, "é", 3, 7));
+        test.assert_equal_int32(3, text.index_of_range(source, "", 3, 7));
+        test.assert_equal_int32(1, text.last_index_of_from(source, "é", 3));
+        test.assert_equal_int32(-1, text.last_index_of_from(source, "é", 0));
+        test.assert_equal_int32(9, text.last_index_of_from(source, "", 9));
+        test.assert_equal_int32(3, text.index_of_code_point(source, 128578));
+        test.assert_equal_int32(7, text.last_index_of_code_point(source, 233));
+        test.assert_equal_string("Ax🙂x", text.replace_code_point(source, 233, 120));
+    };
+
+    export let test_utf16_adapters = func {
+        let source = "Aé🙂";
+        test.assert_equal_int32(7, text.byte_length(source));
+        test.assert_equal_int32(4, text.utf16_length(source));
+        test.assert_equal_int32(0, text.utf16_length(""));
+        test.assert(text.char_at(source, 0) == 65);
+        test.assert(text.char_at(source, 1) == 233);
+        test.assert(text.char_at(source, 2) == 55357);
+        test.assert(text.char_at(source, 3) == 56898);
+        test.assert_equal<uint16[list]>([65, 233, 55357, 56898], text.to_char_array(source));
+        test.assert_equal<uint16[list]>([65, 233, 55357, 56898], text.chars(source));
+        test.assert_equal<uint16[list]>([], text.to_char_array(""));
+        let destination: uint16[] = [7, 7, 7, 7];
+        text.get_chars(source, 2, 4, destination, 1);
+        test.assert_equal<uint16[]>([7, 55357, 56898, 7], destination);
+        let list: uint16[list] = [7, 7];
+        text.get_chars(source, 3, 4, list, 0);
+        text.get_chars(source, 4, 4, list, list.length);
+        test.assert_equal<uint16[list]>([56898, 7], list);
+        test.assert_equal_string(source, text.from_char_array(text.to_char_array(source)));
+        test.assert_equal_string("", text.from_char_array([]));
+        let boundaries = text.from_scalars([55295, 57344, 65535, 65536, 1114111]);
+        let units = text.to_char_array(boundaries);
+        test.assert_equal<uint16[list]>([55295, 57344, 65535, 55296, 56320, 56319, 57343], units);
+        test.assert_equal_string(boundaries, text.from_char_array(units));
+    };
+
+    export let test_order_and_code_points = func {
+        test.assert_equal_int32(-1, text.compare_to("a", "é"));
+        test.assert_equal_int32(0, text.compare_to("é", "é"));
+        test.assert_equal_int32(1, text.compare_to("é", "a"));
+        test.assert_equal_int32(0, text.compare_to_ignore_ascii_case("Abé", "aBé"));
+        test.assert_equal_int32(-1, text.compare_to_ignore_ascii_case("É", "é"));
+        let source = "Aé🙂é";
+        test.assert(text.code_point_at(source, 3) == 128578);
+        test.assert(text.code_point_before(source, 7) == 128578);
+        test.assert_equal_int32(2, text.code_point_count(source, 1, 7));
+        test.assert_equal<uint32[list]>([65, 233, 128578, 233], text.code_points(source));
+        test.assert_equal<uint8[list]>([195, 169], text.get_bytes("é"));
+        test.assert_equal_int32(9, text.offset_by_code_points(source, 1, 3));
+        test.assert_equal_int32(1, text.offset_by_code_points(source, 9, -3));
+        test.assert_equal_int32(7, text.offset_by_code_points(source, 7, 0));
+    };
+
+    export let test_whitespace_and_lines = func {
+        let em_space = text.from_scalars([8195]);
+        let ideographic_space = text.from_scalars([12288]);
+        let non_breaking_space = text.from_scalars([160]);
+        let nul = text.from_scalars([0]);
+        test.assert(text.is_blank(""));
+        test.assert(text.is_blank("\t " + em_space + ideographic_space));
+        test.assert(!text.is_blank(non_breaking_space));
+        test.assert_equal_string("é", text.strip(em_space + "é" + ideographic_space));
+        test.assert_equal_string("é" + ideographic_space, text.strip_leading(em_space + "é" + ideographic_space));
+        test.assert_equal_string(em_space + "é", text.strip_trailing(em_space + "é" + ideographic_space));
+        test.assert_equal_string(non_breaking_space, text.strip(" " + non_breaking_space + " "));
+        test.assert_equal_string("é", text.trim(nul + " é\t" + nul));
+        test.assert_equal_string(em_space, text.trim(" " + em_space + " "));
+        test.assert_equal<string[list]>([], text.lines(""));
+        test.assert_equal<string[list]>(["a", "b", "", "c"], text.lines("a\rb\r\n\nc\n"));
+        test.assert_equal_string("", text.indent("", 2));
+        test.assert_equal_string("  a\n  b\n", text.indent("a\rb\r", 2));
+        test.assert_equal_string(" a\nb\n", text.indent("  a\r" + em_space + "b", -1));
+        test.assert_equal_string("a\n", text.indent("  a", -2147483648));
+        test.assert_equal_string("a\n  b\n", text.strip_indent("  a  \r\n    b\t\r  "));
+        test.assert_equal_string("  a\n    b\n", text.strip_indent("  a  \r\n    b\t\r"));
+    };
+
+    export let test_regex = func {
+        test.assert(text.matches("1234", "[0-9]+"));
+        test.assert(!text.matches("x1234", "[0-9]+"));
+        test.assert_equal_string("<12>,<34>", text.replace_all("12,34", "([0-9]+)", "<$1>"));
+        test.assert_equal_string("x,34", text.replace_first_regex("12,34", "[0-9]+", "x"));
+        test.assert_equal<string[list]>(["a", "b", ""], text.split_regex("a::b:", ":+"));
+        test.assert_equal<string[list]>(["a", "b:"], text.split_regex_limit("a::b:", ":+", 2));
+        test.assert_equal<string[list]>(["a::b:"], text.split_regex_limit("a::b:", ":+", 1));
+        test.assert_equal<string[list]>(["a", "::", "b", ":", ""], text.split_with_delimiters("a::b:", ":+", 3));
+        test.assert_equal<string[list]>(["a", "::", "b:"], text.split_with_delimiters("a::b:", ":+", 2));
+        test.assert_equal<string[list]>(["", "", "é", "", "🙂"], text.split_with_delimiters("é🙂", "", 3));
+    };
+
+    export let test_format_and_transform = func {
+        test.assert_equal_string("count: 42", text.formatted("{1}: {0}", 42, "count"));
+        let args: variadic.Argument[] = [variadic.Argument.Text("é")];
+        test.assert_equal_string("[é]", text.vformatted("[{}]", args));
+        test.assert_equal_string("-32768", text.value_of<int16>(-32768));
+        test.assert_equal_int32(2, text.transform<int>("é", func(value: string) -> int => value.byte_length));
+    };
+
+    export let test_escape_translation = func {
+        test.assert_equal_string("éa \n\t\r\"'\\", text.translate_escapes("é\\141\\s\\n\\t\\r\\\"\\'\\\\"));
+        let controls = text.from_scalars([8, 12]);
+        test.assert_equal_string(controls, text.translate_escapes("\\b\\f"));
+        test.assert_equal_string("ÿ", text.translate_escapes("\\377"));
+        test.assert_equal_string("?7", text.translate_escapes("\\777"));
+        test.assert_equal_string("abc", text.translate_escapes("a\\\r\nb\\\nc"));
+        test.assert_equal_string("", text.translate_escapes(""));
+    };
+);

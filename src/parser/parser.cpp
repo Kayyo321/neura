@@ -81,6 +81,7 @@ private:
 
     TypeSyntax type() {
         const auto start = cursor_;
+        const bool reference = match("&");
         TypeSyntax result{};
         if (match("[")) {
             result.name = "[tuple]";
@@ -119,6 +120,9 @@ private:
             expect("]");
         }
         result.span = span_from(start);
+        if (reference && result.reference)
+            throw Diagnostic(result.span, "a type can have only one reference prefix");
+        result.reference |= reference;
         return result;
     }
 
@@ -182,7 +186,7 @@ private:
     }
 
     // Return true when an expression body still needs its terminating semicolon.
-    bool function_body(Declaration& result) {
+    bool function_body(Declaration& result, std::string_view branch_keyword = {}) {
         result.parameters = parameters();
         result.type = match("->") ? type() : TypeSyntax{current().span, "void", {}, {}};
         result.has_body = at("{") || at("=>");
@@ -194,19 +198,50 @@ private:
         Statement statement{};
         statement.kind = result.type->name == "void" && result.type->collections.empty()
             ? Statement::Kind::Expression : Statement::Kind::Return;
-        statement.expressions.push_back(expression());
+        statement.expressions.push_back(expression(1, true, branch_keyword));
         statement.span = statement.expressions.front().span;
         result.body.push_back(std::move(statement));
         return true;
     }
 
+    bool named_function(Declaration& result, std::string_view branch_keyword) {
+        result.kind = Declaration::Kind::Function;
+        result.generics = generic_parameters();
+        const bool expression_body = function_body(result, branch_keyword);
+        if (!result.has_body && current().kind == TokenKind::Identifier && current().text == "host") {
+            advance();
+            expect("(");
+            const auto& service = current();
+            if (service.kind != TokenKind::String)
+                throw Diagnostic(service.span, "expected a host service name");
+            advance();
+            expect(",");
+            const auto& version = current();
+            std::uint32_t number = 0;
+            const auto end = version.text.data() + version.text.size();
+            const auto [next, error] = std::from_chars(version.text.data(), end, number);
+            if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0)
+                throw Diagnostic(version.span, "host service version must be a positive uint32");
+            advance();
+            expect(")");
+            result.host_binding.emplace(service.text.substr(1, service.text.size() - 2), number);
+        }
+        return expression_body;
+    }
+
+    bool at_branch(std::string_view branch_keyword) const {
+        return !branch_keyword.empty() && at("or") &&
+            tokens_[cursor_ + 1].kind == TokenKind::Keyword && tokens_[cursor_ + 1].text == branch_keyword;
+    }
+
     bool at_declaration() const { return at("export") || at("static") || at("let") || at("const"); }
 
-    Declaration declaration(bool member) {
+    Declaration declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
         const auto start = cursor_;
         bool expression_body = false;
         Declaration result{};
         result.kind = Declaration::Kind::Binding;
+        result.documentation = current().documentation;
         result.exported = match("export");
         result.static_member = match("static");
         result.constant = match("const");
@@ -216,42 +251,58 @@ private:
         if (match(".")) {
             if (!result.constant && match("promote")) {
                 result.promote_import = true;
+            } else if (!result.constant && at("as")) {
+                if (owner != Declaration::Kind::Class)
+                    throw Diagnostic(current().span, "a cast declaration requires a class");
+                const auto& name = advance();
+                result.name = name.text;
+                result.name_span = name.span;
+                result.cast_target = type();
             } else {
                 expect("override");
                 result.override_member = true;
             }
         }
-        result.name = identifier().text;
-        if (match(":")) {
-            result.type = type();
+        if (!result.cast_target) {
+            const auto& name = identifier();
+            result.name = name.text;
+            result.name_span = name.span;
+            if (match(":")) {
+                result.type = type();
+            }
         }
 
-        if (match("=")) {
-            if (!result.type && block_depth_ == 0 && match("func")) {
+        if (result.cast_target) expect("=");
+        if (result.cast_target || match("=")) {
+            if (result.cast_target || (!result.type && block_depth_ == 0 && at("func"))) {
+                expect("func");
                 const auto function_start = cursor_ - 1;
-                definition_has_no_annotation(result);
-                result.kind = Declaration::Kind::Function;
-                result.generics = generic_parameters();
-                expression_body = function_body(result);
-                if (!result.has_body && current().kind == TokenKind::Identifier && current().text == "host") {
-                    advance();
-                    expect("(");
-                    const auto& service = current();
-                    if (service.kind != TokenKind::String)
-                        throw Diagnostic(service.span, "expected a host service name");
-                    advance();
-                    expect(",");
-                    const auto& version = current();
-                    std::uint32_t number = 0;
-                    const auto end = version.text.data() + version.text.size();
-                    const auto [next, error] = std::from_chars(version.text.data(), end, number);
-                    if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0)
-                        throw Diagnostic(version.span, "host service version must be a positive uint32");
-                    advance();
-                    expect(")");
-                    result.host_binding.emplace(service.text.substr(1, service.text.size() - 2), number);
+                const std::string_view branch_keyword = result.cast_target ? "as" : "func";
+                expression_body = named_function(result, branch_keyword);
+                result.span = span_from(start);
+                while (at_branch(branch_keyword)) {
+                    const auto& connector = advance(); // or
+                    const auto branch_start = cursor_;
+                    Declaration branch{};
+                    branch.name = result.name;
+                    branch.documentation = connector.documentation;
+                    branch.name_span = current().span;
+                    branch.constant = result.constant;
+                    branch.exported = result.exported;
+                    branch.override_member = result.override_member;
+                    branch.static_member = result.static_member;
+                    if (result.cast_target) {
+                        expect("as");
+                        branch.cast_target = type();
+                        expect("=");
+                    }
+                    expect("func");
+                    expression_body = named_function(branch, branch_keyword);
+                    branch.span = span_from(branch_start);
+                    result.overloads.push_back(std::move(branch));
                 }
-                if (result.has_body && !expression_body && result.generics.empty() && !result.override_member &&
+                if (!result.cast_target && result.overloads.empty() && result.has_body && !expression_body &&
+                    result.generics.empty() && !result.override_member &&
                     (at("(") || at("[") || at(".") || at("as") || precedence() != 0)) {
                     auto lambda = std::make_shared<Declaration>();
                     lambda->kind = Declaration::Kind::Function;
@@ -280,6 +331,8 @@ private:
                     Declaration member{};
                     member.kind = Declaration::Kind::Binding;
                     member.name = variant.text;
+                    member.documentation = variant.documentation;
+                    member.name_span = variant.span;
                     const bool positional = match("(");
                     member.named_payload = !positional && match("{");
                     if (positional || member.named_payload) {
@@ -331,7 +384,14 @@ private:
                 }
                 expect("(");
                 while (!at_end() && !at(")")) {
-                    result.members.push_back(declaration(true));
+                    auto member = declaration(result.kind);
+                    if (member.cast_target) {
+                        auto more_casts = std::exchange(member.overloads, {});
+                        result.members.push_back(std::move(member));
+                        for (auto& cast : more_casts) result.members.push_back(std::move(cast));
+                    } else {
+                        result.members.push_back(std::move(member));
+                    }
                 }
                 expect(")");
             } else {
@@ -341,13 +401,14 @@ private:
             throw Diagnostic(current().span, "expected a type annotation or an initializer");
         }
 
-        // Aggregate members can omit the semicolon after a function body.
-        if (member && result.has_body && !expression_body) {
+        // Aggregate members and overload groups can end at a block body.
+        auto& final_branch = result.overloads.empty() ? result : result.overloads.back();
+        if ((owner || !result.overloads.empty()) && final_branch.has_body && !expression_body) {
             match(";");
         } else {
             expect(";");
         }
-        result.span = span_from(start);
+        if (result.overloads.empty()) result.span = span_from(start);
         return result;
     }
 
@@ -382,6 +443,7 @@ private:
 
         if ((at("let") || at("const")) && tokens_[cursor_ + 1].text == "[") {
             result.kind = Statement::Kind::Destructure;
+            result.documentation = current().documentation;
             result.constant_bindings = match("const");
             if (!result.constant_bindings) expect("let");
             expect("[");
@@ -394,7 +456,7 @@ private:
             expect(";");
         } else if (at_declaration()) {
             result.kind = Statement::Kind::Binding;
-            result.declaration = std::make_unique<Declaration>(declaration(false));
+            result.declaration = std::make_unique<Declaration>(declaration());
         } else if (at("{")) {
             result.kind = Statement::Kind::Block;
             result.body = block();
@@ -488,7 +550,10 @@ private:
                 auto declaration = std::make_unique<Declaration>();
                 declaration->kind = Declaration::Kind::Binding;
                 declaration->constant = constant;
-                declaration->name = identifier().text;
+                declaration->documentation = tokens_[start].documentation;
+                const auto& name = identifier();
+                declaration->name = name.text;
+                declaration->name_span = name.span;
                 if (match(":")) {
                     declaration->type = type();
                 }
@@ -509,7 +574,7 @@ private:
             const auto start = cursor_;
             Statement binding{};
             binding.kind = Statement::Kind::Binding;
-            binding.declaration = std::make_unique<Declaration>(declaration(false));
+            binding.declaration = std::make_unique<Declaration>(declaration());
             binding.span = span_from(start);
             result.initializer.push_back(std::move(binding));
         } else if (!match(";")) {
@@ -588,12 +653,13 @@ private:
         return 0;
     }
 
-    Expr expression(int minimum_precedence = 1, bool range_step = true) {
+    Expr expression(int minimum_precedence = 1, bool range_step = true, std::string_view branch_keyword = {}) {
         const auto start = cursor_;
-        return expression_tail(start, cast(), minimum_precedence, range_step);
+        return expression_tail(start, cast(branch_keyword), minimum_precedence, range_step, branch_keyword);
     }
 
-    Expr expression_tail(std::size_t start, Expr left, int minimum_precedence, bool range_step = true) {
+    Expr expression_tail(std::size_t start, Expr left, int minimum_precedence, bool range_step = true,
+                         std::string_view branch_keyword = {}) {
         while (precedence() >= minimum_precedence) {
             const auto priority = precedence();
             const bool shift = at_shift();
@@ -601,10 +667,10 @@ private:
             if (shift) {
                 op += advance().text;
             }
-            auto right = expression(priority + 1);
+            auto right = expression(priority + 1, true, branch_keyword);
             if (op != "===" && (priority == equality_precedence || priority == ordering_precedence) &&
-                (at("and") || at("or"))) {
-                left = comparison_chain(start, std::move(op), std::move(left), std::move(right));
+                at_comparison_connector(branch_keyword)) {
+                left = comparison_chain(start, std::move(op), std::move(left), std::move(right), branch_keyword);
                 continue;
             }
             auto binary = make_expression(Expr::Kind::Binary, span_from(start), op);
@@ -615,15 +681,15 @@ private:
         if (minimum_precedence == 1 && match("..")) {
             auto range = make_expression(Expr::Kind::Range, left.span);
             range.operands.push_back(std::move(left));
-            range.operands.push_back(expression(2));
-            if (range_step && match(":")) range.operands.push_back(expression(2));
+            range.operands.push_back(expression(2, true, branch_keyword));
+            if (range_step && match(":")) range.operands.push_back(expression(2, true, branch_keyword));
             range.span = span_from(start);
             left = std::move(range);
         }
         if (minimum_precedence == 1 && match("?")) {
             auto when_true = expression(1, false);
             expect(":");
-            auto when_false = expression(1, range_step);
+            auto when_false = expression(1, range_step, branch_keyword);
             auto conditional = make_expression(Expr::Kind::Conditional, span_from(start));
             conditional.operands.push_back(std::move(left));
             conditional.operands.push_back(std::move(when_true));
@@ -633,7 +699,12 @@ private:
         return left;
     }
 
-    Expr comparison_chain(std::size_t start, std::string op, Expr left, Expr first) {
+    bool at_comparison_connector(std::string_view branch_keyword) const {
+        return at("and") || (at("or") && !at_branch(branch_keyword));
+    }
+
+    Expr comparison_chain(std::size_t start, std::string op, Expr left, Expr first,
+                          std::string_view branch_keyword) {
         const auto connector = current().text;
         auto result = make_expression(Expr::Kind::ComparisonChain, left.span, std::move(op));
         result.chain_conjunction = connector == "and";
@@ -641,12 +712,12 @@ private:
         result.operands.push_back(std::move(first));
         do {
             advance();
-            result.operands.push_back(expression(ordering_precedence + 1));
+            result.operands.push_back(expression(ordering_precedence + 1, true, branch_keyword));
             if (precedence() == equality_precedence || precedence() == ordering_precedence) {
                 throw Diagnostic(current().span, "a comparison chain expects another value; use '&&' or '||' between comparisons");
             }
-        } while (at(connector));
-        if (at("and") || at("or")) {
+        } while (at(connector) && at_comparison_connector(branch_keyword));
+        if (at_comparison_connector(branch_keyword)) {
             throw Diagnostic(current().span, "a comparison chain must use only 'and' or only 'or'");
         }
         result.span = span_from(start);
@@ -656,9 +727,9 @@ private:
     // `as` binds tighter than the binary operators and looser than unary
     // operators: `-x as int64` converts `-x`, and `a * b as int64` converts
     // only `b`.
-    Expr cast() {
+    Expr cast(std::string_view branch_keyword) {
         const auto start = cursor_;
-        return cast_tail(start, unary());
+        return cast_tail(start, unary(branch_keyword));
     }
 
     Expr cast_tail(std::size_t start, Expr result) {
@@ -673,23 +744,23 @@ private:
         return result;
     }
 
-    Expr unary() {
+    Expr unary(std::string_view branch_keyword) {
         const auto start = cursor_;
         if (at("++") || at("--")) {
             const auto op = advance().text;
-            auto operand = unary();
+            auto operand = unary(branch_keyword);
             auto result = make_expression(Expr::Kind::PrefixUpdate, span_from(start), op);
             result.operands.push_back(std::move(operand));
             return result;
         }
         if (at("!") || at("-") || at("~")) {
             const auto op = advance().text;
-            auto operand = unary();
+            auto operand = unary(branch_keyword);
             auto result = make_expression(Expr::Kind::Unary, span_from(start), op);
             result.operands.push_back(std::move(operand));
             return result;
         }
-        auto operand = postfix();
+        auto operand = postfix(branch_keyword);
         if (at("++") || at("--")) {
             const auto op = advance().text;
             auto result = make_expression(Expr::Kind::PostfixUpdate, span_from(start), op);
@@ -726,9 +797,9 @@ private:
         return {};
     }
 
-    Expr postfix() {
+    Expr postfix(std::string_view branch_keyword) {
         const auto start = cursor_;
-        return postfix_tail(start, primary());
+        return postfix_tail(start, primary(branch_keyword));
     }
 
     Expr postfix_tail(std::size_t start, Expr result) {
@@ -789,7 +860,7 @@ private:
         }
     }
 
-    Expr primary() {
+    Expr primary(std::string_view branch_keyword) {
         const auto start = cursor_;
         if (match("match")) {
             auto statement = parse_match(true, start);
@@ -800,7 +871,7 @@ private:
         if (match("func")) {
             auto lambda = std::make_shared<Declaration>();
             lambda->kind = Declaration::Kind::Function;
-            function_body(*lambda);
+            function_body(*lambda, branch_keyword);
             if (!lambda->has_body)
                 throw Diagnostic(current().span, "expected a function body");
             lambda->span = span_from(start);
@@ -839,6 +910,13 @@ private:
         }
         if (match("import")) {
             expect(":");
+            if (current().kind == TokenKind::String) {
+                const auto path = decode_string_literal(advance().text);
+                const auto name = match(".") ? identifier().text : std::string{};
+                auto result = make_expression(Expr::Kind::Import, span_from(start), name);
+                result.import_path = path;
+                return result;
+            }
             auto name = qualified_name(true);
             return make_expression(Expr::Kind::Import, span_from(start), std::move(name));
         }

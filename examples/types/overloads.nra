@@ -1,0 +1,34 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let write = func(text: string) {
+    write(text, text.byte_length);
+} or func(text: string, byte_count: int) {
+    console.print_line(text.substring(0, byte_count));
+}
+
+let MultiInt = class (
+    let value: int64 = 0;
+
+    export let init = func(initial: int16) {
+        instance.value = initial as int64;
+    } or func(initial: int64) {
+        instance.value = initial;
+    }
+
+    export let.as int16 = func -> int16 => value as int16
+        or as int64 = func -> int64 => value;
+
+    export let.as string = func -> string => value.to_string();
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let initial: int16 = 12;
+        let value = new MultiInt(initial);
+        write("Neura", 3);
+        write(value);
+        write((value as int64).to_string());
+        return program.ExitCode.Ok;
+    }
+);

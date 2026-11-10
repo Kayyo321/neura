@@ -6,23 +6,23 @@ This release carries the language below from source through NeuraIR, optimizatio
 
 | Area | Supported | Specification |
 | --- | --- | --- |
-| Core | Bindings and destructuring, functions and closures, variadic parameters, expression bodies, `if`/`else`, conditional expressions, comparison chains, `do`, `do`/`while`, `while`, three-part `for`, for-each, `break`, `continue`, `return` | [Core language](CoreLanguage.md) |
+| Core | Bindings and destructuring, functions and closures, fixed-arity function overloads, variadic parameters, expression bodies, `if`/`else`, conditional expressions, comparison chains, `do`, `do`/`while`, `while`, three-part `for`, for-each, `break`, `continue`, `return` | [Core language](CoreLanguage.md) |
 | Numbers | Sized integers and floats, aliases, checked arithmetic and conversions, update and compound assignment operators, bitwise operations and shifts, exact float bit reinterpretation | [Numbers](Numbers.md) |
-| Types | Classes and interfaces with first-use static initialization, startup singletons, umbrella `class`, explicit `nil`, reference identity and checked casts, value members and `===`, UTF-8 text, tuples, and payload enums with exhaustive matching | [Types](Types.md) |
+| Types | Classes and interfaces with first-use static initialization, startup singletons, umbrella `class`, explicit `nil`, reference identity and checked casts, object casts, non-null primitive references, primitive companion calls, value members and `===`, UTF-8 text, tuples, and payload enums with exhaustive matching | [Types](Types.md) |
 | Generics | Generic functions, classes, enums, interfaces, methods and closures, with explicit type arguments, intersection bounds, and specialization | [Polymorphism](Polymorphism.md) |
-| Modules | Imports, promoted and wildcard imports, discard bindings, exports, module inheritance, initialization, trusted `Std` sources and host bindings, and the library-defined or legacy entry point | [Modules](Modules.md) |
-| Lifecycle | Constructors, field initializers, `destroy`, destructors, deterministic tracing garbage collection | [Object lifecycle](ObjectLifecycle.md) |
+| Modules | Source and prebuilt NeuraIR imports, promoted and wildcard imports, discard bindings, exports, module inheritance, initialization, trusted `Std` sources and host bindings, and the library-defined or legacy entry point | [Modules](Modules.md) |
+| Lifecycle | Constructors and constructor overloads, field initializers, `destroy`, destructors, deterministic tracing garbage collection | [Object lifecycle](ObjectLifecycle.md) |
 | Collections | Arrays, lists, stepped ranges, `length`, indexing, `append`, `remove_at`, structural versions, and for-each over built-ins or `Iterable<T>` | [Collections](Collections.md) |
 | Errors | Expected failures as returned values, plus runtime traps and explicit message traps | [Errors](Errors.md) |
 | Testing | `neura test` with the `Std.Test` assertions | [Testing](Testing.md) |
-| Tooling | `check`, `emit-ir`, `build`, `run` (with capabilities, `--record`, `--replay`, `--stats`, `--profile`), `test`, `disassemble`, `assemble`, `decompile` | [Tooling](Tooling.md), [Decompiler](../Decompiler.md) |
+| Tooling | `check`, `docs` for `///` comments, `emit-ir`, `build`, `run` (with capabilities, `--record`, `--replay`, `--stats`, `--profile`), `test`, `disassemble`, `assemble`, `decompile` | [Tooling](Tooling.md), [Decompiler](../Decompiler.md) |
 | Standard library | The `Std` source modules of the [implementation plan](Stdlib.md), installed with the tool, and the host providers they bind; see [Standard library](StandardLibrary.md) for the module list and [section 18 of the plan](Stdlib.md#18-implementation-decisions) for decisions made while implementing it | [Standard library](StandardLibrary.md) |
 
 ## Outside this release
 
 | Area | Status |
 | --- | --- |
-| Standard library extensions | `Std.Concurrent`, time zones and locales, Unicode beyond ASCII classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](Stdlib.md#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
+| Standard library extensions | `Std.Concurrent`, time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](Stdlib.md#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
 | Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](ResourcesConcurrency.md)). |
 | Foreign interop | Java and other foreign-function interop are not part of the language. |
 | Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](ProjectStructure.md)). |
@@ -63,6 +63,8 @@ These remain open. The compiler rejects or does not offer the affected construct
 | --- | --- |
 | `hello-world`, `modules/module-interface.nra`, `modules/multi-file` | Compile and run; they use `Std.Io.Console` and `Std.Program`. |
 | `guide/core.nra`, `types/overlay.nra`, `types/classes.nra`, `types/collections.nra`, `types/polymorphism.nra` | Libraries. Test drivers in `tests/backend/examples` import them, compile, and run. |
+| `types/overloads.nra` | Runnable example of function and constructor overloads, object casts, and a primitive companion call. |
+| `types/primitive-references.nra` | Library example of a constructor-bound reference field and a reference parameter. |
 | `guide/errors.nra` | A library that reads a count from a file with `Std.Fs` and `Std.Core.Int32.parse` and returns a `Result`; `tests/backend/examples/errors-driver.nra` runs it without the file capability. |
 | `guide/resources.nra` | Top-level statements; runs with the test driver `tests/backend/examples/resources-driver.nra`, built together with it. |
 | `testing/math-tests.nra` | Tests with `Std.Test`; `neura test -I examples/guide examples/testing/math-tests.nra` passes. |

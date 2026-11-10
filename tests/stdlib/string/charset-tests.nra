@@ -1,0 +1,82 @@
+let charsets = import:Std.Text.Charsets;
+let error = import:Std.Core.Error;
+let test = import:Std.Test;
+let text = import:Std.Core.String;
+
+let CharsetTests = module (
+    export let test_utf8_ascii_and_latin1 = func {
+        test.assert_equal<uint8[list]>([65, 195, 169], "Aé".get_bytes());
+        test.assert_equal<uint8[list]>([65, 195, 169], "Aé".get_bytes(text.Charset.Utf8));
+        test.assert_equal<uint8[list]>([65, 63, 63], "Aé🙂".get_bytes("US-ASCII"));
+        test.assert_equal<uint8[list]>([65, 233, 63], "Aé🙂".get_bytes("LATIN1"));
+        test.assert_equal_string("Neura", string.decode_bytes("Neura".get_bytes("ascii"), "ASCII"));
+        test.assert_equal_string("Aéÿ", string.decode_bytes([65, 233, 255], text.Charset.Latin1));
+        test.assert_equal_string("Aé", string.decode_bytes([65, 195, 169]));
+        test.assert_equal_string("�A�", string.decode_bytes([194, 65, 226, 130], "utf8"));
+        test.assert_equal_string("�A", string.decode_bytes([255, 65], text.Charset.Ascii));
+        test.assert_equal_string("é", test.assert_ok<string>(string.try_decode_bytes([195, 169])));
+    };
+
+    export let test_utf16 = func {
+        let source = "Aé🙂";
+        let big: uint8[list] = [0, 65, 0, 233, 216, 61, 222, 66];
+        let little: uint8[list] = [65, 0, 233, 0, 61, 216, 66, 222];
+        let big_bom: uint8[list] = [254, 255, 0, 65, 0, 233, 216, 61, 222, 66];
+        let little_bom: uint8[list] = [255, 254, 65, 0, 233, 0, 61, 216, 66, 222];
+        test.assert_equal<uint8[list]>(big, source.get_bytes("Utf16Be"));
+        test.assert_equal<uint8[list]>(little, source.get_bytes(text.Charset.Utf16Le));
+        test.assert_equal<uint8[list]>(big_bom, source.get_bytes(text.Charset.Utf16));
+        test.assert_equal<uint8[list]>([254, 255], "".get_bytes(text.Charset.Utf16));
+        test.assert_equal_string(source, string.decode_bytes(big, text.Charset.Utf16Be));
+        test.assert_equal_string(source, string.decode_bytes(little, "utf-16le"));
+        test.assert_equal_string(source, string.decode_bytes(big, "utf16"));
+        test.assert_equal_string(source, string.decode_bytes(big_bom, text.Charset.Utf16));
+        test.assert_equal_string(source, string.decode_bytes(little_bom, text.Charset.Utf16));
+        test.assert_equal_string(text.from_scalars([65279, 65]), string.decode_bytes([254, 255, 0, 65], "utf16be"));
+        test.assert_equal_string("A�B�", string.decode_bytes([0, 65, 216, 61, 0, 66, 1], "utf16be"));
+    };
+
+    export let test_utf32 = func {
+        let source = "Aé🙂";
+        let big: uint8[list] = [0, 0, 0, 65, 0, 0, 0, 233, 0, 1, 246, 66];
+        let little: uint8[list] = [65, 0, 0, 0, 233, 0, 0, 0, 66, 246, 1, 0];
+        let big_bom: uint8[list] = [0, 0, 254, 255, 0, 0, 0, 65, 0, 0, 0, 233, 0, 1, 246, 66];
+        let little_bom: uint8[list] = [255, 254, 0, 0, 65, 0, 0, 0, 233, 0, 0, 0, 66, 246, 1, 0];
+        test.assert_equal<uint8[list]>(big, source.get_bytes(text.Charset.Utf32Be));
+        test.assert_equal<uint8[list]>(little, source.get_bytes("utf32le"));
+        test.assert_equal<uint8[list]>(big_bom, source.get_bytes("utf-32"));
+        test.assert_equal<uint8[list]>([0, 0, 254, 255], "".get_bytes(text.Charset.Utf32));
+        test.assert_equal_string(source, string.decode_bytes(big, text.Charset.Utf32Be));
+        test.assert_equal_string(source, string.decode_bytes(little, text.Charset.Utf32Le));
+        test.assert_equal_string(source, string.decode_bytes(big, text.Charset.Utf32));
+        test.assert_equal_string(source, string.decode_bytes(big_bom, text.Charset.Utf32));
+        test.assert_equal_string(source, string.decode_bytes(little_bom, text.Charset.Utf32));
+        test.assert_equal_string(text.from_scalars([65279]), string.decode_bytes([0, 0, 254, 255], "utf32be"));
+        test.assert_equal_string("��", string.decode_bytes([0, 17, 0, 0, 255, 255], "utf32be"));
+    };
+
+    export let test_strict_failures_and_charset_names = func {
+        test.assert(test.assert_ok<charsets.Charset>(charsets.for_name("iso646-us")) == charsets.Charset.Ascii);
+        let _ = test.assert_err<charsets.Charset>(charsets.for_name("unknown"));
+        test.assert_equal<uint8[list]>([233], test.assert_ok<uint8[list]>("é".try_get_bytes("ISO-8859-1")));
+        test.assert_equal_string("é", test.assert_ok<string>(string.try_decode_bytes([233], text.Charset.Latin1)));
+        expect_offset(test.assert_err<uint8[list]>("Aé🙂".try_get_bytes("ascii")), 1);
+        expect_offset(test.assert_err<uint8[list]>("Aé🙂".try_get_bytes(text.Charset.Latin1)), 3);
+        expect_offset(test.assert_err<string>(string.try_decode_bytes([65, 255])), 1);
+        expect_offset(test.assert_err<string>(string.try_decode_bytes([0, 65, 216, 61], "utf16be")), 2);
+        expect_offset(test.assert_err<string>(string.try_decode_bytes([0, 0, 216, 0], text.Charset.Utf32Be)), 0);
+        let _ = test.assert_err<uint8[list]>("text".try_get_bytes("unknown"));
+        let _ = test.assert_err<string>(string.try_decode_bytes([], "unknown"));
+    };
+
+    let expect_offset = func(failure: error.Error, expected: int) {
+        match (failure) {
+            error.Error.Encoding { offset: offset, message: _ } => {
+                test.assert_equal_int32(expected, offset);
+            },
+            _ => {
+                test.fail("expected an encoding error");
+            },
+        }
+    };
+);

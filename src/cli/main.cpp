@@ -4,6 +4,7 @@
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
+#include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/host.hpp"
@@ -13,6 +14,7 @@
 #include "nvm/trace_file.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
+#include "source_docs.hpp"
 #include "source_loader.hpp"
 
 #include <algorithm>
@@ -25,6 +27,7 @@
 #include <iterator>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -46,6 +49,8 @@ constexpr int trap_status = 70;
 
 void usage(std::ostream& out) {
     out << "usage: neura check [-I source-root] <file.nra>...\n"
+           "       neura docs <file.nra>... [-o <file.json>]\n"
+           "       neura docs --doxygen <file.nra>\n"
            "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>... [-o <file.nir>]\n"
            "       neura emit-ir [--no-optimize] <file.nir>\n"
            "       neura build [-I source-root] [--no-optimize] [--no-source-map] <file.nra>... -o <file.nvr>\n"
@@ -70,15 +75,16 @@ void usage(std::ostream& out) {
            "  --replay <file>          (run) answer host requests from a trace instead of services\n";
 }
 
-enum class Command { Check, EmitIr, Build, Run, Test, Disassemble, Assemble, Decompile };
+enum class Command { Check, Docs, EmitIr, Build, Run, Test, Disassemble, Assemble, Decompile };
 
-constexpr const char* commands = "expected check, emit-ir, build, run, test, disassemble, assemble, or decompile";
+constexpr const char* commands = "expected check, docs, emit-ir, build, run, test, disassemble, assemble, or decompile";
 
 struct Options {
     Command command = Command::Check;
     bool optimize = true;
     bool source_map = true;
     bool provenance = true;
+    bool doxygen = false;
     // Report execution costs: steps, peak heap cells, and image size.
     bool stats = false;
     std::vector<fs::path> files;
@@ -150,6 +156,8 @@ Options read_options(int argc, char** argv) {
     const std::string_view command = argv[1];
     if (command == "check") {
         options.command = Command::Check;
+    } else if (command == "docs") {
+        options.command = Command::Docs;
     } else if (command == "emit-ir") {
         options.command = Command::EmitIr;
     } else if (command == "build") {
@@ -206,16 +214,21 @@ Options read_options(int argc, char** argv) {
                 throw std::runtime_error("--no-provenance applies only to decompile");
             }
             options.provenance = false;
+        } else if (arg == "--doxygen") {
+            if (options.command != Command::Docs)
+                throw std::runtime_error("--doxygen applies only to docs");
+            options.doxygen = true;
         } else if (arg == "--no-source-map") {
             if (options.command != Command::Build) {
                 throw std::runtime_error("--no-source-map applies only to build");
             }
             options.source_map = false;
         } else if (arg == "-o") {
-            if (options.command != Command::EmitIr && options.command != Command::Build &&
+            if (options.command != Command::Docs && options.command != Command::EmitIr &&
+                options.command != Command::Build &&
                 options.command != Command::Disassemble && options.command != Command::Assemble &&
                 options.command != Command::Decompile) {
-                throw std::runtime_error("-o applies only to emit-ir, build, disassemble, assemble, and decompile");
+                throw std::runtime_error("-o applies only to docs, emit-ir, build, disassemble, assemble, and decompile");
             }
             options.output = fs::path(next());
         } else if (runs && arg == "--max-steps") {
@@ -277,6 +290,9 @@ Options read_options(int argc, char** argv) {
     if (options.command == Command::Build && !options.output) {
         throw std::runtime_error("build requires -o <file.nvr>");
     }
+    if (options.doxygen && options.files.size() != 1) {
+        throw std::runtime_error("--doxygen requires one source file");
+    }
     if (options.command == Command::Assemble && !options.output) {
         throw std::runtime_error("assemble requires -o <file.nvr>");
     }
@@ -325,16 +341,18 @@ bool is_nir_input(const fs::path& path) {
     return path.extension() == ".nir";
 }
 
+neura::IrProgram load_source_program(const Options& options) {
+    auto roots = options.roots;
+    for (const auto& file : options.files) {
+        roots.push_back(file.parent_path());
+    }
+    return neura::lower_sources(options.files, roots, options.library);
+}
+
 // Loads the program from source files or from one .nir file.
 neura::IrProgram load_program(const Options& options) {
     const bool nir = std::any_of(options.files.begin(), options.files.end(), is_nir_input);
-    if (!nir) {
-        auto roots = options.roots;
-        for (const auto& file : options.files) {
-            roots.push_back(file.parent_path());
-        }
-        return neura::lower(neura::read_sources(options.files, roots, options.library));
-    }
+    if (!nir) return load_source_program(options);
     if (options.files.size() != 1) {
         throw std::runtime_error("a .nir input must be the only input file");
     }
@@ -362,6 +380,7 @@ int emit_ir(const Options& options) {
     // default listing is what conversion receives: specialized and optimized.
     if (options.optimize) {
         neura::require_valid_ir(program, "before specialization");
+        neura::materialize_reference_storage(program);
         neura::specialize(program);
         neura::optimize(program);
     }
@@ -397,6 +416,14 @@ void write_text(const Options& options, const std::string& text) {
     } else {
         std::cout << text;
     }
+}
+
+int docs(const Options& options) {
+    std::ostringstream index;
+    if (options.doxygen) neura::write_doxygen_source(index, options.files.front());
+    else neura::write_source_docs(index, options.files);
+    write_text(options, std::move(index).str());
+    return 0;
 }
 
 int disassemble(const Options& options) {
@@ -620,6 +647,7 @@ int run_tests(const Options& options) {
         throw std::runtime_error("no tests found: a test is an exported, zero-argument void function named "
                                  "test_* in a module of the listed files");
     }
+    neura::materialize_reference_storage(program);
     neura::specialize(program);
     if (options.optimize) {
         neura::optimize(program);
@@ -690,14 +718,10 @@ int main(int argc, char** argv) {
         const auto options = read_options(argc, argv);
         switch (options.command) {
         case Command::Check:
-            neura::lower(neura::read_sources(options.files, [&] {
-                auto roots = options.roots;
-                for (const auto& file : options.files) {
-                    roots.push_back(file.parent_path());
-                }
-                return roots;
-            }(), options.library));
+            load_source_program(options);
             return 0;
+        case Command::Docs:
+            return docs(options);
         case Command::EmitIr:
             return emit_ir(options);
         case Command::Build:

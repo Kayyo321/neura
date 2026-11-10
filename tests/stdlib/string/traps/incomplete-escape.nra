@@ -1,0 +1,11 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: incomplete escape
+let program = import:Std.Program;
+let text = import:Std.Core.String;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = text.translate_escapes("\\");
+        return program.ExitCode.Ok;
+    };
+);

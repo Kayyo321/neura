@@ -20,8 +20,10 @@ constexpr std::uint8_t max_op_1_1 = static_cast<std::uint8_t>(IrOp::Fail);
 constexpr std::uint8_t max_op_1_2 = static_cast<std::uint8_t>(IrOp::SelectValue);
 constexpr std::uint8_t max_op_1_3 = static_cast<std::uint8_t>(IrOp::ValueText);
 constexpr std::uint8_t max_op_1_4 = static_cast<std::uint8_t>(IrOp::RepeatCollection);
+constexpr std::uint8_t max_op_1_7 = static_cast<std::uint8_t>(IrOp::ReferencePlace);
 
 std::uint16_t type_minor(const IrType& type) {
+    if (type.kind == TypeKind::Object && type.name.starts_with('&')) return 7;
     if (is_function_value(type) || (type.kind == TypeKind::Enum && !type.arguments.empty())) return 3;
     return type.kind == TypeKind::Tuple ? 2 : 0;
 }
@@ -54,9 +56,11 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (op > max_op_1_3 || scoped_statements(node) || class_qualified_load(node)) return 4;
-        if (op > max_op_1_2) {
-            version = 3;
+        if (op > max_op_1_4) return 7;
+        if (op > max_op_1_3 || scoped_statements(node) || class_qualified_load(node)) {
+            version = std::max<std::uint16_t>(version, 4);
+        } else if (op > max_op_1_2) {
+            version = std::max<std::uint16_t>(version, 3);
         } else if (op > max_op_1_1 || new_operator(node)) {
             version = std::max<std::uint16_t>(version, 2);
         } else if (op > max_op_1_0 || (node.op == IrOp::Loop && !node.alternative.empty())) {
@@ -69,7 +73,7 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
         for (const auto* region : {&node.operands, &node.body, &node.alternative}) {
             version = std::max(version, required_minor(*region));
         }
-        if (version == 4) return version;
+        if (version == 7) return version;
     }
     return version;
 }
@@ -77,6 +81,10 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
 enum Flag : std::uint8_t {
     Exported = 1, Constant = 2, External = 4, HasBody = 8, HasPayload = 16, HostBound = 32, LibraryFile = 64,
     HasInterfacesOrBounds = 128
+};
+
+enum LinkFlag : std::uint8_t {
+    VariadicMask = 3, UserCast = 4, OverloadBranch = 8, Singleton = 16
 };
 
 class Writer {
@@ -91,6 +99,7 @@ public:
                 paths(node);
             }
         }
+        for (const auto& constant : program.static_constants) paths(constant.value);
     }
 
     std::vector<std::uint8_t> write(const IrProgram& program) {
@@ -98,13 +107,14 @@ public:
             u8(static_cast<std::uint8_t>(c));
         }
         u16(nir_major_version);
-        std::uint16_t version = 0;
+        std::uint16_t version = program.static_constants.empty() ? 0 : 6;
         for (const auto& item : program.symbols) {
-            if (is_static_initializer(item)) {
-                version = 5;
-                break;
+            if (item.variadic != VariadicKind::None || item.user_cast ||
+                item.overload_group != no_symbol || item.singleton_instance != no_symbol) {
+                version = std::max<std::uint16_t>(version, 6);
             }
-            if (is_static_scope(item)) version = 4;
+            if (is_static_initializer(item)) version = std::max<std::uint16_t>(version, 5);
+            if (is_static_scope(item)) version = std::max<std::uint16_t>(version, 4);
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
                 version = std::max<std::uint16_t>(version, 3);
@@ -117,7 +127,7 @@ public:
             }
         }
         for (const auto& body : program.bodies) {
-            if (version >= 4) break;
+            if (version == 7) break;
             version = std::max(version, required_minor(body.instructions));
         }
         u16(version);
@@ -127,12 +137,19 @@ public:
         }
         count(program.symbols.size());
         for (const auto& item : program.symbols) {
-            symbol(item);
+            symbol(item, version);
         }
         count(program.bodies.size());
         for (const auto& body : program.bodies) {
             reference(body.owner);
             nodes(body.instructions);
+        }
+        if (version >= 6) {
+            count(program.static_constants.size());
+            for (const auto& constant : program.static_constants) {
+                reference(constant.field);
+                node(constant.value);
+            }
         }
         return std::move(bytes_);
     }
@@ -216,7 +233,7 @@ private:
         }
     }
 
-    void symbol(const IrSymbol& value) {
+    void symbol(const IrSymbol& value, std::uint16_t version) {
         u8(static_cast<std::uint8_t>(value.kind));
         text(value.name);
         span(value.span);
@@ -246,6 +263,14 @@ private:
         if (extra_types) {
             types(value.interfaces);
             types(value.additional_bounds);
+        }
+        if (version >= 6) {
+            u8(static_cast<std::uint8_t>(static_cast<std::uint8_t>(value.variadic) |
+                (value.user_cast ? UserCast : 0) |
+                (value.overload_group != no_symbol ? OverloadBranch : 0) |
+                (value.singleton_instance != no_symbol ? Singleton : 0)));
+            if (value.overload_group != no_symbol) reference(value.overload_group);
+            if (value.singleton_instance != no_symbol) reference(value.singleton_instance);
         }
     }
 
@@ -277,7 +302,7 @@ class Reader {
 public:
     Reader(std::span<const std::uint8_t> bytes, std::string origin) : bytes_(bytes), origin_(std::move(origin)) {}
 
-    IrProgram read() {
+    IrProgram read(std::uint16_t* minor_version) {
         if (!is_nir(bytes_)) {
             fail("not a NeuraIR file");
         }
@@ -289,7 +314,7 @@ public:
                  " is not supported; this reader accepts 1.0 through 1." + std::to_string(nir_minor_version));
         }
         constexpr std::uint8_t operation_limits[]{
-            max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4};
+            max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7};
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
@@ -312,9 +337,16 @@ public:
             body.instructions = nodes(0);
             program.bodies.push_back(std::move(body));
         }
+        if (minor_ >= 6) {
+            const auto constants = count(5);
+            program.static_constants.reserve(constants);
+            for (std::uint32_t i = 0; i < constants; ++i)
+                program.static_constants.push_back({required_reference(), node(0)});
+        }
         if (position_ != bytes_.size()) {
             fail(std::to_string(bytes_.size() - position_) + " unread bytes at the end of the file");
         }
+        if (minor_version) *minor_version = minor_;
         return program;
     }
 
@@ -423,7 +455,7 @@ private:
         value.name = text();
         value.symbol = reference();
         value.arguments = types(depth + 1);
-        if (type_minor(value) > minor_) fail("a structural function or generic enum type requires NeuraIR format 1.3");
+        if (type_minor(value) > minor_) fail("type requires a newer NeuraIR format");
         return value;
     }
 
@@ -495,6 +527,17 @@ private:
             if (value.interfaces.empty() && value.additional_bounds.empty())
                 fail("an interface/bounds flag needs at least one type");
         }
+        if (minor_ >= 6) {
+            const auto linkage = u8();
+            if ((linkage & ~(VariadicMask | UserCast | OverloadBranch | Singleton)) != 0 ||
+                (linkage & VariadicMask) == VariadicMask) {
+                fail("invalid source linkage flags");
+            }
+            value.variadic = static_cast<VariadicKind>(linkage & VariadicMask);
+            value.user_cast = (linkage & UserCast) != 0;
+            if ((linkage & OverloadBranch) != 0) value.overload_group = required_reference();
+            if ((linkage & Singleton) != 0) value.singleton_instance = required_reference();
+        }
         return value;
     }
 
@@ -560,8 +603,9 @@ std::vector<std::uint8_t> write_nir(const IrProgram& program) {
     return Writer(program).write(program);
 }
 
-IrProgram read_nir(std::span<const std::uint8_t> bytes, const std::string& origin) {
-    return Reader(bytes, origin).read();
+IrProgram read_nir(std::span<const std::uint8_t> bytes, const std::string& origin,
+                   std::uint16_t* minor_version) {
+    return Reader(bytes, origin).read(minor_version);
 }
 
 } // namespace neura

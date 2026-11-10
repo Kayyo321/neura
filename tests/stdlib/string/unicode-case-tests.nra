@@ -1,0 +1,59 @@
+let test = import:Std.Test;
+let text = import:Std.Core.String;
+
+let UnicodeCaseTests = module (
+    export let test_default_case_conversion = func {
+        test.assert_equal_string("", "".to_upper_case());
+        test.assert_equal_string("STRASSE FF É", "Straße ﬀ é".to_upper_case());
+        test.assert_equal_string("aé", "AÉ".to_lower_case());
+        test.assert_equal_string(text.from_scalars([105, 775]), "İ".to_lower_case());
+        test.assert_equal_string("ος οσα σ", "ΟΣ ΟΣΑ Σ".to_lower_case());
+        test.assert_equal_string(text.from_scalars([97, 962, 769, 33]),
+            text.from_scalars([65, 931, 769, 33]).to_lower_case());
+        test.assert_equal_string(text.from_scalars([97, 963, 39, 98]),
+            text.from_scalars([65, 931, 39, 66]).to_lower_case());
+        test.assert_equal_string(text.from_scalars([66600]), text.from_scalars([66560]).to_lower_case());
+        test.assert_equal_string(text.from_scalars([42955]), text.from_scalars([612]).to_upper_case());
+        test.assert_equal_string(text.from_scalars([93883]), text.from_scalars([93856]).to_lower_case());
+        test.assert_equal_string("I", "i".to_upper_case("en-US"));
+    };
+
+    export let test_turkic_case_conversion = func {
+        test.assert_equal_string("ıi", "Iİ".to_lower_case("TR-tr"));
+        test.assert_equal_string("İI", "iı".to_upper_case("az-Latn-AZ"));
+        test.assert_equal_string("i", text.from_scalars([73, 775]).to_lower_case("tr"));
+        test.assert_equal_string(text.from_scalars([105, 808]),
+            text.from_scalars([73, 808, 775]).to_lower_case("az"));
+        test.assert_equal_string(text.from_scalars([305, 769, 775]),
+            text.from_scalars([73, 769, 775]).to_lower_case("tr"));
+        test.assert_equal_string("i", "I".to_lower_case("trs"));
+    };
+
+    export let test_lithuanian_case_conversion = func {
+        test.assert_equal_string(text.from_scalars([105, 775, 769]),
+            text.from_scalars([73, 769]).to_lower_case("lt-LT"));
+        test.assert_equal_string(text.from_scalars([106, 775, 769, 303, 775, 769]),
+            text.from_scalars([74, 769, 302, 769]).to_lower_case("LT"));
+        test.assert_equal_string(text.from_scalars([105, 775, 768, 105, 775, 769, 105, 775, 771]),
+            "ÌÍĨ".to_lower_case("lt"));
+        test.assert_equal_string(text.from_scalars([73, 808, 769]),
+            text.from_scalars([105, 808, 775, 769]).to_upper_case("lt"));
+        test.assert_equal_string(text.from_scalars([73, 769, 775]),
+            text.from_scalars([105, 769, 775]).to_upper_case("lt"));
+    };
+
+    export let test_simple_and_full_case_matching = func {
+        test.assert("ÉςKİ".equals_ignore_case("éΣki"));
+        test.assert(!"Fuß".equals_ignore_case("FUSS"));
+        test.assert("Fuß".equals_fold_case("FUSS"));
+        test.assert_equal_string("ffi σσ ss", "ﬃ Σς ß".case_fold());
+        test.assert(!"İ".equals_fold_case("i"));
+        test.assert_equal_int32(0, "Fuß".compare_to_fold_case("FUSS"));
+        test.assert_equal_int32(-1, "É".compare_to_ignore_case("Ê"));
+        test.assert_equal_int32(1, "aB".compare_to_ignore_case("A"));
+        test.assert_equal_int32(-1, "a".compare_to_fold_case("AB"));
+        test.assert("AÉ".region_matches_ignore_case(1, "bé", 1, 2));
+        test.assert(!"AÉ".region_matches_ignore_case(2, "bé", 1, 1));
+        test.assert(!"AÉ".region_matches_ignore_case(1, "bé", 1, 1));
+    };
+);

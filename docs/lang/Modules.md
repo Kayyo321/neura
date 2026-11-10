@@ -49,6 +49,23 @@ file, and module bindings. Each occurrence has no name to read or redeclare.
 
 For project-local modules, the proposed qualified-name and file layout convention is described in [Project structure](ProjectStructure.md). The [multi-file example](../../examples/modules/multi-file/main.nra) shows a project module importing another project module.
 
+### Prebuilt NeuraIR modules
+
+Use a quoted path to import a module from a prebuilt `.nir` artifact. Select a top-level project module after the closing quote when the artifact bundles several.
+
+```neura
+let stats = import:"lib/stats.nir";
+let helpers = import:"lib/stats.nir".Helpers;
+```
+
+Without a selector, the compiler chooses the module whose source filename convention matches the artifact's filename. If none matches, it uses the sole top-level project module when there is exactly one. Relative paths are searched beside the importing file and in its `-I` roots. More than one candidate is an error. For a named project import such as `import:Stats`, the compiler looks for `stats.nra` first and falls back to `stats.nir` if there is no source candidate. Wildcard imports enumerate source modules.
+
+To package a library, write it as an ordinary module and run `neura emit-ir stats.nra -o lib/stats.nir`. The artifact includes its dependencies, compiled code, types, and initializers. It exposes the module's exported members with the same access rules as a source import. During compilation, compatible copies of a shared dependency join into one definition with one type identity and one initialization. Project dependencies share identity when the recorded source paths match. Incompatible copies or a project source included directly and through an artifact produce an error.
+
+The compiler checks bundled standard library definitions against the installed library. Import `Std.*` by its usual source name. Build an importable library without a program entry override when the consuming application defines its own entry.
+
+The executable and any newly emitted `.nir` contain the linked program. They can be built or run later without reopening the imported artifacts. [NeuraIR format](../NirFormat.md)
+
 ### Standard library imports
 
 The compiler reserves the `Std` namespace. Installed tools resolve `Std.*` below their installation's `share/neura/stdlib` directory. A checkout build can also resolve them from the checkout's `stdlib` directory. Project files and `-I` roots cannot supply replacements for these imports. Imports with an `Internal` component are accessible only from standard library files.

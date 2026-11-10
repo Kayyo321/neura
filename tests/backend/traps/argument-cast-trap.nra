@@ -1,0 +1,25 @@
+// status: 70
+// stderr: explicit program failure .*: cast failed.*argument-cast-trap[.]nra:
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Token = class (
+    export let.as int64 = func -> int64 {
+        console.print_line("cast began");
+        trap_with_message("cast failed");
+    }
+);
+
+let later_argument = func -> int {
+    console.print_line("evaluated a later argument");
+    return 0;
+};
+
+let consume = func(first: int64, second: int) {};
+
+let CastTrap = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        consume(new Token(), later_argument());
+        return program.ExitCode.Ok;
+    }
+);

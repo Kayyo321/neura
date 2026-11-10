@@ -1,5 +1,8 @@
 // Core syntax: functions, loops, and branches. tests/backend/examples/core-driver.nra runs it.
 let Core = module (
+    /// @brief Sums the positive integers through the inclusive limit.
+    /// @param limit The largest integer to add.
+    /// @return Zero for a limit below one, otherwise the sum.
     export let sum_to = func(limit: int32) -> int32 {
         let total: int32 = 0;
         let current: int32 = 1;

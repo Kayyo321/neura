@@ -1,0 +1,257 @@
+let data = import:Std.Text.Internal.UnicodeCaseData;
+let scalars = import:Std.Text.Scalars;
+let string_builder = import:Std.Core.StringBuilder;
+let strings = import:Std.Text.Strings;
+
+export let UnicodeCase = module (
+    let CasingLocale = enum (Root, Turkic, Lithuanian);
+
+    export let lower = func(s: string, language_tag: string) -> string {
+        let locale = casing_locale(language_tag);
+        let source = strings.scalars(s);
+        let result = string_builder.create();
+        let before_cased = false;
+        for (let index = 0; index < source.length; index += 1) {
+            let scalar = source[index];
+            append_lowercase(result, source, index, locale, before_cased);
+            if (!case_ignorable(scalar)) {
+                before_cased = cased(scalar);
+            }
+        }
+        return result.to_string();
+    };
+
+    export let upper = func(s: string, language_tag: string) -> string {
+        let locale = casing_locale(language_tag);
+        let source = strings.scalars(s);
+        let result = string_builder.create();
+        for (let index = 0; index < source.length; index += 1) {
+            append_uppercase(result, source, index, locale);
+        }
+        return result.to_string();
+    };
+
+    export let fold = func(s: string) -> string {
+        let result = string_builder.create();
+        let offset = 0;
+        while (offset < s.byte_length) {
+            let scalar = strings.scalar_at(s, offset);
+            if (scalar < 128) {
+                let _ = result.append_scalar(scalars.to_ascii_lower(scalar));
+            } else {
+                append_mapping(result, data.Fold, 16, scalar);
+            }
+            offset += scalars.utf8_length(scalar);
+        }
+        return result.to_string();
+    };
+
+    export let compare_ignore_case = func(left: string, right: string) -> int {
+        let a = 0;
+        let b = 0;
+        while (a < left.byte_length && b < right.byte_length) {
+            let first = strings.scalar_at(left, a);
+            let second = strings.scalar_at(right, b);
+            if (first != second) {
+                let folded_first = simple_fold(first);
+                let folded_second = simple_fold(second);
+                if (folded_first != folded_second) {
+                    return folded_first < folded_second ? -1 : 1;
+                }
+            }
+            a += scalars.utf8_length(first);
+            b += scalars.utf8_length(second);
+        }
+        return a < left.byte_length ? 1 : b < right.byte_length ? -1 : 0;
+    };
+
+    let casing_locale = func(language_tag: string) -> CasingLocale {
+        if (language_tag.byte_length < 2 || (language_tag.byte_length > 2 && language_tag.byte_at(2) != 45)) {
+            return CasingLocale.Root;
+        }
+        let first = scalars.to_ascii_lower(language_tag.byte_at(0) as uint32);
+        let second = scalars.to_ascii_lower(language_tag.byte_at(1) as uint32);
+        if ((first == 116 && second == 114) || (first == 97 && second == 122)) {
+            return CasingLocale.Turkic;
+        }
+        if (first == 108 && second == 116) {
+            return CasingLocale.Lithuanian;
+        }
+        return CasingLocale.Root;
+    };
+
+    let append_uppercase =
+        func(result: string_builder.StringBuilder, source: uint32[list], index: int, locale: CasingLocale) {
+            let scalar = source[index];
+            if (locale == CasingLocale.Turkic && scalar == 105) {
+                let _ = result.append_scalar(304);
+            } else if (locale == CasingLocale.Lithuanian && scalar == 775 &&
+                contains_property(data.SoftDotted, preceding_base(source, index))) {
+                return;
+            } else if (scalar < 128) {
+                let _ = result.append_scalar(scalars.to_ascii_upper(scalar));
+            } else {
+                append_mapping(result, data.Upper, 16, scalar);
+            }
+        };
+
+    let append_lowercase =
+        func(result: string_builder.StringBuilder, source: uint32[list], index: int, locale: CasingLocale,
+            before_cased: bool) {
+            let scalar = source[index];
+            if (locale == CasingLocale.Turkic) {
+                if (scalar == 304) {
+                    let _ = result.append_scalar(105);
+                    return;
+                }
+                if (scalar == 73 && following_above(source, index) != 775) {
+                    let _ = result.append_scalar(305);
+                    return;
+                }
+                if (scalar == 775 && preceding_base(source, index) == 73) {
+                    return;
+                }
+            }
+            if (locale == CasingLocale.Lithuanian) {
+                if ((scalar == 73 || scalar == 74 || scalar == 302) && following_above(source, index) != 0) {
+                    let _ = result.append_scalar(scalar == 302 ? 303 : scalar + 32);
+                    let _ = result.append_scalar(775);
+                    return;
+                }
+                if (scalar == 204 || scalar == 205 || scalar == 296) {
+                    let _ = result.append_scalar(105);
+                    let _ = result.append_scalar(775);
+                    let _ = result.append_scalar(scalar == 204 ? 768 : scalar == 205 ? 769 : 771);
+                    return;
+                }
+            }
+            if (scalar == 931 && before_cased && !following_cased(source, index)) {
+                let _ = result.append_scalar(962);
+            } else if (scalar < 128) {
+                let _ = result.append_scalar(scalars.to_ascii_lower(scalar));
+            } else {
+                append_mapping(result, data.Lower, 12, scalar);
+            }
+        };
+
+    let cased = func(scalar: uint32) -> bool => scalar < 128 ? scalars.is_ascii_alphabetic(scalar)
+        : contains_property(data.Cased, scalar);
+
+    let case_ignorable = func(scalar: uint32) -> bool => scalar < 128
+        ? scalar == 39 || scalar == 46 || scalar == 58 || scalar == 94 || scalar == 96
+        : contains_property(data.CaseIgnorable, scalar);
+
+    let following_cased = func(source: uint32[list], index: int) -> bool {
+        for (let next = index + 1; next < source.length; next += 1) {
+            let scalar = source[next];
+            if (!case_ignorable(scalar)) {
+                return cased(scalar);
+            }
+        }
+        return false;
+    };
+
+    // Return the first combining mark of class Above before the next base.
+    let following_above = func(source: uint32[list], index: int) -> uint32 {
+        for (let next = index + 1; next < source.length; next += 1) {
+            let scalar = source[next];
+            if (!contains_property(data.Combining, scalar)) {
+                return 0;
+            }
+            if (contains_property(data.Above, scalar)) {
+                return scalar;
+            }
+        }
+        return 0;
+    };
+
+    // Find the base before the current mark, stopping at a class Above mark.
+    let preceding_base = func(source: uint32[list], index: int) -> uint32 {
+        let previous = index;
+        while (previous > 0) {
+            previous -= 1;
+            let scalar = source[previous];
+            if (!contains_property(data.Combining, scalar)) {
+                return scalar;
+            }
+            if (contains_property(data.Above, scalar)) {
+                return 0;
+            }
+        }
+        return 0;
+    };
+
+    let simple_fold = func(scalar: uint32) -> uint32 {
+        if (scalar < 128) {
+            return scalars.to_ascii_lower(scalar);
+        }
+        let offset = mapping_offset(data.SimpleFold, 8, scalar);
+        return offset < 0 ? scalar : unpack(data.SimpleFold, offset + 4);
+    };
+
+    let append_mapping = func(result: string_builder.StringBuilder, table: string, stride: int, scalar: uint32) {
+        let offset = mapping_offset(table, stride, scalar);
+        if (offset < 0) {
+            let _ = result.append_scalar(scalar);
+            return;
+        }
+        for (let i = 4; i < stride; i += 4) {
+            let mapped = unpack(table, offset + i);
+            if (mapped == 0) {
+                return;
+            }
+            let _ = result.append_scalar(mapped);
+        }
+    };
+
+    let mapping_offset = func(table: string, stride: int, scalar: uint32) -> int {
+        let low = 0;
+        let high = table.byte_length / stride;
+        while (low < high) {
+            let middle = low + (high - low) / 2;
+            let offset = middle * stride;
+            let key = unpack(table, offset);
+            if (key == scalar) {
+                return offset;
+            }
+            if (key < scalar) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return -1;
+    };
+
+    let contains_property = func(table: string, scalar: uint32) -> bool {
+        let low = 0;
+        let high = table.byte_length / 4;
+        while (low < high) {
+            let middle = low + (high - low) / 2;
+            if (unpack(table, middle * 4) <= scalar) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return (low & 1) != 0;
+    };
+
+    let unpack = func(table: string, offset: int) -> uint32 =>
+        (digit(table.byte_at(offset)) << 18) | (digit(table.byte_at(offset + 1)) << 12) |
+        (digit(table.byte_at(offset + 2)) << 6) | digit(table.byte_at(offset + 3));
+
+    let digit = func(byte: uint8) -> uint32 {
+        let code = byte as uint32;
+        if (code >= 97) {
+            return code - 61;
+        }
+        if (code >= 65 && code <= 90) {
+            return code - 55;
+        }
+        if (code >= 48 && code <= 57) {
+            return code - 48;
+        }
+        return code == 45 ? 62 : 63;
+    };
+);

@@ -36,6 +36,42 @@ Arrays and lists are built-in collection types, written `string[]` and `string[l
 
 String equality compares UTF-8 bytes. `text.byte_length` returns the byte count as `int` and `text.byte_at(index)` returns a checked `uint8`. `text.slice(start, end)` accepts a half-open range with endpoints on UTF-8 character boundaries. `string.from_utf8(bytes)` copies a `uint8[]` or `uint8[list]` and returns `[bool, string]`. Invalid input returns `[false, ""]`. Valid empty input returns `[true, ""]`.
 
+### Primitive companions
+
+Booleans, sized integers and floats, and strings have [standard library companions](Stdlib.md#7-primitive-companion-modules). A primitive-qualified call such as `int32.parse("42")` looks up an exported function in that companion. A call on a value passes it as the first argument to a function whose first parameter has the same primitive type.
+
+```neura
+let score: int16 = -7;
+let magnitude = score.abs();
+let suffix = "préfixe".substring(4);
+```
+
+Aliases use the companion of their resolved type. Built-in members take precedence. The compiler resolves the companion from the trusted standard library on first use and emits an ordinary module call with primitive values.
+
+### Primitive references
+
+Prefix a Boolean, integer, float, or string type with `&` to declare a non-null alias to mutable storage of that exact type. An ordinary read through the alias yields the stored primitive value. Assigning through the alias changes the stored value and leaves the alias pointing at the same storage.
+
+```neura
+let increment = func(value: &int) {
+    value += 1;
+};
+
+let count: int = 10;
+let alias: &int = count;
+increment(alias);
+alias = 20;
+// count is now 20.
+```
+
+A reference initializer, argument, or return takes a mutable place or an existing reference to the same resolved primitive type. Mutable locals, ordinary parameters, globals, static fields, and instance fields can supply storage. Literals, temporary values, collection elements, constant primitive bindings, and `nil` are invalid in this context. Use an explicit reference type when a declaration must preserve an alias. A `const` reference binding still writes through to its mutable referent because the alias itself is fixed.
+
+Local and global reference declarations require initializers. Static reference fields are unavailable. An instance reference field can bind in its declaration or in its constructor. For a field without a declaration initializer, the first assignment in the constructor binds it to storage. Each successful constructor path must establish that binding before returning. Later assignments write through the established reference.
+
+A constructor can bind a field in separate branches. Binding for the first time inside a loop body or step is rejected, as is an assignment reached with the field bound on only some paths. Direct reads of a field before binding are errors.
+
+A reference keeps its storage alive after the original binding leaves scope. A function declared to return `&T` can return a reference to a mutable local. A caller can keep that alias in a reference binding. The storage of a referenced field also survives destruction of its containing object. Reading a referent before a primitive value has been stored still traps. Primitive references are unavailable as generic type arguments. See [primitive-references.nra](../../examples/types/primitive-references.nra).
+
 ## Tuples
 
 A tuple has one or more ordered elements, each with its own static type. Write
@@ -84,6 +120,7 @@ Overlays can refer to other overlays. See `examples/types/overlay.nra` for more 
 ## Classes
 
 A class defines a type with fields and methods. Mark members `export` to expose them and use `new` to create an instance.
+Inside an instance method, constructor, or field initializer, `instance` names the current receiver if no ordinary binding supplies that name.
 
 ```neura
 let LogEntry = class (
@@ -229,6 +266,32 @@ if (entry is LogEntry) {
 - Reading or writing a field, invoking an instance method, or explicitly destroying a nil reference traps. It has no heap allocation and tracing skips it.
 - `class` supplies `equals(other: class) -> bool`, `hash_code() -> uint32`, and `to_string() -> string`. A class can override those signatures. The defaults use identity and a qualified class name with an identity number, such as `Acme.Shapes.Circle#3`. The runtime assigns that number at first use by default hashing or formatting. An equality override must agree with its hash and return false for nil.
 - The built-in value members of scalars, tuples, arrays, and lists use value semantics. Generic and aggregate value operations treat nil as a distinct value with hash zero and text `nil`. A direct method call on a nil class reference follows the receiver trap rule.
+
+### Object casts
+
+A class can declare a zero-argument conversion method with `let.as Target = func -> Target`. Each target appears at most once per class and must exactly match the method's declared return type. `or as` gives another conversion the same visibility. Separate declarations can choose visibility independently.
+
+```neura
+let Reading = class (
+    let value: int16 = 0;
+
+    export let init = func(initial: int16) {
+        instance.value = initial;
+    }
+
+    export let.as int16 = func -> int16 => value
+        or as int64 = func -> int64 => value as int64;
+);
+
+let accept = func(value: int64) -> int64 => value;
+let reading = new Reading(7);
+let explicit = reading as int64;
+let implicit = accept(reading);
+```
+
+`as` looks for a visible conversion to the exact target on the source's static class, then on its base classes. When none matches, the usual numeric or checked reference cast rules apply. `is` always tests the reference type. Calling a conversion on a nil receiver traps like any other instance method.
+
+Function arguments can use one visible conversion when their type is otherwise incompatible with the parameter. Assignments and returns require ordinary assignability or an explicit `as`. A conversion from `Reading` to `int64` therefore cannot satisfy an `int32` parameter. An unexported cast is only available within its declaring class.
 
 ## Enums
 

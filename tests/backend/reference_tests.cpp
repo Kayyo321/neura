@@ -12,6 +12,7 @@
 #include "fixtures.hpp"
 #include "ir-optimization/evaluator.hpp"
 #include "ir-optimization/optimizer.hpp"
+#include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "nvr/format.hpp"
 
@@ -51,7 +52,43 @@ std::optional<std::string> console_output(const Outcome& outcome) {
     return output;
 }
 
+void check_fixture(const fs::path& path) {
+    auto program = lower_files({path});
+    materialize_reference_storage(program);
+    specialize(program);
+    auto optimized = program;
+    optimize(optimized);
+    const auto exercise = find_symbol(program, "App.exercise");
+    std::string expected;
+    for (const auto* version : {&program, &optimized}) {
+        Evaluator evaluator(*version);
+        for (const auto& initializer : evaluator.initialize()) {
+            check(initializer.status == Status::Returned, describe(initializer));
+        }
+        const auto outcome = evaluator.call(exercise, {});
+        check(outcome.status == Status::Returned, describe(outcome));
+        const auto output = console_output(outcome);
+        check(output.has_value(), "the fixture should record only console lines");
+        if (version == &program) {
+            expected = *output;
+        } else {
+            check_equal(*output, expected, "fixture output after optimization");
+        }
+    }
+    const auto actual = run_captured(build_program({path}));
+    check(actual.result.completed, "the fixture should complete on NVM");
+    check_equal(actual.output, expected, "fixture output on NVM");
+}
+
 } // namespace
+
+NEURA_TEST(reference, overloads_match_the_evaluator) {
+    check_fixture(program_path(environment, "overloads"));
+}
+
+NEURA_TEST(reference, primitive_references_match_the_evaluator) {
+    check_fixture(program_path(environment, "primitive-references"));
+}
 
 NEURA_TEST(reference, library_tests_match_the_evaluator) {
     const auto root = environment.source_dir / "tests" / "stdlib";
@@ -81,6 +118,7 @@ NEURA_TEST(reference, library_tests_match_the_evaluator) {
         const auto tests = test_functions(program, fs::canonical(file));
         if (tests.empty()) continue;
         total += tests.size();
+        materialize_reference_storage(program);
         specialize(program);
         auto optimized = program;
         optimize(optimized);

@@ -68,8 +68,10 @@ bool comparison(std::string_view op) {
 
 class Initialization {
 public:
-    Initialization(IrProgram& program, const std::set<SymbolId>& singletons)
-        : program_(program), singletons_(singletons), scopes_(program.symbols.size(), no_symbol),
+    Initialization(IrProgram& program, const std::set<SymbolId>& singletons,
+                   std::size_t linked_symbols, std::size_t linked_bodies)
+        : program_(program), singletons_(singletons), linked_symbols_(linked_symbols), linked_bodies_(linked_bodies),
+          scopes_(program.symbols.size(), no_symbol),
           guards_(scopes_.size(), no_symbol), pending_(scopes_.size()) {}
 
     void run();
@@ -77,6 +79,8 @@ public:
 private:
     IrProgram& program_;
     const std::set<SymbolId>& singletons_;
+    std::size_t linked_symbols_;
+    std::size_t linked_bodies_;
     std::vector<SymbolId> scopes_;
     std::vector<SymbolId> guards_;
     std::vector<std::vector<IrNode>> pending_;
@@ -85,6 +89,7 @@ private:
     std::set<SymbolId> planned_;
     std::map<SymbolId, IrNode> candidates_;
     std::map<SymbolId, std::optional<IrNode>> constants_;
+    std::set<SymbolId> linked_fields_;
 
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols[id]; }
     SymbolId add(SymbolKind kind, std::string name, const Span& span, SymbolId owner, const IrType& type);
@@ -92,6 +97,7 @@ private:
     const std::optional<IrNode>& constant(SymbolId field);
     std::optional<IrNode> constant_expression(IrNode value);
     void prepare_fields();
+    void recover_linked_fields(const IrBody& body);
     void collect_defaults(SymbolId interface, std::set<SymbolId>& seen, std::vector<SymbolId>& ordered);
     SymbolId plan(SymbolId type);
     std::vector<IrNode>& prepared_body(SymbolId scope);
@@ -190,6 +196,7 @@ std::optional<IrNode> Initialization::constant_expression(IrNode value) {
 
 void Initialization::prepare_fields() {
     for (const auto& [scope, index] : scope_bodies_) {
+        if (index < linked_bodies_) continue;
         for (const auto& entry : program_.bodies[index].instructions) {
             const auto& field = symbol(entry.symbol);
             if (field.constant && constant_type(field.type.kind))
@@ -197,19 +204,35 @@ void Initialization::prepare_fields() {
         }
     }
     for (const auto& [scope, index] : scope_bodies_) {
+        if (index < linked_bodies_) continue;
         auto& body = program_.bodies[index].instructions;
         std::vector<IrNode> prepared;
         for (auto& entry : body) {
             const auto& field = symbol(entry.symbol);
             if (singletons_.contains(entry.symbol)) {
                 prepared.push_back(std::move(entry));
-            } else if (!constant(entry.symbol)) {
+            } else if (const auto& value = constant(entry.symbol)) {
+                program_.static_constants.push_back({entry.symbol, *value});
+            } else {
                 if (auto initial = default_value(field))
                     prepared.push_back(initialize(entry.symbol, std::move(*initial)));
                 pending_[symbol(scope).owner].push_back(std::move(entry));
             }
         }
         body = std::move(prepared);
+    }
+}
+
+void Initialization::recover_linked_fields(const IrBody& body) {
+    if (is_static_scope(symbol(body.owner))) {
+        for (const auto& node : body.instructions) {
+            if (node.op == IrOp::Initialize) linked_fields_.insert(node.symbol);
+        }
+    } else if (is_static_initializer(symbol(body.owner))) {
+        for (const auto& node : body.instructions) {
+            if (node.op == IrOp::Store && node.operands.front().op == IrOp::Load)
+                linked_fields_.insert(node.operands.front().symbol);
+        }
     }
 }
 
@@ -231,6 +254,7 @@ std::vector<IrNode>& Initialization::prepared_body(SymbolId scope) {
 }
 
 SymbolId Initialization::plan(SymbolId type) {
+    if (type < linked_symbols_) return guards_[type];
     if (!planned_.insert(type).second) return guards_[type];
     std::vector<SymbolId> dependencies;
     if (symbol(type).kind == SymbolKind::Class) {
@@ -325,9 +349,16 @@ void Initialization::rewrite(IrNode& node, SymbolId owner, SymbolId former_owner
     }
     if (node.op == IrOp::Load && symbol(node.symbol).kind == SymbolKind::Global) {
         const auto type = static_owner(node.symbol);
-        if (type != no_symbol && !singletons_.contains(node.symbol) &&
-            (guards_[type] != no_symbol || constant(node.symbol)))
-            node = guarded_read(std::move(node), guards_[type]);
+        if (type != no_symbol && !singletons_.contains(node.symbol)) {
+            const auto& field = symbol(node.symbol);
+            if (type < linked_symbols_ && field.constant && constant_type(field.type.kind) &&
+                !constant(node.symbol) && !linked_fields_.contains(node.symbol)) {
+                throw Diagnostic(node.span, "imported static constant '" + field.name +
+                                            "' has no stored value; rebuild its .nir file");
+            }
+            if (guards_[type] != no_symbol || constant(node.symbol))
+                node = guarded_read(std::move(node), guards_[type]);
+        }
     } else if (node.op == IrOp::Allocate) {
         if (const auto guard = guards_[node.type.symbol]; guard != no_symbol) {
             auto result = operation(IrOp::ScopedValue, node.span, node.type);
@@ -342,6 +373,8 @@ void Initialization::run() {
     for (SymbolId id = 0; id < scopes_.size(); ++id) {
         const auto& item = symbol(id);
         if (is_static_scope(item)) scopes_[item.owner] = id;
+        if (id < linked_symbols_ && is_static_initializer(item))
+            guards_[symbol(item.owner).owner] = id;
         if (item.kind == SymbolKind::Function && item.has_body && item.owner != no_symbol &&
             symbol(item.owner).kind == SymbolKind::Interface)
             defaults_.insert(item.owner);
@@ -351,14 +384,16 @@ void Initialization::run() {
     for (std::size_t i = 0; i < source_bodies; ++i) {
         const auto owner = program_.bodies[i].owner;
         if (is_static_scope(symbol(owner))) scope_bodies_.emplace(owner, i);
+        if (i < linked_bodies_) recover_linked_fields(program_.bodies[i]);
     }
-    if (scope_bodies_.empty()) return;
+    for (const auto& entry : program_.static_constants) constants_.emplace(entry.field, entry.value);
     prepare_fields();
     for (SymbolId id = 0; id < scopes_.size(); ++id) {
         if (symbol(id).kind == SymbolKind::Class || symbol(id).kind == SymbolKind::Interface)
             plan(id);
     }
-    for (auto& body : program_.bodies) {
+    for (std::size_t i = linked_bodies_; i < program_.bodies.size(); ++i) {
+        auto& body = program_.bodies[i];
         if (is_static_initializer(symbol(body.owner))) continue;
         for (auto& instruction : body.instructions) rewrite(instruction, body.owner);
         if (symbol(body.owner).kind == SymbolKind::Function) {
@@ -368,7 +403,8 @@ void Initialization::run() {
                     discard(operation(IrOp::Call, symbol(body.owner).span, void_type, guards_[type])));
         }
     }
-    for (auto& body : program_.bodies) {
+    for (std::size_t i = linked_bodies_; i < program_.bodies.size(); ++i) {
+        auto& body = program_.bodies[i];
         if (!is_static_initializer(symbol(body.owner))) continue;
         const auto type = static_owner(body.owner);
         for (auto& entry : pending_[type]) {
@@ -381,8 +417,9 @@ void Initialization::run() {
 
 } // namespace
 
-void lower_static_initializers(IrProgram& program, const std::set<SymbolId>& singletons) {
-    Initialization(program, singletons).run();
+void lower_static_initializers(IrProgram& program, const std::set<SymbolId>& singletons,
+                               std::size_t linked_symbols, std::size_t linked_bodies) {
+    Initialization(program, singletons, linked_symbols, linked_bodies).run();
 }
 
 } // namespace neura

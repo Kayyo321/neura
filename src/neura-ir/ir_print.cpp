@@ -56,6 +56,7 @@ std::string_view spelling(IrOp op) {
     case IrOp::Index: return "index";
     case IrOp::Collection: return "collection";
     case IrOp::RepeatCollection: return "repeat_collection";
+    case IrOp::ReferencePlace: return "reference_place";
     case IrOp::Integer: return "integer";
     case IrOp::Float: return "float";
     case IrOp::String: return "string";

@@ -18,6 +18,7 @@ std::string_view op_name(IrOp op) {
     case IrOp::Index: return "index";
     case IrOp::Collection: return "collection";
     case IrOp::RepeatCollection: return "repeat_collection";
+    case IrOp::ReferencePlace: return "reference_place";
     case IrOp::Integer: return "integer";
     case IrOp::Float: return "float";
     case IrOp::String: return "string";
@@ -148,7 +149,7 @@ IrProgram lower_files(std::vector<fs::path> files, std::vector<fs::path> roots) 
         file = fs::canonical(file);
         roots.push_back(file.parent_path());
     }
-    return lower(read_sources(files, roots, library_root()));
+    return lower_sources(files, roots, library_root());
 }
 
 IrProgram lower_fixture(const Environment& environment, std::string_view file_name) {

@@ -124,6 +124,114 @@ let Derived = class:Base (
 );
 ]=] "6:[1-9][0-9]*" "super.init must be the first statement")
 
+check_rejection(duplicate-overload [=[
+let identify = func(value: int) -> int => value
+    or func(other: int32) -> bool => other == 0;
+]=] "3:[1-9][0-9]*" "duplicate|same parameter")
+check_rejection(ambiguous-overload [=[
+let identify = func(value: int16) -> bool => true
+    or func(value: int64) -> bool => false;
+let use = func -> bool => identify(2);
+]=] "4:[1-9][0-9]*" "ambiguous")
+check_rejection(crossed-overload [=[
+let identify = func(first: int32, second: int16) -> bool => true
+    or func(first: int16, second: int32) -> bool => false;
+let use = func -> bool => identify(1, 2);
+]=] "4:[1-9][0-9]*" "ambiguous")
+check_rejection(no-overload [=[
+let identify = func(value: int16) -> bool => true
+    or func(value: string) -> bool => false;
+let use = func -> bool => identify(nil, nil);
+]=] "4:[1-9][0-9]*" "overload|argument")
+check_rejection(cast-result [=[
+let Box = class (
+    export let.as int64 = func -> string => "wrong type";
+);
+]=] "3:[1-9][0-9]*" "int64.*string|string.*int64|cast.*(result|return)")
+check_rejection(cast-parameter [=[
+let Box = class (
+    export let.as int64 = func(value: int64) -> int64 => value;
+);
+]=] "3:[1-9][0-9]*" "parameter|argument")
+check_rejection(duplicate-cast [=[
+let Box = class (
+    export let.as int = func -> int => 1;
+    export let.as int32 = func -> int32 => 2;
+);
+]=] "4:[1-9][0-9]*" "duplicate|already")
+check_rejection(private-cast [=[
+let Box = class (
+    let.as int64 = func -> int64 => 1;
+);
+let use = func -> int64 => new Box() as int64;
+]=] "5:[1-9][0-9]*" "cast|convert|private|export")
+check_rejection(private-argument-cast [=[
+let Box = class (
+    let.as int64 = func -> int64 => 1;
+);
+let accept = func(value: int64) -> int64 => value;
+let use = func -> int64 => accept(new Box());
+]=] "6:[1-9][0-9]*" "int64|cast|convert|private|export")
+check_rejection(no-chained-cast [=[
+let Middle = class (
+    export let.as int64 = func -> int64 => 1;
+);
+let Box = class (
+    export let.as Middle = func -> Middle => new Middle();
+);
+let accept = func(value: int64) -> int64 => value;
+let use = func -> int64 => accept(new Box());
+]=] "9:[1-9][0-9]*" "int64|cast|convert")
+
+check_rejection(reference-nil [=[
+let unavailable: &int = nil;
+]=] "2:[1-9][0-9]*" "nil requires a class reference type")
+check_rejection(reference-literal [=[
+let temporary: &int = 10;
+]=] "2:[1-9][0-9]*" "requires mutable storage")
+check_rejection(reference-const [=[
+const Constant = 10;
+let alias: &int = Constant;
+]=] "3:[1-9][0-9]*" "requires mutable storage")
+check_rejection(reference-collection [=[
+let invalid: &int[] = [1];
+]=] "2:[1-9][0-9]*" "primitive reference needs")
+check_rejection(reference-field-implicit [=[
+let View = class (
+    let value: &int;
+);
+]=] "3:[1-9][0-9]*" "needs an initializer or constructor")
+check_rejection(reference-field-missing-path [=[
+let View = class (
+    let value: &int;
+    let init = func(storage: &int, bind: bool) {
+        if (bind) {
+            value = storage;
+        }
+    }
+);
+]=] "4:[1-9][0-9]*" "exit before binding reference field 'value'")
+check_rejection(reference-field-ambiguous [=[
+let View = class (
+    let value: &int;
+    let init = func(storage: &int, bind: bool) {
+        if (bind) {
+            value = storage;
+        }
+        value = storage;
+    }
+);
+]=] "8:[1-9][0-9]*" "reference field.*value.*bound")
+check_rejection(reference-field-read [=[
+let View = class (
+    let value: &int;
+    let snapshot: int = value;
+    let init = func(storage: &int) {
+        value = storage;
+    }
+);
+]=] "4:[1-9][0-9]*" "reference field.*value.*bound")
+
 # Loops, conversions, and remainders lower to existing control flow plus the
 # NeuraIR 1.1 operations; a for loop's step is a latch.
 set(loops "${TEST_DIR}/loops.nra")

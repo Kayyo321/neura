@@ -1,0 +1,113 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let global_count: int = 10;
+const global_alias: &int = global_count;
+
+let write_before_initialization = func {
+    delayed_count = 2;
+};
+write_before_initialization();
+let delayed_count: int = 3 + 4;
+
+let increment = func(value: &int) {
+    ++value;
+};
+
+let retained = func(value: int) -> &int => value;
+
+let choose = func(value: int) -> string => "value"
+    or func(value: &int) -> string => "reference";
+
+let Counter = class (
+    export static let offset: int = 2;
+    let backing: int = 5;
+    export let inline_alias: &int = backing;
+    export let alias: &int;
+
+    export let init = func(value: &int, use_value: bool) {
+        if (use_value) {
+            instance.alias = value;
+        } else {
+            instance.alias = backing;
+        }
+    }
+
+    export let read = func -> int => backing;
+);
+
+let Derived = class:Counter (
+    export let init = func(seed: int) {
+        super.init(seed, true);
+        seed += 2;
+    }
+);
+
+let PrivateStorage = module (
+    let hidden: int = 50;
+    export let borrow = func -> &int => hidden;
+);
+
+let HiddenStorage = module:PrivateStorage (
+    let hidden: int = 99;
+);
+
+let App = module:program.Entry (
+    let exercise = func {
+        increment(global_count);
+        global_alias += 1;
+        console.print_line(global_count.to_string());
+        increment(delayed_count);
+        console.print_line(delayed_count.to_string());
+
+        let local = 20;
+        let alias: &int = local;
+        increment(alias);
+        console.print_line(local.to_string());
+        console.print_line(choose(local));
+        console.print_line(choose(alias));
+
+        let first = new Counter(local, true);
+        let second = new Counter(local, false);
+        first.alias += 1;
+        second.alias += 2;
+        second.inline_alias += 3;
+        console.print_line(local.to_string());
+        console.print_line(second.read().to_string());
+        console.print_line(first.read().to_string());
+
+        let survivor: &int = retained(30);
+        let closure = func {
+            survivor += 2;
+        };
+        closure();
+        console.print_line(survivor.to_string());
+
+        let derived = new Derived(40);
+        increment(derived.alias);
+        console.print_line(derived.alias.to_string());
+        let offset: &int = Counter.offset;
+        offset = 4;
+        console.print_line(Counter.offset.to_string());
+
+        let text = "old";
+        let text_alias: &string = text;
+        text_alias = "new";
+        console.print_line(text);
+
+        let owner = new Counter(local, false);
+        let detached: &int = owner.inline_alias;
+        destroy owner;
+        detached += 1;
+        console.print_line(detached.to_string());
+
+        let private_alias: &int = HiddenStorage.borrow();
+        private_alias += 1;
+        console.print_line(private_alias.to_string());
+    }
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        exercise();
+        return program.ExitCode.Ok;
+    }
+);

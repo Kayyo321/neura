@@ -33,8 +33,8 @@ struct FunctionOrigin {
         // An IR function. Module functions are specialized per concrete
         // module receiver; class methods take the receiver as parameter 0.
         Function,
-        // Allocation-time initialization of a class: base initialization,
-        // field initializers, and the declared constructor body.
+        // Allocation-time initialization of the class `symbol`. `receiver`
+        // identifies the declared constructor, or no_symbol for an implicit one.
         Constructor,
         // Cleanup of a class and its bases, most derived first.
         Destructor,

@@ -12,6 +12,7 @@
 namespace neura {
 
 struct ParsedFile;
+struct LinkedImports;
 
 using SymbolId = std::size_t;
 inline constexpr SymbolId no_symbol = static_cast<SymbolId>(-1);
@@ -46,6 +47,8 @@ struct IrHostBinding {
     std::uint32_t version = 0;
 };
 
+enum class VariadicKind { None, Typed, Untyped };
+
 struct IrSymbol {
     SymbolKind kind;
     std::string name;
@@ -70,6 +73,11 @@ struct IrSymbol {
     std::vector<IrType> interfaces{};
     // The first bound stays in bound for compatibility with older NIR.
     std::vector<IrType> additional_bounds{};
+    // Source-level signatures needed when another compilation imports this IR.
+    SymbolId overload_group = no_symbol;
+    VariadicKind variadic = VariadicKind::None;
+    bool user_cast = false;
+    SymbolId singleton_instance = no_symbol;
 };
 
 // Class-owned namespace for class-level storage and receiver-free functions.
@@ -102,7 +110,9 @@ enum class IrOp {
     Nil, ClassHash, ClassText, ClassIs, ClassCast,
     ValueEquals, ValueHash, ValueText,
     // NeuraIR 1.4. Allocate an array or list filled with one value.
-    RepeatCollection
+    RepeatCollection,
+    // NeuraIR 1.7. Materialized into shared storage before specialization.
+    ReferencePlace
 };
 
 struct IrNode {
@@ -129,12 +139,31 @@ struct IrBody {
     std::vector<IrNode> instructions;
 };
 
+struct IrStaticConstant {
+    SymbolId field;
+    IrNode value;
+};
+
 struct IrProgram {
     std::vector<IrSymbol> symbols;
     std::vector<IrBody> bodies;
+    // Prepared constants that a downstream compilation can inline on use.
+    std::vector<IrStaticConstant> static_constants{};
+};
+
+// The source loader can supply this trusted library file and retry lowering.
+class MissingPrimitiveWrapper : public Diagnostic {
+public:
+    MissingPrimitiveWrapper(const Span& span, std::string message, std::string path)
+        : Diagnostic(span, std::move(message)), path(std::move(path)) {}
+
+    std::string path;
 };
 
 IrProgram lower(const std::vector<ParsedFile>& files);
+IrProgram lower(const std::vector<ParsedFile>& files, LinkedImports linked);
+IrProgram builtin_class_ir();
+IrProgram builtin_reference_ir(const std::string& name, const Span& span);
 void print_ir(std::ostream& output, const IrProgram& program);
 
 } // namespace neura

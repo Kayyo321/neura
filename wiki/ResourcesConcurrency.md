@@ -1,0 +1,8 @@
+# Resources and concurrency
+
+[Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
+
+
+[Object lifecycle](https://github.com/Kayyo321/neura/wiki/ObjectLifecycle) proposes `init`, `deinit`, and explicit `destroy`, but aliasing and cleanup on failure remain unresolved. A resource API must define who owns a handle, when it is closed, and what happens if closing fails. Until then, do not assume scope-exit cleanup, garbage collection, or safe access through aliases after destruction. [resources.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/resources.nra) illustrates the intended lifecycle with an in-memory class; it is not a file API.
+
+Concurrency is deferred from the initial core. Threads, async functions, scheduling, cancellation, shared-memory rules, atomic operations and data-race guarantees have no specified syntax or semantics. In particular, no example should be interpreted as promising thread safety. Before adding concurrency, specify ownership and aliasing, a memory model, synchronization, cancellation and resource cleanup across failures. A future concurrency example should cover a cancellable operation and safe shared state after these choices are made.

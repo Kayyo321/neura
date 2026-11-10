@@ -64,6 +64,9 @@ function(check_both_modes label)
     endif()
     symbol_section(optimized_symbols "${optimized}")
     symbol_section(unoptimized_symbols "${unoptimized}")
+    if(unoptimized MATCHES "reference_place" AND optimized MATCHES "reference_place")
+        message(FATAL_ERROR "${label}: the executable IR still has a provisional reference binding")
+    endif()
     # Generic declarations of the program itself, as opposed to those of
     # imported standard library modules, which a program may leave unused.
     string(REGEX MATCHALL "[^\n]* generics=\\[[^\n]*" generic_lines "${unoptimized_symbols}")
@@ -81,9 +84,10 @@ function(check_both_modes label)
         if(NOT optimized_symbols MATCHES "class \"[$]signature[0-9]+" OR optimized MATCHES "make_closure")
             message(FATAL_ERROR "${label}: specialization left a structural closure")
         endif()
-    elseif(NOT optimized_symbols STREQUAL unoptimized_symbols AND NOT unoptimized_symbols MATCHES " generics=\\[")
-        # Without generic declarations, only specialization could change
-        # the symbol table, and it has nothing to do.
+    elseif(NOT optimized_symbols STREQUAL unoptimized_symbols AND
+           NOT unoptimized_symbols MATCHES " generics=\\[" AND NOT unoptimized MATCHES "reference_place")
+        # Specialization and reference storage preparation can change symbols
+        # before the optimizer runs.
         message(FATAL_ERROR "${label}: optimization changed the symbol table")
     endif()
 endfunction()

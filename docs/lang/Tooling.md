@@ -31,7 +31,7 @@ build/neura emit-ir tests/ir-optimization/fixtures/folding.nra > after.ir
 diff before.ir after.ir
 ```
 
-The two listings share the same format and symbol table, so the diff shows only rewritten instructions. The listing is for inspection and is separate from the versioned `.nir` file described below, which holds NeuraIR before optimization. See [NeuraIR optimization](../IrOptimization.md) for the passes and their preconditions.
+The two listings for this fixture share a symbol table, so the diff shows rewritten instructions. For programs that take primitive references or specialize generics, the optimized listing can also show new or rewritten symbols from those compilation stages. The listing is separate from the versioned `.nir` file described below, which holds NeuraIR before those transformations. See [NeuraIR optimization](../IrOptimization.md) for the passes and their preconditions.
 
 ## Build and run executables
 
@@ -43,6 +43,10 @@ build/neura run hello.nvr -- arg1 arg2
 ```
 
 `emit-ir -o` writes the program as lowered, before optimization, to a versioned [`.nir` file](../NirFormat.md). `emit-ir` also accepts one `.nir` file in place of sources and prints its listing. `build` takes sources or one `.nir` file. It verifies and optimizes the IR, converts it to neuron graphs, and writes the `.nvr` image only when every step succeeds. Both routes produce the same bytes for the same program and options, and repeating a build reproduces them. `--no-optimize` converts the verified IR without optimizing it. `--no-source-map` omits the optional source map, which otherwise labels blocks with paths relative to the sources' common directory.
+
+Sources can [import prebuilt modules](Modules.md#prebuilt-neurair-modules) with `import:"library.nir".Module`. `check`, `emit-ir`, `build`, and `test` resolve and link those imports during source compilation.
+
+`neura docs <file.nra>...` exports declaration documentation and source ranges as JSON for IDE tooling. Pass `-o <file.json>` to save the index. `neura docs --doxygen <file.nra>` emits a declaration view for Doxygen's input filter. [Documentation comments](CoreLanguage.md#documentation-comments)
 
 `run` loads and validates an image, binds its host imports to the runner's services ([NVM](../runtime/NVM.md#host-services)), and passes the arguments after `--` to the entry function as UTF-8 text. The image needs no source files. The exit status is the `ExitCode` that `main` returns, or the status given to `Std.Program.Process.exit`. A runtime trap prints its reason and source location, when the image has a source map, to standard error and exits with status 70. Load, bind, and usage errors exit with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` bound a run. `--stats` prints the run's step count, peak heap cells, host requests, graph, neuron, and edge counts, and image bytes to standard error. `cmake --install build --prefix <dir>` installs the `neura` executable, which contains both the compiler and the runner, and the standard library below `<dir>/share/neura/stdlib`, where the installed tool finds it without any `-I` option.
 

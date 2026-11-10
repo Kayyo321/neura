@@ -11,6 +11,7 @@ compile_commands.json
 .ninja_deps
 .ninja_log
 *.o
+*.out
 *.obj
 *.a
 *.lib

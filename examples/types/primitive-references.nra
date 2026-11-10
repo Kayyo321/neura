@@ -1,0 +1,20 @@
+let PrimitiveReferences = module (
+    export let add = func(value: &int, amount: int) {
+        value += amount;
+    };
+
+    export let CounterView = class (
+        export let total: &int;
+
+        export let init = func(value: &int) {
+            instance.total = value;
+        }
+    );
+
+    export let example = func(initial: int, amount: int) -> int {
+        let count: int = initial;
+        let view = new CounterView(count);
+        add(view.total, amount);
+        return count;
+    };
+);

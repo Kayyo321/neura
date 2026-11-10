@@ -37,6 +37,7 @@ neura_target_defaults(neura_nvm)
 
 add_library(neura_compiler STATIC
     src/cli/source_loader.cpp
+    src/cli/source_docs.cpp
     src/lexer/lexer.cpp
     src/parser/parser.cpp
     src/neura-ir/lowering.cpp
@@ -48,6 +49,9 @@ add_library(neura_compiler STATIC
     src/neura-ir/static_initialization.cpp
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
+    src/neura-ir/linker.cpp
+    src/neura-ir/reference_initialization.cpp
+    src/neura-ir/reference_storage.cpp
     src/ir-optimization/analysis.cpp
     src/ir-optimization/integer_folding.cpp
     src/ir-optimization/optimizer.cpp
@@ -88,6 +92,17 @@ if(BUILD_TESTING)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontend-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/frontend.cmake"
+    )
+
+    add_test(NAME source-docs COMMAND "${CMAKE_COMMAND}"
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/source-docs-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/source-docs.cmake"
+    )
+    add_test(NAME nir-link COMMAND "${CMAKE_COMMAND}"
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/nir-link-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/nir-link.cmake"
     )
 
     add_executable(neura_ir_tests

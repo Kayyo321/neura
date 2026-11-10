@@ -122,6 +122,7 @@ public:
 private:
     class Machine;
 
+    std::unique_ptr<IrProgram> materialized_;
     const IrProgram& program_;
     Limits limits_;
     std::map<SymbolId, Value> initial_globals_;

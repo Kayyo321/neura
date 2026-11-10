@@ -2,8 +2,12 @@
 
 #include "fixtures.hpp"
 
+#include "lexer/lexer.hpp"
+#include "neura-ir/linker.hpp"
 #include "neura-ir/nir_format.hpp"
+#include "neura-ir/verifier.hpp"
 #include "nvr/format.hpp"
+#include "parser/syntax.hpp"
 
 #include "backend/converter.hpp"
 
@@ -56,7 +60,8 @@ bool same(const std::vector<IrNode>& a, const std::vector<IrNode>& b, const std:
 
 // Every field of every symbol and node, including spans.
 bool same_program(const IrProgram& a, const IrProgram& b) {
-    if (a.symbols.size() != b.symbols.size() || a.bodies.size() != b.bodies.size()) {
+    if (a.symbols.size() != b.symbols.size() || a.bodies.size() != b.bodies.size() ||
+        a.static_constants.size() != b.static_constants.size()) {
         mismatch = "table sizes differ";
         return false;
     }
@@ -68,13 +73,23 @@ bool same_program(const IrProgram& a, const IrProgram& b) {
             x.overrides != y.overrides || x.parameters != y.parameters || x.generics != y.generics ||
             x.bound != y.bound || x.payload_types != y.payload_types ||
             x.exported != y.exported || x.constant != y.constant ||
-            x.external != y.external || x.has_body != y.has_body) {
+            x.external != y.external || x.has_body != y.has_body ||
+            x.library_path != y.library_path || x.interfaces != y.interfaces ||
+            x.additional_bounds != y.additional_bounds || x.overload_group != y.overload_group ||
+            x.variadic != y.variadic || x.user_cast != y.user_cast || x.singleton_instance != y.singleton_instance ||
+            x.host_binding.has_value() != y.host_binding.has_value() ||
+            (x.host_binding && (x.host_binding->name != y.host_binding->name ||
+                                x.host_binding->version != y.host_binding->version))) {
             mismatch = where + " differs";
             return false;
         }
         if (!same(x.type, y.type, where) || !same(x.span, y.span, where)) {
             return false;
         }
+    }
+    for (std::size_t i = 0; i < a.static_constants.size(); ++i) {
+        if (a.static_constants[i].field != b.static_constants[i].field ||
+            !same(a.static_constants[i].value, b.static_constants[i].value, "static constant")) return false;
     }
     for (std::size_t i = 0; i < a.bodies.size(); ++i) {
         if (a.bodies[i].owner != b.bodies[i].owner ||
@@ -186,8 +201,8 @@ NEURA_TEST(nir, corrupt_files_are_rejected) {
     changed[4] = 2;
     expect_nir_error(changed, "NeuraIR format 2." + std::to_string(bytes[6]) + " is not supported");
     changed = bytes;
-    changed[6] = 6;
-    expect_nir_error(changed, "NeuraIR format 1.6 is not supported");
+    changed[6] = static_cast<std::uint8_t>(nir_minor_version + 1);
+    expect_nir_error(changed, "NeuraIR format 1." + std::to_string(changed[6]) + " is not supported");
     changed = bytes;
     changed.push_back(0);
     expect_nir_error(changed, "1 unread bytes");
@@ -256,6 +271,116 @@ NEURA_TEST(nir, minor_version_follows_the_features_used) {
     check_equal(static_cast<int>(statics[6]), 5, "lazy statics require NeuraIR 1.5");
     statics[6] = 4;
     expect_nir_error(statics, "class initializers require NeuraIR format 1.5");
+}
+
+NEURA_TEST(nir, linking_coalesces_shared_definitions_and_preserves_metadata) {
+    const auto shared = R"(
+        export let Shared = module (
+            export let Numeric = class (
+                export static const Width: int = 16;
+                export let.as int = func -> int => 19;
+                export let init = func {}
+                    or func(value: int) {}
+            );
+            export let echo = func(x: int) -> int => x
+                or func(x: string) -> string => x;
+            export let count = func(values: ...int) -> int => values.length;
+            export let Counter = singleton ();
+        );
+    )";
+    const auto make_unit = [&](std::string file, std::string_view source) {
+        std::vector<ParsedFile> parsed;
+        auto main = parse(lex(source, file));
+        main.imports.push_back({"Shared", "shared.nra"});
+        parsed.push_back(std::move(main));
+        parsed.push_back(parse(lex(shared, "shared.nra")));
+        return lower(parsed);
+    };
+    auto first = make_unit("left.nra", "let shared = import:Shared; let x = new shared.Numeric();");
+    auto second = make_unit("right.nra", R"(
+        let shared = import:Shared;
+        let Alpha = class ();
+        let Beta = class ();
+        let y = shared.echo(8);
+    )");
+    IrProgram merged;
+    const Span site{"consumer.nra"};
+    const auto left = link_ir(merged, read_nir(write_nir(first), "left.nir"), site);
+    const auto right = link_ir(merged, read_nir(write_nir(second), "right.nir"), site);
+    require_valid_ir(merged, "after merging test modules");
+    const auto find = [](const IrProgram& program, std::string_view name) {
+        for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+            if (program.symbols[id].name == name) return id;
+        }
+        return no_symbol;
+    };
+    for (const auto* name : {"shared.nra", "Shared", "Numeric", "Width", "$class", "Counter", "echo", "count"}) {
+        check_equal(left.at(find(first, name)), right.at(find(second, name)), std::string("shared ") + name);
+    }
+    for (SymbolId id = 0; id < second.symbols.size(); ++id) {
+        const auto& before = second.symbols[id];
+        const auto& after = merged.symbols[right[id]];
+        if (before.overload_group != no_symbol)
+            check_equal(after.overload_group, right[before.overload_group], "overload group link");
+        if (before.singleton_instance != no_symbol)
+            check_equal(after.singleton_instance, right[before.singleton_instance], "singleton instance link");
+        check(before.variadic == after.variadic && before.user_cast == after.user_cast,
+              "linking changes function signature metadata");
+    }
+    check_equal(merged.static_constants.size(), std::size_t{1}, "the shared constant is stored once");
+    check_equal(merged.static_constants.front().field, left[find(first, "Width")], "static constant field link");
+    check_equal(merged.static_constants.front().value.text, std::string{"16"}, "static constant value");
+    check(write_nir(read_nir(write_nir(merged), "merged.nir")) == write_nir(merged),
+          "linked metadata must survive a NeuraIR round trip");
+}
+
+NEURA_TEST(nir, linking_rejects_conflicting_embedded_code) {
+    const auto unit = [](std::string_view text, std::string path) {
+        std::vector<ParsedFile> files;
+        auto source = parse(lex(text, path));
+        source.library_path = "std/core/sample.nra";
+        files.push_back(std::move(source));
+        return lower(files);
+    };
+    auto trusted = unit("export let Sample = module (export let first = func(values: ...int) -> int => 1;);",
+                        "trusted/stdlib/std/core/sample.nra");
+    auto embedded = unit("export let Sample = module (export let first = func(values: ...int) -> int => 1;);",
+                         "old/stdlib/std/core/sample.nra");
+    for (auto& symbol : embedded.symbols) symbol.variadic = VariadicKind::None;
+    const Span site{"consumer.nra", 3, 16};
+    const auto before = write_nir(trusted);
+    link_ir(trusted, std::move(embedded), site, true);
+    check(before == write_nir(trusted), "embedded library files must use the installed definitions");
+    auto conflict = unit("export let Sample = module (export let first = func(values: ...int) -> int => 2;);",
+                         "old/stdlib/std/core/sample.nra");
+    try {
+        link_ir(trusted, std::move(conflict), site);
+        fail("the conflicting embedded function was accepted");
+    } catch (const Diagnostic& error) {
+        check(same(error.span, site, "import site"), "diagnostic should point to the source import");
+        check(std::string(error.what()).find("incompatible definitions") != std::string::npos, error.what());
+        check(before == write_nir(trusted), "failed linkage changed the destination");
+    }
+    auto cyclic = unit("export let Sample = module (export let first = func(values: ...int) -> int => 1;);",
+                       "old/stdlib/std/core/sample.nra");
+    for (SymbolId id = 0; id < cyclic.symbols.size(); ++id) {
+        if (cyclic.symbols[id].name == "first") cyclic.symbols[id].overrides = id;
+    }
+    try {
+        link_ir(trusted, std::move(cyclic), site);
+        fail("a cyclic override was accepted");
+    } catch (const Diagnostic& error) {
+        check(std::string(error.what()).find("cyclic owner, base, or override chain") != std::string::npos,
+              error.what());
+    }
+    auto spoofed = unit("let NotStandard = module ();", "trusted/stdlib/std/core/sample.nra");
+    spoofed.symbols.front().library_path.clear();
+    try {
+        link_ir(trusted, std::move(spoofed), site);
+        fail("an untrusted file spoofed the installed library path");
+    } catch (const Diagnostic& error) {
+        check(std::string(error.what()).find("file identity") != std::string::npos, error.what());
+    }
 }
 
 } // namespace neura::testing

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <utility>
 
 namespace neura {
@@ -38,7 +39,7 @@ public:
 
     std::vector<Token> run() {
         if (source_.starts_with("\xEF\xBB\xBF")) {
-            offset_ = 3;
+            offset_ = line_start_ = 3;
         }
         std::vector<Token> tokens;
         while (offset_ < source_.size()) {
@@ -48,16 +49,20 @@ public:
                 continue;
             }
             if (c == '/' && peek(1) == '/') {
-                while (offset_ < source_.size() && peek() != '\n' && peek() != '\r') {
-                    advance_text();
-                }
+                comment();
                 continue;
             }
             const Span start = location();
             const TokenKind kind = scan(start);
             const auto width = offset_ - start.offset;
+            std::shared_ptr<const DocComment> documentation;
+            if (documentation_ && start.line == documentation_end_line_ + 1) {
+                documentation = std::make_shared<DocComment>(std::move(*documentation_));
+            }
+            documentation_.reset();
             tokens.push_back({kind, std::string(source_.substr(start.offset, width)),
-                              {file_, start.line, start.column, start.offset, width}});
+                              {file_, start.line, start.column, start.offset, width},
+                              std::move(documentation)});
         }
         tokens.push_back({TokenKind::End, {}, location()});
         return tokens;
@@ -70,6 +75,7 @@ private:
 
     char advance() {
         const char c = source_[offset_++];
+        if (c == '\r' || c == '\n') line_start_ = offset_;
         if (c == '\r' || (c == '\n' && (offset_ < 2 || source_[offset_ - 2] != '\r'))) {
             ++line_;
             column_ = 1;
@@ -80,6 +86,29 @@ private:
     }
 
     Span location() const { return {file_, line_, column_, offset_, 0}; }
+
+    void comment() {
+        const auto start = location();
+        const auto indent = source_.substr(line_start_, offset_ - line_start_);
+        const bool standalone_doc = peek(2) == '/' && indent.find_first_not_of(" \t") == std::string_view::npos;
+        while (offset_ < source_.size() && peek() != '\n' && peek() != '\r') {
+            advance_text();
+        }
+        if (!standalone_doc) {
+            documentation_.reset();
+            return;
+        }
+        auto text = source_.substr(start.offset + 3, offset_ - start.offset - 3);
+        if (text.starts_with(' ')) text.remove_prefix(1);
+        if (documentation_ && start.line == documentation_end_line_ + 1) {
+            documentation_->text += '\n';
+        } else {
+            documentation_ = DocComment{start, {}};
+        }
+        documentation_->text += text;
+        documentation_->span.length = offset_ - documentation_->span.offset;
+        documentation_end_line_ = start.line;
+    }
 
     void advance_text() {
         const auto lead = static_cast<unsigned char>(peek());
@@ -216,12 +245,32 @@ private:
     std::size_t offset_{};
     std::size_t line_{1};
     std::size_t column_{1};
+    std::size_t line_start_{};
+    std::optional<DocComment> documentation_;
+    std::size_t documentation_end_line_{};
 };
 
 } // namespace
 
 std::vector<Token> lex(std::string_view source, const std::string& file) {
     return Lexer(source, file).run();
+}
+
+std::string decode_string_literal(std::string_view literal) {
+    auto text = literal.substr(1, literal.size() - 2);
+    std::string result;
+    result.reserve(text.size());
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        auto ch = text[i];
+        if (ch == '\\') {
+            ch = text[++i];
+            if (ch == 'n') ch = '\n';
+            else if (ch == 'r') ch = '\r';
+            else if (ch == 't') ch = '\t';
+        }
+        result += ch;
+    }
+    return result;
 }
 
 } // namespace neura

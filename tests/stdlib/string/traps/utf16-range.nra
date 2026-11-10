@@ -1,0 +1,12 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: UTF-16 range out of bounds
+let program = import:Std.Program;
+let text = import:Std.Core.String;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let destination: uint16[] = [0, 0, 0];
+        text.get_chars("🙂", 0, 3, destination, 0);
+        return program.ExitCode.Ok;
+    };
+);

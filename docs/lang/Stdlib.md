@@ -22,7 +22,7 @@ This page defines the Neura standard library's source modules, contracts, and al
 4. **Returned errors and traps are different things.** An expected failure is a returned `Error` value. A violated precondition or a broken invariant is a trap that ends the run; nothing can catch it and no cleanup runs after it. The library promises nothing about state after a trap.
 5. **Deterministic by construction.** For the same image, arguments, and host responses, every operation produces the same result, iteration order, hash codes, and text. There is no per-run hash seed and no dependence on handle values.
 6. **Reference absence is explicit.** Use `nil` for absent class or interface references, such as internal tree links, when there is no distinct present-but-nil case. Use `Optional<T>` when `Some(nil)` is meaningful or the payload may be a value type. A position search uses -1 to represent no match.
-7. **No overloading and no class-level members.** Every member has a distinct name. A type lives in a module of the same name, and that module's functions are its factories and helpers ([section 4.2](#42-source-layout)).
+7. **Use companion modules for factories and helpers.** A type lives in a module of the same name ([section 4.2](#42-source-layout)).
 8. **Storage is reclaimed; resources are closed.** Garbage collection has shipped, so no API has an owner that must `destroy` it. A host resource is released only by an explicit `close`. Reclamation never runs `deinit` and never closes anything.
 9. **Collection type arguments are invariant.** `List<Alert>` and `List<Renderable>` are distinct types. Interfaces define extension points. A library class is meant to be subclassed only where its contract says so.
 10. **Pay only for what is reachable.** An image contains only what the entry point can reach.
@@ -180,7 +180,7 @@ None of these blocks anything. Each replaces a loop of storage operations with o
 - **Factories are module functions.** Where Java writes a static method on a class, this library has an exported function in the type's module. This is why the first plan's class-level members are not needed. In the tables below, a type's "module functions" are these.
 - **Internal helpers** are unexported members of the module that uses them, or separate modules under an `Internal` component (`Std.Collections.Internal.HashCore`) when two types share them. Nothing outside `Std` imports an `Internal` module; P1's namespace rule extends to enforce that.
 - **Facades are deferred.** A module such as `Std.Collections` that re-exports every collection type needs acceleration A6. It is a convenience: the type modules are the stable import paths and remain valid afterwards.
-- **There is no prelude.** Every file imports what it uses. The first plan's implicit import of `Std.Core` saved a line per file at the cost of a compiler feature and an invisible dependency.
+- **There is no general prelude.** Import modules to use their names. Primitive member syntax can resolve functions from the primitive's trusted companion module.
 - The library is compiled together with the program. There is no separately compiled library image.
 
 ### 4.3 Dependency order
@@ -196,7 +196,7 @@ A module may import only modules above it. Cycles are forbidden.
 7. `Std.Fs`, `Std.Net`
 8. `Std.Log`, `Std.Test`
 
-`StringBuilder` is in `Std.Core` because number formatting needs it. `Std.Core` never names a collection class: where a core function returns several values it returns a tuple or a built-in list. `Std.Test` is last in the import order but early in the schedule: its assertions for built-in types import only `Std.Core`.
+`StringBuilder` is in `Std.Core` because number formatting needs it. `Std.Core` never names a collection class: where a core function returns several values it returns a tuple or a built-in list. The `String` companion is an exception to the order above. It depends on `Std.Text` and the pure formatting module in `Std.Io.Internal`. `Std.Test` is last in the import order but early in the schedule: its assertions for built-in types import only `Std.Core`.
 
 
 ### 4.4 Built-in floor
@@ -495,7 +495,7 @@ Named types are kept where the name carries a contract a tuple cannot: `RegexMat
 
 ## 7. Primitive companion modules
 
-`Std.Core` has one module per primitive type: `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `Float16`, `BFloat16`, `Float32`, `Float64`, and `Bool`. There is no overloading, so an operation is spelled with its type's module. The integer modules have identical member lists; so do the float modules. Each is a separate hand-written source file.
+`Std.Core` has one module per primitive type: `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `Float16`, `BFloat16`, `Float32`, `Float64`, `Bool`, and [`String`](StandardLibrary.md#string). The integer modules have identical member lists, as do the float modules. Each is a separate hand-written source file.
 
 ### 7.1 Integer modules
 
@@ -627,7 +627,7 @@ Functions that return several strings return a built-in list, not an `ArrayList`
 
 **UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
 
-**Unicode scope. Decision:** the first version handles encoding, decoding, and iteration for all of Unicode, and classifies and case-maps ASCII only. Member names say `ascii` so that a later `Std.Text.Unicode`, pinned to one Unicode version, can be added without changing existing behavior.
+**Unicode scope. Decision:** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary.md#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 8.2 `StringBuilder`
 

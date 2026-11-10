@@ -6,6 +6,7 @@
 #include "host_binding.hpp"
 #include "nominal.hpp"
 #include "integer.hpp"
+#include "reference_storage.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -89,6 +90,35 @@ bool is_collection(const IrType& type) {
     return (type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.size() == 1;
 }
 
+bool prepared_constant(const IrNode& node) {
+    const bool comparison = node.text == "==" || node.text == "!=" || node.text == "<" ||
+        node.text == "<=" || node.text == ">" || node.text == ">=";
+    switch (node.op) {
+    case IrOp::Boolean:
+    case IrOp::Integer:
+    case IrOp::Float:
+    case IrOp::String:
+    case IrOp::ShortCircuit:
+    case IrOp::SelectValue:
+    case IrOp::TextEqual:
+        break;
+    case IrOp::Unary:
+        if (node.text != "!" && node.text != "~" && node.type.kind != TypeKind::Float) return false;
+        break;
+    case IrOp::Binary:
+        if (!comparison && node.type.kind != TypeKind::Float) return false;
+        break;
+    case IrOp::Convert:
+        if (node.type.kind != TypeKind::Float) return false;
+        break;
+    default:
+        return false;
+    }
+    return std::ranges::all_of(node.operands, prepared_constant) &&
+        std::ranges::all_of(node.body, prepared_constant) &&
+        std::ranges::all_of(node.alternative, prepared_constant);
+}
+
 class Verifier {
 public:
     explicit Verifier(const IrProgram& program)
@@ -97,6 +127,7 @@ public:
     std::vector<VerificationIssue> run() {
         check_symbols();
         check_bodies();
+        check_static_constants();
         return std::move(issues_);
     }
 
@@ -129,6 +160,13 @@ private:
             report(span, "type " + describe(type) + " refers to missing symbol %" +
                          std::to_string(type.symbol));
         }
+        if (is_primitive_reference(type) &&
+            (!valid(type.symbol) || symbol(type.symbol).kind != SymbolKind::Class ||
+             symbol(type.symbol).name != "$reference" || symbol(type.symbol).type != type ||
+             !valid(symbol(type.symbol).owner) || symbol(symbol(type.symbol).owner).kind != SymbolKind::File ||
+             symbol(symbol(type.symbol).owner).name != "<reference:" + type.name.substr(1) + ">")) {
+            report(span, "a primitive reference must name its compiler-provided layout");
+        }
         if (type.kind == TypeKind::Tuple &&
             (type.symbol != no_symbol || !type.name.empty() || type.arguments.empty() ||
              std::ranges::any_of(type.arguments, [](const IrType& element) {
@@ -158,7 +196,7 @@ private:
     }
 
     bool class_reference(const IrType& type, unsigned depth = 0) const {
-        return (type.kind == TypeKind::Object && valid(type.symbol) &&
+        return (type.kind == TypeKind::Object && !is_primitive_reference(type) && valid(type.symbol) &&
                 class_or_interface(symbol(type.symbol).kind)) ||
             (type.kind == TypeKind::TypeParameter && depth < 8 && valid(type.symbol) &&
              symbol(type.symbol).bound && class_reference(*symbol(type.symbol).bound, depth + 1));
@@ -200,6 +238,33 @@ private:
                     report(entry.span, "symbol " + name(id) + " lists " + name(parameter) +
                                        " as a parameter it does not own");
                 }
+            }
+            if (entry.variadic != VariadicKind::None &&
+                (entry.kind != SymbolKind::Function || entry.parameters.empty() ||
+                 !valid(entry.parameters.back()) || symbol(entry.parameters.back()).type.kind != TypeKind::Array ||
+                 !is_collection(symbol(entry.parameters.back()).type))) {
+                report(entry.span, "a variadic function needs a packed array parameter");
+            }
+            if (entry.overload_group != no_symbol &&
+                (entry.kind != SymbolKind::Function || entry.overload_group == id ||
+                 !valid(entry.overload_group) || symbol(entry.overload_group).kind != SymbolKind::Function ||
+                 symbol(entry.overload_group).owner != entry.owner ||
+                 symbol(entry.overload_group).overload_group != no_symbol)) {
+                report(entry.span, "invalid overload group reference");
+            }
+            if (entry.user_cast &&
+                (entry.kind != SymbolKind::Function || !entry.has_body || entry.external ||
+                 !entry.generics.empty() || !entry.parameters.empty() || entry.type.kind == TypeKind::Void ||
+                 !valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Class)) {
+                report(entry.span, "invalid user-defined cast");
+            }
+            if (entry.singleton_instance != no_symbol &&
+                (entry.kind != SymbolKind::Class || !valid(entry.singleton_instance) ||
+                 symbol(entry.singleton_instance).kind != SymbolKind::Global ||
+                 symbol(entry.singleton_instance).owner != entry.owner ||
+                 !symbol(entry.singleton_instance).constant ||
+                 symbol(entry.singleton_instance).type != entry.type)) {
+                report(entry.span, "invalid singleton instance reference");
             }
             for (const auto generic : entry.generics) {
                 if (!valid(generic) || symbol(generic).kind != SymbolKind::TypeParameter) {
@@ -272,6 +337,24 @@ private:
                         report(entry.span, "this parameter cannot cross the host boundary");
                 }
             }
+        }
+    }
+
+    void check_static_constants() {
+        std::set<SymbolId> fields;
+        for (const auto& constant : program_.static_constants) {
+            const auto& value = constant.value;
+            if (!valid(constant.field) || !fields.insert(constant.field).second ||
+                symbol(constant.field).kind != SymbolKind::Global || !symbol(constant.field).constant ||
+                !valid(symbol(constant.field).owner) || !is_static_scope(symbol(symbol(constant.field).owner)) ||
+                !prepared_constant(value)) {
+                report(value.span, "invalid prepared static constant");
+                continue;
+            }
+            const auto& field = symbol(constant.field);
+            Context context{field.owner};
+            check_value(value, context);
+            require_assignable(value.type, field.type, value.span, "static constant");
         }
     }
 
@@ -535,6 +618,23 @@ private:
             check_value(operand, context);
         }
         switch (node.op) {
+        case IrOp::ReferencePlace: {
+            if (!expect_operands(node, 1, "reference binding") ||
+                !check_symbol_kind(node, {SymbolKind::Local, SymbolKind::Parameter, SymbolKind::Global,
+                                          SymbolKind::Field}, "reference binding")) break;
+            const auto* place = &node.operands.front();
+            while (place->op == IrOp::ScopedValue && !place->body.empty()) place = &place->body.back();
+            const auto& target = symbol(node.symbol);
+            if (!is_primitive_reference(node.type) || node.type.name != "&" + target.type.name ||
+                target.constant || target.name.starts_with("$capture") ||
+                (place->op != IrOp::Load && place->op != IrOp::Field) || place->symbol != node.symbol ||
+                place->type != target.type ||
+                (target.type.kind != TypeKind::Bool && target.type.kind != TypeKind::Integer &&
+                 target.type.kind != TypeKind::Float && target.type.kind != TypeKind::String)) {
+                report(node.span, "a primitive reference must bind to matching mutable storage");
+            }
+            break;
+        }
         case IrOp::ValueEquals:
         case IrOp::ValueHash:
         case IrOp::ValueText: {
@@ -717,23 +817,29 @@ private:
             check_arity(node, 0);
             break;
         case IrOp::BaseInitialize:
+            expect_type(node, TypeKind::Void, "base initialization");
             if (node.operands.empty() || node.operands.front().op != IrOp::Receiver) {
                 report(node.span, "base initialization needs a receiver operand");
             }
-            if (node.symbol == no_symbol || check_symbol_kind(node, {SymbolKind::Function}, "base initialization")) {
+            if (check_constructor(node, "base initialization")) {
                 check_arity(node, 1);
+                if (valid(node.symbol)) {
+                    const auto receiver = node.operands.empty() ? no_symbol : node.operands.front().symbol;
+                    if (!valid(context.function) || !valid(receiver) || symbol(receiver).kind != SymbolKind::Class ||
+                        symbol(context.function).owner != receiver || symbol(context.function).name != "init" ||
+                        symbol(receiver).base != symbol(node.symbol).owner) {
+                        report(node.span, "base initialization requires a constructor of the direct base");
+                    }
+                }
             }
             break;
         case IrOp::Allocate:
             expect_type(node, TypeKind::Object, "allocation");
-            if (node.symbol == no_symbol || check_symbol_kind(node, {SymbolKind::Function}, "allocation")) {
+            if (check_constructor(node, "allocation")) {
                 check_arity(node, 0);
                 if (valid(node.symbol)) {
-                    const auto& constructor = symbol(node.symbol);
-                    if (constructor.name != "init" || !valid(constructor.owner) ||
-                        symbol(constructor.owner).kind != SymbolKind::Class ||
-                        (constructor.owner != node.type.symbol &&
-                         !assignable(symbol(constructor.owner).type, node.type))) {
+                    const auto owner = symbol(node.symbol).owner;
+                    if (owner != node.type.symbol && !assignable(symbol(owner).type, node.type)) {
                         report(node.span, "allocation has a constructor for an incompatible class");
                     }
                 }
@@ -811,6 +917,19 @@ private:
                               " argument(s) to " + name(node.symbol) + ", which takes " +
                               std::to_string(parameters));
         }
+    }
+
+    bool check_constructor(const IrNode& node, std::string_view operation) {
+        if (node.symbol == no_symbol) return true;
+        if (!check_symbol_kind(node, {SymbolKind::Function}, operation)) return false;
+        const auto& constructor = symbol(node.symbol);
+        if (constructor.name != "init" || !constructor.has_body || constructor.external ||
+            !constructor.generics.empty() || constructor.type.kind != TypeKind::Void ||
+            !valid(constructor.owner) || symbol(constructor.owner).kind != SymbolKind::Class) {
+            report(node.span, std::string(operation) + " must name a class constructor");
+            return false;
+        }
+        return true;
     }
 
     void check_make_closure(const IrNode& node) {

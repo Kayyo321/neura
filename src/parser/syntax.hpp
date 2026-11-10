@@ -18,6 +18,7 @@ struct TypeSyntax {
     std::string name;
     std::vector<TypeSyntax> arguments;
     std::vector<CollectionKind> collections;
+    bool reference{};
 };
 
 struct GenericParameter {
@@ -60,6 +61,8 @@ struct Expr {
     std::shared_ptr<Declaration> lambda{};
     std::vector<std::string> field_names{};
     std::shared_ptr<Statement> match{};
+    // Artifact imports carry a quoted path and an optional module name in text.
+    std::optional<std::string> import_path{};
 };
 
 struct Statement {
@@ -86,6 +89,8 @@ struct Statement {
     std::vector<MatchArm> arms;
     // Empty for other statements. Holds the operator for an assignment.
     std::string assignment_operator{};
+    // Documentation shared by all bindings in a destructuring declaration.
+    std::shared_ptr<const DocComment> documentation{};
 };
 
 struct MatchArm {
@@ -123,12 +128,20 @@ struct Declaration {
     std::vector<Statement> body;
     std::optional<std::pair<std::string, std::uint32_t>> host_binding{};
     std::vector<TypeSyntax> interfaces{};
+    // Additional signatures in an `or func` declaration.
+    std::vector<Declaration> overloads{};
+    // The target of a class `let.as` declaration. Each `or as` is its own member.
+    std::optional<TypeSyntax> cast_target{};
+    std::shared_ptr<const DocComment> documentation{};
+    std::optional<Span> name_span{};
 };
 
 struct ResolvedImport {
     std::string name;
     std::string file;
     std::string target_module{};
+    bool artifact{};
+    std::string artifact_path{};
 };
 
 struct ParsedFile {

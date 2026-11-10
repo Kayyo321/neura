@@ -9,6 +9,7 @@
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/integer.hpp"
+#include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvr/format.hpp"
@@ -216,6 +217,7 @@ public:
     // function has no runtime binding.
     std::optional<std::uint32_t> external_import(SymbolId function, const Span& where);
     std::uint32_t function(const FunctionOrigin& origin);
+    FunctionOrigin constructor(SymbolId cls, SymbolId selected = no_symbol) const;
     FunctionOrigin value_function(IrOp op, const IrType& type, const Span& span);
     std::pair<IrType, Span> value_type(SymbolId id) const { return value_types_.at(id); }
 
@@ -227,6 +229,8 @@ public:
     const nvr::Import& import_at(std::uint32_t index) const { return image_.imports.at(index); }
     const std::vector<IrNode>& body(SymbolId owner) const;
     const std::vector<const IrNode*>& field_initializers(SymbolId cls) const;
+    const std::vector<const IrNode*>& reference_fields(SymbolId cls) const;
+    bool has_reference_fields() const { return !reference_fields_.empty(); }
     std::optional<std::uint64_t> literal(const IrNode& node, std::uint32_t type);
     // True for a global initializer that becomes an image constant.
     bool constant_initializer(const IrNode& node) const;
@@ -286,8 +290,10 @@ private:
     std::map<std::uint32_t, std::vector<std::string>> slot_names_;
 
     std::map<std::pair<SymbolId, std::string>, SymbolId> members_;
+    std::map<SymbolId, std::vector<SymbolId>> constructors_;
     std::map<SymbolId, const std::vector<IrNode>*> bodies_;
     std::map<SymbolId, std::vector<const IrNode*>> field_initializers_;
+    std::map<SymbolId, std::vector<const IrNode*>> reference_fields_;
     std::map<SymbolId, const IrNode*> global_initializers_;
     std::vector<Startup> startup_;
     std::set<SymbolId> instantiated_;
@@ -620,6 +626,19 @@ SymbolId Converter::member(SymbolId owner, const std::string& name) const {
     return it == members_.end() ? no_symbol : it->second;
 }
 
+FunctionOrigin Converter::constructor(SymbolId cls, SymbolId selected) const {
+    if (selected == no_symbol) {
+        if (const auto group = constructors_.find(cls); group != constructors_.end()) {
+            const auto& candidates = group->second;
+            const auto zero_argument = std::ranges::find_if(candidates, [&](SymbolId candidate) {
+                return symbol(candidate).parameters.empty();
+            });
+            if (zero_argument != candidates.end()) selected = *zero_argument;
+        }
+    }
+    return {Role::Constructor, cls, selected};
+}
+
 SymbolId Converter::resolve_member(SymbolId concrete, SymbolId declared) const {
     const auto& name = symbol(declared).name;
     for (auto scope = concrete; scope != no_symbol; scope = symbol(scope).base) {
@@ -695,6 +714,12 @@ const std::vector<const IrNode*>& Converter::field_initializers(SymbolId cls) co
     return it == field_initializers_.end() ? none : it->second;
 }
 
+const std::vector<const IrNode*>& Converter::reference_fields(SymbolId cls) const {
+    static const std::vector<const IrNode*> none;
+    const auto it = reference_fields_.find(cls);
+    return it == reference_fields_.end() ? none : it->second;
+}
+
 // ---------------------------------------------------------------------------
 // Program-level checks and the conversion driver
 
@@ -705,6 +730,10 @@ void Converter::index_program() {
             (item.kind == SymbolKind::Function || item.kind == SymbolKind::Global || item.kind == SymbolKind::Field)) {
             members_.emplace(std::make_pair(item.owner, item.name), id);
         }
+        if (item.kind == SymbolKind::Function && item.name == "init" && item.has_body &&
+            item.owner != no_symbol && symbol(item.owner).kind == SymbolKind::Class) {
+            constructors_[item.owner].push_back(id);
+        }
     }
     for (const auto& body : program_.bodies) {
         const auto kind = symbol(body.owner).kind;
@@ -713,13 +742,17 @@ void Converter::index_program() {
             continue;
         }
         for (const auto& instruction : body.instructions) {
+            if (kind == SymbolKind::Class) {
+                auto& fields = reference_preparation(instruction) == ReferencePreparation::Field
+                    ? reference_fields_ : field_initializers_;
+                fields[body.owner].push_back(&instruction);
+                continue;
+            }
             if (instruction.op != IrOp::Initialize) {
                 continue;
             }
             const auto target = symbol(instruction.symbol).kind;
-            if (target == SymbolKind::Field) {
-                field_initializers_[body.owner].push_back(&instruction);
-            } else if (target == SymbolKind::Global) {
+            if (target == SymbolKind::Global) {
                 global_initializers_[instruction.symbol] = &instruction.operands.front();
             }
         }
@@ -807,6 +840,8 @@ void Converter::order_initialization() {
             throw std::logic_error("file initialization order has no ready file");
         }
     }
+    std::vector<Startup> reference_boxes;
+    std::vector<Startup> reference_values;
     for (const auto file : order) {
         std::vector<Startup> items;
         for (const auto& body : program_.bodies) {
@@ -818,7 +853,12 @@ void Converter::order_initialization() {
                 if (instruction.op == IrOp::Initialize && constant_initializer(instruction.operands.front())) {
                     continue;
                 }
-                items.push_back({&instruction, kind == SymbolKind::Module ? body.owner : no_symbol});
+                Startup item{&instruction, kind == SymbolKind::Module ? body.owner : no_symbol};
+                switch (reference_preparation(instruction)) {
+                case ReferencePreparation::GlobalBox: reference_boxes.push_back(item); break;
+                case ReferencePreparation::GlobalValue: reference_values.push_back(item); break;
+                default: items.push_back(item); break;
+                }
             }
         }
         std::stable_sort(items.begin(), items.end(), [](const Startup& a, const Startup& b) {
@@ -826,6 +866,10 @@ void Converter::order_initialization() {
         });
         startup_.insert(startup_.end(), items.begin(), items.end());
     }
+    // Addressable globals still need a box when first used, and their
+    // image-prepared primitive values are available before source startup.
+    startup_.insert(startup_.begin(), reference_values.begin(), reference_values.end());
+    startup_.insert(startup_.begin(), reference_boxes.begin(), reference_boxes.end());
 }
 
 FunctionOrigin Converter::entry_point() const {
@@ -1209,7 +1253,17 @@ void Converter::names() {
     for (const auto& origin : origins_) {
         switch (origin.role) {
         case Role::Function: names.functions.push_back(qualified(origin.symbol)); break;
-        case Role::Constructor: names.functions.push_back(qualified(origin.symbol) + ".init"); break;
+        case Role::Constructor: {
+            auto name = qualified(origin.symbol) + ".init";
+            if (const auto group = constructors_.find(origin.symbol); group != constructors_.end() &&
+                group->second.size() > 1 && origin.receiver != no_symbol) {
+                const auto& candidates = group->second;
+                const auto position = std::ranges::find(candidates, origin.receiver) - candidates.begin();
+                name += "#" + std::to_string(position + 1);
+            }
+            names.functions.push_back(std::move(name));
+            break;
+        }
         case Role::Destructor: names.functions.push_back(qualified(origin.symbol) + ".deinit"); break;
         case Role::Concatenate: names.functions.push_back("string +"); break;
         case Role::HashText: names.functions.push_back("string hash_code"); break;
@@ -1948,7 +2002,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
     }
     case IrOp::BaseInitialize: {
         auto operands = sequence(node.operands);
-        return invoke({Role::Constructor, c_.symbol(self_class_).base, no_symbol}, std::move(operands),
+        return invoke(c_.constructor(c_.symbol(self_class_).base, node.symbol), std::move(operands),
                       c_.scalar(nvr::TypeKind::Void), node.span);
     }
     default:
@@ -2569,11 +2623,24 @@ Operand FunctionCompiler::allocate(const IrNode& node) {
     }
     c_.instantiate(cls);
     auto handle = state(nvr::StateOp::AllocateObject, c_.layout(cls, node.span), {}, type, node.span);
+    const auto nothing = c_.scalar(nvr::TypeKind::Void);
+    if (c_.has_reference_fields()) {
+        std::vector<SymbolId> lineage;
+        for (auto scope = cls; scope != no_symbol; scope = c_.symbol(scope).base)
+            lineage.push_back(scope);
+        for (auto scope = lineage.rbegin(); scope != lineage.rend(); ++scope) {
+            for (const auto* preparation : c_.reference_fields(*scope)) {
+                auto value = expression(preparation->operands.front());
+                state(nvr::StateOp::WriteField, c_.field_index(preparation->symbol, preparation->span),
+                      {resolve(handle), value}, nothing, preparation->span);
+            }
+        }
+    }
     std::vector<Operand> constructor{handle};
     for (const auto& argument : arguments) {
         constructor.push_back(resolve(argument));
     }
-    invoke({Role::Constructor, cls, no_symbol}, std::move(constructor), c_.scalar(nvr::TypeKind::Void), node.span);
+    invoke(c_.constructor(cls, node.symbol), std::move(constructor), nothing, node.span);
     return handle;
 }
 
@@ -2606,6 +2673,10 @@ void FunctionCompiler::parameters(SymbolId function) {
 void FunctionCompiler::field_initializers(SymbolId cls) {
     const auto void_type = c_.scalar(nvr::TypeKind::Void);
     for (const auto* initializer : c_.field_initializers(cls)) {
+        if (initializer->op != IrOp::Initialize || c_.symbol(initializer->symbol).kind != SymbolKind::Field) {
+            statement(*initializer);
+            continue;
+        }
         auto value = expression(initializer->operands.front());
         state(nvr::StateOp::WriteField, c_.field_index(initializer->symbol, initializer->span),
               {slot_operand(self_slot_), value}, void_type, initializer->span);
@@ -2639,7 +2710,7 @@ void FunctionCompiler::compile_constructor() {
     const auto cls = origin_.symbol;
     const auto& item = c_.symbol(cls);
     self_parameter(cls);
-    const auto init = c_.member(cls, "init");
+    const auto init = origin_.receiver;
     const bool has_base_initializer = item.base != no_symbol && c_.symbol(item.base).name != "$class";
     if (init != no_symbol) {
         parameters(init);
@@ -2650,10 +2721,14 @@ void FunctionCompiler::compile_constructor() {
     if (init != no_symbol) {
         const auto& body = c_.body(init);
         std::size_t start = 0;
-        if (has_base_initializer && !body.empty()) {
+        while (start < body.size() && reference_preparation(body[start]) == ReferencePreparation::Parameter) {
+            statement(body[start]);
+            ++start;
+        }
+        if (has_base_initializer && start < body.size()) {
             // A derived constructor starts with super.init.
-            statement(body.front());
-            start = 1;
+            statement(body[start]);
+            ++start;
         }
         if (open()) {
             field_initializers(cls);
@@ -2663,7 +2738,7 @@ void FunctionCompiler::compile_constructor() {
         }
     } else {
         if (has_base_initializer) {
-            invoke({Role::Constructor, item.base, no_symbol}, {slot_operand(self_slot_)},
+            invoke(c_.constructor(item.base), {slot_operand(self_slot_)},
                    c_.scalar(nvr::TypeKind::Void), item.span);
         }
         field_initializers(cls);
@@ -3013,6 +3088,7 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     // Specialization needs verified IR, and the result is verified again:
     // by the optimizer, or directly when optimization is off.
     require_valid_ir(program, "before specialization");
+    materialize_reference_storage(program);
     specialize(program);
     if (options.optimize) {
         optimize(program);

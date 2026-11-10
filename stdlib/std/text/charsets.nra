@@ -1,0 +1,167 @@
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let scalars = import:Std.Text.Scalars;
+let string_builder = import:Std.Core.StringBuilder;
+let strings = import:Std.Text.Strings;
+
+export let Charsets = module (
+    export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le);
+
+    const InvalidScalar: uint32 = 1114112;
+
+    export let for_name = func(name: string) -> result.Result<Charset> {
+        let key = strings.to_ascii_lower(name);
+        if (key == "us-ascii" || key == "ascii" || key == "iso646-us") {
+            return result.Result<Charset>.Ok(Charset.Ascii);
+        }
+        if (key == "iso-8859-1" || key == "iso8859-1" || key == "iso_8859-1" || key == "latin1"
+            || key == "latin-1" || key == "iso-latin-1") {
+            return result.Result<Charset>.Ok(Charset.Latin1);
+        }
+        if (key == "utf-8" || key == "utf8") {
+            return result.Result<Charset>.Ok(Charset.Utf8);
+        }
+        if (key == "utf-16" || key == "utf16") {
+            return result.Result<Charset>.Ok(Charset.Utf16);
+        }
+        if (key == "utf-16be" || key == "utf16be") {
+            return result.Result<Charset>.Ok(Charset.Utf16Be);
+        }
+        if (key == "utf-16le" || key == "utf16le") {
+            return result.Result<Charset>.Ok(Charset.Utf16Le);
+        }
+        if (key == "utf-32" || key == "utf32") {
+            return result.Result<Charset>.Ok(Charset.Utf32);
+        }
+        if (key == "utf-32be" || key == "utf32be") {
+            return result.Result<Charset>.Ok(Charset.Utf32Be);
+        }
+        if (key == "utf-32le" || key == "utf32le") {
+            return result.Result<Charset>.Ok(Charset.Utf32Le);
+        }
+        return result.Result<Charset>.Err(error.custom("charset.unsupported", "unsupported charset: " + name));
+    };
+
+    export let encode = func(text: string, charset: Charset) -> uint8[list] =>
+        result.expect<uint8[list]>(encode_text(text, charset, false), "encode text");
+
+    export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]> =>
+        encode_text(text, charset, true);
+
+    export let decode = func(bytes: uint8[list], charset: Charset) -> string =>
+        result.expect<string>(decode_bytes(bytes, charset, false), "decode bytes");
+
+    export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string> =>
+        decode_bytes(bytes, charset, true);
+
+    let encode_text = func(text: string, charset: Charset, strict: bool) -> result.Result<uint8[list]> {
+        if (charset == Charset.Utf8) {
+            return result.Result<uint8[list]>.Ok(strings.to_bytes(text));
+        }
+        let bytes: uint8[list] = [];
+        let little_endian = charset == Charset.Utf16Le || charset == Charset.Utf32Le;
+        let width = unit_width(charset);
+        if (charset == Charset.Utf16 || charset == Charset.Utf32) {
+            append_unit(bytes, 65279, width, little_endian);
+        }
+        let offset = 0;
+        while (offset < text.byte_length) {
+            let scalar = strings.scalar_at(text, offset);
+            if (width == 1) {
+                let maximum: uint32 = charset == Charset.Ascii ? 127 : 255;
+                if (scalar > maximum) {
+                    if (strict) {
+                        return result.Result<uint8[list]>.Err(error.Error.Encoding {
+                            offset: offset, message: "character is not representable in this charset",
+                        });
+                    }
+                    bytes.append(63);
+                } else {
+                    bytes.append(scalar as uint8);
+                }
+            } else if (width == 2 && scalar > 65535) {
+                let supplementary = scalar - 65536;
+                append_unit(bytes, 55296 + (supplementary >> 10), width, little_endian);
+                append_unit(bytes, 56320 + (supplementary & 1023), width, little_endian);
+            } else {
+                append_unit(bytes, scalar, width, little_endian);
+            }
+            offset += scalars.utf8_length(scalar);
+        }
+        return result.Result<uint8[list]>.Ok(bytes);
+    };
+
+    let append_unit = func(bytes: uint8[list], unit: uint32, width: int, little_endian: bool) {
+        for (let i = 0; i < width; i += 1) {
+            let shift = (little_endian ? i : width - 1 - i) * 8;
+            bytes.append(((unit >> shift) & 255) as uint8);
+        }
+    };
+
+    let unit_width = func(charset: Charset) -> int => match (charset) {
+        Charset.Utf16 => 2,
+        Charset.Utf16Be => 2,
+        Charset.Utf16Le => 2,
+        Charset.Utf32 => 4,
+        Charset.Utf32Be => 4,
+        Charset.Utf32Le => 4,
+        _ => 1,
+    };
+
+    let decode_bytes = func(bytes: uint8[list], charset: Charset, strict: bool) -> result.Result<string> {
+        if (charset == Charset.Utf8) {
+            return strict ? strings.from_bytes(bytes) : result.Result<string>.Ok(strings.from_bytes_lossy(bytes));
+        }
+        let text = string_builder.create();
+        let width = unit_width(charset);
+        let little_endian = charset == Charset.Utf16Le || charset == Charset.Utf32Le;
+        let offset = 0;
+        if ((charset == Charset.Utf16 || charset == Charset.Utf32) && bytes.length >= width) {
+            if (read_unit(bytes, 0, width, false) == 65279) {
+                offset = width;
+            } else if (read_unit(bytes, 0, width, true) == 65279) {
+                little_endian = true;
+                offset = width;
+            }
+        }
+        while (offset < bytes.length) {
+            let [scalar, consumed] = read_scalar(bytes, offset, charset, width, little_endian);
+            if (scalar == InvalidScalar && strict) {
+                return result.Result<string>.Err(error.Error.Encoding {
+                    offset: offset, message: "malformed byte sequence",
+                });
+            }
+            let _ = text.append_scalar(scalar == InvalidScalar ? scalars.Replacement : scalar);
+            offset += consumed;
+        }
+        return result.Result<string>.Ok(text.to_string());
+    };
+
+    let read_scalar = func(bytes: uint8[list], offset: int, charset: Charset, width: int, little_endian: bool)
+        -> [uint32, int] {
+        if (bytes.length - offset < width) {
+            return [InvalidScalar, bytes.length - offset];
+        }
+        let unit = read_unit(bytes, offset, width, little_endian);
+        if (width == 2 && unit >= 55296 && unit <= 56319 && bytes.length - offset >= 4) {
+            let low = read_unit(bytes, offset + 2, 2, little_endian);
+            if (low >= 56320 && low <= 57343) {
+                return [65536 + ((unit - 55296) << 10) + (low - 56320), 4];
+            }
+        }
+        if (!scalars.is_valid(unit) || (charset == Charset.Ascii && unit > 127)) {
+            return [InvalidScalar, width];
+        }
+        return [unit, width];
+    };
+
+    let read_unit = func(bytes: uint8[list], offset: int, width: int, little_endian: bool) -> uint32 {
+        let unit: uint32 = 0;
+        for (let i = 0; i < width; i += 1) {
+            let shift = (little_endian ? i : width - 1 - i) * 8;
+            unit = unit | ((bytes[offset + i] as uint32) << shift);
+        }
+        return unit;
+    };
+
+);

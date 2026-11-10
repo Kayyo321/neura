@@ -2,6 +2,7 @@
 
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/nominal.hpp"
+#include "neura-ir/reference_storage.hpp"
 
 #include "float_reference.hpp"
 #include "support.hpp"
@@ -266,7 +267,9 @@ public:
             bodies_.emplace(body.owner, &body);
             if (program.symbols.at(body.owner).kind == SymbolKind::Class) {
                 for (const auto& instruction : body.instructions) {
-                    if (instruction.op == IrOp::Initialize) {
+                    if (reference_preparation(instruction) == ReferencePreparation::Field) {
+                        reference_fields_[body.owner].push_back(&instruction);
+                    } else {
                         field_initializers_[body.owner].push_back(&instruction);
                     }
                 }
@@ -311,6 +314,7 @@ private:
     Heap heap_;
     std::map<SymbolId, const IrBody*> bodies_;
     std::map<SymbolId, std::vector<const IrNode*>> field_initializers_;
+    std::map<SymbolId, std::vector<const IrNode*>> reference_fields_;
     std::map<SymbolId, std::vector<SymbolId>> functions_by_owner_;
     std::vector<Effect> effects_;
     static constexpr std::size_t nil_handle = std::numeric_limits<std::size_t>::max();
@@ -641,7 +645,8 @@ private:
             result.kind = Value::Kind::Reference;
             result.type = node.type;
             result.handle = heap_.entries.size() - 1;
-            construct(cls, result, values, node.span);
+            prepare_reference_fields(cls, result);
+            construct(cls, node.symbol, result, values, node.span);
             return result;
         }
         case IrOp::RepeatCollection:
@@ -698,7 +703,7 @@ private:
         case IrOp::BaseInitialize: {
             auto values = arguments(node, 1, frame);
             const auto self = evaluate(node.operands.at(0), frame);
-            construct(symbol(owner_class(frame)).base, self, values, node.span);
+            construct(symbol(owner_class(frame)).base, node.symbol, self, values, node.span);
             return Value{};
         }
         case IrOp::Unary:
@@ -1397,13 +1402,23 @@ private:
 
     // Construction order (Object lifecycle): the base, then this class's
     // field initializers, then the rest of its declared constructor.
-    void construct(SymbolId cls, const Value& self, const std::vector<Value>& arguments, const Span& site) {
+    void construct(SymbolId cls, SymbolId init, const Value& self, const std::vector<Value>& arguments,
+                   const Span& site) {
         spend(site);
         if (depth_ >= limits_.depth) {
             throw Stop{Status::LimitReached, "call depth limit", site};
         }
         ++depth_;
-        const auto init = own_member(cls, "init");
+        if (init == no_symbol) {
+            if (const auto group = functions_by_owner_.find(cls); group != functions_by_owner_.end()) {
+                const auto& functions = group->second;
+                const auto zero_argument = std::ranges::find_if(functions, [&](SymbolId candidate) {
+                    const auto& function = symbol(candidate);
+                    return function.name == "init" && function.has_body && function.parameters.empty();
+                });
+                if (zero_argument != functions.end()) init = *zero_argument;
+            }
+        }
         const auto base = symbol(cls).base;
         const bool has_base_initializer = base != no_symbol && symbol(base).name != "$class";
         Frame frame;
@@ -1416,9 +1431,13 @@ private:
             }
             const auto& body = bodies_.at(init)->instructions;
             std::size_t start = 0;
-            if (has_base_initializer && !body.empty()) {
-                run_statement(body.front(), frame);
-                start = 1;
+            while (start < body.size() && reference_preparation(body[start]) == ReferencePreparation::Parameter) {
+                run_statement(body[start], frame);
+                ++start;
+            }
+            if (has_base_initializer && start < body.size()) {
+                run_statement(body[start], frame);
+                ++start;
             }
             initialize_fields(cls, self);
             for (std::size_t i = start; i < body.size(); ++i) {
@@ -1428,11 +1447,21 @@ private:
             }
         } else {
             if (has_base_initializer) {
-                construct(base, self, {}, site);
+                construct(base, no_symbol, self, {}, site);
             }
             initialize_fields(cls, self);
         }
         --depth_;
+    }
+
+    void prepare_reference_fields(SymbolId cls, const Value& self) {
+        if (reference_fields_.empty() || cls == no_symbol) return;
+        prepare_reference_fields(symbol(cls).base, self);
+        const auto found = reference_fields_.find(cls);
+        if (found == reference_fields_.end()) return;
+        Frame frame;
+        frame.self = self;
+        for (const auto* preparation : found->second) run_statement(*preparation, frame);
     }
 
     void initialize_fields(SymbolId cls, const Value& self) {
@@ -1544,7 +1573,21 @@ private:
     }
 };
 
-Evaluator::Evaluator(const IrProgram& program, Limits limits) : program_(program), limits_(limits) {}
+namespace {
+
+std::unique_ptr<IrProgram> materialized_copy(const IrProgram& program) {
+    if (std::ranges::none_of(program.symbols, [](const IrSymbol& symbol) {
+            return symbol.kind == SymbolKind::Class && is_primitive_reference(symbol.type);
+        })) return {};
+    auto result = std::make_unique<IrProgram>(program);
+    materialize_reference_storage(*result);
+    return result;
+}
+
+} // namespace
+
+Evaluator::Evaluator(const IrProgram& program, Limits limits)
+    : materialized_(materialized_copy(program)), program_(materialized_ ? *materialized_ : program), limits_(limits) {}
 
 Evaluator::~Evaluator() = default;
 
@@ -1629,6 +1672,8 @@ std::vector<Outcome> Evaluator::initialize() {
         SymbolId owner;
     };
     std::vector<Item> literals;
+    std::vector<Item> reference_boxes;
+    std::vector<Item> reference_values;
     std::vector<std::pair<SymbolId, std::vector<Item>>> steps;
     for (const auto file : order) {
         std::vector<Item> items;
@@ -1638,9 +1683,16 @@ std::vector<Outcome> Evaluator::initialize() {
                 continue;
             }
             for (const auto& instruction : body.instructions) {
-                auto& target = instruction.op == IrOp::Initialize && literal(instruction.operands.front()) ? literals
-                                                                                                          : items;
-                target.push_back({&instruction, kind == SymbolKind::Module ? body.owner : no_symbol});
+                Item item{&instruction, kind == SymbolKind::Module ? body.owner : no_symbol};
+                if (instruction.op == IrOp::Initialize && literal(instruction.operands.front())) {
+                    literals.push_back(item);
+                } else {
+                    switch (reference_preparation(instruction)) {
+                    case ReferencePreparation::GlobalBox: reference_boxes.push_back(item); break;
+                    case ReferencePreparation::GlobalValue: reference_values.push_back(item); break;
+                    default: items.push_back(item); break;
+                    }
+                }
             }
         }
         std::stable_sort(items.begin(), items.end(),
@@ -1650,6 +1702,9 @@ std::vector<Outcome> Evaluator::initialize() {
     for (const auto& item : literals) {
         outcomes.push_back(machine.run_body({item.owner, {*item.node}}, item.owner));
     }
+    for (const auto* preparations : {&reference_boxes, &reference_values})
+        for (const auto& item : *preparations)
+            outcomes.push_back(machine.run_body({item.owner, {*item.node}}, item.owner));
     for (const auto& [file, items] : steps) {
         for (const auto& item : items) {
             outcomes.push_back(machine.run_body({item.owner, {*item.node}}, item.owner));

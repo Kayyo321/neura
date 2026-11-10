@@ -1,0 +1,110 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let write = func(text: string) {
+    write(text, text.byte_length);
+} or func(text: string, length: int) {
+    console.print_line(text.slice(0, length));
+}
+
+let choose = func(value: int16) -> string => "int16"
+    or func(value: int32) -> string => "int32";
+
+let small = func(value: int16) -> bool => value == 1 or 2 or 3
+    or func(value: bool) -> bool => value;
+
+let first = func(values: int16[]) -> string => values[0].to_string()
+    or func(values: string[]) -> string => values[0];
+
+let MultiInt = class (
+    let narrow: int16 = 0;
+    let wide: int64 = 0;
+    export let casts: int = 0;
+
+    export let init = func(seed: int16) {
+        instance.narrow = seed;
+        instance.wide = seed as int64;
+    } or func(seed: int64) {
+        wide = seed;
+    } or func {
+        narrow = 11;
+    }
+
+    export let.as int16 = func -> int16 => narrow
+        or as int64 = func -> int64 {
+            console.print_line("cast");
+            casts += 1;
+            return wide;
+        }
+
+    export let.as string = func -> string => instance.wide.to_string();
+
+    export let format = func -> string => wide.to_string()
+        or func(prefix: string) -> string => prefix + format();
+);
+
+let Derived = class:MultiInt (
+    export let init = func(seed: int64) {
+        super.init(seed);
+    }
+);
+
+let DefaultInt = class:MultiInt ();
+
+let select = func(value: MultiInt) -> string => "object"
+    or func(value: int64) -> string => "converted";
+
+let as_text = func(value: int16) -> string => value.to_string()
+    or func(value: bool) -> string => value.to_string();
+
+let source = func(value: MultiInt) -> MultiInt {
+    console.print_line("source");
+    return value;
+};
+
+let next_argument = func -> int {
+    console.print_line("argument");
+    return 3;
+};
+
+let sum = func(value: int64, offset: int) -> int64 => value + (offset as int64);
+
+let App = module:program.Entry (
+    let exercise = func {
+        write("whole");
+        write("prefix", 3);
+        write(choose(1));
+        write(choose(1 as int16));
+        if (small(2) && small(true)) {
+            write("contextual literal and comparison chain");
+        }
+        write(first([12, 13]));
+
+        let narrow = new MultiInt(5 as int16);
+        let wide = new MultiInt(70000 as int64);
+        let derived = new Derived(9);
+        let inherited_default = new DefaultInt();
+        write(narrow.format("narrow: "));
+        write(wide.format());
+        write(derived as string);
+        write((inherited_default as int16).to_string());
+        write(select(narrow));
+        write(as_text(narrow));
+        write(narrow);
+        write(false ? narrow : wide);
+        write((wide as string) + " explicit");
+        write((source(narrow) as int64).to_string());
+        write(sum(source(narrow), next_argument()).to_string());
+        write(narrow.casts.to_string() + " / " + wide.casts.to_string());
+
+        let number: int16 = -7;
+        write(number.abs().to_string());
+        write("éab".substring(2, 3));
+        write(string.substring("éab", 2));
+    }
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        exercise();
+        return program.ExitCode.Ok;
+    }
+);

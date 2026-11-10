@@ -1,0 +1,11 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: code point offset out of range
+let program = import:Std.Program;
+let text = import:Std.Core.String;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = text.offset_by_code_points("é", 0, -2147483648);
+        return program.ExitCode.Ok;
+    };
+);
