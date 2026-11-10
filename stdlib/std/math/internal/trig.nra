@@ -124,7 +124,7 @@ export let Trig = module (
         let v = z * (T2 + w * (T4 + w * (T6 + w * (T8 + w * (T10 + w * T12)))));
         let s = z * x;
         r = y + z * (s * (r + v) + y);
-        r = r + T0 * s;
+        r += T0 * s;
         w = x + r;
         if (ix >= 1072010280) { // 0x3FE59428
             v = iy as float64;
@@ -167,7 +167,7 @@ export let Trig = module (
                     return [1, y0, (z - y0) - pio2_1t];
                 }
                 // near pi/2, use 33+33+53 bit pi
-                z = z - pio2_2;
+                z -= pio2_2;
                 let y0 = z - pio2_2t;
                 return [1, y0, (z - y0) - pio2_2t];
             }
@@ -176,7 +176,7 @@ export let Trig = module (
                 let y0 = z + pio2_1t;
                 return [-1, y0, (z - y0) + pio2_1t];
             }
-            z = z + pio2_2;
+            z += pio2_2;
             let y0 = z + pio2_2t;
             return [-1, y0, (z - y0) + pio2_2t];
         }
@@ -224,7 +224,7 @@ export let Trig = module (
         let e0 = (ix >> 20) - 1046; // e0 = ilogb(z)-23;
         let z = words.from_words(ix - (e0 << 20), words.low(x));
         let tx: float64[list] = [];
-        for (let i = 0; i < 2; i = i + 1) {
+        for (let i = 0; i < 2; i++) {
             let chunk = (z as int) as float64;
             tx.append(chunk);
             z = (z - chunk) * two24;
@@ -232,7 +232,7 @@ export let Trig = module (
         tx.append(z);
         let nx = 3;
         while (tx[nx - 1] == 0.0) { // skip zero term
-            nx = nx - 1;
+            nx--;
         }
         let [n, y0, y1] = rem_pio2_kernel(tx, e0, nx);
         if (hx < 0) {
@@ -255,7 +255,7 @@ export let Trig = module (
     };
 
     // two_over_pi: 2/pi in 24-bit chunks, most significant first.
-    let two_over_pi = func() -> int[list] {
+    let two_over_pi = func -> int[list] {
         let table: int[list] = [
             10680707, 7228996, 1387004, 2578385, 16069853, 12639074, // 0xA2F983 0x6E4E44 0x1529FC 0x2757D1 0xF534DD 0xC0DB62
             9804092, 4427841, 16666979, 11263675, 12935607, 2387514, // 0x95993C 0x439041 0xFE5163 0xABDEBB 0xC561B7 0x246E3A
@@ -273,7 +273,7 @@ export let Trig = module (
     };
 
     // PIo2: pi/2 in 24-bit chunks, as float64 values.
-    let pio2_chunks = func() -> float64[list] {
+    let pio2_chunks = func -> float64[list] {
         let table: float64[list] = [
             float64.from_bits(4609753056584663040), // 0x3FF921FB40000000 1.57079625129699707031e+00
             float64.from_bits(4500296887714185216), // 0x3E74442D00000000 7.54978941586159635335e-08
@@ -288,9 +288,7 @@ export let Trig = module (
     };
 
     // floor of a non-negative value below 2^63; exact.
-    let floor_nonnegative = func(v: float64) -> float64 {
-        return (v as int64) as float64;
-    };
+    let floor_nonnegative = func(v: float64) -> float64 => (v as int64) as float64;
 
     // __kernel_rem_pio2 with prec 2 (53-bit result in y0 + y1) and the
     // two_over_pi table. x holds nx 24-bit chunks of |input| scaled by
@@ -314,7 +312,7 @@ export let Trig = module (
         let iq: int[list] = [];
         let q: float64[list] = [];
         let fq: float64[list] = [];
-        for (let i = 0; i < 20; i = i + 1) {
+        for (let i = 0; i < 20; i++) {
             f.append(0.0);
             iq.append(0);
             q.append(0.0);
@@ -322,17 +320,17 @@ export let Trig = module (
         }
         let j = jv - jx;
         let m = jx + jk;
-        for (let i = 0; i <= m; i = i + 1) {
+        for (let i = 0; i <= m; i++) {
             if (j >= 0) {
                 f[i] = ipio2[j] as float64;
             }
-            j = j + 1;
+            j++;
         }
         // compute q[0],q[1],...q[jk]
-        for (let i = 0; i <= jk; i = i + 1) {
+        for (let i = 0; i <= jk; i++) {
             let fw = 0.0;
-            for (let k = 0; k <= jx; k = k + 1) {
-                fw = fw + x[k] * f[jx + i - k];
+            for (let k = 0; k <= jx; k++) {
+                fw += x[k] * f[jx + i - k];
             }
             q[i] = fw;
         }
@@ -352,18 +350,18 @@ export let Trig = module (
                 let fw = ((twon24 * z) as int) as float64;
                 iq[i] = (z - two24 * fw) as int;
                 z = q[j - 1] + fw;
-                i = i + 1;
-                j = j - 1;
+                i++;
+                j--;
             }
             // compute n
             z = words.scalbn(z, q0); // actual value of z
-            z = z - 8.0 * floor_nonnegative(z * 0.125); // trim off integer >= 8
+            z -= 8.0 * floor_nonnegative(z * 0.125); // trim off integer >= 8
             n = z as int;
-            z = z - (n as float64);
+            z -= (n as float64);
             ih = 0;
             if (q0 > 0) { // need iq[jz-1] to determine n
                 i = iq[jz - 1] >> (24 - q0);
-                n = n + i;
+                n += i;
                 iq[jz - 1] = iq[jz - 1] - (i << (24 - q0));
                 ih = iq[jz - 1] >> (23 - q0);
             } else if (q0 == 0) {
@@ -372,9 +370,9 @@ export let Trig = module (
                 ih = 2;
             }
             if (ih > 0) { // q > 0.5
-                n = n + 1;
+                n++;
                 carry = 0;
-                for (let k = 0; k < jz; k = k + 1) { // compute 1-q
+                for (let k = 0; k < jz; k++) { // compute 1-q
                     let v = iq[k];
                     if (carry == 0) {
                         if (v != 0) {
@@ -393,49 +391,49 @@ export let Trig = module (
                 if (ih == 2) {
                     z = 1.0 - z;
                     if (carry != 0) {
-                        z = z - words.scalbn(1.0, q0);
+                        z -= words.scalbn(1.0, q0);
                     }
                 }
             }
             // check if recomputation is needed
             if (z == 0.0) {
                 let bits = 0;
-                for (let k = jz - 1; k >= jk; k = k - 1) {
-                    bits = bits | iq[k];
+                for (let k = jz - 1; k >= jk; k--) {
+                    bits |= iq[k];
                 }
                 if (bits == 0) { // need recomputation
                     let k = 1;
                     while (iq[jk - k] == 0) { // k = no. of terms needed
-                        k = k + 1;
+                        k++;
                     }
-                    for (let t = jz + 1; t <= jz + k; t = t + 1) { // add q[jz+1] to q[jz+k]
+                    for (let t = jz + 1; t <= jz + k; t++) { // add q[jz+1] to q[jz+k]
                         f[jx + t] = ipio2[jv + t] as float64;
                         let fw = 0.0;
-                        for (let s = 0; s <= jx; s = s + 1) {
-                            fw = fw + x[s] * f[jx + t - s];
+                        for (let s = 0; s <= jx; s++) {
+                            fw += x[s] * f[jx + t - s];
                         }
                         q[t] = fw;
                     }
-                    jz = jz + k;
+                    jz += k;
                     recompute = true;
                 }
             }
         }
         // chop off zero terms
         if (z == 0.0) {
-            jz = jz - 1;
-            q0 = q0 - 24;
+            jz--;
+            q0 -= 24;
             while (iq[jz] == 0) {
-                jz = jz - 1;
-                q0 = q0 - 24;
+                jz--;
+                q0 -= 24;
             }
         } else { // break z into 24-bit if necessary
             z = words.scalbn(z, -q0);
             if (z >= two24) {
                 let fw = ((twon24 * z) as int) as float64;
                 iq[jz] = (z - two24 * fw) as int;
-                jz = jz + 1;
-                q0 = q0 + 24;
+                jz++;
+                q0 += 24;
                 iq[jz] = fw as int;
             } else {
                 iq[jz] = z as int;
@@ -443,30 +441,30 @@ export let Trig = module (
         }
         // convert integer "bit" chunk to floating-point value
         let fw = words.scalbn(1.0, q0);
-        for (let i = jz; i >= 0; i = i - 1) {
+        for (let i = jz; i >= 0; i--) {
             q[i] = fw * (iq[i] as float64);
-            fw = fw * twon24;
+            fw *= twon24;
         }
         // compute PIo2[0,...,jp]*q[jz,...,0]
-        for (let i = jz; i >= 0; i = i - 1) {
+        for (let i = jz; i >= 0; i--) {
             fw = 0.0;
-            for (let k = 0; k <= jp && k <= jz - i; k = k + 1) {
-                fw = fw + pio2[k] * q[i + k];
+            for (let k = 0; k <= jp && k <= jz - i; k++) {
+                fw += pio2[k] * q[i + k];
             }
             fq[jz - i] = fw;
         }
         // compress fq[] into y[]
         fw = 0.0;
-        for (let i = jz; i >= 0; i = i - 1) {
-            fw = fw + fq[i];
+        for (let i = jz; i >= 0; i--) {
+            fw += fq[i];
         }
         let y0 = fw;
         if (ih != 0) {
             y0 = -fw;
         }
         fw = fq[0] - fw;
-        for (let i = 1; i <= jz; i = i + 1) {
-            fw = fw + fq[i];
+        for (let i = 1; i <= jz; i++) {
+            fw += fq[i];
         }
         let y1 = fw;
         if (ih != 0) {

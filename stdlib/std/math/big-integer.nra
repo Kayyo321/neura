@@ -1,9 +1,9 @@
-let comparable = import:Std.Core.Comparable;
+let.promote _ = import:Std.Core.Comparable;
 let hashing = import:Std.Core.Hash;
 let integer_text = import:Std.Core.Internal.IntegerText;
-let optional = import:Std.Core.Optional;
-let ordering = import:Std.Core.Ordering;
-let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
 let rounding = import:Std.Math.Internal.FloatRounding;
 
 // An immutable arbitrary-precision integer (Stdlib.md section 10.2).
@@ -22,7 +22,7 @@ export let BigInteger = module (
     // Both operands of a product need this many limbs for Karatsuba.
     const KaratsubaLimbs: int = 48;
 
-    export let BigInteger = class implements comparable.Comparable<BigInteger> (
+    export let BigInteger = class implements Comparable<BigInteger> (
         let signum: int = 0;
         let magnitude: uint32[list] = [];
 
@@ -30,7 +30,7 @@ export let BigInteger = module (
         // the top are dropped, and a zero magnitude has sign 0 whatever
         // `sign` says; otherwise only the sign of `sign` matters. The new
         // value owns `limbs`: the caller must not change the list afterwards.
-        export let init = func(sign: int, limbs: uint32[list]) -> void {
+        export let init = func(sign: int, limbs: uint32[list]) {
             while (limbs.length > 0 && limbs[limbs.length - 1] == 0) {
                 limbs.remove_at(limbs.length - 1);
             }
@@ -48,33 +48,21 @@ export let BigInteger = module (
             magnitude = limbs;
         };
 
-        export let sign = func() -> int {
-            return signum;
-        };
+        export let sign = func -> int => signum;
 
-        export let is_zero = func() -> bool {
-            return signum == 0;
-        };
+        export let is_zero = func -> bool => signum == 0;
 
-        export let is_even = func() -> bool {
-            return signum == 0 || (magnitude[0] & 1) == 0;
-        };
+        export let is_even = func -> bool => signum == 0 || (magnitude[0] & 1) == 0;
 
-        export let negate = func() -> BigInteger {
-            return new BigInteger(-signum, magnitude);
-        };
+        export let negate = func -> BigInteger => new BigInteger(-signum, magnitude);
 
-        export let abs = func() -> BigInteger {
-            return new BigInteger(signum * signum, magnitude);
-        };
+        export let abs = func -> BigInteger => new BigInteger(signum * signum, magnitude);
 
-        export let add = func(other: BigInteger) -> BigInteger {
-            return signed_sum(signum, magnitude, other.signum, other.magnitude);
-        };
+        export let add = func(other: BigInteger) -> BigInteger =>
+            signed_sum(signum, magnitude, other.signum, other.magnitude);
 
-        export let subtract = func(other: BigInteger) -> BigInteger {
-            return signed_sum(signum, magnitude, -other.signum, other.magnitude);
-        };
+        export let subtract = func(other: BigInteger) -> BigInteger =>
+            signed_sum(signum, magnitude, -other.signum, other.magnitude);
 
         // Schoolbook with uint64 partial products; Karatsuba when both
         // operands have at least 48 limbs.
@@ -89,7 +77,7 @@ export let BigInteger = module (
         // dividend's sign, from one division. A zero divisor traps (reason
         // 1) in the division by the divisor's sign.
         export let divide_and_remainder = func(other: BigInteger) -> [BigInteger, BigInteger] {
-            let checked = signum / other.signum;
+            let _ = signum / other.signum;
             let [quotient, rest] = divide_magnitudes(magnitude, other.magnitude);
             return [new BigInteger(signum * other.signum, quotient), new BigInteger(signum, rest)];
         };
@@ -137,7 +125,7 @@ export let BigInteger = module (
                 if ((e & 1) != 0) {
                     power = multiply_magnitudes(power, base);
                 }
-                e = e >> 1;
+                e >>= 1;
                 if (e > 0) {
                     base = multiply_magnitudes(base, base);
                 }
@@ -175,7 +163,7 @@ export let BigInteger = module (
             let m = modulus.magnitude;
             let base = floor_mod(modulus).magnitude;
             let [unit_quotient, power] = divide_magnitudes([1], m);
-            for (let bit = exponent.bit_length() - 1; bit >= 0; bit = bit - 1) {
+            for (let bit = exponent.bit_length() - 1; bit >= 0; bit--) {
                 let [square_quotient, square] = divide_magnitudes(multiply_magnitudes(power, power), m);
                 power = square;
                 if (exponent.test_bit(bit)) {
@@ -236,7 +224,7 @@ export let BigInteger = module (
         };
 
         // The number of bits of the magnitude; 0 for zero.
-        export let bit_length = func() -> int {
+        export let bit_length = func -> int {
             if (signum == 0) {
                 return 0;
             }
@@ -256,21 +244,21 @@ export let BigInteger = module (
             return ((magnitude[limb] >> (n % 32)) & 1) != 0;
         };
 
-        export let compare_to = func(other: BigInteger) -> ordering.Ordering {
+        export let compare_to = func(other: BigInteger) -> Ordering {
             if (signum != other.signum) {
                 if (signum < other.signum) {
-                    return ordering.Ordering.Less;
+                    return Ordering.Less;
                 }
-                return ordering.Ordering.Greater;
+                return Ordering.Greater;
             }
             let c = compare_magnitudes(magnitude, other.magnitude) * signum;
             if (c < 0) {
-                return ordering.Ordering.Less;
+                return Ordering.Less;
             }
             if (c > 0) {
-                return ordering.Ordering.Greater;
+                return Ordering.Greater;
             }
-            return ordering.Ordering.Equal;
+            return Ordering.Equal;
         };
 
         export let.override equals = func(other: class) -> bool {
@@ -278,14 +266,14 @@ export let BigInteger = module (
                 return false;
             }
             let value = other as BigInteger;
-            return signum == value.signum && magnitude.equals(value.magnitude);
+            return signum == value.signum && magnitude === value.magnitude;
         };
 
         // Starts at 0, combines each limb from most to least significant,
         // then negates (wrapping) for a negative value.
-        export let.override hash_code = func() -> uint32 {
+        export let.override hash_code = func -> uint32 {
             let h: uint32 = 0;
-            for (let i = magnitude.length - 1; i >= 0; i = i - 1) {
+            for (let i = magnitude.length - 1; i >= 0; i--) {
                 h = hashing.combine(h, magnitude[i]);
             }
             if (signum < 0 && h != 0) {
@@ -294,41 +282,41 @@ export let BigInteger = module (
             return h;
         };
 
-        export let to_int64 = func() -> optional.Optional<int64> {
+        export let to_int64 = func -> Optional<int64> {
             if (magnitude.length > 2) {
-                return optional.Optional<int64>.None;
+                return Optional<int64>.None;
             }
             let value: uint64 = 0;
             if (magnitude.length > 0) {
                 value = magnitude[0] as uint64;
             }
             if (magnitude.length > 1) {
-                value = value | ((magnitude[1] as uint64) << 32);
+                value |= ((magnitude[1] as uint64) << 32);
             }
             if (signum >= 0) {
                 if (value > 9223372036854775807) {
-                    return optional.Optional<int64>.None;
+                    return Optional<int64>.None;
                 }
-                return optional.Optional<int64>.Some(value as int64);
+                return Optional<int64>.Some(value as int64);
             }
             if (value > 9223372036854775808) {
-                return optional.Optional<int64>.None;
+                return Optional<int64>.None;
             }
             if (value == 9223372036854775808) {
-                return optional.Optional<int64>.Some(-9223372036854775808);
+                return Optional<int64>.Some(-9223372036854775808);
             }
-            return optional.Optional<int64>.Some(-(value as int64));
+            return Optional<int64>.Some(-(value as int64));
         };
 
         // The nearest float64, ties to even; an infinity beyond the range.
-        export let to_float64 = func() -> float64 {
+        export let to_float64 = func -> float64 {
             if (magnitude.length <= 2) {
                 let value: uint64 = 0;
                 if (magnitude.length > 0) {
                     value = magnitude[0] as uint64;
                 }
                 if (magnitude.length > 1) {
-                    value = value | ((magnitude[1] as uint64) << 32);
+                    value |= ((magnitude[1] as uint64) << 32);
                 }
                 return rounding.compose(signum < 0, value, 0, false);
             }
@@ -340,9 +328,7 @@ export let BigInteger = module (
         };
 
         // Decimal, by repeated division by 10^9 and nine-digit groups.
-        export let.override to_string = func() -> string {
-            return magnitude_text(signum, magnitude, 10);
-        };
+        export let.override to_string = func -> string => magnitude_text(signum, magnitude, 10);
 
         // Lowercase digits. A radix outside 2 through 36 traps.
         export let to_string_radix = func(radix: int) -> string {
@@ -364,24 +350,20 @@ export let BigInteger = module (
         return new BigInteger(-1, limbs_of(magnitude_value));
     };
 
-    export let of_uint64 = func(value: uint64) -> BigInteger {
-        return new BigInteger(1, limbs_of(value));
-    };
+    export let of_uint64 = func(value: uint64) -> BigInteger => new BigInteger(1, limbs_of(value));
 
-    export let parse = func(text: string) -> result.Result<BigInteger> {
-        return parse_radix(text, 10);
-    };
+    export let parse = func(text: string) -> Result<BigInteger> => parse_radix(text, 10);
 
     // An optional `+` or `-`, then one or more digits of the radix in either
     // case (Stdlib.md section 7.1), with no range failure. A radix outside 2
     // through 36 traps.
-    export let parse_radix = func(text: string, radix: int) -> result.Result<BigInteger> {
+    export let parse_radix = func(text: string, radix: int) -> Result<BigInteger> {
         integer_text.check_radix(radix);
         match (integer_text.syntax_error(text, radix)) {
-            optional.Optional.Some(failure) => {
-                return result.Result<BigInteger>.Err(failure);
+            Optional.Some(failure) => {
+                return Result<BigInteger>.Err(failure);
             },
-            optional.Optional.None => {},
+            Optional.None => {},
         }
         let start = integer_text.sign_length(text);
         let value_sign = 1;
@@ -399,21 +381,21 @@ export let BigInteger = module (
             }
             let value: uint32 = 0;
             let scale: uint32 = 1;
-            for (let j = i; j < end; j = j + 1) {
+            for (let j = i; j < end; j++) {
                 value = value * (radix as uint32) + (integer_text.digit_value(text.byte_at(j)) as uint32);
-                scale = scale * (radix as uint32);
+                scale *= (radix as uint32);
             }
             multiply_add_in_place(limbs, scale, value);
             i = end;
         }
         // "-0" has no limbs, which makes it zero.
-        return result.Result<BigInteger>.Ok(new BigInteger(value_sign, limbs));
+        return Result<BigInteger>.Ok(new BigInteger(value_sign, limbs));
     };
 
     // ---- Magnitudes: uint32 limb lists, least significant first. Helpers
     // never change their arguments; results are fresh lists.
 
-    let check_limbs = func(count: int) -> void {
+    let check_limbs = func(count: int) {
         if (count > MaxLimbs) {
             trap_with_message("invalid argument: magnitude too large");
         }
@@ -432,7 +414,7 @@ export let BigInteger = module (
 
     let zeros = func(count: int) -> uint32[list] {
         let limbs: uint32[list] = [];
-        for (let i = 0; i < count; i = i + 1) {
+        for (let i = 0; i < count; i++) {
             limbs.append(0);
         }
         return limbs;
@@ -440,7 +422,7 @@ export let BigInteger = module (
 
     let copy_limbs = func(a: uint32[list]) -> uint32[list] {
         let limbs: uint32[list] = [];
-        for (let i = 0; i < a.length; i = i + 1) {
+        for (let i = 0; i < a.length; i++) {
             limbs.append(a[i]);
         }
         return limbs;
@@ -460,7 +442,7 @@ export let BigInteger = module (
         if (to > a.length) {
             to = a.length;
         }
-        for (let i = from; i < to; i = i + 1) {
+        for (let i = from; i < to; i++) {
             limbs.append(a[i]);
         }
         return trim(limbs);
@@ -472,8 +454,8 @@ export let BigInteger = module (
         }
         let count = 0;
         while ((limb & 2147483648) == 0) {
-            limb = limb << 1;
-            count = count + 1;
+            limb <<= 1;
+            count++;
         }
         return count;
     };
@@ -486,7 +468,7 @@ export let BigInteger = module (
             }
             return 1;
         }
-        for (let i = a.length - 1; i >= 0; i = i - 1) {
+        for (let i = a.length - 1; i >= 0; i--) {
             if (a[i] != b[i]) {
                 if (a[i] < b[i]) {
                     return -1;
@@ -506,10 +488,10 @@ export let BigInteger = module (
         check_limbs(a.length);
         let sum: uint32[list] = [];
         let carry: uint64 = 0;
-        for (let i = 0; i < a.length; i = i + 1) {
+        for (let i = 0; i < a.length; i++) {
             let t = (a[i] as uint64) + carry;
             if (i < b.length) {
-                t = t + (b[i] as uint64);
+                t += (b[i] as uint64);
             }
             sum.append((t & Mask) as uint32);
             carry = t >> 32;
@@ -524,11 +506,11 @@ export let BigInteger = module (
     let subtract_magnitudes = func(a: uint32[list], b: uint32[list]) -> uint32[list] {
         let difference: uint32[list] = [];
         let borrow: uint64 = 0;
-        for (let i = 0; i < a.length; i = i + 1) {
+        for (let i = 0; i < a.length; i++) {
             let x = a[i] as uint64;
             let y = borrow;
             if (i < b.length) {
-                y = y + (b[i] as uint64);
+                y += (b[i] as uint64);
             }
             if (x >= y) {
                 difference.append((x - y) as uint32);
@@ -578,11 +560,11 @@ export let BigInteger = module (
 
     let schoolbook = func(a: uint32[list], b: uint32[list]) -> uint32[list] {
         let product = zeros(a.length + b.length);
-        for (let i = 0; i < a.length; i = i + 1) {
+        for (let i = 0; i < a.length; i++) {
             let ai = a[i] as uint64;
             if (ai != 0) {
                 let carry: uint64 = 0;
-                for (let j = 0; j < b.length; j = j + 1) {
+                for (let j = 0; j < b.length; j++) {
                     let t = ai * (b[j] as uint64) + (product[i + j] as uint64) + carry;
                     product[i + j] = (t & Mask) as uint32;
                     carry = t >> 32;
@@ -601,7 +583,7 @@ export let BigInteger = module (
         if (b.length > half) {
             half = b.length;
         }
-        half = half / 2;
+        half /= 2;
         let a0 = slice_limbs(a, 0, half);
         let a1 = slice_limbs(a, half, a.length);
         let b0 = slice_limbs(b, 0, half);
@@ -619,25 +601,25 @@ export let BigInteger = module (
 
     // target += source * B^offset, in place on a list built here; target is
     // long enough for the sum.
-    let add_into = func(target: uint32[list], source: uint32[list], offset: int) -> void {
+    let add_into = func(target: uint32[list], source: uint32[list], offset: int) {
         let carry: uint64 = 0;
         let i = 0;
         while (i < source.length || carry != 0) {
             let t = (target[offset + i] as uint64) + carry;
             if (i < source.length) {
-                t = t + (source[i] as uint64);
+                t += (source[i] as uint64);
             }
             target[offset + i] = (t & Mask) as uint32;
             carry = t >> 32;
-            i = i + 1;
+            i++;
         }
     };
 
     // limbs = limbs * factor + addend, in place on a list built here.
-    let multiply_add_in_place = func(limbs: uint32[list], factor: uint32, addend: uint32) -> void {
+    let multiply_add_in_place = func(limbs: uint32[list], factor: uint32, addend: uint32) {
         let carry = addend as uint64;
         let f = factor as uint64;
-        for (let i = 0; i < limbs.length; i = i + 1) {
+        for (let i = 0; i < limbs.length; i++) {
             let t = (limbs[i] as uint64) * f + carry;
             limbs[i] = (t & Mask) as uint32;
             carry = t >> 32;
@@ -656,13 +638,13 @@ export let BigInteger = module (
         }
         let shifted = zeros(limb_shift);
         if (bit_shift == 0) {
-            for (let i = 0; i < a.length; i = i + 1) {
+            for (let i = 0; i < a.length; i++) {
                 shifted.append(a[i]);
             }
             return shifted;
         }
         let carry: uint32 = 0;
-        for (let i = 0; i < a.length; i = i + 1) {
+        for (let i = 0; i < a.length; i++) {
             shifted.append((a[i] << bit_shift) | carry);
             carry = a[i] >> (32 - bit_shift);
         }
@@ -681,13 +663,13 @@ export let BigInteger = module (
             return [shifted, a.length > 0];
         }
         let lost = false;
-        for (let i = 0; i < limb_shift; i = i + 1) {
+        for (let i = 0; i < limb_shift; i++) {
             if (a[i] != 0) {
                 lost = true;
             }
         }
         if (bit_shift == 0) {
-            for (let i = limb_shift; i < a.length; i = i + 1) {
+            for (let i = limb_shift; i < a.length; i++) {
                 shifted.append(a[i]);
             }
             return [shifted, lost];
@@ -696,10 +678,10 @@ export let BigInteger = module (
         if ((a[limb_shift] & low_mask) != 0) {
             lost = true;
         }
-        for (let i = limb_shift; i < a.length; i = i + 1) {
+        for (let i = limb_shift; i < a.length; i++) {
             let limb = a[i] >> bit_shift;
             if (i + 1 < a.length) {
-                limb = limb | (a[i + 1] << (32 - bit_shift));
+                limb |= (a[i + 1] << (32 - bit_shift));
             }
             shifted.append(limb);
         }
@@ -711,7 +693,7 @@ export let BigInteger = module (
         let quotient = zeros(a.length);
         let d = divisor as uint64;
         let rest: uint64 = 0;
-        for (let i = a.length - 1; i >= 0; i = i - 1) {
+        for (let i = a.length - 1; i >= 0; i--) {
             let current = (rest << 32) | (a[i] as uint64);
             quotient[i] = (current / d) as uint32;
             rest = current % d;
@@ -724,7 +706,7 @@ export let BigInteger = module (
     let divide_in_place = func(limbs: uint32[list], divisor: uint32) -> uint32 {
         let d = divisor as uint64;
         let rest: uint64 = 0;
-        for (let i = limbs.length - 1; i >= 0; i = i - 1) {
+        for (let i = limbs.length - 1; i >= 0; i--) {
             let current = (rest << 32) | (limbs[i] as uint64);
             limbs[i] = (current / d) as uint32;
             rest = current % d;
@@ -739,7 +721,7 @@ export let BigInteger = module (
         if (b.length == 0) {
             // Unreachable from the public members, which divide by the
             // divisor's sign first; this division traps the same way.
-            let checked = a.length / b.length;
+            let _ = a.length / b.length;
         }
         let c = compare_magnitudes(a, b);
         if (c < 0) {
@@ -771,15 +753,15 @@ export let BigInteger = module (
         let quotient = zeros(m + 1);
         let top = v[n - 1] as uint64;
         let next = v[n - 2] as uint64;
-        for (let j = m; j >= 0; j = j - 1) {
+        for (let j = m; j >= 0; j--) {
             // D3: estimate qhat from the top two limbs and correct it with
             // the third, so it is at most one too large.
             let numerator = ((u[j + n] as uint64) << 32) | (u[j + n - 1] as uint64);
             let qhat = numerator / top;
             let rhat = numerator % top;
             while (qhat >= Base || qhat * next > ((rhat << 32) | (u[j + n - 2] as uint64))) {
-                qhat = qhat - 1;
-                rhat = rhat + top;
+                qhat--;
+                rhat += top;
                 if (rhat >= Base) {
                     break;
                 }
@@ -787,7 +769,7 @@ export let BigInteger = module (
             // D4: multiply and subtract qhat * v from u[j .. j+n].
             let borrow: uint64 = 0;
             let carry: uint64 = 0;
-            for (let i = 0; i < n; i = i + 1) {
+            for (let i = 0; i < n; i++) {
                 let p = qhat * (v[i] as uint64) + carry;
                 carry = p >> 32;
                 let low = (p & Mask) + borrow;
@@ -810,9 +792,9 @@ export let BigInteger = module (
             }
             // D6: add back when qhat was one too large.
             if (negative) {
-                qhat = qhat - 1;
+                qhat--;
                 let back: uint64 = 0;
-                for (let i = 0; i < n; i = i + 1) {
+                for (let i = 0; i < n; i++) {
                     let t = (u[i + j] as uint64) + (v[i] as uint64) + back;
                     u[i + j] = (t & Mask) as uint32;
                     back = t >> 32;
@@ -840,7 +822,7 @@ export let BigInteger = module (
         let rest = copy_limbs(magnitude);
         while (rest.length > 0) {
             let value = divide_in_place(rest, chunk);
-            for (let i = 0; i < chunk_digits; i = i + 1) {
+            for (let i = 0; i < chunk_digits; i++) {
                 if (rest.length == 0 && value == 0) {
                     break;
                 }
@@ -850,7 +832,7 @@ export let BigInteger = module (
                 } else {
                     reversed.append((digit + 87) as uint8);
                 }
-                value = value / base;
+                value /= base;
             }
         }
         return integer_text.digits_text(reversed, sign < 0);
@@ -862,8 +844,8 @@ export let BigInteger = module (
         let power: uint64 = r;
         let digits = 1;
         while (power * r < Base) {
-            power = power * r;
-            digits = digits + 1;
+            power *= r;
+            digits++;
         }
         return [digits, power as uint32];
     };

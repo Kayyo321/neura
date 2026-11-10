@@ -12,9 +12,7 @@ export let Words = module (
     };
 
     // The low 32 bits of the encoding.
-    export let low = func(x: float64) -> uint32 {
-        return (x.to_bits() & 4294967295) as uint32;
-    };
+    export let low = func(x: float64) -> uint32 => (x.to_bits() & 4294967295) as uint32;
 
     // The float64 whose encoding has the given high and low words.
     export let from_words = func(hi: int, lo: uint32) -> float64 {
@@ -28,19 +26,14 @@ export let Words = module (
     };
 
     // x with its high word replaced.
-    export let with_high = func(x: float64, hi: int) -> float64 {
-        return from_words(hi, low(x));
-    };
+    export let with_high = func(x: float64, hi: int) -> float64 => from_words(hi, low(x));
 
     // x with its low word replaced.
-    export let with_low = func(x: float64, lo: uint32) -> float64 {
-        return float64.from_bits((x.to_bits() & 18446744069414584320) | (lo as uint64));
-    };
+    export let with_low = func(x: float64, lo: uint32) -> float64 =>
+        float64.from_bits((x.to_bits() & 18446744069414584320) | (lo as uint64));
 
     // |x| by clearing the sign bit, like fdlibm's fabs. Never rounds.
-    export let abs = func(x: float64) -> float64 {
-        return float64.from_bits(x.to_bits() & 9223372036854775807);
-    };
+    export let abs = func(x: float64) -> float64 => float64.from_bits(x.to_bits() & 9223372036854775807);
 
     // fdlibm's s_scalbn.c: x times 2^n, computed on the exponent field.
     export let scalbn = func(x: float64, n: int) -> float64 {
@@ -55,7 +48,7 @@ export let Words = module (
             if (lx == 0 && (hx & 2147483647) == 0) {
                 return x;
             }
-            x = x * two54;
+            x *= two54;
             hx = high(x);
             k = ((hx & 2146435072) >> 20) - 54;
             if (n < -50000) {
@@ -68,14 +61,14 @@ export let Words = module (
         if (n > 50000 || k + n > 2046) {
             return huge * copy_sign(huge, x);
         }
-        k = k + n;
+        k += n;
         if (k > 0) {
             return with_high(x, (hx & -2146435073) | (k << 20)); // 0x800fffff
         }
         if (k <= -54) {
             return tiny * copy_sign(tiny, x);
         }
-        k = k + 54;
+        k += 54;
         x = with_high(x, (hx & -2146435073) | (k << 20));
         return x * twom54;
     };

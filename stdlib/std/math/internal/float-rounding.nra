@@ -19,8 +19,8 @@ export let FloatRounding = module (
         // Normalize so that bit 63 is set; value = top * 2^exponent.
         let e = exponent as int64;
         while ((top >> 63) == 0) {
-            top = top << 1;
-            e = e - 1;
+            top <<= 1;
+            e--;
         }
         let binade = e + 63; // the value lies in [2^binade, 2^(binade + 1))
         if (binade > 1023) {
@@ -46,7 +46,7 @@ export let FloatRounding = module (
             rest = rest || (top & below) != 0;
         }
         if (round && (rest || (mantissa & 1) != 0)) {
-            mantissa = mantissa + 1;
+            mantissa++;
         }
         if (binade < -1022) {
             // Subnormal encoding; a carry into 2^52 is the smallest normal.

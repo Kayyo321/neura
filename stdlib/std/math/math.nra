@@ -64,43 +64,43 @@ export let Math = module (
         if (e == 0) { // subnormal: normalize the significand
             e = 1;
             while ((m & 4503599627370496) == 0) { // 0x10000000000000
-                m = m << 1;
-                e = e - 1;
+                m <<= 1;
+                e--;
             }
         } else {
-            m = m | 4503599627370496; // 0x10000000000000
+            m |= 4503599627370496; // 0x10000000000000
         }
-        e = e - 1023; // x = m * 2^(e - 52)
+        e -= 1023; // x = m * 2^(e - 52)
         if ((e & 1) != 0) {
-            m = m << 1;
-            e = e - 1;
+            m <<= 1;
+            e--;
         }
         // q = floor(sqrt(m * 2^54)), 54 bits; r = m * 2^54 - q^2.
         let q: uint64 = 0;
         let r: uint64 = 0;
-        for (let i = 0; i < 27; i = i + 1) {
+        for (let i = 0; i < 27; i++) {
             r = (r << 2) | ((m >> (52 - 2 * i)) & 3);
             let t = (q << 2) | 1;
             if (r >= t) {
-                r = r - t;
+                r -= t;
                 q = (q << 1) | 1;
             } else {
-                q = q << 1;
+                q <<= 1;
             }
         }
-        for (let i = 0; i < 27; i = i + 1) {
-            r = r << 2;
+        for (let i = 0; i < 27; i++) {
+            r <<= 2;
             let t = (q << 2) | 1;
             if (r >= t) {
-                r = r - t;
+                r -= t;
                 q = (q << 1) | 1;
             } else {
-                q = q << 1;
+                q <<= 1;
             }
         }
         let significand = q >> 1;
         if ((q & 1) != 0 && (r != 0 || (significand & 1) != 0)) {
-            significand = significand + 1;
+            significand++;
         }
         let exponent = (e / 2 + 1023) as uint64;
         return float64.from_bits((exponent << 52) + (significand - 4503599627370496)); // 0x10000000000000
@@ -117,7 +117,7 @@ export let Math = module (
         let g0 = float64.from_bits(4600105333671292343); // 0x3FD6DB6DB6DB6DB7 5/14 3.57142857142857150787e-01
         let hx = words.high(x);
         let negative = hx < 0;
-        hx = hx & 2147483647; // 0x7fffffff
+        hx &= 2147483647; // 0x7fffffff
         if (hx >= 2146435072) { // 0x7ff00000 cbrt(NaN,INF) is itself
             return x + x;
         }
@@ -129,7 +129,7 @@ export let Math = module (
         let t = 0.0;
         if (hx < 1048576) { // 0x00100000 subnormal number
             t = words.from_words(1129316352, 0); // 0x43500000 set t= 2**54
-            t = t * x;
+            t *= x;
             t = words.with_high(t, words.high(t) / 3 + B2);
         } else {
             t = words.from_words(hx / 3 + B1, 0);
@@ -137,7 +137,7 @@ export let Math = module (
         // new cbrt to 23 bits, may be implemented in single precision
         let r = t * t / x;
         let s = c0 + r * t;
-        t = t * (g0 + f0 / (s + e0 + d0 / s));
+        t *= (g0 + f0 / (s + e0 + d0 / s));
         // chopped to 20 bits and make it larger than cbrt(x)
         t = words.from_words(words.high(t) + 1, 0); // 0x00000001
         // one step newton iteration to 53 bits with error less than 0.667 ulps
@@ -145,7 +145,7 @@ export let Math = module (
         r = x / s;
         let w = t + t;
         r = (r - t) / (w + r); // r-s is exact
-        t = t + t * r;
+        t += t * r;
         // restore the sign bit
         if (negative) {
             return -t;
@@ -184,9 +184,9 @@ export let Math = module (
                 return w;
             }
             // scale a and b by 2**-600
-            ha = ha - 629145600; // 0x25800000
-            hb = hb - 629145600; // 0x25800000
-            k = k + 600;
+            ha -= 629145600; // 0x25800000
+            hb -= 629145600; // 0x25800000
+            k += 600;
             a = words.with_high(a, ha);
             b = words.with_high(b, hb);
         }
@@ -196,13 +196,13 @@ export let Math = module (
                     return a;
                 }
                 let t1 = words.from_words(2144337920, 0); // 0x7fd00000 t1=2^1022
-                b = b * t1;
-                a = a * t1;
-                k = k - 1022;
+                b *= t1;
+                a *= t1;
+                k -= 1022;
             } else { // scale a and b by 2^600
-                ha = ha + 629145600; // 0x25800000 a *= 2^600
-                hb = hb + 629145600; // 0x25800000 b *= 2^600
-                k = k - 600;
+                ha += 629145600; // 0x25800000 a *= 2^600
+                hb += 629145600; // 0x25800000 b *= 2^600
+                k -= 600;
                 a = words.with_high(a, ha);
                 b = words.with_high(b, hb);
             }
@@ -214,7 +214,7 @@ export let Math = module (
             let t2 = a - t1;
             w = sqrt(t1 * t1 - (b * (-b) - t2 * (t1 + a)));
         } else {
-            a = a + a;
+            a += a;
             let y1 = words.from_words(hb, 0);
             let y2 = b - y1;
             let t1 = words.from_words(ha + 1048576, 0); // 0x00100000
@@ -245,7 +245,7 @@ export let Math = module (
         let P5 = float64.from_bits(4496342204012209360); // 0x3E66376972BEA4D0 4.13813679705723846039e-08
         let hx = words.high(x);
         let xsb = (hx >> 31) & 1; // sign bit of x
-        hx = hx & 2147483647; // 0x7fffffff high word of |x|
+        hx &= 2147483647; // 0x7fffffff high word of |x|
         // filter out non-finite argument
         if (hx >= 1082535490) { // 0x40862E42 if |x|>=709.78...
             if (hx >= 2146435072) { // 0x7ff00000
@@ -323,7 +323,7 @@ export let Math = module (
         let Q5 = float64.from_bits(13730065378259354413); // 0xBE8AFDB76E09C32D -2.01099218183624371326e-07
         let hx = words.high(x);
         let negative = hx < 0; // sign bit of x
-        hx = hx & 2147483647; // 0x7fffffff high word of |x|
+        hx &= 2147483647; // 0x7fffffff high word of |x|
         // filter out huge and non-finite argument
         if (hx >= 1078159482) { // 0x4043687A if |x|>=56*ln2
             if (hx >= 1082535490) { // 0x40862E42 if |x|>=709.78...
@@ -386,7 +386,7 @@ export let Math = module (
             return x - (x * e - hxs);
         }
         e = (x * (e - c) - c);
-        e = e - hxs;
+        e -= hxs;
         if (k == -1) {
             return 0.5 * (x - e) - 0.5;
         }
@@ -409,7 +409,7 @@ export let Math = module (
         } else {
             t = words.from_words((1023 - k) << 20, 0); // 0x3ff 2^-k
             y = x - (e + t);
-            y = y + one;
+            y += one;
             y = words.with_high(y, words.high(y) + (k << 20)); // add k to y's exponent
         }
         return y;
@@ -438,18 +438,18 @@ export let Math = module (
             if (hx < 0) { // log(-#) = NaN
                 return (x - x) / zero;
             }
-            k = k - 54;
-            x = x * two54; // subnormal number, scale up x
+            k -= 54;
+            x *= two54; // subnormal number, scale up x
             hx = words.high(x);
         }
         if (hx >= 2146435072) { // 0x7ff00000
             return x + x;
         }
         k = k + (hx >> 20) - 1023;
-        hx = hx & 1048575; // 0x000fffff
+        hx &= 1048575; // 0x000fffff
         let i = (hx + 614244) & 1048576; // 0x95f64 0x100000
         x = words.with_high(x, hx | (i ^ 1072693248)); // 0x3ff00000 normalize x or x/2
-        k = k + (i >> 20);
+        k += (i >> 20);
         let f = x - 1.0;
         if ((1048575 & (2 + hx)) < 3) { // 0x000fffff |f| < 2**-20
             if (f == zero) {
@@ -474,7 +474,7 @@ export let Math = module (
         let j = 440401 - hx; // 0x6b851
         let t1 = w * (Lg2 + w * (Lg4 + w * Lg6));
         let t2 = z * (Lg1 + w * (Lg3 + w * (Lg5 + w * Lg7)));
-        i = i | j;
+        i |= j;
         let R = t2 + t1;
         if (i > 0) {
             let hfsq = 0.5 * f * f;
@@ -542,18 +542,18 @@ export let Math = module (
                 } else {
                     c = x - (u - 1.0);
                 }
-                c = c / u;
+                c /= u;
             } else {
                 u = x;
                 hu = words.high(u);
                 k = (hu >> 20) - 1023;
                 c = 0.0;
             }
-            hu = hu & 1048575; // 0x000fffff
+            hu &= 1048575; // 0x000fffff
             if (hu < 434334) { // 0x6a09e
                 u = words.with_high(u, hu | 1072693248); // 0x3ff00000 normalize u
             } else {
-                k = k + 1;
+                k++;
                 u = words.with_high(u, hu | 1071644672); // 0x3fe00000 normalize u/2
                 hu = (1048576 - hu) >> 2; // 0x00100000
             }
@@ -566,7 +566,7 @@ export let Math = module (
                 if (k == 0) {
                     return zero;
                 }
-                c = c + dk * ln2_lo;
+                c += dk * ln2_lo;
                 return dk * ln2_hi + c;
             }
             let R = hfsq * (1.0 - two_thirds * f);
@@ -600,8 +600,8 @@ export let Math = module (
             if (hx < 0) { // log(-#) = NaN
                 return (x - x) / zero;
             }
-            k = k - 54;
-            x = x * two54; // subnormal number, scale up x
+            k -= 54;
+            x *= two54; // subnormal number, scale up x
             hx = words.high(x);
         }
         if (hx >= 2146435072) { // 0x7ff00000
@@ -633,8 +633,8 @@ export let Math = module (
             if (hx < 0) { // log(-#) = NaN
                 return (x - x) / zero;
             }
-            k = k - 54;
-            x = x * two54; // subnormal number, scale up x
+            k -= 54;
+            x *= two54; // subnormal number, scale up x
             hx = words.high(x);
         }
         if (hx >= 2146435072) { // 0x7ff00000
@@ -825,8 +825,8 @@ export let Math = module (
             n = 0;
             // take care subnormal number
             if (ix < 1048576) { // 0x00100000
-                ax = ax * two53;
-                n = n - 53;
+                ax *= two53;
+                n -= 53;
                 ix = words.high(ax);
             }
             n = n + (ix >> 20) - 1023; // 0x3ff
@@ -840,8 +840,8 @@ export let Math = module (
                 k = 1;
             } else {
                 k = 0;
-                n = n + 1;
-                ix = ix - 1048576; // 0x00100000
+                n++;
+                ix -= 1048576; // 0x00100000
             }
             ax = words.with_high(ax, ix);
             let bp = 1.0; // bp[0]=1.0, bp[1]=1.5
@@ -864,7 +864,7 @@ export let Math = module (
             // compute log(ax)
             let s2 = ss * ss;
             let r = s2 * s2 * (L1 + s2 * (L2 + s2 * (L3 + s2 * (L4 + s2 * (L5 + s2 * L6)))));
-            r = r + s_l * (s_h + ss);
+            r += s_l * (s_h + ss);
             s2 = s_h * s_h;
             t_h = words.with_low(3.0 + s2 + r, 0);
             t_l = r - ((t_h - 3.0) - s2);
@@ -915,7 +915,7 @@ export let Math = module (
             if (j < 0) {
                 n = -n;
             }
-            p_h = p_h - t;
+            p_h -= t;
         }
         let t = words.with_low(p_l + p_h, 0);
         let u = t * lg2_h;
@@ -927,7 +927,7 @@ export let Math = module (
         let r = (z * t1) / (t1 - two) - (w + z * w);
         z = one - (r - z);
         j = words.high(z);
-        j = j + (n << 20);
+        j += (n << 20);
         if ((j >> 20) <= 0) { // subnormal output
             z = words.scalbn(z, n);
         } else {
