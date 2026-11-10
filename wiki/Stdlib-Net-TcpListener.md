@@ -17,15 +17,17 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **TcpListener** · [`export let TcpListener = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L20)
-- **TcpListener.TcpListener** · [`export let init = func(opened: socket.Handle, bound_port: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L26)
+- **TcpListener** · [`export let TcpListener = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L29)
+  Owns a listening socket and retains its port after close.
+- **TcpListener.TcpListener** · [`export let init = func(opened: socket.Handle, bound_port: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L38)
   Use bind; the handle comes from the library.
-- **TcpListener.TcpListener** · [`export let accept = func -> Result<TcpStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L32)
+- **TcpListener.TcpListener** · [`export let accept = func -> Result<TcpStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L44)
   Waits for the next connection.
-- **TcpListener.TcpListener** · [`export let local_port = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L44)
+- **TcpListener.TcpListener** · [`export let local_port = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L56)
   The port the listener is bound to; for a bind to port 0, the one the host chose. Still available after close.
-- **TcpListener.TcpListener** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L46)
-- **TcpListener** · [`export let bind = func(host: string, port: int) -> Result<TcpListener>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L61)
+- **TcpListener.TcpListener** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L60)
+  Releases the listener. Repeated calls succeed, and an initial close error still leaves it closed.
+- **TcpListener** · [`export let bind = func(host: string, port: int) -> Result<TcpListener>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L76)
   Listens on `host` (a name or an address; empty for every interface) and `port`; port 0 asks the host for a free port. A port outside 0 through 65,535 traps with "invalid argument: port".
 <!-- END SOURCE API -->
 

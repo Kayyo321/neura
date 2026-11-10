@@ -21,76 +21,83 @@ The following public declarations are taken from the module source; each links t
   Constant time.
 - **Strings** · [`export let scalar_count = func(s: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L21)
   The number of bytes that are not continuation bytes. Linear.
-- **Strings** · [`export let is_empty = func(s: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L34)
-- **Strings** · [`export let byte_at = func(s: string, offset: int) -> uint8`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L37)
+- **Strings** · [`export let is_empty = func(s: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L35)
+  Tests whether the string has zero bytes.
+- **Strings** · [`export let byte_at = func(s: string, offset: int) -> uint8`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L38)
   The byte at the offset; the built-in read traps outside the string.
-- **Strings** · [`export let scalar_at = func(s: string, offset: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L42)
+- **Strings** · [`export let scalar_at = func(s: string, offset: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L44)
   The scalar value of the character starting at the offset. An offset outside the string is a built-in bounds trap; a continuation byte traps with "invalid argument: offset is not a character boundary".
-- **Strings** · [`export let is_boundary = func(s: string, offset: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L51)
+- **Strings** · [`export let is_boundary = func(s: string, offset: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L53)
   True for 0, for the byte length, and for every offset whose byte is not a continuation byte; false outside 0 through the byte length.
-- **Strings** · [`export let scalars = func(s: string) -> uint32[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L59)
+- **Strings** · [`export let scalars = func(s: string) -> uint32[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L61)
   The scalar values in order.
-- **Strings** · [`export let scalar_offsets = func(s: string) -> [int, uint32][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L72)
+- **Strings** · [`export let scalar_offsets = func(s: string) -> [int, uint32][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L74)
   Each character's starting offset with its scalar value.
-- **Strings** · [`export let slice = func(s: string, start: int, end: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L85)
+- **Strings** · [`export let slice = func(s: string, start: int, end: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L87)
   The built-in slice: both ends on boundaries and start not above end.
-- **Strings** · [`export let slice_from = func(s: string, start: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L87)
-- **Strings** · [`export let equals = func(a: string, b: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L90)
+- **Strings** · [`export let slice_from = func(s: string, start: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L90)
+  Returns the suffix beginning at a UTF-8 byte boundary.
+- **Strings** · [`export let equals = func(a: string, b: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L93)
   Same bytes (Stdlib.md section 5.2).
-- **Strings** · [`export let hash = func(s: string) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L93)
+- **Strings** · [`export let hash = func(s: string) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L96)
   Start with 0; for each byte, 31 times the hash plus the byte, wrapping.
-- **Strings** · [`export let compare = func(a: string, b: string) -> ordering.Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L97)
+- **Strings** · [`export let compare = func(a: string, b: string) -> ordering.Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L100)
   Byte-wise lexicographic order; a proper prefix sorts first. This is also the order of the scalar values.
-- **Strings** · [`export let starts_with = func(s: string, prefix: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L125)
-- **Strings** · [`export let ends_with = func(s: string, suffix: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L127)
-- **Strings** · [`export let contains = func(s: string, needle: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L135)
-- **Strings** · [`export let index_of = func(s: string, needle: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L139)
+- **Strings** · [`export let starts_with = func(s: string, prefix: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L129)
+  Tests whether the string starts with the literal prefix.
+- **Strings** · [`export let ends_with = func(s: string, suffix: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L132)
+  Tests whether the string ends with the literal suffix.
+- **Strings** · [`export let contains = func(s: string, needle: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L141)
+  Tests whether the literal needle occurs anywhere in the string.
+- **Strings** · [`export let index_of = func(s: string, needle: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L144)
   The offset of the first occurrence, or -1. An empty needle matches at 0.
-- **Strings** · [`export let index_of_from = func(s: string, needle: string, from: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L144)
+- **Strings** · [`export let index_of_from = func(s: string, needle: string, from: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L148)
   The offset of the first occurrence at or after `from`, or -1. An empty needle matches at `from`. `from` must be a boundary from 0 through the byte length.
-- **Strings** · [`export let last_index_of = func(s: string, needle: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L151)
+- **Strings** · [`export let last_index_of = func(s: string, needle: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L154)
   The offset of the last occurrence, or -1. An empty needle matches at the byte length.
-- **Strings** · [`export let split = func(s: string, separator: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L171)
+- **Strings** · [`export let split = func(s: string, separator: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L174)
   Every piece between non-overlapping occurrences of the separator, left to right. Empty pieces are kept; the empty string gives one piece. An empty separator traps with "invalid argument: empty separator".
-- **Strings** · [`export let split_limit = func(s: string, separator: string, limit: int) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L176)
+- **Strings** · [`export let split_limit = func(s: string, separator: string, limit: int) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L179)
   As split, with at most `limit` pieces; the last piece holds the rest. A limit below 1 traps with "invalid argument: limit below 1".
-- **Strings** · [`export let lines = func(s: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L186)
+- **Strings** · [`export let lines = func(s: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L188)
   Splits at LF. A CR immediately before an LF is removed, and the empty piece after a final LF is dropped. The empty string gives one empty line, as split does.
-- **Strings** · [`export let join = func(parts: string[list], separator: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L209)
+- **Strings** · [`export let join = func(parts: string[list], separator: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L211)
   The parts with the separator between each pair.
-- **Strings** · [`export let repeat = func(s: string, count: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L233)
+- **Strings** · [`export let repeat = func(s: string, count: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L234)
   `count` copies of the string. A negative count traps with "invalid argument: negative count".
 - **Strings** · [`export let trim = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L254)
   Removes space, tab, LF, vertical tab, form feed, and CR from both ends.
-- **Strings** · [`export let trim_start = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L263)
-- **Strings** · [`export let trim_end = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L272)
-- **Strings** · [`export let strip_prefix = func(s: string, prefix: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L275)
+- **Strings** · [`export let trim_start = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L264)
+  Removes ASCII space and bytes 9 through 13 from the start.
+- **Strings** · [`export let trim_end = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L274)
+  Removes ASCII space and bytes 9 through 13 from the end.
+- **Strings** · [`export let strip_prefix = func(s: string, prefix: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L277)
   The rest of the string when it starts with the prefix.
-- **Strings** · [`export let strip_suffix = func(s: string, suffix: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L283)
+- **Strings** · [`export let strip_suffix = func(s: string, suffix: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L285)
   The start of the string when it ends with the suffix.
-- **Strings** · [`export let replace = func(s: string, target: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L293)
+- **Strings** · [`export let replace = func(s: string, target: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L295)
   Replaces every non-overlapping occurrence, left to right. An empty target traps with "invalid argument: empty target".
-- **Strings** · [`export let replace_first = func(s: string, target: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L297)
+- **Strings** · [`export let replace_first = func(s: string, target: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L299)
   Replaces the first occurrence. An empty target traps as in replace.
-- **Strings** · [`export let to_ascii_upper = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L301)
+- **Strings** · [`export let to_ascii_upper = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L303)
   a through z become A through Z; every other byte is unchanged.
-- **Strings** · [`export let to_ascii_lower = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L304)
+- **Strings** · [`export let to_ascii_lower = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L306)
   A through Z become a through z; every other byte is unchanged.
-- **Strings** · [`export let equals_ignore_ascii_case = func(a: string, b: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L307)
+- **Strings** · [`export let equals_ignore_ascii_case = func(a: string, b: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L309)
   Equal after mapping A through Z to a through z in both strings.
-- **Strings** · [`export let pad_start = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L330)
+- **Strings** · [`export let pad_start = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L331)
   Copies of `pad` before the string until it has `width` scalar values. `pad` must be exactly one scalar value; otherwise the call traps with "invalid argument: pad is not one scalar value".
-- **Strings** · [`export let pad_end = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L342)
+- **Strings** · [`export let pad_end = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L343)
   Copies of `pad` after the string, with the rules of pad_start.
-- **Strings** · [`export let reverse = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L354)
+- **Strings** · [`export let reverse = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L355)
   The scalar values in reverse order.
-- **Strings** · [`export let to_bytes = func(s: string) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L370)
+- **Strings** · [`export let to_bytes = func(s: string) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L371)
   A copy of the UTF-8 bytes.
-- **Strings** · [`export let from_bytes = func(bytes: uint8[list]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L380)
+- **Strings** · [`export let from_bytes = func(bytes: uint8[list]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L381)
   The text the bytes encode, or an Encoding error whose offset is the start of the first ill-formed sequence (the length of the longest valid prefix). Its message is "invalid start byte", "invalid continuation byte", or "unexpected end of data".
-- **Strings** · [`export let from_bytes_lossy = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L402)
+- **Strings** · [`export let from_bytes_lossy = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L403)
   The text the bytes encode, with each maximal ill-formed subsequence (Unicode's "maximal subpart" practice) replaced by one U+FFFD.
-- **Strings** · [`export let from_scalars = func(values: uint32[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L430)
+- **Strings** · [`export let from_scalars = func(values: uint32[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L431)
   The text of the scalar values. A surrogate or a value above 0x10FFFF traps with "invalid argument: not a Unicode scalar value".
 <!-- END SOURCE API -->
 

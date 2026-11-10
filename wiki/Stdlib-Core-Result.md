@@ -17,23 +17,32 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Result** · [`export let Result = enum<T> (Ok(T), Err(Error))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L8)
-- **Result** · [`export let is_ok = func<T>(r: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L10)
-- **Result** · [`export let is_err = func<T>(r: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L15)
-- **Result** · [`export let value_or = func<T>(r: Result<T>, fallback: T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L20)
-- **Result** · [`export let expect = func<T>(r: Result<T>, detail: string) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L27)
+- **Result** · [`export let Result = enum<T> (Ok(T), Err(Error))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L10)
+  Represents a successful payload (Ok) or an expected failure (Err).
+- **Result** · [`export let is_ok = func<T>(r: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L13)
+  Reports whether the result holds a success payload.
+- **Result** · [`export let is_err = func<T>(r: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L19)
+  Reports whether the result holds an error.
+- **Result** · [`export let value_or = func<T>(r: Result<T>, fallback: T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L25)
+  Returns the success payload or the already-evaluated fallback.
+- **Result** · [`export let expect = func<T>(r: Result<T>, detail: string) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L31)
   The value, or a trap whose message is the detail, ": ", and the error's message.
-- **Result** · [`export let to_optional = func<T>(r: Result<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L38)
-- **Result** · [`export let with_context = func<T>(r: Result<T>, message: string) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L44)
+- **Result** · [`export let to_optional = func<T>(r: Result<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L43)
+  Returns Some for success and discards an error by returning None.
+- **Result** · [`export let with_context = func<T>(r: Result<T>, message: string) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L49)
   Wraps an Err in a Context error; returns an Ok unchanged.
-- **Result** · [`export let map = func<T, U>(r: Result<T>, f: func(T) -> U) -> Result<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L49)
-- **Result** · [`export let and_then = func<T, U>(r: Result<T>, f: func(T) -> Result<U>) -> Result<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L54)
-- **Result** · [`export let map_error = func<T>(r: Result<T>, f: func(Error) -> Error) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L59)
-- **Result** · [`export let equals = func<T>(a: Result<T>, b: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L65)
+- **Result** · [`export let map = func<T, U>(r: Result<T>, f: func(T) -> U) -> Result<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L55)
+  Transforms only a successful payload, preserving an error unchanged.
+- **Result** · [`export let and_then = func<T, U>(r: Result<T>, f: func(T) -> Result<U>) -> Result<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L61)
+  Calls the function on success and returns its result, or propagates the original error.
+- **Result** · [`export let map_error = func<T>(r: Result<T>, f: func(Error) -> Error) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L67)
+  Transforms only the error payload, preserving success unchanged.
+- **Result** · [`export let equals = func<T>(a: Result<T>, b: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L73)
   Both Ok with equal values, or both Err with structurally equal errors.
-- **Result** · [`export let hash = func<T>(r: Result<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L84)
+- **Result** · [`export let hash = func<T>(r: Result<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L91)
   Hash.combine(1, the value's hash) for Ok and Hash.combine(2, the error's hash) for Err.
-- **Result** · [`export let to_string = func<T>(r: Result<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L89)
+- **Result** · [`export let to_string = func<T>(r: Result<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L97)
+  Formats the success value or the error with its variant name.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

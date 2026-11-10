@@ -17,20 +17,25 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **ZoneOffset** · [`export let ZoneOffset = class implements Comparable<ZoneOffset>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L10)
-- **ZoneOffset.ZoneOffset** · [`export let init = func(total: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L13)
-- **ZoneOffset.ZoneOffset** · [`export let total_seconds = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L18)
+- **ZoneOffset** · [`export let ZoneOffset = class implements Comparable<ZoneOffset>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L12)
+  An immutable fixed offset from UTC with whole-minute resolution.
+- **ZoneOffset.ZoneOffset** · [`export let init = func(total: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L17)
+  Stores the supplied offset in seconds.
+- **ZoneOffset.ZoneOffset** · [`export let total_seconds = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L22)
   -64,800 through 64,800, a multiple of 60.
-- **ZoneOffset.ZoneOffset** · [`export let compare_to = func(other: ZoneOffset) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L21)
+- **ZoneOffset.ZoneOffset** · [`export let compare_to = func(other: ZoneOffset) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L25)
   By total seconds, west before east.
-- **ZoneOffset.ZoneOffset** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L31)
-- **ZoneOffset.ZoneOffset** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L35)
-- **ZoneOffset.ZoneOffset** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L38)
+- **ZoneOffset.ZoneOffset** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L36)
+  Tests equality of offsets in seconds.
+- **ZoneOffset.ZoneOffset** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L41)
+  Hashes the offset in seconds.
+- **ZoneOffset.ZoneOffset** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L44)
   Z for zero; otherwise +HH:MM or -HH:MM.
-- **ZoneOffset** · [`export const Utc: ZoneOffset = new ZoneOffset(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L41)
-- **ZoneOffset** · [`export let of_hours_minutes = func(hours: int, minutes: int) -> ZoneOffset`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L46)
+- **ZoneOffset** · [`export const Utc: ZoneOffset = new ZoneOffset(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L48)
+  The zero offset from UTC.
+- **ZoneOffset** · [`export let of_hours_minutes = func(hours: int, minutes: int) -> ZoneOffset`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L52)
   Hours -18 through 18 and minutes -59 through 59 with the same sign (either may be zero), at most 18:00 from zero. Anything else traps with "invalid argument: invalid zone offset".
-- **ZoneOffset** · [`export let parse = func(text: string) -> result.Result<ZoneOffset>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L62)
+- **ZoneOffset** · [`export let parse = func(text: string) -> result.Result<ZoneOffset>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L68)
   Z, or a sign and HH:MM no further than 18:00 from zero. -00:00 and +00:00 are Utc. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an hour above 18 or a minute above 59, or at the sign when the total exceeds 18:00.
 <!-- END SOURCE API -->
 

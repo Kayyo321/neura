@@ -4,20 +4,24 @@ let hashing = import:Std.Core.Hash;
 let.promote _ = import:Std.Core.Ordering;
 let result = import:Std.Core.Result;
 
-// A fixed offset from UTC in whole minutes, -18:00 through +18:00 (Stdlib.md
-// section 12.1). There are no named zones and no daylight-saving rules.
+/// @brief A fixed offset from UTC in whole minutes, -18:00 through +18:00 (Stdlib.md section 12.1). There are
+/// no named zones and no daylight-saving rules.
+/// @see [Std.Time.ZoneOffset](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-ZoneOffset)
 export let ZoneOffset = module (
+    /// @brief An immutable fixed offset from UTC with whole-minute resolution.
     export let ZoneOffset = class implements Comparable<ZoneOffset> (
+        /// @brief The signed offset in seconds east of UTC.
         let seconds: int;
 
+        /// @brief Stores the supplied offset in seconds.
         export let init = func(total: int) {
             seconds = total;
         };
 
-        // -64,800 through 64,800, a multiple of 60.
+        /// @brief -64,800 through 64,800, a multiple of 60.
         export let total_seconds = func -> int => seconds;
 
-        // By total seconds, west before east.
+        /// @brief By total seconds, west before east.
         export let compare_to = func(other: ZoneOffset) -> Ordering {
             if (seconds < other.seconds) {
                 return Ordering.Less;
@@ -28,21 +32,23 @@ export let ZoneOffset = module (
             return Ordering.Equal;
         };
 
+        /// @brief Tests equality of offsets in seconds.
         export let.override equals = func(other: class) -> bool {
             return other is ZoneOffset && seconds == (other as ZoneOffset).seconds;
         };
 
+        /// @brief Hashes the offset in seconds.
         export let.override hash_code = func -> uint32 => hashing.combine(17, seconds.hash_code());
 
-        // Z for zero; otherwise +HH:MM or -HH:MM.
+        /// @brief Z for zero; otherwise +HH:MM or -HH:MM.
         export let.override to_string = func -> string => calendar.offset_text(seconds);
     );
 
+    /// @brief The zero offset from UTC.
     export const Utc: ZoneOffset = new ZoneOffset(0);
 
-    // Hours -18 through 18 and minutes -59 through 59 with the same sign
-    // (either may be zero), at most 18:00 from zero. Anything else traps
-    // with "invalid argument: invalid zone offset".
+    /// @brief Hours -18 through 18 and minutes -59 through 59 with the same sign (either may be zero), at most
+    /// 18:00 from zero. Anything else traps with "invalid argument: invalid zone offset".
     export let of_hours_minutes = func(hours: int, minutes: int) -> ZoneOffset {
         if (hours < -18 || hours > 18 || minutes < -59 || minutes > 59 || (hours > 0 && minutes < 0) ||
             (hours < 0 && minutes > 0)) {
@@ -55,10 +61,10 @@ export let ZoneOffset = module (
         return new ZoneOffset(total);
     };
 
-    // Z, or a sign and HH:MM no further than 18:00 from zero. -00:00 and
-    // +00:00 are Utc. Errors: Empty; InvalidCharacter or UnexpectedEnd at
-    // the first byte that does not fit; OutOfRange at an hour above 18 or a
-    // minute above 59, or at the sign when the total exceeds 18:00.
+    /// @brief Z, or a sign and HH:MM no further than 18:00 from zero. -00:00 and +00:00 are Utc.
+    ///
+    /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an
+    /// hour above 18 or a minute above 59, or at the sign when the total exceeds 18:00.
     export let parse = func(text: string) -> result.Result<ZoneOffset> {
         let scan = new calendar.Scanner(text);
         let total = calendar.read_offset(scan);

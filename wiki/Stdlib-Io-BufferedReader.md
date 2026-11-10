@@ -17,20 +17,23 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **BufferedReader** · [`export const DefaultCapacity: int = 8192`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L9)
-- **BufferedReader** · [`export const MinimumCapacity: int = 16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L10)
-- **BufferedReader** · [`export let BufferedReader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L12)
-- **BufferedReader.BufferedReader** · [`export let init = func(input: func(int) -> Result<uint8[list]>, size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L19)
+- **BufferedReader** · [`export const DefaultCapacity: int = 8192`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L12)
+  The default buffer capacity in bytes.
+- **BufferedReader** · [`export const MinimumCapacity: int = 16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L14)
+  The smallest supported buffer capacity in bytes.
+- **BufferedReader** · [`export let BufferedReader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L17)
+  Wraps a byte source and retains unread bytes between reads.
+- **BufferedReader.BufferedReader** · [`export let init = func(input: func(int) -> Result<uint8[list]>, size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L28)
   Use create or with_capacity.
-- **BufferedReader.BufferedReader** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L29)
+- **BufferedReader.BufferedReader** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L37)
   Up to `max` bytes, at least one unless the source has ended. A maximum below 1 traps.
-- **BufferedReader.BufferedReader** · [`export let read_exact = func(count: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L59)
+- **BufferedReader.BufferedReader** · [`export let read_exact = func(count: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L67)
   Exactly `count` bytes; the source ending first fails with UnexpectedEnd. A negative count traps.
-- **BufferedReader.BufferedReader** · [`export let read_all = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L81)
+- **BufferedReader.BufferedReader** · [`export let read_all = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L89)
   Every remaining byte.
-- **BufferedReader** · [`export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L103)
+- **BufferedReader** · [`export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L112)
   A reader holding up to 8,192 bytes.
-- **BufferedReader** · [`export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L107)
+- **BufferedReader** · [`export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L116)
   A capacity below 16 traps with "invalid argument: capacity below 16".
 <!-- END SOURCE API -->
 

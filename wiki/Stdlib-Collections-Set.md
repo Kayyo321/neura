@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Set** · [`export let Set = interface<T>:Collection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/set.nra#L6)
+- **Set** · [`export let Set = interface<T>:Collection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/set.nra#L8)
+  Read-only access to a collection of distinct elements.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

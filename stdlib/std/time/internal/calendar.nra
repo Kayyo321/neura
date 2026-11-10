@@ -1,38 +1,50 @@
 let error = import:Std.Core.Error;
 let int64s = import:Std.Core.Int64;
 
-// Shared calendar arithmetic, text, and parsing for Std.Time (Stdlib.md
-// section 12.1). Dates use the proleptic Gregorian calendar; day counts are
-// days since 1970-01-01. Library files only.
-//
-// Cost note: an int64 division by a constant compiles to a circuit of about
-// 6,000 neurons and an int32 one to about 1,200. Each conversion therefore
-// splits off whole 400-year cycles with one call to the shared Int64
-// floor_div or floor_mod, whose circuits exist once per image, and does the
-// arithmetic within a cycle in int32, with shifts for division by 4.
+/// @brief Shared calendar arithmetic, text, and parsing for Std.Time (Stdlib.md section 12.1).
+///
+/// Dates use the proleptic Gregorian calendar; day counts are days since 1970-01-01. Library files only.
+///
+/// Cost note: an int64 division by a constant compiles to a circuit of about 6,000 neurons and an int32 one to
+/// about 1,200. Each conversion therefore splits off whole 400-year cycles with one call to the shared Int64
+/// floor_div or floor_mod, whose circuits exist once per image, and does the arithmetic within a cycle in
+/// int32, with shifts for division by 4.
 export let Calendar = module (
+    /// @brief The earliest supported local calendar year.
     export const MinYear: int64 = -999999;
+    /// @brief The latest supported local calendar year.
     export const MaxYear: int64 = 999999;
-    // to_epoch_day of -999999-01-01 and of 999999-12-31.
+    /// @brief to_epoch_day of -999999-01-01 and of 999999-12-31.
     export const MinEpochDay: int64 = -365961662;
+    /// @brief The epoch day of the last supported local date.
     export const MaxEpochDay: int64 = 364522971;
+    /// @brief Nanoseconds per second.
     export const NanosPerSecond: int64 = 1000000000;
+    /// @brief Nanoseconds per 60-second minute.
     export const NanosPerMinute: int64 = 60000000000;
+    /// @brief Nanoseconds per 60-minute hour.
     export const NanosPerHour: int64 = 3600000000000;
+    /// @brief Nanoseconds per 24-hour day.
     export const NanosPerDay: int64 = 86400000000000;
+    /// @brief Seconds per 24-hour day.
     export const SecondsPerDay: int64 = 86400;
+    /// @brief The maximum UTC offset magnitude in seconds.
     export const MaxOffsetSeconds: int = 64800;
 
+    /// @brief Divides with rounding toward negative infinity.
     export let floor_div = func(a: int64, b: int64) -> int64 => int64s.floor_div(a, b);
 
+    /// @brief Returns the remainder associated with division rounded toward negative infinity.
     export let floor_mod = func(a: int64, b: int64) -> int64 => int64s.floor_mod(a, b);
 
+    /// @brief Tests the Gregorian leap-year rule, including century exceptions.
     export let is_leap = func(year: int64) -> bool {
         // The rule repeats every 400 years, and 4 and 100 divide 400.
         let in_cycle = floor_mod(year, 400) as int;
         return (in_cycle & 3) == 0 && (in_cycle % 100 != 0 || in_cycle == 0);
     };
 
+    /// @brief Returns the number of days in the selected Gregorian month.
     export let month_length = func(year: int64, month: int) -> int {
         if (month == 2) {
             if (is_leap(year)) {
@@ -46,10 +58,10 @@ export let Calendar = module (
         return 31;
     };
 
-    // Days since 1970-01-01. The year is shifted to start in March, so the
-    // leap day ends it; the shifted year splits into a 400-year cycle of
-    // 146,097 days and a year of the cycle, with floor division so that
-    // negative years work.
+    /// @brief Days since 1970-01-01.
+    ///
+    /// The year is shifted to start in March, so the leap day ends it; the shifted year splits into a 400-year
+    /// cycle of 146,097 days and a year of the cycle, with floor division so that negative years work.
     export let epoch_day_of = func(year: int64, month: int, day: int) -> int64 {
         let shifted = year;
         let march_month = month - 3;
@@ -65,7 +77,7 @@ export let Calendar = module (
         return cycle * 146097 + (day_of_cycle as int64) - 719468;
     };
 
-    // The inverse of epoch_day_of: [year, month, day].
+    /// @brief The inverse of epoch_day_of: [year, month, day].
     export let civil_of = func(epoch_day: int64) -> [int64, int, int] {
         let shifted_day = epoch_day + 719468;
         let cycle = floor_div(shifted_day, 146097);
@@ -86,7 +98,7 @@ export let Calendar = module (
         return [year, month, day];
     };
 
-    // Decimal digits of a non-negative value, left-padded with zeros.
+    /// @brief Decimal digits of a non-negative value, left-padded with zeros.
     export let padded = func(value: int64, width: int) -> string {
         let text = value.to_string();
         let count = text.byte_length;
@@ -97,8 +109,7 @@ export let Calendar = module (
         return text;
     };
 
-    // Four digits for 0000 through 9999; otherwise a sign and at least four
-    // digits.
+    /// @brief Four digits for 0000 through 9999; otherwise a sign and at least four digits.
     export let year_text = func(year: int64) -> string {
         if (year < 0) {
             return "-" + padded(-year, 4);
@@ -109,12 +120,12 @@ export let Calendar = module (
         return padded(year, 4);
     };
 
+    /// @brief Formats a Gregorian date with a signed extended year when required.
     export let date_text = func(year: int64, month: int, day: int) -> string {
         return year_text(year) + "-" + padded(month as int64, 2) + "-" + padded(day as int64, 2);
     };
 
-    // Empty for zero; otherwise a point and the shortest of 3, 6, or 9
-    // digits that is exact.
+    /// @brief Empty for zero; otherwise a point and the shortest of 3, 6, or 9 digits that is exact.
     export let fraction_text = func(nanos: int) -> string {
         if (nanos == 0) {
             return "";
@@ -128,7 +139,7 @@ export let Calendar = module (
         return "." + padded(nanos as int64, 9);
     };
 
-    // HH:MM:SS and the fraction of fraction_text.
+    /// @brief HH:MM:SS and the fraction of fraction_text.
     export let time_text = func(nano_of_day: int64) -> string {
         let whole = floor_div(nano_of_day, NanosPerSecond);
         let nanos = (nano_of_day - whole * NanosPerSecond) as int;
@@ -137,7 +148,7 @@ export let Calendar = module (
             padded((seconds % 60) as int64, 2) + fraction_text(nanos);
     };
 
-    // Z for zero; otherwise a sign and HH:MM. Offsets are whole minutes.
+    /// @brief Z for zero; otherwise a sign and HH:MM. Offsets are whole minutes.
     export let offset_text = func(total_seconds: int) -> string {
         if (total_seconds == 0) {
             return "Z";
@@ -151,17 +162,25 @@ export let Calendar = module (
         return sign + padded(magnitude / 3600, 2) + ":" + padded(magnitude / 60 % 60, 2);
     };
 
-    // A cursor over text for the ISO parsers. The first failure is kept and
-    // later reads do nothing, so a parser reads straight through and checks
-    // ok() at the end. Offsets are byte offsets (Stdlib.md section 6.3).
+    /// @brief A cursor over text for the ISO parsers.
+    ///
+    /// The first failure is kept and later reads do nothing, so a parser reads straight through and checks ok()
+    /// at the end. Offsets are byte offsets (Stdlib.md section 6.3).
     export let Scanner = class (
+        /// @brief The UTF-8 text being parsed.
         let source: string;
+        /// @brief The byte offset of the next input byte.
         let cursor: int = 0;
+        /// @brief Whether a failure has been recorded.
         let failed: bool = false;
+        /// @brief The first parse error's category.
         let failure_kind: error.ParseErrorKind = error.ParseErrorKind.Empty;
+        /// @brief The first parse error's UTF-8 byte offset.
         let failure_offset: int = 0;
+        /// @brief The first parse error's diagnostic message.
         let failure_message: string = "";
 
+        /// @brief Initializes the scanner at the start of the supplied text.
         export let init = func(text: string) {
             source = text;
             if (text.byte_length == 0) {
@@ -169,13 +188,16 @@ export let Calendar = module (
             }
         };
 
+        /// @brief Reports whether scanning has yet to record a failure.
         export let ok = func -> bool => !failed;
 
+        /// @brief Returns the scanner's next byte offset.
         export let position = func -> int => cursor;
 
+        /// @brief Tests whether the scanner is at the end of the text.
         export let at_end = func -> bool => cursor >= source.byte_length;
 
-        // The byte at the cursor, or -1 at the end or after a failure.
+        /// @brief The byte at the cursor, or -1 at the end or after a failure.
         export let peek = func -> int {
             if (failed || cursor >= source.byte_length) {
                 return -1;
@@ -183,12 +205,13 @@ export let Calendar = module (
             return source.byte_at(cursor) as int;
         };
 
+        /// @brief Tests whether the next byte is an ASCII decimal digit.
         export let peek_digit = func -> bool {
             let b = peek();
             return b >= 48 && b <= 57;
         };
 
-        // Keeps the first failure only.
+        /// @brief Keeps the first failure only.
         export let fail = func(kind: error.ParseErrorKind, offset: int, message: string) {
             if (!failed) {
                 failed = true;
@@ -198,8 +221,8 @@ export let Calendar = module (
             }
         };
 
-        // The byte at the cursor does not fit: UnexpectedEnd at the text's
-        // length at the end, otherwise InvalidCharacter at the cursor.
+        /// @brief The byte at the cursor does not fit: UnexpectedEnd at the text's length at the end, otherwise
+        /// InvalidCharacter at the cursor.
         export let unexpected = func(expected: string) {
             if (cursor >= source.byte_length) {
                 fail(error.ParseErrorKind.UnexpectedEnd, source.byte_length, "unexpected end of input, expected " + expected);
@@ -208,11 +231,12 @@ export let Calendar = module (
             }
         };
 
+        /// @brief Records an out-of-range component at its first byte.
         export let out_of_range = func(offset: int, message: string) {
             fail(error.ParseErrorKind.OutOfRange, offset, message);
         };
 
-        // Consumes the byte when it is `b`.
+        /// @brief Consumes the byte when it is `b`.
         export let accept = func(b: int) -> bool {
             if (peek() == b) {
                 cursor++;
@@ -221,13 +245,14 @@ export let Calendar = module (
             return false;
         };
 
+        /// @brief Consumes an expected byte or records the first mismatch.
         export let expect = func(b: int, expected: string) {
             if (!accept(b)) {
                 unexpected(expected);
             }
         };
 
-        // Exactly `count` decimal digits.
+        /// @brief Exactly `count` decimal digits.
         export let fixed_digits = func(count: int) -> int64 {
             let value: int64 = 0;
             for (let i = 0; i < count; i = i + 1) {
@@ -241,9 +266,8 @@ export let Calendar = module (
             return value;
         };
 
-        // One or more digits as [value, digit count]. A value of 10^18 or
-        // more stops growing (it stays at least 10^18), so callers can
-        // report OutOfRange without overflow.
+        /// @brief One or more digits as [value, digit count]. A value of 10^18 or more stops growing (it stays
+        /// at least 10^18), so callers can report OutOfRange without overflow.
         export let digits = func -> [uint64, int] {
             let value: uint64 = 0;
             let count = 0;
@@ -260,7 +284,7 @@ export let Calendar = module (
             return [value, count];
         };
 
-        // After a point: one through nine digits, scaled to nanoseconds.
+        /// @brief After a point: one through nine digits, scaled to nanoseconds.
         export let fraction = func -> int {
             let value = 0;
             let count = 0;
@@ -280,20 +304,20 @@ export let Calendar = module (
             return value;
         };
 
-        // Any byte left over is an InvalidCharacter.
+        /// @brief Any byte left over is an InvalidCharacter.
         export let finish = func {
             if (!failed && cursor < source.byte_length) {
                 fail(error.ParseErrorKind.InvalidCharacter, cursor, "unexpected character");
             }
         };
 
+        /// @brief Builds a parse error from the recorded failure.
         export let failure = func -> error.Error {
             return error.Error.Parse { kind: failure_kind, offset: failure_offset, message: failure_message };
         };
     );
 
-    // A year: exactly four digits, or a sign and at least four digits;
-    // -999999 through 999999.
+    /// @brief A year: exactly four digits, or a sign and at least four digits; -999999 through 999999.
     export let read_year = func(scan: Scanner) -> int64 {
         let start = scan.position();
         let negative = false;
@@ -325,7 +349,7 @@ export let Calendar = module (
         return value as int64;
     };
 
-    // Two digits from `low` through `high`; OutOfRange at the field.
+    /// @brief Two digits from `low` through `high`; OutOfRange at the field.
     export let read_field = func(scan: Scanner, low: int64, high: int64, name: string) -> int {
         let start = scan.position();
         let value = scan.fixed_digits(2);
@@ -335,7 +359,7 @@ export let Calendar = module (
         return value as int;
     };
 
-    // YYYY-MM-DD as [year, month, day].
+    /// @brief YYYY-MM-DD as [year, month, day].
     export let read_date = func(scan: Scanner) -> [int64, int, int] {
         let year = read_year(scan);
         scan.expect(45, "'-'");
@@ -349,8 +373,7 @@ export let Calendar = module (
         return [year, month, day];
     };
 
-    // HH:MM:SS with an optional fraction of one through nine digits, as
-    // nanoseconds of the day.
+    /// @brief HH:MM:SS with an optional fraction of one through nine digits, as nanoseconds of the day.
     export let read_time = func(scan: Scanner) -> int64 {
         let hour = read_field(scan, 0, 23, "hour");
         scan.expect(58, "':'");
@@ -367,7 +390,7 @@ export let Calendar = module (
         return ((hour * 3600 + minute * 60 + second) as int64) * NanosPerSecond + (nanos as int64);
     };
 
-    // Z, or a sign and HH:MM no further than 18:00 from zero, as seconds.
+    /// @brief Z, or a sign and HH:MM no further than 18:00 from zero, as seconds.
     export let read_offset = func(scan: Scanner) -> int {
         if (scan.accept(90)) {
             return 0;

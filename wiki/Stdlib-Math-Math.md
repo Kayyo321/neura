@@ -17,55 +17,61 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Math** · [`export const Pi: float64 = float64.from_bits(4614256656552045848)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L37)
-- **Math** · [`export const Tau: float64 = float64.from_bits(4618760256179416344)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L38)
-- **Math** · [`export const E: float64 = float64.from_bits(4613303445314885481)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L39)
-- **Math** · [`export const Ln2: float64 = float64.from_bits(4604418534313441775)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L40)
-- **Math** · [`export const Ln10: float64 = float64.from_bits(4612367379483415830)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L41)
-- **Math** · [`export const Sqrt2: float64 = float64.from_bits(4609047870845172685)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L42)
-- **Math** · [`export let sqrt = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L48)
+- **Math** · [`export const Pi: float64 = float64.from_bits(4614256656552045848)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L40)
+  The nearest float64 approximation to pi.
+- **Math** · [`export const Tau: float64 = float64.from_bits(4618760256179416344)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L42)
+  The nearest float64 approximation to twice pi.
+- **Math** · [`export const E: float64 = float64.from_bits(4613303445314885481)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L44)
+  The nearest float64 approximation to Euler's number.
+- **Math** · [`export const Ln2: float64 = float64.from_bits(4604418534313441775)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L46)
+  The nearest float64 approximation to the natural logarithm of two.
+- **Math** · [`export const Ln10: float64 = float64.from_bits(4612367379483415830)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L48)
+  The nearest float64 approximation to the natural logarithm of ten.
+- **Math** · [`export const Sqrt2: float64 = float64.from_bits(4609047870845172685)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L50)
+  The nearest float64 approximation to the square root of two.
+- **Math** · [`export let sqrt = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L55)
   Correctly rounded square root: the integer square root of the significand, shifted to an even exponent and extended by 54 zero bits, one result bit per step with a running remainder; then round to nearest, ties to even. sqrt(-0.0) is -0.0; other negatives give NaN.
-- **Math** · [`export let cbrt = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L110)
+- **Math** · [`export let cbrt = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L117)
   s_cbrt.c
-- **Math** · [`export let hypot = func(x: float64, y: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L157)
+- **Math** · [`export let hypot = func(x: float64, y: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L164)
   e_hypot.c: sqrt(x*x + y*y) without undue overflow or underflow.
-- **Math** · [`export let exp = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L232)
+- **Math** · [`export let exp = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L239)
   e_exp.c
-- **Math** · [`export let expm1 = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L311)
+- **Math** · [`export let expm1 = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L318)
   s_expm1.c: exp(x) - 1, accurate near zero.
-- **Math** · [`export let log = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L419)
+- **Math** · [`export let log = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L426)
   e_log.c
-- **Math** · [`export let log1p = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L493)
+- **Math** · [`export let log1p = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L500)
   s_log1p.c: log(1 + x), accurate near zero.
-- **Math** · [`export let log10 = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L588)
+- **Math** · [`export let log10 = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L595)
   e_log10.c
-- **Math** · [`export let log2 = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L623)
+- **Math** · [`export let log2 = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L630)
   Base-2 logarithm, shaped like e_log10.c (see the file comment).
-- **Math** · [`export let pow = func(x: float64, y: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L659)
+- **Math** · [`export let pow = func(x: float64, y: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L666)
   e_pow.c: x raised to y.
-- **Math** · [`export let sin = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L940)
+- **Math** · [`export let sin = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L947)
   s_sin.c
-- **Math** · [`export let cos = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L964)
+- **Math** · [`export let cos = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L971)
   s_cos.c
-- **Math** · [`export let tan = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L988)
+- **Math** · [`export let tan = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L995)
   s_tan.c
-- **Math** · [`export let asin = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1019)
+- **Math** · [`export let asin = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1026)
   e_asin.c
-- **Math** · [`export let acos = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1060)
+- **Math** · [`export let acos = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1067)
   e_acos.c
-- **Math** · [`export let atan = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1101)
+- **Math** · [`export let atan = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1108)
   s_atan.c
-- **Math** · [`export let atan2 = func(y: float64, x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1184)
+- **Math** · [`export let atan2 = func(y: float64, x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1191)
   e_atan2.c: the angle of the point (x, y).
-- **Math** · [`export let sinh = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1275)
+- **Math** · [`export let sinh = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1282)
   e_sinh.c
-- **Math** · [`export let cosh = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1315)
+- **Math** · [`export let cosh = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1322)
   e_cosh.c
-- **Math** · [`export let tanh = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1354)
+- **Math** · [`export let tanh = func(x: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1361)
   s_tanh.c
-- **Math** · [`export let to_radians = func(degrees: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1389)
+- **Math** · [`export let to_radians = func(degrees: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1396)
   Degrees to radians: x times the nearest float64 to pi/180.
-- **Math** · [`export let to_degrees = func(radians: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1394)
+- **Math** · [`export let to_degrees = func(radians: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/math.nra#L1401)
   Radians to degrees: x times the nearest float64 to 180/pi.
 <!-- END SOURCE API -->
 

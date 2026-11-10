@@ -2,21 +2,28 @@ let bytes = import:Std.Io.Internal.Bytes;
 let.promote _ = import:Std.Core.Optional;
 let result = import:Std.Core.Result;
 
-// Reads UTF-8 text from a byte source (Stdlib.md section 11.1), requesting
-// up to 8,192 bytes at a time. Invalid UTF-8 fails with InvalidData.
+/// @brief Reads UTF-8 text from a byte source (Stdlib.md section 11.1), requesting up to 8,192 bytes at a time.
+/// Invalid UTF-8 fails with InvalidData.
+/// @see [Std.Io.Utf8Reader](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-Utf8Reader)
 export let Utf8Reader = module (
+    /// @brief Decodes UTF-8 from a byte source and retains bytes read ahead.
     export let Utf8Reader = class (
+        /// @brief The underlying byte source called when more input is needed.
         let source: func(int) -> result.Result<uint8[list]>;
+        /// @brief Stores the buffered bytes.
         let buffer: uint8[list] = [];
+        /// @brief The index of the next unread byte in the buffer.
         let start: int = 0;
 
+        /// @brief Initializes the reader with a byte source and an empty buffer.
         export let init = func(input: func(int) -> result.Result<uint8[list]>) {
             source = input;
         };
 
-        // The next Unicode scalar value; None at the end of the stream. An
-        // invalid or truncated sequence fails with InvalidData; the bytes
-        // before the offending byte are consumed and that byte is not.
+        /// @brief The next Unicode scalar value; None at the end of the stream.
+        ///
+        /// An invalid or truncated sequence fails with InvalidData; the bytes before the offending byte are
+        /// consumed and that byte is not.
         export let read_scalar = func -> result.Result<Optional<uint32>> {
             match (fill()) {
                 result.Result.Ok(available) => {
@@ -76,9 +83,8 @@ export let Utf8Reader = module (
             return some_scalar(value);
         };
 
-        // The next line without its LF or a CR before it; None at the end of
-        // the stream. A final line without an LF is returned. Invalid UTF-8
-        // fails with InvalidData and consumes the line.
+        /// @brief The next line without its LF or a CR before it; None at the end of the stream. A final line
+        /// without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
         export let read_line = func -> result.Result<Optional<string>> {
             let line: uint8[list] = [];
             do {
@@ -106,7 +112,7 @@ export let Utf8Reader = module (
             }
         };
 
-        // The rest of the stream as text.
+        /// @brief The rest of the stream as text.
         export let read_to_end = func -> result.Result<string> {
             let all: uint8[list] = [];
             do {
@@ -129,7 +135,7 @@ export let Utf8Reader = module (
             }
         };
 
-        // Makes at least one byte available; false at the end of the stream.
+        /// @brief Makes at least one byte available; false at the end of the stream.
         let fill = func -> result.Result<bool> {
             if (start < buffer.length) {
                 return result.Result<bool>.Ok(true);
@@ -140,12 +146,14 @@ export let Utf8Reader = module (
             };
         };
 
+        /// @brief Installs a new chunk and reports whether any byte is available.
         let refilled = func(chunk: uint8[list]) -> result.Result<bool> {
             buffer = chunk;
             start = 0;
             return result.Result<bool>.Ok(chunk.length > 0);
         };
 
+        /// @brief Strips a final CR from an LF-terminated line and decodes the line.
         let finish_line = func(line: uint8[list]) -> result.Result<Optional<string>> {
             if (line.length > 0 && line[line.length - 1] == 13) {
                 line.remove_at(line.length - 1);
@@ -157,13 +165,16 @@ export let Utf8Reader = module (
             return result.Result<Optional<string>>.Ok(Optional<string>.Some(text));
         };
 
+        /// @brief Wraps a decoded Unicode scalar in a successful present result.
         let some_scalar = func(value: uint32) -> result.Result<Optional<uint32>> =>
             result.Result<Optional<uint32>>.Ok(Optional<uint32>.Some(value));
 
+        /// @brief Creates the invalid UTF-8 result for a malformed scalar.
         let invalid_scalar = func -> result.Result<Optional<uint32>> =>
             result.Result<Optional<uint32>>.Err(bytes.invalid_utf8(""));
     );
 
+    /// @brief Creates a UTF-8 reader over the supplied byte source.
     export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader =>
         new Utf8Reader(source);
 );

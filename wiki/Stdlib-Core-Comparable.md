@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Comparable** · [`export let Comparable = interface<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/comparable.nra#L6)
+- **Comparable** · [`export let Comparable = interface<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/comparable.nra#L8)
+  Defines the natural ordering between a receiver and another value of type T.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

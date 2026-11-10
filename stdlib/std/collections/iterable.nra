@@ -1,9 +1,12 @@
 let iterators = import:Std.Collections.Iterator;
 
-// A source of iterators. For-each over an Iterable calls iterator() once and
-// then has_next() and next() for each element.
+/// @brief A source of iterators. For-each over an Iterable calls iterator() once and
+/// then has_next() and next() for each element.
+/// @see [Std.Collections.Iterable](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Iterable)
 export let Iterable = module (
+    /// @brief A value that provides an iterator for the for-each protocol.
     export let Iterable = interface<T> (
+        /// @brief Returns an iterator positioned before the first element.
         let iterator = func -> iterators.Iterator<T>;
     );
 );

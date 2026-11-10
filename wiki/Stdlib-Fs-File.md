@@ -17,23 +17,26 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **File** · [`export let OpenMode = enum (Read, Write, Append, ReadWrite, CreateNew)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L16)
+- **File** · [`export let OpenMode = enum (Read, Write, Append, ReadWrite, CreateNew)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L17)
   Read: must exist. Write: create or truncate. Append: create, and write at the end. ReadWrite: must exist. CreateNew: read and write a new file; fails with AlreadyExists.
-- **File** · [`export let SeekOrigin = enum (Start, Current, End)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L17)
-- **File** · [`export let File = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L29)
-- **File.File** · [`export let init = func(opened: FileHandle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L34)
+- **File** · [`export let SeekOrigin = enum (Start, Current, End)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L19)
+  Selects the start, current position, or end as the reference point for seeking.
+- **File** · [`export let File = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L41)
+  An unbuffered host file with an explicit, idempotent close operation.
+- **File.File** · [`export let init = func(opened: FileHandle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L48)
   Use File.open; the handle comes from the library.
-- **File.File** · [`export let read = func(max: int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L40)
+- **File.File** · [`export let read = func(max: int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L54)
   Up to `max` bytes from the current position; an empty list at the end of the file. A maximum below 1 traps.
-- **File.File** · [`export let write = func(data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L52)
+- **File.File** · [`export let write = func(data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L66)
   Writes every byte, repeating partial host writes.
-- **File.File** · [`export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L77)
+- **File.File** · [`export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L91)
   Moves the position and returns it, counted from the start.
-- **File.File** · [`export let size = func -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L88)
+- **File.File** · [`export let size = func -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L102)
   The file's size in bytes. The position is unchanged.
-- **File.File** · [`export let close = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L115)
+- **File.File** · [`export let close = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L129)
   Releases the file. Closing again does nothing and returns Ok; the file is closed even when the host reports an error.
-- **File** · [`export let open = func(path: Path, mode: OpenMode) -> result.Result<File>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L127)
+- **File** · [`export let open = func(path: Path, mode: OpenMode) -> result.Result<File>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L142)
+  Opens the normalized path using the selected mode and returns an owned file.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

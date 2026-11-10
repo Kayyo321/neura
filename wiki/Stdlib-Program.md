@@ -19,14 +19,19 @@ The following public declarations are taken from the module source; each links t
 
 - **Program** · [`export let ExitCode = enum (Ok, Failure, Status(int))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L10)
   Ok is status 0, Failure is 1, and Status gives 0 through 255; any other Status traps with "invalid argument: exit status".
-- **Program** · [`export let Entry = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L12)
-- **Program.Entry** · [`export let main = func(args: string[]) -> ExitCode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L13)
-- **Program** · [`export let Environment = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L16)
-- **Program.Environment** · [`export let Lookup = enum (Found(string), Missing, Failed(Error))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L17)
-- **Program.Environment** · [`export let get = func(name: string) -> Lookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L24)
+- **Program** · [`export let Entry = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L13)
+  The module contract implemented by a runnable program.
+- **Program.Entry** · [`export let main = func(args: string[]) -> ExitCode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L15)
+  Runs the program with its command-line arguments and returns its exit status.
+- **Program** · [`export let Environment = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L19)
+  Looks up process environment variables through the host.
+- **Program.Environment** · [`export let Lookup = enum (Found(string), Missing, Failed(Error))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L21)
+  Distinguishes a present value, a missing name, and a failed lookup.
+- **Program.Environment** · [`export let get = func(name: string) -> Lookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L30)
   The value of an environment variable. Needs the env capability; without it the lookup fails with CapabilityDenied.
-- **Program** · [`export let Process = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L33)
-- **Program.Process** · [`export let exit = func(status: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L39)
+- **Program** · [`export let Process = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L41)
+  Provides explicit termination of the current run.
+- **Program.Process** · [`export let exit = func(status: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L49)
   Ends the run with `status` (0 through 255) and does not return. Returning from main is preferred.
 <!-- END SOURCE API -->
 

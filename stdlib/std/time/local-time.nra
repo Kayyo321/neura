@@ -5,34 +5,42 @@ let hashing = import:Std.Core.Hash;
 let.promote _ = import:Std.Core.Ordering;
 let result = import:Std.Core.Result;
 
-// A time of day, stored as nanoseconds since midnight (Stdlib.md section
-// 12.1). There are no leap seconds.
+/// @brief A time of day, stored as nanoseconds since midnight (Stdlib.md section 12.1). There are no leap
+/// seconds.
+/// @see [Std.Time.LocalTime](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-LocalTime)
 export let LocalTime = module (
+    /// @brief An immutable wall-clock time within a 24-hour day.
     export let LocalTime = class implements Comparable<LocalTime> (
+        /// @brief The nanosecond offset from midnight.
         let nanos_of_day: int64;
 
+        /// @brief Stores the supplied nanosecond offset from midnight.
         export let init = func(nanos: int64) {
             nanos_of_day = nanos;
         };
 
+        /// @brief Returns the hour of the day from 0 through 23.
         export let hour = func -> int => (nanos_of_day / calendar.NanosPerHour) as int;
 
+        /// @brief Returns the minute of the hour from 0 through 59.
         export let minute = func -> int => (nanos_of_day / calendar.NanosPerMinute % 60) as int;
 
+        /// @brief Returns the second of the minute from 0 through 59.
         export let second = func -> int => (nanos_of_day / calendar.NanosPerSecond % 60) as int;
 
-        // 0 through 999,999,999.
+        /// @brief 0 through 999,999,999.
         export let nano = func -> int => (nanos_of_day % calendar.NanosPerSecond) as int;
 
-        // 0 through 86,399,999,999,999.
+        /// @brief 0 through 86,399,999,999,999.
         export let to_nano_of_day = func -> int64 => nanos_of_day;
 
-        // Wraps around midnight in either direction.
+        /// @brief Wraps around midnight in either direction.
         export let plus = func(span: duration.Duration) -> LocalTime {
             let shift = calendar.floor_mod(span.to_nanos(), calendar.NanosPerDay);
             return new LocalTime((nanos_of_day + shift) % calendar.NanosPerDay);
         };
 
+        /// @brief Orders times by their nanosecond offsets from midnight.
         export let compare_to = func(other: LocalTime) -> Ordering {
             if (nanos_of_day < other.nanos_of_day) {
                 return Ordering.Less;
@@ -43,21 +51,24 @@ export let LocalTime = module (
             return Ordering.Equal;
         };
 
+        /// @brief Tests equality of nanosecond offsets from midnight.
         export let.override equals = func(other: class) -> bool {
             return other is LocalTime && nanos_of_day == (other as LocalTime).nanos_of_day;
         };
 
+        /// @brief Hashes the nanosecond offset from midnight.
         export let.override hash_code = func -> uint32 => hashing.combine(17, hashing.of_int64(nanos_of_day));
 
-        // HH:MM:SS, then a fraction of 3, 6, or 9 digits (the shortest that
-        // is exact) when the nanoseconds are not zero.
+        /// @brief HH:MM:SS, then a fraction of 3, 6, or 9 digits (the shortest that is exact) when the
+        /// nanoseconds are not zero.
         export let.override to_string = func -> string => calendar.time_text(nanos_of_day);
     );
 
+    /// @brief The time at the start of the day.
     export const Midnight: LocalTime = new LocalTime(0);
 
-    // Traps with "invalid argument: invalid time" unless hour is 0 through
-    // 23, minute and second 0 through 59, and nano 0 through 999,999,999.
+    /// @brief Traps with "invalid argument: invalid time" unless hour is 0 through 23, minute and second 0
+    /// through 59, and nano 0 through 999,999,999.
     export let of = func(hour: int, minute: int, second: int, nano: int) -> LocalTime {
         if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 || nano < 0 ||
             nano > 999999999) {
@@ -67,8 +78,7 @@ export let LocalTime = module (
         return new LocalTime(seconds * calendar.NanosPerSecond + (nano as int64));
     };
 
-    // Traps with "invalid argument: invalid time" outside 0 through
-    // 86,399,999,999,999.
+    /// @brief Traps with "invalid argument: invalid time" outside 0 through 86,399,999,999,999.
     export let of_nano_of_day = func(nanos: int64) -> LocalTime {
         if (nanos < 0 || nanos >= calendar.NanosPerDay) {
             trap_with_message("invalid argument: invalid time");
@@ -76,10 +86,10 @@ export let LocalTime = module (
         return new LocalTime(nanos);
     };
 
-    // HH:MM:SS with an optional fraction of one through nine digits.
-    // Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte
-    // that does not fit; OutOfRange at an hour above 23 or a minute or
-    // second above 59.
+    /// @brief HH:MM:SS with an optional fraction of one through nine digits.
+    ///
+    /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an
+    /// hour above 23 or a minute or second above 59.
     export let parse = func(text: string) -> result.Result<LocalTime> {
         let scan = new calendar.Scanner(text);
         let nanos = calendar.read_time(scan);

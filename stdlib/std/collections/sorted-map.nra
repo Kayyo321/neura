@@ -1,24 +1,36 @@
 let.promote _ = import:Std.Collections.Map;
 let optional = import:Std.Core.Optional;
 
-// A map ordered by its key comparator (TreeMap). first, last, range, and
-// descending give entries; floor, ceiling, lower, and higher give keys and
-// their _entry forms give entries.
+/// @brief Read-only access to a map in comparator order. Navigation can return the
+/// qualifying key or its full entry.
+/// @see [Std.Collections.SortedMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-SortedMap)
 export let SortedMap = module (
+    /// @brief Read-only key navigation and range queries in comparator order.
     export let SortedMap = interface<K, V>:Map<K, V> (
-        // Trap with "no such element" when empty.
+        /// @brief Returns the entry with the least key. Traps with `no such element` when empty.
         let first = func -> [K, V];
+        /// @brief Returns the entry with the greatest key. Traps with `no such element` when empty.
         let last = func -> [K, V];
-        // Entries with keys from `from` inclusive to `to` exclusive.
+        /// @brief Returns a new list of entries in ascending key order from `from` inclusive to `to` exclusive.
+        /// Returns an empty list when `to` is at or below `from`.
         let range = func(from: K, to: K) -> [K, V][list];
+        /// @brief Copies entries into a new list in descending key order.
         let descending = func -> [K, V][list];
+        /// @brief Returns the greatest key at most `key` as `Some`, or `None` when absent.
         let floor = func(key: K) -> optional.Optional<K>;
+        /// @brief Returns the least key at least `key` as `Some`, or `None` when absent.
         let ceiling = func(key: K) -> optional.Optional<K>;
+        /// @brief Returns the greatest key strictly below `key` as `Some`, or `None` when absent.
         let lower = func(key: K) -> optional.Optional<K>;
+        /// @brief Returns the least key strictly above `key` as `Some`, or `None` when absent.
         let higher = func(key: K) -> optional.Optional<K>;
+        /// @brief Returns the entry with the greatest key at most `key`, or `None` when absent.
         let floor_entry = func(key: K) -> optional.Optional<[K, V]>;
+        /// @brief Returns the entry with the least key at least `key`, or `None` when absent.
         let ceiling_entry = func(key: K) -> optional.Optional<[K, V]>;
+        /// @brief Returns the entry with the greatest key strictly below `key`, or `None` when absent.
         let lower_entry = func(key: K) -> optional.Optional<[K, V]>;
+        /// @brief Returns the entry with the least key strictly above `key`, or `None` when absent.
         let higher_entry = func(key: K) -> optional.Optional<[K, V]>;
     );
 );

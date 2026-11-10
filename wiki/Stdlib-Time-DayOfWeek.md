@@ -17,8 +17,9 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **DayOfWeek** · [`export let DayOfWeek = enum (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/day-of-week.nra#L5)
-- **DayOfWeek** · [`export let plus = func(day: DayOfWeek, days: int64) -> DayOfWeek`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/day-of-week.nra#L8)
+- **DayOfWeek** · [`export let DayOfWeek = enum (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/day-of-week.nra#L6)
+  The seven weekdays in ISO order, with Monday at ordinal zero.
+- **DayOfWeek** · [`export let plus = func(day: DayOfWeek, days: int64) -> DayOfWeek`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/day-of-week.nra#L9)
   The day `days` after `day`; negative counts go back.
 - **DayOfWeek** · [`export let of_ordinal = func(ordinal: int) -> DayOfWeek`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/day-of-week.nra#L15)
   0 for Monday through 6 for Sunday; anything else traps with "invalid argument: day of week".

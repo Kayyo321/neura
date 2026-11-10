@@ -4,11 +4,16 @@ let scalars = import:Std.Text.Scalars;
 let string_builder = import:Std.Core.StringBuilder;
 let strings = import:Std.Text.Strings;
 
+/// @brief Looks up charset names and converts between UTF-8 strings and encoded bytes.
+/// @see [Std.Text.Charsets](https://github.com/Kayyo321/neura/wiki/Stdlib-Text-Charsets)
 export let Charsets = module (
+    /// @brief Selects ASCII, Latin-1, UTF-8, or a UTF-16 or UTF-32 byte-order policy.
     export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le);
 
+    /// @brief The out-of-range scalar used to signal malformed input.
     const InvalidScalar: uint32 = 1114112;
 
+    /// @brief Resolves a supported charset name or alias without regard to ASCII case.
     export let for_name = func(name: string) -> result.Result<Charset> {
         let key = strings.to_ascii_lower(name);
         if (key == "us-ascii" || key == "ascii" || key == "iso646-us") {
@@ -42,18 +47,23 @@ export let Charsets = module (
         return result.Result<Charset>.Err(error.custom("charset.unsupported", "unsupported charset: " + name));
     };
 
+    /// @brief Encodes text, substituting a question mark for unrepresentable ASCII or Latin-1 scalars.
     export let encode = func(text: string, charset: Charset) -> uint8[list] =>
         result.expect<uint8[list]>(encode_text(text, charset, false), "encode text");
 
+    /// @brief Encodes strictly and returns an Encoding error for the first unrepresentable scalar.
     export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]> =>
         encode_text(text, charset, true);
 
+    /// @brief Decodes bytes, substituting U+FFFD for malformed input.
     export let decode = func(bytes: uint8[list], charset: Charset) -> string =>
         result.expect<string>(decode_bytes(bytes, charset, false), "decode bytes");
 
+    /// @brief Decodes strictly and returns an Encoding error at the first malformed input.
     export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string> =>
         decode_bytes(bytes, charset, true);
 
+    /// @brief Encodes with either strict or replacement behavior for narrow charsets.
     let encode_text = func(text: string, charset: Charset, strict: bool) -> result.Result<uint8[list]> {
         if (charset == Charset.Utf8) {
             return result.Result<uint8[list]>.Ok(strings.to_bytes(text));
@@ -91,6 +101,7 @@ export let Charsets = module (
         return result.Result<uint8[list]>.Ok(bytes);
     };
 
+    /// @brief Appends a code unit in the selected byte order.
     let append_unit = func(bytes: uint8[list], unit: uint32, width: int, little_endian: bool) {
         for (let i = 0; i < width; i += 1) {
             let shift = (little_endian ? i : width - 1 - i) * 8;
@@ -98,6 +109,7 @@ export let Charsets = module (
         }
     };
 
+    /// @brief Returns the encoded width of a code unit for the selected charset.
     let unit_width = func(charset: Charset) -> int => match (charset) {
         Charset.Utf16 => 2,
         Charset.Utf16Be => 2,
@@ -108,6 +120,7 @@ export let Charsets = module (
         _ => 1,
     };
 
+    /// @brief Decodes bytes using either strict or replacement behavior.
     let decode_bytes = func(bytes: uint8[list], charset: Charset, strict: bool) -> result.Result<string> {
         if (charset == Charset.Utf8) {
             return strict ? strings.from_bytes(bytes) : result.Result<string>.Ok(strings.from_bytes_lossy(bytes));
@@ -137,6 +150,8 @@ export let Charsets = module (
         return result.Result<string>.Ok(text.to_string());
     };
 
+    /// @brief Reads one scalar and reports the number of bytes consumed, using a sentinel for malformed
+    /// sequences.
     let read_scalar = func(bytes: uint8[list], offset: int, charset: Charset, width: int, little_endian: bool)
         -> [uint32, int] {
         if (bytes.length - offset < width) {
@@ -155,6 +170,7 @@ export let Charsets = module (
         return [unit, width];
     };
 
+    /// @brief Assembles a code unit from bytes in the selected byte order.
     let read_unit = func(bytes: uint8[list], offset: int, width: int, little_endian: bool) -> uint32 {
         let unit: uint32 = 0;
         for (let i = 0; i < width; i += 1) {

@@ -17,39 +17,61 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Duration** · [`export let Duration = class implements Comparable<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L11)
-- **Duration.Duration** · [`export let init = func(nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L14)
-- **Duration.Duration** · [`export let plus = func(other: Duration) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L18)
-- **Duration.Duration** · [`export let minus = func(other: Duration) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L20)
-- **Duration.Duration** · [`export let multiplied_by = func(factor: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L22)
-- **Duration.Duration** · [`export let divided_by = func(divisor: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L26)
+- **Duration** · [`export let Duration = class implements Comparable<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L13)
+  An immutable signed duration represented as an exact count of nanoseconds.
+- **Duration.Duration** · [`export let init = func(nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L18)
+  Stores the signed nanosecond count.
+- **Duration.Duration** · [`export let plus = func(other: Duration) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L23)
+  Adds two durations with checked nanosecond arithmetic.
+- **Duration.Duration** · [`export let minus = func(other: Duration) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L26)
+  Subtracts another duration with checked nanosecond arithmetic.
+- **Duration.Duration** · [`export let multiplied_by = func(factor: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L29)
+  Scales the duration by an integer. Overflow traps.
+- **Duration.Duration** · [`export let divided_by = func(divisor: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L33)
   Truncates toward zero. A zero divisor traps (reason 1), as does the most negative duration divided by -1.
-- **Duration.Duration** · [`export let negated = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L28)
-- **Duration.Duration** · [`export let abs = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L30)
-- **Duration.Duration** · [`export let is_zero = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L37)
-- **Duration.Duration** · [`export let is_negative = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L39)
-- **Duration.Duration** · [`export let to_nanos = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L41)
-- **Duration.Duration** · [`export let to_micros = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L44)
+- **Duration.Duration** · [`export let negated = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L36)
+  Reverses the sign. The most negative duration cannot be negated.
+- **Duration.Duration** · [`export let abs = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L39)
+  Returns the nonnegative magnitude. The most negative duration traps.
+- **Duration.Duration** · [`export let is_zero = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L47)
+  Reports whether the nanosecond count is zero.
+- **Duration.Duration** · [`export let is_negative = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L50)
+  Reports whether the nanosecond count is below zero.
+- **Duration.Duration** · [`export let to_nanos = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L53)
+  Returns the exact signed nanosecond count.
+- **Duration.Duration** · [`export let to_micros = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L56)
   The to_ conversions truncate toward zero.
-- **Duration.Duration** · [`export let to_millis = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L46)
-- **Duration.Duration** · [`export let to_seconds = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L48)
-- **Duration.Duration** · [`export let to_seconds_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L52)
+- **Duration.Duration** · [`export let to_millis = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L59)
+  Returns whole milliseconds, truncating toward zero.
+- **Duration.Duration** · [`export let to_seconds = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L62)
+  Returns whole seconds, truncating toward zero.
+- **Duration.Duration** · [`export let to_seconds_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L66)
   The nanoseconds converted to float64, divided by 10^9. Exact conversion, so correctly rounded, while the count is at most 2^53.
-- **Duration.Duration** · [`export let compare_to = func(other: Duration) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L54)
-- **Duration.Duration** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L64)
-- **Duration.Duration** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L68)
-- **Duration.Duration** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L74)
+- **Duration.Duration** · [`export let compare_to = func(other: Duration) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L69)
+  Orders durations by their signed nanosecond counts.
+- **Duration.Duration** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L80)
+  Tests equality of signed nanosecond counts.
+- **Duration.Duration** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L85)
+  Hashes the signed nanosecond count.
+- **Duration.Duration** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L91)
   ISO 8601: PT, then hours, minutes, and seconds with their unit letters, zero units omitted, the fraction trimmed of trailing zeros. Zero is PT0S; a negative duration is - and the text of its magnitude.
-- **Duration** · [`export const Zero: Duration = new Duration(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L99)
-- **Duration** · [`export let of_nanos = func(nanos: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L101)
-- **Duration** · [`export let of_micros = func(micros: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L103)
-- **Duration** · [`export let of_millis = func(millis: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L105)
-- **Duration** · [`export let of_seconds = func(seconds: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L107)
-- **Duration** · [`export let of_minutes = func(minutes: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L109)
-- **Duration** · [`export let of_hours = func(hours: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L111)
-- **Duration** · [`export let of_days = func(days: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L114)
+- **Duration** · [`export const Zero: Duration = new Duration(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L117)
+  The duration of zero nanoseconds.
+- **Duration** · [`export let of_nanos = func(nanos: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L120)
+  Constructs a duration from an exact nanosecond count.
+- **Duration** · [`export let of_micros = func(micros: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L123)
+  Converts microseconds to nanoseconds. Overflow traps.
+- **Duration** · [`export let of_millis = func(millis: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L126)
+  Converts milliseconds to nanoseconds. Overflow traps.
+- **Duration** · [`export let of_seconds = func(seconds: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L129)
+  Converts seconds to nanoseconds. Overflow traps.
+- **Duration** · [`export let of_minutes = func(minutes: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L132)
+  Converts 60-second minutes to nanoseconds. Overflow traps.
+- **Duration** · [`export let of_hours = func(hours: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L135)
+  Converts 60-minute hours to nanoseconds. Overflow traps.
+- **Duration** · [`export let of_days = func(days: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L138)
   A day is 24 hours.
-- **Duration** · [`export let parse = func(text: string) -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L123)
+- **Duration** · [`export let parse = func(text: string) -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L146)
   An optional sign, P, an optional day count with D, then optionally T and at least one of hours (H), minutes (M), and seconds (S) in that order; seconds may have a fraction of one through nine digits. At least one component is required, and letters are uppercase. The to_string form always parses. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first digit of the component that leaves int64.
 <!-- END SOURCE API -->
 

@@ -1,14 +1,21 @@
 let.promote _ = import:Std.Collections.Queue;
 
-// Access at both ends. `enqueue` is add_last and `dequeue` is remove_first.
+/// @brief Access at both ends. `enqueue` is add_last and `dequeue` is remove_first.
+/// @see [Std.Collections.Deque](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Deque)
 export let Deque = module (
+    /// @brief A queue with insertion, inspection, and removal at either end.
     export let Deque = interface<T>:Queue<T> (
+        /// @brief Inserts `value` at the front.
         let add_first = func(value: T);
+        /// @brief Appends `value` at the back.
         let add_last = func(value: T);
-        // Trap with "no such element" when empty.
+        /// @brief Removes and returns the first element. Traps with `no such element` when empty.
         let remove_first = func -> T;
+        /// @brief Removes and returns the last element. Traps with `no such element` when empty.
         let remove_last = func -> T;
+        /// @brief Returns the first element. Traps with `no such element` when empty.
         let first = func -> T;
+        /// @brief Returns the last element. Traps with `no such element` when empty.
         let last = func -> T;
     );
 );

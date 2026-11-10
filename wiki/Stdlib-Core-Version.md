@@ -15,9 +15,12 @@ Import this module as `Std.Core.Version`. Its [source](https://github.com/Kayyo3
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Version** · [`export const Major: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/version.nra#L4)
-- **Version** · [`export const Minor: int = 1`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/version.nra#L5)
-- **Version** · [`export const Patch: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/version.nra#L6)
+- **Version** · [`export const Major: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/version.nra#L6)
+  The major version component of the shipped library.
+- **Version** · [`export const Minor: int = 1`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/version.nra#L8)
+  The minor version component of the shipped library.
+- **Version** · [`export const Patch: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/version.nra#L10)
+  The patch version component of the shipped library.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

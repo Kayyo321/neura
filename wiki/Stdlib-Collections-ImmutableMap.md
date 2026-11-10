@@ -17,29 +17,41 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **ImmutableMap** · [`export let ImmutableMap = class<K, V> implements Map<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L13)
-- **ImmutableMap.ImmutableMap** · [`export let init = func(seal: Seal, contents: hash_map.HashMap<K, V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L16)
-- **ImmutableMap.ImmutableMap** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L20)
-- **ImmutableMap.ImmutableMap** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L22)
-- **ImmutableMap.ImmutableMap** · [`export let contains_key = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L24)
-- **ImmutableMap.ImmutableMap** · [`export let get = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L26)
-- **ImmutableMap.ImmutableMap** · [`export let get_or = func(key: K, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L28)
-- **ImmutableMap.ImmutableMap** · [`export let require = func(key: K) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L31)
-  Traps with "no such element" when the key is absent.
-- **ImmutableMap.ImmutableMap** · [`export let keys = func -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L33)
-- **ImmutableMap.ImmutableMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L35)
-- **ImmutableMap.ImmutableMap** · [`export let entries = func -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L37)
-- **ImmutableMap.ImmutableMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L39)
-- **ImmutableMap.ImmutableMap** · [`export let for_each = func(action: func(K, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L41)
-- **ImmutableMap.ImmutableMap** · [`export let iterator = func -> Iterator<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L46)
-  Yields [K, V] in the order of `of`.
-- **ImmutableMap.ImmutableMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L50)
+- **ImmutableMap** · [`export let ImmutableMap = class<K, V> implements Map<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L14)
+  A read-only hash map with entries in construction order.
+- **ImmutableMap.ImmutableMap** · [`export let init = func(seal: Seal, contents: hash_map.HashMap<K, V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L19)
+  Adopts the privately built table without exposing it for mutation.
+- **ImmutableMap.ImmutableMap** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L24)
+  Returns the number of entries.
+- **ImmutableMap.ImmutableMap** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L27)
+  Returns true when there are no entries.
+- **ImmutableMap.ImmutableMap** · [`export let contains_key = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L30)
+  Reports whether an entry exists for `key`.
+- **ImmutableMap.ImmutableMap** · [`export let get = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L33)
+  Returns the associated value as `Some`, or `None` when the key is absent.
+- **ImmutableMap.ImmutableMap** · [`export let get_or = func(key: K, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L36)
+  Returns the associated value, or `fallback` when the key is absent.
+- **ImmutableMap.ImmutableMap** · [`export let require = func(key: K) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L39)
+  Returns the associated value. Traps with `no such element` when the key is absent.
+- **ImmutableMap.ImmutableMap** · [`export let keys = func -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L42)
+  Copies the keys to a new built-in list in construction order.
+- **ImmutableMap.ImmutableMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L45)
+  Copies the values to a new built-in list in construction order.
+- **ImmutableMap.ImmutableMap** · [`export let entries = func -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L48)
+  Copies the `[key, value]` tuples to a new built-in list in construction order.
+- **ImmutableMap.ImmutableMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L51)
+  Tests whether `value.equals(held_value)` is true for any entry.
+- **ImmutableMap.ImmutableMap** · [`export let for_each = func(action: func(K, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L54)
+  Calls `action` with the key and value of each entry in construction order.
+- **ImmutableMap.ImmutableMap** · [`export let iterator = func -> Iterator<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L59)
+  Returns an iterator over `[key, value]` tuples in construction order.
+- **ImmutableMap.ImmutableMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L63)
   Another ImmutableMap of the same size in which, for each of its entries, this map holds an equal value for the key.
-- **ImmutableMap.ImmutableMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L80)
+- **ImmutableMap.ImmutableMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L93)
   The wrapping sum over entries of the key hash exclusive-or the value hash.
-- **ImmutableMap.ImmutableMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L84)
+- **ImmutableMap.ImmutableMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L97)
   `{k: v, k2: v2}` in iteration order. The entries exist before the map, so it can never contain itself.
-- **ImmutableMap** · [`export let of = func<K, V>(entries: [K, V][list]) -> ImmutableMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L89)
+- **ImmutableMap** · [`export let of = func<K, V>(entries: [K, V][list]) -> ImmutableMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L102)
   Copies `entries`. Traps with "invalid argument: duplicate key" when two entries have equal keys.
 <!-- END SOURCE API -->
 

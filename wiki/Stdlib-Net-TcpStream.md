@@ -17,18 +17,19 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **TcpStream** · [`export let TcpStream = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L23)
-- **TcpStream.TcpStream** · [`export let init = func(opened: socket.Handle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L30)
+- **TcpStream** · [`export let TcpStream = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L33)
+  Owns a connected TCP socket with an independently configured read timeout.
+- **TcpStream.TcpStream** · [`export let init = func(opened: socket.Handle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L42)
   Use connect or TcpListener.accept; the handle comes from the library.
-- **TcpStream.TcpStream** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L37)
+- **TcpStream.TcpStream** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L48)
   Up to `max` bytes; an empty list once the peer has closed its side. Waits at most the read timeout, then fails with TimedOut. A maximum below 1 traps.
-- **TcpStream.TcpStream** · [`export let write = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L49)
+- **TcpStream.TcpStream** · [`export let write = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L60)
   Writes every byte, repeating partial host writes.
-- **TcpStream.TcpStream** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L75)
+- **TcpStream.TcpStream** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L86)
   The longest a read waits; zero waits without limit. A negative timeout traps with "invalid argument: negative timeout".
-- **TcpStream.TcpStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L81)
+- **TcpStream.TcpStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L92)
   Releases the connection. Closing again does nothing and returns Ok; the stream is closed even when the host reports an error.
-- **TcpStream** · [`export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L97)
+- **TcpStream** · [`export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L109)
   Connects to `host` (a name or an address) and `port`, waiting at most `timeout` (zero waits without limit). A port outside 0 through 65,535 traps with "invalid argument: port"; a negative timeout traps with "invalid argument: negative timeout".
 <!-- END SOURCE API -->
 

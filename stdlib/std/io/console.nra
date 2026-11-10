@@ -8,41 +8,53 @@ let result = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 let.promote _ = import:Std.Core.Variadic;
 
-// Console input and output (Stdlib.md section 11.1). Output is unbuffered:
-// each write is one host request (repeated only to finish a partial write),
-// so output order is program order and nothing is lost when a run ends by
-// trap. Input is read in chunks of up to 4,096 bytes; read_line and the
-// input() source share the bytes read ahead.
+/// @brief Console input and output (Stdlib.md section 11.1).
+///
+/// Output is unbuffered: each write is one host request (repeated only to finish a partial write), so output
+/// order is program order and nothing is lost when a run ends by trap. Input is read in chunks of up to 4,096
+/// bytes; read_line and the input() source share the bytes read ahead.
+/// @see [Std.Io.Console](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-Console)
 export let Console = module (
+    /// @brief The host outcome for a line write.
     let WriteOutcome = enum (Ok, Error(uint32));
+    /// @brief Represents a host byte count or an unsigned host error code.
     let CountOutcome = enum (Ok(int), Error(uint32));
+    /// @brief Represents returned bytes or an unsigned host error code.
     let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+    /// @brief Requests a raw stdout line write with a trailing LF.
     let write_line = func(text: string) -> WriteOutcome host("neura.console.write_line", 1);
+    /// @brief Writes bytes to the specified console stream and receives a possibly partial count.
     let write_stream = func(stream: int, data: uint8[list]) -> CountOutcome host("neura.console.write", 1);
+    /// @brief Requests up to the specified byte count from console input.
     let read_stream = func(max: int) -> BytesOutcome host("neura.console.read", 1);
 
-    // Input read ahead of the caller: pending[pending_start] onwards.
+    /// @brief Input read ahead of the caller: pending[pending_start] onwards.
     let pending: uint8[list] = [];
+    /// @brief The index of the next unread byte in the pending input.
     let pending_start: int = 0;
 
-    // Explicit argument arrays support forwarding and runtime-built packs.
+    /// @brief Explicit argument arrays support forwarding and runtime-built packs.
     export let try_vformat = func(pattern: string, args: Argument[]) -> result.Result<string> =>
         formatting.try_vformat(pattern, args);
 
+    /// @brief Formats a prebuilt argument array into text. Invalid formats trap.
     export let vformat = func(pattern: string, args: Argument[]) -> string =>
         result.expect<string>(try_vformat(pattern, args), "invalid format");
 
+    /// @brief Formats variadic arguments into text or returns a parse error.
     export let try_format = func(pattern: string, args: ...) -> result.Result<string> =>
         try_vformat(pattern, args);
 
+    /// @brief Formats variadic arguments into text. Invalid formats trap.
     export let format = func(pattern: string, args: ...) -> string => vformat(pattern, args);
 
+    /// @brief Exposes text formatting through a static method.
     export let Formatter = class (
+        /// @brief Formats variadic arguments into text with the console grammar. Invalid formats trap.
         export static let format = func(pattern: string, args: ...) -> string => vformat(pattern, args);
     );
 
-    // Writes the text and one LF. A failed write traps with
-    // "console write failed".
+    /// @brief Writes the text and one LF. A failed write traps with "console write failed".
     export let print_line = func(s: string) {
         match (write_line(s)) {
             WriteOutcome.Ok => {},
@@ -52,60 +64,71 @@ export let Console = module (
         }
     };
 
-    // The same write, returning its failure. The service's error code 1
-    // maps to Other.
+    /// @brief The same write, returning its failure. The service's error code 1 maps to Other.
     export let try_print_line = func(s: string) -> result.Result<Unit> => match (write_line(s)) {
         WriteOutcome.Ok => bytes.ok(),
         WriteOutcome.Error(_) => result.Result<Unit>.Err(write_failed()),
     };
 
     // Formatted output to stdout and stderr, with or without a final LF.
+    /// @brief Formats the arguments and writes to stdout. A formatting or write error traps.
     export let print = func(pattern: string, args: ...) =>
         check_written(try_formatted(pattern, args, try_write));
 
+    /// @brief Formats the arguments and writes to stdout, returning a formatting or write error.
     export let try_print = func(pattern: string, args: ...) -> result.Result<Unit> =>
         try_formatted(pattern, args, try_write);
 
+    /// @brief Formats the arguments and writes to stdout with one LF. Errors trap.
     export let println = func(pattern: string, args: ...) =>
         check_written(try_formatted(pattern, args, try_print_line));
 
+    /// @brief Formats the arguments and writes to stdout with one LF, returning any error.
     export let try_println = func(pattern: string, args: ...) -> result.Result<Unit> =>
         try_formatted(pattern, args, try_print_line);
 
+    /// @brief Formats the arguments and writes to stderr. Errors trap.
     export let eprint = func(pattern: string, args: ...) =>
         check_written(try_formatted(pattern, args, try_write_error));
 
+    /// @brief Formats the arguments and writes to stderr, returning any error.
     export let try_eprint = func(pattern: string, args: ...) -> result.Result<Unit> =>
         try_formatted(pattern, args, try_write_error);
 
+    /// @brief Formats the arguments and writes to stderr with one LF. Errors trap.
     export let eprintln = func(pattern: string, args: ...) =>
         check_written(try_formatted(pattern, args, try_error_line));
 
+    /// @brief Formats the arguments and writes to stderr with one LF, returning any error.
     export let try_eprintln = func(pattern: string, args: ...) -> result.Result<Unit> =>
         try_formatted(pattern, args, try_error_line);
 
+    /// @brief Writes raw text to stdout without interpreting format fields or adding a newline.
     export let write = func(s: string) => check_written(try_write(s));
 
+    /// @brief Writes raw UTF-8 bytes to stdout and returns any write error.
     export let try_write = func(s: string) -> result.Result<Unit> => write_all(1, bytes.of_string(s));
 
+    /// @brief Writes raw UTF-8 bytes to stderr and returns any write error.
     let try_write_error = func(s: string) -> result.Result<Unit> => write_all(2, bytes.of_string(s));
 
+    /// @brief Finishes formatting before invoking the selected writer, so a format error produces no output.
     let try_formatted = func(pattern: string, args: Argument[], writer: func(string) -> result.Result<Unit>)
         -> result.Result<Unit> => match (try_vformat(pattern, args)) {
         result.Result.Ok(text) => writer(text),
         result.Result.Err(problem) => result.Result<Unit>.Err(problem),
     };
 
-    // Writes the text and one LF to the error stream. A failed write traps
-    // with "console write failed".
+    /// @brief Writes the text and one LF to the error stream. A failed write traps with "console write failed".
     export let error_line = func(s: string) => check_written(try_error_line(s));
 
+    /// @brief Writes raw text and one LF to stderr, returning any write error.
     export let try_error_line = func(s: string) -> result.Result<Unit> =>
         write_all(2, bytes.of_string(s + "\n"));
 
-    // The next line of input without its LF or a CR before it; None at the
-    // end of input. A final line without an LF is returned. Invalid UTF-8
-    // fails with InvalidData and consumes the line.
+    /// @brief The next line of input without its LF or a CR before it; None at the end of input.
+    ///
+    /// A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
     export let read_line = func -> result.Result<Optional<string>> {
         let line: uint8[list] = [];
         do {
@@ -140,18 +163,18 @@ export let Console = module (
         }
     };
 
-    // The output stream as a byte sink.
+    /// @brief The output stream as a byte sink.
     export let output = func -> func(uint8[list]) -> result.Result<Unit> =>
         func(data: uint8[list]) -> result.Result<Unit> => write_all(1, data);
 
-    // The error stream as a byte sink.
+    /// @brief The error stream as a byte sink.
     export let error = func -> func(uint8[list]) -> result.Result<Unit> =>
         func(data: uint8[list]) -> result.Result<Unit> => write_all(2, data);
 
-    // Console input as a byte source. It first returns input that read_line
-    // read ahead.
+    /// @brief Console input as a byte source. It first returns input that read_line read ahead.
     export let input = func -> func(int) -> result.Result<uint8[list]> => read_input;
 
+    /// @brief Returns pending read-ahead bytes first, then reads directly from the host.
     let read_input = func(max: int) -> result.Result<uint8[list]> {
         bytes.check_maximum(max);
         if (pending_start < pending.length) {
@@ -172,12 +195,14 @@ export let Console = module (
         };
     };
 
+    /// @brief Clears the console's read-ahead buffer and resets its cursor.
     let discard_pending = func {
         let empty: uint8[list] = [];
         pending = empty;
         pending_start = 0;
     };
 
+    /// @brief Strips a final CR from an LF-terminated line and decodes the line as UTF-8.
     let finish_line = func(line: uint8[list]) -> result.Result<Optional<string>> {
         if (line.length > 0 && line[line.length - 1] == 13) {
             line.remove_at(line.length - 1);
@@ -189,7 +214,7 @@ export let Console = module (
         return result.Result<Optional<string>>.Ok(Optional<string>.Some(text));
     };
 
-    // Writes every byte to a stream, repeating partial writes.
+    /// @brief Writes every byte to a stream, repeating partial writes.
     let write_all = func(stream: int, data: uint8[list]) -> result.Result<Unit> {
         let remaining = data;
         while (remaining.length > 0) {
@@ -211,6 +236,7 @@ export let Console = module (
         return bytes.ok();
     };
 
+    /// @brief Converts a failed console operation into a trap.
     let check_written = func(written: result.Result<Unit>) {
         match (written) {
             result.Result.Ok(_) => {},
@@ -225,8 +251,10 @@ export let Console = module (
         }
     };
 
+    /// @brief Creates the library error for a failed console write.
     let write_failed = func -> errors.Error =>
         errors.Error.Io { kind: errors.IoErrorKind.Other, message: "console write failed", path: "" };
 
+    /// @brief Maps a provider code to a console read error.
     let read_failed = func(code: uint32) -> errors.Error => host_error.io(code, "console read failed", "");
 );

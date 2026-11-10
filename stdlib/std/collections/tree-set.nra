@@ -7,43 +7,54 @@ let text_depth = import:Std.Collections.Internal.TextDepth;
 let tree_map = import:Std.Collections.TreeMap;
 let unit = import:Std.Core.Unit;
 
-// A sorted set: a TreeMap<T, Unit> ordered by the comparator given at
-// construction (Stdlib.md section 9.7). Two elements are the same element
-// when the comparator returns Equal; equals is never consulted. Iteration is
-// ascending. Iterators and callbacks fail fast with "collection modified
-// during iteration".
+/// @brief A sorted set: a TreeMap<T, Unit> ordered by the comparator given at
+/// construction (Stdlib.md section 9.7). Two elements are the same element
+/// when the comparator returns `Equal`. Iteration is
+/// ascending. Iterators and callbacks fail fast with "collection modified
+/// during iteration".
+/// @see [Std.Collections.TreeSet](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-TreeSet)
 export let TreeSet = module (
+    /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
 
+    /// @brief A mutable set that identifies and orders elements using its comparator.
     export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T> (
+        /// @brief The backing tree with one unit-valued entry per element.
         let map: tree_map.TreeMap<T, unit.Unit>;
+        /// @brief The comparator reused when constructing set operation results.
         let compare: func(T, T) -> ordering.Ordering;
+        /// @brief The depth of this instance's active text conversion, or zero when inactive.
         let printing_depth: int = 0;
 
+        /// @brief Creates an empty backing tree with the comparator supplied by the factory.
         export let init = func(seal: Seal, comparator: func(T, T) -> ordering.Ordering) {
             compare = comparator;
             map = tree_map.create<T, unit.Unit>(comparator);
         };
 
+        /// @brief Returns the number of distinct elements.
         export let size = func -> int => map.size();
 
+        /// @brief Returns true when there are no distinct elements.
         export let is_empty = func -> bool => map.size() == 0;
 
+        /// @brief Removes all elements and invalidates iterators.
         export let clear = func {
             map.clear();
         };
 
+        /// @brief Reports whether an element compares equal to `value`.
         export let contains = func(value: T) -> bool => map.contains_key(value);
 
-        // False when the set already holds an element the comparator calls
-        // Equal; the set keeps the element it holds.
+        /// @brief False when the set already holds an element the comparator calls
+        /// Equal. The set keeps the element it holds.
         export let add = func(value: T) -> bool {
             let before = map.size();
             map.set(value, unit.Unit.Value);
             return map.size() != before;
         };
 
-        // Adds each element in order.
+        /// @brief Adds each element in order.
         export let add_all = func(items: T[list]) {
             let total = items.length;
             let i = 0;
@@ -53,73 +64,87 @@ export let TreeSet = module (
             }
         };
 
+        /// @brief Removes an element that compares equal to `value`. Returns false when absent.
         export let remove = func(value: T) -> bool => map.delete(value);
 
-        // A new built-in list in ascending order.
+        /// @brief A new built-in list in ascending order.
         export let to_list = func -> T[list] => map.keys();
 
+        /// @brief Returns a fail-fast iterator over the elements in ascending order.
         export let iterator = func -> Iterator<T> => map.key_iterator();
 
-        // In ascending order. The action must not change the set
-        // structurally.
+        /// @brief Calls `action` in ascending comparator order.
+        /// @pre The action leaves the set structure unchanged.
         export let for_each = func(action: func(T) -> void) {
             map.for_each(func(value: T, ignored: unit.Unit) -> void {
                 action(value);
             });
         };
 
-        // The callback runs once per element in ascending order; the chosen
-        // elements are removed afterwards. Returns how many were removed.
+        /// @brief Calls `drop` once per element in ascending order, then removes the matches.
+        /// @pre The predicate leaves the set structure unchanged.
+        /// @return The number of removed elements.
         export let remove_if = func(drop: func(T) -> bool) -> int {
             return map.remove_if(func(value: T, ignored: unit.Unit) -> bool {
                 return drop(value);
             });
         };
 
+        /// @brief Calls `keep` once per element in ascending order, then removes rejected elements.
+        /// @pre The predicate leaves the set structure unchanged.
+        /// @return The number of removed elements.
         export let retain_if = func(keep: func(T) -> bool) -> int {
             return map.remove_if(func(value: T, ignored: unit.Unit) -> bool {
                 return !keep(value);
             });
         };
 
-        // Traps with "no such element" when empty.
+        /// @brief Returns the least element. Traps with `no such element` when empty.
         export let first = func -> T {
             let [value, _] = map.first();
             return value;
         };
 
+        /// @brief Returns the greatest element. Traps with `no such element` when empty.
         export let last = func -> T {
             let [value, _] = map.last();
             return value;
         };
 
-        // Removes and returns the least element. Traps with "no such
-        // element" when empty.
+        /// @brief Removes and returns the least element. Traps with "no such
+        /// element" when empty.
         export let remove_first = func -> T {
             let [value, _] = map.remove_first();
             return value;
         };
 
+        /// @brief Removes and returns the greatest element. Traps with `no such element` when empty.
         export let remove_last = func -> T {
             let [value, _] = map.remove_last();
             return value;
         };
 
-        // Elements from `from` inclusive to `to` exclusive, ascending.
+        /// @brief Returns a new list in ascending order from `from` inclusive to `to` exclusive.
+        /// Returns an empty list when `to` is at or below `from`.
         export let range = func(from: T, to: T) -> T[list] => map.key_range(from, to);
 
+        /// @brief Copies the elements into a new list in descending order.
         export let descending = func -> T[list] => map.descending_keys();
 
+        /// @brief Returns the greatest element at most `value` as `Some`, or `None` when absent.
         export let floor = func(value: T) -> optional.Optional<T> => map.floor(value);
 
+        /// @brief Returns the least element at least `value` as `Some`, or `None` when absent.
         export let ceiling = func(value: T) -> optional.Optional<T> => map.ceiling(value);
 
+        /// @brief Returns the greatest element strictly below `value` as `Some`, or `None` when absent.
         export let lower = func(value: T) -> optional.Optional<T> => map.lower(value);
 
+        /// @brief Returns the least element strictly above `value` as `Some`, or `None` when absent.
         export let higher = func(value: T) -> optional.Optional<T> => map.higher(value);
 
-        // Whether every element of this set is in `other`, by the other
-        // set's comparator.
+        /// @brief Whether every element of this set is in `other`, by the other
+        /// set's comparator.
         export let is_subset_of = func(other: TreeSet<T>) -> bool {
             if (map.size() > other.size()) {
                 return false;
@@ -136,6 +161,7 @@ export let TreeSet = module (
             return true;
         };
 
+        /// @brief Reports whether none of this set's elements pass `other`'s membership test.
         export let is_disjoint_from = func(other: TreeSet<T>) -> bool {
             let items = map.keys();
             let total = items.length;
@@ -149,7 +175,7 @@ export let TreeSet = module (
             return true;
         };
 
-        // A new set with this set's comparator holding the elements of both.
+        /// @brief A new set with this set's comparator holding the elements of both.
         export let union = func(other: TreeSet<T>) -> TreeSet<T> {
             let result = new TreeSet<T>(Seal.Token, compare);
             result.add_all(map.keys());
@@ -157,19 +183,19 @@ export let TreeSet = module (
             return result;
         };
 
-        // This set's elements that are in `other`.
+        /// @brief This set's elements that are in `other`.
         export let intersection = func(other: TreeSet<T>) -> TreeSet<T> => selected(other, true);
 
-        // This set's elements that are not in `other`.
+        /// @brief This set's elements that are not in `other`.
         export let difference = func(other: TreeSet<T>) -> TreeSet<T> => selected(other, false);
 
-        // Traps with "invalid state: tree ..." on a broken AVL invariant.
+        /// @brief Traps with "invalid state: tree ..." on a broken AVL invariant.
         export let validate = func {
             map.validate();
         };
 
-        // Another TreeSet of the same size whose elements this set all
-        // contains.
+        /// @brief Another TreeSet of the same size whose elements this set all
+        /// contains.
         export let.override equals = func(other: class) -> bool {
             if (!(other is TreeSet<T>)) {
                 return false;
@@ -190,7 +216,7 @@ export let TreeSet = module (
             return true;
         };
 
-        // The wrapping sum of the element hashes.
+        /// @brief The wrapping sum of the element hashes.
         export let.override hash_code = func -> uint32 {
             let total: uint64 = 0;
             let items = map.keys();
@@ -203,8 +229,8 @@ export let TreeSet = module (
             return total as uint32;
         };
 
-        // `{a, b, c}` in ascending order; the set itself as a direct element
-        // prints "(this collection)".
+        /// @brief Formats elements as `{a, b, c}` in ascending order. The set itself as a direct element
+        /// prints "(this collection)".
         export let.override to_string = func -> string {
             if (printing_depth != 0 && printing_depth == text_depth.current()) {
                 return "(this collection)";
@@ -217,6 +243,7 @@ export let TreeSet = module (
             return "{" + text.slice(1, text.byte_length - 1) + "}";
         };
 
+        /// @brief Copies elements whose membership in `other` matches `present`, ordered by this set's comparator.
         let selected = func(other: TreeSet<T>, present: bool) -> TreeSet<T> {
             let result = new TreeSet<T>(Seal.Token, compare);
             let items = map.keys();
@@ -232,7 +259,7 @@ export let TreeSet = module (
         };
     );
 
-    // An empty set ordered by `comparator`, which must define a total order.
+    /// @brief An empty set ordered by `comparator`, which must define a total order.
     export let create = func<T>(comparator: func(T, T) -> ordering.Ordering) -> TreeSet<T> =>
         new TreeSet<T>(Seal.Token, comparator);
 );

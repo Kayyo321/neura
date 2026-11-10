@@ -17,10 +17,14 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Cell** · [`export let Cell = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L4)
-- **Cell.Cell** · [`export let value: T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L5)
-- **Cell.Cell** · [`export let init = func(initial: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L7)
-- **Cell** · [`export let of = func<T>(value: T) -> Cell<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L12)
+- **Cell** · [`export let Cell = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L6)
+  A mutable slot shared by holders of the same Cell reference.
+- **Cell.Cell** · [`export let value: T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L8)
+  The value currently stored in the shared slot.
+- **Cell.Cell** · [`export let init = func(initial: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L11)
+  Initializes the slot with the supplied value.
+- **Cell** · [`export let of = func<T>(value: T) -> Cell<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L17)
+  Creates a new, independent cell containing the value.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

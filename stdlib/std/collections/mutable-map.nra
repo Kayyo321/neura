@@ -1,22 +1,35 @@
 let map = import:Std.Collections.Map;
 let optional = import:Std.Core.Optional;
 
-// A map that can change. Replacing the value of an existing key is not a
-// structural change. A callback passed to a member must not modify the map.
+/// @brief Mutation operations for maps. Replacing an existing key's value preserves iterator validity.
+/// Member callbacks must leave the map structure unchanged.
+/// @see [Std.Collections.MutableMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-MutableMap)
 export let MutableMap = module (
+    /// @brief An association whose entries can be inserted, replaced, or removed. Replacing the value of an existing key preserves its position and iterator validity.
     export let MutableMap = interface<K, V>:map.Map<K, V> (
-        // Associates the value, replacing any previous one.
+        /// @brief Stores the value for `key`. Replacing an existing value preserves the key and iterator validity.
         let set = func(key: K, value: V);
-        // Removes the key; returns whether it was present.
+        /// @brief Removes the entry for `key`. Returns true if an entry was present.
         let delete = func(key: K) -> bool;
+        /// @brief Removes all entries.
         let clear = func;
-        // The previous value.
+        /// @brief Stores the value for `key` and returns its previous value as `Some`, or `None` for a new key.
         let put = func(key: K, value: V) -> optional.Optional<V>;
+        /// @brief Removes the entry for `key` and returns its value as `Some`, or `None` when absent.
         let remove = func(key: K) -> optional.Optional<V>;
+        /// @brief Calls `drop` once per entry in iteration order and removes the matches.
+        /// @pre The predicate leaves the map structure unchanged.
+        /// @return The number of removed entries.
         let remove_if = func(drop: func(K, V) -> bool) -> int;
+        /// @brief Returns the associated value, or calls `make` once, stores its result, and returns it when absent.
+        /// @pre The factory leaves the map structure unchanged.
         let get_or_put = func(key: K, make: func() -> V) -> V;
+        /// @brief Stores and returns `value` when the key is absent. Otherwise stores and returns `combine(old, value)`.
+        /// @pre The combiner leaves the map structure unchanged.
         let merge = func(key: K, value: V, combine: func(V, V) -> V) -> V;
-        // Stores a Some result and removes the key for None.
+        /// @brief Calls `f` with the key and its optional current value. Stores a `Some` result or removes the entry for `None`.
+        /// @pre The callback leaves the map structure unchanged.
+        /// @return The result of the callback.
         let compute = func(key: K, f: func(K, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>;
     );
 );

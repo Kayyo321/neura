@@ -17,12 +17,16 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Utf8Writer** · [`export let Utf8Writer = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L8)
-- **Utf8Writer.Utf8Writer** · [`export let init = func(output: func(uint8[list]) -> Result<Unit>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L11)
-- **Utf8Writer.Utf8Writer** · [`export let write = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L15)
-- **Utf8Writer.Utf8Writer** · [`export let write_line = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L18)
+- **Utf8Writer** · [`export let Utf8Writer = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L9)
+  Adapts a byte sink to receive UTF-8 text.
+- **Utf8Writer.Utf8Writer** · [`export let init = func(output: func(uint8[list]) -> Result<Unit>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L14)
+  Stores the destination byte sink.
+- **Utf8Writer.Utf8Writer** · [`export let write = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L19)
+  Writes the UTF-8 bytes of the text and returns the sink's result.
+- **Utf8Writer.Utf8Writer** · [`export let write_line = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L22)
   Writes the text and one LF.
-- **Utf8Writer** · [`export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L22)
+- **Utf8Writer** · [`export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L27)
+  Creates a UTF-8 writer over the supplied byte sink.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

@@ -1,17 +1,21 @@
 let.promote _ = import:Std.Collections.Iterable;
 
-// The read-only view shared by every collection (Stdlib.md section 9.10).
-// A function that only reads takes this interface; no member simulates
-// immutability by trapping.
+/// @brief The common interface for reading and traversing collections.
+/// @see [Std.Collections.Collection](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Collection)
 export let Collection = module (
+    /// @brief Read-only operations over a collection of elements.
     export let Collection = interface<T>:Iterable<T> (
+        /// @brief Returns the number of elements.
         let size = func -> int;
+        /// @brief Reports whether the collection contains `value` under its membership rule.
         let contains = func(value: T) -> bool;
-        // A new built-in list of the elements in iteration order.
+        /// @brief Copies the elements into a new built-in list in iteration order.
         let to_list = func -> T[list];
 
+        /// @brief Returns true when there are no elements.
         let is_empty = func -> bool => size() == 0;
 
+        /// @brief Reports whether each item passes the collection's membership test.
         let contains_all = func(items: T[list]) -> bool {
             for (let item in items) {
                 if (!contains(item)) {
@@ -21,7 +25,8 @@ export let Collection = module (
             return true;
         };
 
-        // Calls `action` with each element in iteration order.
+        /// @brief Calls `action` with each element in iteration order.
+        /// @pre The action leaves the collection structure unchanged.
         let for_each = func(action: func(T) -> void) {
             let items = iterator();
             while (items.has_next()) {

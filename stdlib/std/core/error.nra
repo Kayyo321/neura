@@ -1,40 +1,50 @@
 let hashing = import:Std.Core.Hash;
 
-// Returned failures (Stdlib.md section 6.3). An Error is an ordinary value
-// read with match; adding a variant is a major-version change.
+/// @brief Returned failures (Stdlib.md section 6.3). An Error is an ordinary value read with match; adding a
+/// variant is a major-version change.
+/// @see [Std.Core.Error](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Error)
 export let Error = module (
-    // Host error codes 1 through 14 map to the first fourteen kinds in
-    // order. The library produces Closed and InvalidData itself.
+    /// @brief Host error codes 1 through 14 map to the first fourteen kinds in order. The library produces
+    /// Closed and InvalidData itself.
     export let IoErrorKind = enum (
         NotFound, PermissionDenied, AlreadyExists, InvalidInput, Interrupted, UnexpectedEnd, NotADirectory,
         IsADirectory, DirectoryNotEmpty, ConnectionRefused, ConnectionReset, TimedOut, Unsupported,
         CapabilityDenied, Closed, InvalidData, Other
     );
 
+    /// @brief Classifies malformed text, premature endings, and out-of-range values.
     export let ParseErrorKind = enum (Empty, InvalidCharacter, OutOfRange, UnexpectedEnd, Syntax);
 
-    // The base of errors defined outside the library. `code` is a stable
-    // identifier such as billing.card_declined.
+    /// @brief The base of errors defined outside the library. `code` is a stable identifier such as
+    /// billing.card_declined.
     export let ErrorDetail = class (
+        /// @brief Returns the detail's application-defined code.
         export let code = func() -> string;
+        /// @brief Returns the detail's human-readable message.
         export let message = func() -> string;
     );
 
+    /// @brief Stores a custom error's code and message as strings.
     export let SimpleDetail = class:ErrorDetail (
+        /// @brief The application-defined error code.
         let code_text: string;
+        /// @brief The human-readable detail.
         let message_text: string;
 
+        /// @brief Initializes both parts of the error detail.
         export let init = func(code_value: string, message_value: string) {
             super.init();
             code_text = code_value;
             message_text = message_value;
         };
 
+        /// @brief Returns the stored error code.
         export let.override code = func -> string => code_text;
 
+        /// @brief Returns the stored detail message.
         export let.override message = func -> string => message_text;
 
-        // Two simple details are equal when their code and message are.
+        /// @brief Two simple details are equal when their code and message are.
         export let.override equals = func(other: class) -> bool {
             if (!(other is SimpleDetail)) {
                 return false;
@@ -43,12 +53,15 @@ export let Error = module (
             return code_text == detail.code() && message_text == detail.message();
         };
 
+        /// @brief Combines the hashes of the code and message.
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(17, code_text.hash_code()), message_text.hash_code());
 
+        /// @brief Returns the formatted custom error detail.
         export let.override to_string = func -> string => code_text + ": " + message_text;
     );
 
+    /// @brief Represents an expected failure and its category-specific context.
     export let Error = enum (
         Io { kind: IoErrorKind, message: string, path: string },
         Parse { kind: ParseErrorKind, offset: int, message: string },
@@ -57,17 +70,21 @@ export let Error = module (
         Context { message: string, cause: Error }
     );
 
-    // A Custom error holding a SimpleDetail.
+    /// @brief A Custom error holding a SimpleDetail.
     export let custom = func(code: string, text: string) -> Error =>
         Error.Custom(new SimpleDetail(code, text));
 
+    /// @brief Wraps an error with a message that describes the operation that failed.
     export let context = func(cause: Error, text: string) -> Error =>
         Error.Context { message: text, cause: cause };
 
+    /// @brief Returns the spelling of an I/O error category.
     export let io_kind_name = func(kind: IoErrorKind) -> string => kind.to_string();
 
+    /// @brief Returns the spelling of a parse error category.
     export let parse_kind_name = func(kind: ParseErrorKind) -> string => kind.to_string();
 
+    /// @brief Formats an error with its category and context.
     export let message = func(e: Error) -> string => match (e) {
         Error.Io { kind, message: text, path } => io_text(kind, text, path),
         Error.Parse { kind: _, offset, message: text } => "parse error at " + offset.to_string() + ": " + text,
@@ -76,6 +93,7 @@ export let Error = module (
         Error.Context { message: text, cause } => text + ": " + message(cause),
     };
 
+    /// @brief Formats an I/O failure with its kind and optional path.
     let io_text = func(kind: IoErrorKind, text: string, path: string) -> string {
         if (path == "") {
             return io_kind_name(kind) + ": " + text;
@@ -83,7 +101,7 @@ export let Error = module (
         return io_kind_name(kind) + ": " + text + " (" + path + ")";
     };
 
-    // Follows Context causes to the end.
+    /// @brief Follows Context causes to the end.
     export let root_cause = func(e: Error) -> Error {
         let current = e;
         do {
@@ -98,7 +116,7 @@ export let Error = module (
         }
     };
 
-    // The error, then each cause in order.
+    /// @brief The error, then each cause in order.
     export let chain = func(e: Error) -> Error[list] {
         let result: Error[list] = [];
         let current = e;
@@ -117,7 +135,7 @@ export let Error = module (
         return result;
     };
 
-    // Structural equality. Custom details compare with their equals member.
+    /// @brief Structural equality. Custom details compare with their equals member.
     export let equals = func(a: Error, b: Error) -> bool {
         match (a) {
             Error.Io { kind, message: text, path } => {
@@ -161,7 +179,7 @@ export let Error = module (
         }
     };
 
-    // Starts from the variant's position and combines each field's hash.
+    /// @brief Starts from the variant's position and combines each field's hash.
     export let hash = func(e: Error) -> uint32 => match (e) {
         Error.Io { kind, message: text, path } =>
             hashing.combine(hashing.combine(hashing.combine(0, kind.hash_code()), text.hash_code()), path.hash_code()),
@@ -174,6 +192,6 @@ export let Error = module (
             hashing.combine(hashing.combine(4, text.hash_code()), hash(cause)),
     };
 
-    // The same text as message.
+    /// @brief The same text as message.
     export let to_string = func(e: Error) -> string => message(e);
 );

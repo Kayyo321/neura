@@ -17,33 +17,40 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Path** · [`export let Path = class implements Comparable<Path>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L12)
-- **Path.Path** · [`export let init = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L16)
+- **Path** · [`export let Path = class implements Comparable<Path>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L13)
+  An immutable normalized path with lexical operations independent of the filesystem.
+- **Path.Path** · [`export let init = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L18)
   Normalizes `raw`; Path.of is the usual spelling.
-- **Path.Path** · [`export let is_absolute = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L20)
-- **Path.Path** · [`export let join = func(other: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L23)
+- **Path.Path** · [`export let is_absolute = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L23)
+  Reports whether the path starts at the root.
+- **Path.Path** · [`export let join = func(other: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L26)
   This path followed by `other`; an absolute `other` replaces it.
-- **Path.Path** · [`export let parent = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L28)
+- **Path.Path** · [`export let parent = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L31)
   The path without its last component, or nil for the root, `.`, and a single relative component.
-- **Path.Path** · [`export let file_name = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L42)
+- **Path.Path** · [`export let file_name = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L44)
   The last component; None for the root, `.`, and a path ending in `..`.
-- **Path.Path** · [`export let stem = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L51)
+- **Path.Path** · [`export let stem = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L53)
   The file name without its extension.
-- **Path.Path** · [`export let extension = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L60)
+- **Path.Path** · [`export let extension = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L62)
   The text after the last `.` of the file name, when that dot is not the name's first character.
-- **Path.Path** · [`export let components = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L77)
+- **Path.Path** · [`export let components = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L78)
   The components in order, starting with "/" for an absolute path. The path `.` has none.
 - **Path.Path** · [`export let resolve_lexically = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L92)
   Removes each `..` together with the component before it, without consulting the file system. `..` directly below the root is removed; leading `..` of a relative path are kept.
 - **Path.Path** · [`export let starts_with = func(other: Path) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L110)
   True when both paths are absolute or both relative and every component of `other` begins this path.
-- **Path.Path** · [`export let relative_to = func(base: Path) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L132)
+- **Path.Path** · [`export let relative_to = func(base: Path) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L131)
   A relative path that joined to `base` names this path, or nil when one is absolute and the other relative or when `base` has a `..` component after the common part.
 - **Path.Path** · [`export let compare_to = func(other: Path) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L159)
-- **Path.Path** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L161)
-- **Path.Path** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L168)
-- **Path.Path** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L170)
-- **Path** · [`export let of = func(text: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L173)
+  Orders paths lexicographically by their normalized UTF-8 bytes.
+- **Path.Path** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L162)
+  Tests equality of the normalized path text.
+- **Path.Path** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L170)
+  Hashes the normalized path text.
+- **Path.Path** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L173)
+  Returns the normalized path text.
+- **Path** · [`export let of = func(text: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L177)
+  Constructs a path and normalizes its separators and dot components.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

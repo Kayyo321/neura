@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **MutableMap** · [`export let MutableMap = interface<K, V>:map.Map<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/mutable-map.nra#L7)
+- **MutableMap** · [`export let MutableMap = interface<K, V>:map.Map<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/mutable-map.nra#L9)
+  An association whose entries can be inserted, replaced, or removed. Replacing the value of an existing key preserves its position and iterator validity.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

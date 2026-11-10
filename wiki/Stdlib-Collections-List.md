@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **List** · [`export let List = interface<T>:Collection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/list.nra#L6)
+- **List** · [`export let List = interface<T>:Collection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/list.nra#L8)
+  Read-only access to elements by zero-based position.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

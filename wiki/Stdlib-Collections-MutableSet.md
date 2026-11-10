@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **MutableSet** · [`export let MutableSet = interface<T>:Set<T>, MutableCollection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/mutable-set.nra#L5)
+- **MutableSet** · [`export let MutableSet = interface<T>:Set<T>, MutableCollection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/mutable-set.nra#L8)
+  A collection of distinct elements that supports insertion and removal.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

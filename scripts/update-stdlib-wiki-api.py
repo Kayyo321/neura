@@ -18,6 +18,28 @@ BEGIN = "<!-- BEGIN SOURCE API -->"
 END = "<!-- END SOURCE API -->"
 
 
+def comment_notes(lines, start):
+    """Read adjacent prose without exposing Doxygen markup in the wiki."""
+    comments = []
+    for index in range(start - 1, -1, -1):
+        match = re.match(r"^\s*(///|//)\s?(.*)$", lines[index])
+        if not match:
+            break
+        comments.append((match[1], match[2].strip()))
+
+    notes = []
+    include = True
+    for prefix, comment in reversed(comments):
+        if prefix == "///" and (command := re.match(r"^[@\\](\w+)\b\s*(.*)$", comment)):
+            include = command[1] in {"brief", "details", "pre", "return", "note", "warning"}
+            comment = command[2]
+        elif prefix == "//" or not comment:
+            include = True
+        if include and comment:
+            notes.append(comment)
+    return notes
+
+
 def declaration(lines, start):
     """Return a declaration through its signature, excluding its body."""
     text = lines[start].strip()
@@ -91,12 +113,7 @@ def exports(path, module):
             owners.append((indent, container.group(3), bool(container.group(2)) and public))
         if not match or not public or (indent == 0 and match.group(1) == module):
             continue
-        comments = []
-        previous = index - 1
-        while previous >= 0 and re.match(r"^\s*//", lines[previous]):
-            comments.insert(0, re.sub(r"^\s*//\s?", "", lines[previous]).strip())
-            previous -= 1
-        yield index + 1, owner, declaration(lines, index), comments
+        yield index + 1, owner, declaration(lines, index), comment_notes(lines, index)
 
 
 def render(path, module):

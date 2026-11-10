@@ -3,21 +3,22 @@ let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 
-// Comma-separated values (RFC 4180; Stdlib.md section 13.1). Fields are
-// separated by commas and records by LF or CRLF. A field that starts with a
-// quote is quoted: it ends at the next single quote, and inside it commas,
-// CR, LF, and doubled quotes ("" for one quote) are data. Any other byte,
-// including a CR that does not start a CRLF, is data in either kind of
-// field.
+/// @brief Comma-separated values (RFC 4180; Stdlib.md section 13.1).
+///
+/// Fields are separated by commas and records by LF or CRLF. A field that starts with a quote is quoted: it
+/// ends at the next single quote, and inside it commas, CR, LF, and doubled quotes ("" for one quote) are data.
+/// Any other byte, including a CR that does not start a CRLF, is data in either kind of field.
+/// @see [Std.Encoding.Csv](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Csv)
 export let Csv = module (
-    // The records of the text, each a list of its fields. The empty text has
-    // no records; a final line break does not add an empty record; an empty
-    // line is a record with one empty field. Parse errors:
-    //
-    // - Syntax, "quote in unquoted field": at the quote.
-    // - Syntax, "text after closing quote": at the first byte after the
-    //   closing quote that is not a comma or a line break.
-    // - UnexpectedEnd, "unterminated quoted field": at the text's length.
+    /// @brief The records of the text, each a list of its fields.
+    ///
+    /// The empty text has no records; a final line break does not add an empty record; an empty line is a
+    /// record with one empty field. Parse errors:
+    ///
+    /// - Syntax, "quote in unquoted field": at the quote.
+    /// - Syntax, "text after closing quote": at the first byte after the
+    /// closing quote that is not a comma or a line break.
+    /// - UnexpectedEnd, "unterminated quoted field": at the text's length.
     export let parse = func(text: string) -> Result<string[list][list]> {
         let records: string[list][list] = [];
         let count = text.byte_length;
@@ -79,10 +80,10 @@ export let Csv = module (
         return Result<string[list][list]>.Ok(records);
     };
 
-    // The rows as CSV text: fields joined by commas, each record followed by
-    // LF. A field is quoted, with each quote doubled, only when it contains a
-    // comma, a quote, a CR, or an LF. A row with no fields is written as an
-    // empty line, which parses as one empty field.
+    /// @brief The rows as CSV text: fields joined by commas, each record followed by LF.
+    ///
+    /// A field is quoted, with each quote doubled, only when it contains a comma, a quote, a CR, or an LF. A
+    /// row with no fields is written as an empty line, which parses as one empty field.
     export let write = func(rows: string[list][list]) -> string {
         let out = builders.create();
         for (let row in rows) {
@@ -105,7 +106,7 @@ export let Csv = module (
         return out.to_string();
     };
 
-    // Whether the byte at the offset is a comma, an LF, or the CR of a CRLF.
+    /// @brief Whether the byte at the offset is a comma, an LF, or the CR of a CRLF.
     let is_separator = func(text: string, offset: int) -> bool {
         let b = text.byte_at(offset);
         if (b == 44 or 10) {
@@ -114,8 +115,8 @@ export let Csv = module (
         return b == 13 && offset + 1 < text.byte_length && text.byte_at(offset + 1) == 10;
     };
 
-    // The offset of the quote that closes a quoted field whose content
-    // starts at `start`, or -1 when the text ends first.
+    /// @brief The offset of the quote that closes a quoted field whose content starts at `start`, or -1 when
+    /// the text ends first.
     let quoted_end = func(text: string, start: int) -> int {
         let count = text.byte_length;
         let j = start;
@@ -132,8 +133,7 @@ export let Csv = module (
         return -1;
     };
 
-    // The content between `start` and `end` with each doubled quote made
-    // single.
+    /// @brief The content between `start` and `end` with each doubled quote made single.
     let unquote = func(text: string, start: int, end: int) -> string {
         let content = text.slice(start, end);
         if (strings.index_of(content, "\"") < 0) {
@@ -142,6 +142,7 @@ export let Csv = module (
         return strings.replace(content, "\"\"", "\"");
     };
 
+    /// @brief Tests whether a field contains a separator, quote, CR, or LF.
     let needs_quotes = func(field: string) -> bool {
         let count = field.byte_length;
         for (let i = 0; i < count; i++) {
@@ -152,6 +153,7 @@ export let Csv = module (
         return false;
     };
 
+    /// @brief Creates a CSV parse error at the offending UTF-8 byte offset.
     let failure = func(kind: ParseErrorKind, offset: int, message: string) -> Result<string[list][list]> =>
         Result<string[list][list]>.Err(Error.Parse { kind: kind, offset: offset, message: message });
 );

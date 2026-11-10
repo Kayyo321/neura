@@ -1,14 +1,18 @@
-// The IEEE 802.3 CRC-32 checksum (Stdlib.md section 13.2): the reflected
-// polynomial 0xEDB88320, an initial value of all ones, and a final exclusive-or
-// with all ones. The check value of the ASCII text 123456789 is 0xCBF43926.
+/// @brief The IEEE 802.3 CRC-32 checksum (Stdlib.md section 13.2): the reflected polynomial 0xEDB88320, an
+/// initial value of all ones, and a final exclusive-or with all ones.
+///
+/// The check value of the ASCII text 123456789 is 0xCBF43926.
+/// @see [Std.Digest.Crc32](https://github.com/Kayyo321/neura/wiki/Stdlib-Digest-Crc32)
 export let Crc32 = module (
-    // 0xEDB88320 and 0xFFFFFFFF.
+    /// @brief 0xEDB88320 and 0xFFFFFFFF.
     const Polynomial: uint32 = 3988292384;
+    /// @brief The initial register value and final XOR mask.
     const AllOnes: uint32 = 4294967295;
 
-    // The 256-entry byte table, computed by the first checksum that needs it.
+    /// @brief The 256-entry byte table, computed by the first checksum that needs it.
     let table: uint32[list] = [];
 
+    /// @brief Builds the reflected CRC lookup table on first use and returns it.
     let ready_table = func -> uint32[list] {
         if (table.length == 0) {
             let entries: uint32[list] = [];
@@ -28,8 +32,7 @@ export let Crc32 = module (
         return table;
     };
 
-    // Advances the running register (kept without the final exclusive-or)
-    // over the bytes.
+    /// @brief Advances the running register (kept without the final exclusive-or) over the bytes.
     let advance = func(register: uint32, bytes: uint8[list]) -> uint32 {
         let entries = ready_table();
         let c = register;
@@ -49,31 +52,33 @@ export let Crc32 = module (
         return c;
     };
 
-    // A running checksum. A new one, or one after reset, has the value 0,
-    // the checksum of no bytes.
+    /// @brief A running checksum. A new one, or one after reset, has the value 0, the checksum of no bytes.
     export let Crc32 = class (
+        /// @brief The running reflected register before the final XOR.
         let register: uint32 = 4294967295;
 
+        /// @brief Initializes the checksum of an empty byte stream.
         export let init = func {
         };
 
-        // Adds the bytes to the checksum.
+        /// @brief Adds the bytes to the checksum.
         export let update = func(bytes: uint8[list]) {
             register = advance(register, bytes);
         };
 
-        // The checksum of every byte added since creation or the last reset.
-        // Reading it does not end the computation.
+        /// @brief The checksum of every byte added since creation or the last reset. Reading it does not end
+        /// the computation.
         export let value = func -> uint32 => register ^ AllOnes;
 
+        /// @brief Restores the initial register and discards the previous checksum state.
         export let reset = func {
             register = AllOnes;
         };
     );
 
-    // A new checksum with no bytes added.
+    /// @brief A new checksum with no bytes added.
     export let create = func -> Crc32 => new Crc32();
 
-    // The checksum of the bytes.
+    /// @brief The checksum of the bytes.
     export let of = func(bytes: uint8[list]) -> uint32 => advance(AllOnes, bytes) ^ AllOnes;
 );

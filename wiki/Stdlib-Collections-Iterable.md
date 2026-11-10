@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Iterable** · [`export let Iterable = interface<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/iterable.nra#L6)
+- **Iterable** · [`export let Iterable = interface<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/iterable.nra#L8)
+  A value that provides an iterator for the for-each protocol.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

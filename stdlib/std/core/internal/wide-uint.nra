@@ -1,24 +1,30 @@
-// The reference arithmetic of float text conversion (Stdlib.md section 7.5):
-// a non-negative integer stored as a built-in uint32 list of limbs, least
-// significant first. Every limb operation follows the limb row of section
-// 7.2: a limb product plus a carry plus an existing limb is at most
-// (2^32 - 1)^2 + 2(2^32 - 1) = 2^64 - 1, so every intermediate fits uint64.
-// Library files only.
+/// @brief The reference arithmetic of float text conversion (Stdlib.md section 7.5): a non-negative integer
+/// stored as a built-in uint32 list of limbs, least significant first.
+///
+/// Every limb operation follows the limb row of section 7.2: a limb product plus a carry plus an existing limb
+/// is at most (2^32 - 1)^2 + 2(2^32 - 1) = 2^64 - 1, so every intermediate fits uint64. Library files only.
 export let WideUint = module (
+    /// @brief Selects the low 32 bits of a widened limb calculation.
     const LimbMask: uint64 = 4294967295;
+    /// @brief The positional base of the 32-bit limb representation.
     const LimbBase: uint64 = 4294967296;
+    /// @brief The base used to convert the magnitude into decimal digit groups.
     const Billion: uint32 = 1000000000;
-    // 5^13, the largest power of five below 2^32.
+    /// @brief 5^13, the largest power of five below 2^32.
     const FivePower13: uint32 = 1220703125;
 
+    /// @brief A mutable nonnegative integer stored in normalized little-endian limbs.
     export let WideUint = class (
-        // No zero limb at the top; zero has no limbs.
+        /// @brief No zero limb at the top; zero has no limbs.
         export let limbs: uint32[list] = [];
 
+        /// @brief Reports whether the value has no nonzero limbs.
         export let is_zero = func -> bool => limbs.length == 0;
 
+        /// @brief Tests the low bit, treating an empty limb list as even.
         export let is_odd = func -> bool => limbs.length > 0 && (limbs[0] & 1) == 1;
 
+        /// @brief Copies the limbs into an independent value.
         export let copy = func -> WideUint {
             let duplicate = new WideUint();
             let target = duplicate.limbs;
@@ -28,6 +34,7 @@ export let WideUint = module (
             return duplicate;
         };
 
+        /// @brief Returns the number of significant bits, or zero for zero.
         export let bit_length = func -> int {
             let count = limbs.length;
             if (count == 0) {
@@ -42,7 +49,7 @@ export let WideUint = module (
             return (count - 1) * 32 + bits;
         };
 
-        // -1, 0, or 1 as this value is below, equal to, or above `other`.
+        /// @brief -1, 0, or 1 as this value is below, equal to, or above `other`.
         export let compare = func(other: WideUint) -> int {
             let a = limbs;
             let b = other.limbs;
@@ -63,7 +70,7 @@ export let WideUint = module (
             return 0;
         };
 
-        // The value when it is below 2^64; traps otherwise.
+        /// @brief The value when it is below 2^64; traps otherwise.
         export let to_uint64 = func -> uint64 {
             let count = limbs.length;
             if (count > 2) {
@@ -79,6 +86,7 @@ export let WideUint = module (
             return value;
         };
 
+        /// @brief Adds another magnitude in place and propagates carries across limbs.
         export let add = func(other: WideUint) {
             let a = limbs;
             let b = other.limbs;
@@ -108,7 +116,7 @@ export let WideUint = module (
             }
         };
 
-        // Requires this value to be at least `other`.
+        /// @brief Requires this value to be at least `other`.
         export let subtract = func(other: WideUint) {
             if (compare(other) < 0) {
                 trap_with_message("invalid state: wide integer subtraction below zero");
@@ -137,6 +145,7 @@ export let WideUint = module (
             normalize();
         };
 
+        /// @brief Adds a single limb in place, extending storage on a final carry.
         export let add_small = func(value: uint32) {
             let a = limbs;
             let carry = value as uint64;
@@ -153,6 +162,7 @@ export let WideUint = module (
             }
         };
 
+        /// @brief Multiplies by a single limb in place and keeps the result normalized.
         export let multiply_small = func(factor: uint32) {
             if (factor == 0) {
                 limbs = [];
@@ -171,11 +181,11 @@ export let WideUint = module (
             }
         };
 
-        // Divides in place and returns the remainder. A zero divisor traps
-        // (reason 1). The running remainder is below the divisor, so shifting
-        // it into the high half never discards a bit. The remainder is
-        // recovered by a multiplication, which costs far less than a second
-        // division.
+        /// @brief Divides in place and returns the remainder.
+        ///
+        /// A zero divisor traps (reason 1). The running remainder is below the divisor, so shifting it into the
+        /// high half never discards a bit. The remainder is recovered by a multiplication, which costs far less
+        /// than a second division.
         export let divide_small = func(divisor: uint32) -> uint32 {
             let a = limbs;
             let wide_divisor = divisor as uint64;
@@ -190,6 +200,7 @@ export let WideUint = module (
             return remainder as uint32;
         };
 
+        /// @brief Multiplies the magnitude in place by a power of ten.
         export let multiply_pow10 = func(exponent: int) {
             let remaining = exponent;
             while (remaining >= 9) {
@@ -199,9 +210,10 @@ export let WideUint = module (
             multiply_small(small_power(10, remaining));
         };
 
-        // Divides by 5^exponent, rounding toward zero. Returns true when a
-        // remainder was discarded: the chained floor divisions give the floor
-        // of the whole division, and it is exact exactly when every step is.
+        /// @brief Divides by 5^exponent, rounding toward zero.
+        ///
+        /// Returns true when a remainder was discarded: the chained floor divisions give the floor of the whole
+        /// division, and it is exact exactly when every step is.
         export let divide_pow5 = func(exponent: int) -> bool {
             let inexact = false;
             let remaining = exponent;
@@ -217,6 +229,7 @@ export let WideUint = module (
             return inexact;
         };
 
+        /// @brief Shifts the magnitude left in place, inserting zero bits below it.
         export let shift_left = func(count: int) {
             if (count == 0 || limbs.length == 0) {
                 return;
@@ -245,7 +258,7 @@ export let WideUint = module (
             limbs = shifted;
         };
 
-        // Shifts right, discarding the low bits.
+        /// @brief Shifts right, discarding the low bits.
         export let shift_right = func(count: int) {
             if (count == 0) {
                 return;
@@ -269,8 +282,8 @@ export let WideUint = module (
             normalize();
         };
 
-        // Compares the value of the low `count` bits (count >= 1) with
-        // 2^(count - 1): -1 below, 0 equal, 1 above.
+        /// @brief Compares the value of the low `count` bits (count >= 1) with 2^(count - 1): -1 below, 0
+        /// equal, 1 above.
         export let low_bits_versus_half = func(count: int) -> int {
             let a = limbs;
             let index = (count - 1) / 32;
@@ -291,7 +304,7 @@ export let WideUint = module (
             return 0;
         };
 
-        // Whether the low `count` bits are all zero.
+        /// @brief Whether the low `count` bits are all zero.
         export let low_bits_zero = func(count: int) -> bool {
             let a = limbs;
             let whole = count / 32;
@@ -311,7 +324,7 @@ export let WideUint = module (
             return true;
         };
 
-        // Decimal digits, most significant first; "0" for zero.
+        /// @brief Decimal digits, most significant first; "0" for zero.
         export let to_decimal = func -> string {
             if (limbs.length == 0) {
                 return "0";
@@ -330,6 +343,7 @@ export let WideUint = module (
             return text;
         };
 
+        /// @brief Removes high zero limbs to restore the canonical representation.
         let normalize = func {
             let a = limbs;
             while (a.length > 0 && a[a.length - 1] == 0) {
@@ -337,7 +351,7 @@ export let WideUint = module (
             }
         };
 
-        // The digits of one base-10^9 group, padded to nine when `full`.
+        /// @brief The digits of one base-10^9 group, padded to nine when `full`.
         let append_group = func(bytes: uint8[list], group: uint32, full: bool) {
             let digits: uint8[list] = [];
             let rest = group;
@@ -356,8 +370,10 @@ export let WideUint = module (
         };
     );
 
+    /// @brief Creates a fresh zero magnitude with no limbs.
     export let zero = func -> WideUint => new WideUint();
 
+    /// @brief Splits an unsigned 64-bit value into up to two limbs.
     export let of = func(value: uint64) -> WideUint {
         let result_value = new WideUint();
         if (value != 0) {
@@ -370,7 +386,7 @@ export let WideUint = module (
         return result_value;
     };
 
-    // base^exponent for a result below 2^32.
+    /// @brief base^exponent for a result below 2^32.
     let small_power = func(base: uint32, exponent: int) -> uint32 {
         let value: uint32 = 1;
         for (let i = 0; i < exponent; i++) {

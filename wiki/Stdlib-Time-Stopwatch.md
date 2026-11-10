@@ -17,18 +17,21 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Stopwatch** · [`export let Stopwatch = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L9)
-- **Stopwatch.Stopwatch** · [`export let init = func(time_source: Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L15)
-- **Stopwatch.Stopwatch** · [`export let is_running = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L19)
-- **Stopwatch.Stopwatch** · [`export let start = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L24)
+- **Stopwatch** · [`export let Stopwatch = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L11)
+  A clock-backed accumulator for one or more elapsed intervals.
+- **Stopwatch.Stopwatch** · [`export let init = func(time_source: Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L22)
+  Creates a stopped stopwatch using the supplied clock.
+- **Stopwatch.Stopwatch** · [`export let is_running = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L27)
+  Reports whether the stopwatch is currently measuring an interval.
+- **Stopwatch.Stopwatch** · [`export let start = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L31)
   Starts measuring. Traps with "invalid state: stopwatch is running" when it already is; a failed clock read is returned and leaves it stopped.
-- **Stopwatch.Stopwatch** · [`export let stop = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L43)
+- **Stopwatch.Stopwatch** · [`export let stop = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L49)
   Stops measuring and keeps the time so far. Traps with "invalid state: stopwatch is stopped" when it is not running; a failed clock read is returned and leaves it running.
-- **Stopwatch.Stopwatch** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L60)
+- **Stopwatch.Stopwatch** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L66)
   Stops and clears the measured time.
-- **Stopwatch.Stopwatch** · [`export let elapsed = func -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L67)
+- **Stopwatch.Stopwatch** · [`export let elapsed = func -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L73)
   The time measured so far, including the current run. A stopped stopwatch does not read the clock.
-- **Stopwatch** · [`export let create = func(time_source: Clock) -> Stopwatch`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L79)
+- **Stopwatch** · [`export let create = func(time_source: Clock) -> Stopwatch`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L85)
   A stopped stopwatch over `time_source`.
 <!-- END SOURCE API -->
 

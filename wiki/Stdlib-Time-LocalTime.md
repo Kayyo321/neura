@@ -17,28 +17,37 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **LocalTime** · [`export let LocalTime = class implements Comparable<LocalTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L11)
-- **LocalTime.LocalTime** · [`export let init = func(nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L14)
-- **LocalTime.LocalTime** · [`export let hour = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L18)
-- **LocalTime.LocalTime** · [`export let minute = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L20)
-- **LocalTime.LocalTime** · [`export let second = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L22)
-- **LocalTime.LocalTime** · [`export let nano = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L25)
+- **LocalTime** · [`export let LocalTime = class implements Comparable<LocalTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L13)
+  An immutable wall-clock time within a 24-hour day.
+- **LocalTime.LocalTime** · [`export let init = func(nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L18)
+  Stores the supplied nanosecond offset from midnight.
+- **LocalTime.LocalTime** · [`export let hour = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L23)
+  Returns the hour of the day from 0 through 23.
+- **LocalTime.LocalTime** · [`export let minute = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L26)
+  Returns the minute of the hour from 0 through 59.
+- **LocalTime.LocalTime** · [`export let second = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L29)
+  Returns the second of the minute from 0 through 59.
+- **LocalTime.LocalTime** · [`export let nano = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L32)
   0 through 999,999,999.
-- **LocalTime.LocalTime** · [`export let to_nano_of_day = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L28)
+- **LocalTime.LocalTime** · [`export let to_nano_of_day = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L35)
   0 through 86,399,999,999,999.
-- **LocalTime.LocalTime** · [`export let plus = func(span: duration.Duration) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L31)
+- **LocalTime.LocalTime** · [`export let plus = func(span: duration.Duration) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L38)
   Wraps around midnight in either direction.
-- **LocalTime.LocalTime** · [`export let compare_to = func(other: LocalTime) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L36)
-- **LocalTime.LocalTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L46)
-- **LocalTime.LocalTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L50)
-- **LocalTime.LocalTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L54)
+- **LocalTime.LocalTime** · [`export let compare_to = func(other: LocalTime) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L44)
+  Orders times by their nanosecond offsets from midnight.
+- **LocalTime.LocalTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L55)
+  Tests equality of nanosecond offsets from midnight.
+- **LocalTime.LocalTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L60)
+  Hashes the nanosecond offset from midnight.
+- **LocalTime.LocalTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L64)
   HH:MM:SS, then a fraction of 3, 6, or 9 digits (the shortest that is exact) when the nanoseconds are not zero.
-- **LocalTime** · [`export const Midnight: LocalTime = new LocalTime(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L57)
-- **LocalTime** · [`export let of = func(hour: int, minute: int, second: int, nano: int) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L61)
+- **LocalTime** · [`export const Midnight: LocalTime = new LocalTime(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L68)
+  The time at the start of the day.
+- **LocalTime** · [`export let of = func(hour: int, minute: int, second: int, nano: int) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L72)
   Traps with "invalid argument: invalid time" unless hour is 0 through 23, minute and second 0 through 59, and nano 0 through 999,999,999.
-- **LocalTime** · [`export let of_nano_of_day = func(nanos: int64) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L72)
+- **LocalTime** · [`export let of_nano_of_day = func(nanos: int64) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L82)
   Traps with "invalid argument: invalid time" outside 0 through 86,399,999,999,999.
-- **LocalTime** · [`export let parse = func(text: string) -> result.Result<LocalTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L83)
+- **LocalTime** · [`export let parse = func(text: string) -> result.Result<LocalTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L93)
   HH:MM:SS with an optional fraction of one through nine digits. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an hour above 23 or a minute or second above 59.
 <!-- END SOURCE API -->
 

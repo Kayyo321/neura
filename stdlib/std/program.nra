@@ -1,41 +1,51 @@
 let.promote _ = import:Std.Core.Error;
 let host_error = import:Std.Core.Internal.HostError;
 
-// The program entry contract (Stdlib.md section 11.3). A program's entry
-// module inherits Entry and overrides main; arguments arrive only through
-// its parameter.
+/// @brief The program entry contract (Stdlib.md section 11.3). A program's entry module inherits Entry and
+/// overrides main; arguments arrive only through its parameter.
+/// @see [Std.Program](https://github.com/Kayyo321/neura/wiki/Stdlib-Program)
 export let Program = module (
-    // Ok is status 0, Failure is 1, and Status gives 0 through 255; any
-    // other Status traps with "invalid argument: exit status".
+    /// @brief Ok is status 0, Failure is 1, and Status gives 0 through 255; any other Status traps with
+    /// "invalid argument: exit status".
     export let ExitCode = enum (Ok, Failure, Status(int));
 
+    /// @brief The module contract implemented by a runnable program.
     export let Entry = module (
+        /// @brief Runs the program with its command-line arguments and returns its exit status.
         export let main = func(args: string[]) -> ExitCode;
     );
 
+    /// @brief Looks up process environment variables through the host.
     export let Environment = module (
+        /// @brief Distinguishes a present value, a missing name, and a failed lookup.
         export let Lookup = enum (Found(string), Missing, Failed(Error));
 
+        /// @brief The environment provider's presence flag and value, or an error code.
         let GetOutcome = enum (Ok([bool, string]), Error(uint32));
+        /// @brief Requests a named environment variable from the provider.
         let get_variable = func(name: string) -> GetOutcome host("neura.env.get", 1);
 
-        // The value of an environment variable. Needs the env capability;
-        // without it the lookup fails with CapabilityDenied.
+        /// @brief The value of an environment variable. Needs the env capability; without it the lookup fails
+        /// with CapabilityDenied.
         export let get = func(name: string) -> Lookup => match (get_variable(name)) {
             GetOutcome.Ok(found) => lookup_of(found),
             GetOutcome.Error(code) => Lookup.Failed(host_error.io(code, "environment lookup failed", "")),
         };
 
+        /// @brief Converts the presence flag to Found or Missing, preserving an empty value.
         let lookup_of = func(found: [bool, string]) -> Lookup =>
             found[0] ? Lookup.Found(found[1]) : Lookup.Missing;
     );
 
+    /// @brief Provides explicit termination of the current run.
     export let Process = module (
+        /// @brief The provider's response if the termination request returns.
         let ExitOutcome = enum (Ok, Error(uint32));
+        /// @brief Requests immediate termination with the supplied status.
         let exit_process = func(status: int) -> ExitOutcome host("neura.process.exit", 1);
 
-        // Ends the run with `status` (0 through 255) and does not return.
-        // Returning from main is preferred.
+        /// @brief Ends the run with `status` (0 through 255) and does not return. Returning from main is
+        /// preferred.
         export let exit = func(status: int) {
             if (status < 0 || status > 255) {
                 trap_with_message("invalid argument: exit status");

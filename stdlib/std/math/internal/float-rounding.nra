@@ -1,13 +1,12 @@
-// Correct rounding of a binary value to float64, shared by
-// BigInteger.to_float64 and BigDecimal.to_float64 (Stdlib.md sections 10.2
-// and 10.3).
+/// @brief Correct rounding of a binary value to float64, shared by BigInteger.to_float64 and
+/// BigDecimal.to_float64 (Stdlib.md sections 10.2 and 10.3).
 export let FloatRounding = module (
-    // The float64 nearest to (-1)^negative * (top + s) * 2^exponent, ties to
-    // even, where s is 0 when `sticky` is false and some value strictly
-    // between 0 and 1 when it is true (bits below `top` that are not all
-    // zero). Overflow gives an infinity and underflow a subnormal or a zero
-    // of the same sign. `top` should hold at least 55 significant bits when
-    // `sticky` is set, so that the sticky bits lie below the rounding bit.
+    /// @brief The float64 nearest to (-1)^negative * (top + s) * 2^exponent, ties to even, where s is 0 when
+    /// `sticky` is false and some value strictly between 0 and 1 when it is true (bits below `top` that are not
+    /// all zero).
+    ///
+    /// Overflow gives an infinity and underflow a subnormal or a zero of the same sign. `top` should hold at
+    /// least 55 significant bits when `sticky` is set, so that the sticky bits lie below the rounding bit.
     export let compose = func(negative: bool, top: uint64, exponent: int, sticky: bool) -> float64 {
         let sign: uint64 = 0;
         if (negative) {

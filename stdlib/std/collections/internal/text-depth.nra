@@ -1,22 +1,25 @@
-// Nesting depth of collection text conversions, shared by every collection
-// so that a collection can recognize itself as a direct element
-// (Stdlib.md section 5.2: "(this collection)"). A collection records the
-// depth it entered at; when its to_string is called again at that same
-// depth, no other collection's text started in between, so the call came
-// from its own element loop. Deeper cycles still recurse until the
-// frame-limit fault. A trap ends the run, so a depth that is never left
-// cannot be observed.
+/// @brief Nesting depth of collection text conversions, shared by every collection
+/// so that a collection can recognize itself as a direct element
+/// (Stdlib.md section 5.2: "(this collection)"). A collection records the
+/// depth it entered at. A nested call at that same depth comes directly from
+/// its own element loop. Deeper cycles still recurse until the
+/// frame-limit fault. A trap ends the run, so a depth that is never left
+/// cannot be observed.
+/// @see [Standard library design](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#52-equality-hashing-and-text)
 export let TextDepth = module (
+    /// @brief The number of collection text conversions currently on the call stack.
     let depth: int = 0;
 
+    /// @brief Returns the current nesting depth.
     export let current = func -> int => depth;
 
-    // Starts a collection's text and returns the depth it runs at.
+    /// @brief Starts a collection's text and returns the depth it runs at.
     export let enter = func -> int {
         depth += 1;
         return depth;
     };
 
+    /// @brief Ends the innermost collection text conversion.
     export let leave = func {
         depth -= 1;
     };

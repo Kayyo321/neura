@@ -18,51 +18,60 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **OrdinalMap** · [`export let OrdinalMap = class<V> implements MutableMap<int, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L15)
-- **OrdinalMap.OrdinalMap** · [`export let init = func(limit: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L25)
+  A mutable map for a fixed range of integer keys. A key outside that range causes a bounds trap.
+- **OrdinalMap.OrdinalMap** · [`export let init = func(limit: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L29)
   An empty map for the keys 0 through `limit` - 1. Traps with "invalid argument: negative size".
-- **OrdinalMap.OrdinalMap** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L72)
-- **OrdinalMap.OrdinalMap** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L74)
-- **OrdinalMap.OrdinalMap** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L76)
-- **OrdinalMap.OrdinalMap** · [`export let contains_key = func(key: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L87)
-- **OrdinalMap.OrdinalMap** · [`export let get = func(key: int) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L89)
-- **OrdinalMap.OrdinalMap** · [`export let get_or = func(key: int, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L97)
-- **OrdinalMap.OrdinalMap** · [`export let require = func(key: int) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L106)
-  Traps with "no such element" when the key is absent.
-- **OrdinalMap.OrdinalMap** · [`export let set = func(key: int, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L116)
-  Associates the value, replacing any previous one. Replacing is not structural.
-- **OrdinalMap.OrdinalMap** · [`export let delete = func(key: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L126)
-  Removes the key; returns whether it was present.
-- **OrdinalMap.OrdinalMap** · [`export let put = func(key: int, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L136)
-  The previous value.
-- **OrdinalMap.OrdinalMap** · [`export let remove = func(key: int) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L147)
-- **OrdinalMap.OrdinalMap** · [`export let keys = func -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L158)
-  The keys in ascending order.
-- **OrdinalMap.OrdinalMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L172)
-  The values in key order.
-- **OrdinalMap.OrdinalMap** · [`export let entries = func -> [int, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L186)
-- **OrdinalMap.OrdinalMap** · [`export let iterator = func -> iterators.Iterator<[int, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L201)
-  [key, value] entries in key order; fail-fast.
-- **OrdinalMap.OrdinalMap** · [`export let put_all = func(other: OrdinalMap<V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L206)
-  Sets every entry of the other map, in its key order. A key at or beyond this map's size is a bounds trap.
-- **OrdinalMap.OrdinalMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L213)
-  By equals, with `value` as the receiver.
-- **OrdinalMap.OrdinalMap** · [`export let for_each = func(action: func(int, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L223)
-  In key order. The action must not change the map structurally.
-- **OrdinalMap.OrdinalMap** · [`export let remove_if = func(drop: func(int, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L239)
-  Calls `drop` once per entry in key order and removes the matches. Returns how many were removed.
-- **OrdinalMap.OrdinalMap** · [`export let get_or_put = func(key: int, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L262)
-  The existing value, or the result of `make`, stored. `make` must not change the map.
-- **OrdinalMap.OrdinalMap** · [`export let merge = func(key: int, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L276)
-  Stores `value` when the key is absent, otherwise the combination of the old and the new value; returns what was stored.
-- **OrdinalMap.OrdinalMap** · [`export let compute = func(key: int, f: func(int, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L291)
-  Stores a Some result and removes the key for None; returns the result.
-- **OrdinalMap.OrdinalMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L308)
-  Another OrdinalMap with the same value type and size that holds an equal value for each of this map's keys.
-- **OrdinalMap.OrdinalMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L331)
+- **OrdinalMap.OrdinalMap** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L79)
+  Returns the number of entries.
+- **OrdinalMap.OrdinalMap** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L82)
+  Returns true when there are no entries.
+- **OrdinalMap.OrdinalMap** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L85)
+  Removes all entries while preserving the permitted key range. Invalidates active iterators.
+- **OrdinalMap.OrdinalMap** · [`export let contains_key = func(key: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L97)
+  Reports whether an entry exists for `key`.
+- **OrdinalMap.OrdinalMap** · [`export let get = func(key: int) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L100)
+  Returns the associated value as `Some`, or `None` when the key is absent.
+- **OrdinalMap.OrdinalMap** · [`export let get_or = func(key: int, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L109)
+  Returns the associated value, or `fallback` when the key is absent.
+- **OrdinalMap.OrdinalMap** · [`export let require = func(key: int) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L118)
+  Returns the associated value. Traps with `no such element` when the key is absent.
+- **OrdinalMap.OrdinalMap** · [`export let set = func(key: int, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L127)
+  Stores the value for `key`. Replacing an existing value preserves the key and iterator validity.
+- **OrdinalMap.OrdinalMap** · [`export let delete = func(key: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L137)
+  Removes the entry for `key`. Returns true if an entry was present.
+- **OrdinalMap.OrdinalMap** · [`export let put = func(key: int, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L147)
+  Stores the value for `key` and returns its previous value as `Some`, or `None` for a new key.
+- **OrdinalMap.OrdinalMap** · [`export let remove = func(key: int) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L159)
+  Removes the entry for `key` and returns its value as `Some`, or `None` when absent.
+- **OrdinalMap.OrdinalMap** · [`export let keys = func -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L170)
+  Copies the keys to a new built-in list in ascending key order.
+- **OrdinalMap.OrdinalMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L184)
+  Copies the values to a new built-in list in ascending key order.
+- **OrdinalMap.OrdinalMap** · [`export let entries = func -> [int, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L199)
+  Copies the `[key, value]` tuples to a new built-in list in ascending key order.
+- **OrdinalMap.OrdinalMap** · [`export let iterator = func -> iterators.Iterator<[int, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L214)
+  Returns a fail-fast iterator over `[key, value]` tuples in ascending key order.
+- **OrdinalMap.OrdinalMap** · [`export let put_all = func(other: OrdinalMap<V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L218)
+  Sets every entry from `other` in ascending key order. A source key at or beyond this map's construction limit causes a bounds trap.
+- **OrdinalMap.OrdinalMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L225)
+  Tests whether `value.equals(held_value)` is true for any entry.
+- **OrdinalMap.OrdinalMap** · [`export let for_each = func(action: func(int, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L236)
+  Calls `action` with the key and value of each entry in ascending key order. The action leaves the map structure unchanged.
+- **OrdinalMap.OrdinalMap** · [`export let remove_if = func(drop: func(int, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L253)
+  Calls `drop` once per entry in ascending key order and removes each match as it goes. The predicate leaves the map structure unchanged. The number of removed entries.
+- **OrdinalMap.OrdinalMap** · [`export let get_or_put = func(key: int, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L276)
+  Returns the associated value, or calls `make` once, stores its result, and returns it when absent. The factory leaves the map structure unchanged.
+- **OrdinalMap.OrdinalMap** · [`export let merge = func(key: int, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L290)
+  Stores and returns `value` when the key is absent. Otherwise stores and returns `combine(old, value)`. The combiner leaves the map structure unchanged.
+- **OrdinalMap.OrdinalMap** · [`export let compute = func(key: int, f: func(int, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L306)
+  Calls `f` with the key and its optional current value. Stores a `Some` result or removes the entry for `None`. The callback leaves the map structure unchanged. The result of the callback.
+- **OrdinalMap.OrdinalMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L322)
+  Reports whether `other` is an OrdinalMap with the same value type and equal associations. The permitted key limits may differ.
+- **OrdinalMap.OrdinalMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L345)
   The wrapping sum over entries of the key's hash exclusive-or the value's hash.
-- **OrdinalMap.OrdinalMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L345)
-  `{k: v, k2: v2}` in key order; the map itself as a direct value prints "(this collection)".
-- **OrdinalMap** · [`export let create = func<V>(size: int) -> OrdinalMap<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L418)
+- **OrdinalMap.OrdinalMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L359)
+  Formats entries as `{k: v, k2: v2}` in key order. The map itself as a direct value prints "(this collection)".
+- **OrdinalMap** · [`export let create = func<V>(size: int) -> OrdinalMap<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/ordinal-map.nra#L440)
   An empty map for the keys 0 through `size` - 1. Traps with "invalid argument: negative size".
 <!-- END SOURCE API -->
 

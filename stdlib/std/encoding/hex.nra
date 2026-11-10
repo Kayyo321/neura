@@ -1,13 +1,14 @@
 let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 
-// Base 16 (Stdlib.md section 13.1). The encoder writes lowercase digits;
-// the decoder accepts either case.
+/// @brief Base 16 (Stdlib.md section 13.1). The encoder writes lowercase digits; the decoder accepts either
+/// case.
+/// @see [Std.Encoding.Hex](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Hex)
 export let Hex = module (
-    // The value of each byte as a hex digit, or 255. Built by the first
-    // decode that needs it.
+    /// @brief The value of each byte as a hex digit, or 255. Built by the first decode that needs it.
     let digit_values: uint8[list] = [];
 
+    /// @brief Returns the hexadecimal lookup table, creating it on first use.
     let ready_values = func -> uint8[list] {
         if (digit_values.length == 0) {
             let values: uint8[list] = [];
@@ -26,7 +27,7 @@ export let Hex = module (
         return digit_values;
     };
 
-    // Two lowercase hex digits per byte, most significant first.
+    /// @brief Two lowercase hex digits per byte, most significant first.
     export let encode = func(bytes: uint8[list]) -> string {
         let digits: uint8[list] = [];
         for (let b in bytes) {
@@ -41,10 +42,10 @@ export let Hex = module (
         return text;
     };
 
-    // The bytes the digits encode. A byte that is not a hex digit fails
-    // with an Encoding error at its offset ("invalid hex digit"); an odd
-    // number of digits fails at the text's length ("odd number of hex
-    // digits").
+    /// @brief The bytes the digits encode.
+    ///
+    /// A byte that is not a hex digit fails with an Encoding error at its offset ("invalid hex digit"); an odd
+    /// number of digits fails at the text's length ("odd number of hex digits").
     export let decode = func(text: string) -> Result<uint8[list]> {
         let values = ready_values();
         let count = text.byte_length;
@@ -71,6 +72,7 @@ export let Hex = module (
         return Result<uint8[list]>.Ok(bytes);
     };
 
+    /// @brief Creates an Encoding error with its input byte offset.
     let failure = func(offset: int, message: string) -> Result<uint8[list]> =>
         Result<uint8[list]>.Err(Error.Encoding { offset: offset, message: message });
 );

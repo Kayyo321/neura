@@ -17,26 +17,35 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **IntRange** · [`export let IntRange = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L8)
-- **IntRange.IntRange** · [`export let init = func(start_value: int, end_value: int, step_value: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L13)
-- **IntRange.IntRange** · [`export let start = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L22)
-- **IntRange.IntRange** · [`export let end = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L24)
-- **IntRange.IntRange** · [`export let step = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L26)
-- **IntRange.IntRange** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L29)
+- **IntRange** · [`export let IntRange = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L11)
+  An immutable half-open arithmetic progression with a nonzero stride.
+- **IntRange.IntRange** · [`export let init = func(start_value: int, end_value: int, step_value: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L20)
+  Stores the bounds and step. A zero step traps.
+- **IntRange.IntRange** · [`export let start = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L30)
+  Returns the inclusive start bound.
+- **IntRange.IntRange** · [`export let end = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L33)
+  Returns the exclusive end bound.
+- **IntRange.IntRange** · [`export let step = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L36)
+  Returns the signed stride between values.
+- **IntRange.IntRange** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L39)
   Progressions compare by their defining bounds and step.
-- **IntRange.IntRange** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L37)
-- **IntRange.IntRange** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L43)
-- **IntRange.IntRange** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L48)
+- **IntRange.IntRange** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L48)
+  Combines the start, end, and step into a hash.
+- **IntRange.IntRange** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L55)
+  Formats the progression as `start..end:step`.
+- **IntRange.IntRange** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L60)
   The number of values. Computed in int64; a range with more than Int32.Max values traps (reason 1) in the conversion to int.
-- **IntRange.IntRange** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L50)
-- **IntRange.IntRange** · [`export let contains = func(value: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L52)
-- **IntRange.IntRange** · [`export let get = func(index: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L63)
+- **IntRange.IntRange** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L63)
+  Reports whether the bounds leave no values in the stride's direction.
+- **IntRange.IntRange** · [`export let contains = func(value: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L66)
+  Tests whether the value lies within the bounds and on a stride boundary.
+- **IntRange.IntRange** · [`export let get = func(index: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L77)
   The value at `index`. An index outside 0 through size() - 1 traps with "invalid argument: index out of range".
-- **IntRange.IntRange** · [`export let to_list = func -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L71)
+- **IntRange.IntRange** · [`export let to_list = func -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L85)
   A new built-in list of the values in order.
-- **IntRange** · [`export let of = func(start: int, end: int) -> IntRange`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L106)
+- **IntRange** · [`export let of = func(start: int, end: int) -> IntRange`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L120)
   The values from `start` up to, but not including, `end`.
-- **IntRange** · [`export let stepped = func(start: int, end: int, step: int) -> IntRange`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L109)
+- **IntRange** · [`export let stepped = func(start: int, end: int, step: int) -> IntRange`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L123)
   A zero step traps with "invalid argument: zero step".
 <!-- END SOURCE API -->
 

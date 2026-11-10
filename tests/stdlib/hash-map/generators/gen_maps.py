@@ -8,14 +8,20 @@ import sys
 
 collections = pathlib.Path(__file__).resolve().parents[4] / "stdlib" / "std" / "collections"
 src = (collections / "hash-map.nra").read_text()
-# Split off the factories: everything from "    // Keys compared with equals" up to "    let spread" is replaced.
-start = src.index('    // Keys compared with equals and hashed with hash_code.')
-end = src.index('    let spread = func')
+
+
+# Replace the factories together with their attached documentation.
+def documented_start(signature):
+    return re.search(r'(?m)(?:^    ///[^\n]*\n)*(?=^    ' + re.escape(signature) + ')', src).start()
+
+
+start = documented_start('export let create = func')
+end = documented_start('let spread = func')
 body = src[:start] + '@@FACTORIES@@' + src[end:]
 # The universal helpers are not needed.
 def variant(name, key_type, header, factories):
     s = body
-    s = s.replace('        let hash_of: func(K) -> uint32;\n        let same: func(K, K) -> bool;\n', '')
+    s = re.sub(r'(?m)(?:^        ///[^\n]*\n)*^        let (?:hash_of|same):[^\n]*\n', '', s)
     s = s.replace('export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(K) -> uint32, equal: func(K, K) -> bool) {\n            core = table;\n            hash_of = hash;\n            same = equal;\n        };',
                   'export let init = func(seal: Seal, table: hash_core.HashCore) {\n            core = table;\n        };')
     s = s.replace('HashMapIterator<K, V>', name + 'Iterator<V>')
@@ -36,35 +42,35 @@ def variant(name, key_type, header, factories):
     assert 'K,' not in s and '<K>' not in s and 'hash_of' not in s and 'same(' not in s, [l for l in s.splitlines() if 'K,' in l or '<K>' in l or 'hash_of' in l or 'same(' in l]
     return s
 
-int_header = '''// An insertion-ordered hash map with int keys (Stdlib.md section 9.6). It
-// follows the map contract of HashMap with the key type fixed and calls the
-// key operations directly: the hash is Int32.hash (the value's two's
-// complement pattern) and keys are compared with ==.
-//
-// Setting the value of an existing key keeps its position and is not a
-// structural change. A key removed and added again goes to the end. A
-// removed key and value stay reachable until the next compaction, never
-// more than max(size, 7) of them. Iterators and callbacks fail fast with
-// "collection modified during iteration".
+int_header = '''/// @brief Insertion-ordered hash maps with int keys.
+/// Keys are compared by numeric value and hashed by their 32-bit pattern.
+///
+/// Updating an existing value preserves its entry position and iterator validity.
+/// Removing and reinserting a key moves its entry to the end. At most
+/// `max(size(), 7)` removed entries can remain reachable pending compaction.
+/// Iterators and member callbacks detect structural changes and trap with
+/// `collection modified during iteration`.
+/// @see [Std.Collections.IntMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-IntMap)
 '''
-int_factories = '''    export let create = func<V> -> IntMap<V> => new IntMap<V>(Seal.Token, hash_core.create());
+int_factories = '''    /// @brief Creates an empty map with the default table size.
+    export let create = func<V> -> IntMap<V> => new IntMap<V>(Seal.Token, hash_core.create());
 
-    // A table sized for `capacity` entries. Traps with "invalid argument:
-    // capacity" for a negative capacity or one above 2^29.
+    /// @brief Creates an empty map sized for `capacity` entries.
+    /// Traps with `invalid argument: capacity` outside 0 through 2^29.
     export let with_capacity = func<V>(capacity: int) -> IntMap<V> =>
         new IntMap<V>(Seal.Token, hash_core.with_capacity(capacity));
 
 '''
-string_header = '''// An insertion-ordered hash map with string keys (Stdlib.md section 9.6). It
-// follows the map contract of HashMap with the key type fixed and calls the
-// key operations directly: the hash is Strings.hash (31 times the hash plus
-// each byte) and keys are compared with == (the same bytes).
-//
-// Setting the value of an existing key keeps its position and is not a
-// structural change. A key removed and added again goes to the end. A
-// removed key and value stay reachable until the next compaction, never
-// more than max(size, 7) of them. Iterators and callbacks fail fast with
-// "collection modified during iteration".
+string_header = '''/// @brief Insertion-ordered hash maps with string keys.
+/// Keys are compared byte for byte and hashed by folding their bytes from zero.
+/// Each step multiplies the previous hash by 31 and adds the byte with 32-bit wraparound.
+///
+/// Updating an existing value preserves its entry position and iterator validity.
+/// Removing and reinserting a key moves its entry to the end. At most
+/// `max(size(), 7)` removed entries can remain reachable pending compaction.
+/// Iterators and member callbacks detect structural changes and trap with
+/// `collection modified during iteration`.
+/// @see [Std.Collections.StringMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-StringMap)
 '''
 string_factories = int_factories.replace('IntMap', 'StringMap')
 (collections / 'int-map.nra').write_text(variant('IntMap', 'int', int_header, int_factories))

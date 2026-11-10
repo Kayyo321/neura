@@ -1,9 +1,9 @@
 let.promote _ = import:Std.Core.Error;
 
-// Maps a host service's uint32 error code to an Io error (Stdlib.md section
-// 4.5). Codes 1 through 14 are the first fourteen IoErrorKind values in
-// order; every other code is Other.
+/// @brief Maps a host service's uint32 error code to an Io error (Stdlib.md section 4.5). Codes 1 through 14
+/// are the first fourteen IoErrorKind values in order; every other code is Other.
 export let HostError = module (
+    /// @brief Maps a provider error code to its library I/O category, defaulting to Other.
     export let kind_of = func(code: uint32) -> IoErrorKind {
         if (code == 1) { return IoErrorKind.NotFound; }
         if (code == 2) { return IoErrorKind.PermissionDenied; }
@@ -22,6 +22,7 @@ export let HostError = module (
         return IoErrorKind.Other;
     };
 
+    /// @brief Wraps a provider code as an I/O error with the supplied message and path.
     export let io = func(code: uint32, message: string, path: string) -> Error =>
         Error.Io { kind: kind_of(code), message: message, path: path };
 );

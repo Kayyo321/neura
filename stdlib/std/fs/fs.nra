@@ -8,25 +8,33 @@ let.promote _ = import:Std.Fs.Path;
 let result = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 
-// File system operations (Stdlib.md section 11.2). Every function needs the
-// fs capability. Functions that open files close them on every path before
-// returning, including after a failure.
+/// @brief File system operations (Stdlib.md section 11.2).
+///
+/// Every function needs the fs capability. Functions that open files close them on every path before returning,
+/// including after a failure.
+/// @see [Std.Fs.Fs](https://github.com/Kayyo321/neura/wiki/Stdlib-Fs-Fs)
 export let Fs = module (
+    /// @brief Distinguishes regular files, directories, and other entries.
     export let FileKind = enum (File, Directory, Other);
 
-    // What metadata reports about an entry. A link is followed; an entry
-    // that is neither a file nor a directory is of kind Other.
+    /// @brief What metadata reports about an entry. A link is followed; an entry that is neither a file nor a
+    /// directory is of kind Other.
     export let FileMetadata = class (
+        /// @brief The classification reported by the filesystem provider.
         export let kind: FileKind = FileKind.Other;
+        /// @brief The reported size in bytes.
         export let size: int64 = 0;
+        /// @brief The last modification instant, or nil when unavailable.
         export let modified: instant.Instant = nil;
 
+        /// @brief Stores the entry's kind, size, and modification time.
         export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant) {
             kind = entry_kind;
             size = byte_size;
             modified = modified_at;
         };
 
+        /// @brief Tests equality of the kind, size, and modification time.
         export let.override equals = func(other: class) -> bool {
             if (!(other is FileMetadata)) {
                 return false;
@@ -36,27 +44,38 @@ export let Fs = module (
                 (modified == nil ? metadata.modified == nil : modified === metadata.modified);
         };
 
+        /// @brief Combines the hashes of the kind, size, and modification time.
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(kind.hash_code(), size.hash_code()),
                 modified == nil ? 0 : modified.hash_code());
 
+        /// @brief Formats the metadata as Kind(size, modified), with nil for an absent timestamp.
         export let.override to_string = func -> string =>
             kind.to_string() + "(" + size.to_string() + ", " +
                 (modified == nil ? "nil" : modified.to_string()) + ")";
     );
 
+    /// @brief Carries the provider's entry kind, byte size and timestamp fields, or an error code.
     let StatOutcome = enum (Ok([int, int64, int64, int]), Error(uint32));
+    /// @brief Carries the provider's directory entry names or an error code.
     let NamesOutcome = enum (Ok(string[list]), Error(uint32));
+    /// @brief Represents host success without a value or an unsigned host error code.
     let DoneOutcome = enum (Ok, Error(uint32));
+    /// @brief Requests entry metadata, optionally resolving the final link.
     let stat_path = func(path: string, follow_links: bool) -> StatOutcome host("neura.fs.stat", 1);
+    /// @brief Requests the provider's unsorted directory entry names.
     let list_names = func(path: string) -> NamesOutcome host("neura.fs.list", 1);
+    /// @brief Requests creation of a single directory.
     let make_directory = func(path: string) -> DoneOutcome host("neura.fs.make_directory", 1);
+    /// @brief Requests removal of a directory or a non-directory entry.
     let remove_path = func(path: string, directory: bool) -> DoneOutcome host("neura.fs.remove", 1);
+    /// @brief Requests a rename or move between two paths.
     let rename_path = func(from: string, to: string) -> DoneOutcome host("neura.fs.rename", 1);
 
-    // Bytes per read and write of copy_file and read_bytes.
+    /// @brief Bytes per read and write of copy_file and read_bytes.
     export const CopyBufferSize: int = 65536;
 
+    /// @brief Reads all bytes from the path and closes the file before returning.
     export let read_bytes = func(path: Path) -> result.Result<uint8[list]> {
         match (files.open(path, files.OpenMode.Read)) {
             result.Result.Ok(file) => {
@@ -68,7 +87,7 @@ export let Fs = module (
         }
     };
 
-    // The file's text; invalid UTF-8 fails with InvalidData.
+    /// @brief The file's text; invalid UTF-8 fails with InvalidData.
     export let read_text = func(path: Path) -> result.Result<string> {
         match (read_bytes(path)) {
             result.Result.Ok(data) => {
@@ -84,21 +103,22 @@ export let Fs = module (
         }
     };
 
-    // Creates or truncates the file and writes the bytes.
+    /// @brief Creates or truncates the file and writes the bytes.
     export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit> {
         return write_mode(path, data, files.OpenMode.Write);
     };
 
+    /// @brief Creates or truncates the file and writes the UTF-8 bytes of the text.
     export let write_text = func(path: Path, text: string) -> result.Result<Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Write);
     };
 
-    // Creates the file if needed and writes the text at its end.
+    /// @brief Creates the file if needed and writes the text at its end.
     export let append_text = func(path: Path, text: string) -> result.Result<Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Append);
     };
 
-    // Ok(false) for NotFound; other failures are errors. Follows links.
+    /// @brief Ok(false) for NotFound; other failures are errors. Follows links.
     export let exists = func(path: Path) -> result.Result<bool> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(_) => result.Result<bool>.Ok(true),
@@ -106,8 +126,7 @@ export let Fs = module (
         };
     };
 
-    // The kind, size in bytes, and last modification time of an entry,
-    // following links.
+    /// @brief The kind, size in bytes, and last modification time of an entry, following links.
     export let metadata = func(path: Path) -> result.Result<FileMetadata> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(status) => result.Result<FileMetadata>.Ok(metadata_of(status)),
@@ -115,7 +134,7 @@ export let Fs = module (
         };
     };
 
-    // The directory's entries joined to `path`, sorted by name bytes.
+    /// @brief The directory's entries joined to `path`, sorted by name bytes.
     export let list = func(path: Path) -> result.Result<Path[list]> {
         match (list_names(path.to_string())) {
             NamesOutcome.Ok(names) => {
@@ -131,12 +150,12 @@ export let Fs = module (
         }
     };
 
+    /// @brief Creates a single directory. Missing parents and an existing entry are reported as errors.
     export let create_directory = func(path: Path) -> result.Result<Unit> {
         return done(make_directory(path.to_string()), "create directory failed", path.to_string());
     };
 
-    // Creates the directory and any missing parents; succeeds when the
-    // directory already exists.
+    /// @brief Creates the directory and any missing parents; succeeds when the directory already exists.
     export let create_directories = func(path: Path) -> result.Result<Unit> {
         let text = path.to_string();
         match (make_directory(text)) {
@@ -165,20 +184,21 @@ export let Fs = module (
         };
     };
 
-    // Removes a file or another entry that is not a directory, such as a
-    // link (the link, not its target).
+    /// @brief Removes a file or another entry that is not a directory, such as a link (the link, not its
+    /// target).
     export let remove_file = func(path: Path) -> result.Result<Unit> {
         return done(remove_path(path.to_string(), false), "remove file failed", path.to_string());
     };
 
-    // Removes an empty directory.
+    /// @brief Removes an empty directory.
     export let remove_directory = func(path: Path) -> result.Result<Unit> {
         return done(remove_path(path.to_string(), true), "remove directory failed", path.to_string());
     };
 
-    // Removes `path` and, for a directory, everything below it: depth first,
-    // in sorted order. Links and other entries of kind Other are removed
-    // without descending into them. Stops at the first error.
+    /// @brief Removes `path` and, for a directory, everything below it: depth first, in sorted order.
+    ///
+    /// Links and other entries of kind Other are removed without descending into them. Stops at the first
+    /// error.
     export let remove_tree = func(path: Path) -> result.Result<Unit> {
         let text = path.to_string();
         match (stat_path(text, false)) {
@@ -209,13 +229,13 @@ export let Fs = module (
         return remove_directory(path);
     };
 
-    // Renames or moves an entry, replacing an existing file at `to`.
+    /// @brief Renames or moves an entry, replacing an existing file at `to`.
     export let rename = func(from: Path, to: Path) -> result.Result<Unit> {
         return done(rename_path(from.to_string(), to.to_string()), "rename failed", from.to_string());
     };
 
-    // Copies a file's bytes through a 65,536-byte buffer, replacing an
-    // existing target. Both files are closed on every path.
+    /// @brief Copies a file's bytes through a 65,536-byte buffer, replacing an existing target. Both files are
+    /// closed on every path.
     export let copy_file = func(from: Path, to: Path) -> result.Result<Unit> {
         let source: files.File = nil;
         match (files.open(from, files.OpenMode.Read)) {
@@ -268,6 +288,7 @@ export let Fs = module (
         return target.close();
     };
 
+    /// @brief Reads an open file in chunks until EOF or a read error.
     let read_open = func(file: files.File) -> result.Result<uint8[list]> {
         let data: uint8[list] = [];
         do {
@@ -294,7 +315,7 @@ export let Fs = module (
         };
     };
 
-    // A failed write is reported after the file is closed.
+    /// @brief A failed write is reported after the file is closed.
     let write_mode = func(path: Path, data: uint8[list], mode: files.OpenMode) -> result.Result<Unit> {
         match (files.open(path, mode)) {
             result.Result.Ok(file) => {
@@ -314,6 +335,7 @@ export let Fs = module (
         }
     };
 
+    /// @brief Converts the provider's metadata tuple into library values.
     let metadata_of = func(status: [int, int64, int64, int]) -> FileMetadata {
         let kind = FileKind.Other;
         if (status[0] == 0) {
@@ -324,6 +346,7 @@ export let Fs = module (
         return new FileMetadata(kind, status[1], instant.of_epoch_seconds(status[2], status[3]));
     };
 
+    /// @brief Translates NotFound to Ok(false) and preserves other provider failures.
     let missing_or_error = func(code: uint32, path: string) -> result.Result<bool> {
         if (code == 1) {
             return result.Result<bool>.Ok(false);
@@ -331,6 +354,7 @@ export let Fs = module (
         return result.Result<bool>.Err(host_error.io(code, "metadata failed", path));
     };
 
+    /// @brief Checks whether the path that already exists is a directory.
     let existing_directory = func(text: string) -> result.Result<Unit> {
         return match (stat_path(text, true)) {
             StatOutcome.Ok(status) => directory_or_exists(status[0], text),
@@ -338,6 +362,7 @@ export let Fs = module (
         };
     };
 
+    /// @brief Accepts an existing directory and reports AlreadyExists for other kinds.
     let directory_or_exists = func(kind: int, text: string) -> result.Result<Unit> {
         if (kind == 1) {
             return bytes.ok();
@@ -345,6 +370,7 @@ export let Fs = module (
         return result.Result<Unit>.Err(host_error.io(3, "create directory failed", text));
     };
 
+    /// @brief Reports a failed attempt to create a directory after handling its parent.
     let retry_failed = func(code: uint32, text: string) -> result.Result<Unit> {
         if (code == 3) {
             return existing_directory(text);
@@ -352,6 +378,7 @@ export let Fs = module (
         return result.Result<Unit>.Err(host_error.io(code, "create directory failed", text));
     };
 
+    /// @brief Converts provider success or failure into a Result with path context.
     let done = func(outcome: DoneOutcome, message: string, path: string) -> result.Result<Unit> {
         return match (outcome) {
             DoneOutcome.Ok => bytes.ok(),

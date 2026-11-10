@@ -17,18 +17,18 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Lists** · [`export let copy = func<T>(items: T[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L8)
+- **Lists** · [`export let copy = func<T>(items: T[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L9)
   A new list with the same elements.
-- **Lists** · [`export let concat = func<T>(a: T[list], b: T[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L20)
+- **Lists** · [`export let concat = func<T>(a: T[list], b: T[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L21)
   A new list with the elements of `a` followed by those of `b`.
-- **Lists** · [`export let reverse = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L32)
+- **Lists** · [`export let reverse = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L33)
   Reverses the list in place. Not structural.
-- **Lists** · [`export let swap = func<T>(items: T[list], i: int, j: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L45)
+- **Lists** · [`export let swap = func<T>(items: T[list], i: int, j: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L46)
   Exchanges two elements. Not structural.
-- **Lists** · [`export let fill = func<T>(items: T[list], value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L52)
+- **Lists** · [`export let fill = func<T>(items: T[list], value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L53)
   Replaces every element with `value`. Not structural.
 - **Lists** · [`export let insert_at = func<T>(items: T[list], index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L64)
-  Inserts `value` before position `index`; an index equal to the length appends. Appends the last element again and shifts the suffix right by indexed writes.
+  Inserts `value` before position `index`, or appends when the index equals the length. Appends the last element again and shifts the suffix right by indexed writes.
 - **Lists** · [`export let truncate = func<T>(items: T[list], length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L85)
   Removes elements from the end until `length` remain. Traps with "invalid argument: negative size" or "invalid argument: size above current size".
 - **Lists** · [`export let clear = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L98)

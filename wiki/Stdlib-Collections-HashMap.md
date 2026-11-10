@@ -17,60 +17,72 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **HashMap** · [`export let HashMap = class<K, V> implements MutableMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L20)
-- **HashMap.HashMap** · [`export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(K) -> uint32, equal: func(K, K) -> bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L29)
-- **HashMap.HashMap** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L35)
-- **HashMap.HashMap** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L37)
-- **HashMap.HashMap** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L40)
-  Replaces every list with a new one of the initial table size.
-- **HashMap.HashMap** · [`export let contains_key = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L46)
-- **HashMap.HashMap** · [`export let get = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L48)
-- **HashMap.HashMap** · [`export let get_or = func(key: K, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L56)
-- **HashMap.HashMap** · [`export let require = func(key: K) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L65)
-  Traps with "no such element" when the key is absent.
-- **HashMap.HashMap** · [`export let set = func(key: K, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L73)
-- **HashMap.HashMap** · [`export let put = func(key: K, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L84)
-  The previous value.
-- **HashMap.HashMap** · [`export let delete = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L98)
-  Removes the key; returns whether it was present.
-- **HashMap.HashMap** · [`export let remove = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L108)
-  The removed value.
-- **HashMap.HashMap** · [`export let keys = func -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L118)
-- **HashMap.HashMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L132)
-- **HashMap.HashMap** · [`export let entries = func -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L146)
-- **HashMap.HashMap** · [`export let iterator = func -> Iterator<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L162)
-  Yields [K, V] in insertion order.
-- **HashMap.HashMap** · [`export let put_all = func(other: HashMap<K, V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L166)
+- **HashMap** · [`export let HashMap = class<K, V> implements MutableMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L21)
+  A mutable hash table that visits entries in insertion order.
+- **HashMap.HashMap** · [`export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(K) -> uint32, equal: func(K, K) -> bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L36)
+  Initializes a map over the empty table supplied by the module factory.
+- **HashMap.HashMap** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L43)
+  Returns the number of entries.
+- **HashMap.HashMap** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L46)
+  Returns true when there are no entries.
+- **HashMap.HashMap** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L49)
+  Removes all entries, resets the table to its original size, and invalidates iterators.
+- **HashMap.HashMap** · [`export let contains_key = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L56)
+  Reports whether an entry exists for `key`.
+- **HashMap.HashMap** · [`export let get = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L59)
+  Returns the associated value as `Some`, or `None` when the key is absent.
+- **HashMap.HashMap** · [`export let get_or = func(key: K, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L68)
+  Returns the associated value, or `fallback` when the key is absent.
+- **HashMap.HashMap** · [`export let require = func(key: K) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L77)
+  Returns the associated value. Traps with `no such element` when the key is absent.
+- **HashMap.HashMap** · [`export let set = func(key: K, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L86)
+  Stores the value for `key`. Replacing an existing value preserves the key and iterator validity.
+- **HashMap.HashMap** · [`export let put = func(key: K, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L97)
+  Stores the value for `key` and returns its previous value as `Some`, or `None` for a new key.
+- **HashMap.HashMap** · [`export let delete = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L111)
+  Removes the entry for `key`. Returns true if an entry was present.
+- **HashMap.HashMap** · [`export let remove = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L121)
+  Removes the entry for `key` and returns its value as `Some`, or `None` when absent.
+- **HashMap.HashMap** · [`export let keys = func -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L132)
+  Copies the keys to a new built-in list in insertion order.
+- **HashMap.HashMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L147)
+  Copies the values to a new built-in list in insertion order.
+- **HashMap.HashMap** · [`export let entries = func -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L162)
+  Copies the `[key, value]` tuples to a new built-in list in insertion order.
+- **HashMap.HashMap** · [`export let iterator = func -> Iterator<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L178)
+  Returns a fail-fast iterator over `[key, value]` tuples in insertion order.
+- **HashMap.HashMap** · [`export let put_all = func(other: HashMap<K, V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L182)
   Sets each entry of `other` in its iteration order.
-- **HashMap.HashMap** · [`export let for_each = func(action: func(K, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L179)
-  In insertion order. The action must not change the map structurally.
-- **HashMap.HashMap** · [`export let remove_if = func(drop: func(K, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L195)
-  Calls `drop` once per entry in order, then removes the entries it chose. Returns how many were removed.
-- **HashMap.HashMap** · [`export let get_or_put = func(key: K, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L227)
-  The existing value, or the result of `make`, stored. `make` must not change the map structurally.
-- **HashMap.HashMap** · [`export let merge = func(key: K, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L244)
-  Stores `value` when the key is absent, otherwise combine(old, value). Returns the stored value.
-- **HashMap.HashMap** · [`export let compute = func(key: K, f: func(K, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L263)
-  Stores a Some result of `f`, or removes the key for None. Returns the result.
-- **HashMap.HashMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L293)
-  By the values' equals, with `value` as the receiver.
-- **HashMap.HashMap** · [`export let trim = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L307)
-  Compacts at the smallest table whose entry capacity holds size().
-- **HashMap.HashMap** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L313)
+- **HashMap.HashMap** · [`export let for_each = func(action: func(K, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L195)
+  Calls `action` with the key and value of each entry in insertion order. The action leaves the map structure unchanged.
+- **HashMap.HashMap** · [`export let remove_if = func(drop: func(K, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L212)
+  Calls `drop` once per entry in insertion order, then removes the matches and compacts at most once. The predicate leaves the map structure unchanged. The number of removed entries.
+- **HashMap.HashMap** · [`export let get_or_put = func(key: K, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L244)
+  Returns the associated value, or calls `make` once, stores its result, and returns it when absent. The factory leaves the map structure unchanged.
+- **HashMap.HashMap** · [`export let merge = func(key: K, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L261)
+  Stores and returns `value` when the key is absent. Otherwise stores and returns `combine(old, value)`. The combiner leaves the map structure unchanged.
+- **HashMap.HashMap** · [`export let compute = func(key: K, f: func(K, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L281)
+  Calls `f` with the key and its optional current value. Stores a `Some` result or removes the entry for `None`. The callback leaves the map structure unchanged. The result of the callback.
+- **HashMap.HashMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L311)
+  Tests whether `value.equals(held_value)` is true for any entry.
+- **HashMap.HashMap** · [`export let trim = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L325)
+  Compacts to the smallest table that holds the live entries and invalidates iterators.
+- **HashMap.HashMap** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L331)
   Traps with "invalid state: ..." on a broken table invariant or when a live key's hash differs from its cached hash.
-- **HashMap.HashMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L330)
+- **HashMap.HashMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L348)
   Another HashMap with the same size in which, for each of its entries, this map holds an equal value for the key.
-- **HashMap.HashMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L354)
+- **HashMap.HashMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L372)
   The wrapping sum over entries of the key hash exclusive-or the value hash.
-- **HashMap.HashMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L371)
-  `{k: v, k2: v2}` in iteration order; the map itself as a direct key or value prints "(this collection)".
-- **HashMap** · [`export let create = func<K, V> -> HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L493)
-  Keys compared with equals and hashed with hash_code.
-- **HashMap** · [`export let with_capacity = func<K, V>(capacity: int) -> HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L498)
-  A table sized for `capacity` entries. Traps with "invalid argument: capacity" for a negative capacity or one above 2^29.
-- **HashMap** · [`export let with_keys = func<K, V>(hash: func(K) -> uint32, same: func(K, K) -> bool) -> HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L503)
-  Keys hashed and compared with the given functions. Equal keys must have equal hashes.
-- **HashMap** · [`export let with_keys_and_capacity = func<K, V>(hash: func(K) -> uint32, same: func(K, K) -> bool, capacity: int) -> HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L506)
+- **HashMap.HashMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L389)
+  Formats entries as `{k: v, k2: v2}` in iteration order. The map itself as a direct key or value prints "(this collection)".
+- **HashMap** · [`export let create = func<K, V> -> HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L522)
+  Creates an empty map using `equals` and `hash_code` for its keys.
+- **HashMap** · [`export let with_capacity = func<K, V>(capacity: int) -> HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L527)
+  Creates an empty table sized for `capacity` entries. Traps with `invalid argument: capacity` outside 0 through 2^29.
+- **HashMap** · [`export let with_keys = func<K, V>(hash: func(K) -> uint32, same: func(K, K) -> bool) -> HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L532)
+  Creates an empty collection using the supplied hash and equality functions. Equality is an equivalence relation. Equal keys have equal hashes, and both results remain stable while stored.
+- **HashMap** · [`export let with_keys_and_capacity = func<K, V>(hash: func(K) -> uint32, same: func(K, K) -> bool, capacity: int) -> HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-map.nra#L540)
+  Creates an empty collection sized for `capacity` entries using the supplied key operations. Traps with `invalid argument: capacity` outside 0 through 2^29. Equal keys have equal hashes.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

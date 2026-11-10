@@ -6,34 +6,45 @@ let.promote _ = import:Std.Core.Result;
 let socket = import:Std.Net.Internal.Socket;
 let.promote _ = import:Std.Core.Unit;
 
-// A connected, blocking TCP stream (Stdlib.md section 11.4). Its bound read
-// method is a byte source and its bound write method a byte sink. Needs the
-// net capability. After close every operation except close fails with
-// Closed.
+/// @brief A connected, blocking TCP stream (Stdlib.md section 11.4).
+///
+/// Its bound read method is a byte source and its bound write method a byte sink. Needs the net capability.
+/// After close every operation except close fails with Closed.
+/// @see [Std.Net.TcpStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-TcpStream)
 export let TcpStream = module (
+    /// @brief Represents a host success with an identifier or position, or an unsigned host error code.
     let IdOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief Represents returned bytes or an unsigned host error code.
     let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+    /// @brief Represents a host byte count or an unsigned host error code.
     let CountOutcome = enum (Ok(int), Error(uint32));
+    /// @brief Represents host success without a value or an unsigned host error code.
     let DoneOutcome = enum (Ok, Error(uint32));
+    /// @brief Requests a connection with the given timeout in nanoseconds.
     let connect_socket = func(host: string, port: int, timeout_nanos: int64) -> IdOutcome host("neura.net.connect", 1);
+    /// @brief Requests bytes from the socket subject to its current read timeout.
     let read_socket = func(socket: int64, max: int, timeout_nanos: int64) -> BytesOutcome host("neura.net.read", 1);
+    /// @brief Requests a write and receives a possibly partial byte count.
     let write_socket = func(socket: int64, data: uint8[list]) -> CountOutcome host("neura.net.write", 1);
+    /// @brief Requests that the provider release the socket handle.
     let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
+    /// @brief Owns a connected TCP socket with an independently configured read timeout.
     export let TcpStream = class implements Closeable (
+        /// @brief Holds the provider handle and the context used in error messages.
         let handle: socket.Handle = nil;
+        /// @brief Tracks whether the wrapper may still use the host handle.
         let open_now: bool = true;
+        /// @brief The read deadline interval in nanoseconds. Zero permits an indefinite wait.
         let read_timeout: int64 = 0;
 
-        // Use connect or TcpListener.accept; the handle comes from the
-        // library.
+        /// @brief Use connect or TcpListener.accept; the handle comes from the library.
         export let init = func(opened: socket.Handle) {
             handle = opened;
         };
 
-        // Up to `max` bytes; an empty list once the peer has closed its side.
-        // Waits at most the read timeout, then fails with TimedOut. A maximum
-        // below 1 traps.
+        /// @brief Up to `max` bytes; an empty list once the peer has closed its side. Waits at most the read
+        /// timeout, then fails with TimedOut. A maximum below 1 traps.
         export let read = func(max: int) -> Result<uint8[list]> {
             bytes.check_maximum(max);
             if (!open_now) {
@@ -45,7 +56,7 @@ export let TcpStream = module (
             };
         };
 
-        // Writes every byte, repeating partial host writes.
+        /// @brief Writes every byte, repeating partial host writes.
         export let write = func(data: uint8[list]) -> Result<Unit> {
             if (!open_now) {
                 return Result<Unit>.Err(bytes.closed("stream", handle.address));
@@ -70,14 +81,14 @@ export let TcpStream = module (
             return bytes.ok();
         };
 
-        // The longest a read waits; zero waits without limit. A negative
-        // timeout traps with "invalid argument: negative timeout".
+        /// @brief The longest a read waits; zero waits without limit. A negative timeout traps with "invalid
+        /// argument: negative timeout".
         export let set_read_timeout = func(timeout: Duration) {
             read_timeout = timeout_nanos(timeout);
         };
 
-        // Releases the connection. Closing again does nothing and returns
-        // Ok; the stream is closed even when the host reports an error.
+        /// @brief Releases the connection. Closing again does nothing and returns Ok; the stream is closed even
+        /// when the host reports an error.
         export let close = func -> Result<Unit> {
             if (!open_now) {
                 return bytes.ok();
@@ -90,10 +101,11 @@ export let TcpStream = module (
         };
     );
 
-    // Connects to `host` (a name or an address) and `port`, waiting at most
-    // `timeout` (zero waits without limit). A port outside 0 through 65,535
-    // traps with "invalid argument: port"; a negative timeout traps with
-    // "invalid argument: negative timeout".
+    /// @brief Connects to `host` (a name or an address) and `port`, waiting at most `timeout` (zero waits
+    /// without limit).
+    ///
+    /// A port outside 0 through 65,535 traps with "invalid argument: port"; a negative timeout traps with
+    /// "invalid argument: negative timeout".
     export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream> {
         socket.check_port(port);
         let nanos = timeout_nanos(timeout);
@@ -104,6 +116,7 @@ export let TcpStream = module (
         };
     };
 
+    /// @brief Converts a nonnegative duration to the provider's timeout argument.
     let timeout_nanos = func(timeout: Duration) -> int64 {
         let nanos = timeout.to_nanos();
         if (nanos < 0) {

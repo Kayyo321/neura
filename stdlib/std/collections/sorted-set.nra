@@ -1,21 +1,28 @@
 let optional = import:Std.Core.Optional;
 let.promote _ = import:Std.Collections.Set;
 
-// A set ordered by its comparator (TreeSet). Positions are by the
-// comparator, never by equals.
+/// @brief A set ordered by its comparator (TreeSet). Positions are by the
+/// comparator, never by equals.
+/// @see [Std.Collections.SortedSet](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-SortedSet)
 export let SortedSet = module (
+    /// @brief Read-only element navigation and range queries in comparator order.
     export let SortedSet = interface<T>:Set<T> (
-        // Trap with "no such element" when empty.
+        /// @brief Returns the least element. Traps with `no such element` when empty.
         let first = func -> T;
+        /// @brief Returns the greatest element. Traps with `no such element` when empty.
         let last = func -> T;
-        // Elements from `from` inclusive to `to` exclusive, ascending.
+        /// @brief Returns a new list in ascending order from `from` inclusive to `to` exclusive.
+        /// Returns an empty list when `to` is at or below `from`.
         let range = func(from: T, to: T) -> T[list];
+        /// @brief Copies the elements into a new list in descending order.
         let descending = func -> T[list];
-        // The greatest element at most, the least at least, the greatest
-        // below, and the least above the value.
+        /// @brief Returns the greatest element at most `value` as `Some`, or `None` when absent.
         let floor = func(value: T) -> optional.Optional<T>;
+        /// @brief Returns the least element at least `value` as `Some`, or `None` when absent.
         let ceiling = func(value: T) -> optional.Optional<T>;
+        /// @brief Returns the greatest element strictly below `value` as `Some`, or `None` when absent.
         let lower = func(value: T) -> optional.Optional<T>;
+        /// @brief Returns the least element strictly above `value` as `Some`, or `None` when absent.
         let higher = func(value: T) -> optional.Optional<T>;
     );
 );

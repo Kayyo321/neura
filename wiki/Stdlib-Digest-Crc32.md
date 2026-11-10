@@ -17,17 +17,19 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Crc32** · [`export let Crc32 = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L54)
+- **Crc32** · [`export let Crc32 = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L56)
   A running checksum. A new one, or one after reset, has the value 0, the checksum of no bytes.
-- **Crc32.Crc32** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L57)
-- **Crc32.Crc32** · [`export let update = func(bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L61)
+- **Crc32.Crc32** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L61)
+  Initializes the checksum of an empty byte stream.
+- **Crc32.Crc32** · [`export let update = func(bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L65)
   Adds the bytes to the checksum.
-- **Crc32.Crc32** · [`export let value = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L67)
+- **Crc32.Crc32** · [`export let value = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L71)
   The checksum of every byte added since creation or the last reset. Reading it does not end the computation.
-- **Crc32.Crc32** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L69)
-- **Crc32** · [`export let create = func -> Crc32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L75)
+- **Crc32.Crc32** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L74)
+  Restores the initial register and discards the previous checksum state.
+- **Crc32** · [`export let create = func -> Crc32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L80)
   A new checksum with no bytes added.
-- **Crc32** · [`export let of = func(bytes: uint8[list]) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L78)
+- **Crc32** · [`export let of = func(bytes: uint8[list]) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L83)
   The checksum of the bytes.
 <!-- END SOURCE API -->
 

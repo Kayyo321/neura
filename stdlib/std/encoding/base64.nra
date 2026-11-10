@@ -1,36 +1,38 @@
 let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 
-// Base 64 (RFC 4648; Stdlib.md section 13.1) with the standard alphabet
-// (section 4) and the URL- and filename-safe alphabet (section 5). The
-// padded encoders end the text with `=` to a multiple of four characters;
-// the _unpadded encoders omit it.
-//
-// Decoding is strict. A padded decoder requires the text's length to be a
-// multiple of four, with `=` only as one or two final characters; an
-// unpadded decoder rejects `=` and a final group of one character. Every
-// other byte outside the alphabet, including whitespace, line breaks, and
-// the other alphabet's two symbols, is rejected, and the unused low bits of
-// the last character must be zero. Failures are Encoding errors. The first
-// error in the text's structure (characters, padding, and length) is
-// reported; only a well-formed text is checked for trailing bits. The
-// messages and offsets:
-//
-// - "invalid character": a byte outside the alphabet, at its offset.
-// - "invalid padding": a `=` that cannot be padding, or a character after
-//   padding, at its offset.
-// - "unexpected padding": a `=` given to an unpadded decoder, at its offset.
-// - "unexpected end of data": the text ends inside a group, at the length.
-// - "nonzero trailing bits": the last character has unused bits set, at
-//   its offset.
+/// @brief Base 64 (RFC 4648; Stdlib.md section 13.1) with the standard alphabet (section 4) and the URL- and
+/// filename-safe alphabet (section 5).
+///
+/// The padded encoders end the text with `=` to a multiple of four characters; the _unpadded encoders omit it.
+///
+/// Decoding is strict. A padded decoder requires the text's length to be a multiple of four, with `=` only as
+/// one or two final characters; an unpadded decoder rejects `=` and a final group of one character. Every other
+/// byte outside the alphabet, including whitespace, line breaks, and the other alphabet's two symbols, is
+/// rejected, and the unused low bits of the last character must be zero. Failures are Encoding errors. The
+/// first error in the text's structure (characters, padding, and length) is reported; only a well-formed text
+/// is checked for trailing bits. The messages and offsets:
+///
+/// - "invalid character": a byte outside the alphabet, at its offset.
+/// - "invalid padding": a `=` that cannot be padding, or a character after
+/// padding, at its offset.
+/// - "unexpected padding": a `=` given to an unpadded decoder, at its offset.
+/// - "unexpected end of data": the text ends inside a group, at the length.
+/// - "nonzero trailing bits": the last character has unused bits set, at
+/// its offset.
+/// @see [Std.Encoding.Base64](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Base64)
 export let Base64 = module (
+    /// @brief The standard Base64 alphabet with plus and slash.
     const StandardAlphabet: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    /// @brief The URL-safe Base64 alphabet with hyphen and underscore.
     const UrlAlphabet: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-    // Byte to digit value, 255 outside the alphabet. Built on first use.
+    /// @brief Byte to digit value, 255 outside the alphabet. Built on first use.
     let standard_values: uint8[list] = [];
+    /// @brief The lazily initialized URL-safe byte-to-digit lookup table.
     let url_values: uint8[list] = [];
 
+    /// @brief Builds a byte-to-digit lookup table for the selected alphabet.
     let values_of = func(alphabet: string) -> uint8[list] {
         let values: uint8[list] = [];
         for (let b = 0; b < 256; b++) {
@@ -42,6 +44,7 @@ export let Base64 = module (
         return values;
     };
 
+    /// @brief Returns the standard lookup table, creating it on first use.
     let ready_standard = func -> uint8[list] {
         if (standard_values.length == 0) {
             standard_values = values_of(StandardAlphabet);
@@ -49,6 +52,7 @@ export let Base64 = module (
         return standard_values;
     };
 
+    /// @brief Returns the URL-safe lookup table, creating it on first use.
     let ready_url = func -> uint8[list] {
         if (url_values.length == 0) {
             url_values = values_of(UrlAlphabet);
@@ -56,32 +60,37 @@ export let Base64 = module (
         return url_values;
     };
 
+    /// @brief Encodes bytes with the standard alphabet and padding.
     export let encode = func(bytes: uint8[list]) -> string => encode_with(bytes, StandardAlphabet, true);
 
+    /// @brief Encodes bytes with the standard alphabet and omits padding.
     export let encode_unpadded = func(bytes: uint8[list]) -> string =>
         encode_with(bytes, StandardAlphabet, false);
 
+    /// @brief Encodes bytes with the URL-safe alphabet and padding.
     export let encode_url = func(bytes: uint8[list]) -> string => encode_with(bytes, UrlAlphabet, true);
 
+    /// @brief Encodes bytes with the URL-safe alphabet and omits padding.
     export let encode_url_unpadded = func(bytes: uint8[list]) -> string =>
         encode_with(bytes, UrlAlphabet, false);
 
-    // Strict decoding of padded standard text.
+    /// @brief Strict decoding of padded standard text.
     export let decode = func(text: string) -> Result<uint8[list]> =>
         decode_with(text, ready_standard(), true);
 
-    // Strict decoding of unpadded standard text.
+    /// @brief Strict decoding of unpadded standard text.
     export let decode_unpadded = func(text: string) -> Result<uint8[list]> =>
         decode_with(text, ready_standard(), false);
 
-    // Strict decoding of padded URL-safe text.
+    /// @brief Strict decoding of padded URL-safe text.
     export let decode_url = func(text: string) -> Result<uint8[list]> =>
         decode_with(text, ready_url(), true);
 
-    // Strict decoding of unpadded URL-safe text.
+    /// @brief Strict decoding of unpadded URL-safe text.
     export let decode_url_unpadded = func(text: string) -> Result<uint8[list]> =>
         decode_with(text, ready_url(), false);
 
+    /// @brief Packs each group of bytes into six-bit digits and adds padding when requested.
     let encode_with = func(bytes: uint8[list], alphabet: string, padded: bool) -> string {
         let chars: uint8[list] = [];
         let count = bytes.length;
@@ -119,6 +128,8 @@ export let Base64 = module (
         return text;
     };
 
+    /// @brief Decodes using the selected alphabet and padding policy, rejecting malformed tails and nonzero
+    /// unused bits.
     let decode_with = func(text: string, values: uint8[list], padded: bool) -> Result<uint8[list]> {
         let count = text.byte_length;
         let bytes: uint8[list] = [];
@@ -195,6 +206,7 @@ export let Base64 = module (
         return Result<uint8[list]>.Ok(bytes);
     };
 
+    /// @brief Creates an Encoding error with its input byte offset.
     let failure = func(offset: int, message: string) -> Result<uint8[list]> =>
         Result<uint8[list]>.Err(Error.Encoding { offset: offset, message: message });
 );

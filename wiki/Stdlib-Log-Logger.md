@@ -17,25 +17,33 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Logger** · [`export let LogLevel = enum (Trace, Debug, Info, Warn, Error, Off)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L10)
+- **Logger** · [`export let LogLevel = enum (Trace, Debug, Info, Warn, Error, Off)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L11)
   In order; levels compare by ordinal. Off disables a logger and is never a record's level.
-- **Logger** · [`export let Logger = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L12)
-- **Logger.Logger** · [`export let init = func(name: string, target: func(string) -> void, level: LogLevel, time_source: Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L19)
-- **Logger.Logger** · [`export let is_enabled = func(level: LogLevel) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L28)
+- **Logger** · [`export let Logger = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L14)
+  A named logger with its own threshold, sink, and optional clock.
+- **Logger.Logger** · [`export let init = func(name: string, target: func(string) -> void, level: LogLevel, time_source: Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L25)
+  Configures the logger's name, destination, threshold, and optional time source.
+- **Logger.Logger** · [`export let is_enabled = func(level: LogLevel) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L34)
   True when a record at `level` would reach the sink: the level is not Off and is at least the logger's level.
-- **Logger.Logger** · [`export let set_level = func(level: LogLevel)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L31)
-- **Logger.Logger** · [`export let log = func(level: LogLevel, message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L38)
+- **Logger.Logger** · [`export let set_level = func(level: LogLevel)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L38)
+  Changes the minimum level for future records.
+- **Logger.Logger** · [`export let log = func(level: LogLevel, message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L44)
   Sends one record when the level is enabled: with a clock, the instant's text (or - when the clock fails) and a space; then the level in uppercase, a space, the name, ": ", and the message.
-- **Logger.Logger** · [`export let log_lazy = func(level: LogLevel, make: func() -> string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L45)
+- **Logger.Logger** · [`export let log_lazy = func(level: LogLevel, make: func() -> string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L51)
   Calls `make` only when the level is enabled.
-- **Logger.Logger** · [`export let trace = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L51)
-- **Logger.Logger** · [`export let debug = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L53)
-- **Logger.Logger** · [`export let info = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L55)
-- **Logger.Logger** · [`export let warn = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L57)
-- **Logger.Logger** · [`export let error = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L59)
-- **Logger** · [`export let create = func(name: string, sink: func(string) -> void, level: LogLevel) -> Logger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L72)
+- **Logger.Logger** · [`export let trace = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L58)
+  Logs a Trace record if that level is enabled.
+- **Logger.Logger** · [`export let debug = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L61)
+  Logs a Debug record if that level is enabled.
+- **Logger.Logger** · [`export let info = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L64)
+  Logs an Info record if that level is enabled.
+- **Logger.Logger** · [`export let warn = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L67)
+  Logs a Warn record if that level is enabled.
+- **Logger.Logger** · [`export let error = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L70)
+  Logs an Error record if that level is enabled.
+- **Logger** · [`export let create = func(name: string, sink: func(string) -> void, level: LogLevel) -> Logger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L84)
   A logger without timestamps.
-- **Logger** · [`export let create_timed = func(name: string, sink: func(string) -> void, level: LogLevel, source: Clock) -> Logger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L76)
+- **Logger** · [`export let create_timed = func(name: string, sink: func(string) -> void, level: LogLevel, source: Clock) -> Logger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L88)
   A logger whose records start with the clock's instant.
 <!-- END SOURCE API -->
 

@@ -2,14 +2,16 @@ let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Ordering;
 let.promote _ = import:Std.Core.Result;
 
-// Companion functions for bool (Stdlib.md section 7.4).
+/// @brief Companion functions for bool (Stdlib.md section 7.4).
+/// @see [Std.Core.Bool](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Bool)
 export let Bool = module (
-    // 1 for true, 0 for false.
+    /// @brief 1 for true, 0 for false.
     export let to_int = func(v: bool) -> int => v ? 1 : 0;
 
+    /// @brief Returns true when exactly one operand is true.
     export let xor = func(a: bool, b: bool) -> bool => a != b;
 
-    // The natural order: false before true. Usable as a comparator.
+    /// @brief The natural order: false before true. Usable as a comparator.
     export let compare = func(a: bool, b: bool) -> Ordering {
         if (a == b) {
             return Ordering.Equal;
@@ -20,9 +22,10 @@ export let Bool = module (
         return Ordering.Greater;
     };
 
-    // 1231 for true and 1237 for false (section 5.2).
+    /// @brief 1231 for true and 1237 for false (section 5.2).
     export let hash = func(v: bool) -> uint32 => v.hash_code();
 
+    /// @brief Returns the lowercase text `true` or `false`.
     export let to_string = func(v: bool) -> string {
         if (v) {
             return "true";
@@ -30,10 +33,10 @@ export let Bool = module (
         return "false";
     };
 
-    // Accepts exactly `true` and `false`. The empty text fails with Empty; a
-    // proper prefix of either word with UnexpectedEnd at its length; any
-    // other text with InvalidCharacter at the first byte that matches
-    // neither word.
+    /// @brief Accepts exactly `true` and `false`.
+    ///
+    /// The empty text fails with Empty; a proper prefix of either word with UnexpectedEnd at its length; any
+    /// other text with InvalidCharacter at the first byte that matches neither word.
     export let parse = func(text: string) -> Result<bool> {
         if (text == "true") {
             return Result<bool>.Ok(true);
@@ -61,7 +64,7 @@ export let Bool = module (
         });
     };
 
-    // The number of leading bytes that `text` shares with `word`.
+    /// @brief The number of leading bytes that `text` shares with `word`.
     let common_prefix = func(text: string, word: string) -> int {
         let count = 0;
         while (count < text.byte_length && count < word.byte_length && text.byte_at(count) == word.byte_at(count)) {

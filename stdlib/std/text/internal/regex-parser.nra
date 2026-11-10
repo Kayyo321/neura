@@ -2,17 +2,19 @@ let error = import:Std.Core.Error;
 let scalar_values = import:Std.Text.Scalars;
 let strings = import:Std.Text.Strings;
 
-// The regular expression parser (Stdlib.md section 8.4): a recursive-descent
-// parser from pattern text to a syntax tree. It reports the first error with
-// its byte offset; it does not recover.
+/// @brief The regular expression parser (Stdlib.md section 8.4): a recursive-descent parser from pattern text
+/// to a syntax tree.
+///
+/// It reports the first error with its byte offset; it does not recover.
 export let RegexParser = module (
-    // Zero-width assertions. The parser produces StartText and EndText for
-    // ^ and $; the compiler turns them into the line forms under multi_line.
+    /// @brief Zero-width assertions. The parser produces StartText and EndText for ^ and $; the compiler turns
+    /// them into the line forms under multi_line.
     export let Anchor = enum (StartText, EndText, StartLine, EndLine, WordBoundary, NotWordBoundary);
 
-    // The syntax tree. Class ranges are inclusive [low, high] pairs of
-    // scalar values; a Repeat's max is -1 when unbounded; Group is a
-    // capturing group (non-capturing groups leave only their contents).
+    /// @brief The syntax tree.
+    ///
+    /// Class ranges are inclusive [low, high] pairs of scalar values; a Repeat's max is -1 when unbounded;
+    /// Group is a capturing group (non-capturing groups leave only their contents).
     export let Node = enum (
         Empty,
         Literal(uint32),
@@ -25,39 +27,59 @@ export let RegexParser = module (
         Assert(Anchor)
     );
 
+    /// @brief The maximum accepted explicit repetition count.
     export const MaxRepetition: int = 1000;
+    /// @brief The maximum compiled instruction count.
     export const MaxInstructions: int = 10000;
+    /// @brief The maximum nesting depth of groups.
     export const MaxNesting: int = 250;
 
-    // A body above this size cannot fit with the two saves and the match
-    // instruction that every program adds.
+    /// @brief A body above this size cannot fit with the two saves and the match instruction that every program
+    /// adds.
     const MaxBody: int = 9997;
+    /// @brief The largest valid Unicode scalar value, U+10FFFF.
     const MaxScalar: uint32 = 1114111;
 
-    // The state and outcome of one parse. After parse returns, `failed`
-    // says whether the pattern was rejected; otherwise `root` is the tree,
-    // `size` its instruction count, `groups` the number of capturing groups,
-    // and names[i] the name of group i + 1 or "".
+    /// @brief The state and outcome of one parse.
+    ///
+    /// After parse returns, `failed` says whether the pattern was rejected; otherwise `root` is the tree,
+    /// `size` its instruction count, `groups` the number of capturing groups, and names[i] the name of group i
+    /// + 1 or "".
     export let Parser = class (
+        /// @brief The UTF-8 source pattern.
         export let pattern: string = "";
+        /// @brief The byte offset of the next input byte.
         export let position: int = 0;
+        /// @brief Whether the parser has recorded a failure.
         export let failed: bool = false;
+        /// @brief The category of the first failure.
         export let error_kind: error.ParseErrorKind = error.ParseErrorKind.Syntax;
+        /// @brief The UTF-8 byte offset of the first failure.
         export let error_offset: int = 0;
+        /// @brief The message of the first failure.
         export let error_message: string = "";
+        /// @brief The parsed syntax tree on success.
         export let root: Node = Node.Empty;
+        /// @brief The estimated instruction count of the parsed tree.
         export let size: int = 0;
+        /// @brief The number of capturing groups, excluding group zero.
         export let groups: int = 0;
+        /// @brief The names of capturing groups in order, with empty names for unnamed groups.
         export let names: string[list] = [];
+        /// @brief The current group nesting depth.
         let depth: int = 0;
+        /// @brief The pattern's UTF-8 byte length.
         let length: int = 0;
+        /// @brief Whether the last atom was a zero-width assertion.
         let last_was_assertion: bool = false;
 
+        /// @brief Initializes parsing at the start of the supplied pattern.
         export let init = func(text: string) {
             pattern = text;
             length = text.byte_length;
         };
 
+        /// @brief Parses a complete pattern and stores its tree and size estimate or the first failure.
         export let parse = func {
             let [node, node_size] = parse_alternation();
             if (failed) {
@@ -71,6 +93,7 @@ export let RegexParser = module (
             size = node_size;
         };
 
+        /// @brief Records only the first parser failure.
         let fail = func(kind: error.ParseErrorKind, offset: int, message: string) {
             if (!failed) {
                 failed = true;
@@ -80,25 +103,30 @@ export let RegexParser = module (
             }
         };
 
+        /// @brief Records a syntax failure at the given byte offset.
         let fail_syntax = func(offset: int, message: string) {
             fail(error.ParseErrorKind.Syntax, offset, message);
         };
 
+        /// @brief Records premature end at the pattern's byte length.
         let fail_end = func(message: string) {
             fail(error.ParseErrorKind.UnexpectedEnd, length, message);
         };
 
+        /// @brief Reads the pattern byte at the current position.
         let peek = func -> uint8 => pattern.byte_at(position);
 
+        /// @brief Tests whether the input has been consumed.
         let at_end = func -> bool => position >= length;
 
-        // Fails when a node's instruction count leaves no room in a program.
+        /// @brief Fails when a node's instruction count leaves no room in a program.
         let check_size = func(node_size: int, offset: int) {
             if (node_size > MaxBody) {
                 fail(error.ParseErrorKind.OutOfRange, offset, "pattern exceeds 10000 instructions");
             }
         };
 
+        /// @brief Parses alternatives in priority order and estimates split and jump instructions.
         let parse_alternation = func -> [Node, int] {
             let start = position;
             let [first, first_size] = parse_concat();
@@ -126,6 +154,7 @@ export let RegexParser = module (
             return [Node.Alternate(branches), total];
         };
 
+        /// @brief Parses successive atoms and quantifiers up to an alternative, closing group, or end.
         let parse_concat = func -> [Node, int] {
             let items: Node[list] = [];
             let total = 0;
@@ -159,6 +188,7 @@ export let RegexParser = module (
             return [Node.Concat(items), total];
         };
 
+        /// @brief Parses one literal, group, class, wildcard, anchor, or escape.
         let parse_atom = func -> [Node, int] {
             last_was_assertion = false;
             let b = peek();
@@ -194,8 +224,8 @@ export let RegexParser = module (
             return [Node.Literal(value), 1];
         };
 
-        // A quantifier after an atom, with its lazy form. A second
-        // quantifier, a possessive +, or a quantified assertion fails.
+        /// @brief A quantifier after an atom, with its lazy form. A second quantifier, a possessive +, or a
+        /// quantified assertion fails.
         let parse_quantifiers = func(atom: Node, atom_size: int, atom_start: int) -> [Node, int] {
             if (at_end()) {
                 return [atom, atom_size];
@@ -250,7 +280,7 @@ export let RegexParser = module (
             return [Node.Repeat { item: atom, min: min, max: max, greedy: greedy }, total];
         };
 
-        // {n}, {n,}, or {n,m} at the current position.
+        /// @brief {n}, {n,}, or {n,m} at the current position.
         let parse_counts = func -> [int, int] {
             let open = position++;
             let low = parse_count();
@@ -300,8 +330,8 @@ export let RegexParser = module (
             return [low, high];
         };
 
-        // Decimal digits, or -1 when there are none. A value above the
-        // repetition limit fails at its first digit.
+        /// @brief Decimal digits, or -1 when there are none. A value above the repetition limit fails at its
+        /// first digit.
         let parse_count = func -> int {
             let start = position;
             let value = 0;
@@ -321,6 +351,7 @@ export let RegexParser = module (
             return value;
         };
 
+        /// @brief Parses capturing, noncapturing, and named groups and assigns capture indices.
         let parse_group = func -> [Node, int] {
             let open = position;
             position += 1;
@@ -397,7 +428,7 @@ export let RegexParser = module (
             return [Node.Group { item: inner, index: index }, total];
         };
 
-        // An identifier ended by >, unique among the pattern's group names.
+        /// @brief An identifier ended by >, unique among the pattern's group names.
         let parse_group_name = func -> string {
             let start = position;
             while (!at_end() && peek() != 62) {
@@ -429,6 +460,7 @@ export let RegexParser = module (
             return name;
         };
 
+        /// @brief Parses a possibly negated character class and collects its scalar ranges.
         let parse_class = func -> [Node, int] {
             position += 1;
             let negated = false;
@@ -477,8 +509,8 @@ export let RegexParser = module (
             return [Node.Class { ranges: ranges, negated: negated }, 1];
         };
 
-        // One class member: a scalar value, returned, or a shorthand class,
-        // whose ranges are appended and which returns -1.
+        /// @brief One class member: a scalar value, returned, or a shorthand class, whose ranges are appended
+        /// and which returns -1.
         let parse_class_atom = func(ranges: uint32[list]) -> int {
             if (peek() != 92) {
                 let value = strings.scalar_at(pattern, position);
@@ -507,6 +539,7 @@ export let RegexParser = module (
             return parse_escaped_scalar(escape_start);
         };
 
+        /// @brief Parses an escape outside a character class into an assertion, class, or literal.
         let parse_escape = func -> [Node, int] {
             let escape_start = position;
             position += 1;
@@ -538,7 +571,7 @@ export let RegexParser = module (
             return [Node.Literal(value as uint32), 1];
         };
 
-        // The scalar an escape denotes; the position is after the backslash.
+        /// @brief The scalar an escape denotes; the position is after the backslash.
         let parse_escaped_scalar = func(escape_start: int) -> int {
             let b = peek();
             if (b == 116) {
@@ -573,7 +606,7 @@ export let RegexParser = module (
             return 0;
         };
 
-        // \u{X} with one through six hexadecimal digits naming a scalar value.
+        /// @brief \u{X} with one through six hexadecimal digits naming a scalar value.
         let parse_unicode_escape = func(escape_start: int) -> int {
             if (at_end()) {
                 fail_end("incomplete escape");
@@ -613,8 +646,8 @@ export let RegexParser = module (
         };
     );
 
-    // The ranges of \d, \w, and \s (by their lowercase letter) or of their
-    // negations (by the uppercase letter, as complements); empty otherwise.
+    /// @brief The ranges of \d, \w, and \s (by their lowercase letter) or of their negations (by the uppercase
+    /// letter, as complements); empty otherwise.
     export let shorthand_ranges = func(letter: uint8) -> uint32[list] {
         if (letter == 100) {
             return [48, 57];
@@ -638,9 +671,10 @@ export let RegexParser = module (
         return none;
     };
 
-    // The instruction count of a repetition, saturated above the limit.
-    // Each optional copy of an item that can match empty also saves its
-    // entry position and checks for progress (two more instructions).
+    /// @brief The instruction count of a repetition, saturated above the limit.
+    ///
+    /// Each optional copy of an item that can match empty also saves its entry position and checks for progress
+    /// (two more instructions).
     export let repeat_size = func(item: int, min: int, max: int, item_nullable: bool) -> int {
         let limit = MaxInstructions + 1;
         if (max < 0) {
@@ -661,7 +695,7 @@ export let RegexParser = module (
         return saturate(required + optional_part, limit);
     };
 
-    // Whether the node can match the empty string.
+    /// @brief Whether the node can match the empty string.
     export let nullable = func(node: Node) -> bool {
         return match (node) {
             Node.Empty => true,
@@ -676,6 +710,7 @@ export let RegexParser = module (
         };
     };
 
+    /// @brief Tests whether every node in a sequence can match without consuming input.
     let all_nullable = func(items: Node[list]) -> bool {
         for (let item in items) {
             if (!nullable(item)) {
@@ -685,6 +720,7 @@ export let RegexParser = module (
         return true;
     };
 
+    /// @brief Tests whether any node in a sequence can match without consuming input.
     let any_nullable = func(items: Node[list]) -> bool {
         for (let item in items) {
             if (nullable(item)) {
@@ -694,6 +730,7 @@ export let RegexParser = module (
         return false;
     };
 
+    /// @brief Caps an instruction-count estimate at the given limit.
     let saturate = func(value: int, limit: int) -> int {
         if (value > limit) {
             return limit;

@@ -2,22 +2,31 @@ let.promote _ = import:Std.Collections.List;
 let.promote _ = import:Std.Collections.MutableCollection;
 let ordering = import:Std.Core.Ordering;
 
-// A list that can change. `set` and `swap` are not structural changes.
+/// @brief A list that can change. `set` and `swap` are not structural changes.
+/// @see [Std.Collections.MutableList](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-MutableList)
 export let MutableList = module (
+    /// @brief A positional collection that supports replacing, reordering, adding, and removing elements.
     export let MutableList = interface<T>:List<T>, MutableCollection<T> (
+        /// @brief Replaces the element at `index` without invalidating iterators.
         let set = func(index: int, value: T);
-        // Accepts an index equal to the size.
+        /// @brief Inserts before the given index, or appends when the index equals the size.
         let add_at = func(index: int, value: T);
+        /// @brief Removes and returns the element at the given index.
         let remove_at = func(index: int) -> T;
-        // Trap with "no such element" when empty.
+        /// @brief Removes and returns the first element. Traps with `no such element` when empty.
         let remove_first = func -> T;
+        /// @brief Removes and returns the last element. Traps with `no such element` when empty.
         let remove_last = func -> T;
+        /// @brief Exchanges the elements at `i` and `j` without invalidating iterators.
         let swap = func(i: int, j: int);
+        /// @brief Reverses the element order in place without invalidating iterators.
         let reverse = func;
+        /// @brief Replaces each element with `value` without invalidating iterators.
         let fill = func(value: T);
-        // Traps for a size above the current size.
+        /// @brief Keeps the first `size` elements. Traps for a negative size or a size above the current size.
         let truncate = func(size: int);
-        // Stable, by the comparator.
+        /// @brief Sorts in place, preserving the relative order of elements that compare equal.
+        /// @pre The comparator defines a total order and leaves the list structure unchanged.
         let sort = func(c: func(T, T) -> ordering.Ordering);
     );
 );

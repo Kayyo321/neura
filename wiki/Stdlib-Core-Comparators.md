@@ -17,11 +17,11 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Comparators** · [`export let reversed = func<T>(c: func(T, T) -> Ordering) -> func(T, T) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/comparators.nra#L7)
+- **Comparators** · [`export let reversed = func<T>(c: func(T, T) -> Ordering) -> func(T, T) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/comparators.nra#L8)
   The opposite order of `c`.
-- **Comparators** · [`export let by_key = func<T, K>(key: func(T) -> K, c: func(K, K) -> Ordering) -> func(T, T) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/comparators.nra#L15)
+- **Comparators** · [`export let by_key = func<T, K>(key: func(T) -> K, c: func(K, K) -> Ordering) -> func(T, T) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/comparators.nra#L16)
   Orders values by the keys that `key` extracts, compared with `c`. `key` runs once per operand on each comparison.
-- **Comparators** · [`export let then = func<T>(first: func(T, T) -> Ordering, second: func(T, T) -> Ordering) -> func(T, T) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/comparators.nra#L23)
+- **Comparators** · [`export let then = func<T>(first: func(T, T) -> Ordering, second: func(T, T) -> Ordering) -> func(T, T) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/comparators.nra#L24)
   `first`, and `second` only where `first` finds the values equal.
 <!-- END SOURCE API -->
 

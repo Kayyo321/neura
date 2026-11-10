@@ -17,24 +17,38 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Test** · [`export let assert = func(condition: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L10)
-- **Test** · [`export let assert_with = func(condition: bool, message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L16)
-- **Test** · [`export let fail = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L22)
-- **Test** · [`export let assert_equal_int32 = func(expected: int32, actual: int32)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L27)
-- **Test** · [`export let assert_equal_int64 = func(expected: int64, actual: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L33)
-- **Test** · [`export let assert_equal_uint64 = func(expected: uint64, actual: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L39)
-- **Test** · [`export let assert_equal_bool = func(expected: bool, actual: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L45)
-- **Test** · [`export let assert_equal_string = func(expected: string, actual: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L51)
-- **Test** · [`export let assert_equal_float64 = func(expected: float64, actual: float64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L59)
+- **Test** · [`export let assert = func(condition: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L13)
+  Traps with the default assertion diagnostic when the condition is false.
+- **Test** · [`export let assert_with = func(condition: bool, message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L20)
+  Traps with the supplied diagnostic when the condition is false.
+- **Test** · [`export let fail = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L27)
+  Fails the current test with the supplied diagnostic.
+- **Test** · [`export let assert_equal_int32 = func(expected: int32, actual: int32)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L34)
+  Checks exact signed 32-bit equality.
+- **Test** · [`export let assert_equal_int64 = func(expected: int64, actual: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L41)
+  Checks exact signed 64-bit equality.
+- **Test** · [`export let assert_equal_uint64 = func(expected: uint64, actual: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L48)
+  Checks exact unsigned 64-bit equality.
+- **Test** · [`export let assert_equal_bool = func(expected: bool, actual: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L55)
+  Checks that both Boolean values agree.
+- **Test** · [`export let assert_equal_string = func(expected: string, actual: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L62)
+  Checks that both strings contain the same UTF-8 bytes.
+- **Test** · [`export let assert_equal_float64 = func(expected: float64, actual: float64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L70)
   Equal bit patterns, except that every NaN equals every NaN; 0.0 and -0.0 differ (Stdlib.md section 5.2).
-- **Test** · [`export let assert_float_near = func(expected: float64, actual: float64, tolerance: float64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L67)
+- **Test** · [`export let assert_float_near = func(expected: float64, actual: float64, tolerance: float64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L77)
   Fails when the absolute difference exceeds the tolerance or either value is NaN.
-- **Test** · [`export let assert_equal = func<T>(expected: T, actual: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L77)
-- **Test** · [`export let assert_not_equal = func<T>(unexpected: T, actual: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L83)
-- **Test** · [`export let assert_some = func<T>(o: optional.Optional<T>) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L89)
-- **Test** · [`export let assert_none = func<T>(o: optional.Optional<T>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L100)
-- **Test** · [`export let assert_ok = func<T>(r: Result<T>) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L106)
-- **Test** · [`export let assert_err = func<T>(r: Result<T>) -> error.Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L117)
+- **Test** · [`export let assert_equal = func<T>(expected: T, actual: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L88)
+  Checks equality with the type's equals operation.
+- **Test** · [`export let assert_not_equal = func<T>(unexpected: T, actual: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L95)
+  Fails when the type's equals operation reports equality.
+- **Test** · [`export let assert_some = func<T>(o: optional.Optional<T>) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L102)
+  Returns the payload of Some or fails the test on None.
+- **Test** · [`export let assert_none = func<T>(o: optional.Optional<T>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L114)
+  Fails the test if the optional contains a payload.
+- **Test** · [`export let assert_ok = func<T>(r: Result<T>) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L121)
+  Returns a successful payload or fails the test with the error.
+- **Test** · [`export let assert_err = func<T>(r: Result<T>) -> error.Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/test.nra#L133)
+  Returns the error payload or fails the test on success.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

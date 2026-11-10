@@ -17,31 +17,33 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Random** · [`export let Random = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L14)
-- **Random.Random** · [`export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L23)
-- **Random.Random** · [`export let next_uint64 = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L31)
+- **Random** · [`export let Random = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L18)
+  A deterministic xoshiro256** generator with an optional cached normal sample.
+- **Random.Random** · [`export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L33)
+  Initializes the four state words supplied by the seeding factory.
+- **Random.Random** · [`export let next_uint64 = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L41)
   One step: rotate_left(s1 * 5, 7) * 9, then the state transition.
-- **Random.Random** · [`export let next_uint32 = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L44)
+- **Random.Random** · [`export let next_uint32 = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L54)
   The high 32 bits of one step.
-- **Random.Random** · [`export let next_bool = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L47)
+- **Random.Random** · [`export let next_bool = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L57)
   The top bit of one step.
-- **Random.Random** · [`export let next_int_below = func(bound: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L53)
+- **Random.Random** · [`export let next_int_below = func(bound: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L63)
   Uniform in 0 up to but excluding `bound`: next_uint32 masked to the smallest all-ones mask covering bound - 1, drawn until below bound. A bound below 1 traps with "invalid argument: bound must be positive".
-- **Random.Random** · [`export let next_int_between = func(low: int, high: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L63)
+- **Random.Random** · [`export let next_int_between = func(low: int, high: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L72)
   Uniform from `low` up to but excluding `high`, with the span in int64. Traps with "invalid argument: low must be below high" unless low < high.
-- **Random.Random** · [`export let next_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L73)
+- **Random.Random** · [`export let next_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L81)
   The top 53 bits of one step times 2^-53: uniform in 0 up to but excluding 1.
-- **Random.Random** · [`export let next_gaussian = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L80)
+- **Random.Random** · [`export let next_gaussian = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L87)
   A standard normal value by Marsaglia's polar method: u and v are next_float64() * 2 - 1, drawn in pairs until s = u^2 + v^2 is below 1 and not 0; then m = sqrt(-2 log(s) / s) with Std.Math, u * m is returned and v * m is kept for the next call.
-- **Random.Random** · [`export let fill_bytes = func(count: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L102)
+- **Random.Random** · [`export let fill_bytes = func(count: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L110)
   A new list of `count` bytes. Each step supplies 8 bytes, least significant first; a final partial group uses the low bytes. A negative count traps with "invalid argument: negative count".
-- **Random.Random** · [`export let shuffle = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L121)
+- **Random.Random** · [`export let shuffle = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L128)
   Fisher-Yates: for i from the last index down to 1, swaps i with next_int_below(i + 1).
-- **Random.Random** · [`export let choose = func<T>(items: T[list]) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L134)
+- **Random.Random** · [`export let choose = func<T>(items: T[list]) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L140)
   An element chosen with next_int_below. An empty list traps with "no such element".
-- **Random** · [`export let seeded = func(seed: uint64) -> Random`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L160)
+- **Random** · [`export let seeded = func(seed: uint64) -> Random`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L165)
   The four words are successive outputs of SplitMix64 started at the seed.
-- **Random** · [`export let from_entropy = func -> Result<Random>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L179)
+- **Random** · [`export let from_entropy = func -> Result<Random>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L185)
   Seeds with 8 bytes from neura.entropy.fill, read as a little-endian uint64. Needs the entropy capability; a denied or failed request is an Io error (CapabilityDenied when denied).
 <!-- END SOURCE API -->
 

@@ -5,22 +5,24 @@ let ordering = import:Std.Core.Ordering;
 let.promote _ = import:Std.Collections.Queue;
 let text_depth = import:Std.Collections.Internal.TextDepth;
 
-// A binary min-heap following the queue contract (Stdlib.md section 9.8):
-// `dequeue` returns a least element under the comparator given at
-// construction. Equal elements do not leave in first-in, first-out order.
-// The comparator must not change the queue; the modification count is
-// compared after each call. Equality and hashing are by identity.
+/// @brief Binary min-heaps that dequeue a least element under the supplied comparator.
+/// Equal-priority elements have no FIFO guarantee. The comparator must leave the queue structure
+/// unchanged. Structural changes during a comparison trap. Equality and hashing use identity.
+/// @see [Std.Collections.PriorityQueue](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-PriorityQueue)
 export let PriorityQueue = module (
+    /// @brief A min-heap that exposes the least element according to its comparator.
     export let PriorityQueue = class<T> implements Queue<T> (
-        // Heap order: the children of index i are at 2i + 1 and 2i + 2.
+        /// @brief Heap order: the children of index i are at 2i + 1 and 2i + 2.
         let heap: T[list];
+        /// @brief The total ordering used to maintain the heap.
         let comparator: func(T, T) -> ordering.Ordering;
-        // Advanced after each structural change; shared with iterators.
+        /// @brief The structural modification count shared with iterators.
         let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
+        /// @brief The depth of this instance's active text conversion, or zero when inactive.
         let printing_depth: int = 0;
 
-        // Copies `items` and heapifies them: sifts down each index from
-        // size / 2 - 1 to 0.
+        /// @brief Copies `items` and heapifies the copy in linear time.
+        /// @pre The comparator defines a total order and leaves the queue structure unchanged.
         export let init = func(items: T[list], c: func(T, T) -> ordering.Ordering) {
             comparator = c;
             let values: T[list] = [];
@@ -39,6 +41,7 @@ export let PriorityQueue = module (
             }
         };
 
+        /// @brief Compares two elements and traps if the callback changed the queue structurally.
         let less = func(a: T, b: T, expected: uint64) -> bool {
             let order = comparator(a, b);
             if (modifications.value != expected) {
@@ -47,8 +50,8 @@ export let PriorityQueue = module (
             return order == ordering.Ordering.Less;
         };
 
-        // While the item is not at the root and is Less than its parent,
-        // moves the parent down.
+        /// @brief While the item is not at the root and is Less than its parent,
+        /// moves the parent down.
         let sift_up = func(start: int, item: T, expected: uint64) {
             let index = start;
             while (index > 0) {
@@ -63,9 +66,9 @@ export let PriorityQueue = module (
             heap[index] = item;
         };
 
-        // Picks the left child, or the right child when it exists and is
-        // Less than the left; moves that child up while it is Less than the
-        // item.
+        /// @brief Picks the left child, or the right child when it exists and is
+        /// Less than the left. Moves that child up while it is Less than the
+        /// item.
         let sift_down = func(start: int, item: T, expected: uint64) {
             let count = heap.length;
             let index = start;
@@ -88,10 +91,13 @@ export let PriorityQueue = module (
             heap[index] = item;
         };
 
+        /// @brief Returns the number of elements.
         export let size = func -> int => heap.length;
 
+        /// @brief Returns true when there are no elements.
         export let is_empty = func -> bool => heap.length == 0;
 
+        /// @brief Adds `value` and sifts it up to restore heap order.
         export let enqueue = func(value: T) {
             let expected = modifications.value;
             heap.append(value);
@@ -99,8 +105,8 @@ export let PriorityQueue = module (
             modifications.value = expected + 1;
         };
 
-        // Removes and returns a least element. Traps with "no such element"
-        // when empty.
+        /// @brief Removes and returns a least element. Traps with "no such element"
+        /// when empty.
         export let dequeue = func -> T {
             let count = heap.length;
             if (count == 0) {
@@ -117,7 +123,7 @@ export let PriorityQueue = module (
             return root;
         };
 
-        // A least element, or None when empty.
+        /// @brief A least element, or None when empty.
         export let peek = func -> optional.Optional<T> {
             if (heap.length == 0) {
                 return optional.Optional<T>.None;
@@ -125,6 +131,7 @@ export let PriorityQueue = module (
             return optional.Optional<T>.Some(heap[0]);
         };
 
+        /// @brief Removes a least element and returns it as `Some`, or returns `None` when empty.
         export let try_dequeue = func -> optional.Optional<T> {
             if (heap.length == 0) {
                 return optional.Optional<T>.None;
@@ -132,13 +139,14 @@ export let PriorityQueue = module (
             return optional.Optional<T>.Some(dequeue());
         };
 
+        /// @brief Removes all queued elements.
         export let clear = func {
             let empty: T[list] = [];
             heap = empty;
             modifications.value = modifications.value + 1;
         };
 
-        // Dequeues everything into a new built-in list, least first.
+        /// @brief Dequeues everything into a new built-in list, least first.
         export let drain_sorted = func -> T[list] {
             let result: T[list] = [];
             while (heap.length > 0) {
@@ -147,7 +155,7 @@ export let PriorityQueue = module (
             return result;
         };
 
-        // By equals, with `value` as the receiver.
+        /// @brief Tests membership with `value.equals(element)`.
         export let contains = func(value: T) -> bool {
             for (let element in heap) {
                 if (value === element) {
@@ -157,7 +165,7 @@ export let PriorityQueue = module (
             return false;
         };
 
-        // A new built-in list in heap order, which is not sorted.
+        /// @brief A new built-in list in heap order, which is not sorted.
         export let to_list = func -> T[list] {
             let result: T[list] = [];
             for (let element in heap) {
@@ -166,11 +174,12 @@ export let PriorityQueue = module (
             return result;
         };
 
-        // Heap order; fail-fast.
+        /// @brief Returns a fail-fast iterator in heap order.
         export let iterator = func -> iterators.Iterator<T> =>
             new PriorityQueueIterator<T>(heap, modifications);
 
-        // Heap order. The action must not change the queue structurally.
+        /// @brief Calls `action` in heap order.
+        /// @pre The action leaves the queue structure unchanged.
         export let for_each = func(action: func(T) -> void) {
             let expected = modifications.value;
             let i = 0;
@@ -183,8 +192,8 @@ export let PriorityQueue = module (
             }
         };
 
-        // Traps with "invalid state: heap order" when an element is Less
-        // than its parent.
+        /// @brief Traps with "invalid state: heap order" when an element is Less
+        /// than its parent.
         export let validate = func {
             let expected = modifications.value;
             let i = 1;
@@ -196,8 +205,8 @@ export let PriorityQueue = module (
             }
         };
 
-        // `[a, b, c]` in heap order; the queue itself as a direct element
-        // prints "(this collection)".
+        /// @brief Formats elements as `[a, b, c]` in heap order. The queue itself as a direct element
+        /// prints "(this collection)".
         export let.override to_string = func -> string {
             if (printing_depth != 0 && printing_depth == text_depth.current()) {
                 return "(this collection)";
@@ -211,20 +220,26 @@ export let PriorityQueue = module (
         };
     );
 
-    // Walks the heap list in index order, comparing the queue's
-    // modification count before every step.
+    /// @brief Walks the heap list in index order, comparing the queue's
+    /// modification count before every step.
     let PriorityQueueIterator = class<T> implements iterators.Iterator<T> (
+        /// @brief The heap list in heap order.
         let source: T[list];
+        /// @brief The live modification counter shared with the source collection.
         let modifications: cell.Cell<uint64>;
+        /// @brief The source version recorded when the iterator was created.
         let expected: uint64;
+        /// @brief The zero-based position of the next element.
         let position: int = 0;
 
+        /// @brief Captures the heap and current modification count.
         export let init = func(values: T[list], counter: cell.Cell<uint64>) {
             source = values;
             modifications = counter;
             expected = counter.value;
         };
 
+        /// @brief Reports whether another element remains. Traps with `collection modified during iteration` after a structural change.
         export let has_next = func -> bool {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
@@ -232,6 +247,7 @@ export let PriorityQueue = module (
             return position < source.length;
         };
 
+        /// @brief Returns the next element and advances. Traps with `collection modified during iteration` after a structural change. Traps with `no such element` at exhaustion.
         export let next = func -> T {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
@@ -245,13 +261,13 @@ export let PriorityQueue = module (
         };
     );
 
-    // An empty queue ordered by `c`.
+    /// @brief Creates an empty queue using the total order defined by `c`.
     export let create = func<T>(c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T> {
         let empty: T[list] = [];
         return new PriorityQueue<T>(empty, c);
     };
 
-    // A queue of a copy of `items`, heapified in linear time.
+    /// @brief Copies and heapifies `items` in linear time using the total order defined by `c`.
     export let from_list = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T> =>
         new PriorityQueue<T>(items, c);
 );

@@ -2,23 +2,28 @@ let bytes = import:Std.Io.Internal.Bytes;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 
-// Writes UTF-8 text to a byte sink (Stdlib.md section 11.1). The bound write
-// method is a text sink.
+/// @brief Writes UTF-8 text to a byte sink (Stdlib.md section 11.1). The bound write method is a text sink.
+/// @see [Std.Io.Utf8Writer](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-Utf8Writer)
 export let Utf8Writer = module (
+    /// @brief Adapts a byte sink to receive UTF-8 text.
     export let Utf8Writer = class (
+        /// @brief The destination that receives the outgoing bytes.
         let sink: func(uint8[list]) -> Result<Unit>;
 
+        /// @brief Stores the destination byte sink.
         export let init = func(output: func(uint8[list]) -> Result<Unit>) {
             sink = output;
         };
 
+        /// @brief Writes the UTF-8 bytes of the text and returns the sink's result.
         export let write = func(text: string) -> Result<Unit> => sink(bytes.of_string(text));
 
-        // Writes the text and one LF.
+        /// @brief Writes the text and one LF.
         export let write_line = func(text: string) -> Result<Unit> =>
             sink(bytes.of_string(text + "\n"));
     );
 
+    /// @brief Creates a UTF-8 writer over the supplied byte sink.
     export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer =>
         new Utf8Writer(sink);
 );

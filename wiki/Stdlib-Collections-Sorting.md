@@ -17,11 +17,11 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Sorting** · [`export let sort_range = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sorting.nra#L151)
+- **Sorting** · [`export let sort_range = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sorting.nra#L152)
   Sorts items[start, end) stably. Traps with "invalid argument: range" unless 0 <= start <= end <= items.length.
-- **Sorting** · [`export let sort = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sorting.nra#L172)
+- **Sorting** · [`export let sort = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sorting.nra#L173)
   Sorts the whole list stably with at most about n log2 n comparator calls.
-- **Sorting** · [`export let binary_search = func<T>(items: T[list], value: T, c: func(T, T) -> ordering.Ordering) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sorting.nra#L179)
+- **Sorting** · [`export let binary_search = func<T>(items: T[list], value: T, c: func(T, T) -> ordering.Ordering) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sorting.nra#L180)
   `items` must be sorted by `c`. Returns the lowest index whose element is not Less than `value` when that element compares Equal, and otherwise -(insertion point) - 1.
 <!-- END SOURCE API -->
 

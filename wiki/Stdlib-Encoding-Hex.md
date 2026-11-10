@@ -17,9 +17,9 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Hex** · [`export let encode = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/hex.nra#L30)
+- **Hex** · [`export let encode = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/hex.nra#L31)
   Two lowercase hex digits per byte, most significant first.
-- **Hex** · [`export let decode = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/hex.nra#L48)
+- **Hex** · [`export let decode = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/hex.nra#L49)
   The bytes the digits encode. A byte that is not a hex digit fails with an Encoding error at its offset ("invalid hex digit"); an odd number of digits fails at the text's length ("odd number of hex digits").
 <!-- END SOURCE API -->
 

@@ -5,18 +5,26 @@ let instant = import:Std.Time.Instant;
 let result = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 
-// The host's clocks (Stdlib.md section 12.1). Needs the clock capability;
-// without it every member fails with CapabilityDenied.
+/// @brief The host's clocks (Stdlib.md section 12.1). Needs the clock capability; without it every member fails
+/// with CapabilityDenied.
+/// @see [Std.Time.SystemClock](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-SystemClock)
 export let SystemClock = module (
+    /// @brief Carries the provider's UTC epoch seconds and nanosecond fraction or an error code.
     let WallOutcome = enum (Ok([int64, int]), Error(uint32));
+    /// @brief Carries a monotonic nanosecond reading or a provider error code.
     let NanosOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief Represents host success without a value or an unsigned host error code.
     let DoneOutcome = enum (Ok, Error(uint32));
+    /// @brief Requests the current wall-clock reading from the provider.
     let wall_clock = func -> WallOutcome host("neura.clock.wall", 1);
+    /// @brief Requests the current monotonic reading from the provider.
     let monotonic_clock = func -> NanosOutcome host("neura.clock.monotonic", 1);
+    /// @brief Asks the provider to wait for the specified nanosecond count.
     let sleep_for = func(nanos: int64) -> DoneOutcome host("neura.clock.sleep", 1);
 
+    /// @brief A clock whose operations use the runtime's clock capability.
     export let SystemClock = class implements Clock (
-        // The host's wall clock as an instant.
+        /// @brief The host's wall clock as an instant.
         export let now = func -> result.Result<instant.Instant> {
             return match (wall_clock()) {
                 WallOutcome.Ok(reading) => result.Result<instant.Instant>.Ok(instant.of_epoch_seconds(reading[0], reading[1])),
@@ -24,7 +32,7 @@ export let SystemClock = module (
             };
         };
 
-        // The host's monotonic clock, from an origin fixed for the run.
+        /// @brief The host's monotonic clock, from an origin fixed for the run.
         export let monotonic = func -> result.Result<Duration> {
             return match (monotonic_clock()) {
                 NanosOutcome.Ok(nanos) => result.Result<Duration>.Ok(of_nanos(nanos)),
@@ -32,8 +40,8 @@ export let SystemClock = module (
             };
         };
 
-        // Waits for the duration; a zero or negative duration asks the host
-        // to wait for zero nanoseconds.
+        /// @brief Waits for the duration; a zero or negative duration asks the host to wait for zero
+        /// nanoseconds.
         export let sleep = func(span: Duration) -> result.Result<Unit> {
             let nanos = span.to_nanos();
             return match (sleep_for(nanos < 0 ? 0 : nanos)) {
@@ -43,5 +51,6 @@ export let SystemClock = module (
         };
     );
 
+    /// @brief Creates a clock backed by the host's wall and monotonic clocks.
     export let create = func -> SystemClock => new SystemClock();
 );

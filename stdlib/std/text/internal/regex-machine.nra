@@ -1,18 +1,17 @@
 let parser = import:Std.Text.Internal.RegexParser;
 
-// The regular expression compiler and Pike machine (Stdlib.md section 8.4).
-// A program is a list of instructions; the machine advances every live
-// thread over the input one scalar value at a time, in priority order, with
-// at most one thread per instruction per position, so matching takes time
-// proportional to the program size times the input length and never
-// backtracks. Each thread carries its own capture slots; slot 2k is the
-// start and slot 2k + 1 the end of group k, -1 when unset. The slots after
-// the groups' slots hold the entry positions of optional copies of an item
-// that can match empty: Progress(slot) is an assertion that holds when the
-// position has moved since that save (see compile_repeat). A Class carries
-// its sorted ranges and, for ASCII scalars, a 128-bit membership set with the
-// negation already applied.
+/// @brief The regular expression compiler and Pike machine (Stdlib.md section 8.4).
+///
+/// A program is a list of instructions; the machine advances every live thread over the input one scalar value
+/// at a time, in priority order, with at most one thread per instruction per position, so matching takes time
+/// proportional to the program size times the input length and never backtracks. Each thread carries its own
+/// capture slots; slot 2k is the start and slot 2k + 1 the end of group k, -1 when unset. The slots after the
+/// groups' slots hold the entry positions of optional copies of an item that can match empty: Progress(slot) is
+/// an assertion that holds when the position has moved since that save (see compile_repeat). A Class carries
+/// its sorted ranges and, for ASCII scalars, a 128-bit membership set with the negation already applied.
 export let RegexMachine = module (
+    /// @brief Represents consuming instructions, prioritized branches, captures, assertions, progress checks,
+    /// and completion.
     export let Inst = enum (
         Scalar(uint32),
         Any,
@@ -25,29 +24,41 @@ export let RegexMachine = module (
         Match
     );
 
-    // Search modes: the leftmost match with backtracking priority; whether
-    // any match exists; a match of the whole input from the start offset.
+    /// @brief Search modes: the leftmost match with backtracking priority; whether any match exists; a match of
+    /// the whole input from the start offset.
     export const Leftmost: int = 0;
+    /// @brief Selects the earliest successful match for an existence check.
     export const Earliest: int = 1;
+    /// @brief Requires a match to consume the whole input from the start offset.
     export const Whole: int = 2;
 
-    // A compiled program with the scratch state the machine reuses between
-    // searches. `first_bytes` lists the bytes that can begin a match when
-    // `can_skip` holds; `anchored` means a match can only start at offset 0.
+    /// @brief A compiled program with the scratch state the machine reuses between searches. `first_bytes`
+    /// lists the bytes that can begin a match when `can_skip` holds; `anchored` means a match can only start at
+    /// offset 0.
     export let Program = class (
+        /// @brief The option bits captured at compile time.
         export let options: int = 0;
+        /// @brief The compiled instruction sequence.
         export let insts: Inst[list] = [];
+        /// @brief The count of capture and progress slots.
         export let slot_count: int = 2;
+        /// @brief The table of candidate first bytes used to skip ahead in the input.
         export let first_bytes: bool[list] = [];
+        /// @brief Whether the search may skip bytes that cannot start a match.
         export let can_skip: bool = false;
+        /// @brief Whether the program requires a match at the start of the input.
         export let anchored: bool = false;
+        /// @brief The last visited generation for each program counter.
         export let marks: int[list] = [];
+        /// @brief The generation used to deduplicate threads at the current input position.
         export let generation: int = 0;
+        /// @brief The work stack of program counters for pending epsilon transitions.
         export let stack_pcs: int[list] = [];
+        /// @brief The capture-slot lists corresponding to the pending program counters.
         export let stack_caps: (int[list])[list] = [];
     );
 
-    // Compiles a syntax tree with `groups` capturing groups.
+    /// @brief Compiles a syntax tree with `groups` capturing groups.
     export let compile = func(root: parser.Node, groups: int, ignore_case: bool, multi_line: bool, dot_all: bool) -> Program {
         let compiler = new Compiler(ignore_case, multi_line, dot_all, 2 * groups + 2);
         compiler.emit(Inst.Save(0));
@@ -67,13 +78,20 @@ export let RegexMachine = module (
         return program;
     };
 
+    /// @brief Emits instructions and allocates capture and progress slots for a parsed tree.
     let Compiler = class (
+        /// @brief The instructions emitted so far.
         export let insts: Inst[list] = [];
+        /// @brief Whether literal and class instructions fold ASCII case.
         let fold_case: bool = false;
+        /// @brief Whether text anchors compile as line anchors.
         let line_anchors: bool = false;
+        /// @brief Whether dot matches LF.
         let any_newline: bool = false;
+        /// @brief The next available slot for a repeat progress check.
         export let next_slot: int = 2;
 
+        /// @brief Initializes compiler options and the first available progress slot.
         export let init = func(ignore_case: bool, multi_line: bool, dot_all: bool, first_free_slot: int) {
             fold_case = ignore_case;
             line_anchors = multi_line;
@@ -81,11 +99,13 @@ export let RegexMachine = module (
             next_slot = first_free_slot;
         };
 
+        /// @brief Appends an instruction and returns its program counter.
         export let emit = func(inst: Inst) -> int {
             insts.append(inst);
             return insts.length - 1;
         };
 
+        /// @brief Compiles a syntax node, preserving alternative priority and capture boundaries.
         export let compile = func(node: parser.Node) {
             match (node) {
                 parser.Node.Empty => {},
@@ -148,16 +168,13 @@ export let RegexMachine = module (
             }
         };
 
-        // x* is split, x, jump back; x+ (after min - 1 copies) is x then a
-        // split back; a bounded repetition is min copies followed by
-        // max - min optional copies that all exit to the same end.
-        //
-        // Empty iterations follow ECMAScript's backtracking rule: an
-        // iteration beyond the minimum that matches the empty string fails.
-        // In a loop the machine's one-thread-per-instruction rule already
-        // does this (the thread returning to the loop's split at the same
-        // position dies); an optional copy of an item that can match empty
-        // saves its entry position and ends with Progress.
+        /// @brief x* is split, x, jump back; x+ (after min - 1 copies) is x then a split back; a bounded
+        /// repetition is min copies followed by max - min optional copies that all exit to the same end.
+        ///
+        /// Empty iterations follow ECMAScript's backtracking rule: an iteration beyond the minimum that matches
+        /// the empty string fails. In a loop the machine's one-thread-per-instruction rule already does this
+        /// (the thread returning to the loop's split at the same position dies); an optional copy of an item
+        /// that can match empty saves its entry position and ends with Progress.
         let compile_repeat = func(item: parser.Node, min: int, max: int, greedy: bool) {
             let nullable = parser.nullable(item);
             let copies = min;
@@ -207,6 +224,7 @@ export let RegexMachine = module (
             }
         };
 
+        /// @brief Creates a split ordered for greedy or lazy evaluation.
         let choice = func(body: int, exit: int, greedy: bool) -> Inst {
             if (greedy) {
                 return Inst.Split { first: body, second: exit };
@@ -215,8 +233,8 @@ export let RegexMachine = module (
         };
     );
 
-    // A class instruction with its ASCII members as a 128-bit set, so that
-    // matching an ASCII scalar is one read.
+    /// @brief A class instruction with its ASCII members as a 128-bit set, so that matching an ASCII scalar is
+    /// one read.
     let class_of = func(ranges: uint32[list], negated: bool) -> Inst {
         let ascii: uint32[list] = [0, 0, 0, 0];
         let c: uint32 = 0;
@@ -230,8 +248,7 @@ export let RegexMachine = module (
         return Inst.Class { ranges: ranges, negated: negated, ascii: ascii };
     };
 
-    // Sorted, merged ranges; with case folding, each ASCII letter range also
-    // adds the other case.
+    /// @brief Sorted, merged ranges; with case folding, each ASCII letter range also adds the other case.
     let normalize = func(ranges: uint32[list], fold_case: bool) -> uint32[list] {
         let pairs: uint32[list] = [];
         let k = 0;
@@ -281,7 +298,7 @@ export let RegexMachine = module (
         return merged;
     };
 
-    // Adds the part of [low, high] inside [from, to] moved to the other case.
+    /// @brief Adds the part of [low, high] inside [from, to] moved to the other case.
     let add_shifted = func(pairs: uint32[list], low: uint32, high: uint32, from: uint32, to: uint32, up: bool) {
         let a = low;
         if (a < from) {
@@ -303,9 +320,8 @@ export let RegexMachine = module (
         }
     };
 
-    // Finds the bytes that can begin a match, and whether every match must
-    // start at offset 0, by following the epsilon instructions from the
-    // start.
+    /// @brief Finds the bytes that can begin a match, and whether every match must start at offset 0, by
+    /// following the epsilon instructions from the start.
     let analyze_start = func(program: Program) {
         let first: bool[list] = [];
         let k = 0;
@@ -320,12 +336,12 @@ export let RegexMachine = module (
         program.anchored = anchored;
     };
 
-    // Follows the epsilon instructions from the start. Every assertion is
-    // passable, except that a text-start assertion stops the walk unless
-    // `through_start` is set. Marks the first bytes of the consuming
-    // instructions reached and returns true when a match instruction or an
-    // instruction consuming any scalar is reached (no byte can be ruled
-    // out), or, without `through_start`, when any consuming instruction is.
+    /// @brief Follows the epsilon instructions from the start.
+    ///
+    /// Every assertion is passable, except that a text-start assertion stops the walk unless `through_start` is
+    /// set. Marks the first bytes of the consuming instructions reached and returns true when a match
+    /// instruction or an instruction consuming any scalar is reached (no byte can be ruled out), or, without
+    /// `through_start`, when any consuming instruction is.
     let reaches_input = func(insts: Inst[list], first: bool[list], through_start: bool) -> bool {
         let seen: bool[list] = [];
         let k = 0;
@@ -392,8 +408,8 @@ export let RegexMachine = module (
         return open;
     };
 
-    // Marks the first bytes of the UTF-8 encodings of [low, high]. The lead
-    // byte grows with the value, so the leads of the ends bound the rest.
+    /// @brief Marks the first bytes of the UTF-8 encodings of [low, high]. The lead byte grows with the value,
+    /// so the leads of the ends bound the rest.
     let mark_range = func(first: bool[list], low: uint32, high: uint32) {
         let a = lead_byte(low);
         let b = lead_byte(high);
@@ -403,6 +419,7 @@ export let RegexMachine = module (
         }
     };
 
+    /// @brief Marks lead bytes for the complement of the sorted scalar ranges.
     let mark_complement = func(first: bool[list], ranges: uint32[list]) {
         let next: uint32 = 0;
         let r = 0;
@@ -420,6 +437,7 @@ export let RegexMachine = module (
         }
     };
 
+    /// @brief Returns the UTF-8 lead byte for a scalar.
     let lead_byte = func(value: uint32) -> int {
         if (value < 128) {
             return value as int;
@@ -433,8 +451,8 @@ export let RegexMachine = module (
         return (240 | (value >> 18)) as int;
     };
 
-    // Runs the program over `input` from the byte offset `start`. Returns
-    // the capture slots of the match, or an empty list when there is none.
+    /// @brief Runs the program over `input` from the byte offset `start`. Returns the capture slots of the
+    /// match, or an empty list when there is none.
     export let search = func(program: Program, input: string, start: int, mode: int) -> int[list] {
         let none: int[list] = [];
         if (program.anchored && start > 0) {
@@ -567,10 +585,10 @@ export let RegexMachine = module (
         return matched;
     };
 
-    // Adds a thread at `pc` to the list, following jumps, splits (first
-    // target first), saves, and assertions that hold at `pos`. A pc already
-    // marked with this generation is skipped. The stacks are empty on entry
-    // and on return.
+    /// @brief Adds a thread at `pc` to the list, following jumps, splits (first target first), saves, and
+    /// assertions that hold at `pos`.
+    ///
+    /// A pc already marked with this generation is skipped. The stacks are empty on entry and on return.
     let add_thread = func(insts: Inst[list], marks: int[list], generation: int, stack_pcs: int[list],
                           stack_caps: (int[list])[list], pcs: int[list], caps_list: (int[list])[list], start_pc: int,
                           start_caps: int[list], input: string, pos: int) {
@@ -627,8 +645,8 @@ export let RegexMachine = module (
         }
     };
 
-    // A copy of the slots with one changed. Threads share slot lists, so a
-    // save never writes in place. Small counts use one list construction.
+    /// @brief A copy of the slots with one changed. Threads share slot lists, so a save never writes in place.
+    /// Small counts use one list construction.
     let copy_with = func(caps: int[list], slot: int, value: int) -> int[list] {
         let count = caps.length;
         if (count == 2) {
@@ -658,6 +676,7 @@ export let RegexMachine = module (
         return copy;
     };
 
+    /// @brief Evaluates a zero-width assertion at a UTF-8 byte offset.
     let holds = func(kind: parser.Anchor, input: string, pos: int) -> bool {
         let length = input.byte_length;
         if (kind == parser.Anchor.StartText) {
@@ -680,12 +699,12 @@ export let RegexMachine = module (
         return before == after;
     };
 
-    // Word characters are ASCII letters, digits, and the underscore; a byte
-    // of a multi-byte character is never one.
+    /// @brief Word characters are ASCII letters, digits, and the underscore; a byte of a multi-byte character
+    /// is never one.
     let is_word_byte = func(b: uint8) -> bool =>
         (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
 
-    // Sorted ranges: stop at the first range above the value.
+    /// @brief Sorted ranges: stop at the first range above the value.
     let in_ranges = func(ranges: uint32[list], value: uint32) -> bool {
         let count = ranges.length;
         let r = 0;
@@ -701,6 +720,7 @@ export let RegexMachine = module (
         return false;
     };
 
+    /// @brief Returns the UTF-8 sequence width indicated by a lead byte.
     let scalar_width = func(lead: uint8) -> int {
         if (lead < 128) {
             return 1;
@@ -714,6 +734,7 @@ export let RegexMachine = module (
         return 4;
     };
 
+    /// @brief Clears visited-instruction marks and resets the generation counter.
     let reset_marks = func(program: Program) {
         let k = 0;
         while (k < program.marks.length) {

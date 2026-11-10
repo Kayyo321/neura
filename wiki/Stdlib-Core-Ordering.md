@@ -17,14 +17,20 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Ordering** · [`export let Ordering = enum (Less, Equal, Greater)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L4)
-- **Ordering** · [`export let reverse = func(o: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L6)
-- **Ordering** · [`export let then = func(first: Ordering, second: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L17)
+- **Ordering** · [`export let Ordering = enum (Less, Equal, Greater)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L6)
+  The three outcomes of comparing a left operand to a right operand.
+- **Ordering** · [`export let reverse = func(o: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L9)
+  Swaps Less and Greater while preserving Equal.
+- **Ordering** · [`export let then = func(first: Ordering, second: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L20)
   `first` unless it is Equal, for comparing by several keys.
-- **Ordering** · [`export let is_less = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L20)
-- **Ordering** · [`export let is_at_most = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L22)
-- **Ordering** · [`export let is_greater = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L24)
-- **Ordering** · [`export let is_at_least = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L26)
+- **Ordering** · [`export let is_less = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L24)
+  Tests whether the left operand precedes the right.
+- **Ordering** · [`export let is_at_most = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L27)
+  Tests whether the left operand precedes or equals the right.
+- **Ordering** · [`export let is_greater = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L30)
+  Tests whether the left operand follows the right.
+- **Ordering** · [`export let is_at_least = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L33)
+  Tests whether the left operand follows or equals the right.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

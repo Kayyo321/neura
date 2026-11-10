@@ -1,15 +1,22 @@
 let hashing = import:Std.Core.Hash;
 
-// An immutable arithmetic progression of int values (Stdlib.md section 6.5):
-// `start` inclusive, `end` exclusive, and a nonzero `step`. A negative step
-// counts down while the value is greater than `end`. Positions and sizes are
-// computed in int64, so no intermediate overflows.
+/// @brief An immutable arithmetic progression of int values (Stdlib.md section 6.5): `start` inclusive, `end`
+/// exclusive, and a nonzero `step`.
+///
+/// A negative step counts down while the value is greater than `end`. Positions and sizes are computed in
+/// int64, so no intermediate overflows.
+/// @see [Std.Core.IntRange](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-IntRange)
 export let IntRange = module (
+    /// @brief An immutable half-open arithmetic progression with a nonzero stride.
     export let IntRange = class (
+        /// @brief The inclusive start bound.
         let first: int;
+        /// @brief The exclusive end bound.
         let limit: int;
+        /// @brief The signed stride between successive values.
         let increment: int;
 
+        /// @brief Stores the bounds and step. A zero step traps.
         export let init = func(start_value: int, end_value: int, step_value: int) {
             if (step_value == 0) {
                 trap_with_message("invalid argument: zero step");
@@ -19,13 +26,16 @@ export let IntRange = module (
             increment = step_value;
         };
 
+        /// @brief Returns the inclusive start bound.
         export let start = func -> int => first;
 
+        /// @brief Returns the exclusive end bound.
         export let end = func -> int => limit;
 
+        /// @brief Returns the signed stride between values.
         export let step = func -> int => increment;
 
-        // Progressions compare by their defining bounds and step.
+        /// @brief Progressions compare by their defining bounds and step.
         export let.override equals = func(other: class) -> bool {
             if (!(other is IntRange)) {
                 return false;
@@ -34,21 +44,25 @@ export let IntRange = module (
             return first == that.first && limit == that.limit && increment == that.increment;
         };
 
+        /// @brief Combines the start, end, and step into a hash.
         export let.override hash_code = func -> uint32 {
             let start_hash = hashing.combine(17, first.hash_code());
             let bounds_hash = hashing.combine(start_hash, limit.hash_code());
             return hashing.combine(bounds_hash, increment.hash_code());
         };
 
+        /// @brief Formats the progression as `start..end:step`.
         export let.override to_string = func -> string =>
             first.to_string() + ".." + limit.to_string() + ":" + increment.to_string();
 
-        // The number of values. Computed in int64; a range with more than
-        // Int32.Max values traps (reason 1) in the conversion to int.
+        /// @brief The number of values. Computed in int64; a range with more than Int32.Max values traps
+        /// (reason 1) in the conversion to int.
         export let size = func -> int => count() as int;
 
+        /// @brief Reports whether the bounds leave no values in the stride's direction.
         export let is_empty = func -> bool => (increment > 0) ? first >= limit : first <= limit;
 
+        /// @brief Tests whether the value lies within the bounds and on a stride boundary.
         export let contains = func(value: int) -> bool {
             let offset = (value as int64) - (first as int64);
             let stride = increment as int64;
@@ -58,8 +72,8 @@ export let IntRange = module (
             return value <= first && value > limit && offset % stride == 0;
         };
 
-        // The value at `index`. An index outside 0 through size() - 1 traps
-        // with "invalid argument: index out of range".
+        /// @brief The value at `index`. An index outside 0 through size() - 1 traps with "invalid argument:
+        /// index out of range".
         export let get = func(index: int) -> int {
             if (index < 0 || (index as int64) >= count()) {
                 trap_with_message("invalid argument: index out of range");
@@ -67,7 +81,7 @@ export let IntRange = module (
             return ((first as int64) + (index as int64) * (increment as int64)) as int;
         };
 
-        // A new built-in list of the values in order.
+        /// @brief A new built-in list of the values in order.
         export let to_list = func -> int[list] {
             let values: int[list] = [];
             let current = first as int64;
@@ -87,7 +101,7 @@ export let IntRange = module (
             return values;
         };
 
-        // The exact number of values as an int64.
+        /// @brief The exact number of values as an int64.
         let count = func -> int64 {
             if (is_empty()) {
                 return 0;
@@ -102,10 +116,10 @@ export let IntRange = module (
         };
     );
 
-    // The values from `start` up to, but not including, `end`.
+    /// @brief The values from `start` up to, but not including, `end`.
     export let of = func(start: int, end: int) -> IntRange => new IntRange(start, end, 1);
 
-    // A zero step traps with "invalid argument: zero step".
+    /// @brief A zero step traps with "invalid argument: zero step".
     export let stepped = func(start: int, end: int, step: int) -> IntRange =>
         new IntRange(start, end, step);
 );

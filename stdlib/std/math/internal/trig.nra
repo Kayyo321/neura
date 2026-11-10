@@ -17,9 +17,10 @@
 // granted, provided that this notice is preserved.
 let words = import:Std.Math.Internal.Words;
 
+/// @brief Evaluates fdlibm trigonometric kernels and reduces arguments modulo pi over two.
 export let Trig = module (
-    // __kernel_sin: sin(x + y) for |x| <= pi/4, where y is the tail of x.
-    // iy is 0 when y is known to be zero.
+    /// @brief __kernel_sin: sin(x + y) for |x| <= pi/4, where y is the tail of x. iy is 0 when y is known to be
+    /// zero.
     export let sin_kernel = func(x: float64, y: float64, iy: int) -> float64 {
         let half = 0.5;
         let S1 = float64.from_bits(13818544856648471881); // 0xBFC5555555555549 -1.66666666666666324348e-01
@@ -41,7 +42,7 @@ export let Trig = module (
         return x - ((z * (half * y - v * r) - y) - v * S1);
     };
 
-    // __kernel_cos: cos(x + y) for |x| <= pi/4.
+    /// @brief __kernel_cos: cos(x + y) for |x| <= pi/4.
     export let cos_kernel = func(x: float64, y: float64) -> float64 {
         let one = 1.0;
         let C1 = float64.from_bits(4586165620538955084); // 0x3FA555555555554C 4.16666666666666019037e-02
@@ -68,8 +69,7 @@ export let Trig = module (
         return a - (hz - (z * r - x * y));
     };
 
-    // __kernel_tan: tan(x + y) for |x| <= pi/4 when iy is 1, and
-    // -1/tan(x + y) when iy is -1.
+    /// @brief __kernel_tan: tan(x + y) for |x| <= pi/4 when iy is 1, and -1/tan(x + y) when iy is -1.
     export let tan_kernel = func(x: float64, y: float64, iy: int) -> float64 {
         let one = 1.0;
         let T0 = float64.from_bits(4599676419421066595); // 0x3FD5555555555563 3.33333333333334091986e-01
@@ -142,8 +142,8 @@ export let Trig = module (
         return t + a * (s + t * v);
     };
 
-    // __ieee754_rem_pio2: returns [n, y0, y1] with x - n*pi/2 = y0 + y1 and
-    // |y0 + y1| <= pi/4 (n mod 8 for huge arguments, which suffices).
+    /// @brief __ieee754_rem_pio2: returns [n, y0, y1] with x - n*pi/2 = y0 + y1 and |y0 + y1| <= pi/4 (n mod 8
+    /// for huge arguments, which suffices).
     export let rem_pio2 = func(x: float64) -> [int, float64, float64] {
         let half = 0.5;
         let two24 = float64.from_bits(4715268809856909312); // 0x4170000000000000 1.67772160000000000000e+07
@@ -241,7 +241,7 @@ export let Trig = module (
         return [n, y0, y1];
     };
 
-    // npio2_hw[i]: the high word of (i + 1)*pi/2.
+    /// @brief npio2_hw[i]: the high word of (i + 1)*pi/2.
     let quadrant_high_word = func(i: int) -> int {
         let table: int[] = [
             1073291771, 1074340347, 1074977148, 1075388923, 1075800698, 1076025724, // 0x3FF921FB 0x400921FB 0x4012D97C 0x401921FB 0x401F6A7A 0x4022D97C
@@ -254,7 +254,7 @@ export let Trig = module (
         return table[i];
     };
 
-    // two_over_pi: 2/pi in 24-bit chunks, most significant first.
+    /// @brief two_over_pi: 2/pi in 24-bit chunks, most significant first.
     let two_over_pi = func -> int[list] {
         let table: int[list] = [
             10680707, 7228996, 1387004, 2578385, 16069853, 12639074, // 0xA2F983 0x6E4E44 0x1529FC 0x2757D1 0xF534DD 0xC0DB62
@@ -272,7 +272,7 @@ export let Trig = module (
         return table;
     };
 
-    // PIo2: pi/2 in 24-bit chunks, as float64 values.
+    /// @brief PIo2: pi/2 in 24-bit chunks, as float64 values.
     let pio2_chunks = func -> float64[list] {
         let table: float64[list] = [
             float64.from_bits(4609753056584663040), // 0x3FF921FB40000000 1.57079625129699707031e+00
@@ -287,12 +287,11 @@ export let Trig = module (
         return table;
     };
 
-    // floor of a non-negative value below 2^63; exact.
+    /// @brief floor of a non-negative value below 2^63; exact.
     let floor_nonnegative = func(v: float64) -> float64 => (v as int64) as float64;
 
-    // __kernel_rem_pio2 with prec 2 (53-bit result in y0 + y1) and the
-    // two_over_pi table. x holds nx 24-bit chunks of |input| scaled by
-    // 2^-e0; returns [n mod 8, y0, y1].
+    /// @brief __kernel_rem_pio2 with prec 2 (53-bit result in y0 + y1) and the two_over_pi table. x holds nx
+    /// 24-bit chunks of |input| scaled by 2^-e0; returns [n mod 8, y0, y1].
     let rem_pio2_kernel = func(x: float64[list], e0: int, nx: int) -> [int, float64, float64] {
         let two24 = float64.from_bits(4715268809856909312); // 0x4170000000000000 1.67772160000000000000e+07
         let twon24 = float64.from_bits(4499096027743125504); // 0x3E70000000000000 5.96046447753906250000e-08

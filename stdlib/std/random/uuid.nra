@@ -5,20 +5,24 @@ let.promote _ = import:Std.Core.Ordering;
 let.promote _ = import:Std.Random.Random;
 let.promote _ = import:Std.Core.Result;
 
-// An immutable 128-bit identifier (Stdlib.md section 12.2), held as its
-// first and last 8 bytes in big-endian order, so comparing the halves
-// compares the bytes.
+/// @brief An immutable 128-bit identifier (Stdlib.md section 12.2), held as its first and last 8 bytes in
+/// big-endian order, so comparing the halves compares the bytes.
+/// @see [Std.Random.Uuid](https://github.com/Kayyo321/neura/wiki/Stdlib-Random-Uuid)
 export let Uuid = module (
+    /// @brief An immutable 128-bit identifier ordered by its unsigned big-endian bytes.
     export let Uuid = class implements Comparable<Uuid> (
+        /// @brief The most significant eight bytes.
         let high: uint64;
+        /// @brief The least significant eight bytes.
         let low: uint64;
 
+        /// @brief Constructs an identifier from its big-endian halves.
         export let init = func(first: uint64, last: uint64) {
             high = first;
             low = last;
         };
 
-        // The 16 bytes in order, as a new list.
+        /// @brief The 16 bytes in order, as a new list.
         export let to_bytes = func -> uint8[list] {
             let bytes: uint8[list] = [];
             append_word(bytes, high);
@@ -26,7 +30,7 @@ export let Uuid = module (
             return bytes;
         };
 
-        // Lexicographic over the bytes, each unsigned.
+        /// @brief Lexicographic over the bytes, each unsigned.
         export let compare_to = func(other: Uuid) -> Ordering {
             if (high != other.high) {
                 return order(high < other.high);
@@ -37,6 +41,7 @@ export let Uuid = module (
             return Ordering.Equal;
         };
 
+        /// @brief Tests whether another UUID has the same two halves.
         export let.override equals = func(other: class) -> bool {
             if (!(other is Uuid)) {
                 return false;
@@ -45,7 +50,7 @@ export let Uuid = module (
             return high == id.high && low == id.low;
         };
 
-        // Starts from 17 and combines each byte in order.
+        /// @brief Starts from 17 and combines each byte in order.
         export let.override hash_code = func -> uint32 {
             let hash: uint32 = 17;
             for (let b in to_bytes()) {
@@ -54,7 +59,7 @@ export let Uuid = module (
             return hash;
         };
 
-        // The 36-character hyphenated form in lowercase.
+        /// @brief The 36-character hyphenated form in lowercase.
         export let.override to_string = func -> string {
             let text = "";
             let bytes = to_bytes();
@@ -69,10 +74,11 @@ export let Uuid = module (
         };
     );
 
+    /// @brief The lowercase digits used for canonical UUID text.
     const HexDigits: string = "0123456789abcdef";
 
-    // A version 4 identifier from 16 bytes of random.fill_bytes, with the
-    // version bits set to 0100 and the variant bits to 10.
+    /// @brief A version 4 identifier from 16 bytes of random.fill_bytes, with the version bits set to 0100 and
+    /// the variant bits to 10.
     export let random = func(source: Random) -> Uuid {
         let bytes = source.fill_bytes(16);
         bytes[6] = (bytes[6] & 15) | 64;
@@ -80,10 +86,10 @@ export let Uuid = module (
         return new Uuid(word_at(bytes, 0), word_at(bytes, 8));
     };
 
-    // The 36-character hyphenated form, hex digits in either case.
-    // Errors: Empty; InvalidCharacter at the first byte that is not a hex
-    // digit or a hyphen in its place, or at offset 36 when text follows;
-    // UnexpectedEnd at the length for shorter text.
+    /// @brief The 36-character hyphenated form, hex digits in either case.
+    ///
+    /// Errors: Empty; InvalidCharacter at the first byte that is not a hex digit or a hyphen in its place, or
+    /// at offset 36 when text follows; UnexpectedEnd at the length for shorter text.
     export let parse = func(text: string) -> Result<Uuid> {
         let length = text.byte_length;
         if (length == 0) {
@@ -116,9 +122,11 @@ export let Uuid = module (
         return Result<Uuid>.Ok(new Uuid(words[0], words[1]));
     };
 
+    /// @brief Creates a UUID parse error at a specific UTF-8 byte offset.
     let failed = func(kind: ParseErrorKind, offset: int, message: string) -> Result<Uuid> =>
         Result<Uuid>.Err(Error.Parse { kind: kind, offset: offset, message: message });
 
+    /// @brief Decodes one ASCII hexadecimal digit, or returns the invalid-digit sentinel.
     let hex_value = func(b: int) -> int {
         if (b >= 48 && b <= 57) {
             return b - 48;
@@ -132,7 +140,7 @@ export let Uuid = module (
         return -1;
     };
 
-    // Eight bytes from `start`, big-endian.
+    /// @brief Eight bytes from `start`, big-endian.
     let word_at = func(bytes: uint8[list], start: int) -> uint64 {
         let word: uint64 = 0;
         for (let i = start; i < start + 8; i++) {
@@ -141,6 +149,7 @@ export let Uuid = module (
         return word;
     };
 
+    /// @brief Appends eight bytes from the word in big-endian order.
     let append_word = func(bytes: uint8[list], word: uint64) {
         let shift = 56;
         while (shift >= 0) {
@@ -149,5 +158,6 @@ export let Uuid = module (
         }
     };
 
+    /// @brief Converts an unequal comparison to Less or Greater.
     let order = func(less: bool) -> Ordering => less ? Ordering.Less : Ordering.Greater;
 );

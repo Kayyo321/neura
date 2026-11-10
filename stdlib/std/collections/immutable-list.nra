@@ -4,14 +4,16 @@ let optional = import:Std.Core.Optional;
 let ordering = import:Std.Core.Ordering;
 let sorting = import:Std.Collections.Sorting;
 
-// A list that copies its contents at construction and implements only the
-// read-only List interface (Stdlib.md section 9.10). Nothing can change it,
-// so its iterators need no modification check.
+/// @brief Lists with a shallow copy of the supplied elements in read-only storage.
+/// The positions are fixed at construction, so iterators need no modification check.
+/// @see [Std.Collections.ImmutableList](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-ImmutableList)
 export let ImmutableList = module (
+    /// @brief A positional collection with its own shallow copy of the supplied list.
     export let ImmutableList = class<T> implements List<T> (
+        /// @brief The privately owned shallow copy of the supplied list.
         let storage: T[list];
 
-        // Copies `values`.
+        /// @brief Copies `values`.
         export let init = func(values: T[list]) {
             let copy: T[list] = [];
             let count = values.length;
@@ -23,13 +25,16 @@ export let ImmutableList = module (
             storage = copy;
         };
 
+        /// @brief Returns the number of elements.
         export let size = func -> int => storage.length;
 
+        /// @brief Returns true when there are no elements.
         export let is_empty = func -> bool => storage.length == 0;
 
-        // A bounds trap for an index outside 0 through size() - 1.
+        /// @brief Returns the element at zero-based `index`. An invalid index causes a bounds trap.
         export let get = func(index: int) -> T => storage[index];
 
+        /// @brief Returns the first element. Traps with `no such element` when empty.
         export let first = func -> T {
             if (storage.length == 0) {
                 trap_with_message("no such element");
@@ -37,6 +42,7 @@ export let ImmutableList = module (
             return storage[0];
         };
 
+        /// @brief Returns the last element. Traps with `no such element` when empty.
         export let last = func -> T {
             if (storage.length == 0) {
                 trap_with_message("no such element");
@@ -44,6 +50,7 @@ export let ImmutableList = module (
             return storage[storage.length - 1];
         };
 
+        /// @brief Returns the first element as `Some`, or `None` when empty.
         export let first_or_none = func -> optional.Optional<T> {
             if (storage.length == 0) {
                 return optional.Optional<T>.None;
@@ -51,6 +58,7 @@ export let ImmutableList = module (
             return optional.Optional<T>.Some(storage[0]);
         };
 
+        /// @brief Returns the last element as `Some`, or `None` when empty.
         export let last_or_none = func -> optional.Optional<T> {
             if (storage.length == 0) {
                 return optional.Optional<T>.None;
@@ -58,9 +66,10 @@ export let ImmutableList = module (
             return optional.Optional<T>.Some(storage[storage.length - 1]);
         };
 
-        // By equals, with `value` as the receiver.
+        /// @brief Tests membership with `value.equals(element)`.
         export let contains = func(value: T) -> bool => index_of(value) >= 0;
 
+        /// @brief Returns the lowest index where `value.equals(element)` is true, or -1 when absent.
         export let index_of = func(value: T) -> int {
             let count = storage.length;
             let i = 0;
@@ -73,6 +82,7 @@ export let ImmutableList = module (
             return -1;
         };
 
+        /// @brief Returns the highest index where `value.equals(element)` is true, or -1 when absent.
         export let last_index_of = func(value: T) -> int {
             let i = storage.length - 1;
             while (i >= 0) {
@@ -84,7 +94,7 @@ export let ImmutableList = module (
             return -1;
         };
 
-        // The first index whose element passes, or -1.
+        /// @brief Returns the first index accepted by `test`, or -1 if no element matches.
         export let index_where = func(test: func(T) -> bool) -> int {
             let count = storage.length;
             let i = 0;
@@ -97,6 +107,7 @@ export let ImmutableList = module (
             return -1;
         };
 
+        /// @brief Calls `action` once for each element in list order.
         export let for_each = func(action: func(T) -> void) {
             let count = storage.length;
             let i = 0;
@@ -106,9 +117,9 @@ export let ImmutableList = module (
             }
         };
 
-        // A new ImmutableList with the elements from `start` inclusive to
-        // `end` exclusive. Traps with "invalid argument: range" unless
-        // 0 <= start <= end <= size().
+        /// @brief A new ImmutableList with the elements from `start` inclusive to
+        /// `end` exclusive. Traps with "invalid argument: range" unless
+        /// 0 <= start <= end <= size().
         export let slice = func(start: int, end: int) -> ImmutableList<T> {
             if (start < 0 || start > end || end > storage.length) {
                 trap_with_message("invalid argument: range");
@@ -122,11 +133,12 @@ export let ImmutableList = module (
             return new ImmutableList<T>(part);
         };
 
-        // Sorting.binary_search over the elements, which must be sorted by c.
+        /// @brief Returns the first comparator-equal index, or `-insertion_point - 1` when absent.
+        /// @pre The list is already sorted by `c`.
         export let binary_search = func(value: T, c: func(T, T) -> ordering.Ordering) -> int =>
             sorting.binary_search<T>(storage, value, c);
 
-        // A new built-in list in order.
+        /// @brief A new built-in list in order.
         export let to_list = func -> T[list] {
             let result: T[list] = [];
             let count = storage.length;
@@ -138,10 +150,11 @@ export let ImmutableList = module (
             return result;
         };
 
+        /// @brief Returns an iterator over the stable list in index order.
         export let iterator = func -> Iterator<T> => new ImmutableListIterator<T>(storage);
 
-        // Another ImmutableList with the same element type, size, and equal
-        // elements at each index.
+        /// @brief Another ImmutableList with the same element type, size, and equal
+        /// elements at each index.
         export let.override equals = func(other: class) -> bool {
             if (!(other is ImmutableList<T>)) {
                 return false;
@@ -159,24 +172,30 @@ export let ImmutableList = module (
             return true;
         };
 
-        // The list formula of section 5.2.
+        /// @brief Folds the element hashes in list order from 1, multiplying by 31 before each addition with 32-bit wraparound.
         export let.override hash_code = func -> uint32 => storage.hash_code();
 
-        // `[a, b, c]`. The elements exist before the list, so it can never
-        // contain itself.
+        /// @brief `[a, b, c]`. The elements exist before the list, so it can never
+        /// contain itself.
         export let.override to_string = func -> string => storage.to_string();
     );
 
+    /// @brief A traversal over immutable list storage in index order.
     let ImmutableListIterator = class<T> implements Iterator<T> (
+        /// @brief The immutable backing list being traversed.
         let source: T[list];
+        /// @brief The zero-based position of the next element.
         let position: int = 0;
 
+        /// @brief Records the backing list and starts before its first element.
         export let init = func(values: T[list]) {
             source = values;
         };
 
+        /// @brief Reports whether another element remains.
         export let has_next = func -> bool => position < source.length;
 
+        /// @brief Returns the next element and advances. Traps with `no such element` at exhaustion.
         export let next = func -> T {
             if (position >= source.length) {
                 trap_with_message("no such element");
@@ -187,6 +206,6 @@ export let ImmutableList = module (
         };
     );
 
-    // Copies `items`.
+    /// @brief Copies `items`.
     export let of = func<T>(items: T[list]) -> ImmutableList<T> => new ImmutableList<T>(items);
 );

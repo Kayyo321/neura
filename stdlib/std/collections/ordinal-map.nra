@@ -4,24 +4,28 @@ let.promote _ = import:Std.Collections.MutableMap;
 let optional = import:Std.Core.Optional;
 let text_depth = import:Std.Collections.Internal.TextDepth;
 
-// A map from the integers 0 through n - 1 to values, with n fixed at
-// construction (Stdlib.md section 9.9). `position[key]` is the key's place
-// in the dense key and value lists, or -1. Deleting moves the last dense
-// entry into the freed place and removes the last slot, so nothing removed
-// stays reachable. Every operation is constant time; iteration is in key
-// order. A key outside 0 through n - 1 is a bounds trap from the position
-// list.
+/// @brief Maps for a fixed range of integer keys from zero through the limit minus one.
+/// A dense key list and a dense value list hold occupied entries. `position[key]` is the
+/// entry index or -1 when absent. Deletion fills the gap with the last dense entry.
+/// Individual key lookup, insertion, and removal take constant time. Traversal scans
+/// the key range in ascending order. Out-of-range keys cause a bounds trap.
+/// @see [Std.Collections.OrdinalMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-OrdinalMap)
 export let OrdinalMap = module (
+    /// @brief A mutable map for a fixed range of integer keys. A key outside that range causes a bounds trap.
     export let OrdinalMap = class<V> implements MutableMap<int, V> (
+        /// @brief Maps each legal key to its dense slot, or -1 when absent.
         let position: int[list];
+        /// @brief Occupied keys indexed by dense entry slot.
         let dense_keys: int[list] = [];
+        /// @brief The values parallel to the occupied keys.
         let dense_values: V[list] = [];
-        // Advanced after each structural change; shared with iterators.
+        /// @brief The structural modification count shared with iterators.
         let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
+        /// @brief The depth of this instance's active text conversion, or zero when inactive.
         let printing_depth: int = 0;
 
-        // An empty map for the keys 0 through `limit` - 1. Traps with
-        // "invalid argument: negative size".
+        /// @brief An empty map for the keys 0 through `limit` - 1. Traps with
+        /// "invalid argument: negative size".
         export let init = func(limit: int) {
             if (limit < 0) {
                 trap_with_message("invalid argument: negative size");
@@ -35,17 +39,19 @@ export let OrdinalMap = module (
             position = slots;
         };
 
+        /// @brief Advances the version observed by active iterators.
         let changed = func {
             modifications.value = modifications.value + 1;
         };
 
+        /// @brief Traps if a callback changed the map structurally.
         let check = func(expected: uint64) {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
             }
         };
 
-        // Appends a new entry for an absent key.
+        /// @brief Appends a new entry for an absent key.
         let insert = func(key: int, value: V) {
             position[key] = dense_keys.length;
             dense_keys.append(key);
@@ -53,8 +59,8 @@ export let OrdinalMap = module (
             changed();
         };
 
-        // Removes the entry at dense place `slot`, moving the last entry into
-        // it.
+        /// @brief Removes the entry at dense place `slot`, moving the last entry into
+        /// it.
         let release = func(slot: int) {
             let last = dense_keys.length - 1;
             position[dense_keys[slot]] = -1;
@@ -69,10 +75,13 @@ export let OrdinalMap = module (
             changed();
         };
 
+        /// @brief Returns the number of entries.
         export let size = func -> int => dense_keys.length;
 
+        /// @brief Returns true when there are no entries.
         export let is_empty = func -> bool => dense_keys.length == 0;
 
+        /// @brief Removes all entries while preserving the permitted key range. Invalidates active iterators.
         export let clear = func {
             for (let key in dense_keys) {
                 position[key] = -1;
@@ -84,8 +93,10 @@ export let OrdinalMap = module (
             changed();
         };
 
+        /// @brief Reports whether an entry exists for `key`.
         export let contains_key = func(key: int) -> bool => position[key] >= 0;
 
+        /// @brief Returns the associated value as `Some`, or `None` when the key is absent.
         export let get = func(key: int) -> optional.Optional<V> {
             let slot = position[key];
             if (slot < 0) {
@@ -94,6 +105,7 @@ export let OrdinalMap = module (
             return optional.Optional<V>.Some(dense_values[slot]);
         };
 
+        /// @brief Returns the associated value, or `fallback` when the key is absent.
         export let get_or = func(key: int, fallback: V) -> V {
             let slot = position[key];
             if (slot < 0) {
@@ -102,7 +114,7 @@ export let OrdinalMap = module (
             return dense_values[slot];
         };
 
-        // Traps with "no such element" when the key is absent.
+        /// @brief Returns the associated value. Traps with `no such element` when the key is absent.
         export let require = func(key: int) -> V {
             let slot = position[key];
             if (slot < 0) {
@@ -111,8 +123,7 @@ export let OrdinalMap = module (
             return dense_values[slot];
         };
 
-        // Associates the value, replacing any previous one. Replacing is not
-        // structural.
+        /// @brief Stores the value for `key`. Replacing an existing value preserves the key and iterator validity.
         export let set = func(key: int, value: V) {
             let slot = position[key];
             if (slot >= 0) {
@@ -122,7 +133,7 @@ export let OrdinalMap = module (
             insert(key, value);
         };
 
-        // Removes the key; returns whether it was present.
+        /// @brief Removes the entry for `key`. Returns true if an entry was present.
         export let delete = func(key: int) -> bool {
             let slot = position[key];
             if (slot < 0) {
@@ -132,7 +143,7 @@ export let OrdinalMap = module (
             return true;
         };
 
-        // The previous value.
+        /// @brief Stores the value for `key` and returns its previous value as `Some`, or `None` for a new key.
         export let put = func(key: int, value: V) -> optional.Optional<V> {
             let slot = position[key];
             if (slot >= 0) {
@@ -144,6 +155,7 @@ export let OrdinalMap = module (
             return optional.Optional<V>.None;
         };
 
+        /// @brief Removes the entry for `key` and returns its value as `Some`, or `None` when absent.
         export let remove = func(key: int) -> optional.Optional<V> {
             let slot = position[key];
             if (slot < 0) {
@@ -154,7 +166,7 @@ export let OrdinalMap = module (
             return optional.Optional<V>.Some(previous);
         };
 
-        // The keys in ascending order.
+        /// @brief Copies the keys to a new built-in list in ascending key order.
         export let keys = func -> int[list] {
             let result: int[list] = [];
             let limit = position.length;
@@ -168,7 +180,7 @@ export let OrdinalMap = module (
             return result;
         };
 
-        // The values in key order.
+        /// @brief Copies the values to a new built-in list in ascending key order.
         export let values = func -> V[list] {
             let result: V[list] = [];
             let limit = position.length;
@@ -183,6 +195,7 @@ export let OrdinalMap = module (
             return result;
         };
 
+        /// @brief Copies the `[key, value]` tuples to a new built-in list in ascending key order.
         export let entries = func -> [int, V][list] {
             let result: [int, V][list] = [];
             let limit = position.length;
@@ -197,19 +210,18 @@ export let OrdinalMap = module (
             return result;
         };
 
-        // [key, value] entries in key order; fail-fast.
+        /// @brief Returns a fail-fast iterator over `[key, value]` tuples in ascending key order.
         export let iterator = func -> iterators.Iterator<[int, V]> =>
             new OrdinalMapIterator<V>(position, dense_values, modifications);
 
-        // Sets every entry of the other map, in its key order. A key at or
-        // beyond this map's size is a bounds trap.
+        /// @brief Sets every entry from `other` in ascending key order. A source key at or beyond this map's construction limit causes a bounds trap.
         export let put_all = func(other: OrdinalMap<V>) {
             for (let entry in other.entries()) {
                 set(entry[0], entry[1]);
             }
         };
 
-        // By equals, with `value` as the receiver.
+        /// @brief Tests whether `value.equals(held_value)` is true for any entry.
         export let contains_value = func(value: V) -> bool {
             for (let element in dense_values) {
                 if (value === element) {
@@ -219,7 +231,8 @@ export let OrdinalMap = module (
             return false;
         };
 
-        // In key order. The action must not change the map structurally.
+        /// @brief Calls `action` with the key and value of each entry in ascending key order.
+        /// @pre The action leaves the map structure unchanged.
         export let for_each = func(action: func(int, V) -> void) {
             let expected = modifications.value;
             let limit = position.length;
@@ -234,8 +247,9 @@ export let OrdinalMap = module (
             }
         };
 
-        // Calls `drop` once per entry in key order and removes the matches.
-        // Returns how many were removed.
+        /// @brief Calls `drop` once per entry in ascending key order and removes each match as it goes.
+        /// @pre The predicate leaves the map structure unchanged.
+        /// @return The number of removed entries.
         export let remove_if = func(drop: func(int, V) -> bool) -> int {
             let expected = modifications.value;
             let removed = 0;
@@ -257,8 +271,8 @@ export let OrdinalMap = module (
             return removed;
         };
 
-        // The existing value, or the result of `make`, stored. `make` must not
-        // change the map.
+        /// @brief Returns the associated value, or calls `make` once, stores its result, and returns it when absent.
+        /// @pre The factory leaves the map structure unchanged.
         export let get_or_put = func(key: int, make: func() -> V) -> V {
             let slot = position[key];
             if (slot >= 0) {
@@ -271,8 +285,8 @@ export let OrdinalMap = module (
             return value;
         };
 
-        // Stores `value` when the key is absent, otherwise the combination of
-        // the old and the new value; returns what was stored.
+        /// @brief Stores and returns `value` when the key is absent. Otherwise stores and returns `combine(old, value)`.
+        /// @pre The combiner leaves the map structure unchanged.
         export let merge = func(key: int, value: V, combine: func(V, V) -> V) -> V {
             let slot = position[key];
             if (slot < 0) {
@@ -286,8 +300,9 @@ export let OrdinalMap = module (
             return combined;
         };
 
-        // Stores a Some result and removes the key for None; returns the
-        // result.
+        /// @brief Calls `f` with the key and its optional current value. Stores a `Some` result or removes the entry for `None`.
+        /// @pre The callback leaves the map structure unchanged.
+        /// @return The result of the callback.
         export let compute = func(key: int, f: func(int, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V> {
             let expected = modifications.value;
             let result = f(key, get(key));
@@ -303,8 +318,7 @@ export let OrdinalMap = module (
             return result;
         };
 
-        // Another OrdinalMap with the same value type and size that holds an
-        // equal value for each of this map's keys.
+        /// @brief Reports whether `other` is an OrdinalMap with the same value type and equal associations. The permitted key limits may differ.
         export let.override equals = func(other: class) -> bool {
             if (!(other is OrdinalMap<V>)) {
                 return false;
@@ -326,8 +340,8 @@ export let OrdinalMap = module (
             return true;
         };
 
-        // The wrapping sum over entries of the key's hash exclusive-or the
-        // value's hash.
+        /// @brief The wrapping sum over entries of the key's hash exclusive-or the
+        /// value's hash.
         export let.override hash_code = func -> uint32 {
             let sum: uint64 = 0;
             let count = dense_keys.length;
@@ -340,8 +354,8 @@ export let OrdinalMap = module (
             return sum as uint32;
         };
 
-        // `{k: v, k2: v2}` in key order; the map itself as a direct value
-        // prints "(this collection)".
+        /// @brief Formats entries as `{k: v, k2: v2}` in key order. The map itself as a direct value
+        /// prints "(this collection)".
         export let.override to_string = func -> string {
             if (printing_depth != 0 && printing_depth == text_depth.current()) {
                 return "(this collection)";
@@ -369,15 +383,20 @@ export let OrdinalMap = module (
         };
     );
 
-    // Scans the position list in key order, comparing the map's
-    // modification count before every step.
+    /// @brief A fail-fast traversal over occupied entries in ascending key order.
     let OrdinalMapIterator = class<V> implements iterators.Iterator<[int, V]> (
+        /// @brief Maps each key to a value index, or -1 if absent.
         let position: int[list];
+        /// @brief The value storage indexed by `position`.
         let dense_values: V[list];
+        /// @brief The live modification counter shared with the source collection.
         let modifications: cell.Cell<uint64>;
+        /// @brief The source version recorded when the iterator was created.
         let expected: uint64;
+        /// @brief The next occupied key, or the key limit at exhaustion.
         let key: int = 0;
 
+        /// @brief Captures the live storage and version, then finds the first occupied key.
         export let init = func(slots: int[list], values: V[list], counter: cell.Cell<uint64>) {
             position = slots;
             dense_values = values;
@@ -386,12 +405,14 @@ export let OrdinalMap = module (
             skip_absent();
         };
 
+        /// @brief Advances to the next occupied key or the key limit.
         let skip_absent = func {
             while (key < position.length && position[key] < 0) {
                 key += 1;
             }
         };
 
+        /// @brief Reports whether another element remains. Traps with `collection modified during iteration` after a structural change.
         export let has_next = func -> bool {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
@@ -399,6 +420,7 @@ export let OrdinalMap = module (
             return key < position.length;
         };
 
+        /// @brief Returns the next entry in ascending key order and advances. Traps with `collection modified during iteration` after a structural change. Traps with `no such element` at exhaustion.
         export let next = func -> [int, V] {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
@@ -413,7 +435,7 @@ export let OrdinalMap = module (
         };
     );
 
-    // An empty map for the keys 0 through `size` - 1. Traps with "invalid
-    // argument: negative size".
+    /// @brief An empty map for the keys 0 through `size` - 1. Traps with "invalid
+    /// argument: negative size".
     export let create = func<V>(size: int) -> OrdinalMap<V> => new OrdinalMap<V>(size);
 );

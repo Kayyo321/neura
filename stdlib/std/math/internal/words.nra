@@ -1,8 +1,9 @@
-// Access to the 32-bit words of a float64 encoding, as fdlibm's __HI and
-// __LO macros give them (Stdlib.md section 10.1). The high word is a signed
-// int: fdlibm compares it with signed constants and shifts it arithmetically.
+/// @brief Access to the 32-bit words of a float64 encoding, as fdlibm's __HI and __LO macros give them
+/// (Stdlib.md section 10.1).
+///
+/// The high word is a signed int: fdlibm compares it with signed constants and shifts it arithmetically.
 export let Words = module (
-    // The high 32 bits of the encoding as a two's complement int.
+    /// @brief The high 32 bits of the encoding as a two's complement int.
     export let high = func(x: float64) -> int {
         let h = x.to_bits() >> 32;
         if (h >= 2147483648) {
@@ -11,10 +12,10 @@ export let Words = module (
         return h as int;
     };
 
-    // The low 32 bits of the encoding.
+    /// @brief The low 32 bits of the encoding.
     export let low = func(x: float64) -> uint32 => (x.to_bits() & 4294967295) as uint32;
 
-    // The float64 whose encoding has the given high and low words.
+    /// @brief The float64 whose encoding has the given high and low words.
     export let from_words = func(hi: int, lo: uint32) -> float64 {
         let h: uint64 = 0;
         if (hi < 0) {
@@ -25,17 +26,17 @@ export let Words = module (
         return float64.from_bits((h << 32) | (lo as uint64));
     };
 
-    // x with its high word replaced.
+    /// @brief x with its high word replaced.
     export let with_high = func(x: float64, hi: int) -> float64 => from_words(hi, low(x));
 
-    // x with its low word replaced.
+    /// @brief x with its low word replaced.
     export let with_low = func(x: float64, lo: uint32) -> float64 =>
         float64.from_bits((x.to_bits() & 18446744069414584320) | (lo as uint64));
 
-    // |x| by clearing the sign bit, like fdlibm's fabs. Never rounds.
+    /// @brief |x| by clearing the sign bit, like fdlibm's fabs. Never rounds.
     export let abs = func(x: float64) -> float64 => float64.from_bits(x.to_bits() & 9223372036854775807);
 
-    // fdlibm's s_scalbn.c: x times 2^n, computed on the exponent field.
+    /// @brief fdlibm's s_scalbn.c: x times 2^n, computed on the exponent field.
     export let scalbn = func(x: float64, n: int) -> float64 {
         let two54 = float64.from_bits(4850376798678024192); // 0x4350000000000000 1.80143985094819840000e+16
         let twom54 = float64.from_bits(4363988038922010624); // 0x3C90000000000000 5.55111512312578270212e-17
@@ -73,7 +74,7 @@ export let Words = module (
         return x * twom54;
     };
 
-    // magnitude with the sign bit of sign.
+    /// @brief magnitude with the sign bit of sign.
     export let copy_sign = func(magnitude: float64, sign: float64) -> float64 {
         return float64.from_bits((magnitude.to_bits() & 9223372036854775807) | (sign.to_bits() & 9223372036854775808));
     };

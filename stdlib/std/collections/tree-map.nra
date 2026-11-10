@@ -6,29 +6,31 @@ let ordering = import:Std.Core.Ordering;
 let.promote _ = import:Std.Collections.SortedMap;
 let text_depth = import:Std.Collections.Internal.TextDepth;
 
-// A sorted map: an AVL tree ordered by the comparator given at construction
-// (Stdlib.md section 9.7). Two keys are the same key when the comparator
-// returns Equal; equals is never consulted. Lookups call the comparator with
-// the probe key first.
-//
-// Nodes are separately allocated; missing child and parent links are nil,
-// and nothing reads or writes a field on nil. A removed node becomes
-// unreachable at once. Iteration is ascending, by in-order successor through
-// `right` and `parent`, with no stack. Setting the value of an existing key
-// is not a structural change. Iterators and callbacks fail fast with
-// "collection modified during iteration".
+/// @brief Sorted maps implemented as AVL trees. The comparator defines key identity and order and
+/// takes the probe key first during lookup. Iteration follows the in-order successor without
+/// a stack. Updating a value for an existing key preserves iterator validity. Iterators and
+/// member callbacks detect structural changes and trap with `collection modified during iteration`.
+/// @see [Std.Collections.TreeMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-TreeMap)
 export let TreeMap = module (
+    /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
 
+    /// @brief An AVL node holding an entry, parent and child links, and subtree height.
     let Node = class<K, V> (
+        /// @brief The key held by the node.
         export let key: K;
+        /// @brief The value currently associated with the key.
         export let value: V;
+        /// @brief The subtree of smaller keys, or `nil`.
         export let left: Node<K, V> = nil;
+        /// @brief The subtree of greater keys, or `nil`.
         export let right: Node<K, V> = nil;
+        /// @brief The parent node, or `nil` for the root.
         export let parent: Node<K, V> = nil;
-        // A leaf has height 1.
+        /// @brief A leaf has height 1.
         export let height: int = 1;
 
+        /// @brief Creates a leaf holding the supplied entry and parent link.
         export let init = func(item_key: K, item_value: V, above: Node<K, V>) {
             key = item_key;
             value = item_value;
@@ -36,31 +38,42 @@ export let TreeMap = module (
         };
     );
 
+    /// @brief A mutable AVL tree map that identifies keys by comparator equality.
     export let TreeMap = class<K, V> implements MutableMap<K, V>, SortedMap<K, V> (
+        /// @brief The root node, or `nil` when the tree is empty.
         let root: Node<K, V> = nil;
+        /// @brief The number of entries stored in the tree.
         let count: int = 0;
+        /// @brief The key comparator that defines identity and navigation order.
         let compare: func(K, K) -> ordering.Ordering;
-        // The modification count, shared with iterators.
+        /// @brief The modification count, shared with iterators.
         let changes: cell.Cell<uint64>;
+        /// @brief The depth of this instance's active text conversion, or zero when inactive.
         let printing_depth: int = 0;
 
+        /// @brief Starts an empty tree with the comparator supplied by the factory.
         export let init = func(seal: Seal, comparator: func(K, K) -> ordering.Ordering) {
             compare = comparator;
             changes = cell.of<uint64>(0);
         };
 
+        /// @brief Returns the number of entries.
         export let size = func -> int => count;
 
+        /// @brief Returns true when there are no entries.
         export let is_empty = func -> bool => count == 0;
 
+        /// @brief Removes all entries and invalidates iterators.
         export let clear = func {
             root = nil;
             count = 0;
             changes.value = changes.value + 1;
         };
 
+        /// @brief Tests for an existing key that compares equal to the probe.
         export let contains_key = func(key: K) -> bool => find_node(key) != nil;
 
+        /// @brief Returns the associated value as `Some`, or `None` when the key is absent.
         export let get = func(key: K) -> optional.Optional<V> {
             let node = find_node(key);
             if (node == nil) {
@@ -69,6 +82,7 @@ export let TreeMap = module (
             return optional.Optional<V>.Some(node.value);
         };
 
+        /// @brief Returns the associated value, or `fallback` when the key is absent.
         export let get_or = func(key: K, fallback: V) -> V {
             let node = find_node(key);
             if (node == nil) {
@@ -77,7 +91,7 @@ export let TreeMap = module (
             return node.value;
         };
 
-        // Traps with "no such element" when the key is absent.
+        /// @brief Returns the associated value. Traps with `no such element` when the key is absent.
         export let require = func(key: K) -> V {
             let node = find_node(key);
             if (node == nil) {
@@ -86,6 +100,7 @@ export let TreeMap = module (
             return node.value;
         };
 
+        /// @brief Stores the value for `key`. A comparator-equal entry keeps its original key and iterator validity.
         export let set = func(key: K, value: V) {
             let existing = insert(key, value);
             if (existing != nil) {
@@ -93,7 +108,7 @@ export let TreeMap = module (
             }
         };
 
-        // The previous value.
+        /// @brief Stores the value for `key` and returns its previous value as `Some`, or `None` for a new key.
         export let put = func(key: K, value: V) -> optional.Optional<V> {
             let existing = insert(key, value);
             if (existing == nil) {
@@ -104,6 +119,7 @@ export let TreeMap = module (
             return optional.Optional<V>.Some(previous);
         };
 
+        /// @brief Removes the entry for `key`. Returns true if an entry was present.
         export let delete = func(key: K) -> bool {
             let node = find_node(key);
             if (node == nil) {
@@ -113,7 +129,7 @@ export let TreeMap = module (
             return true;
         };
 
-        // The removed value.
+        /// @brief Removes the entry for `key` and returns its value as `Some`, or `None` when absent.
         export let remove = func(key: K) -> optional.Optional<V> {
             let node = find_node(key);
             if (node == nil) {
@@ -124,7 +140,7 @@ export let TreeMap = module (
             return optional.Optional<V>.Some(value);
         };
 
-        // Ascending.
+        /// @brief Copies the keys to a new built-in list in ascending key order.
         export let keys = func -> K[list] {
             let result: K[list] = [];
             let node = leftmost(root);
@@ -135,6 +151,7 @@ export let TreeMap = module (
             return result;
         };
 
+        /// @brief Copies the values to a new built-in list in ascending key order.
         export let values = func -> V[list] {
             let result: V[list] = [];
             let node = leftmost(root);
@@ -145,6 +162,7 @@ export let TreeMap = module (
             return result;
         };
 
+        /// @brief Copies the `[key, value]` tuples to a new built-in list in ascending key order.
         export let entries = func -> [K, V][list] {
             let result: [K, V][list] = [];
             let node = leftmost(root);
@@ -156,15 +174,15 @@ export let TreeMap = module (
             return result;
         };
 
-        // Yields [K, V] in ascending key order.
+        /// @brief Returns a fail-fast iterator over `[key, value]` tuples in ascending key order.
         export let iterator = func -> iterators.Iterator<[K, V]> =>
             new TreeMapIterator<K, V>(leftmost(root), changes);
 
-        // Yields the keys in ascending order.
+        /// @brief Returns a fail-fast iterator over keys in ascending order.
         export let key_iterator = func -> iterators.Iterator<K> =>
             new TreeKeyIterator<K, V>(leftmost(root), changes);
 
-        // Sets each entry of `other` in its ascending order.
+        /// @brief Sets each entry of `other` in its ascending order.
         export let put_all = func(other: TreeMap<K, V>) {
             let items = other.entries();
             let total = items.length;
@@ -176,8 +194,8 @@ export let TreeMap = module (
             }
         };
 
-        // In ascending order. The action must not change the map
-        // structurally.
+        /// @brief Calls `action` with the key and value of each entry in ascending key order.
+        /// @pre The action leaves the map structure unchanged.
         export let for_each = func(action: func(K, V) -> void) {
             let expected = changes.value;
             let node = leftmost(root);
@@ -190,8 +208,9 @@ export let TreeMap = module (
             }
         };
 
-        // Calls `drop` once per entry in ascending order, then removes the
-        // entries it chose. Returns how many were removed.
+        /// @brief Calls `drop` once per entry in ascending key order, then removes the matches.
+        /// @pre The predicate leaves the map structure unchanged.
+        /// @return The number of removed entries.
         export let remove_if = func(drop: func(K, V) -> bool) -> int {
             let expected = changes.value;
             let chosen: K[list] = [];
@@ -215,8 +234,8 @@ export let TreeMap = module (
             return total;
         };
 
-        // The existing value, or the result of `make`, stored. `make` must
-        // not change the map structurally.
+        /// @brief Returns the associated value, or calls `make` once, stores its result, and returns it when absent.
+        /// @pre The factory leaves the map structure unchanged.
         export let get_or_put = func(key: K, make: func() -> V) -> V {
             let node = find_node(key);
             if (node != nil) {
@@ -231,8 +250,8 @@ export let TreeMap = module (
             return value;
         };
 
-        // Stores `value` when the key is absent, otherwise combine(old,
-        // value). Returns the stored value.
+        /// @brief Stores and returns `value` when the key is absent. Otherwise stores and returns `combine(old, value)`.
+        /// @pre The combiner leaves the map structure unchanged.
         export let merge = func(key: K, value: V, combine: func(V, V) -> V) -> V {
             let node = find_node(key);
             if (node == nil) {
@@ -248,8 +267,9 @@ export let TreeMap = module (
             return combined;
         };
 
-        // Stores a Some result of `f`, or removes the key for None. Returns
-        // the result.
+        /// @brief Calls `f` with the key and its optional current value. Stores a `Some` result or removes the entry for `None`.
+        /// @pre The callback leaves the map structure unchanged.
+        /// @return The result of the callback.
         export let compute = func(key: K, f: func(K, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V> {
             let node = find_node(key);
             let current = optional.Optional<V>.None;
@@ -278,7 +298,7 @@ export let TreeMap = module (
             return outcome;
         };
 
-        // By the values' equals, with `value` as the receiver.
+        /// @brief Tests whether `value.equals(held_value)` is true for any entry.
         export let contains_value = func(value: V) -> bool {
             let node = leftmost(root);
             while (node != nil) {
@@ -290,8 +310,7 @@ export let TreeMap = module (
             return false;
         };
 
-        // The entry with the least key. Traps with "no such element" when
-        // empty.
+        /// @brief Returns the entry with the least key. Traps with `no such element` when empty.
         export let first = func -> [K, V] {
             if (root == nil) {
                 trap_with_message("no such element");
@@ -301,8 +320,7 @@ export let TreeMap = module (
             return item;
         };
 
-        // The entry with the greatest key. Traps with "no such element" when
-        // empty.
+        /// @brief Returns the entry with the greatest key. Traps with `no such element` when empty.
         export let last = func -> [K, V] {
             if (root == nil) {
                 trap_with_message("no such element");
@@ -312,8 +330,8 @@ export let TreeMap = module (
             return item;
         };
 
-        // Removes and returns the entry with the least key. Traps with "no
-        // such element" when empty.
+        /// @brief Removes and returns the entry with the least key. Traps with "no
+        /// such element" when empty.
         export let remove_first = func -> [K, V] {
             if (root == nil) {
                 trap_with_message("no such element");
@@ -324,8 +342,8 @@ export let TreeMap = module (
             return item;
         };
 
-        // Removes and returns the entry with the greatest key. Traps with "no
-        // such element" when empty.
+        /// @brief Removes and returns the entry with the greatest key. Traps with "no
+        /// such element" when empty.
         export let remove_last = func -> [K, V] {
             if (root == nil) {
                 trap_with_message("no such element");
@@ -336,8 +354,8 @@ export let TreeMap = module (
             return item;
         };
 
-        // Entries with keys from `from` inclusive to `to` exclusive,
-        // ascending. Empty when `to` is not above `from`.
+        /// @brief Returns a new list of entries in ascending key order from `from` inclusive to `to` exclusive.
+        /// Returns an empty list when `to` is at or below `from`.
         export let range = func(from: K, to: K) -> [K, V][list] {
             let result: [K, V][list] = [];
             let node = ceiling_node(from, true);
@@ -349,7 +367,7 @@ export let TreeMap = module (
             return result;
         };
 
-        // The keys of range(from, to).
+        /// @brief Copies the keys from `from` inclusive to `to` exclusive in ascending order.
         export let key_range = func(from: K, to: K) -> K[list] {
             let result: K[list] = [];
             let node = ceiling_node(from, true);
@@ -360,7 +378,7 @@ export let TreeMap = module (
             return result;
         };
 
-        // Entries in descending key order.
+        /// @brief Copies entries into a new list in descending key order.
         export let descending = func -> [K, V][list] {
             let result: [K, V][list] = [];
             let node = rightmost(root);
@@ -372,7 +390,7 @@ export let TreeMap = module (
             return result;
         };
 
-        // Keys in descending order.
+        /// @brief Copies the keys into a new list in descending order.
         export let descending_keys = func -> K[list] {
             let result: K[list] = [];
             let node = rightmost(root);
@@ -383,31 +401,35 @@ export let TreeMap = module (
             return result;
         };
 
-        // The greatest key at most `key`.
+        /// @brief Returns the greatest key at most `key` as `Some`, or `None` when absent.
         export let floor = func(key: K) -> optional.Optional<K> => key_of(floor_node(key, true));
 
-        // The least key at least `key`.
+        /// @brief Returns the least key at least `key` as `Some`, or `None` when absent.
         export let ceiling = func(key: K) -> optional.Optional<K> => key_of(ceiling_node(key, true));
 
-        // The greatest key below `key`.
+        /// @brief Returns the greatest key strictly below `key` as `Some`, or `None` when absent.
         export let lower = func(key: K) -> optional.Optional<K> => key_of(floor_node(key, false));
 
-        // The least key above `key`.
+        /// @brief Returns the least key strictly above `key` as `Some`, or `None` when absent.
         export let higher = func(key: K) -> optional.Optional<K> => key_of(ceiling_node(key, false));
 
+        /// @brief Returns the entry with the greatest key at most `key`, or `None` when absent.
         export let floor_entry = func(key: K) -> optional.Optional<[K, V]> => entry_of(floor_node(key, true));
 
+        /// @brief Returns the entry with the least key at least `key`, or `None` when absent.
         export let ceiling_entry = func(key: K) -> optional.Optional<[K, V]> =>
             entry_of(ceiling_node(key, true));
 
+        /// @brief Returns the entry with the greatest key strictly below `key`, or `None` when absent.
         export let lower_entry = func(key: K) -> optional.Optional<[K, V]> => entry_of(floor_node(key, false));
 
+        /// @brief Returns the entry with the least key strictly above `key`, or `None` when absent.
         export let higher_entry = func(key: K) -> optional.Optional<[K, V]> =>
             entry_of(ceiling_node(key, false));
 
-        // Traps with "invalid state: tree ..." on a broken invariant: AVL
-        // balance, stored heights, ascending key order, reciprocal parent
-        // links, a nil parent at the root, and the count.
+        /// @brief Traps with "invalid state: tree ..." on a broken invariant: AVL
+        /// balance, stored heights, ascending key order, reciprocal parent
+        /// links, a nil parent at the root, and the count.
         export let validate = func {
             if (root != nil && root.parent != nil) {
                 trap_with_message("invalid state: tree root parent");
@@ -453,8 +475,8 @@ export let TreeMap = module (
             }
         };
 
-        // Another TreeMap of the same size in which, for each of its entries,
-        // this map holds an equal value for the key.
+        /// @brief Another TreeMap of the same size in which, for each of its entries,
+        /// this map holds an equal value for the key.
         export let.override equals = func(other: class) -> bool {
             if (!(other is TreeMap<K, V>)) {
                 return false;
@@ -477,8 +499,8 @@ export let TreeMap = module (
             return true;
         };
 
-        // The wrapping sum over entries of the key hash exclusive-or the
-        // value hash.
+        /// @brief The wrapping sum over entries of the key hash exclusive-or the
+        /// value hash.
         export let.override hash_code = func -> uint32 {
             let total: uint64 = 0;
             let node = leftmost(root);
@@ -490,8 +512,8 @@ export let TreeMap = module (
             return total as uint32;
         };
 
-        // `{k: v, k2: v2}` in ascending order; the map itself as a direct
-        // key or value prints "(this collection)".
+        /// @brief Formats entries as `{k: v, k2: v2}` in ascending order. The map itself as a direct
+        /// key or value prints "(this collection)".
         export let.override to_string = func -> string {
             if (printing_depth != 0 && printing_depth == text_depth.current()) {
                 return "(this collection)";
@@ -510,6 +532,7 @@ export let TreeMap = module (
             return "{" + text.slice(1, text.byte_length - 1) + "}";
         };
 
+        /// @brief Finds the node whose key compares equal to `key`, or returns `nil` when absent.
         let find_node = func(key: K) -> Node<K, V> {
             let node = root;
             while (node != nil) {
@@ -525,8 +548,8 @@ export let TreeMap = module (
             return nil;
         };
 
-        // Returns the node that already holds the key, unchanged, or nil
-        // after attaching a new node and rebalancing.
+        /// @brief Returns the node that already holds the key, unchanged, or nil
+        /// after attaching a new node and rebalancing.
         let insert = func(key: K, value: V) -> Node<K, V> {
             if (root == nil) {
                 root = new Node<K, V>(key, value, nil);
@@ -559,8 +582,8 @@ export let TreeMap = module (
             return nil;
         };
 
-        // Removes a node. A node with two children takes the key and value
-        // of its in-order successor, which is unlinked instead.
+        /// @brief Removes a node. A node with two children takes the key and value
+        /// of its in-order successor, which is unlinked instead.
         let unlink = func(node: Node<K, V>) {
             let target = node;
             if (node.left != nil && node.right != nil) {
@@ -585,9 +608,9 @@ export let TreeMap = module (
             rebalance_from(above);
         };
 
-        // Walks up from `start`, recomputing heights and rotating where the
-        // children's heights differ by 2, until a subtree's height is
-        // unchanged.
+        /// @brief Walks up from `start`, recomputing heights and rotating where the
+        /// children's heights differ by 2, until a subtree's height is
+        /// unchanged.
         let rebalance_from = func(start: Node<K, V>) {
             let node = start;
             while (node != nil) {
@@ -617,8 +640,8 @@ export let TreeMap = module (
             }
         };
 
-        // Lifts the right child of `node` above it; returns the new subtree
-        // top.
+        /// @brief Lifts the right child of `node` above it and returns the new subtree
+        /// top.
         let rotate_left = func(node: Node<K, V>) -> Node<K, V> {
             let lifted = node.right;
             let inner = lifted.left;
@@ -636,8 +659,8 @@ export let TreeMap = module (
             return lifted;
         };
 
-        // Lifts the left child of `node` above it; returns the new subtree
-        // top.
+        /// @brief Lifts the left child of `node` above it and returns the new subtree
+        /// top.
         let rotate_right = func(node: Node<K, V>) -> Node<K, V> {
             let lifted = node.left;
             let inner = lifted.right;
@@ -655,8 +678,8 @@ export let TreeMap = module (
             return lifted;
         };
 
-        // Points the link that held `old` at `replacement`: the parent's
-        // child link, or root when there is no parent.
+        /// @brief Points the link that held `old` at `replacement`: the parent's
+        /// child link, or root when there is no parent.
         let replace_child = func(above: Node<K, V>, old: Node<K, V>, replacement: Node<K, V>) {
             if (above == nil) {
                 root = replacement;
@@ -667,7 +690,7 @@ export let TreeMap = module (
             }
         };
 
-        // The node with the greatest key at most (or below) `key`.
+        /// @brief The node with the greatest key at most (or below) `key`.
         let floor_node = func(key: K, inclusive: bool) -> Node<K, V> {
             let best: Node<K, V> = nil;
             let node = root;
@@ -686,7 +709,7 @@ export let TreeMap = module (
             return best;
         };
 
-        // The node with the least key at least (or above) `key`.
+        /// @brief The node with the least key at least (or above) `key`.
         let ceiling_node = func(key: K, inclusive: bool) -> Node<K, V> {
             let best: Node<K, V> = nil;
             let node = root;
@@ -705,6 +728,7 @@ export let TreeMap = module (
             return best;
         };
 
+        /// @brief Returns the node's key as `Some`, or `None` for `nil`.
         let key_of = func(node: Node<K, V>) -> optional.Optional<K> {
             if (node == nil) {
                 return optional.Optional<K>.None;
@@ -712,6 +736,7 @@ export let TreeMap = module (
             return optional.Optional<K>.Some(node.key);
         };
 
+        /// @brief Returns the node's entry as `Some`, or `None` for `nil`.
         let entry_of = func(node: Node<K, V>) -> optional.Optional<[K, V]> {
             if (node == nil) {
                 return optional.Optional<[K, V]>.None;
@@ -720,6 +745,7 @@ export let TreeMap = module (
             return optional.Optional<[K, V]>.Some(item);
         };
 
+        /// @brief Returns the cached subtree height, or zero for `nil`.
         let height_of = func(node: Node<K, V>) -> int {
             if (node == nil) {
                 return 0;
@@ -727,8 +753,10 @@ export let TreeMap = module (
             return node.height;
         };
 
+        /// @brief Returns the least-key node in the subtree, or `nil` for an empty subtree.
         let leftmost = func(start: Node<K, V>) -> Node<K, V> => leftmost_node<K, V>(start);
 
+        /// @brief Returns the greatest-key node in the subtree, or `nil` for an empty subtree.
         let rightmost = func(start: Node<K, V>) -> Node<K, V> {
             if (start == nil) {
                 return nil;
@@ -740,9 +768,10 @@ export let TreeMap = module (
             return node;
         };
 
+        /// @brief Returns the next node in key order, or `nil` after the greatest key.
         let successor = func(node: Node<K, V>) -> Node<K, V> => successor_node<K, V>(node);
 
-        // The in-order predecessor, through `left` and `parent`.
+        /// @brief The in-order predecessor, through `left` and `parent`.
         let predecessor = func(node: Node<K, V>) -> Node<K, V> {
             if (node.left != nil) {
                 return rightmost(node.left);
@@ -757,18 +786,23 @@ export let TreeMap = module (
         };
     );
 
-    // Compares the modification count before every step.
+    /// @brief Compares the modification count before every step.
     let TreeMapIterator = class<K, V> implements iterators.Iterator<[K, V]> (
+        /// @brief The next node to visit, or `nil` at exhaustion.
         let upcoming: Node<K, V>;
+        /// @brief The live modification counter shared with the tree.
         let changes: cell.Cell<uint64>;
+        /// @brief The source version recorded when the iterator was created.
         let expected: uint64;
 
+        /// @brief Captures the starting node and current modification count.
         export let init = func(start: Node<K, V>, counter: cell.Cell<uint64>) {
             upcoming = start;
             changes = counter;
             expected = counter.value;
         };
 
+        /// @brief Reports whether another element remains. Traps with `collection modified during iteration` after a structural change.
         export let has_next = func -> bool {
             if (changes.value != expected) {
                 trap_with_message("collection modified during iteration");
@@ -776,6 +810,7 @@ export let TreeMap = module (
             return upcoming != nil;
         };
 
+        /// @brief Returns the next `[key, value]` tuple in ascending order and advances. Traps with `collection modified during iteration` after a structural change. Traps with `no such element` at exhaustion.
         export let next = func -> [K, V] {
             if (!has_next()) {
                 trap_with_message("no such element");
@@ -787,17 +822,23 @@ export let TreeMap = module (
         };
     );
 
+    /// @brief A fail-fast traversal over ascending keys without building entry tuples.
     let TreeKeyIterator = class<K, V> implements iterators.Iterator<K> (
+        /// @brief The next node to visit, or `nil` at exhaustion.
         let upcoming: Node<K, V>;
+        /// @brief The live modification counter shared with the tree.
         let changes: cell.Cell<uint64>;
+        /// @brief The source version recorded when the iterator was created.
         let expected: uint64;
 
+        /// @brief Captures the starting node and current modification count.
         export let init = func(start: Node<K, V>, counter: cell.Cell<uint64>) {
             upcoming = start;
             changes = counter;
             expected = counter.value;
         };
 
+        /// @brief Reports whether another element remains. Traps with `collection modified during iteration` after a structural change.
         export let has_next = func -> bool {
             if (changes.value != expected) {
                 trap_with_message("collection modified during iteration");
@@ -805,6 +846,7 @@ export let TreeMap = module (
             return upcoming != nil;
         };
 
+        /// @brief Returns the next key in ascending order and advances. Traps with `collection modified during iteration` after a structural change. Traps with `no such element` at exhaustion.
         export let next = func -> K {
             if (!has_next()) {
                 trap_with_message("no such element");
@@ -815,10 +857,11 @@ export let TreeMap = module (
         };
     );
 
-    // An empty map ordered by `comparator`, which must define a total order.
+    /// @brief An empty map ordered by `comparator`, which must define a total order.
     export let create = func<K, V>(comparator: func(K, K) -> ordering.Ordering) -> TreeMap<K, V> =>
         new TreeMap<K, V>(Seal.Token, comparator);
 
+    /// @brief Walks left links to the least-key node, or returns `nil` for an empty subtree.
     let leftmost_node = func<K, V>(start: Node<K, V>) -> Node<K, V> {
         if (start == nil) {
             return nil;
@@ -830,7 +873,7 @@ export let TreeMap = module (
         return node;
     };
 
-    // The in-order successor, through `right` and `parent`.
+    /// @brief The in-order successor, through `right` and `parent`.
     let successor_node = func<K, V>(node: Node<K, V>) -> Node<K, V> {
         if (node.right != nil) {
             return leftmost_node<K, V>(node.right);
@@ -844,6 +887,7 @@ export let TreeMap = module (
         return above;
     };
 
+    /// @brief Returns the greater of the two integer arguments.
     let larger = func(a: int, b: int) -> int {
         if (a > b) {
             return a;

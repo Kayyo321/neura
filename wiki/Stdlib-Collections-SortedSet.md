@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **SortedSet** · [`export let SortedSet = interface<T>:Set<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sorted-set.nra#L7)
+- **SortedSet** · [`export let SortedSet = interface<T>:Set<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sorted-set.nra#L9)
+  Read-only element navigation and range queries in comparator order.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

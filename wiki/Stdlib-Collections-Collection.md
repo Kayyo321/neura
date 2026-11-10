@@ -18,6 +18,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **Collection** · [`export let Collection = interface<T>:Iterable<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/collection.nra#L7)
+  Read-only operations over a collection of elements.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

@@ -4,29 +4,38 @@ let hashing = import:Std.Core.Hash;
 let.promote _ = import:Std.Core.Ordering;
 let result = import:Std.Core.Result;
 
-// A signed count of nanoseconds in one int64, about 292 years either way
-// (Stdlib.md section 12.1). Every factory and member uses checked
-// arithmetic: a result outside int64 traps with reason 1.
+/// @brief A signed count of nanoseconds in one int64, about 292 years either way (Stdlib.md section 12.1).
+///
+/// Every factory and member uses checked arithmetic: a result outside int64 traps with reason 1.
+/// @see [Std.Time.Duration](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-Duration)
 export let Duration = module (
+    /// @brief An immutable signed duration represented as an exact count of nanoseconds.
     export let Duration = class implements Comparable<Duration> (
+        /// @brief The signed number of nanoseconds.
         let total: int64;
 
+        /// @brief Stores the signed nanosecond count.
         export let init = func(nanos: int64) {
             total = nanos;
         };
 
+        /// @brief Adds two durations with checked nanosecond arithmetic.
         export let plus = func(other: Duration) -> Duration => new Duration(total + other.total);
 
+        /// @brief Subtracts another duration with checked nanosecond arithmetic.
         export let minus = func(other: Duration) -> Duration => new Duration(total - other.total);
 
+        /// @brief Scales the duration by an integer. Overflow traps.
         export let multiplied_by = func(factor: int64) -> Duration => new Duration(total * factor);
 
-        // Truncates toward zero. A zero divisor traps (reason 1), as does
-        // the most negative duration divided by -1.
+        /// @brief Truncates toward zero. A zero divisor traps (reason 1), as does the most negative duration
+        /// divided by -1.
         export let divided_by = func(divisor: int64) -> Duration => new Duration(total / divisor);
 
+        /// @brief Reverses the sign. The most negative duration cannot be negated.
         export let negated = func -> Duration => new Duration(-total);
 
+        /// @brief Returns the nonnegative magnitude. The most negative duration traps.
         export let abs = func -> Duration {
             if (total < 0) {
                 return new Duration(-total);
@@ -34,23 +43,29 @@ export let Duration = module (
             return new Duration(total);
         };
 
+        /// @brief Reports whether the nanosecond count is zero.
         export let is_zero = func -> bool => total == 0;
 
+        /// @brief Reports whether the nanosecond count is below zero.
         export let is_negative = func -> bool => total < 0;
 
+        /// @brief Returns the exact signed nanosecond count.
         export let to_nanos = func -> int64 => total;
 
-        // The to_ conversions truncate toward zero.
+        /// @brief The to_ conversions truncate toward zero.
         export let to_micros = func -> int64 => total / 1000;
 
+        /// @brief Returns whole milliseconds, truncating toward zero.
         export let to_millis = func -> int64 => total / 1000000;
 
+        /// @brief Returns whole seconds, truncating toward zero.
         export let to_seconds = func -> int64 => total / calendar.NanosPerSecond;
 
-        // The nanoseconds converted to float64, divided by 10^9. Exact
-        // conversion, so correctly rounded, while the count is at most 2^53.
+        /// @brief The nanoseconds converted to float64, divided by 10^9. Exact conversion, so correctly
+        /// rounded, while the count is at most 2^53.
         export let to_seconds_float64 = func -> float64 => (total as float64) / 1000000000.0;
 
+        /// @brief Orders durations by their signed nanosecond counts.
         export let compare_to = func(other: Duration) -> Ordering {
             if (total < other.total) {
                 return Ordering.Less;
@@ -61,16 +76,18 @@ export let Duration = module (
             return Ordering.Equal;
         };
 
+        /// @brief Tests equality of signed nanosecond counts.
         export let.override equals = func(other: class) -> bool {
             return other is Duration && total == (other as Duration).total;
         };
 
+        /// @brief Hashes the signed nanosecond count.
         export let.override hash_code = func -> uint32 => hashing.combine(17, hashing.of_int64(total));
 
-        // ISO 8601: PT, then hours, minutes, and seconds with their unit
-        // letters, zero units omitted, the fraction trimmed of trailing
-        // zeros. Zero is PT0S; a negative duration is - and the text of its
-        // magnitude.
+        /// @brief ISO 8601: PT, then hours, minutes, and seconds with their unit letters, zero units omitted,
+        /// the fraction trimmed of trailing zeros.
+        ///
+        /// Zero is PT0S; a negative duration is - and the text of its magnitude.
         export let.override to_string = func -> string {
             let magnitude = magnitude_of(total);
             if (magnitude == 0) {
@@ -96,30 +113,36 @@ export let Duration = module (
         };
     );
 
+    /// @brief The duration of zero nanoseconds.
     export const Zero: Duration = new Duration(0);
 
+    /// @brief Constructs a duration from an exact nanosecond count.
     export let of_nanos = func(nanos: int64) -> Duration => new Duration(nanos);
 
+    /// @brief Converts microseconds to nanoseconds. Overflow traps.
     export let of_micros = func(micros: int64) -> Duration => new Duration(micros * 1000);
 
+    /// @brief Converts milliseconds to nanoseconds. Overflow traps.
     export let of_millis = func(millis: int64) -> Duration => new Duration(millis * 1000000);
 
+    /// @brief Converts seconds to nanoseconds. Overflow traps.
     export let of_seconds = func(seconds: int64) -> Duration => new Duration(seconds * calendar.NanosPerSecond);
 
+    /// @brief Converts 60-second minutes to nanoseconds. Overflow traps.
     export let of_minutes = func(minutes: int64) -> Duration => new Duration(minutes * calendar.NanosPerMinute);
 
+    /// @brief Converts 60-minute hours to nanoseconds. Overflow traps.
     export let of_hours = func(hours: int64) -> Duration => new Duration(hours * calendar.NanosPerHour);
 
-    // A day is 24 hours.
+    /// @brief A day is 24 hours.
     export let of_days = func(days: int64) -> Duration => new Duration(days * calendar.NanosPerDay);
 
-    // An optional sign, P, an optional day count with D, then optionally T
-    // and at least one of hours (H), minutes (M), and seconds (S) in that
-    // order; seconds may have a fraction of one through nine digits. At
-    // least one component is required, and letters are uppercase. The
-    // to_string form always parses. Errors: Empty; InvalidCharacter or
-    // UnexpectedEnd at the first byte that does not fit; OutOfRange at the
-    // first digit of the component that leaves int64.
+    /// @brief An optional sign, P, an optional day count with D, then optionally T and at least one of hours
+    /// (H), minutes (M), and seconds (S) in that order; seconds may have a fraction of one through nine digits.
+    ///
+    /// At least one component is required, and letters are uppercase. The to_string form always parses. Errors:
+    /// Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first
+    /// digit of the component that leaves int64.
     export let parse = func(text: string) -> result.Result<Duration> {
         let scan = new calendar.Scanner(text);
         let negative = false;
@@ -181,16 +204,19 @@ export let Duration = module (
         return result.Result<Duration>.Ok(new Duration(signed_of(state.magnitude, negative)));
     };
 
-    // Sums component magnitudes in uint64 against the sign's limit.
+    /// @brief Sums component magnitudes in uint64 against the sign's limit.
     let Accumulator = class (
+        /// @brief The unsigned magnitude accumulated so far.
         export let magnitude: uint64 = 0;
+        /// @brief The greatest magnitude representable with the parsed sign.
         let limit: uint64;
 
+        /// @brief Starts an empty accumulation with the supplied limit.
         export let init = func(bound: uint64) {
             limit = bound;
         };
 
-        // Adds value * unit + extra, or reports OutOfRange at `start`.
+        /// @brief Adds value * unit + extra, or reports OutOfRange at `start`.
         export let add = func(scan: calendar.Scanner, start: int, value: uint64, unit: uint64, extra: uint64) {
             if (!scan.ok()) {
                 return;
@@ -208,6 +234,7 @@ export let Duration = module (
         };
     );
 
+    /// @brief Returns the valid time-unit suffixes at the current parser stage.
     let unit_names = func(stage: int) -> string {
         if (stage == 0) {
             return "'H', 'M', 'S', or '.'";
@@ -218,7 +245,7 @@ export let Duration = module (
         return "'S' or '.'";
     };
 
-    // |value| as uint64; the most negative value needs no negation.
+    /// @brief |value| as uint64; the most negative value needs no negation.
     let magnitude_of = func(value: int64) -> uint64 {
         if (value >= 0) {
             return value as uint64;
@@ -226,7 +253,7 @@ export let Duration = module (
         return ((-(value + 1)) as uint64) + 1;
     };
 
-    // The inverse of magnitude_of; the magnitude is within the sign's limit.
+    /// @brief The inverse of magnitude_of; the magnitude is within the sign's limit.
     let signed_of = func(magnitude: uint64, negative: bool) -> int64 {
         if (!negative) {
             return magnitude as int64;
@@ -237,7 +264,7 @@ export let Duration = module (
         return -((magnitude - 1) as int64) - 1;
     };
 
-    // Nine digits without trailing zeros, after a point; empty for zero.
+    /// @brief Nine digits without trailing zeros, after a point; empty for zero.
     let trimmed_fraction = func(nanos: uint64) -> string {
         if (nanos == 0) {
             return "";

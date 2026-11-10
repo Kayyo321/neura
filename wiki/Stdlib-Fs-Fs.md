@@ -17,44 +17,55 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Fs** · [`export let FileKind = enum (File, Directory, Other)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L15)
-- **Fs** · [`export let FileMetadata = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L19)
+- **Fs** · [`export let FileKind = enum (File, Directory, Other)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L18)
+  Distinguishes regular files, directories, and other entries.
+- **Fs** · [`export let FileMetadata = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L22)
   What metadata reports about an entry. A link is followed; an entry that is neither a file nor a directory is of kind Other.
-- **Fs.FileMetadata** · [`export let kind: FileKind = FileKind.Other`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L20)
-- **Fs.FileMetadata** · [`export let size: int64 = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L21)
-- **Fs.FileMetadata** · [`export let modified: instant.Instant = nil`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L22)
-- **Fs.FileMetadata** · [`export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L24)
-- **Fs.FileMetadata** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L30)
-- **Fs.FileMetadata** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L39)
-- **Fs.FileMetadata** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L43)
-- **Fs** · [`export const CopyBufferSize: int = 65536`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L58)
+- **Fs.FileMetadata** · [`export let kind: FileKind = FileKind.Other`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L24)
+  The classification reported by the filesystem provider.
+- **Fs.FileMetadata** · [`export let size: int64 = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L26)
+  The reported size in bytes.
+- **Fs.FileMetadata** · [`export let modified: instant.Instant = nil`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L28)
+  The last modification instant, or nil when unavailable.
+- **Fs.FileMetadata** · [`export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L31)
+  Stores the entry's kind, size, and modification time.
+- **Fs.FileMetadata** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L38)
+  Tests equality of the kind, size, and modification time.
+- **Fs.FileMetadata** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L48)
+  Combines the hashes of the kind, size, and modification time.
+- **Fs.FileMetadata** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L53)
+  Formats the metadata as Kind(size, modified), with nil for an absent timestamp.
+- **Fs** · [`export const CopyBufferSize: int = 65536`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L76)
   Bytes per read and write of copy_file and read_bytes.
-- **Fs** · [`export let read_bytes = func(path: Path) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L60)
-- **Fs** · [`export let read_text = func(path: Path) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L72)
+- **Fs** · [`export let read_bytes = func(path: Path) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L79)
+  Reads all bytes from the path and closes the file before returning.
+- **Fs** · [`export let read_text = func(path: Path) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L91)
   The file's text; invalid UTF-8 fails with InvalidData.
-- **Fs** · [`export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L88)
+- **Fs** · [`export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L107)
   Creates or truncates the file and writes the bytes.
-- **Fs** · [`export let write_text = func(path: Path, text: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L92)
-- **Fs** · [`export let append_text = func(path: Path, text: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L97)
+- **Fs** · [`export let write_text = func(path: Path, text: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L112)
+  Creates or truncates the file and writes the UTF-8 bytes of the text.
+- **Fs** · [`export let append_text = func(path: Path, text: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L117)
   Creates the file if needed and writes the text at its end.
-- **Fs** · [`export let exists = func(path: Path) -> result.Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L102)
+- **Fs** · [`export let exists = func(path: Path) -> result.Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L122)
   Ok(false) for NotFound; other failures are errors. Follows links.
-- **Fs** · [`export let metadata = func(path: Path) -> result.Result<FileMetadata>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L111)
+- **Fs** · [`export let metadata = func(path: Path) -> result.Result<FileMetadata>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L130)
   The kind, size in bytes, and last modification time of an entry, following links.
-- **Fs** · [`export let list = func(path: Path) -> result.Result<Path[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L119)
+- **Fs** · [`export let list = func(path: Path) -> result.Result<Path[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L138)
   The directory's entries joined to `path`, sorted by name bytes.
-- **Fs** · [`export let create_directory = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L134)
-- **Fs** · [`export let create_directories = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L140)
+- **Fs** · [`export let create_directory = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L154)
+  Creates a single directory. Missing parents and an existing entry are reported as errors.
+- **Fs** · [`export let create_directories = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L159)
   Creates the directory and any missing parents; succeeds when the directory already exists.
-- **Fs** · [`export let remove_file = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L170)
+- **Fs** · [`export let remove_file = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L189)
   Removes a file or another entry that is not a directory, such as a link (the link, not its target).
-- **Fs** · [`export let remove_directory = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L175)
+- **Fs** · [`export let remove_directory = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L194)
   Removes an empty directory.
-- **Fs** · [`export let remove_tree = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L182)
+- **Fs** · [`export let remove_tree = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L202)
   Removes `path` and, for a directory, everything below it: depth first, in sorted order. Links and other entries of kind Other are removed without descending into them. Stops at the first error.
-- **Fs** · [`export let rename = func(from: Path, to: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L213)
+- **Fs** · [`export let rename = func(from: Path, to: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L233)
   Renames or moves an entry, replacing an existing file at `to`.
-- **Fs** · [`export let copy_file = func(from: Path, to: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L219)
+- **Fs** · [`export let copy_file = func(from: Path, to: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L239)
   Copies a file's bytes through a 65,536-byte buffer, replacing an existing target. Both files are closed on every path.
 <!-- END SOURCE API -->
 

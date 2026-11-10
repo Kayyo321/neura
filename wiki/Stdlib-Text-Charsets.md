@@ -18,12 +18,18 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Charsets** · [`export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L8)
-- **Charsets** · [`export let for_name = func(name: string) -> result.Result<Charset>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L12)
-- **Charsets** · [`export let encode = func(text: string, charset: Charset) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L45)
-- **Charsets** · [`export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L48)
-- **Charsets** · [`export let decode = func(bytes: uint8[list], charset: Charset) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L51)
-- **Charsets** · [`export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L54)
+- **Charsets** · [`export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L11)
+  Selects ASCII, Latin-1, UTF-8, or a UTF-16 or UTF-32 byte-order policy.
+- **Charsets** · [`export let for_name = func(name: string) -> result.Result<Charset>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L17)
+  Resolves a supported charset name or alias without regard to ASCII case.
+- **Charsets** · [`export let encode = func(text: string, charset: Charset) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L51)
+  Encodes text, substituting a question mark for unrepresentable ASCII or Latin-1 scalars.
+- **Charsets** · [`export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L55)
+  Encodes strictly and returns an Encoding error for the first unrepresentable scalar.
+- **Charsets** · [`export let decode = func(bytes: uint8[list], charset: Charset) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L59)
+  Decodes bytes, substituting U+FFFD for malformed input.
+- **Charsets** · [`export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L63)
+  Decodes strictly and returns an Encoding error at the first malformed input.
 <!-- END SOURCE API -->
 
 ## Current text and formatting contracts

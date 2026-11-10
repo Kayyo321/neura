@@ -17,54 +17,75 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Regex** · [`export let RegexFlags = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L34)
-- **Regex.RegexFlags** · [`export let ignore_ascii_case: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L35)
-- **Regex.RegexFlags** · [`export let multi_line: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L36)
+- **Regex** · [`export let RegexFlags = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L31)
+  Stores three matching options whose values participate in equality and hashing.
+- **Regex.RegexFlags** · [`export let ignore_ascii_case: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L33)
+  Enables ASCII-only case-insensitive matching.
+- **Regex.RegexFlags** · [`export let multi_line: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L35)
+  Makes caret and dollar match LF-delimited line boundaries.
 - **Regex.RegexFlags** · [`export let dot_all: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L37)
-- **Regex.RegexFlags** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L39)
-- **Regex.RegexFlags** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L48)
-- **Regex.RegexFlags** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L51)
-- **Regex** · [`export let RegexMatch = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L57)
+  Allows dot to match LF.
+- **Regex.RegexFlags** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L40)
+  Compares flags by their three Boolean values.
+- **Regex.RegexFlags** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L50)
+  Encodes the enabled flags as a bit mask.
+- **Regex.RegexFlags** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L54)
+  Formats the flags as a RegexFlags description.
+- **Regex** · [`export let RegexMatch = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L60)
   One match: group 0 is the whole match. Immutable.
-- **Regex.RegexMatch** · [`export let init = func(text: string, captured: int[list], group_names: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L62)
-- **Regex.RegexMatch** · [`export let start = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L68)
-- **Regex.RegexMatch** · [`export let end = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L70)
-- **Regex.RegexMatch** · [`export let text = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L72)
-- **Regex.RegexMatch** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L74)
-- **Regex.RegexMatch** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L82)
-- **Regex.RegexMatch** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L85)
-- **Regex.RegexMatch** · [`export let group = func(index: int) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L90)
+- **Regex.RegexMatch** · [`export let init = func(text: string, captured: int[list], group_names: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L69)
+  Stores the original input, capture offsets, and capture names.
+- **Regex.RegexMatch** · [`export let start = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L76)
+  Returns the inclusive byte offset of the whole match.
+- **Regex.RegexMatch** · [`export let end = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L79)
+  Returns the exclusive byte offset of the whole match.
+- **Regex.RegexMatch** · [`export let text = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L82)
+  Returns the whole matched substring.
+- **Regex.RegexMatch** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L85)
+  Tests equality of input, capture offsets, and group names.
+- **Regex.RegexMatch** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L94)
+  Combines the hashes of the input, capture offsets, and group names.
+- **Regex.RegexMatch** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L98)
+  Returns the whole matched substring.
+- **Regex.RegexMatch** · [`export let group = func(index: int) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L102)
   The group's text, or None when the group did not participate. An index outside 0 through group_count() traps with "invalid argument: no such group".
-- **Regex.RegexMatch** · [`export let group_start = func(index: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L100)
+- **Regex.RegexMatch** · [`export let group_start = func(index: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L112)
   The group's start offset, or -1 when it did not participate.
-- **Regex.RegexMatch** · [`export let named_group = func(name: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L108)
+- **Regex.RegexMatch** · [`export let named_group = func(name: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L119)
   The named group's text, or None when it did not participate. A name the pattern does not define traps with "invalid argument: no such group".
-- **Regex** · [`export let Regex = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L118)
-- **Regex.Regex** · [`export let init = func(text: string, compiled: machine.Program, group_names: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L124)
+- **Regex** · [`export let Regex = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L131)
+  Stores a compiled pattern and provides matching, replacement, and splitting.
+- **Regex.Regex** · [`export let init = func(text: string, compiled: machine.Program, group_names: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L140)
   Called by compile_with; the program type is internal to the library.
-- **Regex.Regex** · [`export let is_match = func(input: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L130)
-- **Regex.Regex** · [`export let matches_fully = func(input: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L134)
+- **Regex.Regex** · [`export let is_match = func(input: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L147)
+  Tests whether the pattern matches anywhere in the input.
+- **Regex.Regex** · [`export let matches_fully = func(input: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L151)
   Whether the pattern matches the whole input.
-- **Regex.Regex** · [`export let find = func(input: string) -> RegexMatch`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L137)
-- **Regex.Regex** · [`export let find_from = func(input: string, offset: int) -> RegexMatch`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L144)
+- **Regex.Regex** · [`export let find = func(input: string) -> RegexMatch`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L155)
+  Returns the first match or nil when none exists.
+- **Regex.Regex** · [`export let find_from = func(input: string, offset: int) -> RegexMatch`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L162)
   The first match starting at or after the offset, or nil. The offset must be a character boundary from 0 through the byte length; otherwise the call traps with "invalid argument: offset out of range" or "invalid argument: offset is not a character boundary". ^ and \b still see the text before the offset.
-- **Regex.Regex** · [`export let find_all = func(input: string) -> RegexMatch[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L151)
+- **Regex.Regex** · [`export let find_all = func(input: string) -> RegexMatch[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L169)
   Successive non-overlapping matches. After an empty match the search resumes one scalar value later.
-- **Regex.Regex** · [`export let replace_all = func(input: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L179)
+- **Regex.Regex** · [`export let replace_all = func(input: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L196)
   Replaces every match of find_all. In the replacement, $0 through $99 (two digits taken when present) and ${name} or ${number} insert a group, and $$ is a dollar sign; a group that did not participate inserts nothing. A reference to a group the pattern does not have traps with "invalid argument: no such group"; any other $ traps with "invalid argument: malformed replacement". The replacement is checked before matching.
-- **Regex.Regex** · [`export let replace_first = func(input: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L183)
+- **Regex.Regex** · [`export let replace_first = func(input: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L200)
   Replaces the first match, with the rules of replace_all.
-- **Regex.Regex** · [`export let split = func(input: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L195)
+- **Regex.Regex** · [`export let split = func(input: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L211)
   The pieces between the matches of find_all, with the rules of Strings.split: empty pieces are kept, and an input without a match gives one piece.
-- **Regex.Regex** · [`export let group_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L207)
+- **Regex.Regex** · [`export let group_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L223)
   The number of capturing groups, not counting group 0.
-- **Regex.Regex** · [`export let pattern = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L209)
-- **Regex.Regex** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L211)
-- **Regex.Regex** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L219)
-- **Regex.Regex** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L222)
-- **Regex** · [`export let compile = func(pattern: string) -> result.Result<Regex>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L264)
+- **Regex.Regex** · [`export let pattern = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L226)
+  Returns the original pattern text.
+- **Regex.Regex** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L229)
+  Tests equality of the original pattern and recorded compilation options.
+- **Regex.Regex** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L238)
+  Hashes the original pattern and recorded compilation options.
+- **Regex.Regex** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L242)
+  Returns the original pattern text.
+- **Regex** · [`export let compile = func(pattern: string) -> result.Result<Regex>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L287)
   Compiles the pattern with every flag off.
-- **Regex** · [`export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L269)
+- **Regex** · [`export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L292)
   Compiles the pattern; a syntax error or an exceeded limit is a Parse error at the offending pattern offset. The flags are read once.
 <!-- END SOURCE API -->
 

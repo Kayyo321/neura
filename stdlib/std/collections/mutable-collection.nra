@@ -1,18 +1,26 @@
 let.promote _ = import:Std.Collections.Collection;
 
-// Structural changes common to lists and sets. `add` returns false only
-// when a set already holds the value; lists always return true.
+/// @brief Structural changes common to lists and sets. Set insertion reports duplicates.
+/// @see [Std.Collections.MutableCollection](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-MutableCollection)
 export let MutableCollection = module (
+    /// @brief Common insertion and removal operations for lists and sets.
     export let MutableCollection = interface<T>:Collection<T> (
+        /// @brief Adds `value`. Lists return true and sets return false when the value is already present.
         let add = func(value: T) -> bool;
-        // Removes the first element equal to `value`; returns whether one was.
+        /// @brief Removes the first matching element and returns true if one was present.
         let remove = func(value: T) -> bool;
+        /// @brief Removes all elements.
         let clear = func;
-        // The callback runs once per element, in order. Returns how many
-        // elements were removed.
+        /// @brief Removes elements accepted by `drop` and returns the removal count.
+        /// Calls the predicate once per element in iteration order.
+        /// @pre The predicate leaves the collection structure unchanged.
         let remove_if = func(drop: func(T) -> bool) -> int;
+        /// @brief Removes elements rejected by `keep` and returns the removal count.
+        /// Calls the predicate once per element in iteration order.
+        /// @pre The predicate leaves the collection structure unchanged.
         let retain_if = func(keep: func(T) -> bool) -> int;
 
+        /// @brief Adds each element of `items` in its list order.
         let add_all = func(items: T[list]) {
             for (let item in items) {
                 add(item);

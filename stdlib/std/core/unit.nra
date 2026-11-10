@@ -1,4 +1,6 @@
-// The result of an operation that succeeds without a value: Result<Unit>.
+/// @brief The result of an operation that succeeds without a value: Result<Unit>.
+/// @see [Std.Core.Unit](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Unit)
 export let Unit = module (
+    /// @brief The single value used when success has no payload.
     export let Unit = enum (Value);
 );

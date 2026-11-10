@@ -17,14 +17,16 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **SystemClock** · [`export let SystemClock = class implements Clock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L18)
-- **SystemClock.SystemClock** · [`export let now = func -> result.Result<instant.Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L20)
+- **SystemClock** · [`export let SystemClock = class implements Clock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L26)
+  A clock whose operations use the runtime's clock capability.
+- **SystemClock.SystemClock** · [`export let now = func -> result.Result<instant.Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L28)
   The host's wall clock as an instant.
-- **SystemClock.SystemClock** · [`export let monotonic = func -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L28)
+- **SystemClock.SystemClock** · [`export let monotonic = func -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L36)
   The host's monotonic clock, from an origin fixed for the run.
-- **SystemClock.SystemClock** · [`export let sleep = func(span: Duration) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L37)
+- **SystemClock.SystemClock** · [`export let sleep = func(span: Duration) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L45)
   Waits for the duration; a zero or negative duration asks the host to wait for zero nanoseconds.
-- **SystemClock** · [`export let create = func -> SystemClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L46)
+- **SystemClock** · [`export let create = func -> SystemClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L55)
+  Creates a clock backed by the host's wall and monotonic clocks.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

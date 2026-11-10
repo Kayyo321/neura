@@ -1,10 +1,11 @@
 let list = import:Std.Collections.List;
 
-// Helpers for built-in lists (Stdlib.md section 9.11) and the comparison of
-// list collections of different classes (section 9.10). An index outside a
-// list is the language's bounds trap.
+/// @brief Helpers for built-in lists (Stdlib.md section 9.11) and the comparison of
+/// list collections of different classes (section 9.10). An index outside a
+/// list is the language's bounds trap.
+/// @see [Std.Collections.Lists](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Lists)
 export let Lists = module (
-    // A new list with the same elements.
+    /// @brief A new list with the same elements.
     export let copy = func<T>(items: T[list]) -> T[list] {
         let result: T[list] = [];
         let count = items.length;
@@ -16,7 +17,7 @@ export let Lists = module (
         return result;
     };
 
-    // A new list with the elements of `a` followed by those of `b`.
+    /// @brief A new list with the elements of `a` followed by those of `b`.
     export let concat = func<T>(a: T[list], b: T[list]) -> T[list] {
         let result = copy<T>(a);
         let count = b.length;
@@ -28,7 +29,7 @@ export let Lists = module (
         return result;
     };
 
-    // Reverses the list in place. Not structural.
+    /// @brief Reverses the list in place. Not structural.
     export let reverse = func<T>(items: T[list]) {
         let i = 0;
         let j = items.length - 1;
@@ -41,14 +42,14 @@ export let Lists = module (
         }
     };
 
-    // Exchanges two elements. Not structural.
+    /// @brief Exchanges two elements. Not structural.
     export let swap = func<T>(items: T[list], i: int, j: int) {
         let value = items[i];
         items[i] = items[j];
         items[j] = value;
     };
 
-    // Replaces every element with `value`. Not structural.
+    /// @brief Replaces every element with `value`. Not structural.
     export let fill = func<T>(items: T[list], value: T) {
         let count = items.length;
         let i = 0;
@@ -58,9 +59,8 @@ export let Lists = module (
         }
     };
 
-    // Inserts `value` before position `index`; an index equal to the length
-    // appends. Appends the last element again and shifts the suffix right by
-    // indexed writes.
+    /// @brief Inserts `value` before position `index`, or appends when the index equals the length. Appends the last element again and shifts the suffix right by
+    /// indexed writes.
     export let insert_at = func<T>(items: T[list], index: int, value: T) {
         let count = items.length;
         if (index == count) {
@@ -79,9 +79,9 @@ export let Lists = module (
         items[index] = value;
     };
 
-    // Removes elements from the end until `length` remain. Traps with
-    // "invalid argument: negative size" or "invalid argument: size above
-    // current size".
+    /// @brief Removes elements from the end until `length` remain. Traps with
+    /// "invalid argument: negative size" or "invalid argument: size above
+    /// current size".
     export let truncate = func<T>(items: T[list], length: int) {
         if (length < 0) {
             trap_with_message("invalid argument: negative size");
@@ -94,15 +94,15 @@ export let Lists = module (
         }
     };
 
-    // Removes every element from the end of the same list.
+    /// @brief Removes every element from the end of the same list.
     export let clear = func<T>(items: T[list]) {
         while (items.length > 0) {
             items.remove_at(items.length - 1);
         }
     };
 
-    // A new list of `count` copies of `value`. Traps with "invalid argument:
-    // negative count".
+    /// @brief A new list of `count` copies of `value`. Traps with "invalid argument:
+    /// negative count".
     export let filled = func<T>(count: int, value: T) -> T[list] {
         if (count < 0) {
             trap_with_message("invalid argument: negative count");
@@ -116,7 +116,7 @@ export let Lists = module (
         return result;
     };
 
-    // A new list with the array's elements.
+    /// @brief A new list with the array's elements.
     export let from_array = func<T>(items: T[]) -> T[list] {
         let result: T[list] = [];
         let count = items.length;
@@ -128,8 +128,8 @@ export let Lists = module (
         return result;
     };
 
-    // Whether two lists of any classes have the same size and equal elements
-    // at each position, by equals with the element of `a` first.
+    /// @brief Whether two lists of any classes have the same size and equal elements
+    /// at each position, by equals with the element of `a` first.
     export let same_elements = func<T>(a: list.List<T>, b: list.List<T>) -> bool {
         if (a.size() != b.size()) {
             return false;

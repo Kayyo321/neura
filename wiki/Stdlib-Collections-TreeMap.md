@@ -17,81 +17,97 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **TreeMap** · [`export let TreeMap = class<K, V> implements MutableMap<K, V>, SortedMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L39)
-- **TreeMap.TreeMap** · [`export let init = func(seal: Seal, comparator: func(K, K) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L47)
-- **TreeMap.TreeMap** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L52)
-- **TreeMap.TreeMap** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L54)
-- **TreeMap.TreeMap** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L56)
-- **TreeMap.TreeMap** · [`export let contains_key = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L62)
-- **TreeMap.TreeMap** · [`export let get = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L64)
-- **TreeMap.TreeMap** · [`export let get_or = func(key: K, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L72)
-- **TreeMap.TreeMap** · [`export let require = func(key: K) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L81)
-  Traps with "no such element" when the key is absent.
-- **TreeMap.TreeMap** · [`export let set = func(key: K, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L89)
-- **TreeMap.TreeMap** · [`export let put = func(key: K, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L97)
-  The previous value.
-- **TreeMap.TreeMap** · [`export let delete = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L107)
-- **TreeMap.TreeMap** · [`export let remove = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L117)
-  The removed value.
-- **TreeMap.TreeMap** · [`export let keys = func -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L128)
-  Ascending.
-- **TreeMap.TreeMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L138)
-- **TreeMap.TreeMap** · [`export let entries = func -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L148)
-- **TreeMap.TreeMap** · [`export let iterator = func -> iterators.Iterator<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L160)
-  Yields [K, V] in ascending key order.
-- **TreeMap.TreeMap** · [`export let key_iterator = func -> iterators.Iterator<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L164)
-  Yields the keys in ascending order.
-- **TreeMap.TreeMap** · [`export let put_all = func(other: TreeMap<K, V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L168)
+- **TreeMap** · [`export let TreeMap = class<K, V> implements MutableMap<K, V>, SortedMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L42)
+  A mutable AVL tree map that identifies keys by comparator equality.
+- **TreeMap.TreeMap** · [`export let init = func(seal: Seal, comparator: func(K, K) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L55)
+  Starts an empty tree with the comparator supplied by the factory.
+- **TreeMap.TreeMap** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L61)
+  Returns the number of entries.
+- **TreeMap.TreeMap** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L64)
+  Returns true when there are no entries.
+- **TreeMap.TreeMap** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L67)
+  Removes all entries and invalidates iterators.
+- **TreeMap.TreeMap** · [`export let contains_key = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L74)
+  Tests for an existing key that compares equal to the probe.
+- **TreeMap.TreeMap** · [`export let get = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L77)
+  Returns the associated value as `Some`, or `None` when the key is absent.
+- **TreeMap.TreeMap** · [`export let get_or = func(key: K, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L86)
+  Returns the associated value, or `fallback` when the key is absent.
+- **TreeMap.TreeMap** · [`export let require = func(key: K) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L95)
+  Returns the associated value. Traps with `no such element` when the key is absent.
+- **TreeMap.TreeMap** · [`export let set = func(key: K, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L104)
+  Stores the value for `key`. A comparator-equal entry keeps its original key and iterator validity.
+- **TreeMap.TreeMap** · [`export let put = func(key: K, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L112)
+  Stores the value for `key` and returns its previous value as `Some`, or `None` for a new key.
+- **TreeMap.TreeMap** · [`export let delete = func(key: K) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L123)
+  Removes the entry for `key`. Returns true if an entry was present.
+- **TreeMap.TreeMap** · [`export let remove = func(key: K) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L133)
+  Removes the entry for `key` and returns its value as `Some`, or `None` when absent.
+- **TreeMap.TreeMap** · [`export let keys = func -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L144)
+  Copies the keys to a new built-in list in ascending key order.
+- **TreeMap.TreeMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L155)
+  Copies the values to a new built-in list in ascending key order.
+- **TreeMap.TreeMap** · [`export let entries = func -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L166)
+  Copies the `[key, value]` tuples to a new built-in list in ascending key order.
+- **TreeMap.TreeMap** · [`export let iterator = func -> iterators.Iterator<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L178)
+  Returns a fail-fast iterator over `[key, value]` tuples in ascending key order.
+- **TreeMap.TreeMap** · [`export let key_iterator = func -> iterators.Iterator<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L182)
+  Returns a fail-fast iterator over keys in ascending order.
+- **TreeMap.TreeMap** · [`export let put_all = func(other: TreeMap<K, V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L186)
   Sets each entry of `other` in its ascending order.
-- **TreeMap.TreeMap** · [`export let for_each = func(action: func(K, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L181)
-  In ascending order. The action must not change the map structurally.
-- **TreeMap.TreeMap** · [`export let remove_if = func(drop: func(K, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L195)
-  Calls `drop` once per entry in ascending order, then removes the entries it chose. Returns how many were removed.
-- **TreeMap.TreeMap** · [`export let get_or_put = func(key: K, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L220)
-  The existing value, or the result of `make`, stored. `make` must not change the map structurally.
-- **TreeMap.TreeMap** · [`export let merge = func(key: K, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L236)
-  Stores `value` when the key is absent, otherwise combine(old, value). Returns the stored value.
-- **TreeMap.TreeMap** · [`export let compute = func(key: K, f: func(K, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L253)
-  Stores a Some result of `f`, or removes the key for None. Returns the result.
-- **TreeMap.TreeMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L282)
-  By the values' equals, with `value` as the receiver.
-- **TreeMap.TreeMap** · [`export let first = func -> [K, V]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L295)
-  The entry with the least key. Traps with "no such element" when empty.
-- **TreeMap.TreeMap** · [`export let last = func -> [K, V]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L306)
-  The entry with the greatest key. Traps with "no such element" when empty.
-- **TreeMap.TreeMap** · [`export let remove_first = func -> [K, V]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L317)
+- **TreeMap.TreeMap** · [`export let for_each = func(action: func(K, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L199)
+  Calls `action` with the key and value of each entry in ascending key order. The action leaves the map structure unchanged.
+- **TreeMap.TreeMap** · [`export let remove_if = func(drop: func(K, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L214)
+  Calls `drop` once per entry in ascending key order, then removes the matches. The predicate leaves the map structure unchanged. The number of removed entries.
+- **TreeMap.TreeMap** · [`export let get_or_put = func(key: K, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L239)
+  Returns the associated value, or calls `make` once, stores its result, and returns it when absent. The factory leaves the map structure unchanged.
+- **TreeMap.TreeMap** · [`export let merge = func(key: K, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L255)
+  Stores and returns `value` when the key is absent. Otherwise stores and returns `combine(old, value)`. The combiner leaves the map structure unchanged.
+- **TreeMap.TreeMap** · [`export let compute = func(key: K, f: func(K, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L273)
+  Calls `f` with the key and its optional current value. Stores a `Some` result or removes the entry for `None`. The callback leaves the map structure unchanged. The result of the callback.
+- **TreeMap.TreeMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L302)
+  Tests whether `value.equals(held_value)` is true for any entry.
+- **TreeMap.TreeMap** · [`export let first = func -> [K, V]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L314)
+  Returns the entry with the least key. Traps with `no such element` when empty.
+- **TreeMap.TreeMap** · [`export let last = func -> [K, V]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L324)
+  Returns the entry with the greatest key. Traps with `no such element` when empty.
+- **TreeMap.TreeMap** · [`export let remove_first = func -> [K, V]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L335)
   Removes and returns the entry with the least key. Traps with "no such element" when empty.
-- **TreeMap.TreeMap** · [`export let remove_last = func -> [K, V]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L329)
+- **TreeMap.TreeMap** · [`export let remove_last = func -> [K, V]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L347)
   Removes and returns the entry with the greatest key. Traps with "no such element" when empty.
-- **TreeMap.TreeMap** · [`export let range = func(from: K, to: K) -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L341)
-  Entries with keys from `from` inclusive to `to` exclusive, ascending. Empty when `to` is not above `from`.
-- **TreeMap.TreeMap** · [`export let key_range = func(from: K, to: K) -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L353)
-  The keys of range(from, to).
-- **TreeMap.TreeMap** · [`export let descending = func -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L364)
-  Entries in descending key order.
-- **TreeMap.TreeMap** · [`export let descending_keys = func -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L376)
-  Keys in descending order.
-- **TreeMap.TreeMap** · [`export let floor = func(key: K) -> optional.Optional<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L387)
-  The greatest key at most `key`.
-- **TreeMap.TreeMap** · [`export let ceiling = func(key: K) -> optional.Optional<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L390)
-  The least key at least `key`.
-- **TreeMap.TreeMap** · [`export let lower = func(key: K) -> optional.Optional<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L393)
-  The greatest key below `key`.
-- **TreeMap.TreeMap** · [`export let higher = func(key: K) -> optional.Optional<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L396)
-  The least key above `key`.
-- **TreeMap.TreeMap** · [`export let floor_entry = func(key: K) -> optional.Optional<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L398)
-- **TreeMap.TreeMap** · [`export let ceiling_entry = func(key: K) -> optional.Optional<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L400)
-- **TreeMap.TreeMap** · [`export let lower_entry = func(key: K) -> optional.Optional<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L403)
-- **TreeMap.TreeMap** · [`export let higher_entry = func(key: K) -> optional.Optional<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L405)
-- **TreeMap.TreeMap** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L411)
+- **TreeMap.TreeMap** · [`export let range = func(from: K, to: K) -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L359)
+  Returns a new list of entries in ascending key order from `from` inclusive to `to` exclusive. Returns an empty list when `to` is at or below `from`.
+- **TreeMap.TreeMap** · [`export let key_range = func(from: K, to: K) -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L371)
+  Copies the keys from `from` inclusive to `to` exclusive in ascending order.
+- **TreeMap.TreeMap** · [`export let descending = func -> [K, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L382)
+  Copies entries into a new list in descending key order.
+- **TreeMap.TreeMap** · [`export let descending_keys = func -> K[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L394)
+  Copies the keys into a new list in descending order.
+- **TreeMap.TreeMap** · [`export let floor = func(key: K) -> optional.Optional<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L405)
+  Returns the greatest key at most `key` as `Some`, or `None` when absent.
+- **TreeMap.TreeMap** · [`export let ceiling = func(key: K) -> optional.Optional<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L408)
+  Returns the least key at least `key` as `Some`, or `None` when absent.
+- **TreeMap.TreeMap** · [`export let lower = func(key: K) -> optional.Optional<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L411)
+  Returns the greatest key strictly below `key` as `Some`, or `None` when absent.
+- **TreeMap.TreeMap** · [`export let higher = func(key: K) -> optional.Optional<K>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L414)
+  Returns the least key strictly above `key` as `Some`, or `None` when absent.
+- **TreeMap.TreeMap** · [`export let floor_entry = func(key: K) -> optional.Optional<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L417)
+  Returns the entry with the greatest key at most `key`, or `None` when absent.
+- **TreeMap.TreeMap** · [`export let ceiling_entry = func(key: K) -> optional.Optional<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L420)
+  Returns the entry with the least key at least `key`, or `None` when absent.
+- **TreeMap.TreeMap** · [`export let lower_entry = func(key: K) -> optional.Optional<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L424)
+  Returns the entry with the greatest key strictly below `key`, or `None` when absent.
+- **TreeMap.TreeMap** · [`export let higher_entry = func(key: K) -> optional.Optional<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L427)
+  Returns the entry with the least key strictly above `key`, or `None` when absent.
+- **TreeMap.TreeMap** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L433)
   Traps with "invalid state: tree ..." on a broken invariant: AVL balance, stored heights, ascending key order, reciprocal parent links, a nil parent at the root, and the count.
-- **TreeMap.TreeMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L458)
+- **TreeMap.TreeMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L480)
   Another TreeMap of the same size in which, for each of its entries, this map holds an equal value for the key.
-- **TreeMap.TreeMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L482)
+- **TreeMap.TreeMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L504)
   The wrapping sum over entries of the key hash exclusive-or the value hash.
-- **TreeMap.TreeMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L495)
-  `{k: v, k2: v2}` in ascending order; the map itself as a direct key or value prints "(this collection)".
-- **TreeMap** · [`export let create = func<K, V>(comparator: func(K, K) -> ordering.Ordering) -> TreeMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L819)
+- **TreeMap.TreeMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L517)
+  Formats entries as `{k: v, k2: v2}` in ascending order. The map itself as a direct key or value prints "(this collection)".
+- **TreeMap** · [`export let create = func<K, V>(comparator: func(K, K) -> ordering.Ordering) -> TreeMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-map.nra#L861)
   An empty map ordered by `comparator`, which must define a total order.
 <!-- END SOURCE API -->
 

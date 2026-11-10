@@ -1,27 +1,27 @@
 let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 
-// UTF-8 (Stdlib.md section 13.1) with the validity rules of section 8.1:
-// shortest form only, no surrogates, nothing above U+10FFFF. Encoding and
-// decoding share Std.Text.Strings, so an error here is the error
-// Strings.from_bytes reports.
+/// @brief UTF-8 (Stdlib.md section 13.1) with the validity rules of section 8.1: shortest form only, no
+/// surrogates, nothing above U+10FFFF.
+///
+/// Encoding and decoding share Std.Text.Strings, so an error here is the error Strings.from_bytes reports.
+/// @see [Std.Encoding.Utf8](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Utf8)
 export let Utf8 = module (
-    // A copy of the string's bytes.
+    /// @brief A copy of the string's bytes.
     export let encode = func(s: string) -> uint8[list] => strings.to_bytes(s);
 
-    // The text, or an Encoding error at the offset `validate` returns. The
-    // message is "invalid start byte", "invalid continuation byte", or
-    // "unexpected end of data".
+    /// @brief The text, or an Encoding error at the offset `validate` returns. The message is "invalid start
+    /// byte", "invalid continuation byte", or "unexpected end of data".
     export let decode = func(bytes: uint8[list]) -> Result<string> => strings.from_bytes(bytes);
 
-    // The text with each maximal ill-formed subsequence (Unicode's maximal
-    // subpart practice) replaced by one U+FFFD.
+    /// @brief The text with each maximal ill-formed subsequence (Unicode's maximal subpart practice) replaced
+    /// by one U+FFFD.
     export let decode_lossy = func(bytes: uint8[list]) -> string => strings.from_bytes_lossy(bytes);
 
-    // -1 when the bytes are valid UTF-8; otherwise the offset of the first
-    // byte that cannot begin or continue a valid sequence's prefix, which is
-    // the length of the longest valid prefix. Valid input costs one
-    // string.from_utf8 call; invalid input is rescanned here.
+    /// @brief -1 when the bytes are valid UTF-8; otherwise the offset of the first byte that cannot begin or
+    /// continue a valid sequence's prefix, which is the length of the longest valid prefix.
+    ///
+    /// Valid input costs one string.from_utf8 call; invalid input is rescanned here.
     export let validate = func(bytes: uint8[list]) -> int {
         let [valid, _] = string.from_utf8(bytes);
         if (valid) {

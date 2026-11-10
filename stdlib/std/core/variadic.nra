@@ -1,4 +1,7 @@
+/// @brief Defines the argument representation shared by variadic formatting APIs.
+/// @see [Std.Core.Variadic](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Variadic)
 export let Variadic = module (
+    /// @brief Carries a packed argument with its primitive format or object-reference category preserved.
     export let Argument = enum (
         Text(string),
         Signed(int64),

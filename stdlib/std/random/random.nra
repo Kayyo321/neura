@@ -4,22 +4,32 @@ let maths = import:Std.Math.Math;
 let.promote _ = import:Std.Core.Result;
 let uint64s = import:Std.Core.UInt64;
 
-// A seeded pseudo-random generator: xoshiro256** over four uint64 words,
-// seeded by SplitMix64 (Stdlib.md section 12.2). Every wrapping operation
-// follows the uint64 recipes of section 7.2. The same seed gives the same
-// results from every member on every runtime. Not suitable for secrets.
+/// @brief A seeded pseudo-random generator: xoshiro256** over four uint64 words, seeded by SplitMix64
+/// (Stdlib.md section 12.2).
+///
+/// Every wrapping operation follows the uint64 recipes of section 7.2. The same seed gives the same results
+/// from every member on every runtime. Not suitable for secrets.
+/// @see [Std.Random.Random](https://github.com/Kayyo321/neura/wiki/Stdlib-Random-Random)
 export let Random = module (
+    /// @brief Restricts construction to factories that initialize the generator state.
     let Seal = enum (Token);
 
+    /// @brief A deterministic xoshiro256** generator with an optional cached normal sample.
     export let Random = class (
+        /// @brief The first word of the xoshiro256** state.
         let s0: uint64;
+        /// @brief The second word of the xoshiro256** state.
         let s1: uint64;
+        /// @brief The third word of the xoshiro256** state.
         let s2: uint64;
+        /// @brief The fourth word of the xoshiro256** state.
         let s3: uint64;
-        // The second value of the last accepted Gaussian pair.
+        /// @brief The second value of the last accepted Gaussian pair.
         let has_spare: bool = false;
+        /// @brief The cached normal sample when a second value is available.
         let spare: float64 = 0.0;
 
+        /// @brief Initializes the four state words supplied by the seeding factory.
         export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64) {
             s0 = a;
             s1 = b;
@@ -27,7 +37,7 @@ export let Random = module (
             s3 = d;
         };
 
-        // One step: rotate_left(s1 * 5, 7) * 9, then the state transition.
+        /// @brief One step: rotate_left(s1 * 5, 7) * 9, then the state transition.
         export let next_uint64 = func -> uint64 {
             let output = times9(rotate(times5(s1), 7));
             let t = s1 << 17;
@@ -40,16 +50,16 @@ export let Random = module (
             return output;
         };
 
-        // The high 32 bits of one step.
+        /// @brief The high 32 bits of one step.
         export let next_uint32 = func -> uint32 => (next_uint64() >> 32) as uint32;
 
-        // The top bit of one step.
+        /// @brief The top bit of one step.
         export let next_bool = func -> bool => (next_uint64() >> 63) == 1;
 
-        // Uniform in 0 up to but excluding `bound`: next_uint32 masked to
-        // the smallest all-ones mask covering bound - 1, drawn until below
-        // bound. A bound below 1 traps with "invalid argument: bound must be
-        // positive".
+        /// @brief Uniform in 0 up to but excluding `bound`: next_uint32 masked to the smallest all-ones mask
+        /// covering bound - 1, drawn until below bound.
+        ///
+        /// A bound below 1 traps with "invalid argument: bound must be positive".
         export let next_int_below = func(bound: int) -> int {
             if (bound < 1) {
                 trap_with_message("invalid argument: bound must be positive");
@@ -57,9 +67,8 @@ export let Random = module (
             return below(bound as uint32) as int;
         };
 
-        // Uniform from `low` up to but excluding `high`, with the span in
-        // int64. Traps with "invalid argument: low must be below high"
-        // unless low < high.
+        /// @brief Uniform from `low` up to but excluding `high`, with the span in int64. Traps with "invalid
+        /// argument: low must be below high" unless low < high.
         export let next_int_between = func(low: int, high: int) -> int {
             if (low >= high) {
                 trap_with_message("invalid argument: low must be below high");
@@ -68,15 +77,13 @@ export let Random = module (
             return ((low as int64) + (below(span as uint32) as int64)) as int;
         };
 
-        // The top 53 bits of one step times 2^-53: uniform in 0 up to but
-        // excluding 1.
+        /// @brief The top 53 bits of one step times 2^-53: uniform in 0 up to but excluding 1.
         export let next_float64 = func -> float64 =>
             ((next_uint64() >> 11) as float64) * 0.00000000000000011102230246251565404236316680908203125;
 
-        // A standard normal value by Marsaglia's polar method: u and v are
-        // next_float64() * 2 - 1, drawn in pairs until s = u^2 + v^2 is
-        // below 1 and not 0; then m = sqrt(-2 log(s) / s) with Std.Math,
-        // u * m is returned and v * m is kept for the next call.
+        /// @brief A standard normal value by Marsaglia's polar method: u and v are next_float64() * 2 - 1,
+        /// drawn in pairs until s = u^2 + v^2 is below 1 and not 0; then m = sqrt(-2 log(s) / s) with Std.Math,
+        /// u * m is returned and v * m is kept for the next call.
         export let next_gaussian = func -> float64 {
             if (has_spare) {
                 has_spare = false;
@@ -96,9 +103,10 @@ export let Random = module (
             return u * factor;
         };
 
-        // A new list of `count` bytes. Each step supplies 8 bytes, least
-        // significant first; a final partial group uses the low bytes. A
-        // negative count traps with "invalid argument: negative count".
+        /// @brief A new list of `count` bytes.
+        ///
+        /// Each step supplies 8 bytes, least significant first; a final partial group uses the low bytes. A
+        /// negative count traps with "invalid argument: negative count".
         export let fill_bytes = func(count: int) -> uint8[list] {
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
@@ -116,8 +124,7 @@ export let Random = module (
             return bytes;
         };
 
-        // Fisher-Yates: for i from the last index down to 1, swaps i with
-        // next_int_below(i + 1).
+        /// @brief Fisher-Yates: for i from the last index down to 1, swaps i with next_int_below(i + 1).
         export let shuffle = func<T>(items: T[list]) {
             let i = items.length - 1;
             while (i >= 1) {
@@ -129,8 +136,7 @@ export let Random = module (
             }
         };
 
-        // An element chosen with next_int_below. An empty list traps with
-        // "no such element".
+        /// @brief An element chosen with next_int_below. An empty list traps with "no such element".
         export let choose = func<T>(items: T[list]) -> T {
             if (items.length == 0) {
                 trap_with_message("no such element");
@@ -138,7 +144,7 @@ export let Random = module (
             return items[next_int_below(items.length)];
         };
 
-        // Uniform below a bound from 1 through 2^32 - 1.
+        /// @brief Uniform below a bound from 1 through 2^32 - 1.
         let below = func(bound: uint32) -> uint32 {
             let mask = bound - 1;
             mask |= (mask >> 1);
@@ -155,8 +161,7 @@ export let Random = module (
         };
     );
 
-    // The four words are successive outputs of SplitMix64 started at the
-    // seed.
+    /// @brief The four words are successive outputs of SplitMix64 started at the seed.
     export let seeded = func(seed: uint64) -> Random {
         let state = seed;
         state = uint64s.wrapping_add(state, 11400714819323198485);
@@ -170,17 +175,19 @@ export let Random = module (
         return new Random(Seal.Token, a, b, c, d);
     };
 
+    /// @brief Carries the provider's entropy bytes or error code.
     let FillOutcome = enum (Ok(uint8[list]), Error(uint32));
+    /// @brief Requests the specified byte count from the entropy provider.
     let fill_entropy = func(count: int) -> FillOutcome host("neura.entropy.fill", 1);
 
-    // Seeds with 8 bytes from neura.entropy.fill, read as a little-endian
-    // uint64. Needs the entropy capability; a denied or failed request is
-    // an Io error (CapabilityDenied when denied).
+    /// @brief Seeds with 8 bytes from neura.entropy.fill, read as a little-endian uint64. Needs the entropy
+    /// capability; a denied or failed request is an Io error (CapabilityDenied when denied).
     export let from_entropy = func -> Result<Random> => match (fill_entropy(8)) {
         FillOutcome.Ok(bytes) => seeded_from(bytes),
         FillOutcome.Error(code) => Result<Random>.Err(host_error.io(code, "entropy request failed", "")),
     };
 
+    /// @brief Interprets eight entropy bytes as a little-endian seed.
     let seeded_from = func(bytes: uint8[list]) -> Result<Random> {
         if (bytes.length != 8) {
             let wrong = Error.Io {
@@ -198,7 +205,7 @@ export let Random = module (
         return Result<Random>.Ok(seeded(seed));
     };
 
-    // The SplitMix64 output function for a state.
+    /// @brief The SplitMix64 output function for a state.
     let mix = func(state: uint64) -> uint64 {
         let z = state;
         z = uint64s.wrapping_mul(z ^ (z >> 30), 13787848793156543929);
@@ -206,11 +213,12 @@ export let Random = module (
         return z ^ (z >> 31);
     };
 
-    // x * 5 and x * 9 modulo 2^64 as a shift and a wrapping add.
+    /// @brief x * 5 and x * 9 modulo 2^64 as a shift and a wrapping add.
     let times5 = func(x: uint64) -> uint64 => uint64s.wrapping_add(x << 2, x);
 
+    /// @brief Multiplies a word by nine modulo 2^64.
     let times9 = func(x: uint64) -> uint64 => uint64s.wrapping_add(x << 3, x);
 
-    // A rotation by 1 through 63.
+    /// @brief A rotation by 1 through 63.
     let rotate = func(x: uint64, count: int) -> uint64 => (x << count) | (x >> (64 - count));
 );

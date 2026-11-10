@@ -17,29 +17,39 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Instant** · [`export let Instant = class implements Comparable<Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L17)
-- **Instant.Instant** · [`export let init = func(epoch_seconds: int64, nanos: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L21)
-- **Instant.Instant** · [`export let epoch_seconds = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L26)
-- **Instant.Instant** · [`export let nanos = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L29)
+- **Instant** · [`export let Instant = class implements Comparable<Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L20)
+  An immutable point on the UTC timeline, normalized to whole seconds and a nonnegative fraction.
+- **Instant.Instant** · [`export let init = func(epoch_seconds: int64, nanos: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L27)
+  Stores whole seconds and an already-normalized nanosecond adjustment.
+- **Instant.Instant** · [`export let epoch_seconds = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L33)
+  Returns the whole-second offset from the Unix epoch.
+- **Instant.Instant** · [`export let nanos = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L36)
   0 through 999,999,999.
-- **Instant.Instant** · [`export let to_epoch_millis = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L32)
+- **Instant.Instant** · [`export let to_epoch_millis = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L39)
   Milliseconds since the epoch, rounded toward negative infinity.
-- **Instant.Instant** · [`export let plus = func(span: duration.Duration) -> Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L41)
-- **Instant.Instant** · [`export let minus = func(span: duration.Duration) -> Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L51)
-- **Instant.Instant** · [`export let duration_since = func(other: Instant) -> duration.Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L63)
+- **Instant.Instant** · [`export let plus = func(span: duration.Duration) -> Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L49)
+  Adds a duration and normalizes the nanosecond fraction, borrowing or carrying as needed.
+- **Instant.Instant** · [`export let minus = func(span: duration.Duration) -> Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L60)
+  Subtracts a duration without negating it first, then normalizes the fraction.
+- **Instant.Instant** · [`export let duration_since = func(other: Instant) -> duration.Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L71)
   This instant minus `other`. Traps (reason 1) when the difference does not fit a Duration.
-- **Instant.Instant** · [`export let to_local = func(offset: zone_offset.ZoneOffset) -> local_date_time.LocalDateTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L80)
+- **Instant.Instant** · [`export let to_local = func(offset: zone_offset.ZoneOffset) -> local_date_time.LocalDateTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L88)
   Traps with "invalid argument: date out of range" when the local date is outside years -999,999 through 999,999.
-- **Instant.Instant** · [`export let compare_to = func(other: Instant) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L88)
-- **Instant.Instant** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L104)
-- **Instant.Instant** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L112)
-- **Instant.Instant** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L120)
+- **Instant.Instant** · [`export let compare_to = func(other: Instant) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L97)
+  Orders instants by epoch second and then by nanosecond adjustment.
+- **Instant.Instant** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L114)
+  Tests equality of epoch seconds and nanosecond adjustments.
+- **Instant.Instant** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L123)
+  Combines the hashes of the seconds and nanosecond adjustment.
+- **Instant.Instant** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L130)
   YYYY-MM-DDTHH:MM:SS, a fraction of 3, 6, or 9 digits (the shortest that is exact) when the nanoseconds are not zero, then Z. Years outside 0000 through 9999 have a sign and at least four digits; every int64 second count has a text.
-- **Instant** · [`export const Epoch: Instant = new Instant(0, 0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L128)
-- **Instant** · [`export let of_epoch_seconds = func(seconds: int64, nanos: int) -> Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L132)
+- **Instant** · [`export const Epoch: Instant = new Instant(0, 0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L139)
+  The Unix epoch, 1970-01-01T00:00:00Z.
+- **Instant** · [`export let of_epoch_seconds = func(seconds: int64, nanos: int) -> Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L143)
   `nanos` may be any int: whole seconds in it move into the seconds, and a negative remainder borrows one.
-- **Instant** · [`export let of_epoch_millis = func(millis: int64) -> Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L138)
-- **Instant** · [`export let parse = func(text: string) -> result.Result<Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L148)
+- **Instant** · [`export let of_epoch_millis = func(millis: int64) -> Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L150)
+  Converts a signed millisecond count into normalized epoch seconds and nanoseconds.
+- **Instant** · [`export let parse = func(text: string) -> result.Result<Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L160)
   The to_string form with a fraction of one through nine digits, and Z or a numeric offset (+HH:MM or -HH:MM, at most 18:00) after the time. Years are -999,999 through 999,999. Errors are those of LocalDate.parse and LocalTime.parse for the date and time, then those of ZoneOffset.parse for the offset.
 <!-- END SOURCE API -->
 

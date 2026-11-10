@@ -17,34 +17,43 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **StringBuilder** · [`export let StringBuilder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L14)
-- **StringBuilder.StringBuilder** · [`export let init = func(seal: Seal, owner: Cell<StringBuilder>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L18)
-- **StringBuilder.StringBuilder** · [`export let append = func(s: string) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L23)
+- **StringBuilder** · [`export let StringBuilder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L17)
+  Accumulates mutable UTF-8 bytes and produces immutable string snapshots.
+- **StringBuilder.StringBuilder** · [`export let init = func(seal: Seal, owner: Cell<StringBuilder>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L24)
+  Initializes a builder with the supplied backing bytes and construction token.
+- **StringBuilder.StringBuilder** · [`export let append = func(s: string) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L29)
   Appends the bytes of `s` and returns this builder.
-- **StringBuilder.StringBuilder** · [`export let append_scalar = func(scalar: uint32) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L33)
+- **StringBuilder.StringBuilder** · [`export let append_scalar = func(scalar: uint32) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L39)
   Appends the UTF-8 encoding of a Unicode scalar value. Traps for a surrogate or a value above 0x10FFFF.
-- **StringBuilder.StringBuilder** · [`export let append_line = func(s: string) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L59)
+- **StringBuilder.StringBuilder** · [`export let append_line = func(s: string) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L65)
   Appends `s` and one LF.
-- **StringBuilder.StringBuilder** · [`export let append_repeated = func(s: string, count: int) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L66)
+- **StringBuilder.StringBuilder** · [`export let append_repeated = func(s: string, count: int) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L72)
   Appends `count` copies of `s`. A negative count traps.
-- **StringBuilder.StringBuilder** · [`export let append_int = func(v: int64) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L78)
+- **StringBuilder.StringBuilder** · [`export let append_int = func(v: int64) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L83)
   The scalar appends use the built-in decimal and float text (Stdlib.md sections 5.2 and 7.5).
-- **StringBuilder.StringBuilder** · [`export let append_uint = func(v: uint64) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L80)
-- **StringBuilder.StringBuilder** · [`export let append_float = func(v: float64) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L82)
-- **StringBuilder.StringBuilder** · [`export let append_bool = func(v: bool) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L84)
-- **StringBuilder.StringBuilder** · [`export let append_value = func<T>(value: T) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L92)
+- **StringBuilder.StringBuilder** · [`export let append_uint = func(v: uint64) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L86)
+  Appends the decimal text of an unsigned integer.
+- **StringBuilder.StringBuilder** · [`export let append_float = func(v: float64) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L89)
+  Appends the primitive text representation of a floating-point value.
+- **StringBuilder.StringBuilder** · [`export let append_bool = func(v: bool) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L92)
+  Appends lowercase Boolean text.
+- **StringBuilder.StringBuilder** · [`export let append_value = func<T>(value: T) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L100)
   Appends `value.to_string()`.
-- **StringBuilder.StringBuilder** · [`export let byte_length = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L94)
-- **StringBuilder.StringBuilder** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L96)
-- **StringBuilder.StringBuilder** · [`export let truncate = func(new_length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L100)
+- **StringBuilder.StringBuilder** · [`export let byte_length = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L103)
+  Returns the number of accumulated UTF-8 bytes.
+- **StringBuilder.StringBuilder** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L106)
+  Reports whether there are any accumulated bytes.
+- **StringBuilder.StringBuilder** · [`export let truncate = func(new_length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L110)
   Keeps the first `new_length` bytes. The length must be between 0 and the current byte length and fall on a character boundary.
-- **StringBuilder.StringBuilder** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L120)
-- **StringBuilder.StringBuilder** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L125)
+- **StringBuilder.StringBuilder** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L131)
+  Removes all accumulated bytes.
+- **StringBuilder.StringBuilder** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L136)
   The current UTF-8 bytes determine equality and hashing.
-- **StringBuilder.StringBuilder** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L133)
-- **StringBuilder.StringBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L136)
+- **StringBuilder.StringBuilder** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L145)
+  Hashes the current text contents.
+- **StringBuilder.StringBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L148)
   The accumulated text. The builder stays usable.
-- **StringBuilder** · [`export let create = func -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L154)
+- **StringBuilder** · [`export let create = func -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L167)
   A new, empty builder.
 <!-- END SOURCE API -->
 

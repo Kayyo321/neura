@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Queue** · [`export let Queue = interface<T>:Collection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/queue.nra#L7)
+- **Queue** · [`export let Queue = interface<T>:Collection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/queue.nra#L9)
+  A collection with a defined insertion and removal order.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

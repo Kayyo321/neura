@@ -6,37 +6,51 @@ let.promote _ = import:Std.Fs.Path;
 let result = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 
-// An open file (Stdlib.md section 11.2), unbuffered. Its bound read method
-// is a byte source and its bound write method a byte sink. Needs the fs
-// capability. After close every operation except close fails with Closed.
+/// @brief An open file (Stdlib.md section 11.2), unbuffered.
+///
+/// Its bound read method is a byte source and its bound write method a byte sink. Needs the fs capability.
+/// After close every operation except close fails with Closed.
+/// @see [Std.Fs.File](https://github.com/Kayyo321/neura/wiki/Stdlib-Fs-File)
 export let File = module (
-    // Read: must exist. Write: create or truncate. Append: create, and
-    // write at the end. ReadWrite: must exist. CreateNew: read and write a
-    // new file; fails with AlreadyExists.
+    /// @brief Read: must exist. Write: create or truncate. Append: create, and write at the end. ReadWrite:
+    /// must exist. CreateNew: read and write a new file; fails with AlreadyExists.
     export let OpenMode = enum (Read, Write, Append, ReadWrite, CreateNew);
+    /// @brief Selects the start, current position, or end as the reference point for seeking.
     export let SeekOrigin = enum (Start, Current, End);
 
+    /// @brief Represents a host success with an identifier or position, or an unsigned host error code.
     let IdOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief Represents returned bytes or an unsigned host error code.
     let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+    /// @brief Represents a host byte count or an unsigned host error code.
     let CountOutcome = enum (Ok(int), Error(uint32));
+    /// @brief Represents host success without a value or an unsigned host error code.
     let DoneOutcome = enum (Ok, Error(uint32));
+    /// @brief Opens a provider file using the numeric code for the requested mode.
     let open_file = func(path: string, mode: int) -> IdOutcome host("neura.fs.open", 1);
+    /// @brief Requests up to the specified number of bytes from the provider.
     let read_file = func(file: int64, max: int) -> BytesOutcome host("neura.fs.read", 1);
+    /// @brief Requests a provider write and receives the byte count, which may be partial.
     let write_file = func(file: int64, data: uint8[list]) -> CountOutcome host("neura.fs.write", 1);
+    /// @brief Requests a position change and receives the new absolute position.
     let seek_file = func(file: int64, offset: int64, origin: int) -> IdOutcome host("neura.fs.seek", 1);
+    /// @brief Requests that the provider release the open file.
     let close_file = func(file: int64) -> DoneOutcome host("neura.fs.close", 1);
 
+    /// @brief An unbuffered host file with an explicit, idempotent close operation.
     export let File = class implements Closeable (
+        /// @brief Holds the provider handle and the context used in error messages.
         let handle: FileHandle = nil;
+        /// @brief Tracks whether the wrapper may still use the host handle.
         let open_now: bool = true;
 
-        // Use File.open; the handle comes from the library.
+        /// @brief Use File.open; the handle comes from the library.
         export let init = func(opened: FileHandle) {
             handle = opened;
         };
 
-        // Up to `max` bytes from the current position; an empty list at the
-        // end of the file. A maximum below 1 traps.
+        /// @brief Up to `max` bytes from the current position; an empty list at the end of the file. A maximum
+        /// below 1 traps.
         export let read = func(max: int) -> result.Result<uint8[list]> {
             bytes.check_maximum(max);
             if (!open_now) {
@@ -48,7 +62,7 @@ export let File = module (
             };
         };
 
-        // Writes every byte, repeating partial host writes.
+        /// @brief Writes every byte, repeating partial host writes.
         export let write = func(data: uint8[list]) -> result.Result<Unit> {
             if (!open_now) {
                 return result.Result<Unit>.Err(bytes.closed("file", handle.path));
@@ -73,7 +87,7 @@ export let File = module (
             return bytes.ok();
         };
 
-        // Moves the position and returns it, counted from the start.
+        /// @brief Moves the position and returns it, counted from the start.
         export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64> {
             if (!open_now) {
                 return result.Result<int64>.Err(bytes.closed("file", handle.path));
@@ -84,7 +98,7 @@ export let File = module (
             };
         };
 
-        // The file's size in bytes. The position is unchanged.
+        /// @brief The file's size in bytes. The position is unchanged.
         export let size = func -> result.Result<int64> {
             let here: int64 = 0;
             match (seek(0, SeekOrigin.Current)) {
@@ -110,8 +124,8 @@ export let File = module (
             };
         };
 
-        // Releases the file. Closing again does nothing and returns Ok; the
-        // file is closed even when the host reports an error.
+        /// @brief Releases the file. Closing again does nothing and returns Ok; the file is closed even when
+        /// the host reports an error.
         export let close = func -> result.Result<Unit> {
             if (!open_now) {
                 return bytes.ok();
@@ -124,6 +138,7 @@ export let File = module (
         };
     );
 
+    /// @brief Opens the normalized path using the selected mode and returns an owned file.
     export let open = func(path: Path, mode: OpenMode) -> result.Result<File> {
         let text = path.to_string();
         return match (open_file(text, mode as int)) {

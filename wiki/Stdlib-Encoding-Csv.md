@@ -17,9 +17,9 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Csv** · [`export let parse = func(text: string) -> Result<string[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/csv.nra#L21)
-  The records of the text, each a list of its fields. The empty text has no records; a final line break does not add an empty record; an empty line is a record with one empty field. Parse errors:  - Syntax, "quote in unquoted field": at the quote. - Syntax, "text after closing quote": at the first byte after the closing quote that is not a comma or a line break. - UnexpectedEnd, "unterminated quoted field": at the text's length.
-- **Csv** · [`export let write = func(rows: string[list][list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/csv.nra#L86)
+- **Csv** · [`export let parse = func(text: string) -> Result<string[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/csv.nra#L22)
+  The records of the text, each a list of its fields. The empty text has no records; a final line break does not add an empty record; an empty line is a record with one empty field. Parse errors: - Syntax, "quote in unquoted field": at the quote. - Syntax, "text after closing quote": at the first byte after the closing quote that is not a comma or a line break. - UnexpectedEnd, "unterminated quoted field": at the text's length.
+- **Csv** · [`export let write = func(rows: string[list][list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/csv.nra#L87)
   The rows as CSV text: fields joined by commas, each record followed by LF. A field is quoted, with each quote doubled, only when it contains a comma, a quote, a CR, or an LF. A row with no fields is written as an empty line, which parses as one empty field.
 <!-- END SOURCE API -->
 

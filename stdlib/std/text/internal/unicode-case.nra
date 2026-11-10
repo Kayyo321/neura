@@ -3,9 +3,12 @@ let scalars = import:Std.Text.Scalars;
 let string_builder = import:Std.Core.StringBuilder;
 let strings = import:Std.Text.Strings;
 
+/// @brief Applies generated Unicode case mappings with locale-specific context rules.
 export let UnicodeCase = module (
+    /// @brief Selects root, Turkic, or Lithuanian casing rules.
     let CasingLocale = enum (Root, Turkic, Lithuanian);
 
+    /// @brief Converts to lowercase using full mappings and applicable contextual rules.
     export let lower = func(s: string, language_tag: string) -> string {
         let locale = casing_locale(language_tag);
         let source = strings.scalars(s);
@@ -21,6 +24,7 @@ export let UnicodeCase = module (
         return result.to_string();
     };
 
+    /// @brief Converts to uppercase using full mappings and applicable contextual rules.
     export let upper = func(s: string, language_tag: string) -> string {
         let locale = casing_locale(language_tag);
         let source = strings.scalars(s);
@@ -31,6 +35,7 @@ export let UnicodeCase = module (
         return result.to_string();
     };
 
+    /// @brief Applies full locale-independent Unicode case folding.
     export let fold = func(s: string) -> string {
         let result = string_builder.create();
         let offset = 0;
@@ -46,6 +51,7 @@ export let UnicodeCase = module (
         return result.to_string();
     };
 
+    /// @brief Orders scalars after simple uppercase and then simple lowercase mapping.
     export let compare_ignore_case = func(left: string, right: string) -> int {
         let a = 0;
         let b = 0;
@@ -65,6 +71,7 @@ export let UnicodeCase = module (
         return a < left.byte_length ? 1 : b < right.byte_length ? -1 : 0;
     };
 
+    /// @brief Selects a supported locale from the language tag's primary subtag.
     let casing_locale = func(language_tag: string) -> CasingLocale {
         if (language_tag.byte_length < 2 || (language_tag.byte_length > 2 && language_tag.byte_at(2) != 45)) {
             return CasingLocale.Root;
@@ -80,6 +87,7 @@ export let UnicodeCase = module (
         return CasingLocale.Root;
     };
 
+    /// @brief Appends the uppercase mapping of the scalar, including multi-scalar expansions.
     let append_uppercase =
         func(result: string_builder.StringBuilder, source: uint32[list], index: int, locale: CasingLocale) {
             let scalar = source[index];
@@ -95,6 +103,7 @@ export let UnicodeCase = module (
             }
         };
 
+    /// @brief Appends the lowercase mapping of the scalar using its locale and surrounding text.
     let append_lowercase =
         func(result: string_builder.StringBuilder, source: uint32[list], index: int, locale: CasingLocale,
             before_cased: bool) {
@@ -134,13 +143,16 @@ export let UnicodeCase = module (
             }
         };
 
+    /// @brief Tests membership in the Unicode Cased property.
     let cased = func(scalar: uint32) -> bool => scalar < 128 ? scalars.is_ascii_alphabetic(scalar)
         : contains_property(data.Cased, scalar);
 
+    /// @brief Tests membership in the Unicode Case_Ignorable property.
     let case_ignorable = func(scalar: uint32) -> bool => scalar < 128
         ? scalar == 39 || scalar == 46 || scalar == 58 || scalar == 94 || scalar == 96
         : contains_property(data.CaseIgnorable, scalar);
 
+    /// @brief Looks for a following cased scalar, skipping case-ignorable scalars.
     let following_cased = func(source: uint32[list], index: int) -> bool {
         for (let next = index + 1; next < source.length; next += 1) {
             let scalar = source[next];
@@ -151,7 +163,7 @@ export let UnicodeCase = module (
         return false;
     };
 
-    // Return the first combining mark of class Above before the next base.
+    /// @brief Return the first combining mark of class Above before the next base.
     let following_above = func(source: uint32[list], index: int) -> uint32 {
         for (let next = index + 1; next < source.length; next += 1) {
             let scalar = source[next];
@@ -165,7 +177,7 @@ export let UnicodeCase = module (
         return 0;
     };
 
-    // Find the base before the current mark, stopping at a class Above mark.
+    /// @brief Find the base before the current mark, stopping at a class Above mark.
     let preceding_base = func(source: uint32[list], index: int) -> uint32 {
         let previous = index;
         while (previous > 0) {
@@ -181,6 +193,7 @@ export let UnicodeCase = module (
         return 0;
     };
 
+    /// @brief Maps a scalar to simple lowercase of its simple uppercase.
     let simple_fold = func(scalar: uint32) -> uint32 {
         if (scalar < 128) {
             return scalars.to_ascii_lower(scalar);
@@ -189,6 +202,7 @@ export let UnicodeCase = module (
         return offset < 0 ? scalar : unpack(data.SimpleFold, offset + 4);
     };
 
+    /// @brief Appends a scalar's mapped values from a fixed-stride table if a record exists.
     let append_mapping = func(result: string_builder.StringBuilder, table: string, stride: int, scalar: uint32) {
         let offset = mapping_offset(table, stride, scalar);
         if (offset < 0) {
@@ -204,6 +218,7 @@ export let UnicodeCase = module (
         }
     };
 
+    /// @brief Binary-searches sorted mapping keys and returns a record's byte offset or -1.
     let mapping_offset = func(table: string, stride: int, scalar: uint32) -> int {
         let low = 0;
         let high = table.byte_length / stride;
@@ -223,6 +238,7 @@ export let UnicodeCase = module (
         return -1;
     };
 
+    /// @brief Tests membership in a generated table of property ranges.
     let contains_property = func(table: string, scalar: uint32) -> bool {
         let low = 0;
         let high = table.byte_length / 4;
@@ -237,10 +253,12 @@ export let UnicodeCase = module (
         return (low & 1) != 0;
     };
 
+    /// @brief Decodes one scalar or property boundary from four printable ASCII bytes.
     let unpack = func(table: string, offset: int) -> uint32 =>
         (digit(table.byte_at(offset)) << 18) | (digit(table.byte_at(offset + 1)) << 12) |
         (digit(table.byte_at(offset + 2)) << 6) | digit(table.byte_at(offset + 3));
 
+    /// @brief Decodes one digit of the compact case-data alphabet.
     let digit = func(byte: uint8) -> uint32 {
         let code = byte as uint32;
         if (code >= 97) {

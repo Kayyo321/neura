@@ -1,9 +1,11 @@
-// The iteration protocol (Stdlib.md section 5.4). `has_next` has no effect
-// and can be repeated; `next` returns the next element and advances, and
-// traps with "no such element" after the last one. An iterator is used once.
+/// @brief Interfaces for forward traversal. Mutable collection iterators can detect structural changes before advancing.
+/// @see [Std.Collections.Iterator](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Iterator)
 export let Iterator = module (
+    /// @brief A single forward traversal over elements of type `T`.
     export let Iterator = interface<T> (
+        /// @brief Reports whether an element remains without advancing the traversal.
         let has_next = func -> bool;
+        /// @brief Returns the next element and advances. Traps with `no such element` at exhaustion.
         let next = func -> T;
     );
 );

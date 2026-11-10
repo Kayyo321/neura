@@ -1,25 +1,31 @@
 let.promote cell = import:Std.Core.Cell;
 
-// Accumulates UTF-8 text (Stdlib.md section 8.2). The layout is one built-in
-// uint8 list that always holds valid UTF-8: every append adds whole
-// characters and truncate cuts only at a character boundary.
-//
-// The language has no expression for a method's own receiver, so a builder
-// returns itself through a link that its factory fills in. Builders are made
-// with the module function `create`; the constructor takes a token that only
-// this module can name.
+/// @brief Accumulates UTF-8 text (Stdlib.md section 8.2).
+///
+/// The layout is one built-in uint8 list that always holds valid UTF-8: every append adds whole characters and
+/// truncate cuts only at a character boundary.
+///
+/// The language has no expression for a method's own receiver, so a builder returns itself through a link that
+/// its factory fills in. Builders are made with the module function `create`; the constructor takes a token
+/// that only this module can name.
+/// @see [Std.Core.StringBuilder](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-StringBuilder)
 export let StringBuilder = module (
+    /// @brief Restricts construction to the module's factories.
     let Seal = enum (Token);
 
+    /// @brief Accumulates mutable UTF-8 bytes and produces immutable string snapshots.
     export let StringBuilder = class (
+        /// @brief Stores the current UTF-8 bytes.
         let bytes: uint8[list] = [];
+        /// @brief Tracks the builder through a shared cell for bound operations that need its identity.
         let link: Cell<StringBuilder>;
 
+        /// @brief Initializes a builder with the supplied backing bytes and construction token.
         export let init = func(seal: Seal, owner: Cell<StringBuilder>) {
             link = owner;
         };
 
-        // Appends the bytes of `s` and returns this builder.
+        /// @brief Appends the bytes of `s` and returns this builder.
         export let append = func(s: string) -> StringBuilder {
             let count = s.byte_length;
             for (let i = 0; i < count; i++) {
@@ -28,8 +34,8 @@ export let StringBuilder = module (
             return link.value;
         };
 
-        // Appends the UTF-8 encoding of a Unicode scalar value. Traps for a
-        // surrogate or a value above 0x10FFFF.
+        /// @brief Appends the UTF-8 encoding of a Unicode scalar value. Traps for a surrogate or a value above
+        /// 0x10FFFF.
         export let append_scalar = func(scalar: uint32) -> StringBuilder {
             if (scalar < 128) {
                 bytes.append(scalar as uint8);
@@ -55,14 +61,14 @@ export let StringBuilder = module (
             return link.value;
         };
 
-        // Appends `s` and one LF.
+        /// @brief Appends `s` and one LF.
         export let append_line = func(s: string) -> StringBuilder {
             append(s);
             bytes.append(10);
             return link.value;
         };
 
-        // Appends `count` copies of `s`. A negative count traps.
+        /// @brief Appends `count` copies of `s`. A negative count traps.
         export let append_repeated = func(s: string, count: int) -> StringBuilder {
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
@@ -73,14 +79,16 @@ export let StringBuilder = module (
             return link.value;
         };
 
-        // The scalar appends use the built-in decimal and float text
-        // (Stdlib.md sections 5.2 and 7.5).
+        /// @brief The scalar appends use the built-in decimal and float text (Stdlib.md sections 5.2 and 7.5).
         export let append_int = func(v: int64) -> StringBuilder => append(v.to_string());
 
+        /// @brief Appends the decimal text of an unsigned integer.
         export let append_uint = func(v: uint64) -> StringBuilder => append(v.to_string());
 
+        /// @brief Appends the primitive text representation of a floating-point value.
         export let append_float = func(v: float64) -> StringBuilder => append(v.to_string());
 
+        /// @brief Appends lowercase Boolean text.
         export let append_bool = func(v: bool) -> StringBuilder {
             if (v) {
                 return append("true");
@@ -88,15 +96,17 @@ export let StringBuilder = module (
             return append("false");
         };
 
-        // Appends `value.to_string()`.
+        /// @brief Appends `value.to_string()`.
         export let append_value = func<T>(value: T) -> StringBuilder => append(value.to_string());
 
+        /// @brief Returns the number of accumulated UTF-8 bytes.
         export let byte_length = func -> int => bytes.length;
 
+        /// @brief Reports whether there are any accumulated bytes.
         export let is_empty = func -> bool => bytes.length == 0;
 
-        // Keeps the first `new_length` bytes. The length must be between 0
-        // and the current byte length and fall on a character boundary.
+        /// @brief Keeps the first `new_length` bytes. The length must be between 0 and the current byte length
+        /// and fall on a character boundary.
         export let truncate = func(new_length: int) {
             let length = bytes.length;
             if (new_length < 0 || new_length > length) {
@@ -117,11 +127,12 @@ export let StringBuilder = module (
             }
         };
 
+        /// @brief Removes all accumulated bytes.
         export let clear = func {
             bytes = [];
         };
 
-        // The current UTF-8 bytes determine equality and hashing.
+        /// @brief The current UTF-8 bytes determine equality and hashing.
         export let.override equals = func(other: class) -> bool {
             if (!(other is StringBuilder)) {
                 return false;
@@ -130,9 +141,10 @@ export let StringBuilder = module (
             return bytes === builder.bytes;
         };
 
+        /// @brief Hashes the current text contents.
         export let.override hash_code = func -> uint32 => bytes.hash_code();
 
-        // The accumulated text. The builder stays usable.
+        /// @brief The accumulated text. The builder stays usable.
         export let.override to_string = func -> string {
             let [valid, text] = string.from_utf8(bytes);
             if (!valid) {
@@ -141,6 +153,7 @@ export let StringBuilder = module (
             return text;
         };
 
+        /// @brief Copies the requested prefix of the backing bytes.
         let copy_prefix = func(count: int) -> uint8[list] {
             let kept: uint8[list] = [];
             for (let i = 0; i < count; i++) {
@@ -150,7 +163,7 @@ export let StringBuilder = module (
         };
     );
 
-    // A new, empty builder.
+    /// @brief A new, empty builder.
     export let create = func -> StringBuilder {
         let owner = cell.of<StringBuilder>(nil);
         let builder = new StringBuilder(Seal.Token, owner);

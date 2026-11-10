@@ -17,20 +17,26 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **ByteBuffer** · [`export let ByteBuffer = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L9)
-- **ByteBuffer.ByteBuffer** · [`export let write = func(input: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L13)
+- **ByteBuffer** · [`export let ByteBuffer = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L10)
+  A growable in-memory byte sink that can create independent readers.
+- **ByteBuffer.ByteBuffer** · [`export let write = func(input: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L15)
   Appends every byte; never fails.
-- **ByteBuffer.ByteBuffer** · [`export let to_list = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L19)
+- **ByteBuffer.ByteBuffer** · [`export let to_list = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L21)
   A copy of the bytes written so far.
-- **ByteBuffer.ByteBuffer** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L21)
-- **ByteBuffer.ByteBuffer** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L23)
-- **ByteBuffer.ByteBuffer** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L30)
+- **ByteBuffer.ByteBuffer** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L24)
+  Returns the current number of bytes.
+- **ByteBuffer.ByteBuffer** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L27)
+  Discards all accumulated bytes.
+- **ByteBuffer.ByteBuffer** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L34)
   Only the current byte sequence participates. Readers hold their own copies and do not affect the buffer's equality or hash.
-- **ByteBuffer.ByteBuffer** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L38)
-- **ByteBuffer.ByteBuffer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L40)
-- **ByteBuffer.ByteBuffer** · [`export let reader = func -> func(int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L44)
+- **ByteBuffer.ByteBuffer** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L43)
+  Hashes the current byte sequence.
+- **ByteBuffer.ByteBuffer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L46)
+  Returns the built-in list representation of the bytes.
+- **ByteBuffer.ByteBuffer** · [`export let reader = func -> func(int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L49)
   A byte source over a copy of the current contents. A maximum count below 1 traps.
-- **ByteBuffer** · [`export let create = func -> ByteBuffer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L60)
+- **ByteBuffer** · [`export let create = func -> ByteBuffer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L66)
+  Creates an empty byte buffer.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

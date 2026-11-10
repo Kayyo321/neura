@@ -17,15 +17,17 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Bool** · [`export let to_int = func(v: bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L8)
+- **Bool** · [`export let to_int = func(v: bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L9)
   1 for true, 0 for false.
-- **Bool** · [`export let xor = func(a: bool, b: bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L10)
-- **Bool** · [`export let compare = func(a: bool, b: bool) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L13)
+- **Bool** · [`export let xor = func(a: bool, b: bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L12)
+  Returns true when exactly one operand is true.
+- **Bool** · [`export let compare = func(a: bool, b: bool) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L15)
   The natural order: false before true. Usable as a comparator.
-- **Bool** · [`export let hash = func(v: bool) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L24)
+- **Bool** · [`export let hash = func(v: bool) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L26)
   1231 for true and 1237 for false (section 5.2).
-- **Bool** · [`export let to_string = func(v: bool) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L26)
-- **Bool** · [`export let parse = func(text: string) -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L37)
+- **Bool** · [`export let to_string = func(v: bool) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L29)
+  Returns the lowercase text `true` or `false`.
+- **Bool** · [`export let parse = func(text: string) -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L40)
   Accepts exactly `true` and `false`. The empty text fails with Empty; a proper prefix of either word with UnexpectedEnd at its length; any other text with InvalidCharacter at the first byte that matches neither word.
 <!-- END SOURCE API -->
 

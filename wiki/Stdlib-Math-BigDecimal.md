@@ -17,50 +17,57 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **BigDecimal** · [`export let RoundingMode = enum (Up, Down, Ceiling, Floor, HalfUp, HalfDown, HalfEven)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L23)
+- **BigDecimal** · [`export let RoundingMode = enum (Up, Down, Ceiling, Floor, HalfUp, HalfDown, HalfEven)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L21)
   Java's rounding modes: Up and Down round away from and toward zero, Ceiling and Floor toward positive and negative infinity, and the Half modes round to the nearest neighbour with ties away from zero, toward zero, or to the even neighbour.
-- **BigDecimal** · [`export let BigDecimal = class implements Comparable<BigDecimal>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L25)
-- **BigDecimal.BigDecimal** · [`export let init = func(unscaled_part: BigInteger, scale_part: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L30)
+- **BigDecimal** · [`export let BigDecimal = class implements Comparable<BigDecimal>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L24)
+  An immutable decimal represented by an unscaled integer times ten raised to the negative scale.
+- **BigDecimal.BigDecimal** · [`export let init = func(unscaled_part: BigInteger, scale_part: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L31)
   The value unscaled * 10^(-scale). A nil unscaled value traps.
-- **BigDecimal.BigDecimal** · [`export let unscaled = func -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L39)
+- **BigDecimal.BigDecimal** · [`export let unscaled = func -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L40)
   The unscaled value.
 - **BigDecimal.BigDecimal** · [`export let scale = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L43)
   The number of digits after the decimal point; negative for a multiple of a power of ten.
-- **BigDecimal.BigDecimal** · [`export let sign = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L45)
-- **BigDecimal.BigDecimal** · [`export let negate = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L47)
-- **BigDecimal.BigDecimal** · [`export let abs = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L49)
-- **BigDecimal.BigDecimal** · [`export let add = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L52)
+- **BigDecimal.BigDecimal** · [`export let sign = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L46)
+  Returns minus one, zero, or one according to the coefficient's sign.
+- **BigDecimal.BigDecimal** · [`export let negate = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L49)
+  Reverses the sign and preserves the scale.
+- **BigDecimal.BigDecimal** · [`export let abs = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L52)
+  Returns the absolute value and preserves the scale.
+- **BigDecimal.BigDecimal** · [`export let add = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L55)
   Exact; the result has the larger scale.
-- **BigDecimal.BigDecimal** · [`export let subtract = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L65)
+- **BigDecimal.BigDecimal** · [`export let subtract = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L68)
   Exact; the result has the larger scale.
-- **BigDecimal.BigDecimal** · [`export let multiply = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L68)
+- **BigDecimal.BigDecimal** · [`export let multiply = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L71)
   Exact; the result's scale is the sum of the scales.
-- **BigDecimal.BigDecimal** · [`export let divide = func(other: BigDecimal, result_scale: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L73)
+- **BigDecimal.BigDecimal** · [`export let divide = func(other: BigDecimal, result_scale: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L76)
   this / other rounded to `result_scale` digits after the point with `mode`. A zero divisor traps (reason 1) in the BigInteger division.
-- **BigDecimal.BigDecimal** · [`export let set_scale = func(new_scale: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L92)
+- **BigDecimal.BigDecimal** · [`export let set_scale = func(new_scale: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L95)
   The same value with `new_scale` digits after the point, rounded with `mode` when digits are dropped.
-- **BigDecimal.BigDecimal** · [`export let round = func(precision: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L103)
+- **BigDecimal.BigDecimal** · [`export let round = func(precision: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L105)
   The value rounded to `precision` significant digits with `mode`. A precision of 0 returns the value unchanged; a negative precision traps.
-- **BigDecimal.BigDecimal** · [`export let strip_trailing_zeros = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L124)
+- **BigDecimal.BigDecimal** · [`export let strip_trailing_zeros = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L125)
   The numerically equal value with no trailing zeros in the unscaled value; zero has scale 0.
-- **BigDecimal.BigDecimal** · [`export let pow = func(exponent: int) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L152)
+- **BigDecimal.BigDecimal** · [`export let pow = func(exponent: int) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L153)
   this^exponent exactly, with scale * exponent. pow(0) is 1 with scale 0; a negative exponent traps.
-- **BigDecimal.BigDecimal** · [`export let to_big_integer = func(mode: RoundingMode) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L160)
+- **BigDecimal.BigDecimal** · [`export let to_big_integer = func(mode: RoundingMode) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L161)
   The integer part rounded with `mode`.
 - **BigDecimal.BigDecimal** · [`export let to_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L165)
   The nearest float64, ties to even; infinities beyond the range and signed zeros below it.
-- **BigDecimal.BigDecimal** · [`export let compare_to = func(other: BigDecimal) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L197)
-- **BigDecimal.BigDecimal** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L229)
+- **BigDecimal.BigDecimal** · [`export let compare_to = func(other: BigDecimal) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L198)
+  Compares numerical values independently of scale without aligning widely separated scales.
+- **BigDecimal.BigDecimal** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L230)
   Numeric equality: 2.0 equals 2.00.
 - **BigDecimal.BigDecimal** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L238)
   From 17, combines the hashes of the stripped form's unscaled value and scale.
-- **BigDecimal.BigDecimal** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L247)
+- **BigDecimal.BigDecimal** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L246)
   Plain notation: exactly `scale` digits after the point when the scale is positive, and -scale appended zeros when it is negative. Zero with a negative scale prints as 0.
 - **BigDecimal** · [`export let of_int64 = func(value: int64) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L267)
-- **BigDecimal** · [`export let of_big_integer = func(value: BigInteger, scale: int) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L270)
-- **BigDecimal** · [`export let of_float64 = func(v: float64) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L275)
+  Constructs an exact decimal from an int64 at scale zero.
+- **BigDecimal** · [`export let of_big_integer = func(value: BigInteger, scale: int) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L271)
+  Constructs a decimal from its unscaled integer and scale.
+- **BigDecimal** · [`export let of_float64 = func(v: float64) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L276)
   The exact binary value of v with the smallest scale that holds it: 0.5 has scale 1 and 2.0 has scale 0. NaN and the infinities trap.
-- **BigDecimal** · [`export let parse = func(text: string) -> Result<BigDecimal>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L311)
+- **BigDecimal** · [`export let parse = func(text: string) -> Result<BigDecimal>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L313)
   An optional sign, digits with an optional point (at least one digit overall), and an optional exponent: `e` or `E`, an optional sign, and digits. The scale is the number of fraction digits minus the exponent; one outside the int range fails with OutOfRange.
 <!-- END SOURCE API -->
 

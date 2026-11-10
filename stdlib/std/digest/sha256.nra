@@ -1,11 +1,12 @@
-// SHA-256 (FIPS 180-4; Stdlib.md section 13.2). Words are uint32 values, so
-// a rotation is two shifts and an or. A sum modulo 2^32 follows the wrapping
-// recipe of Stdlib.md section 7.2: widen each term to uint64, add, mask with
-// 4294967295, and convert back. The mask is a literal because a named
-// constant is a global read, which costs an NVM step at every use.
+/// @brief SHA-256 (FIPS 180-4; Stdlib.md section 13.2).
+///
+/// Words are uint32 values, so a rotation is two shifts and an or. A sum modulo 2^32 follows the wrapping
+/// recipe of Stdlib.md section 7.2: widen each term to uint64, add, mask with 4294967295, and convert back. The
+/// mask is a literal because a named constant is a global read, which costs an NVM step at every use.
+/// @see [Std.Digest.Sha256](https://github.com/Kayyo321/neura/wiki/Stdlib-Digest-Sha256)
 export let Sha256 = module (
-    // The round constants: the first 32 bits of the fractional parts of the
-    // cube roots of the first 64 primes.
+    /// @brief The round constants: the first 32 bits of the fractional parts of the cube roots of the first 64
+    /// primes.
     let RoundConstants: uint32[] = [
         1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221,
         3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580,
@@ -17,30 +18,32 @@ export let Sha256 = module (
         1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298
     ];
 
-    // A running digest. `finish` ends it: a later update or finish traps
-    // with "invalid state: digest finished".
+    /// @brief A running digest. `finish` ends it: a later update or finish traps with "invalid state: digest
+    /// finished".
     export let Sha256 = class (
-        // The eight hash words, initially the first 32 bits of the
-        // fractional parts of the square roots of the first eight primes.
+        /// @brief The eight hash words, initially the first 32 bits of the fractional parts of the square roots
+        /// of the first eight primes.
         let state: uint32[list] = [
             1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225
         ];
-        // The message schedule, reused by every block.
+        /// @brief The message schedule, reused by every block.
         let schedule: uint32[list] = [];
-        // The bytes of an incomplete block, fewer than 64.
+        /// @brief The bytes of an incomplete block, fewer than 64.
         let pending: uint8[list] = [];
-        // The number of message bytes added so far.
+        /// @brief The number of message bytes added so far.
         let total: uint64 = 0;
+        /// @brief Records whether finish has already consumed the digest state.
         let finished: bool = false;
 
+        /// @brief Initializes the reusable message schedule for a fresh digest.
         export let init = func {
             for (let t = 0; t < 64; t++) {
                 schedule.append(0);
             }
         };
 
-        // Adds the bytes to the message. Whole blocks are read in place from
-        // `bytes`; only the bytes of an incomplete block are copied.
+        /// @brief Adds the bytes to the message. Whole blocks are read in place from `bytes`; only the bytes of
+        /// an incomplete block are copied.
         export let update = func(bytes: uint8[list]) {
             if (finished) {
                 trap_with_message("invalid state: digest finished");
@@ -69,8 +72,7 @@ export let Sha256 = module (
             }
         };
 
-        // Pads the message, ends the digest, and returns the 32 bytes of the
-        // hash.
+        /// @brief Pads the message, ends the digest, and returns the 32 bytes of the hash.
         export let finish = func -> uint8[list] {
             if (finished) {
                 trap_with_message("invalid state: digest finished");
@@ -99,13 +101,11 @@ export let Sha256 = module (
             return digest;
         };
 
-        // Processes the 64-byte block at the offset.
-        //
-        // Cost note: unrolling the rounds (eight per loop iteration, with the
-        // schedule in a 16-word window of locals) cuts the NVM steps for 10 KB
-        // from about 140,000 to about 33,000 but multiplies the neurons and
-        // the image size by four, and the measured run time does not change.
-        // The rolled loops are kept.
+        /// @brief Processes the 64-byte block at the offset.
+        ///
+        /// Cost note: unrolling the rounds (eight per loop iteration, with the schedule in a 16-word window of
+        /// locals) cuts the NVM steps for 10 KB from about 140,000 to about 33,000 but multiplies the neurons
+        /// and the image size by four, and the measured run time does not change. The rolled loops are kept.
         let compress = func(block: uint8[list], offset: int) {
             let w = schedule;
             let p = offset;
@@ -159,10 +159,10 @@ export let Sha256 = module (
         };
     );
 
-    // A new digest with no bytes added.
+    /// @brief A new digest with no bytes added.
     export let create = func -> Sha256 => new Sha256();
 
-    // The 32-byte hash of the bytes.
+    /// @brief The 32-byte hash of the bytes.
     export let of = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha256();
         digest.update(bytes);

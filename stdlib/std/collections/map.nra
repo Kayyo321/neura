@@ -1,23 +1,35 @@
 let.promote _ = import:Std.Collections.Iterable;
 let optional = import:Std.Core.Optional;
 
-// A read-only association of keys to values (HashMap, TreeMap, IntMap,
-// StringMap, OrdinalMap, ImmutableMap). Iteration yields [K, V] entries.
+/// @brief A read-only association of keys to values (HashMap, TreeMap, IntMap,
+/// StringMap, OrdinalMap, ImmutableMap). Iteration yields [K, V] entries.
+/// @see [Std.Collections.Map](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Map)
 export let Map = module (
+    /// @brief Read-only associations that iterate as `[key, value]` tuples.
     export let Map = interface<K, V>:Iterable<[K, V]> (
+        /// @brief Returns the number of entries.
         let size = func -> int;
+        /// @brief Reports whether an entry exists for `key`.
         let contains_key = func(key: K) -> bool;
+        /// @brief Returns the associated value as `Some`, or `None` when the key is absent.
         let get = func(key: K) -> optional.Optional<V>;
+        /// @brief Returns the associated value, or `fallback` when the key is absent.
         let get_or = func(key: K, fallback: V) -> V;
-        // Traps with "no such element" when the key is absent.
+        /// @brief Returns the associated value. Traps with `no such element` when the key is absent.
         let require = func(key: K) -> V;
-        // New built-in lists in iteration order.
+        /// @brief Copies the keys to a new built-in list in iteration order.
         let keys = func -> K[list];
+        /// @brief Copies the values to a new built-in list in iteration order.
         let values = func -> V[list];
+        /// @brief Copies the `[key, value]` tuples to a new built-in list in iteration order.
         let entries = func -> [K, V][list];
+        /// @brief Tests whether `value.equals(held_value)` is true for any entry.
         let contains_value = func(value: V) -> bool;
+        /// @brief Calls `action` with the key and value of each entry in iteration order.
+        /// @pre The action leaves the map structure unchanged.
         let for_each = func(action: func(K, V) -> void);
 
+        /// @brief Returns true when there are no entries.
         let is_empty = func -> bool => size() == 0;
     );
 );

@@ -1,11 +1,15 @@
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 
-// A resource released by an explicit close (Stdlib.md section 5.5). Closing
-// again does nothing and returns Ok; if close reports an error the resource
-// is still closed. File, TcpStream, and TcpListener implement it.
+/// @brief A resource released by an explicit close (Stdlib.md section 5.5).
+///
+/// Closing again does nothing and returns Ok; if close reports an error the resource is still closed. File,
+/// TcpStream, and TcpListener implement it.
+/// @see [Std.Io.Closeable](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-Closeable)
 export let Closeable = module (
+    /// @brief The contract for a resource that callers release explicitly.
     export let Closeable = interface (
+        /// @brief Releases the resource. The resource is closed even if the first call returns an error.
         let close = func -> Result<Unit>;
     );
 );

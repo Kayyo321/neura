@@ -5,37 +5,38 @@ let optional = import:Std.Core.Optional;
 let parser = import:Std.Text.Internal.RegexParser;
 let result = import:Std.Core.Result;
 
-// Regular expressions (Stdlib.md section 8.4). A pattern is parsed into a
-// syntax tree, compiled into a program, and run by a Pike machine: the
-// leftmost match wins, and among the matches that start there the one a
-// backtracking matcher would find first. Positions are byte offsets.
-//
-// Syntax: literals; . (any scalar but LF, or any with dot_all); classes
-// [...] and [^...] with ranges; \d \w \s \D \W \S (ASCII); \t \n \r, an
-// escaped ASCII punctuation character, and \u{X} with 1 to 6 hex digits;
-// ^ and $ (text start and end, or line start and end with multi_line);
-// \b and \B (ASCII word characters); (...), (?:...), (?<name>...) and
-// (?P<name>...); |; and * + ? {n} {n,} {n,m}, each with a lazy form ending
-// in ?. Backreferences, lookaround, possessive quantifiers, Unicode
-// properties, inline flags, and any other escape fail to compile. Limits: a
-// repetition count of at most 1000, at most 10,000 instructions, and group
-// nesting of at most 250. Every failure is a Parse error at the pattern
-// offset of the offending construct.
-//
-// Where backtracking engines disagree: an iteration beyond a quantifier's
-// minimum that matches the empty string fails (ECMAScript's rule; Python and
-// Perl accept one), and a group inside a repeated group keeps the value of
-// the last iteration in which it participated (Python and Perl; ECMAScript
-// resets it). Because the machine keeps one thread per instruction and
-// position, a new iteration of a loop whose body can match empty can merge
-// with the unfinished previous iteration; the match can then differ from
-// every backtracking order. Loops whose body cannot match empty are exact.
+/// @brief Regular expressions (Stdlib.md section 8.4).
+///
+/// A pattern is parsed into a syntax tree, compiled into a program, and run by a Pike machine: the leftmost
+/// match wins, and among the matches that start there the one a backtracking matcher would find first.
+/// Positions are byte offsets.
+///
+/// Syntax: literals; . (any scalar but LF, or any with dot_all); classes [...] and [^...] with ranges; \d \w \s
+/// \D \W \S (ASCII); \t \n \r, an escaped ASCII punctuation character, and \u{X} with 1 to 6 hex digits; ^ and
+/// $ (text start and end, or line start and end with multi_line); \b and \B (ASCII word characters); (...),
+/// (?:...), (?<name>...) and (?P<name>...); |; and * + ? {n} {n,} {n,m}, each with a lazy form ending in ?.
+/// Backreferences, lookaround, possessive quantifiers, Unicode properties, inline flags, and any other escape
+/// fail to compile. Limits: a repetition count of at most 1000, at most 10,000 instructions, and group nesting
+/// of at most 250. Every failure is a Parse error at the pattern offset of the offending construct.
+///
+/// Where backtracking engines disagree: an iteration beyond a quantifier's minimum that matches the empty
+/// string fails (ECMAScript's rule; Python and Perl accept one), and a group inside a repeated group keeps the
+/// value of the last iteration in which it participated (Python and Perl; ECMAScript resets it). Because the
+/// machine keeps one thread per instruction and position, a new iteration of a loop whose body can match empty
+/// can merge with the unfinished previous iteration; the match can then differ from every backtracking order.
+/// Loops whose body cannot match empty are exact.
+/// @see [Std.Text.Regex](https://github.com/Kayyo321/neura/wiki/Stdlib-Text-Regex)
 export let Regex = module (
+    /// @brief Stores three matching options whose values participate in equality and hashing.
     export let RegexFlags = class (
+        /// @brief Enables ASCII-only case-insensitive matching.
         export let ignore_ascii_case: bool = false;
+        /// @brief Makes caret and dollar match LF-delimited line boundaries.
         export let multi_line: bool = false;
+        /// @brief Allows dot to match LF.
         export let dot_all: bool = false;
 
+        /// @brief Compares flags by their three Boolean values.
         export let.override equals = func(other: class) -> bool {
             if (!(other is RegexFlags)) {
                 return false;
@@ -45,32 +46,42 @@ export let Regex = module (
                 multi_line == flags.multi_line && dot_all == flags.dot_all;
         };
 
+        /// @brief Encodes the enabled flags as a bit mask.
         export let.override hash_code = func -> uint32 =>
             (ignore_ascii_case ? 1 : 0) | (multi_line ? 2 : 0) | (dot_all ? 4 : 0);
 
+        /// @brief Formats the flags as a RegexFlags description.
         export let.override to_string = func -> string =>
             "RegexFlags(ignore_ascii_case=" + ignore_ascii_case.to_string() +
                 ", multi_line=" + multi_line.to_string() + ", dot_all=" + dot_all.to_string() + ")";
     );
 
-    // One match: group 0 is the whole match. Immutable.
+    /// @brief One match: group 0 is the whole match. Immutable.
     export let RegexMatch = class (
+        /// @brief The original input retained by the match.
         let input: string = "";
+        /// @brief The capture start and end offsets in UTF-8 bytes. Unset captures use -1.
         let slots: int[list] = [];
+        /// @brief The names of the capturing groups in capture order.
         let names: string[list] = [];
 
+        /// @brief Stores the original input, capture offsets, and capture names.
         export let init = func(text: string, captured: int[list], group_names: string[list]) {
             input = text;
             slots = captured;
             names = group_names;
         };
 
+        /// @brief Returns the inclusive byte offset of the whole match.
         export let start = func -> int => slots[0];
 
+        /// @brief Returns the exclusive byte offset of the whole match.
         export let end = func -> int => slots[1];
 
+        /// @brief Returns the whole matched substring.
         export let text = func -> string => input.slice(slots[0], slots[1]);
 
+        /// @brief Tests equality of input, capture offsets, and group names.
         export let.override equals = func(other: class) -> bool {
             if (!(other is RegexMatch)) {
                 return false;
@@ -79,14 +90,15 @@ export let Regex = module (
             return input == found.input && slots === found.slots && names === found.names;
         };
 
+        /// @brief Combines the hashes of the input, capture offsets, and group names.
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(input.hash_code(), slots.hash_code()), names.hash_code());
 
+        /// @brief Returns the whole matched substring.
         export let.override to_string = func -> string => text();
 
-        // The group's text, or None when the group did not participate. An
-        // index outside 0 through group_count() traps with "invalid
-        // argument: no such group".
+        /// @brief The group's text, or None when the group did not participate. An index outside 0 through
+        /// group_count() traps with "invalid argument: no such group".
         export let group = func(index: int) -> optional.Optional<string> {
             check_group(index);
             let start_offset = slots[2 * index];
@@ -96,18 +108,18 @@ export let Regex = module (
             return optional.Optional<string>.Some(input.slice(start_offset, slots[2 * index + 1]));
         };
 
-        // The group's start offset, or -1 when it did not participate.
+        /// @brief The group's start offset, or -1 when it did not participate.
         export let group_start = func(index: int) -> int {
             check_group(index);
             return slots[2 * index];
         };
 
-        // The named group's text, or None when it did not participate. A
-        // name the pattern does not define traps with "invalid argument: no
-        // such group".
+        /// @brief The named group's text, or None when it did not participate. A name the pattern does not
+        /// define traps with "invalid argument: no such group".
         export let named_group = func(name: string) -> optional.Optional<string> =>
             group(group_index(names, name));
 
+        /// @brief Traps unless the index identifies group zero or a valid capture.
         let check_group = func(index: int) {
             if (index < 0 || index > names.length) {
                 trap_with_message("invalid argument: no such group");
@@ -115,39 +127,45 @@ export let Regex = module (
         };
     );
 
+    /// @brief Stores a compiled pattern and provides matching, replacement, and splitting.
     export let Regex = class (
+        /// @brief The original pattern text.
         let source: string = "";
+        /// @brief The compiled program and its reusable execution state.
         let program: machine.Program = nil;
+        /// @brief The names of the capturing groups in capture order.
         let names: string[list] = [];
 
-        // Called by compile_with; the program type is internal to the library.
+        /// @brief Called by compile_with; the program type is internal to the library.
         export let init = func(text: string, compiled: machine.Program, group_names: string[list]) {
             source = text;
             program = compiled;
             names = group_names;
         };
 
+        /// @brief Tests whether the pattern matches anywhere in the input.
         export let is_match = func(input: string) -> bool =>
             machine.search(program, input, 0, machine.Earliest).length > 0;
 
-        // Whether the pattern matches the whole input.
+        /// @brief Whether the pattern matches the whole input.
         export let matches_fully = func(input: string) -> bool =>
             machine.search(program, input, 0, machine.Whole).length > 0;
 
+        /// @brief Returns the first match or nil when none exists.
         export let find = func(input: string) -> RegexMatch => match_at(input, 0);
 
-        // The first match starting at or after the offset, or nil. The offset
-        // must be a character boundary from 0 through the byte length;
-        // otherwise the call traps with "invalid argument: offset out of
-        // range" or "invalid argument: offset is not a character boundary".
-        // ^ and \b still see the text before the offset.
+        /// @brief The first match starting at or after the offset, or nil.
+        ///
+        /// The offset must be a character boundary from 0 through the byte length; otherwise the call traps
+        /// with "invalid argument: offset out of range" or "invalid argument: offset is not a character
+        /// boundary". ^ and \b still see the text before the offset.
         export let find_from = func(input: string, offset: int) -> RegexMatch {
             check_offset(input, offset);
             return match_at(input, offset);
         };
 
-        // Successive non-overlapping matches. After an empty match the search
-        // resumes one scalar value later.
+        /// @brief Successive non-overlapping matches. After an empty match the search resumes one scalar value
+        /// later.
         export let find_all = func(input: string) -> RegexMatch[list] {
             let matches: RegexMatch[list] = [];
             let length = input.byte_length;
@@ -169,17 +187,16 @@ export let Regex = module (
             return matches;
         };
 
-        // Replaces every match of find_all. In the replacement, $0 through
-        // $99 (two digits taken when present) and ${name} or ${number}
-        // insert a group, and $$ is a dollar sign; a group that did not
-        // participate inserts nothing. A reference to a group the pattern
-        // does not have traps with "invalid argument: no such group"; any
-        // other $ traps with "invalid argument: malformed replacement". The
-        // replacement is checked before matching.
+        /// @brief Replaces every match of find_all.
+        ///
+        /// In the replacement, $0 through $99 (two digits taken when present) and ${name} or ${number} insert a
+        /// group, and $$ is a dollar sign; a group that did not participate inserts nothing. A reference to a
+        /// group the pattern does not have traps with "invalid argument: no such group"; any other $ traps with
+        /// "invalid argument: malformed replacement". The replacement is checked before matching.
         export let replace_all = func(input: string, replacement: string) -> string =>
             replace_matches(input, replacement, find_all(input));
 
-        // Replaces the first match, with the rules of replace_all.
+        /// @brief Replaces the first match, with the rules of replace_all.
         export let replace_first = func(input: string, replacement: string) -> string {
             let matches: RegexMatch[list] = [];
             let first = find(input);
@@ -189,9 +206,8 @@ export let Regex = module (
             return replace_matches(input, replacement, matches);
         };
 
-        // The pieces between the matches of find_all, with the rules of
-        // Strings.split: empty pieces are kept, and an input without a match
-        // gives one piece.
+        /// @brief The pieces between the matches of find_all, with the rules of Strings.split: empty pieces are
+        /// kept, and an input without a match gives one piece.
         export let split = func(input: string) -> string[list] {
             let pieces: string[list] = [];
             let start = 0;
@@ -203,11 +219,13 @@ export let Regex = module (
             return pieces;
         };
 
-        // The number of capturing groups, not counting group 0.
+        /// @brief The number of capturing groups, not counting group 0.
         export let group_count = func -> int => names.length;
 
+        /// @brief Returns the original pattern text.
         export let pattern = func -> string => source;
 
+        /// @brief Tests equality of the original pattern and recorded compilation options.
         export let.override equals = func(other: class) -> bool {
             if (!(other is Regex)) {
                 return false;
@@ -216,13 +234,17 @@ export let Regex = module (
             return source == expression.source && compile_options() == expression.compile_options();
         };
 
+        /// @brief Hashes the original pattern and recorded compilation options.
         export let.override hash_code = func -> uint32 =>
             hashing.combine(source.hash_code(), compile_options().hash_code());
 
+        /// @brief Returns the original pattern text.
         export let.override to_string = func -> string => source;
 
+        /// @brief Returns the option bits or -1 for an uninitialized program.
         let compile_options = func -> int => program == nil ? -1 : program.options;
 
+        /// @brief Searches from a validated byte offset and wraps any matching capture offsets.
         let match_at = func(input: string, offset: int) -> RegexMatch {
             let slots = machine.search(program, input, offset, machine.Leftmost);
             if (slots.length == 0) {
@@ -231,6 +253,7 @@ export let Regex = module (
             return new RegexMatch(input, slots, names);
         };
 
+        /// @brief Builds replacement output from the replacement template and supplied matches.
         let replace_matches = func(input: string, replacement: string, matches: RegexMatch[list]) -> string {
             let segments = parse_replacement(replacement, names);
             if (matches.length == 0) {
@@ -260,12 +283,12 @@ export let Regex = module (
         };
     );
 
-    // Compiles the pattern with every flag off.
+    /// @brief Compiles the pattern with every flag off.
     export let compile = func(pattern: string) -> result.Result<Regex> =>
         compile_with(pattern, new RegexFlags());
 
-    // Compiles the pattern; a syntax error or an exceeded limit is a Parse
-    // error at the offending pattern offset. The flags are read once.
+    /// @brief Compiles the pattern; a syntax error or an exceeded limit is a Parse error at the offending
+    /// pattern offset. The flags are read once.
     export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex> {
         let syntax = new parser.Parser(pattern);
         syntax.parse();
@@ -284,7 +307,7 @@ export let Regex = module (
         return result.Result<Regex>.Ok(new Regex(pattern, program, syntax.names));
     };
 
-    // The index of the named group; traps when there is none.
+    /// @brief The index of the named group; traps when there is none.
     let group_index = func(names: string[list], name: string) -> int {
         let k = 0;
         while (k < names.length) {
@@ -296,7 +319,7 @@ export let Regex = module (
         trap_with_message("invalid argument: no such group");
     };
 
-    // The replacement as segments: literal text, then a group index or -1.
+    /// @brief The replacement as segments: literal text, then a group index or -1.
     let parse_replacement = func(replacement: string, names: string[list]) -> [string, int][list] {
         let segments: [string, int][list] = [];
         let length = replacement.byte_length;
@@ -353,7 +376,7 @@ export let Regex = module (
         return segments;
     };
 
-    // The value of a reference made only of decimal digits, or -1.
+    /// @brief The value of a reference made only of decimal digits, or -1.
     let number_of = func(reference: string) -> int {
         let value = 0;
         let k = 0;
@@ -370,6 +393,7 @@ export let Regex = module (
         return value;
     };
 
+    /// @brief Traps unless the offset lies within the text at a UTF-8 boundary.
     let check_offset = func(s: string, offset: int) {
         if (offset < 0 || offset > s.byte_length) {
             trap_with_message("invalid argument: offset out of range");
@@ -379,6 +403,7 @@ export let Regex = module (
         }
     };
 
+    /// @brief Returns the scalar width implied by a UTF-8 lead byte.
     let scalar_width = func(lead: uint8) -> int {
         if (lead < 128) {
             return 1;
@@ -392,6 +417,7 @@ export let Regex = module (
         return 4;
     };
 
+    /// @brief Appends a half-open string byte range to the output list.
     let append_bytes = func(bytes: uint8[list], s: string, start: int, end: int) {
         let i = start;
         while (i + 4 <= end) {
@@ -407,6 +433,7 @@ export let Regex = module (
         }
     };
 
+    /// @brief Converts the accumulated UTF-8 bytes into a string.
     let text_of = func(bytes: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(bytes);
         return text;

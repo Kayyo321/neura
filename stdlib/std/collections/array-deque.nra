@@ -4,53 +4,59 @@ let iterators = import:Std.Collections.Iterator;
 let optional = import:Std.Core.Optional;
 let text_depth = import:Std.Collections.Internal.TextDepth;
 
-// A double-ended queue over two built-in lists used as stacks (Stdlib.md
-// section 9.4). Removing an element removes its slot, so nothing removed
-// stays reachable. Equality and hashing are by identity.
+/// @brief Double-ended queues backed by two built-in lists used as stacks.
+/// Removal drops the vacated slot, and equality and hashing use identity.
+/// @see [Std.Collections.ArrayDeque](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-ArrayDeque)
 export let ArrayDeque = module (
+    /// @brief A double-ended queue with constant-time indexing and amortized constant-time end operations.
     export let ArrayDeque = class<T> implements Deque<T> (
-        // The first part of the deque in reverse order: its last element is
-        // the deque's first.
+        /// @brief The first part of the deque in reverse order: its last element is
+        /// the deque's first.
         let front: T[list] = [];
-        // The rest of the deque in order.
+        /// @brief The rest of the deque in order.
         let back: T[list] = [];
-        // Advanced after each structural change; shared with iterators.
+        /// @brief The structural modification count shared with iterators.
         let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
+        /// @brief The depth of this instance's active text conversion, or zero when inactive.
         let printing_depth: int = 0;
 
+        /// @brief Advances the version observed by active iterators.
         let changed = func {
             modifications.value += 1;
         };
 
+        /// @brief Returns the number of elements.
         export let size = func -> int => front.length + back.length;
 
+        /// @brief Returns true when there are no elements.
         export let is_empty = func -> bool => front.length == 0 && back.length == 0;
 
-        // The element at `index` from the first, in constant time. A bounds
-        // trap for an index outside 0 through size() - 1.
+        /// @brief Returns the element at zero-based `index` in constant time. An invalid index causes a bounds trap.
         export let get = func(index: int) -> T {
             let split = front.length;
             return (index < split) ? front[split - 1 - index] : back[index - split];
         };
 
+        /// @brief Inserts `value` at the front.
         export let add_first = func(value: T) {
             front.append(value);
             changed();
         };
 
+        /// @brief Appends `value` at the back.
         export let add_last = func(value: T) {
             back.append(value);
             changed();
         };
 
-        // add_last.
+        /// @brief Appends `value` at the back.
         export let enqueue = func(value: T) {
             back.append(value);
             changed();
         };
 
-        // Moves the first half of `back`, rounded up, into `front` in reverse
-        // order and shifts the rest of `back` down.
+        /// @brief Moves the first half of `back`, rounded up, into `front` in reverse
+        /// order and shifts the rest of `back` down.
         let refill_front = func {
             let count = back.length;
             let moved = (count + 1) / 2;
@@ -69,8 +75,7 @@ export let ArrayDeque = module (
             }
         };
 
-        // The mirror of refill_front: the deque's last half, rounded up,
-        // moves from the start of `front` into `back`.
+        /// @brief Moves the last half of the deque, rounded up, from `front` into `back` in deque order.
         let refill_back = func {
             let count = front.length;
             let moved = (count + 1) / 2;
@@ -89,7 +94,7 @@ export let ArrayDeque = module (
             }
         };
 
-        // Traps with "no such element" when empty.
+        /// @brief Removes and returns the first element. Traps with `no such element` when empty.
         export let remove_first = func -> T {
             if (front.length == 0) {
                 if (back.length == 0) {
@@ -104,6 +109,7 @@ export let ArrayDeque = module (
             return value;
         };
 
+        /// @brief Removes and returns the last element. Traps with `no such element` when empty.
         export let remove_last = func -> T {
             if (back.length == 0) {
                 if (front.length == 0) {
@@ -118,9 +124,10 @@ export let ArrayDeque = module (
             return value;
         };
 
-        // remove_first.
+        /// @brief Removes and returns the first element. Traps with `no such element` when empty.
         export let dequeue = func -> T => remove_first();
 
+        /// @brief Returns the first element. Traps with `no such element` when empty.
         export let first = func -> T {
             if (front.length > 0) {
                 return front[front.length - 1];
@@ -131,6 +138,7 @@ export let ArrayDeque = module (
             return back[0];
         };
 
+        /// @brief Returns the last element. Traps with `no such element` when empty.
         export let last = func -> T {
             if (back.length > 0) {
                 return back[back.length - 1];
@@ -141,7 +149,7 @@ export let ArrayDeque = module (
             return front[0];
         };
 
-        // The first element, or None when empty.
+        /// @brief The first element, or None when empty.
         export let peek = func -> optional.Optional<T> {
             if (front.length > 0) {
                 return optional.Optional<T>.Some(front[front.length - 1]);
@@ -152,6 +160,7 @@ export let ArrayDeque = module (
             return optional.Optional<T>.None;
         };
 
+        /// @brief Removes the first element and returns it as `Some`, or returns `None` when empty.
         export let try_dequeue = func -> optional.Optional<T> {
             if (front.length == 0 && back.length == 0) {
                 return optional.Optional<T>.None;
@@ -159,6 +168,7 @@ export let ArrayDeque = module (
             return optional.Optional<T>.Some(remove_first());
         };
 
+        /// @brief Removes all elements from both halves of the deque.
         export let clear = func {
             let empty_front: T[list] = [];
             let empty_back: T[list] = [];
@@ -167,7 +177,7 @@ export let ArrayDeque = module (
             changed();
         };
 
-        // By equals, with `value` as the receiver.
+        /// @brief Tests membership with `value.equals(element)`.
         export let contains = func(value: T) -> bool {
             for (let element in front) {
                 if (value === element) {
@@ -182,7 +192,7 @@ export let ArrayDeque = module (
             return false;
         };
 
-        // A new built-in list from first to last.
+        /// @brief A new built-in list from first to last.
         export let to_list = func -> T[list] {
             let result: T[list] = [];
             let i = front.length - 1;
@@ -196,11 +206,12 @@ export let ArrayDeque = module (
             return result;
         };
 
-        // First to last; fail-fast.
+        /// @brief Returns a fail-fast iterator from the front to the back.
         export let iterator = func -> iterators.Iterator<T> =>
             new ArrayDequeIterator<T>(front, back, modifications);
 
-        // First to last. The action must not change the deque structurally.
+        /// @brief Calls `action` from the front to the back.
+        /// @pre The action leaves the deque structure unchanged.
         export let for_each = func(action: func(T) -> void) {
             let expected = modifications.value;
             let i = 0;
@@ -213,8 +224,8 @@ export let ArrayDeque = module (
             }
         };
 
-        // Traps with "invalid state: ..." when iteration and indexing
-        // disagree or the size is inconsistent.
+        /// @brief Traps with "invalid state: ..." when iteration and indexing
+        /// disagree or the size is inconsistent.
         export let validate = func {
             let count = size();
             if (count != front.length + back.length || count < 0) {
@@ -233,8 +244,8 @@ export let ArrayDeque = module (
             }
         };
 
-        // `[a, b, c]` from first to last; the deque itself as a direct
-        // element prints "(this collection)".
+        /// @brief Formats elements as `[a, b, c]` from first to last. The deque itself as a direct
+        /// element prints "(this collection)".
         export let.override to_string = func -> string {
             if (printing_depth != 0 && printing_depth == text_depth.current()) {
                 return "(this collection)";
@@ -248,15 +259,21 @@ export let ArrayDeque = module (
         };
     );
 
-    // Walks `front` from its end, then `back`, comparing the deque's
-    // modification count before every step.
+    /// @brief Walks `front` from its end, then `back`, comparing the deque's
+    /// modification count before every step.
     let ArrayDequeIterator = class<T> implements iterators.Iterator<T> (
+        /// @brief The first half of the deque stored in reverse order.
         let front: T[list];
+        /// @brief The remaining deque elements stored in forward order.
         let back: T[list];
+        /// @brief The live modification counter shared with the source collection.
         let modifications: cell.Cell<uint64>;
+        /// @brief The source version recorded when the iterator was created.
         let expected: uint64;
+        /// @brief The zero-based position of the next element.
         let position: int = 0;
 
+        /// @brief Captures both deque halves and the current modification count.
         export let init = func(first_part: T[list], rest: T[list], count: cell.Cell<uint64>) {
             front = first_part;
             back = rest;
@@ -264,6 +281,7 @@ export let ArrayDeque = module (
             expected = count.value;
         };
 
+        /// @brief Reports whether another element remains. Traps with `collection modified during iteration` after a structural change.
         export let has_next = func -> bool {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
@@ -271,6 +289,7 @@ export let ArrayDeque = module (
             return position < front.length + back.length;
         };
 
+        /// @brief Returns the next element and advances. Traps with `collection modified during iteration` after a structural change. Traps with `no such element` at exhaustion.
         export let next = func -> T {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
@@ -288,9 +307,10 @@ export let ArrayDeque = module (
         };
     );
 
+    /// @brief Creates an empty deque.
     export let create = func<T> -> ArrayDeque<T> => new ArrayDeque<T>();
 
-    // A deque of `items` from first to last; copies.
+    /// @brief Creates a deque from a shallow copy of `items`, in list order.
     export let of = func<T>(items: T[list]) -> ArrayDeque<T> {
         let result = new ArrayDeque<T>();
         for (let item in items) {

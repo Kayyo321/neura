@@ -17,12 +17,13 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Sha256** · [`export let Sha256 = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L22)
+- **Sha256** · [`export let Sha256 = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L23)
   A running digest. `finish` ends it: a later update or finish traps with "invalid state: digest finished".
-- **Sha256.Sha256** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L36)
-- **Sha256.Sha256** · [`export let update = func(bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L44)
+- **Sha256.Sha256** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L39)
+  Initializes the reusable message schedule for a fresh digest.
+- **Sha256.Sha256** · [`export let update = func(bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L47)
   Adds the bytes to the message. Whole blocks are read in place from `bytes`; only the bytes of an incomplete block are copied.
-- **Sha256.Sha256** · [`export let finish = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L74)
+- **Sha256.Sha256** · [`export let finish = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L76)
   Pads the message, ends the digest, and returns the 32 bytes of the hash.
 - **Sha256** · [`export let create = func -> Sha256`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L163)
   A new digest with no bytes added.

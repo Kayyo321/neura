@@ -17,21 +17,29 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **LocalDateTime** · [`export let LocalDateTime = class implements Comparable<LocalDateTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L14)
-- **LocalDateTime.LocalDateTime** · [`export let init = func(on: local_date.LocalDate, at: local_time.LocalTime)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L18)
-- **LocalDateTime.LocalDateTime** · [`export let date = func -> local_date.LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L23)
-- **LocalDateTime.LocalDateTime** · [`export let time = func -> local_time.LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L25)
-- **LocalDateTime.LocalDateTime** · [`export let plus = func(span: duration.Duration) -> LocalDateTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L29)
+- **LocalDateTime** · [`export let LocalDateTime = class implements Comparable<LocalDateTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L16)
+  An immutable local date and time without an associated UTC offset.
+- **LocalDateTime.LocalDateTime** · [`export let init = func(on: local_date.LocalDate, at: local_time.LocalTime)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L23)
+  Stores the supplied date and time components.
+- **LocalDateTime.LocalDateTime** · [`export let date = func -> local_date.LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L29)
+  Returns the local calendar date.
+- **LocalDateTime.LocalDateTime** · [`export let time = func -> local_time.LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L32)
+  Returns the local time of day.
+- **LocalDateTime.LocalDateTime** · [`export let plus = func(span: duration.Duration) -> LocalDateTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L36)
   Carries whole days into the date. Traps with "invalid argument: date out of range" when the date leaves its range.
-- **LocalDateTime.LocalDateTime** · [`export let at_offset = func(offset: zone_offset.ZoneOffset) -> instant.Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L42)
+- **LocalDateTime.LocalDateTime** · [`export let at_offset = func(offset: zone_offset.ZoneOffset) -> instant.Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L48)
   The instant at which UTC reads this date and time minus the offset.
-- **LocalDateTime.LocalDateTime** · [`export let compare_to = func(other: LocalDateTime) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L49)
-- **LocalDateTime.LocalDateTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L57)
-- **LocalDateTime.LocalDateTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L65)
-- **LocalDateTime.LocalDateTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L70)
+- **LocalDateTime.LocalDateTime** · [`export let compare_to = func(other: LocalDateTime) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L56)
+  Orders by local date first and time of day second.
+- **LocalDateTime.LocalDateTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L65)
+  Tests whether both date and time components are equal.
+- **LocalDateTime.LocalDateTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L74)
+  Combines the hashes of the date and time components.
+- **LocalDateTime.LocalDateTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L79)
   The date, T, and the time.
-- **LocalDateTime** · [`export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L73)
-- **LocalDateTime** · [`export let parse = func(text: string) -> result.Result<LocalDateTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L78)
+- **LocalDateTime** · [`export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L83)
+  Combines a date and time of day without applying an offset.
+- **LocalDateTime** · [`export let parse = func(text: string) -> result.Result<LocalDateTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L88)
   The LocalDate form, T, and the LocalTime form, with their errors.
 <!-- END SOURCE API -->
 

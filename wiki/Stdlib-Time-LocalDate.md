@@ -17,38 +17,49 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **LocalDate** · [`export let LocalDate = class implements Comparable<LocalDate>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L11)
-- **LocalDate.LocalDate** · [`export let init = func(year: int, month: int, day: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L16)
-- **LocalDate.LocalDate** · [`export let year = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L22)
-- **LocalDate.LocalDate** · [`export let month = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L25)
+- **LocalDate** · [`export let LocalDate = class implements Comparable<LocalDate>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L13)
+  An immutable Gregorian date within the supported year range.
+- **LocalDate.LocalDate** · [`export let init = func(year: int, month: int, day: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L22)
+  Stores the supplied Gregorian date components.
+- **LocalDate.LocalDate** · [`export let year = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L29)
+  Returns the Gregorian year.
+- **LocalDate.LocalDate** · [`export let month = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L32)
   1 through 12.
-- **LocalDate.LocalDate** · [`export let day = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L28)
+- **LocalDate.LocalDate** · [`export let day = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L35)
   1 through the length of the month.
-- **LocalDate.LocalDate** · [`export let to_epoch_day = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L30)
-- **LocalDate.LocalDate** · [`export let plus_days = func(days: int64) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L36)
+- **LocalDate.LocalDate** · [`export let to_epoch_day = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L38)
+  Returns the signed number of days since 1970-01-01.
+- **LocalDate.LocalDate** · [`export let plus_days = func(days: int64) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L44)
   These trap with "invalid argument: date out of range" when the result's year is outside -999,999 through 999,999.
-- **LocalDate.LocalDate** · [`export let plus_months = func(months: int64) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L40)
+- **LocalDate.LocalDate** · [`export let plus_months = func(months: int64) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L47)
   Month and year changes clamp the day to the end of the target month.
-- **LocalDate.LocalDate** · [`export let plus_years = func(years: int64) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L46)
-- **LocalDate.LocalDate** · [`export let days_until = func(other: LocalDate) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L51)
+- **LocalDate.LocalDate** · [`export let plus_years = func(years: int64) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L55)
+  Adds whole calendar years and clamps the day to the last day of the target month when necessary.
+- **LocalDate.LocalDate** · [`export let days_until = func(other: LocalDate) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L60)
   other's epoch day minus this one's.
-- **LocalDate.LocalDate** · [`export let day_of_week = func -> weekdays.DayOfWeek`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L53)
-- **LocalDate.LocalDate** · [`export let day_of_year = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L59)
+- **LocalDate.LocalDate** · [`export let day_of_week = func -> weekdays.DayOfWeek`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L63)
+  Returns the weekday of this date in ISO order.
+- **LocalDate.LocalDate** · [`export let day_of_year = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L69)
   1 through 366.
-- **LocalDate.LocalDate** · [`export let is_leap_year = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L64)
-- **LocalDate.LocalDate** · [`export let length_of_month = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L66)
-- **LocalDate.LocalDate** · [`export let compare_to = func(other: LocalDate) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L68)
-- **LocalDate.LocalDate** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L81)
-- **LocalDate.LocalDate** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L89)
-- **LocalDate.LocalDate** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L97)
+- **LocalDate.LocalDate** · [`export let is_leap_year = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L75)
+  Reports whether this date falls in a Gregorian leap year.
+- **LocalDate.LocalDate** · [`export let length_of_month = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L78)
+  Returns the number of days in this date's month.
+- **LocalDate.LocalDate** · [`export let compare_to = func(other: LocalDate) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L81)
+  Orders dates by year, month, and then day.
+- **LocalDate.LocalDate** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L95)
+  Tests whether the year, month, and day all agree.
+- **LocalDate.LocalDate** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L104)
+  Combines the hashes of the year, month, and day.
+- **LocalDate.LocalDate** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L111)
   YYYY-MM-DD; a year outside 0000 through 9999 has a sign and at least four digits.
-- **LocalDate** · [`export let of = func(year: int, month: int, day: int) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L105)
+- **LocalDate** · [`export let of = func(year: int, month: int, day: int) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L118)
   Traps with "invalid argument: invalid date" for a year outside -999,999 through 999,999, a month outside 1 through 12, or a day outside the month.
-- **LocalDate** · [`export let try_of = func(year: int, month: int, day: int) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L113)
+- **LocalDate** · [`export let try_of = func(year: int, month: int, day: int) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L126)
   nil for invalid components.
-- **LocalDate** · [`export let of_epoch_day = func(epoch_day: int64) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L122)
+- **LocalDate** · [`export let of_epoch_day = func(epoch_day: int64) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L134)
   Traps with "invalid argument: date out of range" outside -999999-01-01 through 999999-12-31.
-- **LocalDate** · [`export let parse = func(text: string) -> result.Result<LocalDate>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L134)
+- **LocalDate** · [`export let parse = func(text: string) -> result.Result<LocalDate>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L146)
   YYYY-MM-DD, where the year is four digits or a sign and at least four digits. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first byte of a year beyond 999,999, a month outside 1 through 12, or a day outside the month.
 <!-- END SOURCE API -->
 

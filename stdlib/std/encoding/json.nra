@@ -8,18 +8,19 @@ let.promote _ = import:Std.Core.Result;
 let sorting = import:Std.Collections.Sorting;
 let.promote string_maps = import:Std.Collections.StringMap;
 
-// JSON (RFC 8259; Stdlib.md section 13.1). A value is the recursive payload
-// enum JsonValue. Numbers keep their JSON text, so nothing is lost in a
-// round trip; objects are member lists in member order.
-//
-// Cost model: every byte read, list append, field access, and call is an
-// NVM step, while a slice and string == are one step each. The parser
-// therefore passes offsets as arguments, scans four bytes per iteration,
-// and slices strings and numbers out of the text. The writer builds one
-// uint8 list, escaping string payloads while it copies them, and converts
-// it once (string concatenation and StringBuilder.append also copy every
-// byte, so they would add a second pass).
+/// @brief JSON (RFC 8259; Stdlib.md section 13.1).
+///
+/// A value is the recursive payload enum JsonValue. Numbers keep their JSON text, so nothing is lost in a round
+/// trip; objects are member lists in member order.
+///
+/// Cost model: every byte read, list append, field access, and call is an NVM step, while a slice and string ==
+/// are one step each. The parser therefore passes offsets as arguments, scans four bytes per iteration, and
+/// slices strings and numbers out of the text. The writer builds one uint8 list, escaping string payloads while
+/// it copies them, and converts it once (string concatenation and StringBuilder.append also copy every byte, so
+/// they would add a second pass).
+/// @see [Std.Encoding.Json](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Json)
 export let Json = module (
+    /// @brief Represents null, booleans, number text, strings, arrays, and ordered object members.
     export let JsonValue = enum (
         Null,
         Boolean(bool),
@@ -29,15 +30,16 @@ export let Json = module (
         Object([string, JsonValue][list])
     );
 
-    // The deepest nesting of arrays and objects that parse accepts.
+    /// @brief The deepest nesting of arrays and objects that parse accepts.
     const MaxDepth: int = 512;
 
-    // A Number with the integer's decimal text.
+    /// @brief A Number with the integer's decimal text.
     export let number_of_int64 = func(v: int64) -> JsonValue => JsonValue.Number(v.to_string());
 
-    // A Number with the float's shortest round-trip text (Stdlib.md section
-    // 7.5), which is valid JSON number text. NaN and the infinities trap
-    // with "invalid argument: number is not finite".
+    /// @brief A Number with the float's shortest round-trip text (Stdlib.md section 7.5), which is valid JSON
+    /// number text.
+    ///
+    /// NaN and the infinities trap with "invalid argument: number is not finite".
     export let number_of_float64 = func(v: float64) -> JsonValue {
         if (v != v || v - v != 0.0) {
             trap_with_message("invalid argument: number is not finite");
@@ -45,7 +47,7 @@ export let Json = module (
         return JsonValue.Number(v.to_string());
     };
 
-    // The value of the first member with the name.
+    /// @brief The value of the first member with the name.
     export let member = func(members: [string, JsonValue][list], name: string) -> Optional<JsonValue> {
         for (let entry in members) {
             if (entry[0] == name) {
@@ -55,9 +57,8 @@ export let Json = module (
         return Optional<JsonValue>.None;
     };
 
-    // Some(the value) when the text is a JSON number with no fraction and no
-    // exponent whose value fits in int64; otherwise None, including for text
-    // that is not a JSON number.
+    /// @brief Some(the value) when the text is a JSON number with no fraction and no exponent whose value fits
+    /// in int64; otherwise None, including for text that is not a JSON number.
     export let number_to_int64 = func(text: string) -> Optional<int64> {
         let count = text.byte_length;
         if (scan_number(text, 0) != count) {
@@ -91,8 +92,8 @@ export let Json = module (
         return Optional<int64>.Some(-value);
     };
 
-    // The float64 nearest the number, ties to even (Float64.parse). Text that
-    // is not a JSON number traps with "invalid argument: number text".
+    /// @brief The float64 nearest the number, ties to even (Float64.parse). Text that is not a JSON number
+    /// traps with "invalid argument: number text".
     export let number_to_float64 = func(text: string) -> float64 {
         require_number(text);
         return match (float64s.parse(text)) {
@@ -101,12 +102,10 @@ export let Json = module (
         };
     };
 
-    // The exact value: the number's digits as the unscaled value, with the
-    // scale of its fraction digits minus its exponent, so "1.50" has scale 2
-    // and "15e-1" scale 1. Text that is not a JSON number traps with
-    // "invalid argument: number text"; a number whose scale leaves the int
-    // range, such as 1e3000000000, traps with "invalid argument: number
-    // exponent out of range".
+    /// @brief The exact value: the number's digits as the unscaled value, with the scale of its fraction digits
+    /// minus its exponent, so "1.50" has scale 2 and "15e-1" scale 1. Text that is not a JSON number traps with
+    /// "invalid argument: number text"; a number whose scale leaves the int range, such as 1e3000000000, traps
+    /// with "invalid argument: number exponent out of range".
     export let number_to_big_decimal = func(text: string) -> big_decimals.BigDecimal {
         require_number(text);
         return match (big_decimals.parse(text)) {
@@ -115,24 +114,22 @@ export let Json = module (
         };
     };
 
-    // The value, or a Parse error. Parsing is strict: no comments, no
-    // trailing commas, no leading zeros, and only space, tab, LF, and CR as
-    // whitespace. Nesting deeper than 512 arrays and objects fails. For a
-    // repeated member name the last value wins and the name keeps its first
-    // position. Offsets are byte offsets. The errors:
-    //
-    // - Empty, "no value": the text is empty or only whitespace (offset: its
-    //   length).
-    // - UnexpectedEnd, "unexpected end of input": at the text's length.
-    // - Syntax: "expected a value", "expected ',' or ']'", "expected ',' or
-    //   '}'", "expected a member name", "expected ':'", "unexpected text
-    //   after value", at the offending byte.
-    // - InvalidCharacter: "invalid literal", "expected a digit", "leading
-    //   zero", "control character in string" at the offending byte;
-    //   "invalid escape", "invalid \u escape", and "unpaired surrogate" at
-    //   the escape's backslash.
-    // - OutOfRange, "nesting deeper than 512": at the bracket that opens the
-    //   513th level.
+    /// @brief The value, or a Parse error.
+    ///
+    /// Parsing is strict: no comments, no trailing commas, no leading zeros, and only space, tab, LF, and CR as
+    /// whitespace. Nesting deeper than 512 arrays and objects fails. For a repeated member name the last value
+    /// wins and the name keeps its first position. Offsets are byte offsets. The errors:
+    ///
+    /// - Empty, "no value": the text is empty or only whitespace (offset: its
+    /// length).
+    /// - UnexpectedEnd, "unexpected end of input": at the text's length.
+    /// - Syntax: "expected a value", "expected ',' or ']'", "expected ',' or
+    /// '}'", "expected a member name", "expected ':'", "unexpected text after value", at the offending byte.
+    /// - InvalidCharacter: "invalid literal", "expected a digit", "leading
+    /// zero", "control character in string" at the offending byte; "invalid escape", "invalid \u escape", and
+    /// "unpaired surrogate" at the escape's backslash.
+    /// - OutOfRange, "nesting deeper than 512": at the bracket that opens the
+    /// 513th level.
     export let parse = func(text: string) -> Result<JsonValue> {
         let parser = new Parser();
         parser.document(text);
@@ -146,18 +143,19 @@ export let Json = module (
         return Result<JsonValue>.Ok(parser.value);
     };
 
-    // The value's JSON text with no whitespace. A Number whose text is not
-    // a JSON number traps with "invalid argument: number text".
+    /// @brief The value's JSON text with no whitespace. A Number whose text is not a JSON number traps with
+    /// "invalid argument: number text".
     export let write = func(value: JsonValue) -> string {
         let out: uint8[list] = [];
         write_value(out, value, -1, 0);
         return text_of(out);
     };
 
-    // The value's JSON text with each element and member on its own line,
-    // indented by `indent` spaces per level, and ": " after member names.
-    // Empty arrays and objects are [] and {}. A negative indent traps with
-    // "invalid argument: negative indent".
+    /// @brief The value's JSON text with each element and member on its own line, indented by `indent` spaces
+    /// per level, and ": " after member names.
+    ///
+    /// Empty arrays and objects are [] and {}. A negative indent traps with "invalid argument: negative
+    /// indent".
     export let write_pretty = func(value: JsonValue, indent: int) -> string {
         if (indent < 0) {
             trap_with_message("invalid argument: negative indent");
@@ -167,12 +165,12 @@ export let Json = module (
         return text_of(out);
     };
 
-    // Structural equality. Numbers are equal when their exact decimal values
-    // are, so 1, 1.0, 10e-1, and -0 versus 0 compare by value. Arrays compare
-    // element by element. Objects are equal when they have the same number
-    // of members and each member of either has a member with the same name
-    // and an equal value in the other, in any order. A Number whose text is
-    // not a JSON number traps with "invalid argument: number text".
+    /// @brief Structural equality.
+    ///
+    /// Numbers are equal when their exact decimal values are, so 1, 1.0, 10e-1, and -0 versus 0 compare by
+    /// value. Arrays compare element by element. Objects are equal when they have the same number of members
+    /// and each member of either has a member with the same name and an equal value in the other, in any order.
+    /// A Number whose text is not a JSON number traps with "invalid argument: number text".
     export let equals = func(a: JsonValue, b: JsonValue) -> bool {
         match (a) {
             JsonValue.Null => {
@@ -214,16 +212,15 @@ export let Json = module (
         }
     };
 
-    // A hash consistent with equals. Null is 1; Boolean(b) is
-    // Hash.combine(2, Hash.of_bool(b)); Number is Hash.combine(3, the hash
-    // of its canonical text); Text(s) is Hash.combine(4, s.hash_code());
-    // Array starts at 5 and combines each element's hash in order; Object
-    // is Hash.combine(Hash.combine(6, member count), S), where S is the
-    // wrapping sum of the distinct values among the members'
-    // Hash.combine(name hash, value hash). The canonical text of a number is
-    // "0" for zero and otherwise an optional "-", the significant digits
-    // without leading or trailing zeros, "e", and the decimal exponent that
-    // makes them an integer: 120.50 is "1205e-1".
+    /// @brief A hash consistent with equals.
+    ///
+    /// Null is 1; Boolean(b) is Hash.combine(2, Hash.of_bool(b)); Number is Hash.combine(3, the hash of its
+    /// canonical text); Text(s) is Hash.combine(4, s.hash_code()); Array starts at 5 and combines each
+    /// element's hash in order; Object is Hash.combine(Hash.combine(6, member count), S), where S is the
+    /// wrapping sum of the distinct values among the members' Hash.combine(name hash, value hash). The
+    /// canonical text of a number is "0" for zero and otherwise an optional "-", the significant digits without
+    /// leading or trailing zeros, "e", and the decimal exponent that makes them an integer: 120.50 is
+    /// "1205e-1".
     export let hash = func(value: JsonValue) -> uint32 => match (value) {
         JsonValue.Null => 1,
         JsonValue.Boolean(b) => hashing.combine(2, hashing.of_bool(b)),
@@ -233,9 +230,8 @@ export let Json = module (
         JsonValue.Object(members) => object_hash(members),
     };
 
-    // A StringMap from each member name to its value, in member order. For
-    // a repeated name the last value wins and the name keeps its first
-    // position, as in parse.
+    /// @brief A StringMap from each member name to its value, in member order. For a repeated name the last
+    /// value wins and the name keeps its first position, as in parse.
     export let index = func(members: [string, JsonValue][list]) -> StringMap<JsonValue> {
         let map = string_maps.create<JsonValue>();
         for (let entry in members) {
@@ -246,25 +242,31 @@ export let Json = module (
 
     // Parsing.
 
-    // A recursive-descent parser. Each method takes the text, its length,
-    // and the offset to start at, and returns the offset after what it
-    // read, or -1 after recording the first failure. Values and strings are
-    // returned through the fields `value` and `text_value`. Offsets travel
-    // as arguments rather than fields because every field access is an NVM
-    // step.
+    /// @brief A recursive-descent parser.
+    ///
+    /// Each method takes the text, its length, and the offset to start at, and returns the offset after what it
+    /// read, or -1 after recording the first failure. Values and strings are returned through the fields
+    /// `value` and `text_value`. Offsets travel as arguments rather than fields because every field access is
+    /// an NVM step.
     let Parser = class (
+        /// @brief The parsed JSON value, initially Null.
         export let value: JsonValue = JsonValue.Null;
+        /// @brief The last string decoded by the parser.
         let text_value: string = "";
+        /// @brief Whether the parser has recorded a failure.
         export let failed: bool = false;
+        /// @brief The category of the first failure.
         export let failure_kind: ParseErrorKind = ParseErrorKind.Syntax;
+        /// @brief The UTF-8 byte offset of the first failure.
         export let failure_offset: int = 0;
+        /// @brief The diagnostic message of the first failure.
         export let failure_message: string = "";
 
+        /// @brief Initializes a parser with an empty result and no recorded failure.
         export let init = func {
         };
 
-        // Parses the whole text; afterwards `value` or the failure fields
-        // hold the outcome.
+        /// @brief Parses the whole text; afterwards `value` or the failure fields hold the outcome.
         export let document = func(text: string) {
             let count = text.byte_length;
             let p = skip_whitespace(text, count, 0);
@@ -282,6 +284,7 @@ export let Json = module (
             }
         };
 
+        /// @brief Records only the first parse failure and returns the failure sentinel.
         let fail = func(kind: ParseErrorKind, offset: int, message: string) -> int {
             if (!failed) {
                 failed = true;
@@ -292,11 +295,12 @@ export let Json = module (
             return -1;
         };
 
+        /// @brief Reports premature end at the input's byte length.
         let end_of_input = func(count: int) -> int =>
             fail(ParseErrorKind.UnexpectedEnd, count, "unexpected end of input");
 
-        // The value at the first non-whitespace byte at or after `start`;
-        // `depth` arrays and objects enclose it.
+        /// @brief The value at the first non-whitespace byte at or after `start`; `depth` arrays and objects
+        /// enclose it.
         let value_at = func(text: string, count: int, start: int, depth: int) -> int {
             let p = start;
             if (p == count) {
@@ -346,6 +350,7 @@ export let Json = module (
             return fail(ParseErrorKind.Syntax, p, "expected a value");
         };
 
+        /// @brief Matches a JSON literal and reports the first mismatch or premature end.
         let literal = func(text: string, count: int, p: int, word: string) -> int {
             let length = word.byte_length;
             let end = p + length;
@@ -367,7 +372,7 @@ export let Json = module (
             return p + length;
         };
 
-        // The failure for a number whose grammar breaks at `at`.
+        /// @brief The failure for a number whose grammar breaks at `at`.
         let number_failure = func(text: string, count: int, at: int) -> int {
             if (at == count) {
                 return end_of_input(count);
@@ -379,6 +384,7 @@ export let Json = module (
             return fail(ParseErrorKind.InvalidCharacter, at, "expected a digit");
         };
 
+        /// @brief Parses an array, enforcing the nesting limit and rejecting trailing commas.
         let array_at = func(text: string, count: int, start: int, depth: int) -> int {
             if (depth > MaxDepth) {
                 return fail(ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
@@ -417,6 +423,7 @@ export let Json = module (
             }
         };
 
+        /// @brief Parses an object, replacing a duplicate name's value at its original position.
         let object_at = func(text: string, count: int, start: int, depth: int) -> int {
             if (depth > MaxDepth) {
                 return fail(ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
@@ -514,9 +521,8 @@ export let Json = module (
             }
         };
 
-        // The string whose opening quote is at `start`, into `text_value`.
-        // Text without escapes is one slice; otherwise the bytes are copied
-        // and the escapes decoded.
+        /// @brief The string whose opening quote is at `start`, into `text_value`. Text without escapes is one
+        /// slice; otherwise the bytes are copied and the escapes decoded.
         let string_at = func(text: string, count: int, start: int) -> int {
             let first = start + 1;
             let i = plain_end(text, count, first);
@@ -574,9 +580,8 @@ export let Json = module (
             return end_of_input(count);
         };
 
-        // Decodes the \u escape whose backslash is at `at`, and the low half
-        // of a surrogate pair after it, into `out`. Returns the offset after
-        // the escape or pair.
+        /// @brief Decodes the \u escape whose backslash is at `at`, and the low half of a surrogate pair after
+        /// it, into `out`. Returns the offset after the escape or pair.
         let unicode_escape = func(out: uint8[list], text: string, count: int, at: int) -> int {
             let unit = hex_unit(text, count, at);
             if (unit < 0) {
@@ -609,8 +614,8 @@ export let Json = module (
             return next;
         };
 
-        // The 16-bit value of the four hex digits after the \u at `at`, or
-        // -1 after recording a failure.
+        /// @brief The 16-bit value of the four hex digits after the \u at `at`, or -1 after recording a
+        /// failure.
         let hex_unit = func(text: string, count: int, at: int) -> int {
             let unit = 0;
             for (let k = 2; k < 6; k++) {
@@ -635,8 +640,8 @@ export let Json = module (
         };
     );
 
-    // The first offset at or after `start` that is not JSON whitespace
-    // (space, tab, LF, CR), or `count`.
+    /// @brief The first offset at or after `start` that is not JSON whitespace (space, tab, LF, CR), or
+    /// `count`.
     let skip_whitespace = func(text: string, count: int, start: int) -> int {
         let i = start;
         while (i < count) {
@@ -649,9 +654,10 @@ export let Json = module (
         return count;
     };
 
-    // The first offset at or after `start` holding a quote, a backslash, or
-    // a byte below 0x20, or `count`. Four bytes per iteration: each byte
-    // read is an NVM step, and the loop's own steps are shared.
+    /// @brief The first offset at or after `start` holding a quote, a backslash, or a byte below 0x20, or
+    /// `count`.
+    ///
+    /// Four bytes per iteration: each byte read is an NVM step, and the loop's own steps are shared.
     let plain_end = func(text: string, count: int, start: int) -> int {
         let i = start;
         while (i + 4 <= count) {
@@ -675,8 +681,7 @@ export let Json = module (
         return count;
     };
 
-    // Appends the bytes of `text` from `start` up to `end`, four at a time
-    // where possible.
+    /// @brief Appends the bytes of `text` from `start` up to `end`, four at a time where possible.
     let copy_bytes = func(out: uint8[list], text: string, start: int, end: int) {
         let i = start;
         while (i + 4 <= end) {
@@ -692,11 +697,11 @@ export let Json = module (
         }
     };
 
-    // The end of the JSON number that starts at `start`, or -1 minus the
-    // offset of the first byte that breaks the grammar (the text's length
-    // when it ends too soon). The grammar: an optional minus, 0 or a nonzero
-    // digit followed by digits, an optional point followed by digits, and an
-    // optional e or E, sign, and digits. A digit after a leading 0 breaks it.
+    /// @brief The end of the JSON number that starts at `start`, or -1 minus the offset of the first byte that
+    /// breaks the grammar (the text's length when it ends too soon).
+    ///
+    /// The grammar: an optional minus, 0 or a nonzero digit followed by digits, an optional point followed by
+    /// digits, and an optional e or E, sign, and digits. A digit after a leading 0 breaks it.
     let scan_number = func(text: string, start: int) -> int {
         let count = text.byte_length;
         let i = start;
@@ -737,6 +742,7 @@ export let Json = module (
         return i;
     };
 
+    /// @brief Scans decimal digits four bytes at a time when possible.
     let digits_end = func(text: string, start: int) -> int {
         let count = text.byte_length;
         let i = start;
@@ -760,26 +766,30 @@ export let Json = module (
         return i;
     };
 
+    /// @brief Tests whether a byte is an ASCII decimal digit.
     let is_digit = func(b: uint8) -> bool => b >= 48 && b <= 57;
 
+    /// @brief Traps unless the entire text is a valid JSON number.
     let require_number = func(text: string) {
         if (scan_number(text, 0) != text.byte_length) {
             trap_with_message("invalid argument: number text");
         }
     };
 
+    /// @brief Traps with the supplied diagnostic in a float64-returning expression.
     let trapped_float = func(message: string) -> float64 {
         trap_with_message(message);
     };
 
+    /// @brief Traps with the supplied diagnostic in a BigDecimal-returning expression.
     let trapped_decimal = func(message: string) -> big_decimals.BigDecimal {
         trap_with_message(message);
     };
 
     // Writing.
 
-    // Appends the value's text. A negative indent writes no whitespace;
-    // otherwise `level` is the nesting depth of the value.
+    /// @brief Appends the value's text. A negative indent writes no whitespace; otherwise `level` is the
+    /// nesting depth of the value.
     let write_value = func(out: uint8[list], value: JsonValue, indent: int, level: int) {
         match (value) {
             JsonValue.Null => {
@@ -838,6 +848,7 @@ export let Json = module (
         }
     };
 
+    /// @brief Appends a newline and indentation in pretty mode.
     let new_line = func(out: uint8[list], indent: int, level: int) {
         if (indent < 0) {
             return;
@@ -849,8 +860,7 @@ export let Json = module (
         }
     };
 
-    // Appends the string in quotes, escaping the quote, the backslash, and
-    // every byte below 0x20.
+    /// @brief Appends the string in quotes, escaping the quote, the backslash, and every byte below 0x20.
     let append_string = func(out: uint8[list], s: string) {
         out.append(34);
         let count = s.byte_length;
@@ -904,6 +914,7 @@ export let Json = module (
         out.append(34);
     };
 
+    /// @brief Encodes a scalar into UTF-8 bytes and appends them to the output.
     let append_scalar = func(out: uint8[list], value: uint32) {
         if (value < 128) {
             out.append(value as uint8);
@@ -922,7 +933,7 @@ export let Json = module (
         }
     };
 
-    // Text from bytes this module built from whole characters.
+    /// @brief Text from bytes this module built from whole characters.
     let text_of = func(bytes: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(bytes);
         if (!valid) {
@@ -933,6 +944,7 @@ export let Json = module (
 
     // Equality and hashing.
 
+    /// @brief Compares validated number text by canonical exact decimal value.
     let numbers_equal = func(a: string, b: string) -> bool {
         if (a == b) {
             require_number(a);
@@ -941,6 +953,7 @@ export let Json = module (
         return canonical_number(a) == canonical_number(b);
     };
 
+    /// @brief Tests equal length and recursively compares corresponding elements.
     let arrays_equal = func(a: JsonValue[list], b: JsonValue[list]) -> bool {
         let count = a.length;
         if (count != b.length) {
@@ -954,6 +967,7 @@ export let Json = module (
         return true;
     };
 
+    /// @brief Compares object members without regard to order, with a fast path for matching order.
     let objects_equal = func(a: [string, JsonValue][list], b: [string, JsonValue][list]) -> bool {
         let count = a.length;
         if (count != b.length) {
@@ -970,8 +984,7 @@ export let Json = module (
         return each_matched(a, b) && each_matched(b, a);
     };
 
-    // Whether each member of `a` has a member of `b` with the same name and
-    // an equal value.
+    /// @brief Whether each member of `a` has a member of `b` with the same name and an equal value.
     let each_matched = func(a: [string, JsonValue][list], b: [string, JsonValue][list]) -> bool {
         for (let entry in a) {
             let found = false;
@@ -988,6 +1001,7 @@ export let Json = module (
         return true;
     };
 
+    /// @brief Combines the hashes of the array elements in order.
     let array_hash = func(items: JsonValue[list]) -> uint32 {
         let h: uint32 = 5;
         for (let item in items) {
@@ -996,6 +1010,7 @@ export let Json = module (
         return h;
     };
 
+    /// @brief Combines distinct member-pair hashes without regard to member order.
     let object_hash = func(members: [string, JsonValue][list]) -> uint32 {
         let pairs: uint32[list] = [];
         for (let entry in members) {
@@ -1012,6 +1027,7 @@ export let Json = module (
         return hashing.combine(hashing.combine(6, count as uint32), total as uint32);
     };
 
+    /// @brief Orders unsigned hashes for sorting object member hashes.
     let compare_hashes = func(a: uint32, b: uint32) -> Ordering {
         if (a < b) {
             return Ordering.Less;
@@ -1022,11 +1038,11 @@ export let Json = module (
         return Ordering.Equal;
     };
 
-    // The canonical text of a JSON number: "0" for zero; otherwise an
-    // optional "-", the digits without leading and trailing zeros, "e", and
-    // the exponent that makes them an integer. Two numbers have the same
-    // exact value exactly when their canonical texts are equal. Text that is
-    // not a JSON number traps with "invalid argument: number text".
+    /// @brief The canonical text of a JSON number: "0" for zero; otherwise an optional "-", the digits without
+    /// leading and trailing zeros, "e", and the exponent that makes them an integer.
+    ///
+    /// Two numbers have the same exact value exactly when their canonical texts are equal. Text that is not a
+    /// JSON number traps with "invalid argument: number text".
     let canonical_number = func(text: string) -> string {
         require_number(text);
         let count = text.byte_length;
@@ -1093,10 +1109,11 @@ export let Json = module (
         return prefix + significand + "e" + exponent_sum(exponent, exponent_negative, adjustment);
     };
 
-    // The decimal text of (-1 if negative) * digits + adjustment, where
-    // `digits` has no leading zeros and may be longer than int64 allows.
-    // The adjustment is bounded by a text length, so when the digits have
-    // more than 18 of them the sum keeps the exponent's sign.
+    /// @brief The decimal text of (-1 if negative) * digits + adjustment, where `digits` has no leading zeros
+    /// and may be longer than int64 allows.
+    ///
+    /// The adjustment is bounded by a text length, so when the digits have more than 18 of them the sum keeps
+    /// the exponent's sign.
     let exponent_sum = func(digits: string, negative: bool, adjustment: int64) -> string {
         let length = digits.byte_length;
         if (length <= 18) {

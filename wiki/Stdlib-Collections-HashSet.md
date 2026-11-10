@@ -17,53 +17,62 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **HashSet** · [`export let HashSet = class<T> implements MutableSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L18)
-- **HashSet.HashSet** · [`export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(T) -> uint32, equal: func(T, T) -> bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L26)
-- **HashSet.HashSet** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L32)
-- **HashSet.HashSet** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L34)
-- **HashSet.HashSet** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L37)
+- **HashSet** · [`export let HashSet = class<T> implements MutableSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L16)
+  A mutable set that tests membership by hash and equality and iterates in insertion order.
+- **HashSet.HashSet** · [`export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(T) -> uint32, equal: func(T, T) -> bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L29)
+  Adopts the empty table and the key operations supplied by the module factory.
+- **HashSet.HashSet** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L36)
+  Returns the number of distinct elements.
+- **HashSet.HashSet** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L39)
+  Returns true when there are no distinct elements.
+- **HashSet.HashSet** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L42)
   Replaces every list with a new one of the initial table size.
-- **HashSet.HashSet** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L42)
-- **HashSet.HashSet** · [`export let add = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L46)
-  False when the set already holds an equal element; the set keeps the element it holds.
-- **HashSet.HashSet** · [`export let add_all = func(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L57)
+- **HashSet.HashSet** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L48)
+  Reports whether the set holds an element equal to the probe under its key operations.
+- **HashSet.HashSet** · [`export let add = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L52)
+  Adds the element and returns false for a duplicate. The set keeps the element it holds.
+- **HashSet.HashSet** · [`export let add_all = func(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L63)
   Adds each element in order.
-- **HashSet.HashSet** · [`export let remove = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L66)
-- **HashSet.HashSet** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L76)
+- **HashSet.HashSet** · [`export let remove = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L73)
+  Removes the matching element. Returns false when absent.
+- **HashSet.HashSet** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L83)
   A new built-in list in insertion order.
-- **HashSet.HashSet** · [`export let iterator = func -> Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L90)
-- **HashSet.HashSet** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L94)
+- **HashSet.HashSet** · [`export let iterator = func -> Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L98)
+  Returns a fail-fast iterator over the elements in insertion order.
+- **HashSet.HashSet** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L102)
   In insertion order. The action must not change the set structurally.
-- **HashSet.HashSet** · [`export let remove_if = func(drop: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L110)
-  The callback runs once per element in order; the chosen elements are removed afterwards. Returns how many were removed.
-- **HashSet.HashSet** · [`export let retain_if = func(keep: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L112)
-- **HashSet.HashSet** · [`export let is_subset_of = func(other: HashSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L115)
+- **HashSet.HashSet** · [`export let remove_if = func(drop: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L119)
+  Calls `drop` once per element in insertion order, then removes the matches and compacts at most once. The predicate leaves the set structure unchanged. The number of removed elements.
+- **HashSet.HashSet** · [`export let retain_if = func(keep: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L124)
+  Calls `keep` once per element in insertion order, then removes rejected elements and compacts at most once. The predicate leaves the set structure unchanged. The number of removed elements.
+- **HashSet.HashSet** · [`export let is_subset_of = func(other: HashSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L127)
   Whether every element of this set is in `other`.
-- **HashSet.HashSet** · [`export let is_disjoint_from = func(other: HashSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L132)
+- **HashSet.HashSet** · [`export let is_disjoint_from = func(other: HashSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L144)
   Whether no element of this set is in `other`.
-- **HashSet.HashSet** · [`export let union = func(other: HashSet<T>) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L147)
+- **HashSet.HashSet** · [`export let union = func(other: HashSet<T>) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L159)
   A new set with this set's element operations: this set's elements in order, then the other's new elements in its order.
-- **HashSet.HashSet** · [`export let intersection = func(other: HashSet<T>) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L155)
+- **HashSet.HashSet** · [`export let intersection = func(other: HashSet<T>) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L167)
   This set's elements that are in `other`, in this set's order.
-- **HashSet.HashSet** · [`export let difference = func(other: HashSet<T>) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L158)
+- **HashSet.HashSet** · [`export let difference = func(other: HashSet<T>) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L170)
   This set's elements that are not in `other`, in this set's order.
-- **HashSet.HashSet** · [`export let trim = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L161)
-  Compacts at the smallest table whose entry capacity holds size().
-- **HashSet.HashSet** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L167)
+- **HashSet.HashSet** · [`export let trim = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L173)
+  Compacts to the smallest table that holds the live entries and invalidates iterators.
+- **HashSet.HashSet** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L179)
   Traps with "invalid state: ..." on a broken table invariant or when a live element's hash differs from its cached hash.
-- **HashSet.HashSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L184)
+- **HashSet.HashSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L196)
   Another HashSet of the same size whose elements this set all contains.
-- **HashSet.HashSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L205)
+- **HashSet.HashSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L217)
   The wrapping sum of the element hashes.
-- **HashSet.HashSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L221)
-  `{a, b, c}` in iteration order; the set itself as a direct element prints "(this collection)".
-- **HashSet** · [`export let create = func<T> -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L372)
-  Elements compared with equals and hashed with hash_code.
-- **HashSet** · [`export let with_capacity = func<T>(capacity: int) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L377)
-  A table sized for `capacity` elements. Traps with "invalid argument: capacity" for a negative capacity or one above 2^29.
-- **HashSet** · [`export let with_keys = func<T>(hash: func(T) -> uint32, same: func(T, T) -> bool) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L382)
-  Elements hashed and compared with the given functions. Equal elements must have equal hashes.
-- **HashSet** · [`export let with_keys_and_capacity = func<T>(hash: func(T) -> uint32, same: func(T, T) -> bool, capacity: int) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L385)
+- **HashSet.HashSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L233)
+  Formats elements as `{a, b, c}` in iteration order. The set itself as a direct element prints "(this collection)".
+- **HashSet** · [`export let create = func<T> -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L398)
+  Creates an empty set using `equals` and `hash_code` for its elements.
+- **HashSet** · [`export let with_capacity = func<T>(capacity: int) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L403)
+  Creates an empty table sized for `capacity` entries. Traps with `invalid argument: capacity` outside 0 through 2^29.
+- **HashSet** · [`export let with_keys = func<T>(hash: func(T) -> uint32, same: func(T, T) -> bool) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L408)
+  Creates an empty collection using the supplied hash and equality functions. Equality is an equivalence relation. Equal keys have equal hashes, and both results remain stable while stored.
+- **HashSet** · [`export let with_keys_and_capacity = func<T>(hash: func(T) -> uint32, same: func(T, T) -> bool, capacity: int) -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L416)
+  Creates an empty collection sized for `capacity` entries using the supplied key operations. Traps with `invalid argument: capacity` outside 0 through 2^29. Equal keys have equal hashes.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

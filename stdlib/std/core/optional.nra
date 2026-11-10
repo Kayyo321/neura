@@ -2,27 +2,32 @@ let.promote _ = import:Std.Core.Error;
 let hashing = import:Std.Core.Hash;
 let.promote _ = import:Std.Core.Result;
 
-// A generic value that may be absent (Stdlib.md section 6.1). Read it with
-// match; None and Some(nil) are different values.
+/// @brief A generic value that may be absent (Stdlib.md section 6.1). Read it with match; None and Some(nil)
+/// are different values.
+/// @see [Std.Core.Optional](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Optional)
 export let Optional = module (
+    /// @brief Represents an absent value (None) or a present payload (Some).
     export let Optional = enum<T> (None, Some(T));
 
+    /// @brief Reports whether the optional contains a payload.
     export let is_some = func<T>(o: Optional<T>) -> bool => match (o) {
         Optional.None => false,
         Optional.Some(_) => true,
     };
 
+    /// @brief Reports whether the optional is None.
     export let is_none = func<T>(o: Optional<T>) -> bool => match (o) {
         Optional.None => true,
         Optional.Some(_) => false,
     };
 
+    /// @brief Returns the payload or the already-evaluated fallback.
     export let value_or = func<T>(o: Optional<T>, fallback: T) -> T => match (o) {
         Optional.None => fallback,
         Optional.Some(value) => value,
     };
 
-    // The value, or a trap with "no such element: " and the detail.
+    /// @brief The value, or a trap with "no such element: " and the detail.
     export let expect = func<T>(o: Optional<T>, detail: string) -> T {
         match (o) {
             Optional.None => {
@@ -34,21 +39,25 @@ export let Optional = module (
         }
     };
 
+    /// @brief Wraps a present payload in Ok or uses the supplied error for None.
     export let to_result = func<T>(o: Optional<T>, failure: Error) -> Result<T> => match (o) {
         Optional.None => Result<T>.Err(failure),
         Optional.Some(value) => Result<T>.Ok(value),
     };
 
+    /// @brief Applies the function only to a present payload and wraps its output in Some.
     export let map = func<T, U>(o: Optional<T>, f: func(T) -> U) -> Optional<U> => match (o) {
         Optional.None => Optional<U>.None,
         Optional.Some(value) => Optional<U>.Some(f(value)),
     };
 
+    /// @brief Applies the function only to a present payload and returns its optional result.
     export let and_then = func<T, U>(o: Optional<T>, f: func(T) -> Optional<U>) -> Optional<U> => match (o) {
         Optional.None => Optional<U>.None,
         Optional.Some(value) => f(value),
     };
 
+    /// @brief Keeps the present payload only when it passes the predicate.
     export let filter = func<T>(o: Optional<T>, keep: func(T) -> bool) -> Optional<T> {
         match (o) {
             Optional.None => {
@@ -63,18 +72,19 @@ export let Optional = module (
         }
     };
 
-    // Calls `make` only for None.
+    /// @brief Calls `make` only for None.
     export let value_or_else = func<T>(o: Optional<T>, make: func() -> T) -> T => match (o) {
         Optional.None => make(),
         Optional.Some(value) => value,
     };
 
+    /// @brief Calls the fallback only for None and returns its optional result.
     export let or_else = func<T>(o: Optional<T>, other: func() -> Optional<T>) -> Optional<T> => match (o) {
         Optional.None => other(),
         Optional.Some(_) => o,
     };
 
-    // Both None, or both Some with equal values.
+    /// @brief Both None, or both Some with equal values.
     export let equals = func<T>(a: Optional<T>, b: Optional<T>) -> bool {
         match (a) {
             Optional.None => {
@@ -89,12 +99,13 @@ export let Optional = module (
         }
     };
 
-    // 0 for None, otherwise Hash.combine(1, the value's hash).
+    /// @brief 0 for None, otherwise Hash.combine(1, the value's hash).
     export let hash = func<T>(o: Optional<T>) -> uint32 => match (o) {
         Optional.None => 0,
         Optional.Some(value) => hashing.combine(1, value.hash_code()),
     };
 
+    /// @brief Formats None or the text of a present payload wrapped in Some.
     export let to_string = func<T>(o: Optional<T>) -> string => match (o) {
         Optional.None => "None",
         Optional.Some(value) => "Some(" + value.to_string() + ")",

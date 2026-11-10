@@ -17,58 +17,77 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **BigInteger** · [`export let BigInteger = class implements Comparable<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L25)
-- **BigInteger.BigInteger** · [`export let init = func(sign: int, limbs: uint32[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L33)
+- **BigInteger** · [`export let BigInteger = class implements Comparable<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L28)
+  An immutable signed integer with a normalized little-endian magnitude.
+- **BigInteger.BigInteger** · [`export let init = func(sign: int, limbs: uint32[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L39)
   The value sign * limbs, limbs least significant first. Zero limbs at the top are dropped, and a zero magnitude has sign 0 whatever `sign` says; otherwise only the sign of `sign` matters. The new value owns `limbs`: the caller must not change the list afterwards.
-- **BigInteger.BigInteger** · [`export let sign = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L51)
-- **BigInteger.BigInteger** · [`export let is_zero = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L53)
-- **BigInteger.BigInteger** · [`export let is_even = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L55)
-- **BigInteger.BigInteger** · [`export let negate = func -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L57)
-- **BigInteger.BigInteger** · [`export let abs = func -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L59)
-- **BigInteger.BigInteger** · [`export let add = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L61)
-- **BigInteger.BigInteger** · [`export let subtract = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L64)
-- **BigInteger.BigInteger** · [`export let multiply = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L69)
+- **BigInteger.BigInteger** · [`export let sign = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L58)
+  Returns minus one, zero, or one according to the sign.
+- **BigInteger.BigInteger** · [`export let is_zero = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L61)
+  Reports whether this integer is zero.
+- **BigInteger.BigInteger** · [`export let is_even = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L64)
+  Tests divisibility by two, including zero.
+- **BigInteger.BigInteger** · [`export let negate = func -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L67)
+  Returns the value with its sign reversed.
+- **BigInteger.BigInteger** · [`export let abs = func -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L70)
+  Returns the nonnegative magnitude.
+- **BigInteger.BigInteger** · [`export let add = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L73)
+  Returns the exact sum, subject to the limb limit.
+- **BigInteger.BigInteger** · [`export let subtract = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L77)
+  Returns the exact difference, subject to the limb limit.
+- **BigInteger.BigInteger** · [`export let multiply = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L81)
   Schoolbook with uint64 partial products; Karatsuba when both operands have at least 48 limbs.
-- **BigInteger.BigInteger** · [`export let divide_and_remainder = func(other: BigInteger) -> [BigInteger, BigInteger]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L79)
+- **BigInteger.BigInteger** · [`export let divide_and_remainder = func(other: BigInteger) -> [BigInteger, BigInteger]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L90)
   The quotient truncated toward zero and the remainder with the dividend's sign, from one division. A zero divisor traps (reason 1) in the division by the divisor's sign.
-- **BigInteger.BigInteger** · [`export let divide = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L85)
-- **BigInteger.BigInteger** · [`export let remainder = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L90)
-- **BigInteger.BigInteger** · [`export let floor_mod = func(m: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L97)
+- **BigInteger.BigInteger** · [`export let divide = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L97)
+  Returns the quotient truncated toward zero. A zero divisor traps.
+- **BigInteger.BigInteger** · [`export let remainder = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L103)
+  Returns the remainder from truncating division. A zero divisor traps.
+- **BigInteger.BigInteger** · [`export let floor_mod = func(m: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L110)
   The remainder with the modulus's sign: non-negative for a positive modulus. A zero modulus traps (reason 1).
-- **BigInteger.BigInteger** · [`export let pow = func(exponent: int) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L106)
+- **BigInteger.BigInteger** · [`export let pow = func(exponent: int) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L119)
   Square and multiply. pow(0) is 1; a negative exponent traps.
-- **BigInteger.BigInteger** · [`export let gcd = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L142)
+- **BigInteger.BigInteger** · [`export let gcd = func(other: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L154)
   Euclid's algorithm with remainders; the result is non-negative and gcd(0, 0) is 0.
-- **BigInteger.BigInteger** · [`export let mod_pow = func(exponent: BigInteger, modulus: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L156)
+- **BigInteger.BigInteger** · [`export let mod_pow = func(exponent: BigInteger, modulus: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L167)
   this^exponent mod modulus, in 0 through modulus - 1: left-to-right binary exponentiation reducing after each step. A negative exponent or a modulus that is not positive traps.
-- **BigInteger.BigInteger** · [`export let mod_inverse = func(modulus: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L180)
+- **BigInteger.BigInteger** · [`export let mod_inverse = func(modulus: BigInteger) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L190)
   The x in 0 through modulus - 1 with this * x = 1 (mod modulus), by extended Euclid, or nil when gcd(this, modulus) is not 1. A modulus that is not positive traps.
-- **BigInteger.BigInteger** · [`export let shift_left = func(n: int) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L203)
+- **BigInteger.BigInteger** · [`export let shift_left = func(n: int) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L213)
   this * 2^n. A negative n traps.
-- **BigInteger.BigInteger** · [`export let shift_right = func(n: int) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L215)
+- **BigInteger.BigInteger** · [`export let shift_right = func(n: int) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L224)
   floor(this / 2^n): rounds toward negative infinity. A negative n traps.
-- **BigInteger.BigInteger** · [`export let bit_length = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L227)
+- **BigInteger.BigInteger** · [`export let bit_length = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L236)
   The number of bits of the magnitude; 0 for zero.
-- **BigInteger.BigInteger** · [`export let test_bit = func(n: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L236)
+- **BigInteger.BigInteger** · [`export let test_bit = func(n: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L245)
   Bit n of the magnitude. A negative n traps.
-- **BigInteger.BigInteger** · [`export let compare_to = func(other: BigInteger) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L247)
-- **BigInteger.BigInteger** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L264)
-- **BigInteger.BigInteger** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L274)
+- **BigInteger.BigInteger** · [`export let compare_to = func(other: BigInteger) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L257)
+  Compares signed values by sign and then magnitude.
+- **BigInteger.BigInteger** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L275)
+  Tests whether another BigInteger has the same sign and magnitude.
+- **BigInteger.BigInteger** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L285)
   Starts at 0, combines each limb from most to least significant, then negates (wrapping) for a negative value.
-- **BigInteger.BigInteger** · [`export let to_int64 = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L285)
-- **BigInteger.BigInteger** · [`export let to_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L312)
+- **BigInteger.BigInteger** · [`export let to_int64 = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L297)
+  Returns Some when the value fits in int64, or None otherwise.
+- **BigInteger.BigInteger** · [`export let to_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L324)
   The nearest float64, ties to even; an infinity beyond the range.
-- **BigInteger.BigInteger** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L331)
+- **BigInteger.BigInteger** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L343)
   Decimal, by repeated division by 10^9 and nine-digit groups.
-- **BigInteger.BigInteger** · [`export let to_string_radix = func(radix: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L334)
+- **BigInteger.BigInteger** · [`export let to_string_radix = func(radix: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L346)
   Lowercase digits. A radix outside 2 through 36 traps.
-- **BigInteger** · [`export const Zero: BigInteger = new BigInteger(0, [])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L340)
-- **BigInteger** · [`export const One: BigInteger = new BigInteger(1, [1])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L341)
-- **BigInteger** · [`export const Ten: BigInteger = new BigInteger(1, [10])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L342)
-- **BigInteger** · [`export let of_int64 = func(value: int64) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L344)
-- **BigInteger** · [`export let of_uint64 = func(value: uint64) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L353)
-- **BigInteger** · [`export let parse = func(text: string) -> Result<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L355)
-- **BigInteger** · [`export let parse_radix = func(text: string, radix: int) -> Result<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L360)
+- **BigInteger** · [`export const Zero: BigInteger = new BigInteger(0, [])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L353)
+  The integer zero.
+- **BigInteger** · [`export const One: BigInteger = new BigInteger(1, [1])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L355)
+  The integer one.
+- **BigInteger** · [`export const Ten: BigInteger = new BigInteger(1, [10])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L357)
+  The integer ten.
+- **BigInteger** · [`export let of_int64 = func(value: int64) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L360)
+  Constructs a BigInteger from any int64, including the minimum signed value.
+- **BigInteger** · [`export let of_uint64 = func(value: uint64) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L370)
+  Constructs a nonnegative BigInteger from an unsigned 64-bit value.
+- **BigInteger** · [`export let parse = func(text: string) -> Result<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L373)
+  Parses base-10 integer text or returns a parse error.
+- **BigInteger** · [`export let parse_radix = func(text: string, radix: int) -> Result<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L377)
   An optional `+` or `-`, then one or more digits of the radix in either case (Stdlib.md section 7.1), with no range failure. A radix outside 2 through 36 traps.
 <!-- END SOURCE API -->
 

@@ -1,25 +1,25 @@
 let.promote _ = import:Std.Core.Error;
 let.promote wide = import:Std.Core.Internal.WideUint;
 
-// Float text conversion and bit-level helpers shared by the float companion
-// modules (Stdlib.md sections 7.3 and 7.5). A format is given by its fraction
-// width `f` and exponent width `w`; bit patterns travel as uint64. Every
-// conversion is defined by exact integer arithmetic on the significand and
-// powers of 2 and 10 (WideUint). Library files only.
+/// @brief Float text conversion and bit-level helpers shared by the float companion modules (Stdlib.md sections
+/// 7.3 and 7.5).
+///
+/// A format is given by its fraction width `f` and exponent width `w`; bit patterns travel as uint64. Every
+/// conversion is defined by exact integer arithmetic on the significand and powers of 2 and 10 (WideUint).
+/// Library files only.
 export let FloatText = module (
-    // At most this many significant digits take part in exact parsing. Every
-    // midpoint between two float64 values has at most 767 significant
-    // digits, so the digits after the first 800 only decide, through a sticky
-    // flag, that the value lies above the truncated one.
+    /// @brief At most this many significant digits take part in exact parsing.
+    ///
+    /// Every midpoint between two float64 values has at most 767 significant digits, so the digits after the
+    /// first 800 only decide, through a sticky flag, that the value lies above the truncated one.
     const MaxDigits: int = 800;
 
-    // A parse outcome. `Bits` is a final bit pattern of the format. `Near`
-    // is a float64 that rounds to the correct result with one conversion:
-    // either the exact value, or a value no midpoint of the format separates
-    // from the exact value.
+    /// @brief A parse outcome. `Bits` is a final bit pattern of the format. `Near` is a float64 that rounds to
+    /// the correct result with one conversion: either the exact value, or a value no midpoint of the format
+    /// separates from the exact value.
     export let Parsed = enum (Failure(Error), Bits(uint64), Near(float64));
 
-    // Powers of ten that float64 holds exactly.
+    /// @brief Powers of ten that float64 holds exactly.
     let exact_powers: float64[] = [
         1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0, 100000000.0,
         1000000000.0, 10000000000.0, 100000000000.0, 1000000000000.0, 10000000000000.0,
@@ -30,36 +30,38 @@ export let FloatText = module (
 
     // Bit-level classification. -------------------------------------------
 
+    /// @brief Selects the sign bit for the supplied fraction and exponent widths.
     export let sign_mask = func(f: int, w: int) -> uint64 {
         let one: uint64 = 1;
         return one << (f + w);
     };
 
+    /// @brief Selects the exponent field for the supplied fraction and exponent widths.
     export let exponent_mask = func(f: int, w: int) -> uint64 {
         let one: uint64 = 1;
         return ((one << w) - 1) << f;
     };
 
+    /// @brief Selects the low fraction bits.
     export let fraction_mask = func(f: int) -> uint64 {
         let one: uint64 = 1;
         return (one << f) - 1;
     };
 
+    /// @brief Tests for an all-ones exponent and a nonzero fraction.
     export let is_nan_bits = func(bits: uint64, f: int, w: int) -> bool {
         let exponent = exponent_mask(f, w);
         return (bits & exponent) == exponent && (bits & fraction_mask(f)) != 0;
     };
 
-    // The format's canonical quiet NaN: sign 0, every exponent bit, and only
-    // the top fraction bit.
+    /// @brief The format's canonical quiet NaN: sign 0, every exponent bit, and only the top fraction bit.
     export let nan_bits = func(f: int, w: int) -> uint64 {
         let one: uint64 = 1;
         return exponent_mask(f, w) | (one << (f - 1));
     };
 
-    // floor (0), ceil (1), trunc (2), round half away from zero (3), and
-    // round half to even (4) on a bit pattern. The sign of zero is kept; a
-    // NaN becomes the canonical NaN.
+    /// @brief floor (0), ceil (1), trunc (2), round half away from zero (3), and round half to even (4) on a
+    /// bit pattern. The sign of zero is kept; a NaN becomes the canonical NaN.
     export let round_bits = func(bits: uint64, f: int, w: int, mode: int) -> uint64 {
         let exponent_field = ((bits & exponent_mask(f, w)) >> f) as int;
         let bias = (1 << (w - 1)) - 1;
@@ -125,9 +127,8 @@ export let FloatText = module (
 
     // Fixed and exponential text. ------------------------------------------
 
-    // `digits` fraction digits, correctly rounded, ties to even. NaN and the
-    // infinities print as in to_string; a negative value keeps its `-` even
-    // when it rounds to zero.
+    /// @brief `digits` fraction digits, correctly rounded, ties to even. NaN and the infinities print as in
+    /// to_string; a negative value keeps its `-` even when it rounds to zero.
     export let to_fixed = func(bits: uint64, f: int, w: int, digits: int) -> string {
         check_digits(digits);
         let special = special_text(bits, f, w);
@@ -154,9 +155,8 @@ export let FloatText = module (
         return sign_text(bits, f, w) + text;
     };
 
-    // One digit, a point and `digits` more digits (no point when `digits` is
-    // 0), `e`, and the decimal exponent with `-` when negative. Correctly
-    // rounded, ties to even.
+    /// @brief One digit, a point and `digits` more digits (no point when `digits` is 0), `e`, and the decimal
+    /// exponent with `-` when negative. Correctly rounded, ties to even.
     export let to_exponential = func(bits: uint64, f: int, w: int, digits: int) -> string {
         check_digits(digits);
         let special = special_text(bits, f, w);
@@ -204,11 +204,10 @@ export let FloatText = module (
 
     // Parsing. --------------------------------------------------------------
 
-    // `NaN`, `Infinity`, `+Infinity`, `-Infinity`, or an optional sign,
-    // digits with an optional point (at least one digit), and an optional
-    // exponent (`e` or `E`, an optional sign, and digits). The value is
-    // rounded once, ties to even; too large becomes an infinity and too
-    // small a signed zero.
+    /// @brief `NaN`, `Infinity`, `+Infinity`, `-Infinity`, or an optional sign, digits with an optional point
+    /// (at least one digit), and an optional exponent (`e` or `E`, an optional sign, and digits).
+    ///
+    /// The value is rounded once, ties to even; too large becomes an infinity and too small a signed zero.
     export let parse = func(text: string, f: int, w: int) -> Parsed {
         let length = text.byte_length;
         if (length == 0) {
@@ -323,12 +322,11 @@ export let FloatText = module (
         return Parsed.Bits(sign | exact_bits(digits, scale, sticky, f, w));
     };
 
-    // A positive float64 that rounds to the correct result, or 0.0 when the
-    // exact path must decide. For float64 the result is Clinger's: both
-    // operands are exact and one operation rounds once. For narrower formats
-    // the float64 result is within 3 units in its last place of the exact
-    // value (at most three roundings), so when no midpoint of the format lies
-    // within 16 units, both round to the same value.
+    /// @brief A positive float64 that rounds to the correct result, or 0.0 when the exact path must decide.
+    ///
+    /// For float64 the result is Clinger's: both operands are exact and one operation rounds once. For narrower
+    /// formats the float64 result is within 3 units in its last place of the exact value (at most three
+    /// roundings), so when no midpoint of the format lies within 16 units, both round to the same value.
     let fast_path = func(digits: uint8[list], scale: int64, sticky: bool, f: int, w: int) -> float64 {
         if (sticky || digits.length > 15) {
             return 0.0;
@@ -371,8 +369,8 @@ export let FloatText = module (
         return near;
     };
 
-    // Whether a midpoint between two values of the format lies within 16
-    // float64 units of `near`, a positive normal float64.
+    /// @brief Whether a midpoint between two values of the format lies within 16 float64 units of `near`, a
+    /// positive normal float64.
     let near_midpoint = func(near: float64, f: int, w: int) -> bool {
         let bits = near.to_bits();
         let one: uint64 = 1;
@@ -399,8 +397,8 @@ export let FloatText = module (
         return half - dropped <= 16;
     };
 
-    // The magnitude bits of digits * 10^scale (plus a positive tail when
-    // `sticky`), rounded once to the format, ties to even.
+    /// @brief The magnitude bits of digits * 10^scale (plus a positive tail when `sticky`), rounded once to the
+    /// format, ties to even.
     let exact_bits = func(digits: uint8[list], scale: int64, sticky: bool, f: int, w: int) -> uint64 {
         let bias = (1 << (w - 1)) - 1;
         let precision = f + 1;
@@ -454,9 +452,8 @@ export let FloatText = module (
         return round_to_bits(value, sticky || inexact, -shift - divisor_exponent, f, w);
     };
 
-    // Rounds (value + tail) * 2^scale to the format, where the tail is in
-    // [0, 1) and positive when `sticky`. The value has enough bits that the
-    // tail lies below the rounding position.
+    /// @brief Rounds (value + tail) * 2^scale to the format, where the tail is in [0, 1) and positive when
+    /// `sticky`. The value has enough bits that the tail lies below the rounding position.
     let round_to_bits = func(value: WideUint, sticky: bool, scale: int, f: int, w: int) -> uint64 {
         let bias = (1 << (w - 1)) - 1;
         let one: uint64 = 1;
@@ -500,13 +497,14 @@ export let FloatText = module (
 
     // Helpers. --------------------------------------------------------------
 
+    /// @brief Traps unless the requested fraction digit count is in 0 through 100.
     let check_digits = func(digits: int) {
         if (digits < 0 || digits > 100) {
             trap_with_message("invalid argument: digits outside 0 through 100");
         }
     };
 
-    // "NaN", "Infinity", "-Infinity", or "" for a finite value.
+    /// @brief "NaN", "Infinity", "-Infinity", or "" for a finite value.
     let special_text = func(bits: uint64, f: int, w: int) -> string {
         let exponent = exponent_mask(f, w);
         if ((bits & exponent) != exponent) {
@@ -518,6 +516,7 @@ export let FloatText = module (
         return sign_text(bits, f, w) + "Infinity";
     };
 
+    /// @brief Returns a minus sign when the bit pattern has its sign bit set.
     let sign_text = func(bits: uint64, f: int, w: int) -> string {
         if ((bits & sign_mask(f, w)) != 0) {
             return "-";
@@ -525,8 +524,7 @@ export let FloatText = module (
         return "";
     };
 
-    // The integer significand of a finite value: value = significand *
-    // 2^exponent_of.
+    /// @brief The integer significand of a finite value: value = significand * 2^exponent_of.
     let significand_of = func(bits: uint64, f: int, w: int) -> uint64 {
         let fraction = bits & fraction_mask(f);
         if ((bits & exponent_mask(f, w)) == 0) {
@@ -536,6 +534,7 @@ export let FloatText = module (
         return fraction | (one << f);
     };
 
+    /// @brief Returns the base-two exponent that scales the integer significand.
     let exponent_of = func(bits: uint64, f: int, w: int) -> int {
         let field = ((bits & exponent_mask(f, w)) >> f) as int;
         let bias = (1 << (w - 1)) - 1;
@@ -545,7 +544,7 @@ export let FloatText = module (
         return field - bias - f;
     };
 
-    // floor(2 * significand * 2^exponent * 10^power) and whether it is exact.
+    /// @brief floor(2 * significand * 2^exponent * 10^power) and whether it is exact.
     let scale_doubled = func(significand: uint64, exponent: int, power: int) -> [WideUint, bool] {
         let value = wide.of(significand);
         value.shift_left(1);
@@ -575,7 +574,7 @@ export let FloatText = module (
         return [value, exact];
     };
 
-    // Shifts right by `count` bits, rounding half to even.
+    /// @brief Shifts right by `count` bits, rounding half to even.
     let round_shift_right = func(value: WideUint, count: int) {
         let versus = value.low_bits_versus_half(count);
         value.shift_right(count);
@@ -584,7 +583,7 @@ export let FloatText = module (
         }
     };
 
-    // The first digit, then a point and the rest when there is a rest.
+    /// @brief The first digit, then a point and the rest when there is a rest.
     let with_point = func(digits: string) -> string {
         if (digits.byte_length == 1) {
             return digits;
@@ -592,6 +591,7 @@ export let FloatText = module (
         return digits.slice(0, 1) + "." + digits.slice(1, digits.byte_length);
     };
 
+    /// @brief Builds the requested count of decimal zero digits.
     let zeros = func(count: int) -> string {
         let text = "";
         for (let i = 0; i < count; i++) {
@@ -600,6 +600,7 @@ export let FloatText = module (
         return text;
     };
 
+    /// @brief Divides two integers with the quotient rounded toward negative infinity.
     let floor_div = func(a: int, b: int) -> int {
         let quotient = a / b;
         if (a % b != 0 && (a < 0) != (b < 0)) {
@@ -608,6 +609,7 @@ export let FloatText = module (
         return quotient;
     };
 
+    /// @brief Creates a parse failure with a UTF-8 byte offset.
     let parse_error = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
         Error.Parse { kind: kind, offset: offset, message: message };
 );

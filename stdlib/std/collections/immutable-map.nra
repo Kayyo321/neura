@@ -3,50 +3,63 @@ let.promote _ = import:Std.Collections.Iterator;
 let.promote _ = import:Std.Collections.Map;
 let optional = import:Std.Core.Optional;
 
-// A map that copies its contents at construction and implements only the
-// read-only Map interface (Stdlib.md section 9.10). Keys are compared with
-// equals and hashed with hash_code; iteration is in the order of `of`.
-// Nothing can change it after construction.
+/// @brief Maps whose associations are fixed at construction. Keys use `equals` and
+/// `hash_code`. Iteration follows the order of entries supplied to `of`.
+/// @see [Std.Collections.ImmutableMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-ImmutableMap)
 export let ImmutableMap = module (
+    /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
 
+    /// @brief A read-only hash map with entries in construction order.
     export let ImmutableMap = class<K, V> implements Map<K, V> (
+        /// @brief The private backing hash map created from the input entries.
         let associations: hash_map.HashMap<K, V>;
 
+        /// @brief Adopts the privately built table without exposing it for mutation.
         export let init = func(seal: Seal, contents: hash_map.HashMap<K, V>) {
             associations = contents;
         };
 
+        /// @brief Returns the number of entries.
         export let size = func -> int => associations.size();
 
+        /// @brief Returns true when there are no entries.
         export let is_empty = func -> bool => associations.size() == 0;
 
+        /// @brief Reports whether an entry exists for `key`.
         export let contains_key = func(key: K) -> bool => associations.contains_key(key);
 
+        /// @brief Returns the associated value as `Some`, or `None` when the key is absent.
         export let get = func(key: K) -> optional.Optional<V> => associations.get(key);
 
+        /// @brief Returns the associated value, or `fallback` when the key is absent.
         export let get_or = func(key: K, fallback: V) -> V => associations.get_or(key, fallback);
 
-        // Traps with "no such element" when the key is absent.
+        /// @brief Returns the associated value. Traps with `no such element` when the key is absent.
         export let require = func(key: K) -> V => associations.require(key);
 
+        /// @brief Copies the keys to a new built-in list in construction order.
         export let keys = func -> K[list] => associations.keys();
 
+        /// @brief Copies the values to a new built-in list in construction order.
         export let values = func -> V[list] => associations.values();
 
+        /// @brief Copies the `[key, value]` tuples to a new built-in list in construction order.
         export let entries = func -> [K, V][list] => associations.entries();
 
+        /// @brief Tests whether `value.equals(held_value)` is true for any entry.
         export let contains_value = func(value: V) -> bool => associations.contains_value(value);
 
+        /// @brief Calls `action` with the key and value of each entry in construction order.
         export let for_each = func(action: func(K, V) -> void) {
             associations.for_each(action);
         };
 
-        // Yields [K, V] in the order of `of`.
+        /// @brief Returns an iterator over `[key, value]` tuples in construction order.
         export let iterator = func -> Iterator<[K, V]> => associations.iterator();
 
-        // Another ImmutableMap of the same size in which, for each of its
-        // entries, this map holds an equal value for the key.
+        /// @brief Another ImmutableMap of the same size in which, for each of its
+        /// entries, this map holds an equal value for the key.
         export let.override equals = func(other: class) -> bool {
             if (!(other is ImmutableMap<K, V>)) {
                 return false;
@@ -75,17 +88,17 @@ export let ImmutableMap = module (
             return true;
         };
 
-        // The wrapping sum over entries of the key hash exclusive-or the
-        // value hash.
+        /// @brief The wrapping sum over entries of the key hash exclusive-or the
+        /// value hash.
         export let.override hash_code = func -> uint32 => associations.hash_code();
 
-        // `{k: v, k2: v2}` in iteration order. The entries exist before the
-        // map, so it can never contain itself.
+        /// @brief `{k: v, k2: v2}` in iteration order. The entries exist before the
+        /// map, so it can never contain itself.
         export let.override to_string = func -> string => associations.to_string();
     );
 
-    // Copies `entries`. Traps with "invalid argument: duplicate key" when two
-    // entries have equal keys.
+    /// @brief Copies `entries`. Traps with "invalid argument: duplicate key" when two
+    /// entries have equal keys.
     export let of = func<K, V>(entries: [K, V][list]) -> ImmutableMap<K, V> {
         let contents = hash_map.with_capacity<K, V>(entries.length);
         let count = entries.length;

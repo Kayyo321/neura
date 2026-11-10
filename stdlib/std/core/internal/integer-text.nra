@@ -1,17 +1,19 @@
 let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Optional;
 
-// Text helpers shared by the integer companion modules (Stdlib.md section
-// 7.1): radix checks, digit bytes, padding, and the parsing grammar's
-// syntax errors. The value accumulation stays in each type's module.
+/// @brief Text helpers shared by the integer companion modules (Stdlib.md section 7.1): radix checks, digit
+/// bytes, padding, and the parsing grammar's syntax errors.
+///
+/// The value accumulation stays in each type's module.
 export let IntegerText = module (
+    /// @brief Traps unless the radix is between 2 and 36 inclusive.
     export let check_radix = func(radix: int) {
         if (radix < 2 || radix > 36) {
             trap_with_message("invalid argument: radix outside 2 through 36");
         }
     };
 
-    // The lowercase ASCII digit for a value from 0 through 35.
+    /// @brief The lowercase ASCII digit for a value from 0 through 35.
     export let digit_byte = func(value: int) -> uint8 {
         if (value < 10) {
             return (value + 48) as uint8;
@@ -19,8 +21,8 @@ export let IntegerText = module (
         return (value + 87) as uint8;
     };
 
-    // The value of an ASCII digit byte, letters in either case, or 36 when
-    // the byte is not a digit of any radix.
+    /// @brief The value of an ASCII digit byte, letters in either case, or 36 when the byte is not a digit of
+    /// any radix.
     export let digit_value = func(b: uint8) -> int {
         if (b >= 48 && b <= 57) {
             return (b - 48) as int;
@@ -34,8 +36,7 @@ export let IntegerText = module (
         return 36;
     };
 
-    // The text of digits stored least significant first, with a leading
-    // `-` when `negative` is set.
+    /// @brief The text of digits stored least significant first, with a leading `-` when `negative` is set.
     export let digits_text = func(reversed: uint8[list], negative: bool) -> string {
         let bytes: uint8[list] = [];
         if (negative) {
@@ -48,8 +49,8 @@ export let IntegerText = module (
         return text;
     };
 
-    // Left-pads `text` with copies of `pad` to `min_width` characters. A
-    // `0` pad goes after a leading `-`. `pad` must be one scalar value.
+    /// @brief Left-pads `text` with copies of `pad` to `min_width` characters. A `0` pad goes after a leading
+    /// `-`. `pad` must be one scalar value.
     export let pad_number = func(text: string, min_width: int, pad: string) -> string {
         let pad_length = pad.byte_length;
         if (pad_length == 0 || sequence_length(pad.byte_at(0)) != pad_length) {
@@ -69,8 +70,8 @@ export let IntegerText = module (
         return padding + text;
     };
 
-    // The first error of the grammar: an optional `+` or `-`, then one or
-    // more digits of the radix. None when the text matches.
+    /// @brief The first error of the grammar: an optional `+` or `-`, then one or more digits of the radix.
+    /// None when the text matches.
     export let syntax_error = func(text: string, radix: int) -> Optional<Error> {
         let length = text.byte_length;
         if (length == 0) {
@@ -90,7 +91,7 @@ export let IntegerText = module (
         return Optional<Error>.None;
     };
 
-    // 1 when the text starts with `+` or `-`, otherwise 0.
+    /// @brief 1 when the text starts with `+` or `-`, otherwise 0.
     export let sign_length = func(text: string) -> int {
         let first = text.byte_at(0);
         if (first == 43 || first == 45) {
@@ -99,13 +100,15 @@ export let IntegerText = module (
         return 0;
     };
 
+    /// @brief Creates an out-of-range parse error for the given numeric type.
     export let out_of_range = func(type_name: string) -> Error =>
         parse_error(ParseErrorKind.OutOfRange, 0, "value out of range for " + type_name);
 
+    /// @brief Creates a parse error at the supplied byte offset.
     let parse_error = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
         Error.Parse { kind: kind, offset: offset, message: message };
 
-    // The length of the UTF-8 sequence that a lead byte starts.
+    /// @brief The length of the UTF-8 sequence that a lead byte starts.
     let sequence_length = func(lead: uint8) -> int {
         if (lead < 128) {
             return 1;

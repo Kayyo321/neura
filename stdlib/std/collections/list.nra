@@ -1,20 +1,27 @@
 let.promote _ = import:Std.Collections.Collection;
 let optional = import:Std.Core.Optional;
 
-// A read-only sequence with positions (ArrayList, LinkedList, ImmutableList).
+/// @brief A read-only sequence with positions (ArrayList, LinkedList, ImmutableList).
+/// @see [Std.Collections.List](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-List)
 export let List = module (
+    /// @brief Read-only access to elements by zero-based position.
     export let List = interface<T>:Collection<T> (
-        // A bounds trap for an index outside 0 through size() - 1.
+        /// @brief Returns the element at a valid zero-based index.
         let get = func(index: int) -> T;
-        // Trap with "no such element" when empty.
+        /// @brief Returns the first element. Traps with `no such element` when empty.
         let first = func -> T;
+        /// @brief Returns the last element. Traps with `no such element` when empty.
         let last = func -> T;
+        /// @brief Returns the first element as `Some`, or `None` when empty.
         let first_or_none = func -> optional.Optional<T>;
+        /// @brief Returns the last element as `Some`, or `None` when empty.
         let last_or_none = func -> optional.Optional<T>;
-        // By equals; -1 when absent.
+        /// @brief Returns the lowest index where `value.equals(element)` is true, or -1 when absent.
         let index_of = func(value: T) -> int;
+        /// @brief Returns the highest index where `value.equals(element)` is true, or -1 when absent.
         let last_index_of = func(value: T) -> int;
-        // The first index whose element passes, or -1.
+        /// @brief Returns the first index accepted by `test`, or -1 if no element matches.
+        /// @pre The predicate leaves the list structure unchanged.
         let index_where = func(test: func(T) -> bool) -> int;
     );
 );

@@ -17,7 +17,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Maps** · [`export let same_entries = func<K, V>(a: Map<K, V>, b: Map<K, V>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/maps.nra#L10)
+- **Maps** · [`export let same_entries = func<K, V>(a: Map<K, V>, b: Map<K, V>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/maps.nra#L11)
   Whether the maps have the same size and, for each entry of `b`, `a` holds a value for the key (by `a`'s own key lookup) that equals the entry's value, with `a`'s value as the receiver.
 <!-- END SOURCE API -->
 

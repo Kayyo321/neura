@@ -18,6 +18,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **Iterator** · [`export let Iterator = interface<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/iterator.nra#L5)
+  A single forward traversal over elements of type `T`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

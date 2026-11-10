@@ -17,15 +17,18 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Utf8Reader** · [`export let Utf8Reader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L8)
-- **Utf8Reader.Utf8Reader** · [`export let init = func(input: func(int) -> result.Result<uint8[list]>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L13)
-- **Utf8Reader.Utf8Reader** · [`export let read_scalar = func -> result.Result<Optional<uint32>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L20)
+- **Utf8Reader** · [`export let Utf8Reader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L10)
+  Decodes UTF-8 from a byte source and retains bytes read ahead.
+- **Utf8Reader.Utf8Reader** · [`export let init = func(input: func(int) -> result.Result<uint8[list]>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L19)
+  Initializes the reader with a byte source and an empty buffer.
+- **Utf8Reader.Utf8Reader** · [`export let read_scalar = func -> result.Result<Optional<uint32>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L27)
   The next Unicode scalar value; None at the end of the stream. An invalid or truncated sequence fails with InvalidData; the bytes before the offending byte are consumed and that byte is not.
-- **Utf8Reader.Utf8Reader** · [`export let read_line = func -> result.Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L82)
+- **Utf8Reader.Utf8Reader** · [`export let read_line = func -> result.Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L88)
   The next line without its LF or a CR before it; None at the end of the stream. A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
-- **Utf8Reader.Utf8Reader** · [`export let read_to_end = func -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L110)
+- **Utf8Reader.Utf8Reader** · [`export let read_to_end = func -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L116)
   The rest of the stream as text.
-- **Utf8Reader** · [`export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L167)
+- **Utf8Reader** · [`export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L178)
+  Creates a UTF-8 reader over the supplied byte source.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

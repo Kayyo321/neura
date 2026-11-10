@@ -1,22 +1,27 @@
-// The host ID of an open socket and the address text it was opened with.
-// Only Std.Net creates one; the ID never leaves the library.
+/// @brief The host ID of an open socket and the address text it was opened with. Only Std.Net creates one; the
+/// ID never leaves the library.
 export let Socket = module (
+    /// @brief Pairs a provider socket identifier with its address text.
     export let Handle = class (
+        /// @brief The provider's socket identifier.
         export let id: int64 = 0;
+        /// @brief The address text retained for diagnostics.
         export let address: string = "";
 
+        /// @brief Stores the provider identifier and address text.
         export let init = func(host_id: int64, address_text: string) {
             id = host_id;
             address = address_text;
         };
     );
 
-    // A port outside 0 through 65,535 traps.
+    /// @brief A port outside 0 through 65,535 traps.
     export let check_port = func(port: int) {
         if (port < 0 || port > 65535) {
             trap_with_message("invalid argument: port");
         }
     };
 
+    /// @brief Formats the host and decimal port for diagnostic context.
     export let address_of = func(host: string, port: int) -> string => host + ":" + port.to_string();
 );

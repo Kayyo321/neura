@@ -17,24 +17,34 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Optional** · [`export let Optional = enum<T> (None, Some(T))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L8)
-- **Optional** · [`export let is_some = func<T>(o: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L10)
-- **Optional** · [`export let is_none = func<T>(o: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L15)
-- **Optional** · [`export let value_or = func<T>(o: Optional<T>, fallback: T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L20)
-- **Optional** · [`export let expect = func<T>(o: Optional<T>, detail: string) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L26)
+- **Optional** · [`export let Optional = enum<T> (None, Some(T))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L10)
+  Represents an absent value (None) or a present payload (Some).
+- **Optional** · [`export let is_some = func<T>(o: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L13)
+  Reports whether the optional contains a payload.
+- **Optional** · [`export let is_none = func<T>(o: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L19)
+  Reports whether the optional is None.
+- **Optional** · [`export let value_or = func<T>(o: Optional<T>, fallback: T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L25)
+  Returns the payload or the already-evaluated fallback.
+- **Optional** · [`export let expect = func<T>(o: Optional<T>, detail: string) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L31)
   The value, or a trap with "no such element: " and the detail.
-- **Optional** · [`export let to_result = func<T>(o: Optional<T>, failure: Error) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L37)
-- **Optional** · [`export let map = func<T, U>(o: Optional<T>, f: func(T) -> U) -> Optional<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L42)
-- **Optional** · [`export let and_then = func<T, U>(o: Optional<T>, f: func(T) -> Optional<U>) -> Optional<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L47)
-- **Optional** · [`export let filter = func<T>(o: Optional<T>, keep: func(T) -> bool) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L52)
-- **Optional** · [`export let value_or_else = func<T>(o: Optional<T>, make: func() -> T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L67)
+- **Optional** · [`export let to_result = func<T>(o: Optional<T>, failure: Error) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L43)
+  Wraps a present payload in Ok or uses the supplied error for None.
+- **Optional** · [`export let map = func<T, U>(o: Optional<T>, f: func(T) -> U) -> Optional<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L49)
+  Applies the function only to a present payload and wraps its output in Some.
+- **Optional** · [`export let and_then = func<T, U>(o: Optional<T>, f: func(T) -> Optional<U>) -> Optional<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L55)
+  Applies the function only to a present payload and returns its optional result.
+- **Optional** · [`export let filter = func<T>(o: Optional<T>, keep: func(T) -> bool) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L61)
+  Keeps the present payload only when it passes the predicate.
+- **Optional** · [`export let value_or_else = func<T>(o: Optional<T>, make: func() -> T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L76)
   Calls `make` only for None.
-- **Optional** · [`export let or_else = func<T>(o: Optional<T>, other: func() -> Optional<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L72)
-- **Optional** · [`export let equals = func<T>(a: Optional<T>, b: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L78)
+- **Optional** · [`export let or_else = func<T>(o: Optional<T>, other: func() -> Optional<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L82)
+  Calls the fallback only for None and returns its optional result.
+- **Optional** · [`export let equals = func<T>(a: Optional<T>, b: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L88)
   Both None, or both Some with equal values.
-- **Optional** · [`export let hash = func<T>(o: Optional<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L93)
+- **Optional** · [`export let hash = func<T>(o: Optional<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L103)
   0 for None, otherwise Hash.combine(1, the value's hash).
-- **Optional** · [`export let to_string = func<T>(o: Optional<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L98)
+- **Optional** · [`export let to_string = func<T>(o: Optional<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L109)
+  Formats None or the text of a present payload wrapped in Some.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

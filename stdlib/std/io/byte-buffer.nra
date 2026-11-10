@@ -3,30 +3,34 @@ let cell = import:Std.Core.Cell;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 
-// An in-memory byte accumulator (Stdlib.md section 11.1). Its bound write
-// method is a byte sink.
+/// @brief An in-memory byte accumulator (Stdlib.md section 11.1). Its bound write method is a byte sink.
+/// @see [Std.Io.ByteBuffer](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-ByteBuffer)
 export let ByteBuffer = module (
+    /// @brief A growable in-memory byte sink that can create independent readers.
     export let ByteBuffer = class (
+        /// @brief Stores all bytes written since construction or the last clear.
         let data: uint8[list] = [];
 
-        // Appends every byte; never fails.
+        /// @brief Appends every byte; never fails.
         export let write = func(input: uint8[list]) -> Result<Unit> {
             bytes.append_range(data, input, 0, input.length);
             return bytes.ok();
         };
 
-        // A copy of the bytes written so far.
+        /// @brief A copy of the bytes written so far.
         export let to_list = func -> uint8[list] => bytes.copy_range(data, 0, data.length);
 
+        /// @brief Returns the current number of bytes.
         export let size = func -> int => data.length;
 
+        /// @brief Discards all accumulated bytes.
         export let clear = func {
             let empty: uint8[list] = [];
             data = empty;
         };
 
-        // Only the current byte sequence participates. Readers hold their
-        // own copies and do not affect the buffer's equality or hash.
+        /// @brief Only the current byte sequence participates. Readers hold their own copies and do not affect
+        /// the buffer's equality or hash.
         export let.override equals = func(other: class) -> bool {
             if (!(other is ByteBuffer)) {
                 return false;
@@ -35,12 +39,13 @@ export let ByteBuffer = module (
             return data === buffer.data;
         };
 
+        /// @brief Hashes the current byte sequence.
         export let.override hash_code = func -> uint32 => data.hash_code();
 
+        /// @brief Returns the built-in list representation of the bytes.
         export let.override to_string = func -> string => data.to_string();
 
-        // A byte source over a copy of the current contents. A maximum count
-        // below 1 traps.
+        /// @brief A byte source over a copy of the current contents. A maximum count below 1 traps.
         export let reader = func -> func(int) -> Result<uint8[list]> {
             let snapshot = to_list();
             let position = cell.of<int>(0);
@@ -57,5 +62,6 @@ export let ByteBuffer = module (
         };
     );
 
+    /// @brief Creates an empty byte buffer.
     export let create = func -> ByteBuffer => new ByteBuffer();
 );

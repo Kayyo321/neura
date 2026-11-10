@@ -133,9 +133,23 @@ def generate(ucd, license_file):
         "//",
         *("// " + line if line else "//" for line in notice),
         "",
+        "/// @brief Compact Unicode case mappings and property ranges for deterministic text conversion.",
         "export let UnicodeCaseData = module (",
     ]
-    lines.extend(f'    export const {name}: string = "{value}";' for name, value in data.items())
+    descriptions = {
+        "Lower": "Lowercase mappings indexed by scalar, including expansions.",
+        "Upper": "Uppercase mappings indexed by scalar, including expansions.",
+        "Fold": "Full locale-independent case-fold mappings, including expansions.",
+        "SimpleFold": "Single-scalar mappings used for simple case-insensitive comparisons.",
+        "Cased": "Ranges of scalars with the Unicode Cased property.",
+        "CaseIgnorable": "Ranges of scalars ignored when testing neighboring case context.",
+        "SoftDotted": "Ranges of soft-dotted scalars used by contextual casing rules.",
+        "Combining": "Ranges of scalars with a nonzero canonical combining class.",
+        "Above": "Ranges of scalars with canonical combining class 230 (Above).",
+    }
+    for name, value in data.items():
+        lines.append(f"    /// @brief {descriptions[name]}")
+        lines.append(f'    export const {name}: string = "{value}";')
     lines.append(");")
     return "\n".join(lines) + "\n"
 

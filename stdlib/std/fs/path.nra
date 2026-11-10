@@ -2,29 +2,32 @@ let.promote _ = import:Std.Core.Comparable;
 let optional = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Ordering;
 
-// A file system path held as normalized text (Stdlib.md section 11.2). The
-// separator is `/` on every host. Construction collapses repeated
-// separators, removes `.` components, and removes a trailing separator
-// except for the root; an empty result is `.`. `..` components are kept.
-// Equality, hash, ordering (by UTF-8 bytes), and text use the normalized
-// text.
+/// @brief A file system path held as normalized text (Stdlib.md section 11.2).
+///
+/// The separator is `/` on every host. Construction collapses repeated separators, removes `.` components, and
+/// removes a trailing separator except for the root; an empty result is `.`. `..` components are kept.
+/// Equality, hash, ordering (by UTF-8 bytes), and text use the normalized text.
+/// @see [Std.Fs.Path](https://github.com/Kayyo321/neura/wiki/Stdlib-Fs-Path)
 export let Path = module (
+    /// @brief An immutable normalized path with lexical operations independent of the filesystem.
     export let Path = class implements Comparable<Path> (
+        /// @brief The normalized slash-separated path text.
         let text: string = ".";
 
-        // Normalizes `raw`; Path.of is the usual spelling.
+        /// @brief Normalizes `raw`; Path.of is the usual spelling.
         export let init = func(raw: string) {
             text = normalize(raw);
         };
 
+        /// @brief Reports whether the path starts at the root.
         export let is_absolute = func -> bool => absolute_text(text);
 
-        // This path followed by `other`; an absolute `other` replaces it.
+        /// @brief This path followed by `other`; an absolute `other` replaces it.
         export let join = func(other: string) -> Path =>
             absolute_text(other) ? new Path(other) : new Path(text + "/" + other);
 
-        // The path without its last component, or nil for the root, `.`, and
-        // a single relative component.
+        /// @brief The path without its last component, or nil for the root, `.`, and a single relative
+        /// component.
         export let parent = func -> Path {
             let parts = split(text);
             if (parts.length == 0) {
@@ -37,8 +40,7 @@ export let Path = module (
             return new Path(assemble(is_absolute(), parts));
         };
 
-        // The last component; None for the root, `.`, and a path ending in
-        // `..`.
+        /// @brief The last component; None for the root, `.`, and a path ending in `..`.
         export let file_name = func -> optional.Optional<string> {
             let parts = split(text);
             if (parts.length == 0 || parts[parts.length - 1] == "..") {
@@ -47,7 +49,7 @@ export let Path = module (
             return optional.Optional<string>.Some(parts[parts.length - 1]);
         };
 
-        // The file name without its extension.
+        /// @brief The file name without its extension.
         export let stem = func -> optional.Optional<string> {
             return match (file_name()) {
                 optional.Optional.Some(name) => optional.Optional<string>.Some(name.slice(0, stem_end(name))),
@@ -55,8 +57,8 @@ export let Path = module (
             };
         };
 
-        // The text after the last `.` of the file name, when that dot is not
-        // the name's first character.
+        /// @brief The text after the last `.` of the file name, when that dot is not the name's first
+        /// character.
         export let extension = func -> optional.Optional<string> {
             match (file_name()) {
                 optional.Optional.Some(name) => {
@@ -72,8 +74,7 @@ export let Path = module (
             }
         };
 
-        // The components in order, starting with "/" for an absolute path.
-        // The path `.` has none.
+        /// @brief The components in order, starting with "/" for an absolute path. The path `.` has none.
         export let components = func -> string[list] {
             let parts = split(text);
             if (!is_absolute()) {
@@ -86,9 +87,8 @@ export let Path = module (
             return all;
         };
 
-        // Removes each `..` together with the component before it, without
-        // consulting the file system. `..` directly below the root is
-        // removed; leading `..` of a relative path are kept.
+        /// @brief Removes each `..` together with the component before it, without consulting the file system.
+        /// `..` directly below the root is removed; leading `..` of a relative path are kept.
         export let resolve_lexically = func -> Path {
             let kept: string[list] = [];
             for (let part in split(text)) {
@@ -105,8 +105,8 @@ export let Path = module (
             return new Path(assemble(is_absolute(), kept));
         };
 
-        // True when both paths are absolute or both relative and every
-        // component of `other` begins this path.
+        /// @brief True when both paths are absolute or both relative and every component of `other` begins this
+        /// path.
         export let starts_with = func(other: Path) -> bool {
             if (is_absolute() != other.is_absolute()) {
                 return false;
@@ -126,9 +126,8 @@ export let Path = module (
             return true;
         };
 
-        // A relative path that joined to `base` names this path, or nil when
-        // one is absolute and the other relative or when `base` has a `..`
-        // component after the common part.
+        /// @brief A relative path that joined to `base` names this path, or nil when one is absolute and the
+        /// other relative or when `base` has a `..` component after the common part.
         export let relative_to = func(base: Path) -> Path {
             if (is_absolute() != base.is_absolute()) {
                 return nil;
@@ -156,8 +155,10 @@ export let Path = module (
             return new Path(assemble(false, parts));
         };
 
+        /// @brief Orders paths lexicographically by their normalized UTF-8 bytes.
         export let compare_to = func(other: Path) -> Ordering => compare_text(text, other.to_string());
 
+        /// @brief Tests equality of the normalized path text.
         export let.override equals = func(other: class) -> bool {
             if (!(other is Path)) {
                 return false;
@@ -165,16 +166,20 @@ export let Path = module (
             return text == (other as Path).to_string();
         };
 
+        /// @brief Hashes the normalized path text.
         export let.override hash_code = func -> uint32 => text.hash_code();
 
+        /// @brief Returns the normalized path text.
         export let.override to_string = func -> string => text;
     );
 
+    /// @brief Constructs a path and normalizes its separators and dot components.
     export let of = func(text: string) -> Path => new Path(text);
 
+    /// @brief Tests whether the raw text begins with a slash.
     let absolute_text = func(text: string) -> bool => text.byte_length > 0 && text.byte_at(0) == 47;
 
-    // The components of `text` other than empty ones and `.`.
+    /// @brief The components of `text` other than empty ones and `.`.
     let split = func(text: string) -> string[list] {
         let parts: string[list] = [];
         let start = 0;
@@ -195,6 +200,7 @@ export let Path = module (
         return parts;
     };
 
+    /// @brief Joins components with single separators and represents an empty path as root or dot.
     let assemble = func(absolute: bool, parts: string[list]) -> string {
         if (parts.length == 0) {
             return absolute ? "/" : ".";
@@ -211,10 +217,10 @@ export let Path = module (
         return result;
     };
 
+    /// @brief Normalizes separators and removes empty and dot components while retaining parent components.
     let normalize = func(raw: string) -> string => assemble(absolute_text(raw), split(raw));
 
-    // The byte index of the dot that starts the extension, or the name's
-    // length when there is none.
+    /// @brief The byte index of the dot that starts the extension, or the name's length when there is none.
     let stem_end = func(name: string) -> int {
         let i = name.byte_length - 1;
         while (i > 0) {
@@ -226,6 +232,7 @@ export let Path = module (
         return name.byte_length;
     };
 
+    /// @brief Orders two UTF-8 strings lexicographically by their bytes.
     let compare_text = func(a: string, b: string) -> Ordering {
         let i = 0;
         while (i < a.byte_length && i < b.byte_length) {

@@ -6,29 +6,41 @@ let socket = import:Std.Net.Internal.Socket;
 let.promote _ = import:Std.Net.TcpStream;
 let.promote _ = import:Std.Core.Unit;
 
-// A listening TCP socket (Stdlib.md section 11.4). Needs the net
-// capability. After close, accept fails with Closed.
+/// @brief A listening TCP socket (Stdlib.md section 11.4). Needs the net capability. After close, accept fails
+/// with Closed.
+/// @see [Std.Net.TcpListener](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-TcpListener)
 export let TcpListener = module (
+    /// @brief Represents a host success with an identifier or position, or an unsigned host error code.
     let IdOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief Carries the bound port or a provider error code.
     let PortOutcome = enum (Ok(int), Error(uint32));
+    /// @brief Represents host success without a value or an unsigned host error code.
     let DoneOutcome = enum (Ok, Error(uint32));
+    /// @brief Requests a listening socket for a host and port.
     let listen_socket = func(host: string, port: int) -> IdOutcome host("neura.net.listen", 1);
+    /// @brief Queries the provider for the actual bound port.
     let socket_port = func(socket: int64) -> PortOutcome host("neura.net.local_port", 1);
+    /// @brief Waits for the provider to accept a connection.
     let accept_socket = func(listener: int64) -> IdOutcome host("neura.net.accept", 1);
+    /// @brief Requests that the provider release the socket handle.
     let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
+    /// @brief Owns a listening socket and retains its port after close.
     export let TcpListener = class implements Closeable (
+        /// @brief Holds the provider handle and the context used in error messages.
         let handle: socket.Handle = nil;
+        /// @brief The port the provider actually bound.
         let port: int = 0;
+        /// @brief Tracks whether the wrapper may still use the host handle.
         let open_now: bool = true;
 
-        // Use bind; the handle comes from the library.
+        /// @brief Use bind; the handle comes from the library.
         export let init = func(opened: socket.Handle, bound_port: int) {
             handle = opened;
             port = bound_port;
         };
 
-        // Waits for the next connection.
+        /// @brief Waits for the next connection.
         export let accept = func -> Result<TcpStream> {
             if (!open_now) {
                 return Result<TcpStream>.Err(bytes.closed("listener", handle.address));
@@ -39,10 +51,12 @@ export let TcpListener = module (
             };
         };
 
-        // The port the listener is bound to; for a bind to port 0, the one
-        // the host chose. Still available after close.
+        /// @brief The port the listener is bound to; for a bind to port 0, the one the host chose. Still
+        /// available after close.
         export let local_port = func -> int => port;
 
+        /// @brief Releases the listener. Repeated calls succeed, and an initial close error still leaves it
+        /// closed.
         export let close = func -> Result<Unit> {
             if (!open_now) {
                 return bytes.ok();
@@ -55,9 +69,10 @@ export let TcpListener = module (
         };
     );
 
-    // Listens on `host` (a name or an address; empty for every interface)
-    // and `port`; port 0 asks the host for a free port. A port outside 0
-    // through 65,535 traps with "invalid argument: port".
+    /// @brief Listens on `host` (a name or an address; empty for every interface) and `port`; port 0 asks the
+    /// host for a free port.
+    ///
+    /// A port outside 0 through 65,535 traps with "invalid argument: port".
     export let bind = func(host: string, port: int) -> Result<TcpListener> {
         socket.check_port(port);
         let address = socket.address_of(host, port);
@@ -76,6 +91,7 @@ export let TcpListener = module (
         };
     };
 
+    /// @brief Closes a newly bound socket after a port query fails, then reports the query error.
     let close_after = func(id: int64, code: uint32, address: string) -> Result<TcpListener> {
         close_socket(id);
         return Result<TcpListener>.Err(host_error.io(code, "bind failed", address));

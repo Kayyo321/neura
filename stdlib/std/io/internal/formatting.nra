@@ -6,36 +6,55 @@ let strings = import:Std.Text.Strings;
 let unsigned = import:Std.Core.UInt64;
 let.promote _ = import:Std.Core.Variadic;
 
-// Formatting stays in the program. Console sends only the completed UTF-8
-// string to its existing write services.
+/// @brief Formatting stays in the program. Console sends only the completed UTF-8 string to its existing write
+/// services.
 export let Formatting = module (
+    /// @brief Holds the resolved formatting options for one replacement field.
     let Spec = class (
+        /// @brief The single Unicode scalar used to fill unused width.
         export let fill: string = " ";
+        /// @brief The ASCII alignment marker, or zero for the presentation's default.
         export let align: uint8 = 0;
+        /// @brief The ASCII sign policy marker, or zero when omitted.
         export let sign: uint8 = 0;
+        /// @brief Whether alternate numeric formatting was requested.
         export let alternate: bool = false;
+        /// @brief Whether implicit zero padding was requested.
         export let zero: bool = false;
+        /// @brief The minimum field width in Unicode scalars.
         export let width: int = 0;
+        /// @brief The requested precision, or -1 when omitted.
         export let precision: int = -1;
+        /// @brief The presentation byte, or zero for the default.
         export let presentation: uint8 = 0;
     );
 
+    /// @brief Parses a UTF-8 pattern and tracks argument indexing and the first error.
     let Cursor = class (
+        /// @brief The UTF-8 format pattern.
         let pattern: string;
+        /// @brief The packed values available to replacement fields.
         let values: Argument[];
+        /// @brief The current UTF-8 byte offset in the pattern.
         let position: int = 0;
+        /// @brief The next index for an automatically numbered field.
         let next_auto: int = 0;
-        // 0 means unset, 1 automatic, and 2 manual indexing.
+        /// @brief 0 means unset, 1 automatic, and 2 manual indexing.
         let index_mode: int = 0;
+        /// @brief The first parse error message, or empty before a failure.
         let issue: string = "";
+        /// @brief The UTF-8 byte offset of the first error.
         let issue_offset: int = 0;
+        /// @brief The category of the first parse error.
         let issue_kind: errors.ParseErrorKind = errors.ParseErrorKind.Syntax;
 
+        /// @brief Starts parsing at the beginning of the pattern with the given argument pack.
         export let init = func(source: string, arguments: Argument[]) {
             pattern = source;
             values = arguments;
         };
 
+        /// @brief Renders the pattern or returns its first parse or formatting error.
         export let render = func -> Result<string> {
             let output = string_builder.create();
             let literal_start = 0;
@@ -70,6 +89,7 @@ export let Formatting = module (
             return Result<string>.Ok(output.to_string());
         };
 
+        /// @brief Parses one replacement field and renders its selected argument.
         let replacement = func -> string {
             if (position == pattern.byte_length) {
                 fail(errors.ParseErrorKind.UnexpectedEnd, "unclosed replacement field");
@@ -100,6 +120,7 @@ export let Formatting = module (
             return text;
         };
 
+        /// @brief Reads an argument index and rejects mixing automatic and manual indexing.
         let read_index = func -> int {
             let start = position;
             let mode = 1;
@@ -129,6 +150,7 @@ export let Formatting = module (
             return index;
         };
 
+        /// @brief Parses fill, alignment, sign, width, precision, and presentation options.
         let read_spec = func(spec: Spec) {
             // A single Unicode scalar followed by an alignment character is
             // the fill. Otherwise an alignment character can appear alone.
@@ -189,6 +211,7 @@ export let Formatting = module (
             }
         };
 
+        /// @brief Reads a nested field as a nonnegative integer width or precision.
         let read_dynamic = func -> int {
             position += 1;
             let start = position;
@@ -221,6 +244,7 @@ export let Formatting = module (
             return 0;
         };
 
+        /// @brief Scans a nonnegative decimal integer, recording an error on overflow.
         let read_number = func -> int {
             let number = 0;
             while (is_digit(peek())) {
@@ -235,6 +259,7 @@ export let Formatting = module (
             return number;
         };
 
+        /// @brief Returns the next byte or zero at the end of the pattern.
         let peek = func -> uint8 {
             if (position >= pattern.byte_length) {
                 return 0;
@@ -242,14 +267,17 @@ export let Formatting = module (
             return pattern.byte_at(position);
         };
 
+        /// @brief Records an error at the current pattern offset.
         let fail = func(kind: errors.ParseErrorKind, message: string) => fail_at(kind, position, message);
 
+        /// @brief Records an error at the supplied offset if this is the first failure.
         let fail_at = func(kind: errors.ParseErrorKind, offset: int, message: string) {
             issue_kind = kind;
             issue_offset = offset;
             issue = message;
         };
 
+        /// @brief Dispatches to the renderer for the packed argument type.
         let render_value = func(value: Argument, spec: Spec) -> string => match (value) {
             Argument.Text(text) => render_text(text, spec),
             Argument.Signed(n) => render_signed(n, spec),
@@ -262,6 +290,7 @@ export let Formatting = module (
             Argument.Object(object) => render_text(object_text(object), spec),
         };
 
+        /// @brief Applies text precision, quoting, and padding.
         let render_text = func(text: string, spec: Spec) -> string {
             if (spec.sign != 0 || spec.alternate || spec.zero ||
                 (spec.presentation != 0 && spec.presentation != 115 && spec.presentation != 63)) {
@@ -277,6 +306,7 @@ export let Formatting = module (
             return pad(body, "", false, spec);
         };
 
+        /// @brief Formats a Boolean as text or in a supported integer presentation.
         let render_bool = func(flag: bool, spec: Spec) -> string {
             if (is_integer_presentation(spec.presentation)) {
                 let number: uint64 = 0;
@@ -294,6 +324,7 @@ export let Formatting = module (
             return render_text("false", spec);
         };
 
+        /// @brief Separates the signed integer's magnitude and sign without overflowing at the minimum value.
         let render_signed = func(n: int64, spec: Spec) -> string {
             if (n >= 0) {
                 return render_integer(n as uint64, false, spec);
@@ -301,6 +332,7 @@ export let Formatting = module (
             return render_integer((-(n + 1) as uint64) + 1, true, spec);
         };
 
+        /// @brief Formats a magnitude in the selected radix or as a Unicode scalar.
         let render_integer = func(magnitude: uint64, negative: bool, spec: Spec) -> string {
             let presentation = spec.presentation;
             if (spec.precision >= 0) {
@@ -347,6 +379,7 @@ export let Formatting = module (
             return pad(body, prefix, true, spec);
         };
 
+        /// @brief Selects the floating-point presentation and applies sign, case, and padding.
         let render_float = func(n: float64, original: string, spec: Spec) -> string {
             let presentation = spec.presentation;
             let hexadecimal = presentation == 97 || presentation == 65;
@@ -394,12 +427,14 @@ export let Formatting = module (
             return pad(body, number_sign(negative, spec.sign), true, spec);
         };
 
+        /// @brief Records an invalid argument-presentation combination.
         let invalid_spec = func -> string {
             fail(errors.ParseErrorKind.Syntax, "format specification is invalid for the argument type");
             return "";
         };
     );
 
+    /// @brief Formats a prebuilt argument array and reports pattern failures with byte offsets.
     export let try_vformat = func(pattern: string, args: Argument[]) -> Result<string> {
         if (!strings.contains(pattern, "{") && !strings.contains(pattern, "}")) {
             return Result<string>.Ok(pattern);
@@ -408,18 +443,23 @@ export let Formatting = module (
         return cursor.render();
     };
 
+    /// @brief Recognizes an ASCII decimal digit.
     let is_digit = func(b: uint8) -> bool => b >= 48 && b <= 57;
 
+    /// @brief Recognizes the left, right, and center alignment markers.
     let is_align = func(b: uint8) -> bool => b == 60 || b == 62 || b == 94;
 
+    /// @brief Recognizes radix-based integer presentation markers.
     let is_integer_presentation = func(b: uint8) -> bool =>
         b == 100 || b == 98 || b == 66 || b == 111 || b == 120 || b == 88;
 
+    /// @brief Recognizes supported text and numeric presentation markers.
     let is_presentation = func(b: uint8) -> bool {
         return is_integer_presentation(b) || b == 63 || b == 99 || b == 115 ||
             b == 102 || b == 70 || b == 101 || b == 69 || b == 103 || b == 71 || b == 97 || b == 65;
     };
 
+    /// @brief Returns an object's text representation, or `nil` for a nil reference.
     let object_text = func(value: class) -> string {
         if (value == nil) {
             return "nil";
@@ -427,6 +467,7 @@ export let Formatting = module (
         return value.to_string();
     };
 
+    /// @brief Returns the UTF-8 boundary after at most count scalars.
     let scalar_end = func(text: string, count: int) -> int {
         let end = 0;
         let remaining = count;
@@ -440,6 +481,7 @@ export let Formatting = module (
         return end;
     };
 
+    /// @brief Adds quotation marks and escapes the text for quoted presentation.
     let quote = func(text: string) -> string {
         let output = string_builder.create();
         output.append("\"");
@@ -473,6 +515,7 @@ export let Formatting = module (
         return output.to_string();
     };
 
+    /// @brief Chooses the numeric sign prefix from the value sign and format policy.
     let number_sign = func(negative: bool, sign: uint8) -> string {
         if (negative) {
             return "-";
@@ -486,6 +529,7 @@ export let Formatting = module (
         return "";
     };
 
+    /// @brief Pads by scalar width, inserting implicit numeric zeros after the sign and radix prefix.
     let pad = func(body: string, prefix: string, numeric: bool, spec: Spec) -> string {
         if (spec.width == 0) {
             return prefix == "" ? body : prefix + body;
@@ -506,8 +550,8 @@ export let Formatting = module (
         return strings.repeat(spec.fill, left) + prefix + body + strings.repeat(spec.fill, missing - left);
     };
 
-    // Render the binary64 significand in base 16. All narrower floats are
-    // exactly representable in binary64. Round truncated nibbles to even.
+    /// @brief Render the binary64 significand in base 16. All narrower floats are exactly representable in
+    /// binary64. Round truncated nibbles to even.
     let hex_float = func(value: float64, precision: int, alternate: bool) -> string {
         let bits = value.to_bits();
         let fraction_mask: uint64 = (1 as uint64 << 52) - 1;
@@ -554,8 +598,8 @@ export let Formatting = module (
         return leading.to_string() + point + digits + "p" + sign + exponent.to_string();
     };
 
-    // Pick fixed or scientific form using the rounded exponent. Rearranging
-    // the already-rounded significant digits avoids a second rounding.
+    /// @brief Pick fixed or scientific form using the rounded exponent. Rearranging the already-rounded
+    /// significant digits avoids a second rounding.
     let general_float = func(value: float64, precision: int, alternate: bool) -> string {
         let digits = precision;
         if (digits == 0) {
@@ -595,6 +639,7 @@ export let Formatting = module (
         return sign + fixed;
     };
 
+    /// @brief Parses the signed decimal exponent of a formatted number.
     let parse_exponent = func(text: string, start: int) -> int {
         let i = start;
         let negative = text.byte_at(i) == 45;
@@ -612,6 +657,7 @@ export let Formatting = module (
         return value;
     };
 
+    /// @brief Removes trailing fractional zeros and a trailing decimal point.
     let trim_fraction = func(text: string) -> string {
         let point = strings.index_of(text, ".");
         if (point < 0) {
@@ -627,6 +673,7 @@ export let Formatting = module (
         return text.slice(0, end);
     };
 
+    /// @brief Keeps or removes trailing fractional zeros and the decimal point according to alternate form.
     let finish_float = func(body: string, alternate: bool) -> string {
         let marker = strings.index_of(body, "e");
         if (marker < 0) {

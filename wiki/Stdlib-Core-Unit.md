@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Unit** · [`export let Unit = enum (Value)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/unit.nra#L3)
+- **Unit** · [`export let Unit = enum (Value)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/unit.nra#L5)
+  The single value used when success has no payload.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

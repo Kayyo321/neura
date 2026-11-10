@@ -17,17 +17,21 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Base64** · [`export let encode = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L59)
-- **Base64** · [`export let encode_unpadded = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L61)
-- **Base64** · [`export let encode_url = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L64)
-- **Base64** · [`export let encode_url_unpadded = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L66)
-- **Base64** · [`export let decode = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L70)
+- **Base64** · [`export let encode = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L64)
+  Encodes bytes with the standard alphabet and padding.
+- **Base64** · [`export let encode_unpadded = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L67)
+  Encodes bytes with the standard alphabet and omits padding.
+- **Base64** · [`export let encode_url = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L71)
+  Encodes bytes with the URL-safe alphabet and padding.
+- **Base64** · [`export let encode_url_unpadded = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L74)
+  Encodes bytes with the URL-safe alphabet and omits padding.
+- **Base64** · [`export let decode = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L78)
   Strict decoding of padded standard text.
-- **Base64** · [`export let decode_unpadded = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L74)
+- **Base64** · [`export let decode_unpadded = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L82)
   Strict decoding of unpadded standard text.
-- **Base64** · [`export let decode_url = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L78)
+- **Base64** · [`export let decode_url = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L86)
   Strict decoding of padded URL-safe text.
-- **Base64** · [`export let decode_url_unpadded = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L82)
+- **Base64** · [`export let decode_url_unpadded = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L90)
   Strict decoding of unpadded URL-safe text.
 <!-- END SOURCE API -->
 

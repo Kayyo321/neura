@@ -17,7 +17,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Sets** · [`export let same_elements = func<T>(a: Set<T>, b: Set<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sets.nra#L8)
+- **Sets** · [`export let same_elements = func<T>(a: Set<T>, b: Set<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sets.nra#L9)
   Whether the sets have the same size and `a` contains each element of `b`, by `a`'s own membership test.
 <!-- END SOURCE API -->
 

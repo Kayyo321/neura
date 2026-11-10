@@ -1,6 +1,8 @@
-// The library's single trap entry point (Stdlib.md section 5.1). A trap ends
-// the run with reason 3 and the message; nothing can observe or recover it.
+/// @brief The library's single trap entry point (Stdlib.md section 5.1). A trap ends the run with reason 3 and
+/// the message; nothing can observe or recover it.
+/// @see [Std.Core.Failure](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Failure)
 export let Failure = module (
+    /// @brief Stops execution and reports the supplied diagnostic message.
     export let trap = func(message: string) {
         trap_with_message(message);
     };

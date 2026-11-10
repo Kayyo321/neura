@@ -17,7 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Map** · [`export let Map = interface<K, V>:Iterable<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/map.nra#L7)
+- **Map** · [`export let Map = interface<K, V>:Iterable<[K, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/map.nra#L9)
+  Read-only associations that iterate as `[key, value]` tuples.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

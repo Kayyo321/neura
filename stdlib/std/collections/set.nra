@@ -1,7 +1,9 @@
 let.promote _ = import:Std.Collections.Collection;
 
-// A read-only collection without duplicates (HashSet, TreeSet, BitSet,
-// ImmutableSet).
+/// @brief A read-only collection without duplicates (HashSet, TreeSet, BitSet,
+/// ImmutableSet).
+/// @see [Std.Collections.Set](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Set)
 export let Set = module (
+    /// @brief Read-only access to a collection of distinct elements.
     export let Set = interface<T>:Collection<T> ();
 );
