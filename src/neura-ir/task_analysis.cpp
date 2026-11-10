@@ -360,6 +360,10 @@ std::optional<TaskAnalysis::Unsafe> TaskAnalysis::unsafe(SymbolId function) cons
     return chain(unsafe_, function);
 }
 
+std::optional<TaskAnalysis::Unsafe> TaskAnalysis::not_isolated(SymbolId function) const {
+    return chain(impure_, function);
+}
+
 std::optional<TaskAnalysis::Unsafe> TaskAnalysis::chain(const std::map<SymbolId, Reason>& reasons,
                                                         SymbolId function) const {
     const auto& unsafe_ = reasons;

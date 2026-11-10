@@ -385,4 +385,24 @@ let work = func(x: int) -> int => x + 1;
         }
 ]=] "8:24" "a program that spawns a task cannot use Std.DynamicForeign or import:c")
 
+# `check --task-safety` reports each function of the linked program.
+file(WRITE "${TEST_DIR}/report.nra" "${prelude}let counter: int = 0;
+let pure = func(x: int) -> int => x + 1;
+let counting = func(x: int) -> int { counter = counter + 1; return x; };
+let relay = func(x: int) -> int => counting(x);
+let noisy = func(x: int) -> int { console.print_line(\"x\"); return x; };
+${entry_open}${entry_close}")
+execute_process(COMMAND "${NEURA}" check --task-safety report.nra WORKING_DIRECTORY "${TEST_DIR}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status STREQUAL "0" OR
+   NOT stdout MATCHES "(^|\n)report.nra\n  Main.main: task-safe[^\n]*\n  counting: not task-safe: uses the reassignable binding 'counter' at report.nra:5:38\n  noisy: task-safe; not for a parallel map: issues a host request at [^\n]*\n  pure: task-safe\n  relay: not task-safe: uses the reassignable binding 'counter' at report.nra:5:38\n" OR
+   NOT stdout MATCHES "\n[0-9]+ function\\(s\\): [0-9]+ task-safe, of which [0-9]+ can also be the worker of a parallel map\n$")
+    message(FATAL_ERROR "check --task-safety: unexpected report (status ${status})\n${stdout}\n${stderr}")
+endif()
+execute_process(COMMAND "${NEURA}" build --task-safety report.nra -o report.nvr WORKING_DIRECTORY "${TEST_DIR}"
+    RESULT_VARIABLE status OUTPUT_QUIET ERROR_VARIABLE stderr)
+if(status STREQUAL "0" OR NOT stderr MATCHES "--task-safety applies only to check")
+    message(FATAL_ERROR "build accepted --task-safety\n${stderr}")
+endif()
+
 message(STATUS "concurrency frontend conformance passed")

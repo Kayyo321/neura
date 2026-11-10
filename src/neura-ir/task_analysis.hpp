@@ -34,6 +34,10 @@ public:
         Span span;
     };
     std::optional<Unsafe> unsafe(SymbolId function) const;
+    // Why `function` cannot be the worker of a parallel map beyond being
+    // task-safe: it issues a host request, uses the scheduler, or uses an
+    // object's identity (section 12). Nothing when it can.
+    std::optional<Unsafe> not_isolated(SymbolId function) const;
 
     // Checks every spawn of the program and decision C15. Throws a
     // Diagnostic at the first violation: at the argument for a value that is

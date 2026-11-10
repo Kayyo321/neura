@@ -786,13 +786,16 @@ private:
         scheduler_->requests.erase(found);
         if (finished_) return;
         auto& task = scheduler_->tasks.at(id);
-        // A fault while the response is copied in belongs to the waiting task.
+        // A fault while the response is copied in belongs to the waiting
+        // task. The task that is running, if one is, stays the current one.
+        const auto running = scheduler_->current;
         scheduler_->current = id;
         emit(TaskEvent::Kind::HostCompletion, id, sequence,
              [&] { return image_.imports[task.pending.import].name; });
         try {
             apply_completion(task.frames, task.pending, completion);
             if (!finished_) make_runnable(id, task);
+            scheduler_->current = running;
         } catch (const Fault& fault) {
             Event event;
             event.kind = Event::Kind::Trapped;
@@ -837,8 +840,18 @@ private:
             // The trapping task and its spawn chain. A long chain keeps its
             // ends: the task itself and the tasks nearest the root.
             constexpr std::size_t shown = 4;
+            // Between tasks, as when a deadline expires, the last task that
+            // ran may already be released; the chain then starts nowhere.
             std::vector<std::uint64_t> chain;
-            for (auto id = scheduler_->current; id != 0; id = scheduler_->tasks.at(id).parent) chain.push_back(id);
+            for (auto id = scheduler_->current; id != 0;) {
+                const auto found = scheduler_->tasks.find(id);
+                if (found == scheduler_->tasks.end()) {
+                    chain.clear();
+                    break;
+                }
+                chain.push_back(id);
+                id = found->second.parent;
+            }
             if (!trap.detail.empty()) trap.detail += " ";
             trap.detail += "(task " + std::to_string(scheduler_->current);
             for (std::size_t i = 0; i < chain.size(); ++i) {

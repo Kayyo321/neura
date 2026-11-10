@@ -9,6 +9,7 @@
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/task_analysis.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/fleet.hpp"
 #include "nvm/host.hpp"
@@ -28,6 +29,7 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <map>
 #include <set>
 #include <span>
 #include <sstream>
@@ -57,7 +59,7 @@ using neura::runner::read_file;
 using neura::runner::write_file;
 
 void usage(std::ostream& out) {
-    out << "usage: neura check [-I source-root] <file.nra>...\n"
+    out << "usage: neura check [-I source-root] [--task-safety] <file.nra>...\n"
            "       neura docs <file.nra>... [-o <file.json>]\n"
            "       neura docs --doxygen <file.nra>\n"
            "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>... [-o <file.nir>]\n"
@@ -134,6 +136,8 @@ struct Options {
     // Report execution costs: steps, peak heap cells, and image size.
     bool stats = false;
     std::optional<neura::nvm::TaskDumpFormat> task_dump;
+    // check --task-safety: report every function instead of only checking.
+    bool task_safety = false;
     std::optional<fs::path> trace_events;
     bool trace_wall_time = false;
     std::vector<fs::path> files;
@@ -392,6 +396,9 @@ Options read_options(int argc, char** argv) {
             if (form == "text") options.task_dump = neura::nvm::TaskDumpFormat::Text;
             else if (form == "json") options.task_dump = neura::nvm::TaskDumpFormat::Json;
             else throw std::runtime_error("--task-dump expects text or json");
+        } else if (arg == "--task-safety") {
+            if (options.command != Command::Check) throw std::runtime_error("--task-safety applies only to check");
+            options.task_safety = true;
         } else if (arg == "--trace-events") {
             if (options.command != Command::Run) throw std::runtime_error("--trace-events applies only to run");
             options.trace_events = fs::path(next());
@@ -1064,6 +1071,77 @@ int run_tests(const Options& options) {
 
 } // namespace
 
+// `check --task-safety`: for every function of the linked program, whether
+// a task may call it (Concurrency.md section 5.2) and whether it can be the
+// worker of a parallel map (section 12), with the first reason when not.
+// The analysis runs on the specialized program, so a generic function is
+// listed once for each specialization the program uses.
+int task_safety_report(neura::IrProgram program) {
+    neura::require_valid_ir(program, "before specialization");
+    neura::materialize_reference_storage(program);
+    neura::specialize(program);
+    const neura::TaskAnalysis analysis(program);
+    const auto file_of = [&](neura::SymbolId id) {
+        for (std::size_t hops = 0; id < program.symbols.size() && hops < program.symbols.size(); ++hops) {
+            if (program.symbols[id].kind == neura::SymbolKind::File) return id;
+            id = program.symbols[id].owner;
+        }
+        return neura::no_symbol;
+    };
+    const auto qualified = [&](neura::SymbolId id) {
+        std::string name = program.symbols[id].name;
+        for (auto owner = program.symbols[id].owner; owner < program.symbols.size();
+             owner = program.symbols[owner].owner) {
+            if (program.symbols[owner].kind == neura::SymbolKind::File) break;
+            name = program.symbols[owner].name + "." + name;
+        }
+        return name;
+    };
+    const auto place = [](const neura::Span& span) {
+        const auto slash = span.file.find_last_of("/\\");
+        return (slash == std::string::npos ? span.file : span.file.substr(slash + 1)) + ":" +
+               std::to_string(span.line) + ":" + std::to_string(span.column);
+    };
+    std::map<std::string, std::vector<std::string>> by_file;
+    std::size_t safe = 0;
+    std::size_t isolated = 0;
+    std::size_t total = 0;
+    std::set<neura::SymbolId> with_body;
+    for (const auto& body : program.bodies) with_body.insert(body.owner);
+    for (neura::SymbolId id = 0; id < program.symbols.size(); ++id) {
+        const auto& item = program.symbols[id];
+        if (item.kind != neura::SymbolKind::Function || !with_body.contains(id)) continue;
+        const auto file = file_of(id);
+        if (file == neura::no_symbol) continue;
+        // Functions the compiler generates (closures, initializers) are
+        // covered through the functions that use them.
+        if (qualified(id).find('$') != std::string::npos) continue;
+        const auto& source = program.symbols[file];
+        const auto label = source.library_path.empty() ? fs::path(source.name).filename().string() : source.library_path;
+        std::string line = "  " + qualified(id) + ": ";
+        ++total;
+        if (const auto reason = analysis.unsafe(id)) {
+            line += "not task-safe: " + reason->operation + " at " + place(reason->span);
+        } else if (const auto impure = analysis.not_isolated(id)) {
+            ++safe;
+            line += "task-safe; not for a parallel map: " + impure->operation + " at " + place(impure->span);
+        } else {
+            ++safe;
+            ++isolated;
+            line += "task-safe";
+        }
+        by_file[label].push_back(std::move(line));
+    }
+    for (auto& [label, lines] : by_file) {
+        std::sort(lines.begin(), lines.end());
+        std::cout << label << "\n";
+        for (const auto& line : lines) std::cout << line << "\n";
+    }
+    std::cout << total << " function(s): " << safe << " task-safe, of which " << isolated
+              << " can also be the worker of a parallel map\n";
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--help") {
         usage(std::cout);
@@ -1075,6 +1153,7 @@ int main(int argc, char** argv) {
         switch (options.command) {
         case Command::Check: {
             auto program = load_source_program(options);
+            if (options.task_safety) return task_safety_report(std::move(program));
             if (neura::uses_tasks(program)) {
                 // The isolation rules of a spawn need concrete types, which
                 // exist after specialization (Concurrency.md section 5).

@@ -40,8 +40,20 @@ file(GLOB_RECURSE examples "${SOURCE_DIR}/examples/*.nra")
 if(NOT examples)
     message(FATAL_ERROR "No Neura examples were found")
 endif()
+# A program cannot both spawn a task and use native bindings
+# (docs/lang/Concurrency.md, C15), and the examples include one of each, so
+# the concurrency examples are checked as programs of their own.
+set(concurrency_examples ${examples})
+list(FILTER concurrency_examples INCLUDE REGEX "/examples/concurrency/")
+list(FILTER examples EXCLUDE REGEX "/examples/concurrency/")
+if(NOT concurrency_examples)
+    message(FATAL_ERROR "No concurrency examples were found")
+endif()
 list(SORT examples)
 run_success(unused check ${examples})
+foreach(example IN LISTS concurrency_examples)
+    run_success(unused check "${example}")
+endforeach()
 
 set(multi_file "${SOURCE_DIR}/examples/modules/multi-file")
 run_success(unused check -I "${multi_file}" "${multi_file}/main.nra")
