@@ -1,5 +1,6 @@
 #include "syntax.hpp"
 
+#include <charconv>
 #include <cstddef>
 #include <string_view>
 #include <utility>
@@ -95,9 +96,11 @@ private:
             expect(")");
             expect("->");
             result.arguments.push_back(type());
+        } else if (match("class")) {
+            result.name = "class";
         } else {
             result.name = qualified_name();
-        if (!at_shift() && match("<")) {
+            if (!at_shift() && match("<")) {
                 result.arguments = type_arguments();
             }
         }
@@ -131,7 +134,14 @@ private:
                 GenericParameter parameter{};
                 parameter.name = identifier().text;
                 if (match(":")) {
-                    parameter.bound = type();
+                    if (match("[")) {
+                        do {
+                            parameter.bounds.push_back(type());
+                        } while (match(","));
+                        expect("]");
+                    } else {
+                        parameter.bounds.push_back(type());
+                    }
                 }
                 parameter.span = span_from(start);
                 result.push_back(std::move(parameter));
@@ -187,6 +197,23 @@ private:
                 result.has_body = at("{");
                 if (result.has_body) {
                     result.body = block();
+                } else if (current().kind == TokenKind::Identifier && current().text == "host") {
+                    advance();
+                    expect("(");
+                    const auto& service = current();
+                    if (service.kind != TokenKind::String)
+                        throw Diagnostic(service.span, "expected a host service name");
+                    advance();
+                    expect(",");
+                    const auto& version = current();
+                    std::uint32_t number = 0;
+                    const auto end = version.text.data() + version.text.size();
+                    const auto [next, error] = std::from_chars(version.text.data(), end, number);
+                    if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0)
+                        throw Diagnostic(version.span, "host service version must be a positive uint32");
+                    advance();
+                    expect(")");
+                    result.host_binding.emplace(service.text.substr(1, service.text.size() - 2), number);
                 }
                 if (result.has_body && result.generics.empty() && !result.override_member &&
                     (at("(") || at("[") || at(".") || at("as") || precedence() != 0)) {
@@ -209,6 +236,7 @@ private:
             } else if (match("enum")) {
                 definition_has_no_annotation(result);
                 result.kind = Declaration::Kind::Enum;
+                result.generics = generic_parameters();
                 expect("(");
                 while (!at(")")) {
                     const auto variant_start = cursor_;
@@ -242,18 +270,27 @@ private:
                     throw Diagnostic(current().span, "an enum needs at least one variant");
                 }
                 expect(")");
-            } else if (at("module") || at("class")) {
+            } else if (at("module") || at("class") || at("interface")) {
                 definition_has_no_annotation(result);
-                const bool class_definition = match("class");
-                if (!class_definition) {
-                    expect("module");
-                }
-                result.kind = class_definition ? Declaration::Kind::Class : Declaration::Kind::Module;
-                if (class_definition) {
+                const auto kind = advance().text;
+                result.kind = kind == "class" ? Declaration::Kind::Class
+                            : kind == "interface" ? Declaration::Kind::Interface : Declaration::Kind::Module;
+                if (result.kind != Declaration::Kind::Module) {
                     result.generics = generic_parameters();
                 }
-                if (match(":")) {
+                if (result.kind == Declaration::Kind::Interface) {
+                    if (match(":")) {
+                        do {
+                            result.interfaces.push_back(type());
+                        } while (match(","));
+                    }
+                } else if (match(":")) {
                     result.base = type();
+                }
+                if (result.kind == Declaration::Kind::Class && match("implements")) {
+                    do {
+                        result.interfaces.push_back(type());
+                    } while (match(","));
                 }
                 expect("(");
                 while (!at_end() && !at(")")) {
@@ -561,9 +598,10 @@ private:
     }
 
     Expr cast_tail(std::size_t start, Expr result) {
-        while (match("as")) {
+        while (at("as") || at("is")) {
+            const bool test = advance().text == "is";
             auto target = type();
-            auto conversion = make_expression(Expr::Kind::Cast, span_from(start));
+            auto conversion = make_expression(test ? Expr::Kind::TypeTest : Expr::Kind::Cast, span_from(start));
             conversion.type = std::move(target);
             conversion.operands.push_back(std::move(result));
             result = std::move(conversion);
@@ -594,13 +632,13 @@ private:
         return result;
     }
 
-    // A type argument list on an expression is only recognized before a call.
-    std::vector<TypeSyntax> call_type_arguments() {
+    // Only unambiguous postfix or terminating tokens commit a type argument list.
+    std::vector<TypeSyntax> postfix_type_arguments() {
         const auto start = cursor_;
         advance();
         try {
             auto result = type_arguments();
-            if (at("(")) {
+            if (at("(") || at(".") || at(";")) {
                 return result;
             }
         } catch (const Diagnostic&) {
@@ -649,7 +687,14 @@ private:
             }
             std::vector<TypeSyntax> arguments;
             if (at("<") && !at_shift() && (result.kind == Expr::Kind::Name || result.kind == Expr::Kind::Member)) {
-                arguments = call_type_arguments();
+                arguments = postfix_type_arguments();
+                if (!arguments.empty() && !at("(")) {
+                    auto application = make_expression(Expr::Kind::TypeApplication, span_from(start));
+                    application.operands.push_back(std::move(result));
+                    application.type_arguments = std::move(arguments);
+                    result = std::move(application);
+                    continue;
+                }
             }
             if (!match("(")) {
                 return result;
@@ -716,6 +761,7 @@ private:
 
         const auto& token = current();
         if (at("true") || at("false")) return token_expression(Expr::Kind::Boolean);
+        if (at("nil")) return token_expression(Expr::Kind::Nil);
         if (token.kind == TokenKind::Identifier) return token_expression(Expr::Kind::Name);
         if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
         if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);

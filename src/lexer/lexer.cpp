@@ -22,7 +22,7 @@ constexpr bool is_name_char(char c) {
 constexpr auto keywords = std::to_array<std::string_view>({
     "let", "const", "export", "override", "func", "module", "class", "import", "new",
     "destroy", "if", "else", "while", "for", "in", "break", "continue", "return", "true", "false",
-    "as", "enum", "match", "and", "or",
+    "as", "is", "nil", "enum", "match", "and", "or", "interface", "implements",
 });
 
 constexpr auto pairs = std::to_array<std::string_view>({"->", "=>", "==", "!=", "<=", ">=", "&&", "||"});

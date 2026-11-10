@@ -2,9 +2,11 @@
 
 #include "lexer/lexer.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace neura {
@@ -21,7 +23,7 @@ struct TypeSyntax {
 struct GenericParameter {
     Span span;
     std::string name;
-    std::optional<TypeSyntax> bound;
+    std::vector<TypeSyntax> bounds;
 };
 
 struct Parameter {
@@ -41,7 +43,7 @@ struct Expr {
         // `operand as type`: the target type is in `type`.
         Cast, NamedVariant, Match,
         ComparisonChain,
-        Lambda,
+        Lambda, Nil, TypeTest, TypeApplication,
     };
 
     Kind kind;
@@ -95,7 +97,7 @@ struct MatchArm {
 
 struct Declaration {
     // An enum's variants are its members. Their parameters describe the payload.
-    enum class Kind { Binding, Function, Class, Module, Enum };
+    enum class Kind { Binding, Function, Class, Module, Enum, Interface };
 
     Kind kind;
     Span span;
@@ -113,6 +115,8 @@ struct Declaration {
     bool named_payload{};
     std::vector<Declaration> members;
     std::vector<Statement> body;
+    std::optional<std::pair<std::string, std::uint32_t>> host_binding{};
+    std::vector<TypeSyntax> interfaces{};
 };
 
 struct ResolvedImport {
@@ -124,6 +128,7 @@ struct ParsedFile {
     std::vector<Statement> statements;
     std::string file;
     std::vector<ResolvedImport> imports;
+    std::string library_path{};
 };
 
 ParsedFile parse(const std::vector<Token>& tokens);
