@@ -38,6 +38,20 @@ own field initializers. A singleton lowers to one object allocation during
 startup and a global reference shared by every use. Both use the existing
 circuit state interfaces for global and object access.
 
+Tasks ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md)) change each stage's contract as follows, and the language rules stay in the stage that owns them.
+
+| Stage | Contract for tasks | Hands on |
+| --- | --- | --- |
+| C import | None. A program that spawns cannot use native bindings. | |
+| Lexer | None. `scope`, `spawn`, and `select` remain identifiers. | |
+| Parser | Reads `scope`, `spawn`, and `select` as forms only in the positions the grammar gives, with spans for the keyword, the operand, and each arm. It does no typing or name resolution. | Syntax nodes for the three forms |
+| NeuraIR | Resolves `Task<T>` and `Scope`, checks that scope-bound values do not leave their scope, and, on the specialized linked program, that spawn arguments and channel messages are transferable and spawned calls are task-safe. Makes scope entry and exit, spawn, every other scheduler operation, and polls explicit (`task_scope`, `spawn`, `scheduler_call`, and a poll flag). Written as `.nir` 1.9. | No operation after this point needs a source-level rule |
+| IR optimization | Preserves every executed call, loop back edge, spawn, scope, and scheduler call, and their order. | The same scheduler operations and polls as the unoptimized program |
+| IRtoNeuronConversion | Turns each scheduler operation into a typed exit, makes `return`, `break`, and `continue` leave the scopes they cross, puts each poll on the exit that makes the call or takes the back edge, and marks transferable layouts. | NVR 1.5 with the `TRNS` table |
+| Output | The scheduler exit, the poll bit, and `TRNS`; an image without tasks keeps its earlier version and bytes. | An image a compatible runtime runs without source |
+
+The NVM runs the tasks of an image on one deterministic scheduler. Scheduler state (task records, queues, channel buffers, timers, guards) is NVM state reached through exits, like the heap; graph profile 1 does not change, and no scheduler operation is a host service. The decompiler reads scheduler exits and polls as decoded records ([Decompiler](Decompiler#tasks-and-scheduler-operations)). In progress and not part of this contract yet: overlapping host I/O, concurrent record and replay, and schedule exploration.
+
 A C header import (`import:c(...)`) runs before parsing for the importing file's imports. The C import stage reads the header with libclang and generates the source of an ordinary Neura module that calls the header's functions through `Std.DynamicForeign`; that module then enters the lexer and parser like any other. The tool links the imports' static libraries into one shared object after lowering. The shared object travels in NeuraIR and in the image's `NATV` section, and the circuit never contains native code ([Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop#c-imports)).
 
 The stages should be inspectable independently. A diagnostic or test should be able to identify whether a discrepancy came from source analysis, an IR transformation, lowering, serialization, or circuit execution.
