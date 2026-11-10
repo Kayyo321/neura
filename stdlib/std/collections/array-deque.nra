@@ -2,7 +2,6 @@ let cell = import:Std.Core.Cell;
 let.promote _ = import:Std.Collections.Deque;
 let iterators = import:Std.Collections.Iterator;
 let optional = import:Std.Core.Optional;
-let text_depth = import:Std.Collections.Internal.TextDepth;
 
 /// @brief Double-ended queues backed by two built-in lists used as stacks.
 /// Removal drops the vacated slot, and equality and hashing use identity.
@@ -17,8 +16,8 @@ export let ArrayDeque = module (
         let back: T[list] = [];
         /// @brief The structural modification count shared with iterators.
         let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
-        /// @brief The depth of this instance's active text conversion, or zero when inactive.
-        let printing_depth: int = 0;
+        /// @brief Whether this instance's text conversion is running.
+        let printing: bool = false;
 
         /// @brief Advances the version observed by active iterators.
         let changed = func {
@@ -244,17 +243,15 @@ export let ArrayDeque = module (
             }
         };
 
-        /// @brief Formats elements as `[a, b, c]` from first to last. The deque itself as a direct
-        /// element prints "(this collection)".
+        /// @brief Formats elements as `[a, b, c]` from first to last. The deque prints "(this collection)"
+        /// where its own text reaches it again.
         export let.override to_string = func -> string {
-            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+            if (printing) {
                 return "(this collection)";
             }
-            let saved = printing_depth;
-            printing_depth = text_depth.enter();
+            printing = true;
             let text = to_list().to_string();
-            text_depth.leave();
-            printing_depth = saved;
+            printing = false;
             return text;
         };
     );

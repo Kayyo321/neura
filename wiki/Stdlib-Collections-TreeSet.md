@@ -17,73 +17,73 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **TreeSet** · [`export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L21)
+- **TreeSet** · [`export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L20)
   A mutable set that identifies and orders elements using its comparator.
-- **TreeSet.TreeSet** · [`export let init = func(seal: Seal, comparator: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L30)
+- **TreeSet.TreeSet** · [`export let init = func(seal: Seal, comparator: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L29)
   Creates an empty backing tree with the comparator supplied by the factory.
-- **TreeSet.TreeSet** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L36)
+- **TreeSet.TreeSet** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L35)
   Returns the number of distinct elements.
-- **TreeSet.TreeSet** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L39)
+- **TreeSet.TreeSet** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L38)
   Returns true when there are no distinct elements.
-- **TreeSet.TreeSet** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L42)
+- **TreeSet.TreeSet** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L41)
   Removes all elements and invalidates iterators.
-- **TreeSet.TreeSet** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L47)
+- **TreeSet.TreeSet** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L46)
   Reports whether an element compares equal to `value`.
-- **TreeSet.TreeSet** · [`export let add = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L51)
+- **TreeSet.TreeSet** · [`export let add = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L50)
   False when the set already holds an element the comparator calls Equal. The set keeps the element it holds.
-- **TreeSet.TreeSet** · [`export let add_all = func(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L58)
+- **TreeSet.TreeSet** · [`export let add_all = func(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L57)
   Adds each element in order.
-- **TreeSet.TreeSet** · [`export let remove = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L68)
+- **TreeSet.TreeSet** · [`export let remove = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L67)
   Removes an element that compares equal to `value`. Returns false when absent.
-- **TreeSet.TreeSet** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L71)
+- **TreeSet.TreeSet** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L70)
   A new built-in list in ascending order.
-- **TreeSet.TreeSet** · [`export let iterator = func -> Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L74)
+- **TreeSet.TreeSet** · [`export let iterator = func -> Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L73)
   Returns a fail-fast iterator over the elements in ascending order.
-- **TreeSet.TreeSet** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L78)
+- **TreeSet.TreeSet** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L77)
   Calls `action` in ascending comparator order. The action leaves the set structure unchanged.
-- **TreeSet.TreeSet** · [`export let remove_if = func(drop: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L87)
+- **TreeSet.TreeSet** · [`export let remove_if = func(drop: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L86)
   Calls `drop` once per element in ascending order, then removes the matches. The predicate leaves the set structure unchanged. The number of removed elements.
-- **TreeSet.TreeSet** · [`export let retain_if = func(keep: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L96)
+- **TreeSet.TreeSet** · [`export let retain_if = func(keep: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L95)
   Calls `keep` once per element in ascending order, then removes rejected elements. The predicate leaves the set structure unchanged. The number of removed elements.
-- **TreeSet.TreeSet** · [`export let first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L103)
+- **TreeSet.TreeSet** · [`export let first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L102)
   Returns the least element. Traps with `no such element` when empty.
-- **TreeSet.TreeSet** · [`export let last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L109)
+- **TreeSet.TreeSet** · [`export let last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L108)
   Returns the greatest element. Traps with `no such element` when empty.
-- **TreeSet.TreeSet** · [`export let remove_first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L116)
+- **TreeSet.TreeSet** · [`export let remove_first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L115)
   Removes and returns the least element. Traps with "no such element" when empty.
-- **TreeSet.TreeSet** · [`export let remove_last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L122)
+- **TreeSet.TreeSet** · [`export let remove_last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L121)
   Removes and returns the greatest element. Traps with `no such element` when empty.
-- **TreeSet.TreeSet** · [`export let range = func(from: T, to: T) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L129)
+- **TreeSet.TreeSet** · [`export let range = func(from: T, to: T) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L128)
   Returns a new list in ascending order from `from` inclusive to `to` exclusive. Returns an empty list when `to` is at or below `from`.
-- **TreeSet.TreeSet** · [`export let descending = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L132)
+- **TreeSet.TreeSet** · [`export let descending = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L131)
   Copies the elements into a new list in descending order.
-- **TreeSet.TreeSet** · [`export let floor = func(value: T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L135)
+- **TreeSet.TreeSet** · [`export let floor = func(value: T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L134)
   Returns the greatest element at most `value` as `Some`, or `None` when absent.
-- **TreeSet.TreeSet** · [`export let ceiling = func(value: T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L138)
+- **TreeSet.TreeSet** · [`export let ceiling = func(value: T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L137)
   Returns the least element at least `value` as `Some`, or `None` when absent.
-- **TreeSet.TreeSet** · [`export let lower = func(value: T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L141)
+- **TreeSet.TreeSet** · [`export let lower = func(value: T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L140)
   Returns the greatest element strictly below `value` as `Some`, or `None` when absent.
-- **TreeSet.TreeSet** · [`export let higher = func(value: T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L144)
+- **TreeSet.TreeSet** · [`export let higher = func(value: T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L143)
   Returns the least element strictly above `value` as `Some`, or `None` when absent.
-- **TreeSet.TreeSet** · [`export let is_subset_of = func(other: TreeSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L148)
+- **TreeSet.TreeSet** · [`export let is_subset_of = func(other: TreeSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L147)
   Whether every element of this set is in `other`, by the other set's comparator.
-- **TreeSet.TreeSet** · [`export let is_disjoint_from = func(other: TreeSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L165)
+- **TreeSet.TreeSet** · [`export let is_disjoint_from = func(other: TreeSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L164)
   Reports whether none of this set's elements pass `other`'s membership test.
-- **TreeSet.TreeSet** · [`export let union = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L179)
+- **TreeSet.TreeSet** · [`export let union = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L178)
   A new set with this set's comparator holding the elements of both.
-- **TreeSet.TreeSet** · [`export let intersection = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L187)
+- **TreeSet.TreeSet** · [`export let intersection = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L186)
   This set's elements that are in `other`.
-- **TreeSet.TreeSet** · [`export let difference = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L190)
+- **TreeSet.TreeSet** · [`export let difference = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L189)
   This set's elements that are not in `other`.
-- **TreeSet.TreeSet** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L193)
+- **TreeSet.TreeSet** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L192)
   Traps with "invalid state: tree ..." on a broken AVL invariant.
-- **TreeSet.TreeSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L199)
+- **TreeSet.TreeSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L198)
   Another TreeSet of the same size whose elements this set all contains.
-- **TreeSet.TreeSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L220)
+- **TreeSet.TreeSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L219)
   The wrapping sum of the element hashes.
-- **TreeSet.TreeSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L234)
-  Formats elements as `{a, b, c}` in ascending order. The set itself as a direct element prints "(this collection)".
-- **TreeSet** · [`export let create = func<T>(comparator: func(T, T) -> ordering.Ordering) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L263)
+- **TreeSet.TreeSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L233)
+  Formats elements as `{a, b, c}` in ascending order. The set prints "(this collection)" where its own text reaches it again.
+- **TreeSet** · [`export let create = func<T>(comparator: func(T, T) -> ordering.Ordering) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L260)
   An empty set ordered by `comparator`, which must define a total order.
 <!-- END SOURCE API -->
 

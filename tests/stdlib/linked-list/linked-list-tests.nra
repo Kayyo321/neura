@@ -275,6 +275,15 @@ let LinkedListTests = module (
         objects.add(objects);
         objects.add(a);
         test.assert_equal_string("[(this collection), [1, 2]]", objects.to_string());
+        // A cycle through another collection ends where the text reaches the
+        // outer list again, and the flag is clear afterwards.
+        let outer = linked_list.create<class>();
+        let inner = linked_list.create<class>();
+        outer.add(inner);
+        inner.add(outer);
+        test.assert_equal_string("[[(this collection)]]", outer.to_string());
+        test.assert_equal_string("[[(this collection)]]", inner.to_string());
+        test.assert_equal_string("[[(this collection)]]", outer.to_string());
     };
 
     export let test_interfaces = func() -> void {

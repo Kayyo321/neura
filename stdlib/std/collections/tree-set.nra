@@ -3,7 +3,6 @@ let.promote _ = import:Std.Collections.MutableSet;
 let optional = import:Std.Core.Optional;
 let ordering = import:Std.Core.Ordering;
 let.promote _ = import:Std.Collections.SortedSet;
-let text_depth = import:Std.Collections.Internal.TextDepth;
 let tree_map = import:Std.Collections.TreeMap;
 let unit = import:Std.Core.Unit;
 
@@ -23,8 +22,8 @@ export let TreeSet = module (
         let map: tree_map.TreeMap<T, unit.Unit>;
         /// @brief The comparator reused when constructing set operation results.
         let compare: func(T, T) -> ordering.Ordering;
-        /// @brief The depth of this instance's active text conversion, or zero when inactive.
-        let printing_depth: int = 0;
+        /// @brief Whether this instance's text conversion is running.
+        let printing: bool = false;
 
         /// @brief Creates an empty backing tree with the comparator supplied by the factory.
         export let init = func(seal: Seal, comparator: func(T, T) -> ordering.Ordering) {
@@ -229,17 +228,15 @@ export let TreeSet = module (
             return total as uint32;
         };
 
-        /// @brief Formats elements as `{a, b, c}` in ascending order. The set itself as a direct element
-        /// prints "(this collection)".
+        /// @brief Formats elements as `{a, b, c}` in ascending order. The set prints "(this collection)"
+        /// where its own text reaches it again.
         export let.override to_string = func -> string {
-            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+            if (printing) {
                 return "(this collection)";
             }
-            let saved = printing_depth;
-            printing_depth = text_depth.enter();
+            printing = true;
             let text = map.keys().to_string();
-            text_depth.leave();
-            printing_depth = saved;
+            printing = false;
             return "{" + text.slice(1, text.byte_length - 1) + "}";
         };
 

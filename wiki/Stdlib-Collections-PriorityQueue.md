@@ -17,41 +17,41 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **PriorityQueue** · [`export let PriorityQueue = class<T> implements Queue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L14)
+- **PriorityQueue** · [`export let PriorityQueue = class<T> implements Queue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L13)
   A min-heap that exposes the least element according to its comparator.
-- **PriorityQueue.PriorityQueue** · [`export let init = func(items: T[list], c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L26)
+- **PriorityQueue.PriorityQueue** · [`export let init = func(items: T[list], c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L25)
   Copies `items` and heapifies the copy in linear time. The comparator defines a total order and leaves the queue structure unchanged.
-- **PriorityQueue.PriorityQueue** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L95)
+- **PriorityQueue.PriorityQueue** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L94)
   Returns the number of elements.
-- **PriorityQueue.PriorityQueue** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L98)
+- **PriorityQueue.PriorityQueue** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L97)
   Returns true when there are no elements.
-- **PriorityQueue.PriorityQueue** · [`export let enqueue = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L101)
+- **PriorityQueue.PriorityQueue** · [`export let enqueue = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L100)
   Adds `value` and sifts it up to restore heap order.
-- **PriorityQueue.PriorityQueue** · [`export let dequeue = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L110)
+- **PriorityQueue.PriorityQueue** · [`export let dequeue = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L109)
   Removes and returns a least element. Traps with "no such element" when empty.
-- **PriorityQueue.PriorityQueue** · [`export let peek = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L127)
+- **PriorityQueue.PriorityQueue** · [`export let peek = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L126)
   A least element, or None when empty.
-- **PriorityQueue.PriorityQueue** · [`export let try_dequeue = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L135)
+- **PriorityQueue.PriorityQueue** · [`export let try_dequeue = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L134)
   Removes a least element and returns it as `Some`, or returns `None` when empty.
-- **PriorityQueue.PriorityQueue** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L143)
+- **PriorityQueue.PriorityQueue** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L142)
   Removes all queued elements.
-- **PriorityQueue.PriorityQueue** · [`export let drain_sorted = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L150)
+- **PriorityQueue.PriorityQueue** · [`export let drain_sorted = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L149)
   Dequeues everything into a new built-in list, least first.
-- **PriorityQueue.PriorityQueue** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L159)
+- **PriorityQueue.PriorityQueue** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L158)
   Tests membership with `value.equals(element)`.
-- **PriorityQueue.PriorityQueue** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L169)
+- **PriorityQueue.PriorityQueue** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L168)
   A new built-in list in heap order, which is not sorted.
-- **PriorityQueue.PriorityQueue** · [`export let iterator = func -> iterators.Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L178)
+- **PriorityQueue.PriorityQueue** · [`export let iterator = func -> iterators.Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L177)
   Returns a fail-fast iterator in heap order.
-- **PriorityQueue.PriorityQueue** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L183)
+- **PriorityQueue.PriorityQueue** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L182)
   Calls `action` in heap order. The action leaves the queue structure unchanged.
-- **PriorityQueue.PriorityQueue** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L197)
+- **PriorityQueue.PriorityQueue** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L196)
   Traps with "invalid state: heap order" when an element is Less than its parent.
-- **PriorityQueue.PriorityQueue** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L210)
-  Formats elements as `[a, b, c]` in heap order. The queue itself as a direct element prints "(this collection)".
-- **PriorityQueue** · [`export let create = func<T>(c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L265)
+- **PriorityQueue.PriorityQueue** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L209)
+  Formats elements as `[a, b, c]` in heap order. The queue prints "(this collection)" where its own text reaches it again.
+- **PriorityQueue** · [`export let create = func<T>(c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L262)
   Creates an empty queue using the total order defined by `c`.
-- **PriorityQueue** · [`export let from_list = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L271)
+- **PriorityQueue** · [`export let from_list = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L268)
   Copies and heapifies `items` in linear time using the total order defined by `c`.
 <!-- END SOURCE API -->
 
@@ -170,7 +170,7 @@ These rules fix which of several equal elements comes out first; they are not fi
 
 - **Modification counts.** `ArrayList` uses its backing list's `version`; `ArrayDeque`, `LinkedList`, `PriorityQueue`, `BitSet`, and `OrdinalMap` share a `Cell<uint64>` count with their iterators. A callback or comparator that changes the collection traps with `collection modified during iteration`, and `Sorting` checks the list's version after every comparator call, also when it sorts a built-in list directly.
 - **Construction.** `new ArrayList<T>(items)` adopts the list, as `wrap` does. `PriorityQueue`'s constructor takes the items and the comparator and heapifies a copy. `ArrayDeque`, `LinkedList`, and `BitSet` also have `create` and `of`.
-- **Self-containment.** Text prints `(this collection)` for a collection that directly contains itself, through a shared depth counter (`Std.Collections.Internal.TextDepth`); deeper cycles still end with the frame-limit fault.
+- **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)).
 - **LinkedList.** `sort` and `binary_search` work on a copy; `sort` and `reverse` move values between existing nodes, which is not a structural change; `clear` unlinks every node. Positional access outside the list traps with `invalid argument: index out of range`.
 - **ArrayList.add_all** reads the argument up to its starting length, so `add_all(items())` doubles the list instead of trapping.
 - **Equality direction.** Search members call `value.equals(element)` with the probe as the receiver.
