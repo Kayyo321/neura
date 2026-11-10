@@ -253,7 +253,9 @@ if(BUILD_TESTING)
             neura_target_defaults(neura_test_vulkan_loader)
             add_dependencies(neura_gpu_cli_test neura_test_vulkan_loader)
             target_compile_definitions(neura_gpu_cli_test PRIVATE NEURA_TEST_VULKAN_FAULTS=1)
-            list(APPEND gpu_cli_test_options "-DFAULT_LOADER_DIR=$<TARGET_FILE_DIR:neura_test_vulkan_loader>")
+            list(APPEND gpu_cli_test_options
+                "-DFAULT_LOADER_DIR=$<TARGET_FILE_DIR:neura_test_vulkan_loader>"
+                "-DBACKEND_TESTS=$<TARGET_FILE:neura_backend_tests>")
         endif()
         add_test(NAME gpu-device COMMAND neura_backend_tests gpu_device "${CMAKE_CURRENT_SOURCE_DIR}")
         add_test(NAME gpu-cli COMMAND neura_gpu_cli_test "${CMAKE_COMMAND}"

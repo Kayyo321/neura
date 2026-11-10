@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -27,6 +28,7 @@ constexpr std::uint32_t request_words = 4;
 constexpr std::uint32_t directory_words = 8;
 constexpr std::uint32_t evaluated_status = 2;
 constexpr std::uint32_t escaped_status = 3;
+const std::string host_allocation_failure = allocation_failure;
 
 struct Buffer {
     VkBuffer handle = VK_NULL_HANDLE;
@@ -69,7 +71,7 @@ std::uint32_t Context::max_requests_per_dispatch() const {
 }
 
 struct VulkanGraphDevice::State {
-    State(Context::State& context, const nvr::Image& image) : context(context), image(image) {
+    State(Context::State& context, nvm::GraphDeviceStatistics& statistics) : context(context), statistics(statistics) {
         if (context.device_in_use) throw std::logic_error("Vulkan context already serves a graph device");
         context.device_in_use = true;
     }
@@ -92,15 +94,15 @@ struct VulkanGraphDevice::State {
         context.device_in_use = false;
     }
 
-    void initialize() {
+    void initialize(const nvr::Image& image) {
         if (context.timed_out) {
             failure = "the Vulkan context has timed out";
             return;
         }
         const auto storage_range = context.properties.limits.maxStorageBufferRange;
-        tables = nvm::pack_layered(image, storage_range);
-        request_limit = std::min(maximum_requests, context.properties.limits.maxComputeWorkGroupCount[0]);
         const auto buffer_ceiling = std::min(maximum_buffer, VkDeviceSize{storage_range});
+        tables = nvm::pack_layered(image, storage_range, buffer_ceiling);
+        request_limit = std::min(maximum_requests, context.properties.limits.maxComputeWorkGroupCount[0]);
         VkDeviceSize io_initial = minimum_buffer;
         VkDeviceSize wires_initial = minimum_buffer;
         for (std::size_t index = 0; index < tables.slots.size(); ++index) {
@@ -108,10 +110,6 @@ struct VulkanGraphDevice::State {
             if (slot == nvr::absent) continue;
             io_initial = std::max(io_initial, tables.shapes[index].io_words * sizeof(std::uint32_t));
             wires_initial = std::max(wires_initial, VkDeviceSize{wire_count(slot)} * sizeof(std::int32_t));
-        }
-        if (io_initial > buffer_ceiling || wires_initial > buffer_ceiling) {
-            failure = "cannot allocate device memory";
-            return;
         }
         // Growth always uses powers of two. An initial capacity may itself
         // be larger than the greatest power of two that the device can bind.
@@ -137,14 +135,29 @@ struct VulkanGraphDevice::State {
     }
 
     void evaluate(std::span<nvm::GraphJob> jobs) {
-        nvm::validate_graph_jobs(image, jobs);
-        for (auto& job : jobs) job.evaluated = false;
-        if (failed()) {
-            statistics.declined_failed += jobs.size();
-            return;
-        }
-        dispatch.reserve(std::min(jobs.size(), std::size_t{request_limit}));
         std::size_t next = 0;
+        dispatch.clear();
+        if (!failed()) {
+            try {
+                if (evaluate_batches(jobs, next)) return;
+            } catch (const std::bad_alloc&) {
+                host_allocation_failed = true;
+            } catch (const std::length_error&) {
+                host_allocation_failed = true;
+            }
+        }
+        statistics.declined_failed += dispatch.size();
+        for (const auto& job : jobs.subspan(next)) {
+            if (!tables.shapes.empty() && !tables.shapes[job.graph].eligible) {
+                ++statistics.declined_ineligible;
+            } else {
+                ++statistics.declined_failed;
+            }
+        }
+    }
+
+    bool evaluate_batches(std::span<nvm::GraphJob> jobs, std::size_t& next) {
+        dispatch.reserve(std::min(jobs.size(), std::size_t{request_limit}));
         while (next < jobs.size()) {
             dispatch.clear();
             VkDeviceSize io_words = 0;
@@ -169,21 +182,20 @@ struct VulkanGraphDevice::State {
                 ++next;
             }
             if (dispatch.empty()) {
-                if (next != jobs.size()) {
-                    failure = "cannot allocate device memory";
-                    statistics.declined_failed += jobs.size() - next;
-                }
-                return;
+                if (next == jobs.size()) return true;
+                failure = allocation_failure;
+                return false;
             }
             if (!grow_buffers(io_words * sizeof(std::uint32_t), wire_words * sizeof(std::int32_t)) ||
                 !run_dispatch(jobs)) {
-                statistics.declined_failed += dispatch.size() + (jobs.size() - next);
-                return;
+                return false;
             }
         }
+        return true;
     }
 
-    bool failed() const { return !failure.empty(); }
+    bool failed() const { return host_allocation_failed || !failure.empty(); }
+    const std::string& reason() const { return host_allocation_failed ? host_allocation_failure : failure; }
 
     std::uint32_t wire_count(std::uint32_t slot) const { return tables.words[directory_words * slot + 7]; }
 
@@ -207,7 +219,8 @@ struct VulkanGraphDevice::State {
     std::uint32_t memory_type(std::uint32_t candidates, VkMemoryPropertyFlags required,
                               VkMemoryPropertyFlags preferred) const {
         std::uint32_t fallback = VK_MAX_MEMORY_TYPES;
-        for (std::uint32_t i = 0; i < context.memory_properties.memoryTypeCount; ++i) {
+        const auto count = std::min(context.memory_properties.memoryTypeCount, std::uint32_t{VK_MAX_MEMORY_TYPES});
+        for (std::uint32_t i = 0; i < count; ++i) {
             const auto flags = context.memory_properties.memoryTypes[i].propertyFlags;
             if ((candidates & (std::uint32_t{1} << i)) == 0 || (flags & required) != required) continue;
             if ((flags & preferred) == preferred) return i;
@@ -220,9 +233,11 @@ struct VulkanGraphDevice::State {
                   VkMemoryPropertyFlags required, VkMemoryPropertyFlags preferred = 0) {
         const auto allocation_failed = [&] {
             destroy_buffer(buffer);
-            failure = "cannot allocate device memory";
+            failure = allocation_failure;
             return false;
         };
+        if ((usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) != 0 &&
+            bytes > context.properties.limits.maxStorageBufferRange) return allocation_failed();
         VkBufferCreateInfo create{};
         create.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         create.size = bytes;
@@ -486,10 +501,10 @@ struct VulkanGraphDevice::State {
     }
 
     Context::State& context;
-    const nvr::Image& image;
+    nvm::GraphDeviceStatistics& statistics;
     nvm::LayeredTables tables;
-    nvm::GraphDeviceStatistics statistics;
     std::string failure;
+    bool host_allocation_failed = false;
     std::uint32_t request_limit = 0;
     VkDeviceSize io_limit = 0;
     VkDeviceSize wires_limit = 0;
@@ -504,30 +519,48 @@ struct VulkanGraphDevice::State {
 };
 
 VulkanGraphDevice::VulkanGraphDevice(Context& context, const nvr::Image& image)
-    : state_(std::make_unique<State>(*context.state_, image)) {
-    state_->initialize();
+    : image_(image) {
+    initialize(context);
 }
 
 VulkanGraphDevice::VulkanGraphDevice(std::unique_ptr<Context> context, const nvr::Image& image)
-    : owned_context_(std::move(context)) {
+    : image_(image), owned_context_(std::move(context)) {
     if (!owned_context_) throw std::invalid_argument("Vulkan graph device needs a context");
-    state_ = std::make_unique<State>(*owned_context_->state_, image);
-    state_->initialize();
+    initialize(*owned_context_);
+}
+
+void VulkanGraphDevice::initialize(Context& context) try {
+    state_ = std::make_unique<State>(*context.state_, statistics_);
+    state_->initialize(image_);
+} catch (const std::bad_alloc&) {
+    if (state_) state_->host_allocation_failed = true;
+} catch (const std::length_error&) {
+    if (state_) state_->host_allocation_failed = true;
 }
 
 VulkanGraphDevice::~VulkanGraphDevice() = default;
-const nvr::Image& VulkanGraphDevice::image() const { return state_->image; }
-void VulkanGraphDevice::evaluate(std::span<nvm::GraphJob> jobs) { state_->evaluate(jobs); }
+const nvr::Image& VulkanGraphDevice::image() const { return image_; }
+void VulkanGraphDevice::evaluate(std::span<nvm::GraphJob> jobs) {
+    nvm::validate_graph_jobs(image_, jobs);
+    for (auto& job : jobs) job.evaluated = false;
+    if (state_) {
+        state_->evaluate(jobs);
+    } else {
+        statistics_.declined_failed += jobs.size();
+    }
+}
 std::size_t VulkanGraphDevice::batch_hint() const { return std::numeric_limits<std::size_t>::max(); }
-nvm::GraphDeviceStatistics VulkanGraphDevice::statistics() const { return state_->statistics; }
-std::string_view VulkanGraphDevice::failure_reason() const { return state_->failure; }
-std::span<const nvm::GraphShape> VulkanGraphDevice::graph_shapes() const { return state_->tables.shapes; }
-bool VulkanGraphDevice::failed() const { return state_->failed(); }
-const std::string& VulkanGraphDevice::reason() const { return state_->failure; }
-const nvm::LayeredTables& VulkanGraphDevice::tables() const { return state_->tables; }
-
-std::uint64_t VulkanGraphDevice::io_capacity() const { return state_->io.capacity; }
-std::uint64_t VulkanGraphDevice::wires_capacity() const { return state_->wires.capacity; }
+nvm::GraphDeviceStatistics VulkanGraphDevice::statistics() const { return statistics_; }
+std::string_view VulkanGraphDevice::failure_reason() const { return reason(); }
+std::span<const nvm::GraphShape> VulkanGraphDevice::graph_shapes() const { return tables().shapes; }
+bool VulkanGraphDevice::failed() const { return !state_ || state_->failed(); }
+const std::string& VulkanGraphDevice::reason() const { return state_ ? state_->reason() : host_allocation_failure; }
+const nvm::LayeredTables& VulkanGraphDevice::tables() const {
+    static const nvm::LayeredTables empty;
+    return state_ ? state_->tables : empty;
+}
+std::uint64_t VulkanGraphDevice::io_capacity() const { return state_ ? state_->io.capacity : 0; }
+std::uint64_t VulkanGraphDevice::wires_capacity() const { return state_ ? state_->wires.capacity : 0; }
 
 bool VulkanGraphDevice::self_test(Context& context) {
     auto fixtures = nvm::self_test_graphs();
@@ -543,8 +576,9 @@ bool VulkanGraphDevice::self_test(Context& context) {
     }
     VulkanGraphDevice device(context, image);
     device.evaluate(jobs);
+    if (device.failed() || device.statistics().dispatches != 1) return false;
     const auto& dispatch = device.state_->dispatch;
-    if (device.failed() || device.statistics().dispatches != 1 || dispatch.size() != jobs.size()) return false;
+    if (dispatch.size() != jobs.size()) return false;
 
     const auto words = device.state_->io_words();
     std::vector<std::int64_t> reference;

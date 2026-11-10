@@ -52,7 +52,10 @@ public:
 private:
     friend class Context;
     static bool self_test(Context& context);
+    void initialize(Context& context);
     struct State;
+    const nvr::Image& image_;
+    nvm::GraphDeviceStatistics statistics_;
     std::unique_ptr<Context> owned_context_;
     std::unique_ptr<State> state_;
 };

@@ -126,8 +126,10 @@ void append_graph(const nvr::Graph& graph, const GraphOrder& order, const GraphS
 
 template <class KeepOrder>
 std::uint64_t analyze_graphs(const nvr::Image& image, std::uint64_t max_table_bytes,
-                             std::vector<GraphShape>& shapes, KeepOrder keep_order) {
+                             std::uint64_t max_request_bytes, std::vector<GraphShape>& shapes,
+                             KeepOrder keep_order) {
     const auto word_limit = std::min(max_table_bytes, layered_table_limit) / sizeof(std::uint32_t);
+    const auto request_word_limit = max_request_bytes / sizeof(std::uint32_t);
     shapes.resize(image.graphs.size());
     std::uint64_t word_count = 0;
     for (std::size_t index = 0; index < image.graphs.size(); ++index) {
@@ -138,7 +140,9 @@ std::uint64_t analyze_graphs(const nvr::Image& image, std::uint64_t max_table_by
         const auto non_edge_words = directory_words + node_words * shape.nodes +
                                     order.starts.size() + graph.outputs.size();
         const auto remaining = word_limit - word_count;
-        if (non_edge_words > remaining || shape.edges > (remaining - non_edge_words) / edge_words) {
+        if (shape.io_words > request_word_limit ||
+            graph.input_lanes + shape.nodes > request_word_limit ||
+            non_edge_words > remaining || shape.edges > (remaining - non_edge_words) / edge_words) {
             shape.eligible = false;
             shape.reason = IneligibleReason::table_limit;
             continue;
@@ -151,11 +155,11 @@ std::uint64_t analyze_graphs(const nvr::Image& image, std::uint64_t max_table_by
 
 } // namespace
 
-LayeredTables pack_layered(const nvr::Image& image, std::uint64_t max_table_bytes) {
+LayeredTables pack_layered(const nvr::Image& image, std::uint64_t max_table_bytes, std::uint64_t max_request_bytes) {
     LayeredTables tables;
     tables.slots.resize(image.graphs.size(), nvr::absent);
     std::vector<GraphOrder> orders;
-    const auto word_count = analyze_graphs(image, max_table_bytes, tables.shapes,
+    const auto word_count = analyze_graphs(image, max_table_bytes, max_request_bytes, tables.shapes,
         [&](std::size_t index, GraphOrder&& order) {
             tables.slots[index] = static_cast<std::uint32_t>(orders.size());
             orders.push_back(std::move(order));
@@ -173,7 +177,8 @@ LayeredTables pack_layered(const nvr::Image& image, std::uint64_t max_table_byte
 
 std::vector<GraphShape> layered_shapes(const nvr::Image& image, std::uint64_t max_table_bytes) {
     std::vector<GraphShape> shapes;
-    analyze_graphs(image, max_table_bytes, shapes, [](std::size_t, GraphOrder&&) {});
+    analyze_graphs(image, max_table_bytes, std::numeric_limits<std::uint64_t>::max(),
+                   shapes, [](std::size_t, GraphOrder&&) {});
     return shapes;
 }
 

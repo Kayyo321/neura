@@ -4,11 +4,16 @@
 
 #include <algorithm>
 #include <array>
+#include <new>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
 namespace neura::gpu {
 namespace {
+
+constexpr std::uint32_t max_enumeration_count = 1024;
+constexpr int max_enumeration_attempts = 8;
 
 struct Candidate {
     VkPhysicalDevice physical;
@@ -29,17 +34,20 @@ int device_rank(VkPhysicalDeviceType type, bool allow_software) {
 }
 
 std::vector<VkPhysicalDevice> physical_devices(VkInstance instance, const InstanceFunctions& vk) {
-    for (;;) {
+    for (int attempt = 0; attempt < max_enumeration_attempts; ++attempt) {
         std::uint32_t count = 0;
-        if (vk.EnumeratePhysicalDevices(instance, &count, nullptr) != VK_SUCCESS || count == 0) return {};
+        if (vk.EnumeratePhysicalDevices(instance, &count, nullptr) != VK_SUCCESS ||
+            count == 0 || count > max_enumeration_count) return {};
         std::vector<VkPhysicalDevice> devices(count);
         const auto result = vk.EnumeratePhysicalDevices(instance, &count, devices.data());
         if (result == VK_SUCCESS) {
+            if (count > devices.size()) return {};
             devices.resize(count);
             return devices;
         }
         if (result != VK_INCOMPLETE) return {};
     }
+    return {};
 }
 
 std::vector<Candidate> candidates(VkInstance instance, const InstanceFunctions& vk, bool allow_software) {
@@ -57,9 +65,10 @@ std::vector<Candidate> candidates(VkInstance instance, const InstanceFunctions& 
 
         std::uint32_t count = 0;
         vk.GetPhysicalDeviceQueueFamilyProperties(physical, &count, nullptr);
-        if (count == 0) continue;
+        if (count == 0 || count > max_enumeration_count) continue;
         std::vector<VkQueueFamilyProperties> families(count);
         vk.GetPhysicalDeviceQueueFamilyProperties(physical, &count, families.data());
+        if (count > families.size()) continue;
         for (std::uint32_t i = 0; i < count; ++i) {
             if (families[i].queueCount != 0 && (families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0) {
                 choices.push_back({physical, properties, i, rank});
@@ -77,6 +86,16 @@ bool create_object(VkDevice device, Handle& target, const Info& info, Create cre
     if (create(device, &info, nullptr, &created) != VK_SUCCESS) return false;
     target = created;
     return true;
+}
+
+void note_allocation_failure(std::string& reason) {
+    try {
+        reason = allocation_failure;
+    } catch (const std::bad_alloc&) {
+        reason.clear();
+    } catch (const std::length_error&) {
+        reason.clear();
+    }
 }
 
 } // namespace
@@ -188,9 +207,11 @@ std::string Context::State::create_device(VkPhysicalDevice physical, std::uint32
     pipeline_info.stage.pName = "main";
     pipeline_info.layout = pipeline_layout;
     pipeline_info.basePipelineIndex = -1;
-    if (vk.CreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline) != VK_SUCCESS) {
+    VkPipeline created_pipeline = VK_NULL_HANDLE;
+    if (vk.CreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &created_pipeline) != VK_SUCCESS) {
         return "cannot create the graph compute pipeline";
     }
+    pipeline = created_pipeline;
 
     VkCommandPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -207,7 +228,7 @@ std::string Context::State::create_device(VkPhysicalDevice physical, std::uint32
 Context::Context(std::unique_ptr<State> state) : state_(std::move(state)) {}
 Context::~Context() = default;
 
-std::unique_ptr<Context> Context::create(const ContextOptions& options, std::string& reason) {
+std::unique_ptr<Context> Context::create(const ContextOptions& options, std::string& reason) try {
     auto state = std::make_unique<State>();
     if (!state->loader.open()) {
         reason = "Vulkan loader not found";
@@ -252,6 +273,12 @@ std::unique_ptr<Context> Context::create(const ContextOptions& options, std::str
         if (reason.empty()) reason = current.name + ": " + failure;
         current.destroy_device();
     }
+    return nullptr;
+} catch (const std::bad_alloc&) {
+    note_allocation_failure(reason);
+    return nullptr;
+} catch (const std::length_error&) {
+    note_allocation_failure(reason);
     return nullptr;
 }
 

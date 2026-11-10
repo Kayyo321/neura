@@ -3,6 +3,7 @@
 #include "graph_device.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace neura::nvm {
@@ -20,8 +21,9 @@ struct LayeredTables {
 };
 
 // Packs the validated graph table in graph index order. Graphs too large for
-// the remaining table space are skipped without affecting later graphs.
-LayeredTables pack_layered(const nvr::Image& image, std::uint64_t max_table_bytes = layered_table_limit);
+// the remaining table space or either per-request buffer are skipped.
+LayeredTables pack_layered(const nvr::Image& image, std::uint64_t max_table_bytes = layered_table_limit,
+                           std::uint64_t max_request_bytes = std::numeric_limits<std::uint64_t>::max());
 std::vector<GraphShape> layered_shapes(const nvr::Image& image,
                                       std::uint64_t max_table_bytes = layered_table_limit);
 

@@ -108,6 +108,54 @@ NEURA_TEST(gpu_device, integer_circuits_and_mixed_dispatch) {
     std::cout << "mixed graph call: " << count << " requests in " << stats.dispatches << " dispatches\n";
 }
 
+NEURA_TEST(gpu_storage_limits, oversized_graphs_leave_other_graphs_eligible) {
+    auto context = open_gpu();
+    constexpr std::uint32_t range = 3U << 19;
+    check_equal(context->max_storage_buffer_range(), range, "the shim reports a non-power-of-two range");
+    constexpr std::uint32_t words = range / sizeof(std::uint32_t);
+    constexpr std::uint32_t near_lanes = (1U << 18) + 20;
+    const nvr::Node constant{nvr::Activation::Identity, 7, {}};
+    nvr::Image image;
+    image.graphs = {
+        {words - 5, {constant}, {words - 5}},                  // IO too large, WIRES fits
+        {words - 6, std::vector<nvr::Node>(7, constant), {}}, // WIRES too large, IO fits
+        {near_lanes, {constant}, {near_lanes}},               // both fit above 1 MiB
+        {0, {constant}, {0}},
+    };
+    gpu::VulkanGraphDevice device(*context, image);
+    check(!device.failed(), device.reason());
+    check(device.io_capacity() > (1U << 20) && device.io_capacity() <= range &&
+          device.wires_capacity() > (1U << 20) && device.wires_capacity() <= range,
+          "both initial buffers fit the eligible graph and the device range");
+    const auto shapes = device.graph_shapes();
+    for (std::size_t graph = 0; graph < 2; ++graph) {
+        check(!shapes[graph].eligible && shapes[graph].reason == nvm::IneligibleReason::table_limit &&
+              device.tables().slots[graph] == nvr::absent, "an oversized graph has no table slot");
+    }
+    check(shapes[2].eligible && shapes[3].eligible, "later graphs remain eligible");
+
+    const std::vector<std::int64_t> inputs(words, 0);
+    std::array<std::int64_t, 4> outputs{};
+    auto input = std::span(inputs);
+    auto output = std::span(outputs);
+    std::array<nvm::GraphJob, 5> jobs{{
+        {0, input.first(words - 5), output.subspan(0, 1)},
+        {1, input.first(words - 6), {}},
+        {2, input.first(near_lanes), output.subspan(1, 1)},
+        {3, {}, output.subspan(2, 1)},
+        {2, input.first(near_lanes), output.subspan(3, 1)},
+    }};
+    device.evaluate(jobs);
+    check(!device.failed(), device.reason());
+    const auto stats = device.statistics();
+    check(stats.declined_ineligible == 2 && stats.evaluated == 3 && stats.dispatches == 3,
+          "the oversized jobs decline and the eligible jobs split across dispatches");
+    check(!jobs[0].evaluated && !jobs[1].evaluated &&
+          jobs[2].evaluated && jobs[3].evaluated && jobs[4].evaluated &&
+          outputs[1] == 7 && outputs[2] == 7 && outputs[3] == 7,
+          "the device returns the eligible graphs' output lanes");
+}
+
 NEURA_TEST(gpu_device, callback_trace_is_identical_across_evaluators) {
     auto context = open_gpu();
     auto image = hello_model();
@@ -162,6 +210,25 @@ NEURA_TEST(gpu_device, callback_trace_is_identical_across_evaluators) {
     check_equal(nvm::write_trace(cpu_replay.trace), cpu_bytes, "CPU replay trace bytes");
     check_equal(nvm::write_trace(gpu_replay.trace), gpu_bytes, "GPU replay trace bytes");
     check_equal(device.statistics().evaluated, std::uint64_t{4}, "GPU evaluates both the outer and callback blocks on each run");
+}
+
+NEURA_TEST(gpu_failure_counts, ineligible_jobs_remain_ineligible_after_failure) {
+    auto context = open_gpu();
+    nvr::Image image;
+    image.graphs = {{}, {0, {{nvr::Activation::Identity, 7, {}}}, {0}}};
+    gpu::VulkanGraphDevice device(*context, image);
+    check(!device.failed(), device.reason());
+    std::array<std::int64_t, 1> output{};
+    std::array<nvm::GraphJob, 3> jobs{{{0, {}, {}}, {1, {}, output}, {0, {}, {}}}};
+    for (std::uint64_t calls = 1; calls <= 2; ++calls) {
+        device.evaluate(jobs);
+        const auto stats = device.statistics();
+        check(device.failed() && device.failure_reason() == "cannot allocate device memory",
+              "an allocation exception fails the device");
+        check(std::ranges::none_of(jobs, &nvm::GraphJob::evaluated), "all jobs declined");
+        check(stats.evaluated == 0 && stats.dispatches == 1 && stats.declined_failed == calls &&
+              stats.declined_ineligible == 2 * calls, "failed and ineligible jobs are counted separately");
+    }
 }
 
 } // namespace neura::testing

@@ -9,6 +9,8 @@
 
 namespace neura::gpu {
 
+inline constexpr char allocation_failure[] = "cannot allocate device memory";
+
 std::span<const std::uint32_t> graph_eval_words();
 
 struct Context::State {
