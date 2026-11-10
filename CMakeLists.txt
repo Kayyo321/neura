@@ -313,6 +313,7 @@ if(BUILD_TESTING)
     endforeach()
 
     add_executable(neura_backend_tests
+        tests/backend/allocation_fault.cpp
         tests/backend/assembler.cpp
         tests/backend/circuit_tests.cpp
         tests/backend/concurrency_tests.cpp

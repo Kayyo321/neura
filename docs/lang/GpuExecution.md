@@ -6,7 +6,7 @@ This page specifies how `neura run` and `neura test` can evaluate neuron graphs 
 
 - "Must" states a requirement on the implementation. A constant, name, message, or layout given here is fixed. An implementer who finds one unworkable stops and reports it; they do not pick a replacement.
 - Section 3 lists every decision. Section 4 gives the measurements those decisions rest on, and says which are measurements and which are estimates.
-- Source references describe the tree at commit `b48d163`, which has host callbacks (`Execution::invoke_callback`).
+- Source references name the files and functions of the tree this page ships with, including host callbacks (`Execution::invoke_callback`).
 
 Terms:
 
@@ -25,7 +25,7 @@ Terms:
 
 ## 2. Summary
 
-Each NVM step resolves a block's inputs, evaluates the block's graph, decodes the selected exit, and commits it ([block transition](../runtime/NVM.md#execution-state)). This plan lets the second action, graph evaluation, run on a Vulkan compute device. Everything else stays in the CPU NVM: input resolution, the selector and lane checks, exits, frames, the heap, garbage collection, limits, host calls, traces, and every trap diagnostic.
+Each NVM step resolves a block's inputs, evaluates the block's graph, decodes the selected exit, and commits it ([block transition](../runtime/NVM.md#execution-state)). A graph device lets the second action, graph evaluation, run on a Vulkan compute device. Everything else stays in the CPU NVM: input resolution, the selector and lane checks, exits, frames, the heap, garbage collection, limits, host calls, traces, and every trap diagnostic.
 
 The GPU evaluates a graph layer by layer in exact 32-bit integer arithmetic. A static check on each graph's weights and a run-time bound on every neuron's value together guarantee that the 32-bit result equals the reference evaluator's checked 64-bit result; a request that leaves the bound is recomputed by the reference evaluator. No floating-point operation is involved in a result, so results do not depend on the device.
 
@@ -51,12 +51,13 @@ Whatever is chosen, a run must be indistinguishable to the program and to anyone
 | D9 | The NVM library's default stays the reference evaluator. `nvm::Execution`, `nvm::run`, `nvm::record`, `nvm::replay`, and `nvm::Fleet` use a device only when the caller passes one. Only the CLI applies D1. |
 | D10 | Device choice is deterministic: discrete, then integrated, then virtual, then other, each in loader enumeration order. Software implementations (`VK_PHYSICAL_DEVICE_TYPE_CPU`) are used only with `--gpu-software`. |
 | D11 | The existing CTest entries run with `NEURA_GPU=off`, so their evidence continues to come from the reference evaluator, one execution at a time, and their duration does not depend on the machine. New entries cover fleets, placement, and the GPU path. |
-| D12 | macOS is outside this plan. The CMake option `NEURA_GPU=AUTO` resolves to `OFF` on Apple platforms. The Windows path is specified and unverified, as MSVC builds are today ([Backend](../Backend.md#tests-and-the-limits-of-the-evidence)). |
+| D12 | macOS is outside this specification. The CMake option `NEURA_GPU=AUTO` resolves to `OFF` on Apple platforms. The Windows path is specified and unverified, as MSVC builds are today ([Backend](../Backend.md#tests-and-the-limits-of-the-evidence)). |
 | D13 | A fleet delivers host requests and results in member order: a member's host request is issued only after every lower-numbered member has finished. A fleet is therefore equivalent to running its members one after another. |
 | D14 | `neura test` and `neura run --each` run their members as a fleet in `auto` and `always`, and one at a time in `off`. A `neura run` without `--each` executes one program and never forms a fleet. |
 | D15 | In `auto`, the decision to open a device is a deterministic function of the image and of the jobs the run produces. Decisions made after that use measured time, so they can differ between runs and machines. No decision can change a result. |
 | D16 | `auto` prefers the CPU when in doubt: the device must be predicted to take at most 0.75 of the CPU's time. A rejection lasts for the rest of the process. Nothing is cached on disk and no thread is created. |
 | D17 | `neura run --each <file>` is the command-line way to give one image many inputs (section 10.11). It is defined in every mode and build, including builds without the GPU. |
+| D18 | In `auto`, an Active device is retired when 256 consecutive Active calls kept more than nine jobs on the CPU for each job they placed (section 11.10). Retirement is a rejection with the reason `the device stopped gaining` and is not a failure. The call that retires it depends on measured time, so on the machine, unlike the opening decision of D15. |
 
 ## 4. Release measurements
 
@@ -70,28 +71,28 @@ The single-execution runs used every program in `tests/benchmarks`, at both size
 
 ### 4.3 Single-execution timing
 
-Each row is the median of nine paired wall-time samples after warming each mode. The image was built once. Every auto run reported `gpu: auto, not used (no graph can gain at this batch size)`. Output and non-GPU statistics matched byte for byte.
+Each row is the median of nine paired wall-time samples after warming each mode, measured at the release commit with retirement (section 11.10) in place. The image was built once. Every auto run reported `gpu: auto, not used (no graph can gain at this batch size)`. Output and non-GPU statistics matched byte for byte. All 18 rows are within the 1.05 bound of section 19, the largest being 1.018268.
 
 | Workload | CPU only (s) | Auto (s) | Auto / CPU |
 | --- | ---: | ---: | ---: |
-| array-list/1000 | 0.008250 | 0.008392 | 1.017127 |
-| array-list/2000 | 0.014638 | 0.014819 | 1.012362 |
-| format/100 | 0.024562 | 0.024696 | 1.005452 |
-| format/200 | 0.047325 | 0.047312 | 0.999716 |
-| hash-map/1000 | 0.031394 | 0.031346 | 0.998471 |
-| hash-map/2000 | 0.069701 | 0.069786 | 1.001219 |
-| json/100 | 0.019332 | 0.019577 | 1.012637 |
-| json/200 | 0.037311 | 0.037262 | 0.998681 |
-| sha256/10240 | 0.180542 | 0.181026 | 1.002677 |
-| sha256/20480 | 0.356972 | 0.357439 | 1.001308 |
-| sort/1000 | 0.038903 | 0.038751 | 0.996100 |
-| sort/2000 | 0.082329 | 0.082323 | 0.999927 |
-| strings/10000 | 0.044804 | 0.045229 | 1.009478 |
-| strings/20000 | 0.087473 | 0.086792 | 0.992217 |
-| time-text/100 | 0.120894 | 0.121812 | 1.007594 |
-| time-text/200 | 0.234959 | 0.235724 | 1.003257 |
-| tree-map/1000 | 0.046747 | 0.047356 | 1.013027 |
-| tree-map/2000 | 0.096395 | 0.097303 | 1.009418 |
+| array-list/1000 | 0.008290 | 0.008442 | 1.018268 |
+| array-list/2000 | 0.014788 | 0.014959 | 1.011570 |
+| format/100 | 0.024261 | 0.024521 | 1.010723 |
+| format/200 | 0.046320 | 0.046390 | 1.001506 |
+| hash-map/1000 | 0.030989 | 0.031142 | 1.004955 |
+| hash-map/2000 | 0.068956 | 0.068703 | 0.996335 |
+| json/100 | 0.019559 | 0.019460 | 0.994928 |
+| json/200 | 0.037236 | 0.037208 | 0.999224 |
+| sha256/10240 | 0.174512 | 0.174021 | 0.997191 |
+| sha256/20480 | 0.344974 | 0.343416 | 0.995483 |
+| sort/1000 | 0.037684 | 0.037982 | 1.007891 |
+| sort/2000 | 0.079897 | 0.080178 | 1.003507 |
+| strings/10000 | 0.045008 | 0.045235 | 1.005050 |
+| strings/20000 | 0.085755 | 0.086667 | 1.010637 |
+| time-text/100 | 0.118632 | 0.118968 | 1.002838 |
+| time-text/200 | 0.229772 | 0.231159 | 1.006036 |
+| tree-map/1000 | 0.046652 | 0.046639 | 0.999731 |
+| tree-map/2000 | 0.096732 | 0.097023 | 1.003003 |
 
 ### 4.4 Reproducing the measurements
 
@@ -104,31 +105,33 @@ env -u DISPLAY -u WAYLAND_DISPLAY python3 tests/benchmarks/gpu-collatz.py build-
 
 ### 4.5 Fleet timing
 
-The test area times include compilation and test execution. Each row is the median of nine paired samples.
+The test area times include compilation and test execution. Each row is the median of nine paired samples, pinned to CPU 7, at the release commit.
 
 | Workload | CPU only (s) | Auto (s) | Auto / CPU |
 | --- | ---: | ---: | ---: |
-| array-deque | 2.154411 | 2.159302 | 1.002270 |
-| core | 0.019096 | 0.019206 | 1.005720 |
-| integers | 1.476595 | 1.566640 | 1.060982 |
+| array-deque | 2.144161 | 2.149104 | 1.002306 |
+| core | 0.019437 | 0.019528 | 1.004648 |
+| integers | 1.485685 | 1.574914 | 1.060059 |
 
-On 65,536 Collatz argument lists, CPU-only wall time was 17.072696 s and auto wall time was 18.878298 s, a ratio of 1.105760. Both exited with status 0 and matched the independent integer oracle and each other's non-GPU statistics. The pinned pair missed the 1.0 release bound.
+All three are within the 1.10 bound of section 19. The harness reported 21 of 21 workloads within their gates. The auto runs of `array-deque` and `core` reported `gpu: auto, not used (no graph can gain at this batch size)`. The `integers` area also reported `gpu: auto, not used (the workload stayed under the opening budget)` for some of its files.
+
+**The Collatz gate (phase 5, bound (c)).** `neura run --each` over 65,536 Collatz argument lists is the workload that opens a device. Before retirement, an Active device declined about 97 percent of the jobs of every round while each round still paid the formation of a wide round and the placement bookkeeping, and the auto run was slower than the CPU run. Three pinned pairs measured then were 1.105760, 1.096626 (all eight cores), and 1.083100 (after the prepared-input change). The bound was **NOT MET**.
+
+With retirement (section 11.10), three pinned pairs of `python3 tests/benchmarks/gpu-collatz.py build-gpu/neura --cpu 7` measured:
+
+| Run | CPU only (s) | Auto (s) | Auto / CPU |
+| --- | ---: | ---: | ---: |
+| 1 | 18.157887 | 17.683262 | 0.973861 |
+| 2 | 18.103580 | 17.987131 | 0.993568 |
+| 3 | 18.067897 | 17.728125 | 0.981195 |
+
+Every run exited with status 0, matched the independent Collatz oracle and the other mode's non-GPU statistics (`members 65536, steps 37613886, peak heap cells 223, host requests 65536`), and printed `MET` under the script's rule (ratio at most 1.0). Phase 5(c) is **MET**. The margin is small: 0.6 to 2.6 percent, which is the same order as the 0.5 percent spread of the CPU-only times across the three runs, so the result establishes that the auto run is no slower on this host, not that it is faster. The device is retired early; run 3 printed:
 
 ```text
-gpu: auto, device "NVIDIA GeForce RTX 5080", eligible graphs 48 of 50, evaluated 930920, kept on cpu 32183194, ineligible 0, escaped 0, failed 0, dispatches 421, correction 1.13
+gpu: auto, device "NVIDIA GeForce RTX 5080", eligible graphs 48 of 50, evaluated 951711, kept on cpu 602481, ineligible 0, escaped 0, failed 0, dispatches 453, correction 1.13, retired (the device stopped gaining)
 ```
 
-The pair with all eight cores available took 17.719397 s on CPU and 19.431556 s in auto, a ratio of 1.096626.
-
-```text
-gpu: auto, device "NVIDIA GeForce RTX 5080", eligible graphs 48 of 50, evaluated 942829, kept on cpu 32171285, ineligible 0, escaped 0, failed 0, dispatches 435, correction 1.19
-```
-
-The review reran the pinned pair with the expanded verification and driver checks. Before the prepared-input change, it took 15.879288 s off and 18.076411 s in auto (1.138364). Reusing the checks from preparation gave 16.445611 s off and 17.812238 s in auto (1.083100). Both pairs matched the oracle and each other's non-GPU statistics. Phase 5(c) remains **NOT MET** against the 1.0 bound. The placement rules and constants are unchanged.
-
-```text
-gpu: auto, device "NVIDIA GeForce RTX 5080", eligible graphs 48 of 50, evaluated 925423, kept on cpu 32188691, ineligible 0, escaped 0, failed 0, dispatches 421, correction 1.02
-```
+The counters are those at retirement. `kept on cpu` no longer includes the roughly 32 million jobs that earlier runs counted, because a retired device does no accounting.
 
 ### 4.6 Calibration and fixed model fixtures
 
@@ -142,7 +145,7 @@ The structural model-fitting test uses the fixed design probe times 9.2, 253.9, 
 
 ### 4.7 Correctness on devices
 
-The integer circuit suite passed on the RTX 5080 and the integrated Radeon. On both, the mixed 65,536-request call split into two dispatches. The CLI suite ran on the RTX 5080, including byte-identical trace recording and replay across evaluators. The llvmpipe context passed the startup self-test.
+The integer circuit suite passed on the RTX 5080 and the integrated Radeon. On both, the mixed 65,536-request call split into exactly two dispatches, 65,535 requests and one, as section 7.4 derives. The CLI suite ran on the RTX 5080, including byte-identical trace recording and replay across evaluators. The llvmpipe context passed the startup self-test.
 
 ## 5. Contract
 
@@ -187,9 +190,9 @@ A graph is **eligible** when all of the following hold. The check runs once per 
 
 1. It has at least one node.
 2. For every node, `|bias| + wire_bound × Σ|weightᵢ| ≤ sum_limit`, where the sum is over the node's edges. The implementation computes magnitudes as unsigned 64-bit values (the magnitude of `INT64_MIN` is 2⁶³) and treats any unsigned overflow of the product or the sum as failing the test.
-3. Its packed records fit the table limit of section 7.4.
+3. Its packed records fit the table limit of section 7.4, and one request for it fits the `IO` and `WIRES` buffers: its `IO` need `W` (section 7.5) and its `WIRES` need `input_lanes + nodes` are each at most the buffer ceiling `min(256 MiB, maxStorageBufferRange)` of the device (section 7.4).
 
-Rule 2 implies that the bias and every weight fit in 32 bits. A graph that fails a rule is **ineligible** for the life of the device and is evaluated by the reference evaluator on every step. The failing rule is recorded per graph as `no_nodes`, `weight_budget`, or `table_limit`.
+Rule 2 implies that the bias and every weight fit in 32 bits. A graph that fails a rule is **ineligible** for the life of the device and is evaluated by the reference evaluator on every step. The failing rule is recorded per graph as `no_nodes`, `weight_budget`, or `table_limit`. Rule 3, in both of its parts, is `table_limit`.
 
 ### 6.3 Run-time bound
 
@@ -253,11 +256,12 @@ After a dispatch a status word must be 2 (evaluated) or 3 (escaped). Any other v
 | Limit | Value |
 | --- | --- |
 | `TABLES` size | At most the smaller of 2 GiB and the device's `maxStorageBufferRange`. Graphs are packed in ascending index order; a graph whose records would exceed the limit is ineligible with `table_limit` and packing continues with the next graph. |
-| `IO` capacity | Starts at the larger of 1 MiB and four bytes times `5 + max(input_lanes + output_count)` over eligible graphs. Grows to the next power of two that fits a dispatch, up to 256 MiB and subject to the device's `maxStorageBufferRange`. |
-| `WIRES` capacity | Starts at the larger of 1 MiB and four bytes times the largest eligible `wire_count`. Grows the same way, up to 256 MiB and subject to the device's `maxStorageBufferRange`. |
+| Buffer ceiling | `ceiling = min(256 MiB, maxStorageBufferRange)`. A graph whose `IO` need `W × 4` bytes or `WIRES` need `(input_lanes + nodes) × 4` bytes for one request exceeds the ceiling is ineligible with `table_limit`, and packing continues with the next graph. A device applies this rule when it packs. The shapes of section 7.5 that do not come from a device omit it. |
+| `IO` capacity | Starts at `io_initial`, the larger of 1 MiB and four bytes times `5 + max(input_lanes + output_count)` over eligible graphs. May grow, by powers of two, up to `max(io_initial, bit_floor(ceiling))`, where `bit_floor` is the largest power of two not above its argument. |
+| `WIRES` capacity | Starts at `wires_initial`, the larger of 1 MiB and four bytes times the largest eligible `wire_count`. May grow the same way up to `max(wires_initial, bit_floor(ceiling))`. |
 | Requests per dispatch | At most the smaller of 65,535 and the device's `maxComputeWorkGroupCount[0]`. |
 
-A call with more requests than one dispatch can hold is split into consecutive dispatches, each taking the longest prefix of the remaining requests that fits all three limits. The single-request path of `Execution` always fits the initial capacities, so it never reallocates.
+Because the ceiling bounds one request, `io_initial` and `wires_initial` never exceed it, so neither buffer ever exceeds `min(256 MiB, maxStorageBufferRange)`. A call with more requests than one dispatch can hold is split into consecutive dispatches, each taking the longest prefix of the remaining requests that fits all three limits (a prefix is limited by the request count, by the `IO` words its requests need, and by the `WIRES` words they need). The single-request path of `Execution` always fits the initial capacities, so it never reallocates.
 
 ### 7.5 Graph shapes
 
@@ -395,8 +399,11 @@ private:
     friend class Fleet;
     // Fleet has resolved binary inputs for every graph in this order. An
     // opting-in device may synchronously materialize a single nonempty
-    // subset of strictly increasing job indices. Returning false without
-    // materializing leaves all work to the caller's ordinary eager batch.
+    // subset of strictly increasing job indices. The materializer returns an
+    // empty span when the fleet cannot allocate the jobs; the device then
+    // evaluates none of them and returns true, and the fleet evaluates the
+    // whole round by reference. Returning false without materializing leaves
+    // all work to the caller's ordinary eager batch.
     virtual bool evaluate_prepared(std::span<const std::uint32_t>, const detail::MaterializeGraphJobs&) { return false; }
 };
 } // namespace neura::nvm
@@ -404,13 +411,13 @@ private:
 
 `graph_shapes()` returns one shape per graph in image order when supplied. It includes current table admission and escape demotion. An empty span means the wrapper uses the image's static shapes. A nonempty `failure_reason()` indicates a failed device and retires it from automatic placement. The view belongs to the device.
 
-The private prepared hook is called only by a fleet. The materializer may be called once, synchronously, with a nonempty strictly increasing subset of valid job indices. Returning true declines any job that was never materialized. Returning false requires that no jobs were materialized, and the caller takes the eager path. The callback and any views it supplies are valid only during the call.
+The private prepared hook is called only by a fleet. The materializer may be called once, synchronously, with a nonempty strictly increasing subset of valid job indices. Returning true declines any job that was never materialized. Returning false requires that no jobs were materialized, and the caller takes the eager path. The callback and any views it supplies are valid only during the call. An empty result from the callback means the fleet could not allocate the round's jobs (section 9.5): the device must evaluate none of them and must not count them as its own failure.
 
 Contract of `evaluate`, for every job:
 
 - If it sets `evaluated` to true, then `outputs[k]` equals the value the reference evaluator assigns to wire `graph.outputs[k]` for those inputs, for every `k`, and the reference evaluator reports no overflow for those inputs.
 - Otherwise it sets `evaluated` to false and the contents of `outputs` are unspecified. The caller must then use the reference evaluator.
-- A device failure never throws; the device declines the job.
+- A device failure never throws, and neither does running out of host memory: an allocation failure (`std::bad_alloc` or `std::length_error`) is a device failure (section 9.5) and the device declines the job. Jobs whose dispatch completed before the failure stay evaluated, with their outputs written.
 - `graph` out of range, `inputs.size() != input_lanes`, `outputs.size() != graph.outputs.size()`, or an input other than 0 or 1 is a caller bug and throws `std::invalid_argument`.
 
 A device belongs to one image object. It reads `image.graphs` once, when constructed, and must not be used after the image is destroyed or its graph table changes. The jobs of one call are independent; a device may evaluate them in any order or together.
@@ -483,15 +490,25 @@ The exception leaves `Execution::advance()` or `Fleet::advance()`, which catch o
 
 ### 9.5 Device failure
 
-A device **fails** when a Vulkan call returns an error, a dispatch does not complete within 30 seconds, or a status word is neither 2 nor 3. From then on it declines every job, including the rest of the failing call, counts them in `declined_failed`, and keeps a one-line reason. The run continues on the reference evaluator with identical results. A failed device is never retried.
+A device **fails** when a Vulkan call returns an error, a dispatch does not complete within 30 seconds, a status word is neither 2 nor 3, or the host cannot allocate memory for it (`std::bad_alloc` or `std::length_error`, reason `cannot allocate device memory`). From then on it declines every job, including the rest of the failing call, and keeps a one-line reason. Each declined job is counted in `declined_failed`, except a job for a graph that is ineligible, which is counted in `declined_ineligible` as it would be without a failure: the jobs of the failing call that were not yet in a dispatch, and every job of later calls, are counted this way, and so are the requests of the dispatch that was in flight, which are all eligible and are counted in `declined_failed`. Jobs of dispatches that completed before the failure keep their results and stay counted in `evaluated`, and a dispatch is published only after all of its status words have been checked. The run continues on the reference evaluator with identical results. A failed device is never retried.
+
+Running out of host memory outside the Vulkan layer is contained in the same way, and never throws out of `evaluate`:
+
+| Where | Effect |
+| --- | --- |
+| The opener of section 11.4, in calibration or in creating the context or device | The opener reports `cannot allocate device memory` and `AutoDevice` is Rejected with `unavailable: cannot allocate device memory`. No device exists and the state is not a failure. |
+| `AutoDevice`, in placing the jobs of a call (scratch growth, job lists) | Before the inner device is asked, no job of the call has been evaluated: every one is declined and counted in `declined_failed`, and the state becomes Rejected with `device failed: cannot allocate placement memory`, which is a failure (`failure_reason()` is that text). |
+| `Fleet`, in materializing the jobs of a round | The fleet sends none of that round's device jobs and the reference evaluator computes them. It is not a device failure, and later rounds try again. |
+
+The reference evaluator computes every declined job, so none of these changes a result.
 
 ## 10. Batched running
 
 ### 10.1 Purpose
 
-Section 4.5 shows that a dispatch costs almost the same for one request as for several hundred. A single execution produces one request per step, so it can only ever fill a dispatch with one. A fleet advances many executions of one image a step at a time and hands all of that round's requests to the device in one call.
+The [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements) show that a dispatch costs almost the same for one request as for several hundred. A single execution produces one request per step, so it can only ever fill a dispatch with one. A fleet advances many executions of one image a step at a time and hands all of that round's requests to the device in one call.
 
-Where the members come from in this plan:
+Where the members come from:
 
 | Consumer | Members |
 | --- | --- |
@@ -499,7 +516,7 @@ Where the members come from in this plan:
 | `neura run --each` (section 10.11) | One per argument list in a file |
 | Embedders and tests of the toolchain, through `nvm::Fleet` | Any set of entry points or scalar function calls of one image, for example every input of an exhaustive sweep |
 
-A `neura run` without `--each` executes one program, so it has one execution and no fleet. Section 18 lists other consumers that this plan does not add.
+A `neura run` without `--each` executes one program, so it has one execution and no fleet. Section 18 lists other consumers that this specification does not add.
 
 ### 10.2 Entry points
 
@@ -693,7 +710,7 @@ Without a line number: `<lists>: no argument lists` when the file produces no me
 
 ### 10.12 The cost of a fleet whose jobs stay on the CPU
 
-A round whose jobs are all declined does the same work per step as a single execution, through the same `begin_step`, `evaluate_outputs`, and `finish_step`. What it adds is the job list and moving between members' state. This plan assumes that is small and does not rely on the assumption: phase 2 measures it (section 19), and auto mode stops forming rounds, by returning a `batch_hint` of 1, once it has rejected the device.
+A round whose jobs are all declined does the same work per step as a single execution, through the same `begin_step`, `evaluate_outputs`, and `finish_step`. What it adds is the job list and moving between members' state. The cost is small but not zero, and nothing relies on it being zero: the release gates of section 19 measure it, and auto mode stops forming rounds, by returning a `batch_hint` of 1, once it has rejected or retired the device (section 11.10).
 
 ## 11. Auto mode
 
@@ -706,6 +723,7 @@ Auto mode makes three decisions, each by predicted time only.
 | Whether to open a device at all | Before the Vulkan loader is touched, from the image and the jobs seen so far (section 11.5) | Yes |
 | Whether the opened device is worth keeping | Once, right after it is opened and measured (sections 11.6 and 11.7) | No: it uses measured time |
 | Which jobs of each call go to the device | Every call after that (sections 11.8 and 11.9) | No: it uses measured time |
+| Whether an Active device still gains | After every window of 256 Active calls (section 11.10) | No: it follows the placement decisions |
 
 It is implemented as one `GraphDevice`, `AutoDevice`, in `src/nvm/placement.hpp` and `placement.cpp` (library `neura_nvm`). Executions and fleets treat it like any other device: they offer jobs, it evaluates some and declines the rest, and declined jobs are evaluated by reference. Nothing outside `AutoDevice` knows about placement.
 
@@ -760,6 +778,7 @@ public:
     const std::string& reason() const;       // why it is Rejected
     const std::string& device_name() const;  // empty until opened
     double correction() const;
+    bool retired() const;                    // Rejected because it stopped gaining (section 11.10)
     // GraphDevice
 };
 ```
@@ -768,7 +787,7 @@ public:
 | --- | --- | --- |
 | Gated | Declines every job and does the accounting of section 11.5. | `max_jobs` |
 | Active | Places the call's jobs (section 11.8). | `max_jobs` |
-| Rejected | Declines every job. Does no accounting. | 1 |
+| Rejected | Declines every job. Does no accounting. A retired device (section 11.10) is Rejected. | 1 |
 
 A job that `AutoDevice` declines by its own choice is counted in `declined_placement`. The other counters are the inner device's.
 
@@ -857,7 +876,7 @@ Let `s` be the correction of section 11.9. For the call's jobs:
 
 The sorted walk is what keeps a deep graph from holding up a batch: a graph is included only if the jobs up to and including it repay the longest wait among them. A call with one job is the same procedure with one count. The work per call is linear in the number of jobs plus a sort of the distinct graphs in the call.
 
-Jobs the inner device declines, because they escaped or it failed, are returned declined. If the inner device has failed, the state becomes Rejected with `device failed: <reason>`.
+Jobs the inner device declines, because they escaped or it failed, are returned declined. If the inner device has failed, the state becomes Rejected with `device failed: <reason>`. If `AutoDevice` cannot allocate the memory it needs to place the call, section 9.5 applies.
 
 ### 11.9 Correction
 
@@ -872,14 +891,36 @@ A device that is slower than its calibration raises `s`, which shrinks the set o
 
 When both the predicted and elapsed times are zero, the sample supplies no timing evidence and leaves `s` unchanged.
 
-### 11.10 What auto mode will choose for today's programs
+### 11.10 Retirement
+
+A device that is Active but whose jobs placement mostly declines still costs every round: the fleet forms wide rounds and `AutoDevice` places each of them, and almost nothing is sent to the device. The device is therefore retired when it stops gaining.
+
+```text
+retire_window = 256      consecutive Active calls in a window
+retire_ratio  = 9        kept jobs allowed for each placed job
+```
+
+Only calls made while the state is Active count, and only those with at least one job. The call that opens the device is Gated and does not count; a call with no jobs does not count. For each counted call, `placed` is the number of its jobs sent to the inner device (the `jobs` of the prefix of section 11.8, zero when the prefix is empty or the caller could not allocate the jobs) and `kept` is `size - placed`: jobs declined by placement, including those of ineligible graphs. Sum both over a window of exactly 256 counted calls. When the window completes:
+
+- if `kept > 9 × placed`, that is, if the device took fewer than one job in ten, the device is **retired**: the state becomes Rejected with the reason exactly `the device stopped gaining`, the inner device is released as in any rejection, and the counters keep the values they had. The check follows the processing of the call that completes the window, so that call's placed jobs were evaluated. Later calls are declined by the Rejected state, with no accounting, and `batch_hint` is 1;
+- otherwise both sums and the call count are set to zero and the next call starts a new window. Windows do not overlap and nothing carries over, so one window that placed everything does not excuse the next.
+
+The comparison is strict: `kept = 9 × placed` does not retire and `kept = 9 × placed + 1` does. A window whose calls all place nothing has `placed = 0` and retires on any `kept > 0`.
+
+Retirement is a rejection, not a failure: the device is not marked failed, `failure_reason()` stays empty, and `--require-gpu` is not involved because it selects `always`. The device name and counters remain available to `--stats`, which reports the state as retired (section 14.5).
+
+**Why it cannot change a result.** Placement only chooses which evaluator computes a job (D7), and every declined job is computed by the reference evaluator whose result a device must equal (section 5.1). Retiring a device declines jobs that placement would, at worst, have sent to it, so a retired device can differ from an active one in wall time and in the `gpu:` line, and in nothing else.
+
+**What it depends on.** The index of the call that retires the device is a function of the sequence of calls and of which jobs placement selects. Placement uses the calibrated models and the correction, which come from measured time, so the retirement call index depends on the machine and on the run. This differs from the opening decision of section 11.5 and D15, which is a deterministic function of the image and the jobs.
+
+### 11.11 What auto mode will choose for today's programs
 
 From the [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements):
 
 - **`neura run`.** No compiled graph measured passes the prospect test with `max_jobs = 1`: the best case, the 499-neuron graph, would need about 10 microseconds on the optimistic device against a nominal 2.2 on the CPU. No device is opened and the run costs what `--no-gpu` costs.
 - **`neura test` with few tests.** A fleet forms when the image has a graph that passes the prospect test at the test count: from about seven tests for an image with a wide, shallow graph like the 499-neuron one, and from about thirty for the other graphs measured. The gate then opens a device only if enough tests are at profitable graphs in the same rounds; otherwise the workload is rejected after `give_up_work` and the rest runs one test at a time.
 - **`neura run --each` with thousands of argument lists.** This is the fleet case below whenever the program computes before it prints.
-- **Fleets of hundreds or thousands of members on a discrete GPU.** The gate opens within tens of rounds, the verdict keeps the device, and placement sends most rounds' jobs to it.
+- **Fleets of hundreds or thousands of members on a discrete GPU.** The gate opens within tens of rounds, the verdict keeps the device, and placement sends the rounds' jobs to it for as long as it gains. A workload whose jobs are mostly cheap, like the 65,536 Collatz lists of section 4.5, retires the device after the first window in which it took under a tenth of the jobs, and the rest of the run is the CPU run.
 - **An integrated or software GPU.** The verdict rejects it for the graphs measured, apart from the wide, shallow case above.
 
 The implementation measurements in section 4 are observed results on the release host.
@@ -921,7 +962,7 @@ public:
 Creation, in order:
 
 1. Create an instance with `apiVersion = VK_API_VERSION_1_0`, application name `neura`, no layers, no extensions. Failure: `cannot create a Vulkan instance`.
-2. Enumerate physical devices. A **candidate** has a queue family with `VK_QUEUE_COMPUTE_BIT` (the lowest-numbered one is used), `maxComputeWorkGroupInvocations ≥ 64`, `maxComputeWorkGroupSize[0] ≥ 64`, `maxPerStageDescriptorStorageBuffers ≥ 3`, `maxStorageBufferRange ≥ 2²⁰`, and a device type allowed by D10. The implementation checks these limits on the device; it must not assume the specification's minimums.
+2. Enumerate physical devices. The enumeration is bounded: it asks the loader for the count and then for the devices, repeats the pair when the loader answers `VK_INCOMPLETE` because the count grew, and gives up after 8 attempts; a count of 0 or above 1,024 devices means no usable device. A device that reports 0 or more than 1,024 queue families is not a candidate. A **candidate** has a queue family with `VK_QUEUE_COMPUTE_BIT` and at least one queue (the lowest-numbered such family is used), `maxComputeWorkGroupInvocations ≥ 64`, `maxComputeWorkGroupSize[0] ≥ 64`, `maxPerStageDescriptorStorageBuffers ≥ 3`, `maxStorageBufferRange ≥ 2²⁰`, and a device type allowed by D10. The implementation checks these limits on the device; it must not assume the specification's minimums.
 3. Order candidates by type rank (discrete 0, integrated 1, virtual 2, other 3, CPU 4 and only with `allow_software`), then by enumeration index. No candidate: `no usable Vulkan device`.
 4. For each candidate in order, create the logical device with one queue and with `robustBufferAccess` enabled when the device reports it; create the shader module, a descriptor set layout with three `VK_DESCRIPTOR_TYPE_STORAGE_BUFFER` bindings for the compute stage, the pipeline layout, the compute pipeline, a command pool with `VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`, and one fence; then run the self-test of section 12.5. The first candidate that passes is the device. A candidate that fails any step is destroyed and the next is tried. If all fail, the reason is `<device name>: <failure>` for the first candidate.
 
@@ -937,7 +978,7 @@ Creation, in order:
 
 If no memory type satisfies a row, or an allocation fails, construction leaves the device in the failed state of section 9.5 with the reason `cannot allocate device memory`. A context serves one `VulkanGraphDevice` at a time. In `always` the CLI creates one for the program's image; the opener of section 11.4 creates one for the probe image, destroys it, and then creates one for the program's image. `batch_hint` returns the largest `std::size_t`.
 
-The storage-buffer range further bounds `IO` and `WIRES`, whose ceiling is 256 MiB. Growth uses the largest power of two within both limits. An empty table binds a single dummy word without uploading records. A staging allocation without coherent memory is flushed before submission.
+The storage-buffer range further bounds `IO` and `WIRES`. With `ceiling = min(256 MiB, maxStorageBufferRange)`, each buffer starts at its initial capacity (section 7.4), which is at most `ceiling` because a graph whose single request needs more is ineligible with `table_limit`, and may grow by powers of two up to `max(initial, bit_floor(ceiling))`: a buffer is reallocated at `bit_ceil(needed)` when a dispatch needs more than its capacity, and `needed` never exceeds that limit. No buffer is ever larger than `ceiling`, whether or not `ceiling` is a power of two. An empty table binds a single dummy word without uploading records. A staging allocation without coherent memory is flushed before submission.
 
 ### 12.4 Dispatch protocol
 
@@ -1061,9 +1102,10 @@ gpu: always, device "<name>", eligible graphs <E> of <G>, evaluated <n>, ineligi
 gpu: auto, not used (<reason>)
 gpu: auto, device "<name>", eligible graphs <E> of <G>, evaluated <n>, kept on cpu <n>, ineligible <n>, escaped <n>, failed <n>, dispatches <n>, correction <x.xx>
 gpu: auto, device "<name>", eligible graphs <E> of <G>, evaluated <n>, kept on cpu <n>, ineligible <n>, escaped <n>, failed <n>, dispatches <n>, correction <x.xx>, rejected (<reason>)
+gpu: auto, device "<name>", eligible graphs <E> of <G>, evaluated <n>, kept on cpu <n>, ineligible <n>, escaped <n>, failed <n>, dispatches <n>, correction <x.xx>, retired (the device stopped gaining)
 ```
 
-The counters are the fields of `GraphDeviceStatistics`; `kept on cpu` is `declined_placement`. For `auto`, the reason is `AutoDevice::reason()`, or `the workload stayed under the opening budget` when the state is still Gated at the end. The last form is used when a device was opened and the state ended Rejected.
+The counters are the fields of `GraphDeviceStatistics`; `kept on cpu` is `declined_placement`. For `auto`, the reason is `AutoDevice::reason()`, or `the workload stayed under the opening budget` when the state is still Gated at the end. The `rejected` form is used when a device was opened and the state ended Rejected for any reason except retirement. The `retired` form is used when the device was retired (section 11.10). In it the device name and the counters are those accumulated before the retirement: jobs offered after it are declined without being counted.
 
 ### 14.6 Usage text
 
@@ -1103,8 +1145,13 @@ Each entry names what it compares, over what domain, and what kind of evidence i
 | `backend-placement` | `fit_device` and `fit_cpu`, the pure functions behind section 11.6: the six RTX 5080 measurements of section 4.6 (9.2, 253.9, 4605.6, 15.2, 371.9, 152.6) give `a` 9.2, `b0` 0.343, `b1` 0.135, `K` 2,123, `d` 0.000259 to three significant digits; the clamps apply for measurements that would give negative or unbounded values. | Structural |
 | `backend-placement` | The placement procedure with fixed models and hand-computed expectations: all jobs declined below break-even; a deep graph left out of a batch of shallow ones and included once it has enough jobs; the tie rule; a gain of exactly zero declines; ineligible graphs declined. The prospect test, the gate opening at an exact call and identically on a second run, the give-up rule, and the verdict accepting the RTX 5080 parameters and rejecting the llvmpipe parameters of section 4.6 for the same shapes. | Structural |
 | `backend-placement` | `AutoDevice` with an opener that returns `ModelDevice` and fixed models, and a scripted clock: state transitions, `batch_hint`, every counter, the correction after scripted elapsed times including both clamps, and rejection when the inner device fails. Then the corpus fleets of `backend-fleet` run through it wrapped in `VerifyingDevice`, with models that make it place some rounds and decline others: all results equal the serial runs. Across the same corpus at windows 1, 3, and 4,096, the unwrapped prepared path agrees with serial execution and the eager fleet, including round counts at each completion. | Structural, end to end |
-| `gpu-device` (new, built with the GPU) | `VulkanGraphDevice` against `evaluate_graph` with the same circuit domains as `backend-layered`, submitted in dispatches of up to 65,535 requests; a mixed dispatch over several graphs; a call large enough to split into several dispatches; `IO` and `WIRES` growth. Calibration returns finite, non-negative parameters and every probe job matches the reference. A deterministic host callback produces identical trace bytes and cross-replays in both directions. Uses `allow_software = true`. | Exhaustive (8-bit), sampled (wider) |
-| `gpu-cli` (new CMake script) | For each program under `tests/backend/programs` and `tests/backend/traps` whose `--no-gpu --stats` run takes at most 200,000 steps: stdout, exit status, and stderr without the `gpu:` line are identical between `--no-gpu`, `--require-gpu --gpu-software --gpu-verify`, and `--gpu=auto --gpu-software --gpu-verify`. The same comparison, also with auto verification disabled, for the programs, `neura test` on the suites under `tests/backend/testing`, and for `neura run --each` with a generated file of 2,000 argument lists for `first-argument.nra`. A single-request run, a multi-request run, and a trap produce byte-identical CPU and GPU traces and replay across evaluators in both directions. The usage and run errors of section 14. `NEURA_GPU` and its precedence. Programs over the step bound are listed in the log. Only files declaring a `// run-options:` line are also compared with their fixture options. | End to end |
+| `backend-placement` | Retirement (section 11.10) with `ModelDevice` and fixed models under which the device places the wide graph and never the one-neuron graph. A call of 1 placed and 10 kept jobs, repeated: the device is Active through call 389 and retired at the end of call 390 (the gate opens on call 134, calls 135 to 390 are the 256 Active calls), `batch_hint` is 1, the reason is `the device stopped gaining`, `failure_reason()` is empty, the counters keep the values they had (256 evaluated, `134 × 512 + 256 × 10` placement declines), later calls change none, and every evaluated output equals the reference. Calls that place nothing and calls with no jobs. `kept = 9 × placed` over four windows never retires, `kept = 9 × placed + 1` retires on the window's last call, and a window of kept and placed jobs is judged by its sums. A workload that places 10 and 18 percent never retires over ten windows. A window that gains resets the sums. | Structural |
+| `backend-placement` | The corpus fleets of `backend-fleet`, through `AutoDevice` with models under which nothing is placed, at windows 3 and 4,096, prepared and eager: results equal the serial runs and the device retires in at least one fleet. | End to end |
+| `backend-placement` | Allocation failure (section 9.5). An opener that throws `std::bad_alloc` or `std::length_error`: `unavailable: cannot allocate device memory`, no failure, one opener call. For each state, Gated and Active, the Nth allocation of `AutoDevice::evaluate` fails for N = 1 upward until the call finishes without a fault: the device is Rejected as failed with `device failed: cannot allocate placement memory`, every job of the call is declined and counted in `declined_failed`, none reaches the inner device, and later calls are declined without a retry. A prepared batch whose materializer returns an empty span is declined whole, and the next batch is served. A fleet whose first-dispatch allocation fails (the 1st to 3rd, prepared and eager) over every corpus image produces serial results. | Structural, end to end |
+| `gpu-device` (new, built with the GPU) | `VulkanGraphDevice` against `evaluate_graph` with the same circuit domains as `backend-layered`, submitted in dispatches of up to 65,535 requests; a mixed dispatch over several graphs; a call large enough to split into exactly two dispatches (65,535 requests and 1); `IO` and `WIRES` growth. Calibration returns finite, non-negative parameters and every probe job matches the reference. Calibration and the opener under injected host allocation failure, at the first allocations and at a spread of later ones: no exception, and the reason `cannot allocate device memory`. A deterministic host callback produces identical trace bytes and cross-replays in both directions. Uses `allow_software = true`. | Exhaustive (8-bit), sampled (wider), structural |
+| `gpu-cli` (new CMake script) | For each program under `tests/backend/programs` and `tests/backend/traps` whose `--no-gpu --stats` run takes at most 200,000 steps: stdout, exit status, and stderr without the `gpu:` line are identical between `--no-gpu`, `--require-gpu --gpu-software --gpu-verify`, and `--gpu=auto --gpu-software --gpu-verify`. The same comparison, also with auto verification disabled, for the programs, `neura test` on the suites under `tests/backend/testing`, and for `neura run --each` with a generated file of 2,000 argument lists for `first-argument.nra`. A single-request run, a multi-request run, and a trap produce byte-identical CPU and GPU traces and replay across evaluators in both directions. The usage and run errors of section 14. `NEURA_GPU` and its precedence. Two fixtures that open the gate (a 4,096-member run of one wide graph, and an 8,192-member run of 16 steps over two wide graphs on which the device keeps winning): off, unwrapped auto, and verified auto produce the same outputs, status, and non-GPU statistics, and whenever the `--require-gpu` run of the fixture reports a hardware device, the unwrapped auto run must report `evaluated` above 0 (and at least 1 and at least 2 dispatches respectively) with no `retired` suffix on the second. Under the fault loader of Linux builds: submission, status, mismatch, timeout, and allocation failures of one dispatch, startup failures, a non-power-of-two storage range, and a failure of the second of three dispatches (`gpu_partial_failure`), after which the first dispatch's jobs stay evaluated and the other 65,536 are declined as failed and have reference results. Programs over the step bound are listed in the log. Only files declaring a `// run-options:` line are also compared with their fixture options. | End to end |
+
+**Which `gpu-cli` legs reach a device.** The `--require-gpu` legs over the programs, traps, test suites, the 2,000-list run, the trace recordings, and both fixtures evaluate jobs on the device the machine provides, and each sweep requires a nonzero `evaluated` count. The `--gpu=auto` legs over the programs, test suites, and the 2,000-list run, whether or not they are wrapped in `--gpu-verify`, report `gpu: auto, not used (...)`: their prospect or opening budget never opens a device. They establish that auto placement does not change any output and that the line has its specified form, and they do not reach a device. The auto legs reach a device only on the two fixtures, and only when the device is one that auto keeps; on a software device auto rejects it, and those legs establish equality of results alone. The log of a run names the device and the evaluated and dispatch counts of each fixture leg.
 
 `gpu-device` and `gpu-cli` exit with status 77 and are registered with `SKIP_RETURN_CODE 77` when no Vulkan device, hardware or software, can be created, so CTest reports them as skipped and never as passed. Both carry the CTest label `gpu` and a timeout of 1,800 seconds.
 
@@ -1122,11 +1169,11 @@ Each entry names what it compares, over what domain, and what kind of evidence i
 | [Release](../Release.md) | Rows under "Toolchain and formats" mapping GPU graph execution, fleets, and auto placement to their tests and kinds. |
 | [Project](../Project.md) | One sentence in "Runtime boundary": graph evaluation may run on a GPU, and independent executions may be advanced together, with results identical to the reference evaluator run one execution at a time. |
 | `wiki/` | The matching pages, following [wiki maintenance](../Wiki.md). |
-| This page | Becomes the specification: remove "plan", replace section 4 with the measurements a release actually records, and keep sections 5 to 14 as the contract. |
+| This page | Is the specification. Section 4 records the measurements of the release it describes, and sections 5 to 14 are the contract. |
 
 ## 18. What to expect
 
-The single-run, test, and argument-list measurements are in section 4. A forced device pays setup and dispatch costs for each eligible graph even when a CPU would be faster. Auto estimates those costs before opening the device and again before selecting jobs.
+The single-run, test, and argument-list measurements are in section 4. A forced device pays setup and dispatch costs for each eligible graph even when a CPU would be faster. Auto estimates those costs before opening the device and again before selecting jobs, and retires a device that has stopped gaining (section 11.10). On the Collatz workload the run with a retired device was no slower than the CPU-only run on this host (section 4.5): a workload that suits a device only briefly neither gains nor loses much.
 
 Further ways to use graph devices require separate design work:
 
@@ -1136,9 +1183,9 @@ Further ways to use graph devices require separate design work:
 
 Also outside this specification: moving frames, exits, state operations, or the heap to the GPU; stepping fleet members on several CPU threads; any change to circuits, the image format, or the graph profile; device selection by the user, several devices at once, and pipeline caches; storing calibration between runs; opening a device on a background thread; macOS, and any API other than Vulkan.
 
-## 19. Phases
+## 19. Release gates
 
-Each phase is one reviewable change and leaves every existing test passing. Where a phase asks for a measurement, the handoff reports the command, the machine, and the numbers; a missed bound is reported and the constants of this plan are not changed to meet it.
+The work was delivered in the phases below. Each leaves every existing test passing. Where a phase asks for a measurement, the handoff reports the command, the machine, and the numbers; a missed bound is reported and the constants of this specification are not changed to meet it.
 
 | Phase | Work | Done when |
 | --- | --- | --- |

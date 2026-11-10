@@ -497,4 +497,31 @@ NEURA_TEST(fleet, exhaustive_two_byte_arguments) {
     check(fleet.done(), "the sweep reported all 65,536 results");
 }
 
+NEURA_TEST(fleet, advancing_again_after_a_device_threw_is_refused) {
+    auto image = hello_model();
+    image.graphs.push_back({0, {{nvr::Activation::Identity, 0, {}}}, {}});
+    image.functions[0].blocks[0].graph = 1;
+    image = nvr::load(nvr::encode(image));
+
+    // A device must not throw, but a caller that survives one that does must
+    // not be able to charge the begun step a second time.
+    class ThrowingDevice final : public nvm::GraphDevice {
+    public:
+        explicit ThrowingDevice(const nvr::Image& image) : image_(image) {}
+        const nvr::Image& image() const override { return image_; }
+        std::size_t batch_hint() const override { return std::numeric_limits<std::size_t>::max(); }
+        nvm::GraphDeviceStatistics statistics() const override { return {}; }
+        void evaluate(std::span<nvm::GraphJob>) override { throw std::runtime_error("injected device exception"); }
+
+    private:
+        const nvr::Image& image_;
+    } device(image);
+
+    nvm::Fleet fleet(image, {{}, &device, 2});
+    fleet.add(0, {});
+    rejects<std::runtime_error>([&] { fleet.advance(); }, "the device exception reaches the caller");
+    rejects<std::logic_error>([&] { fleet.advance(); }, "a second advance charged the begun step again");
+    rejects<std::logic_error>([&] { fleet.advance(); }, "a third advance charged the begun step again");
+}
+
 } // namespace neura::testing

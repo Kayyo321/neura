@@ -1,3 +1,4 @@
+#include "allocation_fault.hpp"
 #include "fleet_tests.hpp"
 #include "graph_test_support.hpp"
 #include "nvm/fleet.hpp"
@@ -6,7 +7,24 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <memory>
+#include <new>
+#include <numeric>
+#include <optional>
+#include <stdexcept>
+
+namespace neura::nvm {
+
+// Lets a test play the fleet: it hands AutoDevice a materializer of its own.
+struct AutoDeviceAccess {
+    static bool evaluate_prepared(AutoDevice& device, std::span<const std::uint32_t> graphs,
+                                  const detail::MaterializeGraphJobs& materialize) {
+        return device.evaluate_prepared(graphs, materialize);
+    }
+};
+
+} // namespace neura::nvm
 
 namespace neura::testing {
 namespace {
@@ -543,6 +561,456 @@ NEURA_TEST(placement, prepared_and_eager_fleets_agree) {
               stats.dispatches == 2 && device->correction() == 1, "both devices count the same selected and declined jobs");
     }
     check(prepared_clock.reads == 4 && eager_clock.reads == 4, "only the two selected batches were timed");
+}
+
+// Retirement (GPU specification section 11.8). The image holds a wide graph
+// that the model below always places and a one-neuron graph that it never
+// places: the narrow job costs 0.2 * 7 = 1.4 microseconds of host I/O on the
+// device against 0.75 microseconds of CPU time. A call of w wide and n narrow
+// jobs therefore places exactly w and keeps n.
+namespace {
+
+constexpr DeviceModel retire_model{1.0 / 128, 1.0 / 256, 0, 64, 0.2};
+constexpr CpuModel retire_cpu{0, 1, 0};
+
+nvr::Image retirement_image() {
+    nvr::Image image;
+    image.graphs = {wide_graph(), chain_graph(1)};
+    return image;
+}
+
+class RetirementRun {
+public:
+    RetirementRun()
+        : image_(retirement_image()),
+          device_(image_, [this](std::string&) {
+              return nvm::Opened{std::make_unique<nvm::ModelDevice>(image_), retire_model, retire_cpu, "model"};
+          }, {batch_size, [this] { return clock_.read(); }}),
+          verifying_(device_) {
+        // Calls 1 to 134 are gated; call 134 opens the device and is declined.
+        offer_opening_work(device_, 0);
+        check(device_.state() == AutoDevice::State::Active && device_.reason().empty() && !device_.retired(),
+              "the device is Active after the opening call");
+    }
+
+    // One evaluate call with `wide` placed jobs and `narrow` kept jobs. Every
+    // job is checked against the reference through the verifying wrapper.
+    void call(std::size_t wide, std::size_t narrow) {
+        const bool active = device_.state() == AutoDevice::State::Active;
+        Jobs wide_jobs(0, wide);
+        Jobs narrow_jobs(1, narrow);
+        std::vector<GraphJob> mixed;
+        for (std::size_t i = 0; i < std::max(wide, narrow); ++i) {
+            if (i < wide) mixed.push_back(wide_jobs.jobs[i]);
+            if (i < narrow) mixed.push_back(narrow_jobs.jobs[i]);
+        }
+        // The dispatch takes exactly the predicted time, a + critical + w * per_job
+        // with per_job = d * 7 + critical / K, so the correction stays at 1.
+        constexpr double critical = 1.0 / 256;
+        clock_.elapsed = 1.0 / 128 + critical + static_cast<double>(wide) * (0.2 * 7 + critical / 64);
+        verifying_.evaluate(mixed);
+        ++calls_;
+        for (const auto& job : mixed) {
+            const bool placed = active && job.graph == 0;
+            check(job.evaluated == placed, "only the wide jobs of an Active call are evaluated");
+            if (job.evaluated) check_equal(job.outputs[0], std::int64_t{1}, "device output equals the reference");
+        }
+    }
+
+    AutoDevice& device() { return device_; }
+    // The number of the last evaluate call made with at least one job,
+    // counting the gated calls (offer_opening_work makes calls 1 to 134).
+    std::size_t last_call() const { return opening_call + calls_; }
+
+private:
+    nvr::Image image_;
+    ScriptedClock clock_;
+    AutoDevice device_;
+    nvm::VerifyingDevice verifying_;
+    std::size_t calls_ = 0;
+};
+
+void check_retired(AutoDevice& device, const std::string& label) {
+    check(device.state() == AutoDevice::State::Rejected && device.retired() &&
+          device.reason() == "the device stopped gaining" && device.batch_hint() == 1 &&
+          device.failure_reason().empty() && device.device_name() == "model", label + ": retired, not failed");
+}
+
+} // namespace
+
+NEURA_TEST(placement, device_that_keeps_declining_is_retired) {
+    RetirementRun run;
+    auto& device = run.device();
+    // The gate opened on call 134. Calls 135 to 390 are the 256 calls made
+    // while Active. Each places 1 job and keeps 10, so the window holds
+    // placed = 256 and kept = 2,560 > 9 * 256 = 2,304 and the device retires
+    // at the end of call 390 and not before.
+    for (std::size_t call = 135; call <= 390; ++call) {
+        check(device.state() == AutoDevice::State::Active && device.batch_hint() == batch_size && !device.retired(),
+              "the device stays Active until its window completes");
+        run.call(1, 10);
+        check_equal(run.last_call(), call, "call index");
+    }
+    check_retired(device, "after call 390");
+
+    // 134 gated calls of 512 jobs, and 256 Active calls that kept 10 jobs each.
+    const auto at_retirement = device.statistics();
+    check(at_retirement.evaluated == 256 && at_retirement.dispatches == 256 &&
+          at_retirement.declined_placement == 134 * 512 + 256 * 10 && at_retirement.declined_failed == 0 &&
+          at_retirement.declined_ineligible == 0 && at_retirement.escaped == 0,
+          "retirement keeps the counters accumulated before it");
+
+    // Later calls are declined by the Rejected state. No accounting happens.
+    run.call(1, 10);
+    run.call(0, 3);
+    device.evaluate({});
+    const auto later = device.statistics();
+    check(later.evaluated == at_retirement.evaluated && later.dispatches == at_retirement.dispatches &&
+          later.declined_placement == at_retirement.declined_placement &&
+          later.declined_failed == at_retirement.declined_failed, "a retired device does no accounting");
+    check_retired(device, "after later calls");
+}
+
+NEURA_TEST(placement, calls_that_place_nothing_count_toward_the_window) {
+    RetirementRun run;
+    auto& device = run.device();
+    // Placed 0, kept 1 on each of 256 calls: 256 > 9 * 0. Empty calls carry
+    // no job and are not counted, so they cannot move the retirement call.
+    for (std::size_t call = 1; call <= 256; ++call) {
+        check(device.state() == AutoDevice::State::Active, "the window is still open");
+        run.call(0, 1);
+        device.evaluate({});
+    }
+    check_retired(device, "after 256 calls that placed nothing");
+}
+
+NEURA_TEST(placement, retirement_boundary_is_nine_kept_for_each_placed) {
+    // kept == 9 * placed does not retire, over several windows.
+    {
+        RetirementRun run;
+        for (int window = 0; window < 4; ++window) {
+            for (int call = 0; call < 256; ++call) run.call(1, 9);
+            check(run.device().state() == AutoDevice::State::Active && !run.device().retired(),
+                  "kept == 9 * placed does not retire");
+        }
+    }
+    // One more kept job in the window retires the device on its last call.
+    {
+        RetirementRun run;
+        for (int call = 0; call < 255; ++call) run.call(1, 9);
+        check(run.device().state() == AutoDevice::State::Active, "the window is still open on its 255th call");
+        run.call(1, 10);
+        check_retired(run.device(), "kept == 9 * placed + 1");
+    }
+    // The same window is decided by its sums, not call by call: one call
+    // that keeps 100 jobs is absorbed by calls that keep fewer than nine.
+    {
+        RetirementRun run;
+        run.call(1, 100);
+        for (int call = 0; call < 255; ++call) run.call(1, 8);
+        check(run.device().state() == AutoDevice::State::Active, "kept 2,140 <= 9 * 256");
+    }
+}
+
+NEURA_TEST(placement, a_workload_that_places_a_tenth_never_retires) {
+    RetirementRun run;
+    // 2 wide and 9 narrow jobs per call place 2 of 11, or 18 percent, and
+    // 1 wide with 9 narrow places exactly 10 percent. Alternate between
+    // them for ten windows.
+    for (int window = 0; window < 10; ++window) {
+        for (int call = 0; call < 256; ++call) {
+            if (window % 2 == 0) run.call(2, 9);
+            else run.call(1, 9);
+        }
+        check(run.device().state() == AutoDevice::State::Active && !run.device().retired() &&
+              run.device().batch_hint() == batch_size, "a workload that places at least 10 percent keeps the device");
+    }
+    // Five windows of 256 calls placed 2 jobs and five placed 1.
+    check_equal(run.device().statistics().evaluated, std::uint64_t{5 * 256 * 2 + 5 * 256 * 1},
+                "every placed job was evaluated");
+}
+
+NEURA_TEST(placement, a_window_that_gains_resets_the_sums) {
+    RetirementRun run;
+    // Window 1 places 512 of 512 jobs. Window 2 places 256 and keeps 2,560.
+    // The device retires at the end of window 2 even though the two windows
+    // taken together (placed 768, kept 2,560) would not satisfy the rule.
+    for (int call = 0; call < 256; ++call) run.call(2, 0);
+    check(run.device().state() == AutoDevice::State::Active, "the first window placed everything");
+    for (int call = 0; call < 255; ++call) run.call(1, 10);
+    check(run.device().state() == AutoDevice::State::Active, "the second window is still open");
+    run.call(1, 10);
+    check_retired(run.device(), "after the second window");
+}
+
+NEURA_TEST(placement, corpus_fleets_equal_serial_runs_through_retirement) {
+    std::uint64_t retired = 0;
+    std::uint64_t runs = 0;
+    for (const auto window : {3U, 4'096U}) {
+        for (const auto& item : image_corpus(environment)) {
+            auto image = nvr::load(item.bytes);
+            if (image.entry == nvr::absent) continue;
+            const auto limits = fleet_corpus_limits(item);
+            const auto reference = capture_serial_members(image, limits);
+            const auto warmup = static_cast<std::uint32_t>(image.graphs.size());
+            image.graphs.push_back(wide_graph());
+            // The unused wide graph opens the gate. With eight members a
+            // round has too few jobs to repay a dispatch of 8 microseconds,
+            // so after 256 Active calls nothing has been placed.
+            const auto open_model = [&](std::string&) {
+                return nvm::Opened{std::make_unique<nvm::ModelDevice>(image), {8, 0, 0, 1, 0}, {0.2, 0, 0.01}, "model"};
+            };
+            const auto label = item.label + " with window " + std::to_string(window);
+            ScriptedClock prepared_clock{.elapsed = 8};
+            ScriptedClock eager_clock{.elapsed = 8};
+            AutoDevice prepared(image, open_model, {batch_size, [&] { return prepared_clock.read(); }});
+            AutoDevice eager(image, open_model, {batch_size, [&] { return eager_clock.read(); }});
+            for (auto* device : {&prepared, &eager}) offer_opening_work(*device, warmup);
+            nvm::VerifyingDevice eager_only(eager);
+            const auto prepared_rounds = check_corpus_fleet(image, limits, &prepared, window, reference, label + " prepared");
+            const auto eager_rounds = check_corpus_fleet(image, limits, &eager_only, window, reference, label + " eager");
+            check(prepared_rounds == eager_rounds, label + " rounds at member completion");
+            check(prepared.retired() == eager.retired(), label + " retires in both paths");
+            if (prepared.retired()) {
+                ++retired;
+                check(prepared.reason() == "the device stopped gaining" && prepared.failure_reason().empty(),
+                      label + " retirement is not a failure");
+            }
+            check_equal(prepared.statistics().evaluated, eager.statistics().evaluated, label + " evaluated jobs");
+            ++runs;
+        }
+    }
+    check(runs != 0 && retired != 0, "some corpus fleet ran long enough to retire its device");
+}
+
+namespace {
+
+// A device with no host allocation of its own, so that every allocation in a
+// call belongs to AutoDevice. It reports the reference output of the
+// fixtures below (an input of 1 gives an output of 1).
+class NonAllocatingDevice final : public nvm::GraphDevice {
+public:
+    NonAllocatingDevice(const nvr::Image& image, std::uint64_t& calls) : image_(image), calls_(calls) {}
+    const nvr::Image& image() const override { return image_; }
+    std::size_t batch_hint() const override { return std::numeric_limits<std::size_t>::max(); }
+    nvm::GraphDeviceStatistics statistics() const override { return statistics_; }
+    void evaluate(std::span<GraphJob> jobs) override {
+        ++calls_;
+        ++statistics_.dispatches;
+        for (auto& job : jobs) {
+            for (auto& output : job.outputs) output = 1;
+            job.evaluated = true;
+            ++statistics_.evaluated;
+        }
+    }
+
+private:
+    const nvr::Image& image_;
+    std::uint64_t& calls_;
+    nvm::GraphDeviceStatistics statistics_;
+};
+
+} // namespace
+
+NEURA_TEST(placement, opener_allocation_failure_rejects_the_device) {
+    nvr::Image image = retirement_image();
+    for (const bool length_error : {false, true}) {
+        std::size_t opens = 0;
+        AutoDevice device(image, [&](std::string&) -> std::optional<nvm::Opened> {
+            ++opens;
+            if (length_error) throw std::length_error("probe vector");
+            throw std::bad_alloc();
+        }, {batch_size, {}});
+        offer_opening_work(device, 0);
+        check(device.state() == AutoDevice::State::Rejected && device.batch_hint() == 1 &&
+              device.reason() == "unavailable: cannot allocate device memory" && device.device_name().empty() &&
+              device.failure_reason().empty() && !device.retired(),
+              "an opener that cannot allocate leaves the device unavailable, not failed");
+        Jobs later(0, 4);
+        device.evaluate(later.jobs);
+        check(std::ranges::none_of(later.jobs, &GraphJob::evaluated) && opens == 1 &&
+              device.statistics().declined_placement == opening_call * batch_size && device.statistics().declined_failed == 0,
+              "the opener ran once and later jobs are declined without accounting");
+    }
+}
+
+NEURA_TEST(placement, allocation_failure_in_every_placement_allocation_rejects_the_device) {
+    nvr::Image image = retirement_image();
+    const auto open_model = [&image](std::uint64_t& calls) {
+        return [&image, &calls](std::string&) {
+            return nvm::Opened{std::make_unique<NonAllocatingDevice>(image, calls), retire_model, retire_cpu, "model"};
+        };
+    };
+    for (const bool active : {false, true}) {
+        std::size_t sites = 0;
+        for (std::size_t nth = 1;; ++nth) {
+            std::uint64_t inner_calls = 0;
+            AutoDevice device(image, open_model(inner_calls), {batch_size, [] { return 0.0; }});
+            if (active) {
+                offer_opening_work(device, 0);
+                check(device.state() == AutoDevice::State::Active, "the device is Active before the failing call");
+            }
+            Jobs wide(0, 3);
+            Jobs narrow(1, 5);
+            std::vector<GraphJob> mixed;
+            for (std::size_t i = 0; i < 5; ++i) {
+                if (i < 3) mixed.push_back(wide.jobs[i]);
+                mixed.push_back(narrow.jobs[i]);
+            }
+            bool fired = false;
+            {
+                AllocationFault fault(nth);
+                device.evaluate(mixed);
+                fired = fault.fired();
+            }
+            const auto before = active ? opening_call * batch_size : std::size_t{0};
+            if (!fired) {
+                // The call made fewer than nth allocations and finished normally.
+                check(device.state() == (active ? AutoDevice::State::Active : AutoDevice::State::Gated) &&
+                      !device.retired() && device.failure_reason().empty(), "a call without a failure keeps its state");
+                if (active) check_equal(device.statistics().evaluated, std::uint64_t{3}, "the wide jobs were placed");
+                break;
+            }
+            ++sites;
+            const std::string where = std::string(active ? "Active" : "Gated") + " allocation " + std::to_string(nth);
+            check(device.state() == AutoDevice::State::Rejected && device.batch_hint() == 1 && !device.retired() &&
+                  device.reason() == "device failed: cannot allocate placement memory" &&
+                  device.failure_reason() == device.reason(), where + " rejects the device as failed");
+            check(std::ranges::none_of(mixed, &GraphJob::evaluated), where + " declines every job of the call");
+            const auto stats = device.statistics();
+            check(stats.declined_failed == mixed.size() && stats.declined_placement == before &&
+                  stats.evaluated == 0 && inner_calls == 0, where + " counts the call as failed");
+            // A rejected device declines later calls without a retry.
+            Jobs later(0, 2);
+            device.evaluate(later.jobs);
+            check(std::ranges::none_of(later.jobs, &GraphJob::evaluated) &&
+                  device.statistics().declined_failed == stats.declined_failed &&
+                  device.statistics().declined_placement == stats.declined_placement, where + " stays rejected");
+            check(nth < 64, "the allocation sweep terminates");
+        }
+        check(sites >= (active ? 3U : 2U), "the sweep reached the scratch allocations of the state");
+    }
+}
+
+NEURA_TEST(placement, a_fleet_that_cannot_allocate_its_jobs_declines_the_batch) {
+    nvr::Image image = retirement_image();
+    std::uint64_t inner_calls = 0;
+    AutoDevice device(image, [&](std::string&) {
+        return nvm::Opened{std::make_unique<NonAllocatingDevice>(image, inner_calls), retire_model, retire_cpu, "model"};
+    }, {batch_size, [] { return 0.0; }});
+    offer_opening_work(device, 0);
+
+    // The fleet reports an empty batch when it cannot allocate the jobs.
+    const std::array<std::uint32_t, 4> graphs{0, 1, 1, 1};
+    std::size_t asked = 0;
+    const auto refuse = [&](std::span<const std::size_t> indices) -> std::span<GraphJob> {
+        asked = indices.size();
+        return {};
+    };
+    check(nvm::AutoDeviceAccess::evaluate_prepared(device, graphs, refuse), "the prepared call is handled");
+    check(asked == 1 && inner_calls == 0 && device.state() == AutoDevice::State::Active &&
+          device.failure_reason().empty() && device.statistics().evaluated == 0 &&
+          device.statistics().declined_placement == opening_call * batch_size + graphs.size() &&
+          device.statistics().declined_failed == 0, "no job reaches the device and the device is not rejected");
+
+    // The next batch is materialized and evaluated as usual.
+    std::array<std::int64_t, 1> input{1};
+    std::array<std::int64_t, 1> output{};
+    std::array<GraphJob, 1> jobs{{{0, input, output}}};
+    const auto serve = [&](std::span<const std::size_t> indices) -> std::span<GraphJob> {
+        check(indices.size() == 1 && indices[0] == 0, "the wide job is the one selected");
+        return jobs;
+    };
+    check(nvm::AutoDeviceAccess::evaluate_prepared(device, graphs, serve), "the second prepared call is handled");
+    check(jobs[0].evaluated && output[0] == 1 && device.statistics().evaluated == 1,
+          "a materialized batch is evaluated after a refused one");
+}
+
+namespace {
+
+// Plays the part of a device that opts into the fleet's prepared path, or
+// declines it, and makes the fleet's own allocation for the first dispatch
+// fail. Everything else is evaluated by a ModelDevice.
+class MaterializationFault final : public nvm::GraphDevice {
+public:
+    MaterializationFault(const nvr::Image& image, bool prepared, std::size_t nth)
+        : model_(image), prepared_(prepared), nth_(nth) {}
+    const nvr::Image& image() const override { return model_.image(); }
+    std::size_t batch_hint() const override { return model_.batch_hint(); }
+    nvm::GraphDeviceStatistics statistics() const override { return model_.statistics(); }
+    void evaluate(std::span<GraphJob> jobs) override {
+        // The eager path reached the device, so the fault did not fire.
+        if (fault_) fault_.reset();
+        model_.evaluate(jobs);
+    }
+
+    bool fired() const { return fired_ || (fault_ && fault_->fired()); }
+    std::uint64_t calls() const { return calls_; }
+    std::uint64_t refused() const { return refused_; }
+
+private:
+    bool evaluate_prepared(std::span<const std::uint32_t> graphs, const nvm::detail::MaterializeGraphJobs& materialize) override {
+        if (fault_) {
+            fired_ = fired_ || fault_->fired();
+            fault_.reset();
+        }
+        const bool first = ++calls_ == 1;
+        if (!prepared_) {
+            // Leave the fault armed for the fleet's own eager materialization
+            // that follows. evaluate() disarms it when the fleet succeeds.
+            if (first) fault_.emplace(nth_);
+            return false;
+        }
+        std::vector<std::size_t> all(graphs.size());
+        std::iota(all.begin(), all.end(), std::size_t{0});
+        std::span<GraphJob> jobs;
+        if (first) {
+            AllocationFault fault(nth_);
+            jobs = materialize(all);
+            fired_ = fault.fired();
+        } else {
+            jobs = materialize(all);
+        }
+        if (jobs.empty()) ++refused_;
+        else model_.evaluate(jobs);
+        return true;
+    }
+
+    nvm::ModelDevice model_;
+    bool prepared_;
+    std::size_t nth_;
+    std::uint64_t calls_ = 0;
+    std::uint64_t refused_ = 0;
+    bool fired_ = false;
+    std::optional<AllocationFault> fault_;
+};
+
+} // namespace
+
+NEURA_TEST(placement, fleet_allocation_failure_hands_the_round_to_the_reference_evaluator) {
+    std::uint64_t fired_runs = 0;
+    for (const bool prepared : {true, false}) {
+        for (const std::size_t nth : {1U, 2U, 3U}) {
+            std::uint64_t fired_here = 0;
+            for (const auto& item : image_corpus(environment)) {
+                auto image = nvr::load(item.bytes);
+                if (image.entry == nvr::absent) continue;
+                const auto limits = fleet_corpus_limits(item);
+                const auto reference = capture_serial_members(image, limits);
+                MaterializationFault device(image, prepared, nth);
+                const auto label = item.label + (prepared ? " prepared" : " eager") + " allocation " + std::to_string(nth);
+                check_corpus_fleet(image, limits, &device, 4'096, reference, label);
+                if (device.fired()) {
+                    ++fired_here;
+                    // A refused prepared batch is declined, not evaluated.
+                    if (prepared) check_equal(device.refused(), std::uint64_t{1}, label + " refused batches");
+                }
+                if (nth == 1 && device.calls() > 0) check(device.fired(), label + " fails its first allocation");
+            }
+            fired_runs += fired_here;
+        }
+    }
+    check(fired_runs != 0, "the fleet's job allocation failed and results still matched serial runs");
 }
 
 } // namespace neura::testing

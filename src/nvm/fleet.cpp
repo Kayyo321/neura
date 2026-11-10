@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <functional>
 #include <limits>
+#include <new>
 #include <ranges>
 #include <stdexcept>
 #include <variant>
@@ -153,26 +154,36 @@ private:
         return true;
     }
 
+    // Returns the jobs for a nonempty subset of the round, or an empty span
+    // when memory for them cannot be allocated. In that case the caller sends
+    // nothing to the device and every job of the round is evaluated by
+    // reference. Nothing is evaluated or marked by this function.
     template <class Indices>
     std::span<GraphJob> materialize_jobs(const Indices& indices) {
-        std::size_t output_count = 0;
-        for (const auto index : indices) {
-            const auto count = image_.graphs[graph_ids_[index]].outputs.size();
-            if (count > arena_.max_size() - output_count) {
-                throw std::length_error("fleet graph output arena exceeds storage limits");
+        try {
+            std::size_t output_count = 0;
+            for (const auto index : indices) {
+                const auto count = image_.graphs[graph_ids_[index]].outputs.size();
+                if (count > arena_.max_size() - output_count) {
+                    throw std::length_error("fleet graph output arena exceeds storage limits");
+                }
+                output_count += count;
             }
-            output_count += count;
+            if (arena_.size() < output_count) arena_.resize(output_count);
+            auto outputs = std::span(arena_).first(output_count);
+            jobs_.reserve(std::ranges::size(indices));
+            for (const auto index : indices) {
+                const auto graph = graph_ids_[index];
+                const auto count = image_.graphs[graph].outputs.size();
+                jobs_.push_back({graph, pending_members_[index]->execution->prepared_inputs(), outputs.first(count)});
+                outputs = outputs.subspan(count);
+            }
+            return jobs_;
+        } catch (const std::bad_alloc&) {
+        } catch (const std::length_error&) {
         }
-        if (arena_.size() < output_count) arena_.resize(output_count);
-        auto outputs = std::span(arena_).first(output_count);
-        jobs_.reserve(std::ranges::size(indices));
-        for (const auto index : indices) {
-            const auto graph = graph_ids_[index];
-            const auto count = image_.graphs[graph].outputs.size();
-            jobs_.push_back({graph, pending_members_[index]->execution->prepared_inputs(), outputs.first(count)});
-            outputs = outputs.subspan(count);
-        }
-        return jobs_;
+        jobs_.clear();
+        return {};
     }
 
     std::size_t dispatch() {
@@ -184,12 +195,23 @@ private:
                     std::ranges::adjacent_find(indices, std::greater_equal{}) != indices.end()) {
                     throw std::logic_error("graph device selected invalid prepared jobs");
                 }
-                selected_.assign(indices.begin(), indices.end());
-                return materialize_jobs(indices);
+                std::span<GraphJob> jobs;
+                try {
+                    selected_.assign(indices.begin(), indices.end());
+                    jobs = materialize_jobs(indices);
+                } catch (const std::bad_alloc&) {
+                    jobs_.clear();
+                } catch (const std::length_error&) {
+                    jobs_.clear();
+                }
+                // An empty result declines the whole batch to the reference evaluator.
+                if (jobs.empty()) selected_.clear();
+                return jobs;
             });
         if (!prepared) {
             if (!selected_.empty()) throw std::logic_error("graph device did not finish a prepared batch");
-            options_.device->evaluate(materialize_jobs(std::views::iota(std::size_t{0}, pending_members_.size())));
+            const auto jobs = materialize_jobs(std::views::iota(std::size_t{0}, pending_members_.size()));
+            if (!jobs.empty()) options_.device->evaluate(jobs);
         }
 
         std::size_t finished = 0;
@@ -197,7 +219,7 @@ private:
         for (std::size_t i = 0; i < pending_members_.size(); ++i) {
             auto& live = *pending_members_[i];
             const GraphJob* job = nullptr;
-            if (!prepared) job = &jobs_[i];
+            if (!prepared) job = jobs_.empty() ? nullptr : &jobs_[i];
             else if (selected < selected_.size() && selected_[selected] == i) job = &jobs_[selected++];
             auto& run = *live.execution;
             auto event = job && job->evaluated ? run.finish_step(job->outputs)

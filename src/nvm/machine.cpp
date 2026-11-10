@@ -1166,7 +1166,14 @@ private:
     template <bool Prepared>
     std::optional<Event> begin_active_step() {
         if (finished_) return *finished_;
-        if constexpr (!Prepared) {
+        if constexpr (Prepared) {
+            // One branch guards the fleet's path. A caller that advanced again
+            // after a device threw would otherwise charge the step twice.
+            if (!started_ || pending_ || active_block_) {
+                throw std::logic_error("begin_prepared_step() called before the run started, while a host request is "
+                                       "pending, or while a step is already begun");
+            }
+        } else {
             if (pending_) throw std::logic_error("begin_step() called while a host request is pending");
             if (active_block_) throw std::logic_error("begin_step() called while a step is already begun");
         }

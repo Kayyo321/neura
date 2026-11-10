@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace neura::nvm {
 
@@ -63,6 +64,10 @@ public:
     const std::string& reason() const;
     const std::string& device_name() const;
     double correction() const;
+    // True when an Active device was retired after it kept declining
+    // (section 11.8 of the GPU specification). A retired device is Rejected
+    // with the reason "the device stopped gaining" and has not failed.
+    bool retired() const;
     std::span<const GraphShape> shapes() const;
 
     const nvr::Image& image() const override;
@@ -73,12 +78,22 @@ public:
     std::string_view failure_reason() const override;
 
 private:
+    friend struct AutoDeviceAccess;
     bool evaluate_prepared(std::span<const std::uint32_t> graphs,
                            const detail::MaterializeGraphJobs& materialize) override;
     void evaluate_batch(std::span<GraphJob> jobs, std::span<const std::uint32_t> graphs,
                         const detail::MaterializeGraphJobs* materialize);
+    // How far one call has got. An allocation failure is contained according
+    // to the stage it interrupts (see evaluate_batch).
+    enum class Stage { placing, evaluating, finished };
+    void evaluate_placed(std::span<GraphJob> jobs, std::span<const std::uint32_t> graphs,
+                         const detail::MaterializeGraphJobs* materialize, std::size_t size, Stage& stage);
+    // Counts one Active call toward the retirement window and retires the
+    // device when the window completes without gaining.
+    void count_window(std::size_t placed, std::size_t kept);
     void open();
-    void reject(std::string reason);
+    void reject(std::string_view reason) noexcept;
+    void fail_allocation() noexcept;
 
     const nvr::Image& image_;
     Opener opener_;
@@ -92,6 +107,11 @@ private:
     CpuModel cpu_model_;
     GraphDeviceStatistics last_inner_statistics_;
     std::uint64_t declined_placement_ = 0;
+    std::uint64_t declined_failed_ = 0;
+    std::uint64_t window_calls_ = 0;
+    std::uint64_t window_placed_ = 0;
+    std::uint64_t window_kept_ = 0;
+    bool retired_ = false;
     double saved_ = 0;
     double work_ = 0;
     double correction_ = 1;

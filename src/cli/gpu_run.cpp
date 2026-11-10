@@ -141,7 +141,11 @@ void GpuRun::print_stats() const {
         std::ostringstream correction;
         correction << std::fixed << std::setprecision(2) << auto_->correction();
         std::cerr << ", correction " << correction.str();
-        if (auto_->state() == nvm::AutoDevice::State::Rejected) {
+        // A retired device was kept and evaluated jobs; the counters above are
+        // those it accumulated before it was retired. It has not failed.
+        if (auto_->retired()) {
+            std::cerr << ", retired (" << auto_->reason() << ')';
+        } else if (auto_->state() == nvm::AutoDevice::State::Rejected) {
             std::cerr << ", rejected (" << auto_->reason() << ')';
         }
     }

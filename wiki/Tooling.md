@@ -101,7 +101,7 @@ The CMake setting `NEURA_GPU=AUTO` builds the GPU backend when the Vulkan header
 
 `NEURA_GPU` accepts `auto`, `always`, and `off` for `run` and `test`. An unset or empty value uses the default. An explicit mode option, `--no-gpu`, or `--require-gpu` takes precedence. Other values are usage errors. The effective off mode also applies the option checks for software devices and verification.
 
-With `--stats`, a final `gpu:` line reports the selected mode, whether a device was built or used, and the reason when no device was used. A device report includes the device name, eligible graphs, evaluated and declined jobs, escapes, failures, and dispatches. Auto mode also reports the jobs kept on the CPU, the timing correction, and any rejection reason.
+With `--stats`, a final `gpu:` line reports the selected mode, whether a device was built or used, and the reason when no device was used. A device report includes the device name, eligible graphs, evaluated and declined jobs, escapes, failures, and dispatches. Auto mode also reports the jobs kept on the CPU, the timing correction, and any rejection reason. An opened device that is later rejected ends the line with `rejected (<reason>)`. A device that kept declining most of its jobs is retired, and the line ends with `retired (the device stopped gaining)`; its counters are those accumulated before it was retired, because a retired device does no accounting. Retirement is not a failure and does not affect `--require-gpu`.
 
 ### Run an image over argument lists
 

@@ -16,7 +16,7 @@ namespace {
 
 enum class Fault {
     None, Submit, Mismatch, Timeout, Status, BadAlloc, TooManyDevices, IncompleteDevices,
-    Pipeline, ContextBadAlloc, DeviceLengthError, StorageRange, MemoryTypeCount,
+    Pipeline, ContextBadAlloc, DeviceLengthError, StorageRange, MemoryTypeCount, BadAllocSecondDispatch,
 };
 
 constexpr std::uint32_t storage_range = 3U << 19;
@@ -36,6 +36,7 @@ Fault fault() {
     if (std::strcmp(mode, "device_length_error") == 0) return Fault::DeviceLengthError;
     if (std::strcmp(mode, "storage_range") == 0) return Fault::StorageRange;
     if (std::strcmp(mode, "memory_type_count") == 0) return Fault::MemoryTypeCount;
+    if (std::strcmp(mode, "bad_alloc_second_dispatch") == 0) return Fault::BadAllocSecondDispatch;
     std::abort();
 }
 
@@ -76,6 +77,7 @@ bool self_test_submitted = false;
 bool injected = false;
 Fault dispatch_fault = Fault::None;
 bool timed_out = false;
+unsigned graph_dispatches = 0;
 
 VKAPI_ATTR VkResult VKAPI_CALL enumerate(VkInstance instance, std::uint32_t* count, VkPhysicalDevice* devices) {
     switch (fault()) {
@@ -183,12 +185,17 @@ VKAPI_ATTR VkResult VKAPI_CALL submit(VkQueue queue, std::uint32_t count, const 
         if (groups != group_counts.end()) {
             // The startup self-test submits at least 128 jobs in one
             // dispatch. This fixture only submits single graph requests.
-            if (groups->second >= 128) {
+            // In the second-dispatch mode every dispatch after the startup
+            // self-test is a graph dispatch, of any size. Its second one
+            // throws std::bad_alloc after the driver has finished it.
+            const bool graph_dispatch = fault() == Fault::BadAllocSecondDispatch && self_test_submitted;
+            if (graph_dispatch) {
+                if (++graph_dispatches == 2) dispatch_fault = Fault::BadAlloc;
+            } else if (groups->second >= 128) {
                 const auto result = real_submit(queue, count, infos, fence);
                 self_test_submitted = result == VK_SUCCESS;
                 return result;
-            }
-            if (groups->second == 1 && self_test_submitted && !injected) {
+            } else if (groups->second == 1 && self_test_submitted && !injected) {
                 injected = true;
                 dispatch_fault = fault();
                 if (dispatch_fault == Fault::Submit) return VK_ERROR_DEVICE_LOST;

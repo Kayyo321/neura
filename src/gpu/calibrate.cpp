@@ -1,11 +1,14 @@
 #include "calibrate.hpp"
 
+#include "context_internal.hpp"
 #include "nvm/machine.hpp"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <new>
+#include <stdexcept>
 #include <span>
 #include <utility>
 #include <vector>
@@ -77,10 +80,16 @@ std::optional<double> measure_cpu(const nvr::Graph& graph) {
 
 } // namespace
 
-std::optional<Calibration> calibrate(Context& context) {
+std::optional<Calibration> calibrate(Context& context, std::string* reason) try {
     const auto image = nvm::probe_image();
     VulkanGraphDevice device(context, image);
-    if (device.failed()) return std::nullopt;
+    // A device that ran out of host memory is reported as such, not as a
+    // failed measurement.
+    const auto fail = [&]() -> std::optional<Calibration> {
+        if (reason && device.failed() && device.reason() == allocation_failure) *reason = allocation_failure;
+        return std::nullopt;
+    };
+    if (device.failed()) return fail();
 
     struct Trial {
         std::uint32_t graph;
@@ -91,7 +100,7 @@ std::optional<Calibration> calibrate(Context& context) {
     for (std::size_t i = 0; i < trials.size(); ++i) {
         const auto& trial = trials[i];
         const auto time = measure_device(device, trial.graph, trial.request_count);
-        if (!time) return std::nullopt;
+        if (!time) return fail();
         device_times[i] = *time;
     }
     const auto device_model = nvm::fit_device(device_times);
@@ -104,24 +113,40 @@ std::optional<Calibration> calibrate(Context& context) {
         cpu_times[i] = *time;
     }
     return Calibration{device_model, nvm::fit_cpu(cpu_times)};
+} catch (const std::bad_alloc&) {
+    if (reason) *reason = allocation_failure;
+    return std::nullopt;
+} catch (const std::length_error&) {
+    if (reason) *reason = allocation_failure;
+    return std::nullopt;
 }
 
 nvm::Opener make_opener(const nvr::Image& image, ContextOptions options) {
     return [&image, options](std::string& reason) -> std::optional<nvm::Opened> {
-        auto context = Context::create(options, reason);
-        if (!context) return std::nullopt;
-        const auto models = calibrate(*context);
-        if (!models) {
-            reason = "calibration failed";
-            return std::nullopt;
+        // Running out of host memory is a device that cannot be opened, not an
+        // error of the run.
+        try {
+            auto context = Context::create(options, reason);
+            if (!context) return std::nullopt;
+            std::string calibration_reason;
+            const auto models = calibrate(*context, &calibration_reason);
+            if (!models) {
+                reason = calibration_reason.empty() ? "calibration failed" : calibration_reason;
+                return std::nullopt;
+            }
+            auto name = context->device_name();
+            auto device = std::make_unique<VulkanGraphDevice>(std::move(context), image);
+            if (device->failed()) {
+                reason = device->reason();
+                return std::nullopt;
+            }
+            return nvm::Opened{std::move(device), models->device_model, models->cpu_model, std::move(name)};
+        } catch (const std::bad_alloc&) {
+            reason = allocation_failure;
+        } catch (const std::length_error&) {
+            reason = allocation_failure;
         }
-        auto name = context->device_name();
-        auto device = std::make_unique<VulkanGraphDevice>(std::move(context), image);
-        if (device->failed()) {
-            reason = device->reason();
-            return std::nullopt;
-        }
-        return nvm::Opened{std::move(device), models->device_model, models->cpu_model, std::move(name)};
+        return std::nullopt;
     };
 }
 

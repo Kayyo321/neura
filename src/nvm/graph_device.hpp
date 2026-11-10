@@ -67,8 +67,11 @@ private:
     friend class Fleet;
     // Fleet has resolved binary inputs for every graph in this order. An
     // opting-in device may synchronously materialize a single nonempty
-    // subset of strictly increasing job indices. Returning false without
-    // materializing leaves all work to the caller's ordinary eager batch.
+    // subset of strictly increasing job indices. The materializer returns an
+    // empty span when the fleet cannot allocate the jobs; the device then
+    // evaluates none of them and returns true, and the fleet evaluates the
+    // whole round by reference. Returning false without materializing leaves
+    // all work to the caller's ordinary eager batch.
     virtual bool evaluate_prepared(std::span<const std::uint32_t>, const detail::MaterializeGraphJobs&) { return false; }
 };
 
