@@ -15,7 +15,8 @@ bool breaks_out(const std::vector<IrNode>& region) {
     return std::ranges::any_of(region, [](const IrNode& node) {
         switch (node.op) {
         case IrOp::Break: return true;
-        case IrOp::Block: return breaks_out(node.body);
+        case IrOp::Block:
+        case IrOp::TaskScope: return breaks_out(node.body);
         case IrOp::Branch: return breaks_out(node.body) || breaks_out(node.alternative);
         default: return false;
         }
@@ -32,7 +33,9 @@ bool always_returns(const std::vector<IrNode>& region) {
         switch (node.op) {
         case IrOp::Return: return true;
         case IrOp::TrapMessage: return true;
-        case IrOp::Block: return always_returns(node.body);
+        // A task scope's exits wait for its tasks and then leave as written.
+        case IrOp::Block:
+        case IrOp::TaskScope: return always_returns(node.body);
         case IrOp::Branch: return always_returns(node.body) && always_returns(node.alternative);
         case IrOp::Loop: return infinite_loop(node);
         default: return false;
@@ -48,6 +51,7 @@ bool never_completes(const IrNode& statement) {
     case IrOp::TrapMessage:
         return true;
     case IrOp::Block:
+    case IrOp::TaskScope:
         return std::ranges::any_of(statement.body, never_completes);
     case IrOp::Branch:
         return std::ranges::any_of(statement.body, never_completes) &&

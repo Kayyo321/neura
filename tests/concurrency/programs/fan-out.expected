@@ -1,0 +1,17 @@
+twice 7
+w0 0
+w0 2
+w1 0
+w1 2
+w2 0
+w2 2
+fan 9
+nested 16
+e 0
+e 0
+e 0
+e 0
+e 0
+early 5
+finished? false
+late 0

@@ -1,4 +1,6 @@
 #include "specialize.hpp"
+
+#include "task_analysis.hpp"
 #include "nominal.hpp"
 
 #include <algorithm>
@@ -509,6 +511,7 @@ private:
         result.span = node.span;
         result.text = node.text;
         result.symbol = node.symbol;
+        result.poll = node.poll;
         result.operands = region(node.operands, context);
         result.body = region(node.body, context);
         result.alternative = region(node.alternative, context);
@@ -679,6 +682,11 @@ private:
 
 void specialize(IrProgram& program, const SpecializationLimits& limits) {
     Specializer(program, limits).run();
+    // Polls are a property of the whole program, and the isolation rules of
+    // Concurrency.md section 5 need the concrete types that exist only now:
+    // a generic function is checked at each specialization.
+    insert_polls(program);
+    if (has_spawn(program)) TaskAnalysis(program).check();
 }
 
 } // namespace neura

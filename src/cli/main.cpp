@@ -100,6 +100,7 @@ void usage(std::ostream& out) {
            "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
            "  --max-tasks N            bound the number of live tasks in a concurrent image\n"
            "  --task-quantum N         polls per turn for a concurrent image\n"
+           "  --task-dump[=text|json]  print every task when one traps; SIGQUIT prints a dump at any time\n"
            "\n"
            "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
            "  --c-include <dir>        search a directory for C headers\n"
@@ -127,6 +128,7 @@ struct Options {
     std::optional<fs::path> launcher;
     // Report execution costs: steps, peak heap cells, and image size.
     bool stats = false;
+    std::optional<neura::nvm::TaskDumpFormat> task_dump;
     std::vector<fs::path> files;
     std::vector<fs::path> roots;
     fs::path library;
@@ -372,6 +374,12 @@ Options read_options(int argc, char** argv) {
             const auto value = parse_limit(arg, next());
             if (arg == "--max-tasks") options.limits.max_tasks = value;
             else options.limits.task_quantum = value;
+        } else if (arg == "--task-dump" || arg.starts_with("--task-dump=")) {
+            if (!runs) throw std::runtime_error("--task-dump applies only to run and test");
+            const auto form = arg == "--task-dump" ? std::string_view("text") : arg.substr(12);
+            if (form == "text") options.task_dump = neura::nvm::TaskDumpFormat::Text;
+            else if (form == "json") options.task_dump = neura::nvm::TaskDumpFormat::Json;
+            else throw std::runtime_error("--task-dump expects text or json");
         } else if (runs && arg == "--stats") {
             options.stats = true;
         } else if (compiles && arg == "--c-include") {
@@ -844,8 +852,11 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
     const auto append_list = [](std::vector<std::string>& arguments, std::vector<std::string>& listed) {
         arguments.insert(arguments.end(), std::make_move_iterator(listed.begin()), std::make_move_iterator(listed.end()));
     };
+    neura::runner::TaskDumps dumps(options.task_dump);
+    auto limits = options.limits;
+    limits.task_dump = dumps.request();
     if (device) {
-        neura::nvm::Fleet fleet(image, {options.limits, device});
+        neura::nvm::Fleet fleet(image, {limits, device});
         for (auto& list : lists) {
             if (options.arguments.empty()) {
                 fleet.add(image.entry, std::move(list.arguments));
@@ -861,7 +872,7 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
         for (std::size_t member = 0; member < lists.size(); ++member) {
             arguments.resize(options.arguments.size());
             append_list(arguments, lists[member].arguments);
-            finished(member, neura::nvm::run(image, bindings, arguments, options.limits));
+            finished(member, neura::nvm::run(image, bindings, arguments, limits));
         }
     }
     if (options.stats) {
@@ -885,7 +896,8 @@ int run(const Options& options) {
     Host host(options.capabilities);
     provide_native_library(image, host.services);
     if (options.each) return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device()), options.stats);
-    neura::runner::RunOptions run_options{options.limits, options.stats, options.record, options.replay};
+    neura::runner::RunOptions run_options{options.limits, options.stats, options.record, options.replay,
+                                          options.task_dump};
     run_options.limits.graph_device = gpu.device();
     const auto status = neura::runner::run(image, host, options.arguments, run_options, path.string(), image_bytes);
     return gpu.finish(status, options.stats);
@@ -1012,8 +1024,11 @@ int run_tests(const Options& options) {
             std::cout << neura::nvm::describe(result.trap, image, false) << '\n';
         }
     };
+    neura::runner::TaskDumps dumps(options.task_dump);
+    auto limits = options.limits;
+    limits.task_dump = dumps.request();
     if (auto* device = gpu.device()) {
-        neura::nvm::Fleet fleet(image, {options.limits, device});
+        neura::nvm::Fleet fleet(image, {limits, device});
         for (std::size_t i = 0; i < tests.size(); ++i) fleet.add(static_cast<std::uint32_t>(i), {});
         neura::nvm::run_fleet(fleet, bindings, finished);
     } else {
@@ -1021,7 +1036,7 @@ int run_tests(const Options& options) {
             // The start functions share the entry signature, so any of them can
             // be the entry of a validated image.
             image.entry = static_cast<std::uint32_t>(i);
-            finished(i, neura::nvm::run(image, bindings, {}, options.limits));
+            finished(i, neura::nvm::run(image, bindings, {}, limits));
         }
     }
     std::cout << tests.size() << " test(s), " << tests.size() - failed << " passed, " << failed << " failed\n";
@@ -1040,9 +1055,17 @@ int main(int argc, char** argv) {
     try {
         const auto options = read_options(argc, argv);
         switch (options.command) {
-        case Command::Check:
-            load_source_program(options);
+        case Command::Check: {
+            auto program = load_source_program(options);
+            if (neura::has_spawn(program)) {
+                // The isolation rules of a spawn need concrete types, which
+                // exist after specialization (Concurrency.md section 5).
+                neura::require_valid_ir(program, "before specialization");
+                neura::materialize_reference_storage(program);
+                neura::specialize(program);
+            }
             return 0;
+        }
         case Command::Docs:
             return docs(options);
         case Command::EmitIr:

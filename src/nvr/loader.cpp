@@ -814,7 +814,11 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
                 invalid(argument + ": spawn argument is not transferable");
             }
         }
-        require_slot_type([&](std::uint32_t type) { return is_unsigned(type, 64); }, "uint64");
+        // Without a slot the task has no handle: nothing can join it, and
+        // the scheduler releases it when it finishes.
+        if (exit.result_slot != absent) {
+            require_slot_type([&](std::uint32_t type) { return is_unsigned(type, 64); }, "uint64");
+        }
         break;
     }
     case SchedulerOp::Join:

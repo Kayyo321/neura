@@ -10,7 +10,9 @@
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/reference_storage.hpp"
+#include "neura-ir/scheduler_ops.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/task_analysis.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
@@ -68,6 +70,8 @@ struct Dispatch {
     std::vector<Operand> arguments;
     std::uint32_t result_slot = absent;
     std::uint32_t resume = 0;
+    // The call exits of the dispatch block poll (NVR 1.5).
+    bool poll = false;
 };
 
 constexpr std::uint32_t arithmetic_failure = static_cast<std::uint32_t>(nvr::TrapReason::Arithmetic);
@@ -99,7 +103,7 @@ private:
     // The open block. Every operation that emits into a block requires one.
     OpenBlock& current();
     void close(std::vector<ExitSpec> exits);
-    void jump(std::uint32_t target);
+    void jump(std::uint32_t target, bool poll = false);
     void branch(const Operand& condition, std::uint32_t when_true, std::uint32_t when_false);
     void finish();
 
@@ -119,7 +123,13 @@ private:
     Operand state(nvr::StateOp operation, std::uint32_t immediate, std::vector<Operand> arguments,
                   std::uint32_t result_type, const Span& span);
     Operand invoke(const FunctionOrigin& callee, std::vector<Operand> arguments, std::uint32_t result_type,
-                   const Span& span);
+                   const Span& span, bool poll = false);
+    // A scheduler operation (NVR 1.5). `target` is the function of a spawn.
+    Operand scheduler(nvr::SchedulerOp operation, std::uint32_t target, std::vector<Operand> arguments,
+                      std::uint32_t result_type, const Span& span);
+    // Scope exits for every task scope opened inside `depth` enclosing ones,
+    // innermost first, for a return, break, or continue that leaves them.
+    void leave_task_scopes(std::size_t depth, const Span& span);
 
     // Statements and expressions.
     void region(const std::vector<IrNode>& statements);
@@ -146,7 +156,9 @@ private:
     Operand call(const IrNode& node);
     Operand virtual_call(const IrNode& node);
     Operand dispatch_call(SymbolId cls, SymbolId method, std::vector<Operand> operands,
-                          std::uint32_t result_type, const Span& span);
+                          std::uint32_t result_type, const Span& span, bool poll = false);
+    Operand spawn(const IrNode& node, bool handle = true);
+    Operand scheduler_call(const IrNode& node);
     Operand value_member(IrOp op, const IrType& type, std::vector<Operand> operands, const Span& span);
     Operand external_call(const IrNode& node);
     Operand bound_host_call(const IrNode& node);
@@ -190,8 +202,14 @@ private:
         // Where `continue` goes: the latch, or the head when there is none.
         std::uint32_t next;
         std::uint32_t exit;
+        // `continue` takes the back edge itself and the loop polls there.
+        bool poll_on_continue;
+        // Task scopes open where the loop began.
+        std::size_t task_scopes;
     };
     std::vector<LoopTargets> loops_;
+    // Task scopes open at the statement being converted.
+    std::size_t task_scopes_ = 0;
     std::vector<std::uint32_t> placeholders_;
 
     friend class Converter;
@@ -252,6 +270,8 @@ public:
     std::uint64_t ordinal(SymbolId variant) const;
 
     void instantiate(SymbolId cls) { instantiated_.insert(cls); }
+    // The image uses tasks or polls, so it carries the TRNS table (NVR 1.5).
+    void mark_concurrent() { concurrent_ = true; }
     void add_dispatch(Dispatch dispatch) { dispatches_.push_back(std::move(dispatch)); }
     void set_function(std::uint32_t index, nvr::Function function, std::vector<std::optional<Span>> spans,
                       std::vector<std::uint32_t> placeholders);
@@ -309,6 +329,8 @@ private:
     std::set<SymbolId> callback_symbols_;
     std::vector<nvr::Callback> callbacks_;
     void add_reached_callbacks();
+    bool concurrent_ = false;
+    void mark_transferable_layouts();
 };
 
 // ---------------------------------------------------------------------------
@@ -1017,12 +1039,40 @@ Conversion Converter::run() {
     }
     thread_jumps();
     remove_unreachable_blocks();
+    if (concurrent_) {
+        mark_transferable_layouts();
+    }
     if (options_.source_map) {
         source_map();
         names();
     }
     image_.entry = 0;
     return {std::move(image_), std::move(origins_)};
+}
+
+// The TRNS table of a concurrent image: the layouts of transferable classes,
+// payload enums, and tuples (Concurrency.md section 5.1), closed under
+// parents as the format requires. The scheduler checks the actual layout of
+// every object a spawn transfers against this table.
+void Converter::mark_transferable_layouts() {
+    const TaskAnalysis analysis(program_);
+    std::set<std::uint32_t> marked;
+    for (const auto& [id, index] : layouts_) {
+        const auto& item = symbol(id);
+        if (item.kind == SymbolKind::Enum ? analysis.transferable(item.type) : analysis.transferable_class(id)) {
+            marked.insert(index);
+        }
+    }
+    for (const auto& [type, index] : tuple_layouts_) {
+        if (analysis.transferable(type)) marked.insert(index);
+    }
+    std::vector<std::uint32_t> pending(marked.begin(), marked.end());
+    while (!pending.empty()) {
+        const auto parent = image_.layouts[pending.back()].parent;
+        pending.pop_back();
+        if (parent != absent && marked.insert(parent).second) pending.push_back(parent);
+    }
+    image_.transferable_layouts = std::vector<std::uint32_t>(marked.begin(), marked.end());
 }
 
 void Converter::add_reached_callbacks() {
@@ -1083,6 +1133,7 @@ void Converter::build_dispatch(const Dispatch& dispatch) {
                 exit.target = callee;
                 exit.result_slot = dispatch.result_slot;
                 exit.resume = dispatch.resume;
+                exit.poll = dispatch.poll;
                 exits.push_back(exit);
                 indicators.push_back(matches);
             } else {
@@ -1156,8 +1207,11 @@ void Converter::thread_jumps() {
         const auto count = static_cast<std::uint32_t>(function.blocks.size());
         const auto jump_only = [&](std::uint32_t index) {
             const auto& block = function.blocks[index];
+            // A poll is an effect of the exit that carries it, so a block that
+            // only polls and continues stays.
             return block.inputs.empty() && image_.graphs[block.graph].nodes.empty() && block.exits.size() == 1 &&
-                   block.exits.front().kind == nvr::ExitKind::Continue && block.exits.front().assignments.empty();
+                   block.exits.front().kind == nvr::ExitKind::Continue && block.exits.front().assignments.empty() &&
+                   !block.exits.front().poll;
         };
         std::vector<std::uint32_t> forward(count);
         for (std::uint32_t b = 0; b < count; ++b) {
@@ -1174,6 +1228,7 @@ void Converter::thread_jumps() {
                 case nvr::ExitKind::Continue:
                 case nvr::ExitKind::Call:
                 case nvr::ExitKind::State:
+                case nvr::ExitKind::Scheduler:
                     exit.resume = forward[exit.resume];
                     break;
                 case nvr::ExitKind::Host:
@@ -1205,6 +1260,7 @@ void Converter::remove_unreachable_blocks() {
                 case nvr::ExitKind::Continue:
                 case nvr::ExitKind::Call:
                 case nvr::ExitKind::State:
+                case nvr::ExitKind::Scheduler:
                     targets = {exit.resume};
                     break;
                 case nvr::ExitKind::Host:
@@ -1238,7 +1294,8 @@ void Converter::remove_unreachable_blocks() {
             auto block = std::move(function.blocks[old]);
             for (auto& exit : block.exits) {
                 exit.resume = exit.kind == nvr::ExitKind::Continue || exit.kind == nvr::ExitKind::Call ||
-                                      exit.kind == nvr::ExitKind::State || exit.kind == nvr::ExitKind::Host
+                                      exit.kind == nvr::ExitKind::State || exit.kind == nvr::ExitKind::Host ||
+                                      exit.kind == nvr::ExitKind::Scheduler
                                   ? position[exit.resume]
                                   : exit.resume;
                 if (exit.kind == nvr::ExitKind::Host) {
@@ -1516,10 +1573,12 @@ void FunctionCompiler::close(std::vector<ExitSpec> exits) {
     ++generation_;
 }
 
-void FunctionCompiler::jump(std::uint32_t target) {
+void FunctionCompiler::jump(std::uint32_t target, bool poll) {
     ExitSpec exit;
     exit.kind = nvr::ExitKind::Continue;
     exit.resume = target;
+    exit.poll = poll;
+    if (poll) c_.mark_concurrent();
     close({exit});
 }
 
@@ -1581,7 +1640,7 @@ Operand FunctionCompiler::state(nvr::StateOp operation, std::uint32_t immediate,
 }
 
 Operand FunctionCompiler::invoke(const FunctionOrigin& callee, std::vector<Operand> arguments,
-                                 std::uint32_t result_type, const Span& span) {
+                                 std::uint32_t result_type, const Span& span, bool poll) {
     const auto target = c_.function(callee);
     const auto result_slot = c_.type_at(result_type).kind == nvr::TypeKind::Void ? absent : new_slot(result_type);
     const auto resume = new_block();
@@ -1591,10 +1650,36 @@ Operand FunctionCompiler::invoke(const FunctionOrigin& callee, std::vector<Opera
     exit.arguments = std::move(arguments);
     exit.result_slot = result_slot;
     exit.resume = resume;
+    exit.poll = poll;
+    if (poll) c_.mark_concurrent();
     operation_at(span);
     close({exit});
     begin(resume, span);
     return result_slot == absent ? Operand{} : slot_operand(result_slot);
+}
+
+Operand FunctionCompiler::scheduler(nvr::SchedulerOp operation, std::uint32_t target, std::vector<Operand> arguments,
+                                    std::uint32_t result_type, const Span& span) {
+    const auto result_slot = c_.type_at(result_type).kind == nvr::TypeKind::Void ? absent : new_slot(result_type);
+    const auto resume = new_block();
+    ExitSpec exit;
+    exit.kind = nvr::ExitKind::Scheduler;
+    exit.scheduler = operation;
+    exit.target = target;
+    exit.arguments = std::move(arguments);
+    exit.result_slot = result_slot;
+    exit.resume = resume;
+    c_.mark_concurrent();
+    operation_at(span);
+    close({exit});
+    begin(resume, span);
+    return result_slot == absent ? Operand{} : slot_operand(result_slot);
+}
+
+void FunctionCompiler::leave_task_scopes(std::size_t depth, const Span& span) {
+    for (auto open_scopes = task_scopes_; open_scopes > depth; --open_scopes) {
+        scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, c_.scalar(nvr::TypeKind::Void), span);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1637,6 +1722,11 @@ void FunctionCompiler::statement(const IrNode& node) {
         store(node);
         return;
     case IrOp::Discard:
+        if (node.operands.front().op == IrOp::Spawn) {
+            // A discarded spawn has no handle and so no result slot.
+            spawn(node.operands.front(), false);
+            return;
+        }
         expression(node.operands.front());
         return;
     case IrOp::Block:
@@ -1648,21 +1738,47 @@ void FunctionCompiler::statement(const IrNode& node) {
     case IrOp::Loop:
         loop(node);
         return;
+    case IrOp::TaskScope: {
+        const auto nothing = c_.scalar(nvr::TypeKind::Void);
+        scheduler(nvr::SchedulerOp::ScopeEnter, 0, {}, nothing, node.span);
+        ++task_scopes_;
+        region(node.body);
+        // Falling off the end waits for the scope's tasks. A return, break,
+        // or continue inside the body has already left it.
+        if (open()) {
+            scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, nothing, node.span);
+        }
+        --task_scopes_;
+        return;
+    }
     case IrOp::Return: {
         ExitSpec exit;
         exit.kind = nvr::ExitKind::Return;
         if (!node.operands.empty()) {
-            exit.arguments.push_back(expression(node.operands.front()));
+            auto value = expression(node.operands.front());
+            if (task_scopes_ != 0) {
+                // The value is computed first, then each scope waits for its
+                // tasks, then the function returns it (Concurrency.md 4.1).
+                const auto slot = new_slot(c_.type_of(node.operands.front().type, node.span));
+                assign(slot, std::move(value));
+                leave_task_scopes(0, node.span);
+                value = slot_operand(slot);
+            }
+            exit.arguments.push_back(std::move(value));
+        } else {
+            leave_task_scopes(0, node.span);
         }
         operation_at(node.span);
         close({exit});
         return;
     }
     case IrOp::Break:
+        leave_task_scopes(loops_.back().task_scopes, node.span);
         jump(loops_.back().exit);
         return;
     case IrOp::Continue:
-        jump(loops_.back().next);
+        leave_task_scopes(loops_.back().task_scopes, node.span);
+        jump(loops_.back().next, loops_.back().poll_on_continue);
         return;
     case IrOp::Fail: {
         // The only failure NeuraIR names is a list changed during for-each.
@@ -1756,18 +1872,21 @@ void FunctionCompiler::loop(const IrNode& node) {
     // A latch runs after the body and on continue, then the condition is
     // tested again. A loop without one continues straight at its head.
     const auto latch = node.alternative.empty() ? head : new_block();
-    loops_.push_back({latch, exit});
+    // The poll of a loop rides on the exit that takes the back edge: the
+    // jump from the latch, or without a latch every jump back to the head.
+    const bool poll_at_head = node.poll && latch == head;
+    loops_.push_back({latch, exit, poll_at_head, task_scopes_});
     begin(body, node.body.empty() ? node.span : node.body.front().span);
     region(node.body);
     if (open()) {
-        jump(latch);
+        jump(latch, poll_at_head);
     }
     loops_.pop_back();
     if (latch != head) {
         begin(latch, node.alternative.front().span);
         region(node.alternative);
         if (open()) {
-            jump(head);
+            jump(head, node.poll);
         }
     }
     begin(exit, node.span);
@@ -1977,6 +2096,10 @@ Operand FunctionCompiler::expression(const IrNode& node) {
     case IrOp::MakeClosure:
     case IrOp::CallClosure:
         throw Diagnostic(node.span, "function values must be specialized before conversion");
+    case IrOp::Spawn:
+        return spawn(node);
+    case IrOp::SchedulerCall:
+        return scheduler_call(node);
     case IrOp::Allocate:
         return allocate(node);
     case IrOp::Tuple:
@@ -2444,7 +2567,41 @@ Operand FunctionCompiler::call(const IrNode& node) {
     const auto receiver = owner != no_symbol && c_.symbol(owner).kind == SymbolKind::Module ? owner : no_symbol;
     auto arguments = sequence(node.operands);
     return invoke({Role::Function, node.symbol, receiver}, std::move(arguments), c_.type_of(node.type, node.span),
-                  node.span);
+                  node.span, node.poll);
+}
+
+// The task starts in the invoke method of the function value's own capture
+// layout, with that object as its only argument. The spawn names the method
+// directly: which closure starts is known where the spawn is written.
+Operand FunctionCompiler::spawn(const IrNode& node, bool handle) {
+    const auto& body = node.operands.front();
+    if (body.op != IrOp::Allocate || body.symbol == no_symbol) {
+        throw Diagnostic(node.span, "function values must be specialized before conversion");
+    }
+    const auto layout = c_.symbol(body.symbol).owner;
+    const auto method = c_.member(layout, "$invoke");
+    if (method == no_symbol || !c_.symbol(method).has_body) {
+        throw Diagnostic(node.span, "a spawned function value has no body");
+    }
+    auto object = expression(body);
+    spill(object);
+    const auto target = c_.function({Role::Function, method, no_symbol});
+    const auto result = handle ? c_.type_of(node.type, node.span) : c_.scalar(nvr::TypeKind::Void);
+    return scheduler(nvr::SchedulerOp::Spawn, target, {resolve(object)}, result, node.span);
+}
+
+Operand FunctionCompiler::scheduler_call(const IrNode& node) {
+    const auto operation = scheduler_operation(node.text);
+    if (!operation) {
+        throw Diagnostic(node.span, "unknown scheduler operation '" + node.text + "'");
+    }
+    auto arguments = sequence(node.operands);
+    for (auto& argument : arguments) {
+        spill(argument);
+        argument = resolve(argument);
+    }
+    return scheduler(static_cast<nvr::SchedulerOp>(operation->code), 0, std::move(arguments),
+                     c_.type_of(node.type, node.span), node.span);
 }
 
 Operand FunctionCompiler::virtual_call(const IrNode& node) {
@@ -2460,17 +2617,19 @@ Operand FunctionCompiler::virtual_call(const IrNode& node) {
                                             c_.symbol(node.symbol).name + "'");
         }
         auto arguments = sequence(node.operands, 1);
-        return invoke({Role::Function, implementation, module}, std::move(arguments), result_type, node.span);
+        return invoke({Role::Function, implementation, module}, std::move(arguments), result_type, node.span,
+                      node.poll);
     }
     c_.type_of(receiver.type, receiver.span);
     if (receiver.type.kind != TypeKind::Object) {
         throw Diagnostic(receiver.span, "unsupported method receiver");
     }
-    return dispatch_call(receiver.type.symbol, node.symbol, sequence(node.operands), result_type, node.span);
+    return dispatch_call(receiver.type.symbol, node.symbol, sequence(node.operands), result_type, node.span,
+                         node.poll);
 }
 
 Operand FunctionCompiler::dispatch_call(SymbolId cls, SymbolId method, std::vector<Operand> operands,
-                                        std::uint32_t result_type, const Span& span) {
+                                        std::uint32_t result_type, const Span& span, bool poll) {
     for (auto& operand : operands) {
         spill(operand);
     }
@@ -2503,7 +2662,8 @@ Operand FunctionCompiler::dispatch_call(SymbolId cls, SymbolId method, std::vect
     }
     spans_[dispatch_block] = span;
     Dispatch dispatch{index_, dispatch_block, cls, method, tag_slot, operands.front(),
-                      std::vector<Operand>(operands.begin() + 1, operands.end()), result_slot, resume};
+                      std::vector<Operand>(operands.begin() + 1, operands.end()), result_slot, resume, poll};
+    if (poll) c_.mark_concurrent();
     c_.add_dispatch(std::move(dispatch));
     begin(resume, span);
     return result_slot == absent ? Operand{} : slot_operand(result_slot);

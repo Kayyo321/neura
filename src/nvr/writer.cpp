@@ -98,6 +98,9 @@ void values(Output& out, const std::vector<Value>& items) {
 }
 
 void exit(Output& out, const Exit& item, bool returns_value) {
+    if (item.poll && item.kind != ExitKind::Continue && item.kind != ExitKind::Call) {
+        throw std::invalid_argument("a poll is valid only on a continue or call exit");
+    }
     out.u8(static_cast<std::uint8_t>(static_cast<std::uint8_t>(item.kind) | (item.poll ? scheduler_poll_bit : 0)));
     vector(out, item.assignments, [](Output& o, const Assignment& assignment) {
         o.u32(assignment.slot);
@@ -336,6 +339,11 @@ std::vector<std::uint8_t> encode(const Image& image) {
         throw std::invalid_argument("the image records an unsupported minor version");
     }
     const auto minor = std::max(image.minor_version, required_minor_version(image));
+    // required_minor_version reports 5 for a scheduler exit or a poll, which
+    // the loader accepts only together with the table.
+    if (minor >= 5 && !image.transferable_layouts && required_minor_version(image) >= 5) {
+        throw std::invalid_argument("an image with tasks or polls needs its transferable-layout table");
+    }
     const auto parts = sections(image, minor);
     constexpr std::uint64_t header_size = 24;
     constexpr std::uint64_t directory_record_size = 24;

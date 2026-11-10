@@ -4,6 +4,7 @@
 #include "run_support.hpp"
 #include "scalar_text.hpp"
 #include "nvr/format.hpp"
+#include "nvr/names.hpp"
 
 #include <algorithm>
 #include <array>
@@ -291,6 +292,9 @@ public:
         if (pending_) {
             throw std::logic_error("advance() called while a host request is pending");
         }
+        // An image without tasks has no scheduling points; it answers a
+        // dump request between host requests.
+        serve_dump_request();
         for (;;) {
             if (auto event = step(wires_)) return std::move(*event);
         }
@@ -440,7 +444,8 @@ public:
     std::uint64_t live_heap_cells() const { return live_cells_; }
     std::uint64_t peak_heap_cells() const { return peak_cells_; }
     const std::vector<std::uint64_t>& function_steps() const { return function_steps_; }
-    std::string dump_tasks() const;
+    std::string dump_tasks(TaskDumpFormat format) const;
+    std::uint64_t peak_tasks() const { return scheduler_ ? scheduler_->peak_live : 0; }
 
 private:
     friend class Execution;
@@ -481,9 +486,16 @@ private:
         std::vector<std::uint64_t> children;
     };
 
+    // The heap cells one task record is charged: a record with its place in
+    // the task table measured about 160 bytes (Concurrency.md section 10.3).
+    static constexpr std::uint64_t task_record_cells = 20;
+
     struct Task {
         std::uint64_t parent = 0;
         std::size_t parent_scope = 0;
+        // Spawned without a result slot: nothing can join it, so its record
+        // is released when it finishes instead of when its scope closes.
+        bool unjoinable = false;
         std::uint32_t spawn_function = nvr::absent;
         std::uint32_t spawn_block = nvr::absent;
         std::uint32_t result_type = nvr::absent;
@@ -502,7 +514,10 @@ private:
         std::uint64_t current = 0;
         std::uint64_t next_id = 1;
         std::uint64_t live = 1;
+        std::uint64_t peak_live = 1;
         std::uint64_t polls = 0;
+        // Scheduling decisions made so far.
+        std::uint64_t ticks = 0;
     };
 
     struct Pending {
@@ -542,15 +557,26 @@ private:
         trap.reason = reason;
         trap.detail = std::move(detail);
         if (scheduler_ && kind != TrapKind::Deadlock) {
+            // The trapping task and its spawn chain. A long chain keeps its
+            // ends: the task itself and the tasks nearest the root.
+            constexpr std::size_t shown = 4;
+            std::vector<std::uint64_t> chain;
+            for (auto id = scheduler_->current; id != 0; id = scheduler_->tasks.at(id).parent) chain.push_back(id);
             if (!trap.detail.empty()) trap.detail += " ";
             trap.detail += "(task " + std::to_string(scheduler_->current);
-            for (auto id = scheduler_->current; id != 0;) {
-                const auto& task = scheduler_->tasks.at(id);
+            for (std::size_t i = 0; i < chain.size(); ++i) {
+                if (chain.size() > 2 * shown && i == shown) {
+                    trap.detail += " ... " + std::to_string(chain.size() - 2 * shown) + " more spawns ...";
+                    i = chain.size() - shown;
+                }
+                const auto& task = scheduler_->tasks.at(chain[i]);
                 trap.detail += " spawned at " + task_location(task.spawn_function, task.spawn_block) +
                                " by task " + std::to_string(task.parent);
-                id = task.parent;
             }
             trap.detail += ")";
+            if (limits_.task_dump && limits_.task_dump->on_trap && limits_.task_dump->write) {
+                limits_.task_dump->write(dump_tasks(limits_.task_dump->format));
+            }
         }
         if (!frames_.empty()) {
             trap.function = frames_.back().function;
@@ -766,6 +792,7 @@ private:
             if (limits_.max_tasks == 0) fault(TrapKind::TaskLimit, "starting the root task");
             scheduler_ = std::make_unique<Scheduler>();
             scheduler_->tasks.try_emplace(0);
+            names_ = nvr::decode_names(image_);
         }
         const_values_.resize(image_.constants.size());
         for (std::size_t i = 0; i < image_.constants.size(); ++i) {
@@ -877,17 +904,19 @@ private:
     void close_scope(Task& task) {
         const auto& scope = task.scopes.back();
         for (const auto child : scope.children) scheduler_->tasks.erase(child);
-        remove_live_cells(1 + scope.children.size());
+        remove_live_cells(1 + task_record_cells * scope.children.size());
         task.scopes.pop_back();
     }
 
     void schedule_next() {
         if (scheduler_->runnable.empty()) {
-            fault(TrapKind::Deadlock, "all tasks are parked\n" + dump_tasks());
+            fault(TrapKind::Deadlock, "all tasks are parked\n" + dump_tasks(TaskDumpFormat::Text));
         }
         scheduler_->current = scheduler_->runnable.front();
         scheduler_->runnable.pop_front();
         scheduler_->polls = 0;
+        ++scheduler_->ticks;
+        if (limits_.schedule) limits_.schedule->push_back(scheduler_->current);
         auto& task = current_task();
         task.state = TaskState::Running;
         frames_ = std::move(task.frames);
@@ -905,7 +934,17 @@ private:
         schedule_next();
     }
 
+    // A requested task dump is written at a scheduling point and leaves the
+    // run as it was.
+    void serve_dump_request() const {
+        auto* request = limits_.task_dump;
+        if (!request || !request->requested.load(std::memory_order_relaxed)) return;
+        request->requested.store(false, std::memory_order_relaxed);
+        if (request->write) request->write(dump_tasks(request->format));
+    }
+
     void poll() {
+        serve_dump_request();
         if (++scheduler_->polls >= limits_.task_quantum) {
             if (scheduler_->runnable.empty()) scheduler_->polls = 0;
             else park(TaskState::Runnable);
@@ -974,7 +1013,7 @@ private:
                 if (limits_.max_frames == 0) fault(TrapKind::FrameLimit, "starting a task frame");
                 check_transfer(exit.target, arguments);
                 roots = argument_roots(exit.target, arguments);
-                cells += frame_cells(exit.target);
+                cells = task_record_cells + frame_cells(exit.target);
             }
             const auto& types = image_.functions[frames_.back().function].frame_types;
             for (const auto& [slot, value] : assignments) {
@@ -1015,11 +1054,12 @@ private:
             child.result_type = image_.functions[exit.target].result_type;
             child.frames.push_back(make_frame(exit.target, arguments, nvr::absent, 0));
             child.state = TaskState::Runnable;
+            child.unjoinable = exit.result_slot == nvr::absent;
             ++task.scopes.back().live_children;
-            task.scopes.back().children.push_back(id);
-            ++scheduler_->live;
+            if (!child.unjoinable) task.scopes.back().children.push_back(id);
+            scheduler_->peak_live = std::max(scheduler_->peak_live, ++scheduler_->live);
             scheduler_->runnable.push_back(id);
-            add_live_cells(1 + frame_cells(exit.target));
+            add_live_cells(task_record_cells + frame_cells(exit.target));
             write_result(frame, exit.result_slot, id);
             break;
         }
@@ -1041,22 +1081,31 @@ private:
     }
 
     void finish_task(std::uint64_t result) {
+        const auto id = scheduler_->current;
         auto& child = current_task();
         child.result = result;
         child.state = TaskState::Finished;
+        // A finished task keeps only what a join needs.
+        std::vector<Frame>().swap(child.frames);
+        std::vector<TaskScope>().swap(child.scopes);
         --scheduler_->live;
-        auto& parent = scheduler_->tasks.at(child.parent);
+        const auto parent_id = child.parent;
+        auto& parent = scheduler_->tasks.at(parent_id);
         auto& scope = parent.scopes[child.parent_scope];
         --scope.live_children;
-        if (parent.state == TaskState::Joining && parent.waiting_for == scheduler_->current) {
+        const bool last_of_scope = child.parent_scope + 1 == parent.scopes.size() && scope.live_children == 0;
+        if (child.unjoinable) {
+            scheduler_->tasks.erase(id);
+            remove_live_cells(task_record_cells);
+        }
+        if (parent.state == TaskState::Joining && parent.waiting_for == id) {
             write_result(parent.frames.back(), parent.join_slot, result);
             parent.state = TaskState::Runnable;
-            scheduler_->runnable.push_back(child.parent);
-        } else if (parent.state == TaskState::LeavingScope && child.parent_scope + 1 == parent.scopes.size() &&
-                   scope.live_children == 0) {
+            scheduler_->runnable.push_back(parent_id);
+        } else if (parent.state == TaskState::LeavingScope && last_of_scope) {
             parent.close_on_wake = true;
             parent.state = TaskState::Runnable;
-            scheduler_->runnable.push_back(child.parent);
+            scheduler_->runnable.push_back(parent_id);
         }
         schedule_next();
     }
@@ -1684,6 +1733,10 @@ private:
     std::vector<std::uint8_t> global_initialized_;
     std::vector<Frame> frames_;
     std::unique_ptr<Scheduler> scheduler_;
+    // Function names for task dumps, when the image carries them.
+    std::optional<nvr::Names> names_;
+    std::string frame_text(const Frame& frame) const;
+    std::string wait_text(std::uint64_t id, const Task& task) const;
     const nvr::Block* active_block_ = nullptr;
     std::vector<std::int64_t> inputs_;
     std::vector<std::int64_t> outputs_;
@@ -1694,33 +1747,103 @@ private:
     std::uint64_t steps_ = 0;
 };
 
-std::string Execution::State::dump_tasks() const {
+std::string Execution::State::frame_text(const Frame& frame) const {
+    std::string text;
+    if (names_ && frame.function < names_->functions.size() && !names_->functions[frame.function].empty()) {
+        text = names_->functions[frame.function] + " at ";
+    }
+    return text + task_location(frame.function, frame.block);
+}
+
+std::string Execution::State::wait_text(std::uint64_t id, const Task& task) const {
+    switch (task.state) {
+    case TaskState::Running:
+        return pending_ ? "parked: host request " + std::to_string(sequence_ - 1) : std::string("running");
+    case TaskState::Runnable:
+        return "runnable";
+    case TaskState::Joining:
+        return "parked: join of task " + std::to_string(task.waiting_for);
+    case TaskState::LeavingScope: {
+        const auto live = task.scopes.empty() ? 0 : task.scopes.back().live_children;
+        return "parked: scope exit, waiting for " + std::to_string(live) + (live == 1 ? " task" : " tasks");
+    }
+    case TaskState::Finished:
+        return id == 0 ? "finished" : "finished, result not yet released";
+    }
+    return "unknown";
+}
+
+std::string Execution::State::dump_tasks(TaskDumpFormat format) const {
     if (!scheduler_) return {};
-    std::string result;
+    std::map<std::uint64_t, std::vector<std::uint64_t>> children;
     for (const auto& [id, task] : scheduler_->tasks) {
-        result += "task " + std::to_string(id);
-        if (id == 0) result += " root";
-        else result += " spawned at " + task_location(task.spawn_function, task.spawn_block) +
-                       " by task " + std::to_string(task.parent);
-        switch (task.state) {
-        case TaskState::Running:
-            if (pending_) result += " parked: host request " + std::to_string(sequence_ - 1);
-            else result += " running";
-            break;
-        case TaskState::Runnable: result += " runnable"; break;
-        case TaskState::Joining: result += " parked: join task " + std::to_string(task.waiting_for); break;
-        case TaskState::LeavingScope:
-            result += " parked: scope exit, waiting for " + std::to_string(task.scopes.back().live_children) + " tasks";
-            break;
-        case TaskState::Finished: result += " finished"; break;
+        if (id != 0) children[task.parent].push_back(id);
+    }
+    const auto stack_of = [&](std::uint64_t id, const Task& task) -> const std::vector<Frame>& {
+        return id == scheduler_->current && task.state == TaskState::Running ? frames_ : task.frames;
+    };
+    if (format == TaskDumpFormat::Json) {
+        const auto quoted = [](const std::string& text) {
+            std::string out = "\"";
+            for (const char c : text) {
+                if (c == '"' || c == '\\') {
+                    out += '\\';
+                    out += c;
+                } else if (static_cast<unsigned char>(c) < 0x20) {
+                    constexpr std::string_view hex = "0123456789abcdef";
+                    out += "\\u00";
+                    out += hex[(c >> 4) & 15];
+                    out += hex[c & 15];
+                } else {
+                    out += c;
+                }
+            }
+            return out + '"';
+        };
+        std::string out = "{\"tasks\":[";
+        bool first = true;
+        for (const auto& [id, task] : scheduler_->tasks) {
+            if (!first) out += ',';
+            first = false;
+            out += "{\"id\":" + std::to_string(id);
+            out += ",\"parent\":" + (id == 0 ? std::string("null") : std::to_string(task.parent));
+            out += ",\"spawned_at\":" +
+                   (id == 0 ? std::string("null") : quoted(task_location(task.spawn_function, task.spawn_block)));
+            out += ",\"state\":" + quoted(wait_text(id, task));
+            out += ",\"stack\":[";
+            const auto& stack = stack_of(id, task);
+            for (auto frame = stack.rbegin(); frame != stack.rend(); ++frame) {
+                if (frame != stack.rbegin()) out += ',';
+                out += quoted(frame_text(*frame));
+            }
+            out += "]}";
         }
-        result += '\n';
-        const auto& stack = task.state == TaskState::Running ? frames_ : task.frames;
+        return out + "]}\n";
+    }
+    std::string out;
+    // The tree is written without recursion: a spawn chain can be as deep
+    // as the task limit.
+    std::vector<std::pair<std::uint64_t, std::size_t>> pending{{0, 0}};
+    while (!pending.empty()) {
+        const auto [id, depth] = pending.back();
+        pending.pop_back();
+        const auto& task = scheduler_->tasks.at(id);
+        const std::string indent(2 * depth, ' ');
+        out += indent + "task " + std::to_string(id) + "  ";
+        out += id == 0 ? std::string("root")
+                       : "spawned at " + task_location(task.spawn_function, task.spawn_block);
+        out += "  " + wait_text(id, task) + '\n';
+        const auto& stack = stack_of(id, task);
         for (auto frame = stack.rbegin(); frame != stack.rend(); ++frame) {
-            result += "    " + task_location(frame->function, frame->block) + '\n';
+            out += indent + "    " + frame_text(*frame) + '\n';
+        }
+        if (const auto found = children.find(id); found != children.end()) {
+            for (auto child = found->second.rbegin(); child != found->second.rend(); ++child) {
+                pending.emplace_back(*child, depth + 1);
+            }
         }
     }
-    return result;
+    return out;
 }
 
 Execution::Execution(const nvr::Image& image, std::span<const std::string> arguments, RunLimits limits)
@@ -1805,7 +1928,8 @@ Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::
 }
 
 Event Execution::advance() { return state_->advance(); }
-std::string Execution::dump_tasks() const { return state_->dump_tasks(); }
+std::string Execution::dump_tasks(TaskDumpFormat format) const { return state_->dump_tasks(format); }
+std::uint64_t Execution::peak_tasks() const { return state_->peak_tasks(); }
 
 std::optional<Event> Execution::begin_step(GraphStep& step) { return state_->begin_step(step); }
 

@@ -244,11 +244,18 @@ NEURA_TEST(concurrency, nested_scope_chain_parks_until_the_task_limit) {
     const auto first = run_captured(image, limits);
     check(first.result.trap.kind == nvm::TrapKind::TaskLimit, "the chain ends at the task limit");
     check_equal(nvm::exit_status(first.result.trap), 137, "task limit status");
-    // Each parked task holds a record, a scope, and a one-slot frame; the root adds one slot.
-    check_equal(first.result.peak_heap_cells, std::uint64_t{4 * 1024 + 1}, "parked tasks are charged as heap cells");
+    // Each of the 1,023 spawned tasks holds a 20-cell record, a 1-cell scope, and a one-slot frame
+    // (2 cells): 23 cells. The root holds no spawned record; it is charged 4 cells like a task
+    // under the first accounting plus one more slot: 5 cells.
+    check_equal(first.result.peak_heap_cells, std::uint64_t{23 * 1023 + 5}, "parked tasks are charged as heap cells");
     check_equal(first.result.steps, std::uint64_t{3 * 1024 - 1}, "three scheduler steps per task");
-    check(first.result.trap.detail.find("task 1023 spawned at function 1 block 1 by task 1022") != std::string::npos,
-          "the trap names the full spawn chain");
+    const auto& detail = first.result.trap.detail;
+    check(detail.find("task 1023 spawned at function 1 block 1 by task 1022") != std::string::npos &&
+          detail.find("by task 1019 ... 1015 more spawns ... spawned at function 1 block 1 by task 3") !=
+              std::string::npos &&
+          detail.find("spawned at function 0 block 1 by task 0)") != std::string::npos,
+          "the trap names the trapping task and both ends of its spawn chain");
+    check(detail.size() < 1024, "a deep spawn chain is abbreviated");
     check_same_run(run_captured(image, limits).result, first.result, "repeat from clean state");
 }
 
@@ -303,13 +310,18 @@ NEURA_TEST(concurrency, task_dump_and_run_wide_termination) {
     nvm::Execution execution(image, {});
     check(execution.advance().kind == nvm::Event::Kind::HostRequest, "root reaches its first request");
     const auto root_dump = execution.dump_tasks();
-    check(root_dump.find("task 0 root parked: host request 0") != std::string::npos &&
-          root_dump.find("task 2 spawned at function 0 block 2 by task 0 runnable") != std::string::npos,
-          "dump includes runnable children");
+    check(root_dump.find("task 0  root  parked: host request 0\n") != std::string::npos &&
+          root_dump.find("\n  task 2  spawned at function 0 block 2  runnable\n") != std::string::npos,
+          "the dump lists runnable children under their parent");
+    const auto json = execution.dump_tasks(nvm::TaskDumpFormat::Json);
+    check(json.starts_with("{\"tasks\":[{\"id\":0,\"parent\":null,\"spawned_at\":null,") &&
+          json.find("{\"id\":2,\"parent\":0,\"spawned_at\":\"function 0 block 2\",\"state\":\"runnable\"") !=
+              std::string::npos && json.ends_with("]}\n"),
+          "the JSON dump carries the same tasks");
     execution.complete(nvm::HostCompletion::ok());
     check(execution.advance().kind == nvm::Event::Kind::HostRequest, "child reaches its first request");
-    check(execution.dump_tasks().find("task 0 root parked: join task 1") != std::string::npos,
-          "dump includes join dependency");
+    check(execution.dump_tasks().find("task 0  root  parked: join of task 1\n") != std::string::npos,
+          "the dump names the task a join waits for");
     execution.complete(nvm::HostCompletion::terminate(7));
     const auto end = execution.advance();
     check(end.kind == nvm::Event::Kind::Completed && end.status == 7, "child exit terminates the run");
@@ -356,7 +368,8 @@ NEURA_TEST(concurrency, collection_preserves_parked_frames_and_finished_results)
     const auto image = nvr::load(nvr::encode(fixture));
 
     nvm::RunLimits limits;
-    limits.max_heap_cells = 45;
+    // 45 cells of program data, plus 19 more for each of the two task records than one cell.
+    limits.max_heap_cells = 45 + 2 * 19;
     const auto bounded = run_captured(image, limits);
     check_equal(bounded.result.status, 0, "collection allows more allocations than fit at once");
     check_equal(bounded.output, std::string("R\nA\n"), "parked frame and unjoined child result survive collection");

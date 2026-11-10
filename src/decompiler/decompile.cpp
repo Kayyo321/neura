@@ -294,10 +294,33 @@ std::vector<std::uint32_t> successors(const nvr::Block& block) {
     return result;
 }
 
-// Pair markers only if the incoming paths to each reachable block agree
-// on the full stack of scope entries in this function.
+// Pair markers only if the incoming paths agree on the full stack of scope
+// entries at every block from which a scope operation or a return can still
+// be reached. A block that only traps, such as an error block shared by code
+// inside and outside a scope, cannot affect a pairing and is not compared.
 ScopePairs pair_scopes(const nvr::Function& function) {
     constexpr auto unvisited = std::numeric_limits<std::size_t>::max();
+    std::vector<char> sensitive(function.blocks.size(), 0);
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (std::size_t b = 0; b < function.blocks.size(); ++b) {
+            if (sensitive[b]) continue;
+            for (const auto& exit : function.blocks[b].exits) {
+                bool matters = exit.kind == nvr::ExitKind::Return ||
+                    (exit.kind == nvr::ExitKind::Scheduler && (exit.scheduler == nvr::SchedulerOp::ScopeEnter ||
+                                                                exit.scheduler == nvr::SchedulerOp::ScopeExit ||
+                                                                exit.scheduler == nvr::SchedulerOp::Spawn));
+                for (const auto next : successors(exit)) {
+                    matters = matters || (next != absent && next < sensitive.size() && sensitive[next]);
+                }
+                if (matters) {
+                    sensitive[b] = 1;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+    }
     struct ScopeFrame {
         std::size_t parent = 0;
         ScopeLocation entry{};
@@ -331,7 +354,7 @@ ScopePairs pair_scopes(const nvr::Function& function) {
                 if (incoming[next] == unvisited) {
                     incoming[next] = scope;
                     pending.push_back(next);
-                } else if (incoming[next] != scope) {
+                } else if (incoming[next] != scope && sensitive[next]) {
                     return {};
                 }
             }

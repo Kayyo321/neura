@@ -1,0 +1,83 @@
+// Scoped tasks through generics, function values, a list of handles, nested
+// scopes, and loops whose break and continue leave a scope.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let tasks = import:Std.Concurrent.Task;
+
+let Counter = module (
+    export let count_to = func(label: string, limit: int) -> int {
+        let total = 0;
+        for (let i: int = 0; i < limit; i++) {
+            total = total + i;
+            if (i % 2 == 0) {
+                console.print_line(label + " " + i.to_string());
+            }
+        }
+        return total;
+    };
+);
+
+let twice = func<T>(value: T, work: func(T) -> T) -> T {
+    scope {
+        let first = spawn work(value);
+        return work(first.join());
+    }
+};
+
+let fan_out = func(width: int) -> int {
+    let sum = 0;
+    scope {
+        let pending: tasks.Task<int>[list] = [];
+        for (let i: int = 0; i < width; i++) {
+            pending.append(spawn Counter.count_to("w" + i.to_string(), 3));
+        }
+        for (let task: tasks.Task<int> in pending) {
+            sum = sum + task.join();
+        }
+    }
+    return sum;
+};
+
+let nested = func(depth: int) -> int {
+    if (depth == 0) {
+        return 1;
+    }
+    scope {
+        let left = spawn nested(depth - 1);
+        let right = spawn nested(depth - 1);
+        return left.join() + right.join();
+    }
+};
+
+let early = func(limit: int) -> int {
+    let i = 0;
+    while (true) {
+        scope {
+            let task = spawn Counter.count_to("e", 1);
+            i = i + 1;
+            if (i == limit) {
+                break;
+            }
+            if (i % 2 == 0) {
+                continue;
+            }
+            task.join();
+        }
+    }
+    return i;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let add_one = func(x: int) -> int => x + 1;
+        console.print_line("twice " + twice<int>(5, add_one).to_string());
+        console.print_line("fan " + fan_out(3).to_string());
+        console.print_line("nested " + nested(4).to_string());
+        console.print_line("early " + early(5).to_string());
+        scope {
+            let unfinished = spawn Counter.count_to("late", 2);
+            console.print_line("finished? " + unfinished.is_finished().to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

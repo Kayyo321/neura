@@ -70,6 +70,9 @@ std::string_view op_name(IrOp op) {
     case IrOp::ValueText: return "value_text";
     case IrOp::MakeClosure: return "make_closure";
     case IrOp::CallClosure: return "call_closure";
+    case IrOp::TaskScope: return "task_scope";
+    case IrOp::Spawn: return "spawn";
+    case IrOp::SchedulerCall: return "scheduler_call";
     }
     return "<invalid>";
 }

@@ -36,6 +36,7 @@ struct Parameter {
 
 struct Declaration;
 struct MatchArm;
+struct SelectArm;
 struct Statement;
 
 struct Expr {
@@ -46,6 +47,9 @@ struct Expr {
         Cast, NamedVariant, Match,
         ComparisonChain, Conditional, PrefixUpdate, PostfixUpdate,
         Lambda, Nil, TypeTest, TypeApplication,
+        // `spawn call` (Concurrency.md section 4.4): the call is operand 0.
+        // The span starts at the contextual keyword, which is five bytes long.
+        Spawn,
     };
 
     Kind kind;
@@ -66,6 +70,8 @@ struct Expr {
     // `import:c("header.h", "lib.a", ...)`: the header and then the libraries,
     // as written. The loader generates the module (ForeignInterop.md).
     std::vector<std::string> c_import{};
+    // The opening parenthesis of a Call's argument list.
+    std::optional<Span> open{};
 };
 
 struct Statement {
@@ -77,6 +83,11 @@ struct Statement {
         // for (let name: Type in collection) body. `declaration` names the
         // element binding; `expressions` holds the collection.
         ForEach, Destructure, Match, Do,
+        // scope { body } and scope (name) { body }. `bindings` holds the
+        // handle name when one is given; `keyword` is the contextual word.
+        Scope,
+        // select { arms }. `keyword` is the contextual word.
+        Select,
     };
 
     Kind kind;
@@ -90,6 +101,9 @@ struct Statement {
     std::vector<Token> bindings;
     bool constant_bindings{};
     std::vector<MatchArm> arms;
+    std::vector<SelectArm> select_arms;
+    // The contextual keyword of a scope or select statement.
+    Span keyword{};
     // Empty for other statements. Holds the operator for an assignment.
     std::string assignment_operator{};
     // Documentation shared by all bindings in a destructuring declaration.
@@ -104,6 +118,16 @@ struct MatchArm {
     bool named{};
     std::vector<Statement> body;
     std::optional<Expr> value;
+};
+
+// One arm of a select statement: `[let name =] operation => { body }`, or
+// the default arm `_ => { body }`, which has no operation.
+struct SelectArm {
+    Span span;
+    std::optional<Token> binding;
+    bool constant_binding{};
+    std::optional<Expr> operation;
+    std::vector<Statement> body;
 };
 
 struct Declaration {
@@ -133,6 +157,9 @@ struct Declaration {
     // `callback("service", version)` after a block body: a function the
     // runtime may call during a host request (trusted library only).
     std::optional<std::pair<std::string, std::uint32_t>> host_callback{};
+    // `scheduler("operation")` in place of a body: a function the NVM
+    // scheduler implements (trusted library only; Concurrency.md section 10.1).
+    std::optional<std::string> scheduler_binding{};
     std::vector<TypeSyntax> interfaces{};
     // Additional signatures in an `or func` declaration.
     std::vector<Declaration> overloads{};

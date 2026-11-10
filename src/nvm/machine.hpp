@@ -3,6 +3,7 @@
 #include "host.hpp"
 #include "nvr/image.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <functional>
@@ -16,6 +17,8 @@ namespace neura::nvm {
 
 class GraphDevice;
 class Fleet;
+
+struct TaskDumpRequest;
 
 // Bounds a run enforces. Exhaustion traps at the operation that would exceed
 // the bound, before the allocation, frame, or block it would start.
@@ -37,6 +40,28 @@ struct RunLimits {
     GraphDevice* graph_device = nullptr;
     std::uint64_t max_tasks = 65'536;
     std::uint64_t task_quantum = 1'024;
+    // Where the run writes a task dump when one is requested, or nullptr.
+    // It must outlive the run.
+    TaskDumpRequest* task_dump = nullptr;
+    // When set, receives the task chosen by each scheduling decision, in
+    // order: entry N is the task that ran from tick N. It must outlive the
+    // run. Tests and tools compare schedules with it.
+    std::vector<std::uint64_t>* schedule = nullptr;
+};
+
+enum class TaskDumpFormat { Text, Json };
+
+// Asks a running image for a task dump (docs/lang/Concurrency.md section
+// 14.1). Setting `requested` is safe from a signal handler. The run takes
+// the snapshot at its next scheduling point, hands it to `write`, clears the
+// request, and continues: a dump never changes the run.
+struct TaskDumpRequest {
+    std::atomic<bool> requested{false};
+    TaskDumpFormat format = TaskDumpFormat::Text;
+    // Also write the full dump when a task traps, before the run ends.
+    bool on_trap = false;
+    // Receives each dump. The text is empty for an image without tasks.
+    std::function<void(const std::string&)> write;
 };
 
 enum class TrapKind {
@@ -140,8 +165,12 @@ public:
     // exit. A host request suspends the run until complete() supplies its
     // response. Advancing a finished run returns its final event again.
     Event advance();
-    // Snapshot of scheduler state between block steps. Empty for a serial image.
-    std::string dump_tasks() const;
+    // Snapshot of scheduler state between block steps: the task tree with
+    // each task's spawn site, state, and stack. Empty for a serial image.
+    std::string dump_tasks(TaskDumpFormat format = TaskDumpFormat::Text) const;
+    // The most tasks that were live at once, counting the root. Zero for a
+    // serial image.
+    std::uint64_t peak_tasks() const;
 
     struct GraphStep {
         std::uint32_t graph = 0;
@@ -227,6 +256,8 @@ struct RunResult {
     std::uint64_t peak_heap_cells = 0;
     // Steps per image function when RunLimits::profile is set.
     std::vector<std::uint64_t> function_steps{};
+    // The most tasks live at once; zero for an image without tasks.
+    std::uint64_t peak_tasks = 0;
 };
 
 // Runs `image` to completion, issuing each host request to its bound service

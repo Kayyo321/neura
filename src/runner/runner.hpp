@@ -25,6 +25,24 @@ struct RunOptions {
     bool stats = false;
     std::optional<std::filesystem::path> record;
     std::optional<std::filesystem::path> replay;
+    // --task-dump: the full task dump of a trap, in this form.
+    std::optional<nvm::TaskDumpFormat> task_dump;
+};
+
+// Task dumps for the runs made while it lives (docs/lang/Concurrency.md
+// section 14.1). SIGQUIT asks the running image for a dump on standard
+// error and the run continues; `on_trap` adds the full dump when a task
+// traps. Pass request() in RunLimits::task_dump. One at a time per process.
+class TaskDumps {
+public:
+    explicit TaskDumps(std::optional<nvm::TaskDumpFormat> on_trap);
+    ~TaskDumps();
+    TaskDumps(const TaskDumps&) = delete;
+    TaskDumps& operator=(const TaskDumps&) = delete;
+    nvm::TaskDumpRequest* request() { return &request_; }
+
+private:
+    nvm::TaskDumpRequest request_;
 };
 
 std::vector<std::uint8_t> read_file(const std::filesystem::path& path);

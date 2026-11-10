@@ -293,7 +293,21 @@ private:
     bool awaiting_ = false;
 };
 
-Fleet::Fleet(const nvr::Image& image, FleetOptions options) : state_(std::make_unique<State>(image, options)) {}
+namespace {
+
+// Members are created as they are admitted, so a setting no member could
+// run with is rejected here, before any of them starts.
+const FleetOptions& checked(const nvr::Image& image, const FleetOptions& options) {
+    if (image.transferable_layouts && options.limits.task_quantum == 0) {
+        throw std::invalid_argument("task quantum must be positive");
+    }
+    return options;
+}
+
+} // namespace
+
+Fleet::Fleet(const nvr::Image& image, FleetOptions options)
+    : state_(std::make_unique<State>(image, checked(image, options))) {}
 Fleet::~Fleet() = default;
 
 std::size_t Fleet::add(std::uint32_t entry, std::vector<std::string> arguments) {

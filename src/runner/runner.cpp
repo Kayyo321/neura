@@ -5,6 +5,8 @@
 #include "nvr/names.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <csignal>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -22,6 +24,45 @@
 
 namespace neura::runner {
 namespace fs = std::filesystem;
+
+namespace {
+
+// The request SIGQUIT sets. A handler may only store to a lock-free atomic.
+std::atomic<nvm::TaskDumpRequest*> signalled_request{nullptr};
+
+#ifdef SIGQUIT
+extern "C" void request_task_dump(int) {
+    if (auto* request = signalled_request.load(std::memory_order_relaxed)) {
+        request->requested.store(true, std::memory_order_relaxed);
+    }
+}
+#endif
+
+} // namespace
+
+TaskDumps::TaskDumps(std::optional<nvm::TaskDumpFormat> on_trap) {
+    request_.format = on_trap.value_or(nvm::TaskDumpFormat::Text);
+    request_.on_trap = on_trap.has_value();
+    request_.write = [](const std::string& text) {
+        if (text.empty()) {
+            std::cerr << "task dump: this image has no tasks\n";
+        } else {
+            std::cerr << text;
+        }
+        std::cerr.flush();
+    };
+    signalled_request.store(&request_, std::memory_order_relaxed);
+#ifdef SIGQUIT
+    std::signal(SIGQUIT, request_task_dump);
+#endif
+}
+
+TaskDumps::~TaskDumps() {
+#ifdef SIGQUIT
+    std::signal(SIGQUIT, SIG_DFL);
+#endif
+    signalled_request.store(nullptr, std::memory_order_relaxed);
+}
 
 Host::Host(const nvm::Capabilities& capabilities)
     : services(output, error, input, capabilities) {
@@ -215,7 +256,9 @@ void print_profile(const nvr::Image& image, const nvm::RunResult& result) {
 
 int run(const nvr::Image& image, Host& host, std::span<const std::string> arguments,
         const RunOptions& options, std::string_view name, std::size_t image_bytes) {
-    const auto& limits = options.limits;
+    TaskDumps dumps(options.task_dump);
+    auto limits = options.limits;
+    limits.task_dump = dumps.request();
     nvm::RunResult result;
     if (options.replay) {
         // No service runs: every response comes from the trace. Console
@@ -246,7 +289,10 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
     if (options.stats) {
         std::cerr << "stats: steps " << result.steps << ", peak heap cells " << result.peak_heap_cells
                   << ", host requests " << result.host_requests << ", " << image_costs(image)
-                  << ", image bytes " << image_bytes << '\n';
+                  << ", image bytes " << image_bytes;
+        // Only an image with tasks reports them, so other output is unchanged.
+        if (result.peak_tasks != 0) std::cerr << ", peak tasks " << result.peak_tasks;
+        std::cerr << '\n';
     }
     if (options.limits.profile) {
         print_profile(image, result);

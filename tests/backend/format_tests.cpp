@@ -201,7 +201,27 @@ NEURA_TEST(format, scheduler_exits_and_transferable_layouts) {
         expect_rejected(nvr::encode(other), kind, reason);
     };
     expect_rejected(assemble(sections, {.minor = 4}), Kind::Malformed, "uses NVR 1.5 features but declares 1.4");
-    changed([](auto& i) { i.transferable_layouts.reset(); }, Kind::Malformed, "missing required section TRNS");
+    // The writer refuses to encode tasks without the table, so the bytes
+    // that lack it are assembled by hand.
+    auto without_table = sections;
+    std::erase_if(without_table, [](const Section& section) { return std::string_view(section.tag) == "TRNS"; });
+    expect_rejected(assemble(without_table, concurrent), Kind::Malformed, "missing required section TRNS");
+    {
+        auto other = image;
+        other.transferable_layouts.reset();
+        try {
+            nvr::encode(other);
+            fail("the writer encoded scheduler exits without the transferable-layout table");
+        } catch (const std::invalid_argument&) {
+        }
+        other = image;
+        other.functions.front().blocks.back().exits.front().poll = true;
+        try {
+            nvr::encode(other);
+            fail("the writer encoded a poll on a return exit");
+        } catch (const std::invalid_argument&) {
+        }
+    }
     changed([](auto& i) { i.transferable_layouts = std::vector<std::uint32_t>{1, 0}; },
             Kind::Invalid, "strictly ascending order");
     changed([](auto& i) { i.transferable_layouts = std::vector<std::uint32_t>{0, 0}; },
@@ -219,7 +239,15 @@ NEURA_TEST(format, scheduler_exits_and_transferable_layouts) {
             "result slot must have type bool");
     changed([](auto& i) { i.functions[0].blocks[3].exits[0].arguments[0] = {nvr::ValueKind::Constant, 2, 0}; },
             Kind::Invalid, "task operand must have type uint64");
-    changed([](auto& i) { i.functions[0].blocks[0].exits[0].poll = true; }, Kind::Malformed, "poll flag is valid only");
+    {
+        // The writer refuses a poll on a scheduler exit, so set the bit in the assembled bytes: after
+        // the 36-byte function header and the 16-byte block header, byte 52 of FUNC is the first exit's tag.
+        auto polled = sections;
+        for (auto& section : polled) {
+            if (section.tag == "FUNC") section.data[52] |= 0x80;
+        }
+        expect_rejected(assemble(polled, concurrent), Kind::Malformed, "poll flag is valid only");
+    }
     changed([](auto& i) { i.functions[0].blocks[0].exits[0].scheduler = static_cast<nvr::SchedulerOp>(5); },
             Kind::Malformed, "invalid scheduler operation 5");
     changed([](auto& i) { i.native_library = nvr::NativeLibrary{"target", {1}, {}}; }, Kind::Malformed,

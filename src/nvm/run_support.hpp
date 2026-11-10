@@ -33,7 +33,7 @@ private:
 
 inline RunResult finished_result(const Execution& execution, const Event& event, std::uint64_t requests = 0) {
     return {event.kind == Event::Kind::Completed, event.status, event.trap, execution.steps(), requests,
-            execution.peak_heap_cells(), execution.function_steps()};
+            execution.peak_heap_cells(), execution.function_steps(), execution.peak_tasks()};
 }
 
 } // namespace neura::nvm::detail

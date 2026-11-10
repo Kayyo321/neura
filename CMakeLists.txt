@@ -176,6 +176,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/control_flow.cpp
     src/neura-ir/specialize.cpp
     src/neura-ir/static_initialization.cpp
+    src/neura-ir/task_analysis.cpp
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
     src/neura-ir/linker.cpp
@@ -263,6 +264,21 @@ if(BUILD_TESTING)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontend-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/frontend.cmake"
+    )
+
+    # Scoped tasks (docs/lang/Concurrency.md): conformance of the forms and
+    # their checks, then compiled programs through every build route.
+    add_test(NAME concurrency-frontend COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-frontend-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/frontend.cmake"
+    )
+    add_test(NAME concurrency-programs COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-programs-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/programs.cmake"
     )
 
     add_test(NAME source-docs COMMAND "${CMAKE_COMMAND}"

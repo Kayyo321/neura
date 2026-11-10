@@ -2,6 +2,7 @@
 #include "control_flow.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
+#include "scheduler_ops.hpp"
 #include "integer.hpp"
 #include "ir.hpp"
 #include "linker.hpp"
@@ -166,6 +167,12 @@ struct Context {
     unsigned loops = 0;
     std::vector<Names> scopes;
     ClosureEnvironment* closure = nullptr;
+    // Enclosing `scope` statements of this function body (Concurrency.md 4.1).
+    unsigned task_scopes = 0;
+    // The index in `scopes` of the innermost task scope's block. A local
+    // found at or above it was declared inside that scope. Without a task
+    // scope every local of the function body qualifies; parameters never do.
+    std::size_t task_scope_base = 0;
 };
 
 struct ClosureEnvironment {
@@ -226,6 +233,8 @@ private:
     std::set<std::pair<SymbolId, SymbolId>> wrapper_imports_;
     const std::vector<ParsedFile>* files_ = nullptr;
     SymbolId root_class_ = no_symbol;
+    // Trusted library functions bound to a scheduler operation, by name.
+    std::map<SymbolId, std::string> scheduler_bindings_;
 
     IrSymbol& symbol(SymbolId id) { return program_.symbols[id]; }
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols[id]; }
@@ -334,6 +343,19 @@ private:
     IrNode for_each_iterable(const Statement& stmt, Context& context, IrNode items);
     std::vector<IrNode> body(const std::vector<Statement>& stmts, Context& context);
     SymbolId owner_kind(SymbolId id, SymbolKind kind) const;
+
+    // Scoped tasks (Concurrency.md sections 4 and 5).
+    bool scope_bound_class(SymbolId id) const;
+    bool scope_bound(const IrType& type) const;
+    bool declared_in_task_scope(const IrNode& place, const Context& context) const;
+    void require_scope_local(const IrNode& place, const IrType& stored, const Span& span,
+                             const Context& context) const;
+    SymbolId library_module(std::string_view path, std::string_view module, const Span& span,
+                            const Context& context, const std::string& message);
+    IrNode task_scope(const Statement& stmt, Context& context);
+    // With `handle`, the Task<T> for the new task; without, the bare spawn
+    // of a statement that discards it.
+    IrNode spawn(const Expr& expr, Context& context, bool handle = true);
 };
 
 SymbolId Lowering::add(SymbolKind kind, std::string name, const Span& span, SymbolId owner) {
@@ -693,6 +715,9 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
         if (actual.kind == TypeKind::Void) throw Diagnostic(args[i].span, "void is not a type argument");
         if (is_primitive_reference(actual))
             throw Diagnostic(args[i].span, "a primitive reference cannot be a type argument");
+        if (scope_bound(actual))
+            throw Diagnostic(args[i].span, "a value of type " + describe(actual) +
+                                           " cannot leave its scope: it cannot be a type argument");
         result.emplace(params[i], std::move(actual));
     }
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -929,6 +954,9 @@ IrNode Lowering::capture(ClosureEnvironment& environment, SymbolId key, IrNode i
     if (const auto found = environment.fields.find(key); found != environment.fields.end()) {
         return closure_field(found->second, span);
     }
+    if (scope_bound(input.type))
+        throw Diagnostic(span, "a value of type " + describe(input.type) +
+                               " cannot leave its scope: a lambda cannot capture it");
     const auto field = add(SymbolKind::Field, "$capture" + std::to_string(environment.inputs.size()),
                            span, environment.layout);
     symbol(field).type = input.type;
@@ -1161,6 +1189,9 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
                 symbol(initializer.symbol).kind != SymbolKind::Variant)
                 throw Diagnostic(init.span, "expected a value initializer");
         }
+        if (scope_bound(initializer.type))
+            throw Diagnostic(init.span, "a value of type " + describe(initializer.type) +
+                                        " cannot leave its scope: it cannot be stored in a field or global");
         symbol(id).type = initializer.type;
         entries_[id].initializer = std::move(initializer);
         return;
@@ -1168,6 +1199,9 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     if (!decl.type) throw Diagnostic(decl.span, "declaration needs a type or initializer");
     auto declared = type(*decl.type, ctx);
     if (declared.kind == TypeKind::Void) throw Diagnostic(decl.span, "a binding cannot have type void");
+    if (scope_bound(declared))
+        throw Diagnostic(decl.type->span, "a value of type " + describe(declared) +
+                                          " cannot leave its scope: it cannot be stored in a field or global");
     if (is_primitive_reference(declared)) {
         if (decl.static_member)
             throw Diagnostic(decl.span, "a static binding cannot have a primitive reference type");
@@ -1270,6 +1304,9 @@ void Lowering::resolve(SymbolId id) {
                 auto payload = type(field.type, ctx);
                 if (payload.kind == TypeKind::Void)
                     throw Diagnostic(field.span, "an enum payload cannot have type void");
+                if (scope_bound(payload))
+                    throw Diagnostic(field.span, "a value of type " + describe(payload) +
+                                                 " cannot leave its scope: it cannot be an enum payload");
                 symbol(variant).payload_types.push_back(std::move(payload));
             }
         }
@@ -1319,6 +1356,23 @@ void Lowering::resolve(SymbolId id) {
                 throw Diagnostic(decl.span, "a host result needs exactly Ok or Ok(T), and Error(uint32)");
             symbol(id).external = true;
             symbol(id).host_binding = IrHostBinding{decl.host_binding->first, decl.host_binding->second};
+        }
+        if (decl.scheduler_binding) {
+            // The NVM scheduler implements the function (Concurrency.md
+            // section 10.1). It is not a host service: it needs no import
+            // and no capability, and a call lowers to a SchedulerCall.
+            const auto file = source_file(program_, id);
+            if (file == no_symbol || symbol(file).library_path.empty() ||
+                symbol(symbol(id).owner).kind != SymbolKind::Module)
+                throw Diagnostic(decl.span, "scheduler bindings are only allowed in standard library modules");
+            const auto operation = scheduler_operation(*decl.scheduler_binding);
+            if (!operation)
+                throw Diagnostic(decl.span, "unknown scheduler operation '" + *decl.scheduler_binding + "'");
+            if (decl.exported || decl.override_member || decl.static_member ||
+                std::ranges::any_of(decl.parameters, &Parameter::variadic) ||
+                decl.parameters.size() != operation->arguments.size())
+                throw Diagnostic(decl.span, "a scheduler binding needs a private function with the operation's arguments");
+            scheduler_bindings_.emplace(id, *decl.scheduler_binding);
         }
         if (decl.host_callback) {
             // A callback: a function with a body that a host service may
@@ -1859,6 +1913,11 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
 IrNode Lowering::call(const Expr& expr, Context& context) {
     if (auto result = primitive_call(expr, context)) return std::move(*result);
     const auto& callee_expr = expr.operands.front();
+    // `spawn (f)(x)` parses as a call of a function named spawn. Without one,
+    // say what the form requires (Concurrency.md section 4.4).
+    if (callee_expr.kind == ExprKind::Name && callee_expr.text == "spawn" && expr.open &&
+        find("spawn", context, callee_expr.span) == no_symbol)
+        throw Diagnostic(*expr.open, "a spawn operand begins with a name; bind the callee to a name first");
     auto callee = callee_expr.kind == ExprKind::Member
         ? select(callee_expr, context, true) : expression(callee_expr, context);
     if (callee.op == IrOp::Reference && callee.symbol != no_symbol &&
@@ -1937,6 +1996,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         if (callee.type.name == "append") {
             result.op = IrOp::Append;
             auto element = value(expr.operands[1], context, &receiver.type.arguments.front());
+            require_scope_local(receiver, element.type, element.span, context);
             result.operands = {std::move(receiver), std::move(element)};
         } else {
             result.op = IrOp::RemoveAt;
@@ -1949,6 +2009,16 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     }
     if (symbol(target).kind != SymbolKind::Function)
         throw Diagnostic(expr.span, "expression is not callable");
+    resolve(target);
+    if (const auto bound = scheduler_bindings_.find(target); bound != scheduler_bindings_.end()) {
+        auto replacements = type_arguments(symbol(target).generics, expr.type_arguments, expr.span, context);
+        arguments(result, expr, 1, target, replacements, context);
+        result.op = IrOp::SchedulerCall;
+        result.symbol = no_symbol;
+        result.text = bound->second;
+        result.type = substitute(symbol(target).type, replacements);
+        return result;
+    }
     auto qualifier = static_qualifier(callee);
     auto replacements = callee.operands.empty() ? Substitution{}
         : receiver_arguments(callee.operands.front().type, symbol(target).owner);
@@ -2483,6 +2553,8 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     }
     case ExprKind::Lambda:
         return lambda(*expr.lambda, context);
+    case ExprKind::Spawn:
+        return spawn(expr, context);
     case ExprKind::Name: {
         SymbolId promoted_receiver = no_symbol;
         auto id = find(expr.text, context, expr.span, &promoted_receiver);
@@ -2750,6 +2822,201 @@ IrNode Lowering::update(const Expr& expr, Context& context) {
     return result;
 }
 
+// Task<T> and Scope are the scope-bound classes: the trusted library
+// declares each in its own module file.
+bool Lowering::scope_bound_class(SymbolId id) const {
+    if (id >= program_.symbols.size() || symbol(id).kind != SymbolKind::Class) return false;
+    const auto file = source_file(program_, id);
+    if (file == no_symbol) return false;
+    const auto& path = symbol(file).library_path;
+    return (symbol(id).name == "Task" && path == "std/concurrent/task.nra") ||
+           (symbol(id).name == "Scope" && path == "std/concurrent/scope.nra");
+}
+
+// A type is scope-bound if it is Task<T>, Scope, or an array, list, or
+// tuple with a scope-bound element (Concurrency.md section 4.3).
+bool Lowering::scope_bound(const IrType& type) const {
+    switch (type.kind) {
+    case TypeKind::Object:
+        return scope_bound_class(type.symbol);
+    case TypeKind::Array:
+    case TypeKind::List:
+    case TypeKind::Tuple:
+        return std::ranges::any_of(type.arguments, [&](const IrType& part) { return scope_bound(part); });
+    default:
+        return false;
+    }
+}
+
+// True when `place` is, or is an element of, a local declared inside the
+// innermost enclosing task scope. A parameter or an outer local is not.
+bool Lowering::declared_in_task_scope(const IrNode& place, const Context& context) const {
+    const auto* root = &place;
+    while ((root->op == IrOp::Index || root->op == IrOp::Project) && !root->operands.empty())
+        root = &root->operands.front();
+    if (root->op != IrOp::Load || root->symbol == no_symbol || symbol(root->symbol).kind != SymbolKind::Local)
+        return false;
+    for (std::size_t i = context.task_scope_base; i < context.scopes.size(); ++i) {
+        for (const auto& [name, id] : context.scopes[i]) {
+            if (id == root->symbol) return true;
+        }
+    }
+    return false;
+}
+
+void Lowering::require_scope_local(const IrNode& place, const IrType& stored, const Span& span,
+                                   const Context& context) const {
+    if (!scope_bound(stored) || declared_in_task_scope(place, context)) return;
+    throw Diagnostic(span, "a value of type " + describe(stored) +
+                           " cannot leave its scope: it can be stored only in a local declared inside that scope");
+}
+
+// The module `module` of trusted library file `path`. The source loader
+// supplies the file and retries when the program has not loaded it. The
+// file of `context` gains a dependency so that the library file initializes
+// first, as a primitive wrapper's does.
+SymbolId Lowering::library_module(std::string_view path, std::string_view module, const Span& span,
+                                  const Context& context, const std::string& message) {
+    const auto file = library_files_.find(path);
+    if (file == library_files_.end()) throw MissingPrimitiveWrapper(span, message, std::string(path));
+    const auto result = own_member(file->second, module);
+    if (result == no_symbol || symbol(result).kind != SymbolKind::Module)
+        throw Diagnostic(span, "invalid standard library module " + std::string(path));
+    resolve(result);
+    const auto from = source_file(program_, lexical_owner(context));
+    if (from != no_symbol && from != file->second && wrapper_imports_.emplace(from, result).second) {
+        const auto dependency = add(SymbolKind::Import, "$concurrent", span, from);
+        symbol(dependency).type = symbol(result).type;
+    }
+    return result;
+}
+
+IrNode Lowering::task_scope(const Statement& stmt, Context& context) {
+    // Open decision "scope in initialization" (Concurrency.md section 18):
+    // decided no. Globals are still being initialized there.
+    if (context.function == no_symbol)
+        throw Diagnostic(stmt.keyword, "a scope block is only allowed inside a function body");
+    if (!stmt.bindings.empty())
+        throw Diagnostic(stmt.bindings.front().span,
+                         "a scope handle needs Std.Concurrent.Scope, which this toolchain does not provide yet");
+    auto result = node(IrOp::TaskScope, stmt.span);
+    const auto base = context.task_scope_base;
+    ++context.task_scopes;
+    // body() opens the scope's own lexical block at this index.
+    context.task_scope_base = context.scopes.size();
+    result.body = body(stmt.body, context);
+    context.task_scope_base = base;
+    --context.task_scopes;
+    return result;
+}
+
+// `spawn call`. The parent evaluates the callee, a receiver, and the
+// arguments exactly as the call would, and the task starts from those
+// values: they become the captures of a function value that takes no
+// arguments and makes the call. A void call yields Unit, so every task has
+// a result to join.
+IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
+    const auto& operand = expr.operands.front();
+    if (context.function == no_symbol || context.task_scopes == 0)
+        throw Diagnostic(expr.span, "spawn requires an enclosing scope block in the same function body");
+    const std::string missing = "spawn requires Std.Concurrent.Task";
+    const auto task_module = library_module("std/concurrent/task.nra", "Task", expr.span, context, missing);
+    const auto task_class = own_member(task_module, "Task");
+    if (task_class == no_symbol || !scope_bound_class(task_class))
+        throw Diagnostic(expr.span, "Std.Concurrent.Task must declare the class Task");
+    resolve(task_class);
+    const auto task_init = own_member(task_class, "init");
+    if (task_init == no_symbol || symbol(task_class).generics.size() != 1)
+        throw Diagnostic(expr.span, "Std.Concurrent.Task.Task must be Task<T> with a constructor");
+    resolve(task_init);
+
+    auto invocation = call(operand, context);
+    std::optional<IrNode> qualifier;
+    if (invocation.op == IrOp::ScopedValue && invocation.body.size() == 2 &&
+        invocation.body.front().op == IrOp::Discard) {
+        // A static member's qualifier is evaluated, then dropped (see call).
+        qualifier = std::move(invocation.body.front().operands.front());
+        auto inner = std::move(invocation.body.back());
+        invocation = std::move(inner);
+    }
+    if (invocation.op != IrOp::Call && invocation.op != IrOp::VirtualCall && invocation.op != IrOp::CallClosure)
+        throw Diagnostic(operand.span, "spawn requires a call of a function, a method, or a function value");
+
+    ClosureEnvironment environment{closure_layout(expr.span, lexical_owner(context)), context, {}, {}};
+    for (std::size_t i = 0; i < invocation.operands.size(); ++i) {
+        auto& input = invocation.operands[i];
+        if (i == 0 && invocation.op == IrOp::VirtualCall && input.type.kind == TypeKind::Module) {
+            // A module receiver is static and has no runtime value.
+            if (input.op == IrOp::Receiver) input.op = IrOp::Reference;
+            continue;
+        }
+        if (scope_bound(input.type))
+            throw Diagnostic(input.span, "a value of type " + describe(input.type) +
+                                         " cannot leave its scope: it cannot be passed to spawn");
+        const auto span = input.span;
+        const auto field = add(SymbolKind::Field, "$capture" + std::to_string(environment.inputs.size()),
+                               span, environment.layout);
+        symbol(field).type = input.type;
+        environment.fields.emplace(field, field);
+        environment.inputs.emplace_back(field, std::move(input));
+        input = closure_field(field, span);
+    }
+
+    IrType result_type = invocation.type;
+    std::vector<IrNode> instructions;
+    if (invocation.type.kind == TypeKind::Void) {
+        const auto unit_module = library_module("std/core/unit.nra", "Unit", expr.span, context, missing);
+        const auto unit = own_member(unit_module, "Unit");
+        if (unit == no_symbol || symbol(unit).kind != SymbolKind::Enum)
+            throw Diagnostic(expr.span, "Std.Core.Unit must export its Unit enum");
+        resolve(unit);
+        const auto unit_value = own_member(unit, "Value");
+        if (unit_value == no_symbol || symbol(unit_value).kind != SymbolKind::Variant)
+            throw Diagnostic(expr.span, "Std.Core.Unit.Unit must declare the variant Value");
+        result_type = symbol(unit).type;
+        auto discard = node(IrOp::Discard, operand.span);
+        discard.operands.push_back(std::move(invocation));
+        instructions.push_back(std::move(discard));
+        auto value = node(IrOp::Reference, operand.span, result_type);
+        value.symbol = unit_value;
+        auto finish = node(IrOp::Return, operand.span);
+        finish.operands.push_back(std::move(value));
+        instructions.push_back(std::move(finish));
+    } else {
+        if (scope_bound(result_type))
+            throw Diagnostic(operand.span, "a value of type " + describe(result_type) +
+                                           " cannot leave its scope: a task cannot return it");
+        auto finish = node(IrOp::Return, operand.span);
+        finish.operands.push_back(std::move(invocation));
+        instructions.push_back(std::move(finish));
+    }
+
+    const auto callable = callable_type({result_type}, expr.span);
+    const auto method = closure_method(environment.layout, callable, expr.span, {});
+    program_.bodies.push_back({method, std::move(instructions)});
+    auto started = node(IrOp::Spawn, expr.span, uint64_type);
+    started.operands.push_back(closure_value(callable, environment, expr.span));
+
+    if (!handle) {
+        // Nothing can join this task, so the runtime need not keep its
+        // result until the scope closes.
+        auto dropped = node(IrOp::Discard, expr.span);
+        dropped.operands.push_back(std::move(started));
+        if (!qualifier) return dropped;
+        auto both = node(IrOp::Block, expr.span);
+        auto first = node(IrOp::Discard, qualifier->span);
+        first.operands.push_back(std::move(*qualifier));
+        both.body.push_back(std::move(first));
+        both.body.push_back(std::move(dropped));
+        return both;
+    }
+    Substitution arguments{{symbol(task_class).generics.front(), result_type}};
+    auto task = node(IrOp::Allocate, expr.span, apply_arguments(symbol(task_class).type, arguments));
+    task.symbol = task_init;
+    task.operands.push_back(std::move(started));
+    return qualifier ? discard_before(std::move(*qualifier), std::move(task)) : std::move(task);
+}
+
 IrNode Lowering::statement(const Statement& stmt, Context& context) {
     switch (stmt.kind) {
     case StmtKind::Binding: {
@@ -2795,6 +3062,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
             result.operands.push_back(value(syntax.operands[1], context, &string_type));
             return result;
         }
+        if (syntax.kind == ExprKind::Spawn) return spawn(syntax, context, false);
         auto result = node(IrOp::Discard, stmt.span);
         // Expression statements can call functions that return void.
         auto operand = expression(stmt.expressions.front(), context);
@@ -2833,6 +3101,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         auto destination = expression(stmt.expressions[0], context);
         place(destination);
         auto source = value(stmt.expressions[1], context, &destination.type);
+        require_scope_local(destination, source.type, source.span, context);
         auto result = node(IrOp::Store, stmt.span);
         result.operands.push_back(std::move(destination));
         result.operands.push_back(std::move(source));
@@ -2883,9 +3152,17 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
                 throw Diagnostic(stmt.span, "a void function cannot return a value");
             }
             result.operands.push_back(value(stmt.expressions.front(), context, &expected));
+            if (scope_bound(result.operands.back().type))
+                throw Diagnostic(result.operands.back().span,
+                                 "a value of type " + describe(result.operands.back().type) +
+                                 " cannot leave its scope: it cannot be returned from a function");
         }
         return result;
     }
+    case StmtKind::Scope:
+        return task_scope(stmt, context);
+    case StmtKind::Select:
+        throw Diagnostic(stmt.keyword, "select needs Std.Concurrent channels, which this toolchain does not provide yet");
     case StmtKind::Break:
     case StmtKind::Continue:
         if (context.loops == 0) {
@@ -2911,7 +3188,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
 bool has_loop_transfer(const std::vector<IrNode>& region) {
     return std::ranges::any_of(region, [](const IrNode& item) {
         return item.op == IrOp::Break || item.op == IrOp::Continue ||
-            ((item.op == IrOp::Block || item.op == IrOp::Branch) &&
+            ((item.op == IrOp::Block || item.op == IrOp::Branch || item.op == IrOp::TaskScope) &&
              (has_loop_transfer(item.body) || has_loop_transfer(item.alternative)));
     });
 }
@@ -3703,7 +3980,9 @@ IrProgram lower(const std::vector<ParsedFile>& files) {
 }
 
 IrProgram lower(const std::vector<ParsedFile>& files, LinkedImports linked) {
-    return Lowering{}.run(files, std::move(linked));
+    auto program = Lowering{}.run(files, std::move(linked));
+    insert_polls(program);
+    return program;
 }
 
 IrProgram builtin_class_ir() {

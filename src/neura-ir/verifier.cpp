@@ -4,6 +4,7 @@
 #include "control_flow.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
+#include "scheduler_ops.hpp"
 #include "nominal.hpp"
 #include "integer.hpp"
 #include "reference_storage.hpp"
@@ -71,6 +72,7 @@ bool is_statement(IrOp op) {
     case IrOp::Destroy:
     case IrOp::Fail:
     case IrOp::TrapMessage:
+    case IrOp::TaskScope:
         return true;
     default:
         return false;
@@ -137,6 +139,8 @@ private:
         SymbolId function = no_symbol;
         unsigned loops = 0;
         bool scoped_value = false;
+        // Enclosing TaskScope statements of this body.
+        unsigned task_scopes = 0;
     };
 
     const IrProgram& program_;
@@ -432,6 +436,10 @@ private:
         for (const auto& argument : node.type_arguments) {
             check_type_references(argument, node.span);
         }
+        if (node.poll && node.op != IrOp::Loop && node.op != IrOp::Call && node.op != IrOp::VirtualCall &&
+            node.op != IrOp::CallClosure) {
+            report(node.span, "a poll marks an operation that is neither a loop nor a call");
+        }
     }
 
     bool expect_operands(const IrNode& node, std::size_t count, std::string_view operation) {
@@ -463,7 +471,8 @@ private:
             check_expression(node, context, true);
             return;
         }
-        if (node.op != IrOp::Block && node.op != IrOp::Branch && node.op != IrOp::Loop) {
+        if (node.op != IrOp::Block && node.op != IrOp::Branch && node.op != IrOp::Loop &&
+            node.op != IrOp::TaskScope) {
             expect_no_regions(node, "a simple statement");
         }
         if (node.type.kind != TypeKind::Void) {
@@ -505,6 +514,21 @@ private:
             }
             check_region(node.alternative, context);
             break;
+        case IrOp::TaskScope:
+            expect_operands(node, 0, "task scope");
+            if (!node.alternative.empty()) {
+                report(node.span, "a task scope has an else region");
+            }
+            if (context.function == no_symbol) {
+                report(node.span, "a task scope appears outside a function body");
+            }
+            if (node.symbol != no_symbol) {
+                report(node.span, "a task scope names a handle, which this format revision does not define");
+            }
+            ++context.task_scopes;
+            check_region(node.body, context);
+            --context.task_scopes;
+            break;
         case IrOp::Return: check_return(node, context); break;
         case IrOp::Break:
         case IrOp::Continue:
@@ -537,6 +561,63 @@ private:
             break;
         default:
             break;
+        }
+    }
+
+    // A spawn starts a function value of no arguments. Specialization turns
+    // that value into the allocation of its capture layout, whose static
+    // type is the signature layout it derives from.
+    void check_spawn(const IrNode& node, const Context& context) {
+        if (node.type != IrType{TypeKind::Integer, "uint64", no_symbol, {}}) {
+            report(node.span, "spawn result must be uint64");
+        }
+        if (context.task_scopes == 0) {
+            report(node.span, "spawn appears outside a task scope of its function body");
+        }
+        if (!expect_operands(node, 1, "spawn")) return;
+        const auto& body = node.operands.front();
+        if (body.op != IrOp::MakeClosure && body.op != IrOp::Allocate) {
+            report(node.span, "spawn requires the function value it starts as its operand");
+            return;
+        }
+        if (body.op == IrOp::MakeClosure &&
+            (!is_function_value(body.type) || body.type.arguments.size() != 1)) {
+            report(node.span, "spawn requires a function value that takes no arguments");
+        }
+        if (body.op == IrOp::MakeClosure && body.type.arguments.size() == 1 &&
+            body.type.arguments.front().kind == TypeKind::Void) {
+            report(node.span, "a spawned function value returns a value");
+        }
+    }
+
+    void check_scheduler_call(const IrNode& node) {
+        if (node.symbol != no_symbol || !node.type_arguments.empty()) {
+            report(node.span, "a scheduler call names its operation in text only");
+        }
+        const auto operation = scheduler_operation(node.text);
+        if (!operation) {
+            report(node.span, "scheduler call names unknown operation '" + node.text + "'");
+            return;
+        }
+        const auto matches = [](char letter, const IrType& type) {
+            switch (letter) {
+            case 'u': return type == IrType{TypeKind::Integer, "uint64", no_symbol, {}};
+            case 'i': return type == IrType{TypeKind::Integer, "int64", no_symbol, {}};
+            case 'b': return type.kind == TypeKind::Bool;
+            case 'v': return type.kind != TypeKind::Void && type.kind != TypeKind::Module;
+            case '0': return type.kind == TypeKind::Void;
+            default: return false;
+            }
+        };
+        if (!expect_operands(node, operation->arguments.size(), "scheduler call")) return;
+        for (std::size_t i = 0; i < node.operands.size(); ++i) {
+            if (!matches(operation->arguments[i], node.operands[i].type)) {
+                report(node.operands[i].span, "scheduler operation '" + node.text + "' argument " +
+                                               std::to_string(i + 1) + " has type " + describe(node.operands[i].type));
+            }
+        }
+        if (!matches(operation->result, node.type)) {
+            report(node.span, "scheduler operation '" + node.text + "' has result type " + describe(node.type));
         }
     }
 
@@ -810,6 +891,12 @@ private:
             break;
         case IrOp::MakeClosure:
             check_make_closure(node);
+            break;
+        case IrOp::Spawn:
+            check_spawn(node, context);
+            break;
+        case IrOp::SchedulerCall:
+            check_scheduler_call(node);
             break;
         case IrOp::CallClosure:
             check_call_closure(node);
