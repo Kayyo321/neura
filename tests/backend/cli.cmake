@@ -189,9 +189,14 @@ endforeach()
 
 # Library examples run through drivers that import them.
 foreach(driver IN ITEMS core overlay classes collections polymorphism errors)
+    # The errors driver shows a denied read, so it runs with files denied.
+    set(driver_options)
+    if(driver STREQUAL "errors")
+        set(driver_options --deny-fs)
+    endif()
     build_image("${TEST_DIR}/${driver}-driver.nvr" ${roots} "${tests}/examples/${driver}-driver.nra")
     file(READ "${tests}/examples/${driver}-driver.out" expected)
-    expect_run("${driver} driver" "${TEST_DIR}/${driver}-driver.nvr" "${expected}" 0 "")
+    expect_run("${driver} driver" "${TEST_DIR}/${driver}-driver.nvr" "${expected}" 0 "" ${driver_options})
 endforeach()
 
 # Examples whose builds stop at a documented limitation.

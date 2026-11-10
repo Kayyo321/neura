@@ -1,5 +1,5 @@
-// Runs examples/guide/errors.nra against a missing file. With --allow-fs it
-// also reads a real one; without it, the read is denied.
+// Runs examples/guide/errors.nra against a missing file. With files granted
+// it also reads a real one; with --deny-fs, the read is denied.
 let console = import:Std.Io.Console;
 let errors = import:Errors;
 let program = import:Std.Program;

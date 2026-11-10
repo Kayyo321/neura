@@ -7,7 +7,7 @@
 - "Must" states a requirement on the implementation. A row of section 3 is a decision; an option name, message, or record layout given here is fixed. Section 13 lists what is still open.
 - Two terms distinguish the image from the executable and from foreign code:
   - **Standalone image.** [Overview](Overview.md) and [Status](Status.md) call a `.nvr` image standalone because it runs without its source. It still needs a runner.
-  - **Native code.** `--allow-native`, `Std.DynamicForeign`, and the `NATV` section concern C code that a program calls ([Foreign interop](ForeignInterop.md)). `--native` grants no native access and compiles nothing to machine code.
+  - **Native code.** `--deny-native`, `Std.DynamicForeign`, and the `NATV` section concern C code that a program calls ([Foreign interop](ForeignInterop.md)). `--native` compiles nothing to machine code; whether the packaged program may call native code is the policy's native capability, which is granted unless `--deny-native` or `--deny-all` is given.
 
 | Term | Meaning |
 | --- | --- |
@@ -41,8 +41,8 @@ Because the image is embedded unchanged, everything that inspects images keeps w
 | N3 | `neura build --native` needs no compiler, linker, or other external tool. It reads an installed launcher and writes the output itself. A program with C imports still needs the C compiler those imports need today. |
 | N4 | The container is the launcher's bytes, then the payload, then a fixed footer at the end of the file (section 5). The launcher's bytes are not modified. |
 | N5 | Every command-line argument of a native executable belongs to the program. The launcher interprets none. |
-| N6 | Capabilities are chosen when the executable is built and recorded in its policy. The default grants what `neura run` grants by default: console input and output and process exit. Nothing at run time can widen them. |
-| N7 | Run-time settings that only restrict or observe a run come from one environment variable, `NEURA_RUN_OPTIONS`, unless the executable was built with `--sealed`. |
+| N6 | Capabilities are chosen when the executable is built and recorded in its policy. The default grants what `neura run` grants by default: every group (files, network, environment, clock, entropy, and native code) as well as console input and output and process exit. `--deny-*` options at build time remove groups, and `--allow-fs=prefix,...` narrows files. A native executable can therefore do whatever the user who runs it can, unless it was built with `--deny-*` options or `NEURA_RUN_OPTIONS` denies a group. Nothing at run time can widen the policy. |
+| N7 | Run-time settings that only restrict or observe a run come from one environment variable, `NEURA_RUN_OPTIONS`, unless the executable was built with `--sealed`. Restricting includes lowering a limit and denying a group with a `--deny-*` option. |
 | N8 | Output bytes are a function of the launcher file, the image, and the policy. There are no timestamps, paths, or host names. Building the same source label with the same options gives identical bytes from any working directory and from a copy at any absolute path; nothing legitimately differs. |
 | N9 | The toolchain reads the image back out. `run`, `disassemble`, and `decompile` accept a native executable in place of a `.nvr` file, and `neura inspect` reports the launcher, the policy, and the image. |
 | N10 | There are two launcher flavors. The default links the platform C library dynamically and everything else statically. `--static` selects a fully static launcher without native interop. |
@@ -70,14 +70,19 @@ These are accepted only with `--native`.
 
 | Option | Meaning |
 | --- | --- |
-| `--allow-fs`, `--allow-fs=prefix,...`, `--allow-net`, `--allow-env`, `--allow-clock`, `--allow-entropy`, `--allow-native` | Record the capability in the policy. Same meaning as for [`neura run`](Tooling.md#build-and-run-executables). |
+| `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, `--deny-all` | Remove the group (every group for `--deny-all`) from the policy. Without any capability option the policy grants every group (N6). |
+| `--allow-fs`, `--allow-fs=prefix,...`, `--allow-net`, `--allow-env`, `--allow-clock`, `--allow-entropy`, `--allow-native` | Grant the group in the policy, which matters after a `--deny` option. Same meaning as for [`neura run`](Tooling.md#build-and-run-executables). |
 | `--max-steps N`, `--max-frames N`, `--max-heap-cells N` | Record a run limit in the policy. Without one, the policy records the default of `neura run`. |
 | `--sealed` | The executable ignores `NEURA_RUN_OPTIONS` (section 6.4). |
 | `--static` | Use the static launcher (section 7.2). |
 | `--target <triple>` | Use the launcher for another target, such as `aarch64-linux-gnu`. The default is the target of the `neura` that is running. |
 | `--launcher <file>` | Use this launcher file instead of searching (section 7.3). |
 
+Capability options apply in command-line order: `--deny-all --allow-net --allow-fs=data` records exactly the network and the files below `data`, and `--allow-net --deny-all` records nothing. `--allow-fs=prefix,...` narrows files to the prefixes, and several lists accumulate until `--deny-fs` or `--deny-all` clears them. A plain `--allow-fs` records every path and drops any list before it, so `--allow-fs=a --allow-fs` records every path and `--allow-fs --allow-fs=a` records only `a`.
+
 A file-system prefix is recorded as written. A relative prefix is resolved when the executable starts, against its working directory, as `neura run` resolves one.
+
+With `--static`, the default policy grants every group except native code, because the static launcher has no native interop. Asking for native code with `--allow-native` is the error in section 4.3, and a `--deny-native` after it cancels the request.
 
 ### 4.3 Errors and notes
 
@@ -92,7 +97,7 @@ Errors are printed as `neura: error: <text>` and exit with status 1. No output f
 | The file is not a launcher | `--native: <file> is not a Neura launcher` |
 | The image needs a newer runtime | `--native: the image is NVR 1.<m>; this launcher runs up to 1.<n>` |
 | The image's native library is for another target (N12) | `--native: the image's native library is for <triple>; the launcher is for <triple>` |
-| `--static` with an image that imports `neura.ffi.*` or has a `NATV` section, or with `--allow-native` | `--static: the image uses native interop, which the static launcher does not provide` |
+| `--static` with an image that imports `neura.ffi.*` or has a `NATV` section, or with an `--allow-native` that no later `--deny-native` or `--deny-all` cancels | `--static: the image uses native interop, which the static launcher does not provide` |
 | `--target` or `--launcher` given twice with different values | `conflicting <option> values` |
 | `--target` names a different target than the launcher's descriptor | `--target: launcher is for <triple>, expected <triple>` |
 | `--static` with a launcher whose descriptor is the default flavor | `--static: <file> is a default launcher` |
@@ -107,7 +112,7 @@ Errors are printed as `neura: error: <text>` and exit with status 1. No output f
 | `--max-frames` above 4,294,967,295 | `--max-frames is too large` |
 | `--allow-fs=` with an empty entry | `--allow-fs= expects a comma-separated list of path prefixes` |
 
-One note is printed to standard error without failing the build: for each capability group whose services the image imports and the policy does not grant, `neura: note: the image uses <group> services; without --allow-<group> they fail with CapabilityDenied`. The executable is still valid: a denied service binds and fails with error 14, as under `neura run`. Granting a capability removes exactly its note.
+One note is printed to standard error without failing the build: for each capability group whose services the image imports and the policy does not grant, `neura: note: the image uses <group> services, which are denied; they fail with CapabilityDenied`. Because every group is granted by default, a note appears only for a group that a `--deny` option or `--static` removed. The executable is still valid: a denied service binds and fails with error 14, as under `neura run`. Granting the group again removes exactly its note.
 
 `neura inspect` reports a file that is not a native executable as `neura: error: <file>: not a native executable (no NEURAEXE footer)` and exits with status 1. A file that holds the launcher descriptor (`NEURA-LAUNCHER-1`) but no footer, such as a bare or stripped launcher, gets the message of section 6.1 instead: `this is a Neura launcher with no program; build one with neura build --native`. A damaged container is reported as `native executable: <reason>`.
 
@@ -189,7 +194,9 @@ Container and load failures are printed as `<program name>: error: <text>` and e
 
 ### 6.3 Capabilities and limits
 
-The policy is the whole grant. A service outside it still binds, and every call returns `CapabilityDenied` (error 14), so the same program behaves the same way under `neura run` without the option.
+The policy is the whole grant, and by default it grants every group. A service outside it still binds, and every call returns `CapabilityDenied` (error 14), so the same program behaves the same way under `neura run` with the matching `--deny` option.
+
+A native executable built without a `--deny-*` option can do whatever the user who runs it can: read and write that user's files, use the network, read the environment, and call native libraries, which run outside Neura's memory-safety and determinism guarantees. Build with `--deny-*` options to give it less, or run it with `NEURA_RUN_OPTIONS` set to a `--deny-*` option (section 6.4) to give a particular run less.
 
 Choosing capabilities at build time fits what a native executable is. Under `neura run`, the person running an image decides what it may touch. A native executable has no runner command line (N5), so the builder decides, and `neura inspect` shows anyone what was decided. The operating system remains the security boundary for whoever starts the file, as for any program; the policy bounds what the Neura program inside can ask for, which still contains a bug or a compromised dependency.
 
@@ -203,13 +210,14 @@ An operator sometimes needs to bound or record a deployed program without rebuil
 | --- | --- |
 | `--max-steps N`, `--max-frames N`, `--max-heap-cells N` | The run uses the smaller of this value and the policy's. A limit can be lowered, never raised. |
 | `--max-tasks N` | Lowers the run's live-task bound for NVR 1.5 task images: the run uses the smaller of this value and the default of 65,536. |
+| `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, `--deny-all` | Removes the group, or every group, from the policy for this run, as the same option does for `neura run`. A group the policy does not grant stays denied. Files with a prefix list lose the list and all files with it. |
 | `--no-gpu`, `--gpu=off` | Accepted as requests for the launcher's CPU execution mode. The launcher has no GPU backend. |
 | `--stats`, `--profile` | As for `neura run`, on standard error. |
 | `--record <file>` | Writes the run's host trace ([NVM](../runtime/NVM.md#determinism-limits-and-observability)). |
 | `--replay <file>` | Answers every host request from the trace. No service runs, so the policy's capabilities are not used. |
 
 - An unset or empty variable has no effect.
-- Any other option, including every `--allow-*`, `--task-quantum`, `--gpu=auto`, and `--gpu=always`, is the start-up error `NEURA_RUN_OPTIONS: <option> is not accepted by a native executable`. The variable cannot widen the policy (N6). `--task-quantum` is refused because the quantum changes how tasks interleave and so the order of their output; N7 admits only settings that restrict or observe a run. The quantum of a native executable is the default 1,024. A missing or non-positive number after a limit is `NEURA_RUN_OPTIONS: expected a positive integer after <option>`, a missing path after `--record` or `--replay` is `NEURA_RUN_OPTIONS: expected a value after <option>`, and giving both is `NEURA_RUN_OPTIONS: --record and --replay cannot be combined`.
+- Any other option, including every `--allow-*` (the variable only restricts), `--task-quantum`, `--gpu=auto`, and `--gpu=always`, is the start-up error `NEURA_RUN_OPTIONS: <option> is not accepted by a native executable`. The variable cannot widen the policy (N6). `--task-quantum` is refused because the quantum changes how tasks interleave and so the order of their output; N7 admits only settings that restrict or observe a run. The quantum of a native executable is the default 1,024. A missing or non-positive number after a limit is `NEURA_RUN_OPTIONS: expected a positive integer after <option>`, a missing path after `--record` or `--replay` is `NEURA_RUN_OPTIONS: expected a value after <option>`, and giving both is `NEURA_RUN_OPTIONS: --record and --replay cannot be combined`.
 - A sealed executable ignores the variable entirely. Sealing suits programs that run with more privilege than the user who sets their environment.
 - A non-sealed executable trusts whoever sets its environment. `--record <file>` creates or replaces any file the process may write, and `--replay <file>` answers host requests from a file of that person's choosing. A trace is written through a new, uniquely named temporary file in the destination directory (created exclusively, never through a symbolic link, and flushed) and renamed over the destination, so a symbolic link at the destination or at a guessed temporary name is replaced or ignored rather than followed. That protects other files from a planted link; it does not restrict where the trace goes. Build with `--sealed` when this trust is not acceptable.
 - A trace recorded this way replays under `neura run --replay` with the extracted image, and a trace recorded by `neura run` replays in the executable, because both run the same image on the same NVM.
@@ -220,7 +228,7 @@ Implementation status: the launcher accepts `--max-tasks`, which can only lower 
 
 ### 6.5 Native libraries
 
-An image with C imports carries its linked library in `NATV` ([Foreign interop](ForeignInterop.md#c-imports)). The executable loads it on the first native call, and only when the policy grants the native capability; otherwise that call fails as it does under `neura run` without `--allow-native`. Libraries a program opens by path with `SymbolLookup.library_lookup` are not bundled. They must exist on the machine that runs the executable, and the page of a program that needs them should say so.
+An image with C imports carries its linked library in `NATV` ([Foreign interop](ForeignInterop.md#c-imports)). The executable loads it on the first native call, and only when the policy grants the native capability; otherwise that call fails as it does under `neura run --deny-native`. Libraries a program opens by path with `SymbolLookup.library_lookup` are not bundled. They must exist on the machine that runs the executable, and the page of a program that needs them should say so.
 
 ## 7. Launchers
 
@@ -291,11 +299,11 @@ CTest entries, with the evidence each gives:
 | --- | --- | --- |
 | `native-build` | Sources, a `.nir`, and a `.nvr` give the same executable for the same options, from another working directory and from a copy at another path. Building twice gives identical bytes. `inspect -o` returns the bytes `neura build` writes. `inspect` of a file that is not a native executable. Every error and note of section 4.3. The default launcher is CPU-only (no Vulkan dependency or text). | Structural, reproducibility |
 | `native-run` | Every runnable example, every driver in `tests/backend/examples`, and every trap program (the test prints how many): standard output, standard error, and status equal those of `neura run`. Arguments such as `--help`, `--`, `--max-steps`, an empty string, and one with spaces reach `main`. | End to end, differential |
-| `native-policy` | Each capability denied by default and allowed when recorded, and its denial note disappearing when it is granted; path prefixes; recorded limits; `NEURA_RUN_OPTIONS` lowering a limit, refusing to raise one, refusing `--allow-fs` and `--task-quantum`, and rejecting malformed values; a sealed executable ignoring the variable. | End to end |
+| `native-policy` | Every capability granted with no option, each denied by its `--deny-*` option and by `--deny-all`, and its denial note appearing only then; `--allow-*` after `--deny-all`; the order of options, including both files corner cases, read back with `inspect`; path prefixes narrowing the default; recorded limits; `NEURA_RUN_OPTIONS` lowering a limit, denying each group as an executable built with that `--deny-*` behaves, refusing every `--allow-*` and `--task-quantum`, and rejecting malformed values; a sealed executable ignoring the variable, `--deny-*` options included. | End to end |
 | `native-replay` | A trace recorded by the executable replays under `neura run`, and the reverse, with identical trace bytes. A symbolic link planted at the destination and at the old temporary name is not followed, and the trace still replays. | Replay, hardening |
 | `native-container` | Every truncation of the payload and footer, a wrong checksum, reserved bits, trailing bytes, a newer container version, a bare launcher, a stripped executable, and crafted payloads (empty or non-UTF-8 file-system prefix, a prefix count or length beyond the payload, an image length that lies, a zero-length payload, a payload offset inside the launcher) each fail at start-up with status 1 and before any host import is invoked. | Exhaustive (truncations), structural |
 | `native-install` | From an installed toolchain, an executable is built, copied to an empty directory with no toolchain on the path, and run. With `--static`, it runs with no shared library available, in a root holding only the executable (no procfs) and in a root with procfs. When no static launcher was built, the test prints `static launcher: NOT BUILT, static checks not run` as a warning. | End to end |
-| `native-c-import` | An image with a `NATV` section runs with the capability recorded and fails as documented without it; a library for another target is a build error. | End to end on Linux x86-64 |
+| `native-c-import` | An image with a `NATV` section runs with the default policy and fails as documented under `--deny-native`; the static launcher's default policy omits native code; a library for another target is a build error. | End to end on Linux x86-64 |
 
 On a platform without a launcher, CMake registers none of these except `native-replay`, without its launcher comparison, and prints a status line naming them.
 
@@ -327,7 +335,6 @@ The existing image tests are the evidence for the image itself. These tests esta
 
 | Area | Open |
 | --- | --- |
-| Narrowing at deployment | Whether `NEURA_RUN_OPTIONS` should also accept options that remove a recorded capability. |
 | Sealing by default | Whether accepting the variable should be the opt-in, with `--sealed` as the default. |
 | `neura run <executable>` | Whether it should offer a way to apply the executable's policy instead of the runner's command line. |
 | Descriptor location | Searching for the descriptor's 16 bytes is simple and format-independent. An ELF section would be more conventional and ties the reader to one format. |

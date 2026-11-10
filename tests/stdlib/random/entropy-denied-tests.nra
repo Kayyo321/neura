@@ -1,8 +1,9 @@
+// test-options: --deny-entropy
 let error = import:Std.Core.Error;
 let randoms = import:Std.Random.Random;
 let test = import:Std.Test;
 
-// Without --allow-entropy, from_entropy fails with CapabilityDenied.
+// With --deny-entropy, from_entropy fails with CapabilityDenied.
 let EntropyDeniedTests = module (
     export let test_from_entropy_is_denied = func() -> void {
         let failure = test.assert_err<randoms.Random>(randoms.from_entropy());

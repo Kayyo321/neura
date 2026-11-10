@@ -80,14 +80,20 @@ void usage(std::ostream& out) {
            "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
            "       neura c-bindings [--linked] [c-options] <header.h>\n"
            "\n"
-           "capabilities: run and test allow only console input and output (and process exit) by\n"
-           "default; a denied host service fails with error 14 (CapabilityDenied).\n"
-           "  --allow-fs[=prefix,...]  files and directories, optionally only below the prefixes\n"
-           "  --allow-net              TCP connections and listeners\n"
-           "  --allow-env              environment variables\n"
-           "  --allow-clock            wall and monotonic clocks and sleeping\n"
-           "  --allow-entropy          operating-system entropy\n"
-           "  --allow-native           native libraries, memory, and calls (unsafe)\n"
+           "capabilities: run and test, and the policy that build --native records, grant every host\n"
+           "service by default: files, network, environment, clock, entropy, and native code. A denied\n"
+           "service fails with error 14 (CapabilityDenied). Options apply in command-line order.\n"
+           "  --deny-fs                files and directories\n"
+           "  --deny-net               TCP connections and listeners\n"
+           "  --deny-env               environment variables\n"
+           "  --deny-clock             wall and monotonic clocks and sleeping\n"
+           "  --deny-entropy           operating-system entropy\n"
+           "  --deny-native            native libraries, memory, and calls\n"
+           "  --deny-all               every group above\n"
+           "  --allow-fs[=prefix,...]  grant files again: every path, or only below the prefixes\n"
+           "  --allow-net, --allow-env, --allow-clock, --allow-entropy, --allow-native\n"
+           "                           grant that group again after a --deny option (native code is unsafe)\n"
+           "  Run an image you do not trust with --deny-all, plus the --allow options it needs.\n"
            "  --record <file>          (run) write every host request and response to a trace\n"
            "  --profile                (run) print the steps each function took\n"
            "  --replay <file>          (run) answer host requests from a trace instead of services\n"
@@ -122,6 +128,13 @@ enum class Command { Check, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble
 constexpr const char* commands =
     "expected check, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, or c-bindings";
 
+neura::nvm::Capabilities granted_capabilities() {
+    neura::nvm::Capabilities capabilities;
+    capabilities.fs = capabilities.net = capabilities.env = capabilities.clock = capabilities.entropy = true;
+    capabilities.native = true;
+    return capabilities;
+}
+
 struct Options {
     Command command = Command::Check;
     bool optimize = true;
@@ -147,9 +160,12 @@ struct Options {
     std::optional<fs::path> output;
     std::vector<std::string> arguments;
     neura::nvm::RunLimits limits;
-    neura::nvm::Capabilities capabilities;
-    // A plain --allow-fs grants every path, whatever prefixes are also given.
-    bool all_paths = false;
+    // The command-line tools start with every group granted; the C++
+    // default of nvm::Capabilities denies every group.
+    neura::nvm::Capabilities capabilities = granted_capabilities();
+    // An explicit --allow-native that is still in effect; the static
+    // launcher cannot honor it.
+    bool allow_native_requested = false;
     std::optional<fs::path> record;
     std::optional<fs::path> replay;
     std::optional<fs::path> each;
@@ -222,21 +238,28 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
     } else if (arg == "--max-heap-cells") {
         options.limits.max_heap_cells = parse_limit(arg, next());
     } else if (arg == "--allow-fs") {
+        // Every path, replacing any earlier prefix list.
         options.capabilities.fs = true;
-        options.all_paths = true;
+        options.capabilities.fs_prefixes.clear();
     } else if (arg.starts_with("--allow-fs=")) {
-        options.capabilities.fs = true;
         auto list = arg.substr(std::string_view("--allow-fs=").size());
+        std::vector<std::string> prefixes;
         for (;;) {
             const auto comma = list.find(',');
             const auto prefix = list.substr(0, comma);
             if (prefix.empty()) {
                 throw std::runtime_error("--allow-fs= expects a comma-separated list of path prefixes");
             }
-            options.capabilities.fs_prefixes.emplace_back(prefix);
+            prefixes.emplace_back(prefix);
             if (comma == std::string_view::npos) break;
             list.remove_prefix(comma + 1);
         }
+        // A list narrows "every path" or "denied" to the listed prefixes and
+        // adds to a list that is already in effect.
+        auto& capabilities = options.capabilities;
+        if (!capabilities.fs) capabilities.fs_prefixes.clear();
+        capabilities.fs = true;
+        capabilities.fs_prefixes.insert(capabilities.fs_prefixes.end(), prefixes.begin(), prefixes.end());
     } else if (arg == "--allow-net") {
         options.capabilities.net = true;
     } else if (arg == "--allow-env") {
@@ -247,6 +270,24 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
         options.capabilities.entropy = true;
     } else if (arg == "--allow-native") {
         options.capabilities.native = true;
+        options.allow_native_requested = true;
+    } else if (arg == "--deny-fs") {
+        options.capabilities.fs = false;
+        options.capabilities.fs_prefixes.clear();
+    } else if (arg == "--deny-net") {
+        options.capabilities.net = false;
+    } else if (arg == "--deny-env") {
+        options.capabilities.env = false;
+    } else if (arg == "--deny-clock") {
+        options.capabilities.clock = false;
+    } else if (arg == "--deny-entropy") {
+        options.capabilities.entropy = false;
+    } else if (arg == "--deny-native") {
+        options.capabilities.native = false;
+        options.allow_native_requested = false;
+    } else if (arg == "--deny-all") {
+        options.capabilities = {};
+        options.allow_native_requested = false;
     } else {
         return false;
     }
@@ -463,9 +504,6 @@ Options read_options(int argc, char** argv) {
     }
     if (runs) options.gpu.read_environment();
     options.gpu.validate();
-    if (options.all_paths) {
-        options.capabilities.fs_prefixes.clear();
-    }
     return options;
 }
 
@@ -654,8 +692,7 @@ void note_denied_imports(const neura::nvr::Image& image, const neura::nvm::Capab
         if (!group.granted && std::ranges::any_of(image.imports, [&](const auto& import) {
             return import.name.starts_with(group.prefix);
         })) {
-            std::cerr << "neura: note: the image uses " << group.flag << " services; without --allow-"
-                      << group.flag << " they fail with CapabilityDenied\n";
+            std::cerr << "neura: note: the image uses " << group.flag << " services, which are denied; they fail with CapabilityDenied\n";
         }
     }
 }
@@ -663,7 +700,7 @@ void note_denied_imports(const neura::nvr::Image& image, const neura::nvm::Capab
 void package_native(const Options& options, std::span<const std::uint8_t> bytes) {
     constexpr const char* static_interop_error =
         "--static: the image uses native interop, which the static launcher does not provide";
-    if (options.static_launcher && options.capabilities.native) throw std::runtime_error(static_interop_error);
+    if (options.static_launcher && options.allow_native_requested) throw std::runtime_error(static_interop_error);
     const auto triple = options.native_target.value_or(neura::nvm::native_target_triple());
     auto prefix = options.executable.parent_path();
     if (prefix.filename() == "bin") prefix = prefix.parent_path();
@@ -699,11 +736,15 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
         throw std::runtime_error("--native: the image's native library is for " + image.native_library->triple +
                                  "; the launcher is for " + descriptor->triple);
     }
-    if (descriptor->flavor == 1 && (options.capabilities.native || image.native_library ||
+    // The static launcher has no native interop, so the default policy it
+    // records grants every group except native code.
+    auto capabilities = options.capabilities;
+    if (descriptor->flavor == 1) capabilities.native = false;
+    if (descriptor->flavor == 1 && (options.allow_native_requested || image.native_library ||
         std::ranges::any_of(image.imports, [](const auto& import) { return import.name.starts_with("neura.ffi."); }))) {
         throw std::runtime_error(static_interop_error);
     }
-    const neura::launcher::Policy policy{options.capabilities, options.limits, options.sealed};
+    const neura::launcher::Policy policy{capabilities, options.limits, options.sealed};
     neura::launcher::write_executable(*options.output, launcher, bytes, policy);
     note_denied_imports(image, policy.capabilities);
 }

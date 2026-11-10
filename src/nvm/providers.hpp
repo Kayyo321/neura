@@ -50,6 +50,11 @@ inline constexpr std::int32_t max_entropy_bytes = 1 << 20;
 // The capability groups a runner grants. The console group and process exit
 // are always available; every other group is denied unless granted. A denied
 // service still binds, and each call returns error 14.
+//
+// The library default is all-denied: an embedder grants each group
+// explicitly. Only the command-line tools (neura run, neura test, and the
+// policy that neura build --native records) start from "every group
+// granted" and take --deny-* options away.
 struct Capabilities {
     bool fs = false;
     // With fs granted and this empty, every path is allowed. Otherwise a

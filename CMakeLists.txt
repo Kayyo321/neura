@@ -441,6 +441,12 @@ if(BUILD_TESTING)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
     endforeach()
     set(neura_native_test_dir "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
+    add_test(NAME backend-capabilities COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/backend-capabilities-tests"
+        "-DMATHOPS=$<TARGET_FILE:neura_test_mathops_shared>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/capabilities.cmake")
     if(TARGET neura_launcher)
         add_test(NAME native-policy COMMAND ${CMAKE_COMMAND}
             "-DNEURA=$<TARGET_FILE:neura>"

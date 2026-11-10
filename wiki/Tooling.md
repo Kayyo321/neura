@@ -61,17 +61,21 @@ Sources can [import prebuilt modules](https://github.com/Kayyo321/neura/wiki/Mod
 
 `run` loads and validates an image, binds its host imports to the runner's services ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services)), and passes the arguments after `--` to the entry function as UTF-8 text. The image needs no source files. The exit status is the `ExitCode` that `main` returns, or the status given to `Std.Program.Process.exit`. A runtime trap prints its reason and source location, when the image has a source map, to standard error and exits with the status of its class, such as 136 for an arithmetic trap or 134 for a message trap ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). Load, bind, and usage errors exit with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` bound a run. For an NVR 1.5 image with a `TRNS` table, `run` and `test` also accept `--max-tasks N` (live tasks, 65,536 by default; exceeding it traps with status 137) and `--task-quantum N` (polls per scheduler turn, 1,024 by default); the compiler does not yet produce such images ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md)). `--stats` prints the run's step count, peak heap cells, host requests, graph, neuron, and edge counts, and image bytes to standard error. `cmake --install build --prefix <dir>` installs the `neura` executable, which contains both the compiler and the runner, and the standard library below `<dir>/share/neura/stdlib`, where the installed tool finds it without any `-I` option.
 
-Console input and output and `Std.Program.Process.exit` are always available. Other host services need a capability option; without it, every call returns the `CapabilityDenied` error:
+Console input and output and `Std.Program.Process.exit` are always available. Every other host service is granted by default: with no capability option, `run`, `test`, and the policy that `build --native` records grant files, the network, environment variables, clocks, entropy, and native code. A `--deny-*` option turns a group off. A denied service still binds, and every call returns the `CapabilityDenied` error (error 14), exactly as if the program had no access:
 
-| Option | Grants |
-| --- | --- |
-| `--allow-fs` | Files and directories ([`Std.Fs`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#112-stdfs)) |
-| `--allow-fs=prefix,...` | Files and directories at or below the listed paths, after resolving symbolic links |
-| `--allow-net` | TCP connections and listeners ([`Std.Net`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#114-stdnet)) |
-| `--allow-env` | Environment variables (`Std.Program.Environment`) |
-| `--allow-clock` | The wall and monotonic clocks and sleeping (`Std.Time.SystemClock`) |
-| `--allow-entropy` | Operating-system entropy (`Std.Random.Random.from_entropy`) |
-| `--allow-native` | Native libraries, memory, and calls ([`Std.DynamicForeign`](https://github.com/Kayyo321/neura/wiki/ForeignInterop)); native code runs outside Neura's safety guarantees |
+| Group | Services | Turn it off | Grant it again |
+| --- | --- | --- | --- |
+| Files | Files and directories ([`Std.Fs`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#112-stdfs)) | `--deny-fs` | `--allow-fs`, or `--allow-fs=prefix,...` for only the paths at or below the listed prefixes, after resolving symbolic links |
+| Network | TCP connections and listeners ([`Std.Net`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#114-stdnet)) | `--deny-net` | `--allow-net` |
+| Environment | Environment variables (`Std.Program.Environment`) | `--deny-env` | `--allow-env` |
+| Clock | The wall and monotonic clocks and sleeping (`Std.Time.SystemClock`) | `--deny-clock` | `--allow-clock` |
+| Entropy | Operating-system entropy (`Std.Random.Random.from_entropy`) | `--deny-entropy` | `--allow-entropy` |
+| Native | Native libraries, memory, and calls ([`Std.DynamicForeign`](https://github.com/Kayyo321/neura/wiki/ForeignInterop)); native code runs outside Neura's memory-safety and determinism guarantees | `--deny-native` | `--allow-native` |
+| Every group above | | `--deny-all` | |
+
+Capability options apply in command-line order, and a later option for a group overrides an earlier one. `--deny-all --allow-net --allow-fs=data` grants exactly the network and the files at or below `data`; `--allow-net --deny-all` grants nothing. The `--allow-*` options matter after a `--deny-*` option, and they keep their old meaning for files: `--allow-fs=prefix,...` narrows the default, so only the listed prefixes are reachable. Several lists accumulate (`--allow-fs=a --allow-fs=b` reaches `a` and `b`) until `--deny-fs` or `--deny-all` clears them. A plain `--allow-fs` grants every path again and replaces any list before it, so `--allow-fs=a --allow-fs` reaches every path. A list after it narrows it, so `--allow-fs --allow-fs=a` reaches only `a`.
+
+> **Security.** Nothing is denied by default. An image runs with everything the user who starts it can do: it can read, write, and delete their files, open connections, read their environment, and load native libraries that run outside Neura's guarantees. To run an image you do not trust, pass `--deny-all` and add only the `--allow-*` options it needs, for example `neura run --deny-all --allow-fs=data image.nvr`. The same holds for `neura test` and for the policy of an executable built with `neura build --native`.
 
 `neura run --record trace.txt` writes every host request and response, and how the run ended, to a text trace. `neura run --replay trace.txt` runs the image answering each request from the trace instead of calling any service, so it needs no capability, and reproduces the console output of the recorded run. A replay whose requests differ from the trace stops with status 1 and names the first difference. [NVM](https://github.com/Kayyo321/neura/wiki/NVM#determinism-limits-and-observability) describes the trace format.
 
@@ -80,16 +84,16 @@ Console input and output and `Std.Program.Process.exit` are always available. Ot
 ### Package a native executable
 
 ```sh
-neura build --native --allow-fs=data --max-steps 1000000 hello.nra -o hello
+neura build --native --deny-all --allow-fs=data --max-steps 1000000 hello.nra -o hello
 ./hello --help
 neura inspect hello -o hello.nvr
 ```
 
-`build --native` packages sources, a `.nir`, or a validated `.nvr` with a CPU launcher. The image and launcher bytes are preserved. Every argument to the executable reaches the program, including `--help` and `--`. The build records the capability options and the three run limits above. Relative file-system prefixes are resolved from the executable's working directory.
+`build --native` packages sources, a `.nir`, or a validated `.nvr` with a CPU launcher. The image and launcher bytes are preserved. Every argument to the executable reaches the program, including `--help` and `--`. The build records the capability policy and the three run limits above. With no capability option the policy grants every group, so the executable can do whatever the user who runs it can; build with `--deny-*` options (the example denies everything but the files below `data`) to give it less. Relative file-system prefixes are resolved from the executable's working directory.
 
-Set `NEURA_RUN_OPTIONS` to space- or tab-separated options to lower a recorded limit or to select `--stats`, `--profile`, `--record <file>`, or `--replay <file>`. It also accepts `--max-tasks N`, which can only lower the task bound, and `--no-gpu` or `--gpu=off`, which name the CPU evaluation the launcher always uses. `--task-quantum` is rejected, because it changes the interleaving and so the output order of tasks; a native executable uses the default quantum of 1,024. The variable has no quoting and cannot widen the build policy. A build with `--sealed` ignores it. Without `--sealed`, an executable trusts whoever sets the variable: `--record` can create or replace any file the process may write, and `--replay` answers host requests from a file of their choosing.
+Set `NEURA_RUN_OPTIONS` to space- or tab-separated options to lower a recorded limit, to deny a group with `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, or `--deny-all`, or to select `--stats`, `--profile`, `--record <file>`, or `--replay <file>`. It also accepts `--max-tasks N`, which can only lower the task bound, and `--no-gpu` or `--gpu=off`, which name the CPU evaluation the launcher always uses. `--task-quantum` is rejected, because it changes the interleaving and so the output order of tasks; a native executable uses the default quantum of 1,024. The variable has no quoting and cannot widen the build policy: every `--allow-*` option is rejected. A build with `--sealed` ignores it, `--deny-*` options included. Without `--sealed`, an executable trusts whoever sets the variable: `--record` can create or replace any file the process may write, and `--replay` answers host requests from a file of their choosing.
 
-`--static` selects the fully static flavor, which excludes native interop. Set the CMake option `NEURA_STATIC_LAUNCHER` to `ON` to require that flavor or `OFF` to disable it. `AUTO` builds it when a static C library is available. Linux launchers install below `lib/neura/launchers/<triple>/`. Use `--target <triple>` to choose an installed ELF target or `--launcher <file>` to supply the launcher. Linux x86-64 is the verified target.
+`--static` selects the fully static flavor, which excludes native interop, so the policy it records grants every group except native code and `--static --allow-native` is an error. Set the CMake option `NEURA_STATIC_LAUNCHER` to `ON` to require that flavor or `OFF` to disable it. `AUTO` builds it when a static C library is available. Linux launchers install below `lib/neura/launchers/<triple>/`. Use `--target <triple>` to choose an installed ELF target or `--launcher <file>` to supply the launcher. Linux x86-64 is the verified target.
 
 `inspect` reports the launcher, the recorded policy, and the image. A file that is not a native executable is reported as `not a native executable (no NEURAEXE footer)` with status 1. Its `-o` option extracts the original image bytes. `run`, `disassemble`, and `decompile` also accept a packaged executable. `neura run` uses the supplied command-line policy. Run the file directly to apply the recorded policy. [Native executable format and contract](https://github.com/Kayyo321/neura/blob/main/docs/lang/Standalone.md)
 

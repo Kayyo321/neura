@@ -1,0 +1,203 @@
+cmake_minimum_required(VERSION 3.20)
+
+# Host service groups are granted by default; --deny-* turns a group off.
+#
+#   test   one test per group (tests/backend/capabilities/service-tests.nra)
+#          passes when the group is granted and fails with CapabilityDenied
+#          when it is not.
+#   run    a program that touches every group (tests/native/policy-capabilities.nra),
+#          used for the order of capability options and the files corner cases.
+#   parse  --deny-* is accepted exactly where --allow-* is accepted.
+foreach(variable IN ITEMS NEURA SOURCE_DIR TEST_DIR MATHOPS)
+    if(NOT DEFINED ${variable})
+        message(FATAL_ERROR "Provide NEURA, SOURCE_DIR, TEST_DIR, and MATHOPS")
+    endif()
+endforeach()
+file(REMOVE_RECURSE "${TEST_DIR}")
+set(launch_dir "${TEST_DIR}/launch-dir")
+set(absolute_prefix "${TEST_DIR}/absolute")
+file(MAKE_DIRECTORY "${launch_dir}/relative" "${launch_dir}/relative-neighbor" "${absolute_prefix}")
+file(WRITE "${launch_dir}/relative/inside.txt" "relative data")
+file(WRITE "${absolute_prefix}/inside.txt" "absolute data")
+file(WRITE "${launch_dir}/relative-neighbor/outside.txt" "neighbor data")
+set(ENV{NEURA_NATIVE_POLICY_TEST} "environment data")
+unset(ENV{NEURA_RUN_OPTIONS})
+
+function(invoke prefix directory)
+    execute_process(COMMAND ${ARGN} WORKING_DIRECTORY "${directory}"
+        RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+    foreach(field IN ITEMS status stdout stderr)
+        set(${prefix}_${field} "${${field}}" PARENT_SCOPE)
+    endforeach()
+endfunction()
+
+set(groups fs net env clock entropy native)
+
+# neura test: the groups in `granted` pass, the others fail with a denial.
+set(service_tests "${SOURCE_DIR}/tests/backend/capabilities/service-tests.nra")
+function(expect_test_groups granted)
+    invoke(result "${launch_dir}" "${NEURA}" test ${ARGN} "${service_tests}")
+    set(failures 0)
+    foreach(group IN LISTS groups)
+        if(group IN_LIST granted)
+            if(NOT result_stdout MATCHES "(^|\n)PASS ServiceTests[.]test_${group}\n")
+                message(FATAL_ERROR "neura test ${ARGN}: ${group} should be granted\n${result_stdout}${result_stderr}")
+            endif()
+        else()
+            math(EXPR failures "${failures} + 1")
+            if(NOT result_stdout MATCHES "(^|\n)FAIL ServiceTests[.]test_${group}: [^\n]*[Dd]enied")
+                message(FATAL_ERROR "neura test ${ARGN}: ${group} should be denied\n${result_stdout}${result_stderr}")
+            endif()
+        endif()
+    endforeach()
+    list(LENGTH granted granted_count)
+    if(NOT result_stdout MATCHES "(^|\n)6 test[(]s[)], ${granted_count} passed, ${failures} failed\n")
+        message(FATAL_ERROR "neura test ${ARGN}: unexpected totals\n${result_stdout}")
+    endif()
+    if(failures EQUAL 0 AND NOT result_status STREQUAL "0")
+        message(FATAL_ERROR "neura test ${ARGN} returned ${result_status}\n${result_stdout}${result_stderr}")
+    endif()
+    if(NOT failures EQUAL 0 AND result_status STREQUAL "0")
+        message(FATAL_ERROR "neura test ${ARGN} should report failures\n${result_stdout}")
+    endif()
+endfunction()
+
+expect_test_groups("${groups}")
+expect_test_groups("${groups}" --allow-fs --allow-net --allow-env --allow-clock --allow-entropy --allow-native)
+expect_test_groups("" --deny-all)
+expect_test_groups("" --allow-net --allow-fs --deny-all)
+expect_test_groups("net" --deny-all --allow-net)
+# The fs test probes a file outside `data`, so a prefix that excludes it still
+# denies it; a prefix that names it grants it.
+expect_test_groups("net" --deny-all --allow-net --allow-fs=data)
+expect_test_groups("fs;net" --deny-all --allow-net --allow-fs=capability-probe-does-not-exist.txt)
+expect_test_groups("net;env;clock;entropy;native" --allow-fs=data)
+expect_test_groups("fs;net;env;clock;entropy;native" --deny-all --allow-fs --allow-net --allow-env --allow-clock
+    --allow-entropy --allow-native)
+foreach(group IN LISTS groups)
+    set(others ${groups})
+    list(REMOVE_ITEM others "${group}")
+    expect_test_groups("${others}" "--deny-${group}")
+    expect_test_groups("${groups}" "--deny-${group}" "--allow-${group}")
+    expect_test_groups("${others}" "--allow-${group}" "--deny-${group}")
+    expect_test_groups("${group}" --deny-all "--allow-${group}")
+    expect_test_groups("" "--allow-${group}" --deny-all)
+endforeach()
+
+# neura run: each group answers the same way as under neura test.
+set(program "${TEST_DIR}/policy-capabilities.nvr")
+invoke(built "${TEST_DIR}" "${NEURA}" build "${SOURCE_DIR}/tests/native/policy-capabilities.nra" -o "${program}")
+if(NOT built_status STREQUAL "0")
+    message(FATAL_ERROR "building the capability program failed\n${built_stdout}${built_stderr}")
+endif()
+
+# Runs the program and compares each group's answer. `granted` names the
+# groups that answer, plus `fs-all` for every path or `fs-prefixes` for the
+# files below `relative` and the absolute prefix only.
+function(expect_run_groups granted)
+    set(relative denied)
+    set(absolute denied)
+    set(neighbor denied)
+    if("fs-all" IN_LIST granted OR "fs-prefixes" IN_LIST granted)
+        set(relative "relative data")
+        set(absolute "absolute data")
+    endif()
+    if("fs-all" IN_LIST granted)
+        set(neighbor "neighbor data")
+    endif()
+    if("fs-neighbor" IN_LIST granted)
+        set(neighbor "neighbor data")
+    endif()
+    set(expected "fs-relative: ${relative}\nfs-absolute: ${absolute}\nfs-neighbor: ${neighbor}\n")
+    foreach(group IN ITEMS net env clock entropy)
+        set(value denied)
+        if(group IN_LIST granted)
+            set(value allowed)
+            if(group STREQUAL "env")
+                set(value "environment data")
+            endif()
+        endif()
+        string(APPEND expected "${group}: ${value}\n")
+    endforeach()
+    invoke(result "${launch_dir}" "${NEURA}" run --no-gpu ${ARGN} "${program}" -- "${MATHOPS}" "${absolute_prefix}/inside.txt")
+    if("native" IN_LIST granted)
+        string(APPEND expected "native: allowed\n")
+        if(NOT result_status STREQUAL "0")
+            message(FATAL_ERROR "neura run ${ARGN}: native should be granted\n${result_stdout}${result_stderr}")
+        endif()
+    elseif(NOT result_status STREQUAL "134" OR NOT result_stderr MATCHES "native access denied")
+        message(FATAL_ERROR "neura run ${ARGN}: native should be denied\n${result_stdout}${result_stderr}")
+    endif()
+    if(NOT result_stdout STREQUAL expected)
+        message(FATAL_ERROR "neura run ${ARGN}: expected\n${expected}got\n${result_stdout}${result_stderr}")
+    endif()
+endfunction()
+
+set(everything fs-all net env clock entropy native)
+expect_run_groups("${everything}")
+expect_run_groups("" --deny-all)
+foreach(group IN LISTS groups)
+    set(others ${everything})
+    if(group STREQUAL "fs")
+        list(REMOVE_ITEM others fs-all)
+    else()
+        list(REMOVE_ITEM others "${group}")
+    endif()
+    expect_run_groups("${others}" "--deny-${group}")
+    set(only "${group}")
+    if(group STREQUAL "fs")
+        set(only fs-all)
+    endif()
+    expect_run_groups("${only}" --deny-all "--allow-${group}")
+endforeach()
+
+# Capability options apply in command-line order.
+expect_run_groups("net;fs-prefixes" --deny-all --allow-net "--allow-fs=${absolute_prefix},relative")
+expect_run_groups("" --allow-net --deny-all)
+expect_run_groups("" --allow-fs --deny-all)
+expect_run_groups("${everything}" --deny-net --allow-net)
+expect_run_groups("fs-all;env;clock;entropy;native" --allow-net --deny-net)
+
+# Files: a list narrows the default and a list that follows another list adds
+# to it. A plain --allow-fs that follows a list grants every path, and one that
+# precedes a list is narrowed by it. --deny-fs and --deny-all clear any list.
+set(narrowed "--allow-fs=${absolute_prefix},relative")
+set(others net env clock entropy native)
+expect_run_groups("${others};fs-prefixes" ${narrowed})
+expect_run_groups("${others};fs-all" ${narrowed} --allow-fs)
+expect_run_groups("${others};fs-prefixes" --allow-fs ${narrowed})
+expect_run_groups("${others};fs-prefixes;fs-neighbor" ${narrowed} --allow-fs=relative-neighbor)
+expect_run_groups("${others};fs-prefixes" --allow-fs=relative "--allow-fs=${absolute_prefix}")
+expect_run_groups("${others}" ${narrowed} --deny-fs)
+expect_run_groups("${others};fs-prefixes" --allow-fs=relative-neighbor --deny-fs ${narrowed})
+expect_run_groups("${others};fs-prefixes" --allow-fs=relative-neighbor --deny-all ${narrowed} --allow-net --allow-env
+    --allow-clock --allow-entropy --allow-native)
+
+# --deny-* is accepted exactly where --allow-* is. Every command that refuses
+# --allow-* refuses --deny-* with the same error, naming the option.
+set(hello "${SOURCE_DIR}/examples/hello-world/hello-world.nra")
+foreach(command IN ITEMS check "docs" emit-ir inspect disassemble assemble decompile c-bindings)
+    foreach(suffix IN ITEMS fs net env clock entropy native all)
+        invoke(allowed "${TEST_DIR}" "${NEURA}" ${command} "--allow-${suffix}" "${hello}")
+        invoke(denied "${TEST_DIR}" "${NEURA}" ${command} "--deny-${suffix}" "${hello}")
+        string(REPLACE "--allow-${suffix}" "--deny-${suffix}" allowed_stderr "${allowed_stderr}")
+        if(suffix STREQUAL "all")
+            # There is no --allow-all: both options are unknown to these commands.
+            if(NOT denied_status STREQUAL "1" OR NOT denied_stderr STREQUAL "neura: error: unknown option: --deny-all\n")
+                message(FATAL_ERROR "${command} --deny-all should be an unknown option\n${denied_stderr}")
+            endif()
+        elseif(NOT denied_status STREQUAL allowed_status OR NOT denied_stderr STREQUAL allowed_stderr OR
+               allowed_status STREQUAL "0")
+            message(FATAL_ERROR "${command} --deny-${suffix} should fail like --allow-${suffix}\n"
+                "allow (${allowed_status}): ${allowed_stderr}\ndeny (${denied_status}): ${denied_stderr}")
+        endif()
+    endforeach()
+endforeach()
+foreach(suffix IN ITEMS fs net env clock entropy native all)
+    invoke(denied "${TEST_DIR}" "${NEURA}" build "--deny-${suffix}" "${hello}" -o "${TEST_DIR}/rejected.nvr")
+    if(NOT denied_status STREQUAL "1" OR
+       NOT denied_stderr STREQUAL "neura: error: --deny-${suffix} applies only with --native\n" OR
+       EXISTS "${TEST_DIR}/rejected.nvr")
+        message(FATAL_ERROR "build --deny-${suffix} without --native should be rejected\n${denied_stderr}")
+    endif()
+endforeach()

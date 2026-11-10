@@ -226,7 +226,7 @@ Every interaction with the outside world is a host service with a name, a versio
 
 The exact signatures are in [NVM](../runtime/NVM.md#host-services). The retired `neura.test.assert` and `neura.test.assert_equal_int32` services are no longer registered.
 
-- **Capabilities.** `neura run` and `neura test` allow only the console group and `neura.process.exit` by default. `--allow-fs`, `--allow-net`, `--allow-env`, `--allow-clock`, `--allow-entropy`, and `--allow-native` enable groups; `--allow-fs` takes an optional list of path prefixes. A denied service still binds, and each call returns error 14.
+- **Capabilities.** `neura run` and `neura test` grant every group by default: files, network, environment, clock, entropy, and native code, as well as the console group and `neura.process.exit`. `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, and `--deny-all` turn groups off; `--allow-*` options grant a group again, and `--allow-fs` takes an optional list of path prefixes that narrows files to them. Options apply in command-line order. A denied service still binds, and each call returns error 14. The library default of `nvm::Capabilities` is all-denied: an embedder grants each group explicitly.
 - **Replay.** The NVM library already records and replays host interactions (`nvm::record`, `nvm::replay`). `neura run --record file` and `--replay file` expose that. Tests of I/O, time, and entropy run under replay.
 - **Ordering.** `neura.fs.list` returns names sorted by their UTF-8 bytes. The host sorts.
 - Host IDs are opaque `int64` values that the library wraps in classes and never exposes.

@@ -133,7 +133,7 @@ Format strings are checked at runtime and may come from any string expression. I
 
 ## Host services and capabilities
 
-Everything that reaches outside the program goes through a named, versioned host service ([NVM](../runtime/NVM.md#host-services)). `neura run` and `neura test` allow the console and process exit by default; files, the network, environment variables, clocks, and entropy need `--allow-fs`, `--allow-net`, `--allow-env`, `--allow-clock`, and `--allow-entropy` ([Tooling](Tooling.md#build-and-run-executables)). Without the capability a call returns an `Io` error of kind `CapabilityDenied`. `neura run --record` and `--replay` capture and replay every host interaction, which makes programs that use time, entropy, files, or sockets reproducible.
+Everything that reaches outside the program goes through a named, versioned host service ([NVM](../runtime/NVM.md#host-services)). `neura run` and `neura test` grant every host service by default: files, the network, environment variables, clocks, and entropy work with no option. `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, and `--deny-all` turn groups off ([Tooling](Tooling.md#build-and-run-executables)). A call to a denied service returns an `Io` error of kind `CapabilityDenied`. `neura run --record` and `--replay` capture and replay every host interaction, which makes programs that use time, entropy, files, or sockets reproducible.
 
 A host resource (`File`, `TcpStream`, `TcpListener`) is closed explicitly with `close()`. When a run ends, the runner closes whatever the program left open; reclaiming an unreachable resource object does not close it.
 

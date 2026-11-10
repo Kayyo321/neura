@@ -74,52 +74,187 @@ function(check_capabilities executable)
     endif()
 endfunction()
 
-build(--native "${capability_image}" -o default)
-set(expected_notes "")
-foreach(group IN LISTS groups)
-    string(APPEND expected_notes
-        "neura: note: the image uses ${group} services; without --allow-${group} they fail with CapabilityDenied\n")
-endforeach()
-if(NOT build_notes STREQUAL expected_notes)
-    message(FATAL_ERROR "expected the six denial notes\n${build_notes}")
-endif()
-check_capabilities(default)
-
 function(denial_notes granted result)
     set(notes "")
     foreach(group IN LISTS groups)
         if(NOT group IN_LIST granted)
             string(APPEND notes
-                "neura: note: the image uses ${group} services; without --allow-${group} they fail with CapabilityDenied\n")
+                "neura: note: the image uses ${group} services, which are denied; they fail with CapabilityDenied\n")
         endif()
     endforeach()
     set(${result} "${notes}" PARENT_SCOPE)
 endfunction()
 
+# Nothing is denied by default: every group is granted, there is nothing to
+# note, and the image can use every service.
+build(--native "${capability_image}" -o default)
+if(NOT build_notes STREQUAL "")
+    message(FATAL_ERROR "a build with no capability option should print no notes\n${build_notes}")
+endif()
+check_capabilities(default ${groups})
+
+# --deny-all denies every group; each group's note appears.
+build(--native --deny-all "${capability_image}" -o denied-all)
+denial_notes("" expected_notes)
+if(NOT build_notes STREQUAL expected_notes)
+    message(FATAL_ERROR "expected the six denial notes\n${build_notes}")
+endif()
+check_capabilities(denied-all)
+
 foreach(group IN LISTS groups)
-    build(--native "--allow-${group}" "${capability_image}" -o "only-${group}")
+    # Denying one group leaves the other five granted and notes only that one.
+    set(others ${groups})
+    list(REMOVE_ITEM others "${group}")
+    build(--native "--deny-${group}" "${capability_image}" -o "deny-${group}")
+    check_capabilities("deny-${group}" ${others})
+    denial_notes("${others}" expected_notes)
+    if(NOT build_notes STREQUAL expected_notes)
+        message(FATAL_ERROR "--deny-${group} should note only the ${group} group\n${build_notes}")
+    endif()
+
+    # --allow after --deny-all grants exactly that group.
+    build(--native --deny-all "--allow-${group}" "${capability_image}" -o "only-${group}")
     check_capabilities("only-${group}" "${group}")
-    # Granting a capability removes exactly its note.
     denial_notes("${group}" expected_notes)
     if(NOT build_notes STREQUAL expected_notes)
-        message(FATAL_ERROR "--allow-${group} should remove only the ${group} note\n${build_notes}")
+        message(FATAL_ERROR "--deny-all --allow-${group} should remove only the ${group} note\n${build_notes}")
     endif()
 endforeach()
 
+# The --allow options are still accepted without a --deny option.
 build(--native --allow-fs --allow-net --allow-env --allow-clock --allow-entropy --allow-native
       "${capability_image}" -o everything)
 if(NOT build_notes STREQUAL "")
     message(FATAL_ERROR "granting every capability should print no notes\n${build_notes}")
 endif()
+check_capabilities(everything ${groups})
 
 # The relative prefix is absent in the build directory. Its sibling shares
 # the same leading characters but falls outside the allowed path component.
-build(--native "--allow-fs=${absolute_prefix},relative" "${capability_image}" -o prefixed)
+build(--native --deny-all "--allow-fs=${absolute_prefix},relative" "${capability_image}" -o prefixed)
 check_capabilities(prefixed fs-prefixes)
 denial_notes("fs" expected_notes)
 if(NOT build_notes STREQUAL expected_notes)
     message(FATAL_ERROR "--allow-fs=prefixes should remove the fs note\n${build_notes}")
 endif()
+
+# --allow-fs=prefixes narrows the default grant of files and leaves the other
+# groups granted.
+build(--native "--allow-fs=${absolute_prefix},relative" "${capability_image}" -o narrowed)
+set(others ${groups})
+list(REMOVE_ITEM others fs)
+check_capabilities(narrowed fs-prefixes ${others})
+if(NOT build_notes STREQUAL "")
+    message(FATAL_ERROR "narrowing files keeps them granted, so no note\n${build_notes}")
+endif()
+
+# Capability options apply in command-line order. The policy is read back with
+# `neura inspect`.
+function(inspect_capabilities expected)
+    build(--native ${ARGN} "${SOURCE_DIR}/examples/hello-world/hello-world.nra" -o order-case)
+    invoke(inspected "${TEST_DIR}" "${NEURA}" inspect "${TEST_DIR}/order-case")
+    if(NOT inspected_status STREQUAL "0" OR NOT inspected_stdout MATCHES "(^|\n)capabilities: ([^\n]*)\n")
+        message(FATAL_ERROR "inspect failed for ${ARGN}\n${inspected_stdout}${inspected_stderr}")
+    endif()
+    if(NOT CMAKE_MATCH_2 STREQUAL "${expected}")
+        message(FATAL_ERROR "${ARGN} should record 'capabilities: ${expected}', got '${CMAKE_MATCH_2}'")
+    endif()
+endfunction()
+set(everything_line "console, process exit, files, network, environment, clock, entropy, native")
+inspect_capabilities("${everything_line}")
+inspect_capabilities("console, process exit" --deny-all)
+inspect_capabilities("console, process exit, files (data), network" --deny-all --allow-net --allow-fs=data)
+inspect_capabilities("console, process exit" --allow-net --deny-all)
+inspect_capabilities("console, process exit, network, environment, clock, entropy, native" --deny-fs)
+inspect_capabilities("console, process exit, files, environment, clock, entropy, native" --deny-net)
+inspect_capabilities("console, process exit, files, network, clock, entropy, native" --deny-env)
+inspect_capabilities("console, process exit, files, network, environment, entropy, native" --deny-clock)
+inspect_capabilities("console, process exit, files, network, environment, clock, native" --deny-entropy)
+inspect_capabilities("console, process exit, files, network, environment, clock, entropy" --deny-native)
+# A deny followed by an allow of the same group grants it again, and the
+# reverse order denies it.
+inspect_capabilities("${everything_line}" --deny-net --allow-net)
+inspect_capabilities("console, process exit, files, environment, clock, entropy, native" --allow-net --deny-net)
+# Files: a list narrows the default, a plain --allow-fs after it widens to every
+# path, a plain --allow-fs before it is narrowed, and lists accumulate until a
+# --deny-fs or --deny-all clears them.
+inspect_capabilities("console, process exit, files (a), network, environment, clock, entropy, native" --allow-fs=a)
+inspect_capabilities("${everything_line}" --allow-fs=a --allow-fs)
+inspect_capabilities("console, process exit, files (a), network, environment, clock, entropy, native"
+    --allow-fs --allow-fs=a)
+inspect_capabilities("console, process exit, files (a, b), network, environment, clock, entropy, native"
+    --allow-fs=a --allow-fs=b)
+inspect_capabilities("console, process exit, files (b), network, environment, clock, entropy, native"
+    --allow-fs=a --deny-fs --allow-fs=b)
+inspect_capabilities("console, process exit, files (b), network, environment, clock, entropy, native"
+    --allow-fs=a --deny-all --allow-fs=b --allow-net --allow-env --allow-clock --allow-entropy --allow-native)
+inspect_capabilities("console, process exit, network, environment, clock, entropy, native" --allow-fs=a --deny-fs)
+
+# NEURA_RUN_OPTIONS on a launcher that is not sealed can only restrict, so it
+# accepts the --deny options. The restricted run must behave exactly like an
+# executable built with the same denial.
+function(restricted_by_environment settings built_with)
+    set(ENV{NEURA_RUN_OPTIONS} "${settings}")
+    invoke(restricted "${launch_dir}" "${TEST_DIR}/default" "${MATHOPS}" "${absolute_prefix}/inside.txt")
+    unset(ENV{NEURA_RUN_OPTIONS})
+    invoke(reference "${launch_dir}" "${TEST_DIR}/${built_with}" "${MATHOPS}" "${absolute_prefix}/inside.txt")
+    # A trap names the program; the two executables have different names.
+    string(REGEX REPLACE "(^|\n)[^\n]+: trap:" "\\1<program>: trap:" restricted_stderr "${restricted_stderr}")
+    string(REGEX REPLACE "(^|\n)[^\n]+: trap:" "\\1<program>: trap:" reference_stderr "${reference_stderr}")
+    if(NOT restricted_status STREQUAL reference_status OR NOT restricted_stdout STREQUAL reference_stdout OR
+       NOT restricted_stderr STREQUAL reference_stderr)
+        message(FATAL_ERROR "NEURA_RUN_OPTIONS='${settings}' should behave like an executable built with ${built_with}\n"
+            "environment (${restricted_status}): ${restricted_stdout}${restricted_stderr}\n"
+            "built (${reference_status}): ${reference_stdout}${reference_stderr}")
+    endif()
+endfunction()
+restricted_by_environment("--deny-fs" deny-fs)
+restricted_by_environment("--deny-net" deny-net)
+restricted_by_environment("--deny-env" deny-env)
+restricted_by_environment("--deny-clock" deny-clock)
+restricted_by_environment("--deny-entropy" deny-entropy)
+restricted_by_environment("--deny-native" deny-native)
+restricted_by_environment("--deny-all" denied-all)
+build(--native --deny-net --deny-env "${capability_image}" -o deny-env-net)
+restricted_by_environment("--deny-net\t--deny-env" deny-env-net)
+# Several settings, a --deny repeated, and an observing option together.
+restricted_by_environment("--deny-fs --deny-fs --max-steps 100000000\t--deny-clock --deny-net --deny-env --deny-entropy --deny-native"
+    denied-all)
+
+# NEURA_RUN_OPTIONS still cannot widen the policy: --allow-* is refused for the
+# executable that denies everything as well.
+foreach(group IN LISTS groups)
+    set(ENV{NEURA_RUN_OPTIONS} "--allow-${group}")
+    invoke(widened "${launch_dir}" "${TEST_DIR}/denied-all" "${MATHOPS}" "${absolute_prefix}/inside.txt")
+    unset(ENV{NEURA_RUN_OPTIONS})
+    if(NOT widened_status STREQUAL "1" OR NOT widened_stdout STREQUAL "" OR
+       NOT widened_stderr MATCHES ": error: NEURA_RUN_OPTIONS: --allow-${group} is not accepted by a native executable\n$")
+        message(FATAL_ERROR "NEURA_RUN_OPTIONS=--allow-${group} must stay a start-up error\n${widened_stdout}${widened_stderr}")
+    endif()
+endforeach()
+
+# A sealed executable ignores the variable, --deny options included, so it
+# keeps the policy it was built with.
+build(--native --sealed "${capability_image}" -o sealed-default)
+build(--native --sealed --deny-net "${capability_image}" -o sealed-no-net)
+foreach(settings IN ITEMS "--deny-all" "--deny-fs --deny-native" "--allow-fs --allow-net")
+    set(ENV{NEURA_RUN_OPTIONS} "${settings}")
+    invoke(sealed_all "${launch_dir}" "${TEST_DIR}/sealed-default" "${MATHOPS}" "${absolute_prefix}/inside.txt")
+    invoke(sealed_none "${launch_dir}" "${TEST_DIR}/sealed-no-net" "${MATHOPS}" "${absolute_prefix}/inside.txt")
+    unset(ENV{NEURA_RUN_OPTIONS})
+    invoke(plain_all "${launch_dir}" "${TEST_DIR}/default" "${MATHOPS}" "${absolute_prefix}/inside.txt")
+    invoke(plain_no_net "${launch_dir}" "${TEST_DIR}/deny-net" "${MATHOPS}" "${absolute_prefix}/inside.txt")
+    if(NOT sealed_all_status STREQUAL "0" OR NOT sealed_all_stdout STREQUAL plain_all_stdout OR
+       NOT sealed_all_stderr STREQUAL "" OR NOT sealed_none_status STREQUAL "0" OR
+       NOT sealed_none_stdout STREQUAL plain_no_net_stdout OR NOT sealed_none_stderr STREQUAL "")
+        message(FATAL_ERROR "a sealed executable should ignore NEURA_RUN_OPTIONS='${settings}'\n"
+            "${sealed_all_stdout}${sealed_all_stderr}${sealed_none_stdout}${sealed_none_stderr}")
+    endif()
+endforeach()
+if(NOT plain_all_stdout MATCHES "net: allowed\n" OR NOT plain_no_net_stdout MATCHES "net: denied\n")
+    message(FATAL_ERROR "the reference executables should differ in the network\n${plain_all_stdout}${plain_no_net_stdout}")
+endif()
+
 
 set(ENV{NEURA_RUN_OPTIONS} "--allow-fs")
 invoke(refused "${launch_dir}" "${TEST_DIR}/default" "${MATHOPS}" "${absolute_prefix}/inside.txt")

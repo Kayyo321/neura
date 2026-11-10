@@ -44,7 +44,10 @@ constexpr std::string_view toolchain_version = "development";
     return bytes;
 }();
 
-neura::runner::RunOptions run_options(const neura::launcher::Policy& policy) {
+// Reads NEURA_RUN_OPTIONS. The variable can only restrict or observe: a
+// --deny option removes a group from `capabilities`, which starts as the
+// policy's grant, and no option adds one.
+neura::runner::RunOptions run_options(const neura::launcher::Policy& policy, neura::nvm::Capabilities& capabilities) {
     neura::runner::RunOptions options;
     options.limits = policy.limits;
     if (policy.sealed) return options;
@@ -79,6 +82,21 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy) {
             options.limits.max_heap_cells = std::min(options.limits.max_heap_cells, limit(flag));
         } else if (flag == "--max-tasks") {
             options.limits.max_tasks = std::min(options.limits.max_tasks, limit(flag));
+        } else if (flag == "--deny-fs") {
+            capabilities.fs = false;
+            capabilities.fs_prefixes.clear();
+        } else if (flag == "--deny-net") {
+            capabilities.net = false;
+        } else if (flag == "--deny-env") {
+            capabilities.env = false;
+        } else if (flag == "--deny-clock") {
+            capabilities.clock = false;
+        } else if (flag == "--deny-entropy") {
+            capabilities.entropy = false;
+        } else if (flag == "--deny-native") {
+            capabilities.native = false;
+        } else if (flag == "--deny-all") {
+            capabilities = {};
         } else if (flag == "--no-gpu" || flag == "--gpu=off") {
             // Both options request the CPU mode this launcher already uses.
         } else if (flag == "--stats") {
@@ -133,11 +151,12 @@ int main(int argc, char** argv) {
             throw std::runtime_error("could not open the executable file (tried " + tried + ")");
         }
         const auto executable = neura::launcher::read_container(file);
-        const auto options = run_options(executable.policy);
+        auto capabilities = executable.policy.capabilities;
+        const auto options = run_options(executable.policy, capabilities);
         const auto image = neura::nvr::load(executable.image);
         std::vector<std::string> arguments;
         for (int i = 1; i < argc; ++i) arguments.emplace_back(argv[i]);
-        neura::runner::Host host(executable.policy.capabilities);
+        neura::runner::Host host(capabilities);
         neura::runner::provide_native_library(image, host.services);
         return neura::runner::run(image, host, arguments, options, name, executable.image.size());
     } catch (const std::exception& error) {

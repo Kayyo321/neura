@@ -6,7 +6,7 @@ Import this module as `Std.DynamicForeign.MemoryLayout`. Its [source](https://gi
 
 ## Detailed contracts
 
-[Foreign interop](ForeignInterop) defines the safety, determinism, and capability rules shared by every `Std.DynamicForeign` module. Native operations need `--allow-native`; without it the first one traps with `invalid state: native access denied: run with --allow-native`.
+[Foreign interop](ForeignInterop) defines the safety, determinism, and capability rules shared by every `Std.DynamicForeign` module. Native operations are granted by default and denied with `--deny-native`; when denied, the first one traps with `invalid state: native access denied: run with --allow-native`.
 
 ## Exported declarations
 

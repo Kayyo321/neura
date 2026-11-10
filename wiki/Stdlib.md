@@ -87,7 +87,7 @@ The [full design and implementation decisions](Stdlib-Design) preserve the histo
 
 ### `Std.DynamicForeign`
 
-Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Needs `--allow-native`.
+Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Granted by default; denied with `--deny-native`.
 
 | Module | Detailed contracts | Exported declarations |
 | --- | --- | --- |

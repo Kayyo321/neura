@@ -1,3 +1,4 @@
+// test-options: --deny-clock
 let duration = import:Std.Time.Duration;
 let error = import:Std.Core.Error;
 let instant = import:Std.Time.Instant;
@@ -5,7 +6,7 @@ let system_clock = import:Std.Time.SystemClock;
 let test = import:Std.Test;
 let unit = import:Std.Core.Unit;
 
-// Without --allow-clock every member fails with CapabilityDenied.
+// With --deny-clock every member fails with CapabilityDenied.
 let SystemClockDeniedTests = module (
     export let test_every_member_is_denied = func() -> void {
         let source = system_clock.create();

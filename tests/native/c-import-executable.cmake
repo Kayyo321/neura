@@ -41,9 +41,15 @@ expect_ok("${NEURA}" build c-import.nra -o c-import.nvr)
 expect_ok("${NEURA}" build --native --allow-native c-import.nvr -o granted)
 expect_ok("${NEURA}" build --native --allow-native c-import.nra -o from-source)
 expect_ok("${CMAKE_COMMAND}" -E compare_files "${TEST_DIR}/granted" "${TEST_DIR}/from-source")
-expect_ok("${NEURA}" build --native c-import.nvr -o denied)
+# Native code is granted by default, so the default policy equals --allow-native.
+expect_ok("${NEURA}" build --native c-import.nvr -o default-grant)
+if(NOT command_stderr STREQUAL "")
+    message(FATAL_ERROR "the default policy grants native code, so there is no note\n${command_stderr}")
+endif()
+expect_ok("${CMAKE_COMMAND}" -E compare_files "${TEST_DIR}/granted" "${TEST_DIR}/default-grant")
+expect_ok("${NEURA}" build --native --deny-native c-import.nvr -o denied)
 if(NOT command_stderr STREQUAL
-   "neura: note: the image uses native services; without --allow-native they fail with CapabilityDenied\n")
+   "neura: note: the image uses native services, which are denied; they fail with CapabilityDenied\n")
     message(FATAL_ERROR "expected the denied native capability note\n${command_stderr}")
 endif()
 
@@ -77,6 +83,16 @@ if(HAS_STATIC)
     file(WRITE "${TEST_DIR}/natv-only.nvra" "${plain_assembly}\n${native_record}\n")
     expect_ok("${NEURA}" assemble natv-only.nvra -o natv-only.nvr)
     build_error("${static_error}" --static natv-only.nvr)
+
+    # The static launcher has no native interop, so the default policy it
+    # records grants every group except native; asking for native is refused.
+    expect_ok("${NEURA}" build --native --static plain.nvr -o static-default)
+    invoke("${NEURA}" inspect static-default)
+    if(NOT result_status STREQUAL "0" OR NOT result_stdout MATCHES "\ncapabilities: console, process exit, files, network, environment, clock, entropy\n")
+        message(FATAL_ERROR "a static launcher's default policy should omit native\n${result_stdout}")
+    endif()
+    expect_ok("${NEURA}" build --native --static --allow-native --deny-native plain.nvr -o static-denied-native)
+    build_error("${static_error}" --static --deny-native --allow-native plain.nvr)
 endif()
 
 # The original archive and source play no part in either execution.

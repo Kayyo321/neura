@@ -1,8 +1,9 @@
+// test-options: --deny-env
 let error = import:Std.Core.Error;
 let program = import:Std.Program;
 let test = import:Std.Test;
 
-// Without --allow-env every lookup fails with CapabilityDenied.
+// With --deny-env every lookup fails with CapabilityDenied.
 let EnvironmentDeniedTests = module (
     export let test_lookup_is_denied = func() -> void {
         match (program.Environment.get("PATH")) {
