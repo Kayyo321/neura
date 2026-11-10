@@ -11,7 +11,7 @@ export let Lists = module (
         let i = 0;
         while (i < count) {
             result.append(items[i]);
-            i = i + 1;
+            i += 1;
         }
         return result;
     };
@@ -23,45 +23,45 @@ export let Lists = module (
         let i = 0;
         while (i < count) {
             result.append(b[i]);
-            i = i + 1;
+            i += 1;
         }
         return result;
     };
 
     // Reverses the list in place. Not structural.
-    export let reverse = func<T>(items: T[list]) -> void {
+    export let reverse = func<T>(items: T[list]) {
         let i = 0;
         let j = items.length - 1;
         while (i < j) {
             let value = items[i];
             items[i] = items[j];
             items[j] = value;
-            i = i + 1;
-            j = j - 1;
+            i += 1;
+            j -= 1;
         }
     };
 
     // Exchanges two elements. Not structural.
-    export let swap = func<T>(items: T[list], i: int, j: int) -> void {
+    export let swap = func<T>(items: T[list], i: int, j: int) {
         let value = items[i];
         items[i] = items[j];
         items[j] = value;
     };
 
     // Replaces every element with `value`. Not structural.
-    export let fill = func<T>(items: T[list], value: T) -> void {
+    export let fill = func<T>(items: T[list], value: T) {
         let count = items.length;
         let i = 0;
         while (i < count) {
             items[i] = value;
-            i = i + 1;
+            i += 1;
         }
     };
 
     // Inserts `value` before position `index`; an index equal to the length
     // appends. Appends the last element again and shifts the suffix right by
     // indexed writes.
-    export let insert_at = func<T>(items: T[list], index: int, value: T) -> void {
+    export let insert_at = func<T>(items: T[list], index: int, value: T) {
         let count = items.length;
         if (index == count) {
             items.append(value);
@@ -74,7 +74,7 @@ export let Lists = module (
         let k = count - 1;
         while (k > index) {
             items[k] = items[k - 1];
-            k = k - 1;
+            k -= 1;
         }
         items[index] = value;
     };
@@ -82,7 +82,7 @@ export let Lists = module (
     // Removes elements from the end until `length` remain. Traps with
     // "invalid argument: negative size" or "invalid argument: size above
     // current size".
-    export let truncate = func<T>(items: T[list], length: int) -> void {
+    export let truncate = func<T>(items: T[list], length: int) {
         if (length < 0) {
             trap_with_message("invalid argument: negative size");
         }
@@ -95,7 +95,7 @@ export let Lists = module (
     };
 
     // Removes every element from the end of the same list.
-    export let clear = func<T>(items: T[list]) -> void {
+    export let clear = func<T>(items: T[list]) {
         while (items.length > 0) {
             items.remove_at(items.length - 1);
         }
@@ -111,7 +111,7 @@ export let Lists = module (
         let i = 0;
         while (i < count) {
             result.append(value);
-            i = i + 1;
+            i += 1;
         }
         return result;
     };
@@ -123,7 +123,7 @@ export let Lists = module (
         let i = 0;
         while (i < count) {
             result.append(items[i]);
-            i = i + 1;
+            i += 1;
         }
         return result;
     };

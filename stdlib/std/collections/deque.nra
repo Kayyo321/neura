@@ -1,14 +1,14 @@
-let queue = import:Std.Collections.Queue;
+let.promote _ = import:Std.Collections.Queue;
 
 // Access at both ends. `enqueue` is add_last and `dequeue` is remove_first.
 export let Deque = module (
-    export let Deque = interface<T>:queue.Queue<T> (
-        let add_first = func(value: T) -> void;
-        let add_last = func(value: T) -> void;
+    export let Deque = interface<T>:Queue<T> (
+        let add_first = func(value: T);
+        let add_last = func(value: T);
         // Trap with "no such element" when empty.
-        let remove_first = func() -> T;
-        let remove_last = func() -> T;
-        let first = func() -> T;
-        let last = func() -> T;
+        let remove_first = func -> T;
+        let remove_last = func -> T;
+        let first = func -> T;
+        let last = func -> T;
     );
 );

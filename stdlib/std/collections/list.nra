@@ -1,16 +1,16 @@
-let collection = import:Std.Collections.Collection;
+let.promote _ = import:Std.Collections.Collection;
 let optional = import:Std.Core.Optional;
 
 // A read-only sequence with positions (ArrayList, LinkedList, ImmutableList).
 export let List = module (
-    export let List = interface<T>:collection.Collection<T> (
+    export let List = interface<T>:Collection<T> (
         // A bounds trap for an index outside 0 through size() - 1.
         let get = func(index: int) -> T;
         // Trap with "no such element" when empty.
-        let first = func() -> T;
-        let last = func() -> T;
-        let first_or_none = func() -> optional.Optional<T>;
-        let last_or_none = func() -> optional.Optional<T>;
+        let first = func -> T;
+        let last = func -> T;
+        let first_or_none = func -> optional.Optional<T>;
+        let last_or_none = func -> optional.Optional<T>;
         // By equals; -1 when absent.
         let index_of = func(value: T) -> int;
         let last_index_of = func(value: T) -> int;

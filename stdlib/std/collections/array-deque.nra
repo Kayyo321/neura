@@ -1,5 +1,5 @@
 let cell = import:Std.Core.Cell;
-let deque = import:Std.Collections.Deque;
+let.promote _ = import:Std.Collections.Deque;
 let iterators = import:Std.Collections.Iterator;
 let optional = import:Std.Core.Optional;
 let text_depth = import:Std.Collections.Internal.TextDepth;
@@ -8,7 +8,7 @@ let text_depth = import:Std.Collections.Internal.TextDepth;
 // section 9.4). Removing an element removes its slot, so nothing removed
 // stays reachable. Equality and hashing are by identity.
 export let ArrayDeque = module (
-    export let ArrayDeque = class<T> implements deque.Deque<T> (
+    export let ArrayDeque = class<T> implements Deque<T> (
         // The first part of the deque in reverse order: its last element is
         // the deque's first.
         let front: T[list] = [];
@@ -33,36 +33,36 @@ export let ArrayDeque = module (
             return (index < split) ? front[split - 1 - index] : back[index - split];
         };
 
-        export let add_first = func(value: T) -> void {
+        export let add_first = func(value: T) {
             front.append(value);
             changed();
         };
 
-        export let add_last = func(value: T) -> void {
+        export let add_last = func(value: T) {
             back.append(value);
             changed();
         };
 
         // add_last.
-        export let enqueue = func(value: T) -> void {
+        export let enqueue = func(value: T) {
             back.append(value);
             changed();
         };
 
         // Moves the first half of `back`, rounded up, into `front` in reverse
         // order and shifts the rest of `back` down.
-        let refill_front = func() -> void {
+        let refill_front = func {
             let count = back.length;
             let moved = (count + 1) / 2;
             let i = moved - 1;
             while (i >= 0) {
                 front.append(back[i]);
-                i = i - 1;
+                i -= 1;
             }
             let j = 0;
             while (j + moved < count) {
                 back[j] = back[j + moved];
-                j = j + 1;
+                j += 1;
             }
             while (back.length > count - moved) {
                 back.remove_at(back.length - 1);
@@ -71,18 +71,18 @@ export let ArrayDeque = module (
 
         // The mirror of refill_front: the deque's last half, rounded up,
         // moves from the start of `front` into `back`.
-        let refill_back = func() -> void {
+        let refill_back = func {
             let count = front.length;
             let moved = (count + 1) / 2;
             let i = moved - 1;
             while (i >= 0) {
                 back.append(front[i]);
-                i = i - 1;
+                i -= 1;
             }
             let j = 0;
             while (j + moved < count) {
                 front[j] = front[j + moved];
-                j = j + 1;
+                j += 1;
             }
             while (front.length > count - moved) {
                 front.remove_at(front.length - 1);
@@ -90,7 +90,7 @@ export let ArrayDeque = module (
         };
 
         // Traps with "no such element" when empty.
-        export let remove_first = func() -> T {
+        export let remove_first = func -> T {
             if (front.length == 0) {
                 if (back.length == 0) {
                     trap_with_message("no such element");
@@ -104,7 +104,7 @@ export let ArrayDeque = module (
             return value;
         };
 
-        export let remove_last = func() -> T {
+        export let remove_last = func -> T {
             if (back.length == 0) {
                 if (front.length == 0) {
                     trap_with_message("no such element");
@@ -119,11 +119,9 @@ export let ArrayDeque = module (
         };
 
         // remove_first.
-        export let dequeue = func() -> T {
-            return remove_first();
-        };
+        export let dequeue = func -> T => remove_first();
 
-        export let first = func() -> T {
+        export let first = func -> T {
             if (front.length > 0) {
                 return front[front.length - 1];
             }
@@ -133,7 +131,7 @@ export let ArrayDeque = module (
             return back[0];
         };
 
-        export let last = func() -> T {
+        export let last = func -> T {
             if (back.length > 0) {
                 return back[back.length - 1];
             }
@@ -144,7 +142,7 @@ export let ArrayDeque = module (
         };
 
         // The first element, or None when empty.
-        export let peek = func() -> optional.Optional<T> {
+        export let peek = func -> optional.Optional<T> {
             if (front.length > 0) {
                 return optional.Optional<T>.Some(front[front.length - 1]);
             }
@@ -154,14 +152,14 @@ export let ArrayDeque = module (
             return optional.Optional<T>.None;
         };
 
-        export let try_dequeue = func() -> optional.Optional<T> {
+        export let try_dequeue = func -> optional.Optional<T> {
             if (front.length == 0 && back.length == 0) {
                 return optional.Optional<T>.None;
             }
             return optional.Optional<T>.Some(remove_first());
         };
 
-        export let clear = func() -> void {
+        export let clear = func {
             let empty_front: T[list] = [];
             let empty_back: T[list] = [];
             front = empty_front;
@@ -185,12 +183,12 @@ export let ArrayDeque = module (
         };
 
         // A new built-in list from first to last.
-        export let to_list = func() -> T[list] {
+        export let to_list = func -> T[list] {
             let result: T[list] = [];
             let i = front.length - 1;
             while (i >= 0) {
                 result.append(front[i]);
-                i = i - 1;
+                i -= 1;
             }
             for (let element in back) {
                 result.append(element);
@@ -199,12 +197,11 @@ export let ArrayDeque = module (
         };
 
         // First to last; fail-fast.
-        export let iterator = func() -> iterators.Iterator<T> {
-            return new ArrayDequeIterator<T>(front, back, modifications);
-        };
+        export let iterator = func -> iterators.Iterator<T> =>
+            new ArrayDequeIterator<T>(front, back, modifications);
 
         // First to last. The action must not change the deque structurally.
-        export let for_each = func(action: func(T) -> void) -> void {
+        export let for_each = func(action: func(T) -> void) {
             let expected = modifications.value;
             let i = 0;
             while (i < front.length + back.length) {
@@ -212,13 +209,13 @@ export let ArrayDeque = module (
                 if (modifications.value != expected) {
                     trap_with_message("collection modified during iteration");
                 }
-                i = i + 1;
+                i += 1;
             }
         };
 
         // Traps with "invalid state: ..." when iteration and indexing
         // disagree or the size is inconsistent.
-        export let validate = func() -> void {
+        export let validate = func {
             let count = size();
             if (count != front.length + back.length || count < 0) {
                 trap_with_message("invalid state: deque size");
@@ -229,7 +226,7 @@ export let ArrayDeque = module (
                 if (i >= count || !walk.next().equals(get(i))) {
                     trap_with_message("invalid state: deque order");
                 }
-                i = i + 1;
+                i += 1;
             }
             if (i != count) {
                 trap_with_message("invalid state: deque order");
@@ -238,7 +235,7 @@ export let ArrayDeque = module (
 
         // `[a, b, c]` from first to last; the deque itself as a direct
         // element prints "(this collection)".
-        export let.override to_string = func() -> string {
+        export let.override to_string = func -> string {
             if (printing_depth != 0 && printing_depth == text_depth.current()) {
                 return "(this collection)";
             }
@@ -260,21 +257,21 @@ export let ArrayDeque = module (
         let expected: uint64;
         let position: int = 0;
 
-        export let init = func(first_part: T[list], rest: T[list], count: cell.Cell<uint64>) -> void {
+        export let init = func(first_part: T[list], rest: T[list], count: cell.Cell<uint64>) {
             front = first_part;
             back = rest;
             modifications = count;
             expected = count.value;
         };
 
-        export let has_next = func() -> bool {
+        export let has_next = func -> bool {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
             }
             return position < front.length + back.length;
         };
 
-        export let next = func() -> T {
+        export let next = func -> T {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
             }
@@ -283,7 +280,7 @@ export let ArrayDeque = module (
             if (index >= split + back.length) {
                 trap_with_message("no such element");
             }
-            position = position + 1;
+            position += 1;
             if (index < split) {
                 return front[split - 1 - index];
             }
@@ -291,9 +288,7 @@ export let ArrayDeque = module (
         };
     );
 
-    export let create = func<T>() -> ArrayDeque<T> {
-        return new ArrayDeque<T>();
-    };
+    export let create = func<T> -> ArrayDeque<T> => new ArrayDeque<T>();
 
     // A deque of `items` from first to last; copies.
     export let of = func<T>(items: T[list]) -> ArrayDeque<T> {

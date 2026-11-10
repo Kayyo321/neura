@@ -3,7 +3,7 @@
 // traps with "no such element" after the last one. An iterator is used once.
 export let Iterator = module (
     export let Iterator = interface<T> (
-        let has_next = func() -> bool;
-        let next = func() -> T;
+        let has_next = func -> bool;
+        let next = func -> T;
     );
 );

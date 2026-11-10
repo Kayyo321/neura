@@ -1,8 +1,8 @@
 let cell = import:Std.Core.Cell;
-let deque = import:Std.Collections.Deque;
+let.promote _ = import:Std.Collections.Deque;
 let hashing = import:Std.Core.Hash;
 let iterators = import:Std.Collections.Iterator;
-let mutable_list = import:Std.Collections.MutableList;
+let.promote _ = import:Std.Collections.MutableList;
 let optional = import:Std.Core.Optional;
 let ordering = import:Std.Core.Ordering;
 let sequences = import:Std.Collections.Sequence;
@@ -19,12 +19,12 @@ export let LinkedList = module (
         export let next: Node<T> = nil;
         export let previous: Node<T> = nil;
 
-        export let init = func(item: T) -> void {
+        export let init = func(item: T) {
             value = item;
         };
     );
 
-    export let LinkedList = class<T> implements mutable_list.MutableList<T>, deque.Deque<T> (
+    export let LinkedList = class<T> implements MutableList<T>, Deque<T> (
         let head: Node<T> = nil;
         let tail: Node<T> = nil;
         let count: int = 0;
@@ -32,7 +32,7 @@ export let LinkedList = module (
         let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
         let printing_depth: int = 0;
 
-        let changed = func() -> void {
+        let changed = func {
             modifications.value = modifications.value + 1;
         };
 
@@ -47,7 +47,7 @@ export let LinkedList = module (
                 let i = 0;
                 while (i < index) {
                     node = node.next;
-                    i = i + 1;
+                    i += 1;
                 }
                 return node;
             }
@@ -55,13 +55,13 @@ export let LinkedList = module (
             let i = count - 1;
             while (i > index) {
                 node = node.previous;
-                i = i - 1;
+                i -= 1;
             }
             return node;
         };
 
         // Links a new node before `successor`, or at the end for nil.
-        let link_before = func(successor: Node<T>, value: T) -> void {
+        let link_before = func(successor: Node<T>, value: T) {
             let node = new Node<T>(value);
             if (successor == nil) {
                 node.previous = tail;
@@ -82,7 +82,7 @@ export let LinkedList = module (
                     predecessor.next = node;
                 }
             }
-            count = count + 1;
+            count += 1;
             changed();
         };
 
@@ -103,52 +103,46 @@ export let LinkedList = module (
             }
             node.previous = nil;
             node.next = nil;
-            count = count - 1;
+            count -= 1;
             changed();
             return node.value;
         };
 
-        export let size = func() -> int {
-            return count;
-        };
+        export let size = func -> int => count;
 
-        export let is_empty = func() -> bool {
-            return count == 0;
-        };
+        export let is_empty = func -> bool => count == 0;
 
         // Traps with "invalid argument: index out of range" for an index
         // outside 0 through size() - 1.
-        export let get = func(index: int) -> T {
-            return node_at(index).value;
-        };
+        export let get = func(index: int) -> T => node_at(index).value;
 
         // Not structural.
-        export let set = func(index: int, value: T) -> void {
+        export let set = func(index: int, value: T) {
             node_at(index).value = value;
         };
 
-        export let first = func() -> T {
+        export let first = func -> T {
             if (head == nil) {
                 trap_with_message("no such element");
             }
             return head.value;
         };
 
-        export let last = func() -> T {
+        export let last = func -> T {
             if (tail == nil) {
                 trap_with_message("no such element");
             }
             return tail.value;
         };
 
-        export let first_or_none = func() -> optional.Optional<T> {
+        export let first_or_none = func -> optional.Optional<T> {
             if (head == nil) {
                 return optional.Optional<T>.None;
             }
             return optional.Optional<T>.Some(head.value);
         };
 
-        export let last_or_none = func() -> optional.Optional<T> {
+        export let last_or_none = func -> optional.Optional<T> {
             if (tail == nil) {
                 return optional.Optional<T>.None;
             }
@@ -156,9 +150,7 @@ export let LinkedList = module (
         };
 
         // The first element, or None when empty.
-        export let peek = func() -> optional.Optional<T> {
-            return first_or_none();
-        };
+        export let peek = func -> optional.Optional<T> => first_or_none();
 
         // Appends; always true.
         export let add = func(value: T) -> bool {
@@ -166,22 +158,22 @@ export let LinkedList = module (
             return true;
         };
 
-        export let add_last = func(value: T) -> void {
+        export let add_last = func(value: T) {
             link_before(nil, value);
         };
 
         // add_last.
-        export let enqueue = func(value: T) -> void {
+        export let enqueue = func(value: T) {
             link_before(nil, value);
         };
 
-        export let add_first = func(value: T) -> void {
+        export let add_first = func(value: T) {
             link_before(head, value);
         };
 
         // Inserts before `index`; an index equal to the size appends. Traps
         // with "invalid argument: index out of range" otherwise.
-        export let add_at = func(index: int, value: T) -> void {
+        export let add_at = func(index: int, value: T) {
             if (index == count) {
                 link_before(nil, value);
                 return;
@@ -191,28 +183,26 @@ export let LinkedList = module (
 
         // Appends each element in order, reading by position up to the
         // starting length.
-        export let add_all = func(values: T[list]) -> void {
+        export let add_all = func(values: T[list]) {
             let total = values.length;
             let i = 0;
             while (i < total) {
                 link_before(nil, values[i]);
-                i = i + 1;
+                i += 1;
             }
         };
 
-        export let remove_at = func(index: int) -> T {
-            return unlink(node_at(index));
-        };
+        export let remove_at = func(index: int) -> T => unlink(node_at(index));
 
         // Traps with "no such element" when empty.
-        export let remove_first = func() -> T {
+        export let remove_first = func -> T {
             if (head == nil) {
                 trap_with_message("no such element");
             }
             return unlink(head);
         };
 
-        export let remove_last = func() -> T {
+        export let remove_last = func -> T {
             if (tail == nil) {
                 trap_with_message("no such element");
             }
@@ -220,11 +210,9 @@ export let LinkedList = module (
         };
 
         // remove_first.
-        export let dequeue = func() -> T {
-            return remove_first();
-        };
+        export let dequeue = func -> T => remove_first();
 
-        export let try_dequeue = func() -> optional.Optional<T> {
+        export let try_dequeue = func -> optional.Optional<T> {
             if (head == nil) {
                 return optional.Optional<T>.None;
             }
@@ -232,7 +220,7 @@ export let LinkedList = module (
         };
 
         // Exchanges two values. Not structural.
-        export let swap = func(i: int, j: int) -> void {
+        export let swap = func(i: int, j: int) {
             let a = node_at(i);
             let b = node_at(j);
             let value = a.value;
@@ -241,7 +229,7 @@ export let LinkedList = module (
         };
 
         // Reverses the values in place. Not structural.
-        export let reverse = func() -> void {
+        export let reverse = func {
             let left = head;
             let right = tail;
             let steps = count / 2;
@@ -251,12 +239,12 @@ export let LinkedList = module (
                 right.value = value;
                 left = left.next;
                 right = right.previous;
-                steps = steps - 1;
+                steps -= 1;
             }
         };
 
         // Not structural.
-        export let fill = func(value: T) -> void {
+        export let fill = func(value: T) {
             let node = head;
             while (node != nil) {
                 node.value = value;
@@ -267,7 +255,7 @@ export let LinkedList = module (
         // Removes elements from the end until `size` remain. Traps with
         // "invalid argument: negative size" or "invalid argument: size above
         // current size".
-        export let truncate = func(size: int) -> void {
+        export let truncate = func(size: int) {
             if (size < 0) {
                 trap_with_message("invalid argument: negative size");
             }
@@ -281,7 +269,7 @@ export let LinkedList = module (
 
         // Clears every node's links, so iterators that still hold a node
         // keep nothing else reachable.
-        export let clear = func() -> void {
+        export let clear = func {
             let node = head;
             while (node != nil) {
                 let successor = node.next;
@@ -311,13 +299,13 @@ export let LinkedList = module (
             while (i < end) {
                 result.add_last(node.value);
                 node = node.next;
-                i = i + 1;
+                i += 1;
             }
             return result;
         };
 
         // A new built-in list in order.
-        export let to_list = func() -> T[list] {
+        export let to_list = func -> T[list] {
             let result: T[list] = [];
             let node = head;
             while (node != nil) {
@@ -328,18 +316,14 @@ export let LinkedList = module (
         };
 
         // First to last; fail-fast.
-        export let iterator = func() -> iterators.Iterator<T> {
-            return new LinkedListIterator<T>(head, modifications);
-        };
+        export let iterator = func -> iterators.Iterator<T> => new LinkedListIterator<T>(head, modifications);
 
         // A lazy pipeline over this list's fail-fast iterator (Stdlib.md
         // section 9.12): a structural change while it runs traps.
-        export let sequence = func() -> sequences.Sequence<T> {
-            return sequences.from_iterator<T>(iterator());
-        };
+        export let sequence = func -> sequences.Sequence<T> => sequences.from_iterator<T>(iterator());
 
         // In order. The action must not change the list structurally.
-        export let for_each = func(action: func(T) -> void) -> void {
+        export let for_each = func(action: func(T) -> void) {
             let expected = modifications.value;
             let node = head;
             while (node != nil) {
@@ -353,13 +337,9 @@ export let LinkedList = module (
 
         // Calls `drop` once per element in order and unlinks the matches.
         // Returns how many were removed.
-        export let remove_if = func(drop: func(T) -> bool) -> int {
-            return remove_matching(drop, true);
-        };
+        export let remove_if = func(drop: func(T) -> bool) -> int => remove_matching(drop, true);
 
-        export let retain_if = func(keep: func(T) -> bool) -> int {
-            return remove_matching(keep, false);
-        };
+        export let retain_if = func(keep: func(T) -> bool) -> int => remove_matching(keep, false);
 
         let remove_matching = func(test: func(T) -> bool, remove_when: bool) -> int {
             let expected = modifications.value;
@@ -373,7 +353,7 @@ export let LinkedList = module (
                 }
                 if (matched == remove_when) {
                     unlink(node);
-                    removed = removed + 1;
+                    removed += 1;
                     expected = modifications.value;
                 }
                 node = successor;
@@ -395,14 +375,14 @@ export let LinkedList = module (
                     return i;
                 }
                 node = node.next;
-                i = i + 1;
+                i += 1;
             }
             return -1;
         };
 
         // Stable. Sorts a copy with Sorting.sort and writes the values back
         // into the same nodes, which is not structural.
-        export let sort = func(c: func(T, T) -> ordering.Ordering) -> void {
+        export let sort = func(c: func(T, T) -> ordering.Ordering) {
             let values = to_list();
             let expected = modifications.value;
             sorting.sort<T>(values, func(a: T, b: T) -> ordering.Ordering {
@@ -417,7 +397,7 @@ export let LinkedList = module (
             while (node != nil) {
                 node.value = values[i];
                 node = node.next;
-                i = i + 1;
+                i += 1;
             }
         };
 
@@ -435,19 +415,17 @@ export let LinkedList = module (
         };
 
         // By equals, with `value` as the receiver.
-        export let contains = func(value: T) -> bool {
-            return index_of(value) >= 0;
-        };
+        export let contains = func(value: T) -> bool => index_of(value) >= 0;
 
         export let index_of = func(value: T) -> int {
             let node = head;
             let i = 0;
             while (node != nil) {
-                if (value.equals(node.value)) {
+                if (value === node.value) {
                     return i;
                 }
                 node = node.next;
-                i = i + 1;
+                i += 1;
             }
             return -1;
         };
@@ -456,11 +434,11 @@ export let LinkedList = module (
             let node = tail;
             let i = count - 1;
             while (node != nil) {
-                if (value.equals(node.value)) {
+                if (value === node.value) {
                     return i;
                 }
                 node = node.previous;
-                i = i - 1;
+                i -= 1;
             }
             return -1;
         };
@@ -469,7 +447,7 @@ export let LinkedList = module (
         export let remove = func(value: T) -> bool {
             let node = head;
             while (node != nil) {
-                if (value.equals(node.value)) {
+                if (value === node.value) {
                     unlink(node);
                     return true;
                 }
@@ -480,7 +458,7 @@ export let LinkedList = module (
 
         // Traps with "invalid state: ..." on a broken endpoint, reciprocal
         // link, or count.
-        export let validate = func() -> void {
+        export let validate = func {
             if ((head == nil) != (tail == nil)) {
                 trap_with_message("invalid state: linked list endpoints");
             }
@@ -494,7 +472,7 @@ export let LinkedList = module (
                 if (node.previous != previous) {
                     trap_with_message("invalid state: linked list reciprocal links");
                 }
-                walked = walked + 1;
+                walked += 1;
                 if (walked > count) {
                     trap_with_message("invalid state: linked list count");
                 }
@@ -528,7 +506,7 @@ export let LinkedList = module (
         };
 
         // The list formula of section 5.2.
-        export let.override hash_code = func() -> uint32 {
+        export let.override hash_code = func -> uint32 {
             let result: uint32 = 1;
             let node = head;
             while (node != nil) {
@@ -540,7 +518,7 @@ export let LinkedList = module (
 
         // `[a, b, c]`; the list itself as a direct element prints
         // "(this collection)".
-        export let.override to_string = func() -> string {
+        export let.override to_string = func -> string {
             if (printing_depth != 0 && printing_depth == text_depth.current()) {
                 return "(this collection)";
             }
@@ -560,20 +538,20 @@ export let LinkedList = module (
         let modifications: cell.Cell<uint64>;
         let expected: uint64;
 
-        export let init = func(start: Node<T>, counter: cell.Cell<uint64>) -> void {
+        export let init = func(start: Node<T>, counter: cell.Cell<uint64>) {
             current = start;
             modifications = counter;
             expected = counter.value;
         };
 
-        export let has_next = func() -> bool {
+        export let has_next = func -> bool {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
             }
             return current != nil;
         };
 
-        export let next = func() -> T {
+        export let next = func -> T {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
             }
@@ -586,9 +564,7 @@ export let LinkedList = module (
         };
     );
 
-    export let create = func<T>() -> LinkedList<T> {
-        return new LinkedList<T>();
-    };
+    export let create = func<T> -> LinkedList<T> => new LinkedList<T>();
 
     // Copies `items`.
     export let of = func<T>(items: T[list]) -> LinkedList<T> {
