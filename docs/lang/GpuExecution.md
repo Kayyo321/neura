@@ -1,6 +1,6 @@
 # GPU execution of neuron graphs: implementation plan
 
-This page is a plan. Nothing in it is implemented. It specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the contracts for execution; this plan adds other ways to carry out the same contract and changes neither document's semantics.
+This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The graph-device interface, step split, and CPU model are implemented in `neura_nvm`. The CLI, fleets, Vulkan device, and auto placement remain planned. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
 
 ## 1. How to read this plan
 
@@ -441,6 +441,8 @@ The order of faults within a step does not change: step limit, input reads, grap
 ### 9.3 `ModelDevice`
 
 `src/nvm/layered.hpp` also declares `ModelDevice`, a `GraphDevice` that runs the kernel's algorithm on the CPU from the same `TABLES` words: 32-bit arithmetic, layer order, the escape rule, the demotion rule, and the status values. It processes a layer's positions in ascending order, and its `batch_hint` is the largest `std::size_t`. It exists so that eligibility, packing, the exactness argument, fleets, and placement are tested everywhere, including machines without Vulkan. It is not used by the CLI.
+
+Each call models one dispatch. An escape demotes the graph for later calls. Jobs already in the same dispatch still produce their individual status, as on the device.
 
 ### 9.4 `VerifyingDevice`
 
@@ -921,13 +923,13 @@ After a timeout the device is not idle, so its Vulkan objects must not be destro
 `layered.hpp` exposes `self_test_graphs()`, a fixed list of small graphs with input sets, built in code. `Context::create` packs them, dispatches every request in one call, and compares every output and status with `evaluate_graph`. Expected values are computed at run time, never stored. The list must contain:
 
 1. `relu(a + b - 1)` on all four inputs.
-2. An identity neuron and a ReLU neuron with negative weights and a nonzero bias, on inputs that make the ReLU clamp and not clamp.
+2. An identity neuron `1 - 2a` and a ReLU neuron `relu(1 - 2b)`, on inputs that make the ReLU clamp and not clamp.
 3. A chain of 200 neurons, each `relu(1 - previous)`, so that 200 layers and barriers execute.
-4. One layer of 200 neurons, each reading a different input lane, followed by one identity neuron that sums all 200, so that a layer wider than a work group and a fan-in above 64 execute.
-5. A graph whose output list repeats a wire and names an input wire.
+4. One layer of 200 identity neurons, each reading a different input lane with weight 1, followed by one identity neuron that sums all 200, so that a layer wider than a work group and a fan-in above 64 execute.
+5. A graph whose output list `[-a, a, -a]` repeats a wire and names an input wire.
 6. An identity neuron computing `40000 × a`, which must return status 3 for `a = 1` and status 2 for `a = 0`.
 
-The dispatch must hold at least 128 requests across these graphs. Any difference rejects the candidate with `self-test failed`. The same list runs against `ModelDevice` in the test suite.
+The dispatch must hold at least 128 requests across these graphs. The list uses all four bit pairs for each of the first two graphs and both bit values for the chain, repeated output, and escape graphs. The wide graph uses all-zero and all-one inputs plus 112 patterns. For pattern `s` from 1 to 112, lane `j` is set when `(67j + s) mod 200 < s`. Any difference rejects the candidate with `self-test failed`. The same list runs against `ModelDevice` in the test suite.
 
 ## 13. Libraries and build
 

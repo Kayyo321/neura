@@ -1,5 +1,6 @@
 #include "machine.hpp"
 
+#include "graph_device.hpp"
 #include "scalar_text.hpp"
 #include "nvr/format.hpp"
 
@@ -198,10 +199,24 @@ std::optional<std::size_t> evaluate_graph(const nvr::Graph& graph, std::vector<s
     return std::nullopt;
 }
 
+std::optional<std::size_t> evaluate_outputs(const nvr::Graph& graph, std::span<const std::int64_t> inputs,
+                                            std::vector<std::int64_t>& scratch, std::span<std::int64_t> outputs) {
+    scratch.resize(std::size_t{graph.input_lanes} + graph.nodes.size());
+    std::ranges::copy(inputs, scratch.begin());
+    if (const auto failed = evaluate_graph(graph, scratch)) {
+        return failed;
+    }
+    for (std::size_t i = 0; i < graph.outputs.size(); ++i) {
+        outputs[i] = scratch[graph.outputs[i]];
+    }
+    return std::nullopt;
+}
+
 class Execution::State {
 public:
     State(const nvr::Image& image, std::span<const std::string> arguments, RunLimits limits)
         : image_(image), types_(image), limits_(limits), arguments_(arguments.begin(), arguments.end()) {
+        check_device();
         for (std::size_t i = 0; i < arguments_.size(); ++i) {
             if (!nvr::valid_utf8(arguments_[i])) {
                 throw std::invalid_argument("argument " + std::to_string(i + 1) + " is not valid UTF-8");
@@ -212,6 +227,7 @@ public:
     State(const nvr::Image& image, std::uint32_t function, std::span<const std::uint64_t> arguments, RunLimits limits)
         : image_(image), types_(image), limits_(limits), start_function_(function),
           start_arguments_(arguments.begin(), arguments.end()) {
+        check_device();
         if (function >= image.functions.size()) {
             throw std::invalid_argument("function " + std::to_string(function) + " is out of range");
         }
@@ -238,24 +254,51 @@ public:
         if (pending_) {
             throw std::logic_error("advance() called while a host request is pending");
         }
+        for (;;) {
+            if (auto event = step()) return std::move(*event);
+        }
+    }
+
+    std::optional<Event> begin_step(GraphStep& step) {
+        if (finished_) return *finished_;
+        if (pending_) throw std::logic_error("begin_step() called while a host request is pending");
+        if (active_block_) throw std::logic_error("begin_step() called while a step is already begun");
         try {
-            if (!started_) {
-                start();
-            }
-            for (;;) {
-                if (auto event = step()) {
-                    if (event->kind != Event::Kind::HostRequest) {
-                        finished_ = event;
-                    }
-                    return *event;
-                }
-            }
-        } catch (const Fault& fault) {
-            Event event;
-            event.kind = Event::Kind::Trapped;
-            event.trap = fault.trap;
-            finished_ = event;
+            if (!started_) start();
+            prepare_step(step);
+            return std::nullopt;
+        } catch (const Fault& failure) {
+            return trap(failure);
+        }
+    }
+
+    std::optional<Event> finish_step(std::span<const std::int64_t> outputs) {
+        if (!active_block_) throw std::logic_error("finish_step() called without a begun step");
+        if (outputs.size() != image_.graphs[active_block_->graph].outputs.size()) {
+            throw std::invalid_argument("finish_step() received the wrong number of output lanes");
+        }
+        if (outputs.data() != outputs_.data()) {
+            outputs_.assign(outputs.begin(), outputs.end());
+        }
+        const auto& block = *std::exchange(active_block_, nullptr);
+        try {
+            auto event = commit_step(block);
+            // A callback's return leaves its suspended caller's frames in
+            // place and only completes the callback, not the enclosing run.
+            if (event && event->kind == Event::Kind::Completed && frames_.empty()) finished_ = event;
             return event;
+        } catch (const Fault& failure) {
+            return trap(failure);
+        }
+    }
+
+    Event fail_step(std::size_t node) {
+        if (!active_block_) throw std::logic_error("fail_step() called without a begun step");
+        const auto graph = std::exchange(active_block_, nullptr)->graph;
+        try {
+            fault(TrapKind::GraphOverflow, "graph " + std::to_string(graph) + " node " + std::to_string(node));
+        } catch (const Fault& failure) {
+            return trap(failure);
         }
     }
 
@@ -350,6 +393,10 @@ public:
                     restore();
                     return result;
                 }
+                if (event->kind == Event::Kind::Trapped) {
+                    restore();
+                    return std::nullopt;
+                }
                 if (event->kind == Event::Kind::HostRequest) {
                     complete(host(event->request));
                     if (finished_) {
@@ -369,6 +416,7 @@ public:
     }
 
     std::uint64_t steps() const { return steps_; }
+    std::uint64_t live_heap_cells() const { return live_cells_; }
     std::uint64_t peak_heap_cells() const { return peak_cells_; }
     const std::vector<std::uint64_t>& function_steps() const { return function_steps_; }
 
@@ -408,6 +456,20 @@ private:
         std::uint32_t error_slot = nvr::absent;
         std::uint32_t error_block = 0;
     };
+
+    void check_device() const {
+        if (limits_.graph_device && &limits_.graph_device->image() != &image_) {
+            throw std::invalid_argument("graph device was created for another image");
+        }
+    }
+
+    Event trap(const Fault& failure) {
+        Event event;
+        event.kind = Event::Kind::Trapped;
+        event.trap = failure.trap;
+        finished_ = event;
+        return event;
+    }
 
     [[noreturn]] void fault(TrapKind kind, std::string detail = {}, std::uint32_t reason = 0) const {
         Trap trap;
@@ -673,7 +735,7 @@ private:
         frames_.push_back(std::move(frame));
     }
 
-    std::uint64_t read(const nvr::Value& value, const Frame& frame, const nvr::Graph& graph) {
+    std::uint64_t read(const nvr::Value& value, const Frame& frame) {
         switch (value.kind) {
         case nvr::ValueKind::Slot:
             if (!frame.initialized[value.index]) {
@@ -686,7 +748,7 @@ private:
             const auto lanes = nvr::lane_count(type(value.type));
             std::uint64_t bits = 0;
             for (unsigned i = 0; i < lanes; ++i) {
-                const auto lane = wires_[graph.outputs[value.index + i]];
+                const auto lane = outputs_[value.index + i];
                 if (lane != 0 && lane != 1) {
                     fault(TrapKind::NonBinaryLane, "output lane " + std::to_string(value.index + i) +
                                                        " holds " + std::to_string(lane));
@@ -704,35 +766,14 @@ private:
         return 0;
     }
 
-    void evaluate(const nvr::Block& block, const Frame& frame, const nvr::Graph& graph) {
-        // Inputs are resolved before any lane is written, so an input that
-        // traps leaves no partial state.
-        std::vector<std::uint64_t> values;
-        values.reserve(block.inputs.size());
-        for (const auto& input : block.inputs) {
-            values.push_back(read(input, frame, graph));
-        }
-        wires_.assign(std::size_t{graph.input_lanes} + graph.nodes.size(), 0);
-        std::size_t lane = 0;
-        for (std::size_t i = 0; i < block.inputs.size(); ++i) {
-            const auto lanes = nvr::lane_count(type(block.inputs[i].type));
-            for (unsigned b = 0; b < lanes; ++b) {
-                wires_[lane++] = static_cast<std::int64_t>((values[i] >> b) & 1U);
-            }
-        }
-        if (const auto failed = evaluate_graph(graph, wires_)) {
-            fault(TrapKind::GraphOverflow, "graph " + std::to_string(block.graph) + " node " + std::to_string(*failed));
-        }
-    }
-
-    std::uint32_t select(const nvr::Block& block, const nvr::Graph& graph) {
+    std::uint32_t select(const nvr::Block& block) {
         if (block.exits.size() == 1) {
             return 0;
         }
         const auto lanes = nvr::selector_lanes(block.exits.size());
         std::uint32_t index = 0;
         for (unsigned i = 0; i < lanes; ++i) {
-            const auto lane = wires_[graph.outputs[block.selector_start + i]];
+            const auto lane = outputs_[block.selector_start + i];
             if (lane != 0 && lane != 1) {
                 fault(TrapKind::NonBinaryLane, "selector lane " + std::to_string(i) + " holds " + std::to_string(lane));
             }
@@ -745,12 +786,12 @@ private:
         return index;
     }
 
-    std::optional<Event> step() {
+    void prepare_step(GraphStep& step) {
         if (steps_ >= limits_.max_steps) {
             fault(TrapKind::StepLimit, std::to_string(limits_.max_steps) + " steps");
         }
         ++steps_;
-        auto& frame = frames_.back();
+        const auto& frame = frames_.back();
         if (limits_.profile) {
             if (function_steps_.size() != image_.functions.size()) function_steps_.resize(image_.functions.size());
             ++function_steps_[frame.function];
@@ -758,19 +799,51 @@ private:
         const auto& function = image_.functions[frame.function];
         const auto& block = function.blocks[frame.block];
         const auto& graph = image_.graphs[block.graph];
-        evaluate(block, frame, graph);
-        const auto& exit = block.exits[select(block, graph)];
+        // Graph inputs can only read constants or slots. A failing read
+        // leaves the partial lanes private and the VM state unchanged.
+        inputs_.resize(graph.input_lanes);
+        std::size_t lane = 0;
+        for (const auto& input : block.inputs) {
+            const auto value = read(input, frame);
+            const auto lanes = nvr::lane_count(type(input.type));
+            for (unsigned bit = 0; bit < lanes; ++bit) {
+                inputs_[lane++] = static_cast<std::int64_t>((value >> bit) & 1U);
+            }
+        }
+        active_block_ = &block;
+        step = GraphStep{block.graph, inputs_, graph.outputs.size()};
+    }
+
+    std::optional<Event> step() {
+        GraphStep current;
+        if (auto event = begin_step(current)) return event;
+        const auto& graph = image_.graphs[current.graph];
+        outputs_.resize(current.output_count);
+        if (limits_.graph_device && !graph.nodes.empty()) {
+            GraphJob job{current.graph, current.inputs, outputs_};
+            limits_.graph_device->evaluate(std::span{&job, 1});
+            if (job.evaluated) return finish_step(outputs_);
+        }
+        if (const auto failed = evaluate_outputs(graph, current.inputs, wires_, outputs_)) {
+            return fail_step(*failed);
+        }
+        return finish_step(outputs_);
+    }
+
+    std::optional<Event> commit_step(const nvr::Block& block) {
+        auto& frame = frames_.back();
+        const auto& exit = block.exits[select(block)];
 
         // Resolve every value against the pre-transition state, then commit.
         std::vector<std::pair<std::uint32_t, std::uint64_t>> assignments;
         assignments.reserve(exit.assignments.size());
         for (const auto& assignment : exit.assignments) {
-            assignments.emplace_back(assignment.slot, read(assignment.value, frame, graph));
+            assignments.emplace_back(assignment.slot, read(assignment.value, frame));
         }
         std::vector<std::uint64_t> arguments;
         arguments.reserve(exit.arguments.size());
         for (const auto& argument : exit.arguments) {
-            arguments.push_back(read(argument, frame, graph));
+            arguments.push_back(read(argument, frame));
         }
         for (const auto& [slot, value] : assignments) {
             frame.slots[slot] = value;
@@ -1190,6 +1263,9 @@ private:
     std::vector<std::uint64_t> globals_;
     std::vector<std::uint8_t> global_initialized_;
     std::vector<Frame> frames_;
+    const nvr::Block* active_block_ = nullptr;
+    std::vector<std::int64_t> inputs_;
+    std::vector<std::int64_t> outputs_;
     std::vector<std::int64_t> wires_;
     std::optional<Event> finished_;
     std::optional<Pending> pending_;
@@ -1208,6 +1284,14 @@ Execution::~Execution() = default;
 
 Event Execution::advance() { return state_->advance(); }
 
+std::optional<Event> Execution::begin_step(GraphStep& step) { return state_->begin_step(step); }
+
+std::optional<Event> Execution::finish_step(std::span<const std::int64_t> outputs) {
+    return state_->finish_step(outputs);
+}
+
+Event Execution::fail_step(std::size_t node) { return state_->fail_step(node); }
+
 void Execution::complete(const HostCompletion& completion) { state_->complete(completion); }
 
 std::optional<HostValue> Execution::invoke_callback(std::string_view name, std::uint32_t version,
@@ -1217,6 +1301,7 @@ std::optional<HostValue> Execution::invoke_callback(std::string_view name, std::
 }
 
 std::uint64_t Execution::steps() const { return state_->steps(); }
+std::uint64_t Execution::live_heap_cells() const { return state_->live_heap_cells(); }
 std::uint64_t Execution::peak_heap_cells() const { return state_->peak_heap_cells(); }
 const std::vector<std::uint64_t>& Execution::function_steps() const { return state_->function_steps(); }
 

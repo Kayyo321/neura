@@ -36,9 +36,17 @@ A function has a signature, a frame layout, and an entry block. Each block evalu
 
 The reference graph profile uses signed 64-bit integer weights and biases, with identity and ReLU activations. For a node, NVM starts with its bias and visits incoming edges in ascending source index order. Each multiplication and running sum uses checked signed 64-bit arithmetic. Overflow traps before the activation. Identity returns the sum. ReLU returns zero for a negative sum and the sum otherwise. Node evaluation order follows the stored topological order. A backend must produce circuits whose intermediate arithmetic is valid for the input domain it claims to support.
 
+An implementation may compute graph output lanes by another method when they equal the reference values and reference evaluation does not overflow. If the method cannot establish both conditions, the reference evaluator supplies the result or reports the overflow.
+
 At the graph boundary, each value occupies a sequence of bit lanes. Lane zero is the least significant bit. Booleans occupy one lane, and integers occupy their declared width with two's-complement encoding for signed values. References cross the graph boundary as 64-bit opaque handles. Every output lane consumed by the selected exit, including the selector, must be exactly zero or one. A selector outside the block's exit table traps. Source arithmetic and comparisons are expressed by the graph, including checks and exits for specified arithmetic failures. Checked neuron arithmetic is an execution rule for the target and is distinct from the source language's arithmetic rules.
 
 A typed value descriptor can read a frame slot, a constant, or an output lane slice. The runtime transports opaque handles and checks their type and validity when used. Language-level equality, arithmetic, and control decisions are represented in the circuit. Execution metadata can transport a constant or a live reference without routing it through a neuron.
+
+### Graph devices
+
+A graph device belongs to one validated image. Each job sends a graph index and its binary input lanes. The device either returns the exact output lanes in the graph's output order or declines the job. A device failure also declines the job. The executor evaluates declined jobs by reference, including the reference evaluator's first-overflow diagnostic. The executor checks selectors and consumed output lanes and owns every continuation, slot, heap object, resource limit, and host interaction. Device evaluation has no host import or trace entry.
+
+Embedders can split a block transition using `Execution::begin_step`, then `finish_step` with exact output lanes or `fail_step` with the reference overflow's node index. Begin charges the block's step and resolves its inputs before evaluation. The input view remains valid until the step is settled. Beginning another step or calling `advance` before settling it is an API error. Finishing with the wrong number of lanes rejects the call and leaves the step open. With no device in `RunLimits`, `advance` evaluates by reference.
 
 ## Execution state
 

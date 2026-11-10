@@ -25,7 +25,9 @@ neura_target_defaults(neura_nvr)
 add_library(neura_nvm STATIC
     src/nvm/ffi_provider.cpp
     src/nvm/fs_provider.cpp
+    src/nvm/graph_device.cpp
     src/nvm/host.cpp
+    src/nvm/layered.cpp
     src/nvm/machine.cpp
     src/nvm/net_provider.cpp
     src/nvm/providers.cpp
@@ -155,11 +157,13 @@ if(BUILD_TESTING)
         tests/backend/circuit_tests.cpp
         tests/backend/conversion_tests.cpp
     tests/backend/decompiler_tests.cpp
+        tests/backend/fleet_tests.cpp
         tests/backend/fixtures.cpp
     tests/backend/float_tests.cpp
         tests/backend/format_tests.cpp
     tests/backend/generics_tests.cpp
         tests/backend/host_tests.cpp
+        tests/backend/layered_tests.cpp
         tests/backend/nir_tests.cpp
         tests/backend/reference_tests.cpp
         tests/backend/vm_tests.cpp
@@ -172,7 +176,7 @@ if(BUILD_TESTING)
     target_include_directories(neura_backend_tests PRIVATE tests)
     neura_target_defaults(neura_backend_tests)
 
-    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics)
+    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()

@@ -5,8 +5,11 @@
 // guarded so that the reference itself never overflows.
 
 #include "backend/circuit.hpp"
+#include "circuit_tests.hpp"
 #include "fixtures.hpp"
+#include "nvm/layered.hpp"
 
+#include <array>
 #include <functional>
 #include <limits>
 
@@ -237,6 +240,76 @@ private:
     std::size_t checked_ = 0;
 };
 
+// Pack independent requests into one call. The same domain is used by the
+// Vulkan suite, so even a 65,536-pair sweep does not need one dispatch per pair.
+class DeviceChecker {
+public:
+    DeviceChecker(nvr::Graph graph, unsigned width, const GraphDeviceFactory& make_device, std::string label)
+        : width_(width), label_(std::move(label)) {
+        image_.graphs.push_back(std::move(graph));
+        device_ = make_device(image_);
+        inputs_.reserve(batch_size * image_.graphs[0].input_lanes);
+    }
+
+    void add(std::uint64_t a, std::uint64_t b = 0) {
+        const auto lanes = image_.graphs[0].input_lanes;
+        for (unsigned i = 0; i < lanes; ++i) {
+            inputs_.push_back(static_cast<std::int64_t>(((i < width_ ? a : b) >> (i % width_)) & 1U));
+        }
+        if (inputs_.size() == batch_size * lanes) {
+            check_batch();
+        }
+    }
+
+    void check_batch() {
+        const auto& graph = image_.graphs[0];
+        const auto count = inputs_.size() / graph.input_lanes;
+        if (count == 0) {
+            return;
+        }
+        const auto output_count = graph.outputs.size();
+        outputs_.resize(count * output_count);
+        jobs_.clear();
+        jobs_.reserve(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            jobs_.push_back({0, std::span(inputs_).subspan(i * graph.input_lanes, graph.input_lanes),
+                             std::span(outputs_).subspan(i * output_count, output_count)});
+        }
+        device_->evaluate(jobs_);
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& job = jobs_[i];
+            wires_.assign(job.inputs.begin(), job.inputs.end());
+            if (job.evaluated == graph.nodes.empty() || nvm::evaluate_graph(graph, wires_)) {
+                fail(label_ + " request " + std::to_string(checked_ + i) + " has an unexpected evaluation outcome");
+            }
+            // Some conversions return only input wires. A device must leave
+            // those graphs to the reference evaluator even on valid inputs.
+            if (!job.evaluated) {
+                continue;
+            }
+            for (std::size_t lane = 0; lane < output_count; ++lane) {
+                if (job.outputs[lane] != wires_[graph.outputs[lane]]) {
+                    fail(label_ + " request " + std::to_string(checked_ + i) + " differs at lane " + std::to_string(lane));
+                }
+            }
+        }
+        checked_ += count;
+        inputs_.clear();
+    }
+
+private:
+    static constexpr std::size_t batch_size = 65'535;
+    unsigned width_;
+    std::string label_;
+    nvr::Image image_;
+    std::unique_ptr<nvm::GraphDevice> device_;
+    std::vector<std::int64_t> inputs_;
+    std::vector<std::int64_t> outputs_;
+    std::vector<std::int64_t> wires_;
+    std::vector<nvm::GraphJob> jobs_;
+    std::size_t checked_ = 0;
+};
+
 constexpr Op all_ops[] = {Op::Add, Op::Subtract, Op::Multiply, Op::Divide, Op::Remainder,
                           Op::Negate, Op::Equal, Op::Less};
 
@@ -258,7 +331,94 @@ std::vector<std::uint64_t> samples(unsigned width, std::size_t random_count, uns
     return values;
 }
 
+std::vector<std::uint64_t> wide_operation_samples(unsigned width) {
+    return width == 16 ? samples(16, 64, 2) : width == 32 ? samples(32, 40, 3) : samples(64, 16, 7);
+}
+
+std::vector<std::uint64_t> conversion_samples(unsigned from) {
+    if (from > 16) {
+        return samples(from, 64, 1);
+    }
+    std::vector<std::uint64_t> values;
+    for (std::uint64_t v = 0; v <= mask(from); ++v) {
+        values.push_back(v);
+    }
+    return values;
+}
+
+nvr::Graph conversion_circuit(unsigned from, bool from_signed, unsigned to, bool to_signed) {
+    Circuit circuit;
+    Word a;
+    for (unsigned i = 0; i < from; ++i) {
+        a.push_back(circuit.input());
+    }
+    const auto result = backend::convert_integer(circuit, a, from_signed, to, to_signed);
+    for (const auto& lane : result.value) {
+        circuit.output(lane);
+    }
+    circuit.output(result.failure);
+    return circuit.finish();
+}
+
 } // namespace
+
+void check_integer_graph_device(const GraphDeviceFactory& make_device) {
+    const auto check_pairs = [&](Op op, unsigned width, bool is_signed, std::span<const std::uint64_t> left,
+                                 std::span<const std::uint64_t> right) {
+        const auto label = std::string(is_signed ? "int" : "uint") + std::to_string(width) + " " + name(op);
+        DeviceChecker checker(circuit_for(op, width, is_signed), width, make_device, label);
+        for (const auto a : left) {
+            if (op == Op::Negate) {
+                checker.add(a);
+            } else {
+                for (const auto b : right) {
+                    checker.add(a, b);
+                }
+            }
+        }
+        checker.check_batch();
+    };
+    const auto bytes = conversion_samples(8);
+    for (const bool is_signed : {false, true}) {
+        for (const auto op : all_ops) {
+            check_pairs(op, 8, is_signed, bytes, bytes);
+        }
+        for (const auto op : {Op::ShiftLeft, Op::ShiftRight}) {
+            check_pairs(op, 8, is_signed, bytes, bytes);
+            const auto wide = samples(64, 8, 8);
+            const std::array<std::uint64_t, 6> counts{0, 1, 32, 63, 64, std::uint64_t{1} << 63};
+            check_pairs(op, 64, is_signed, wide, counts);
+        }
+    }
+    for (const unsigned width : {16U, 32U, 64U}) {
+        const auto values = wide_operation_samples(width);
+        for (const bool is_signed : {false, true}) {
+            for (const auto op : all_ops) {
+                check_pairs(op, width, is_signed, values, values);
+            }
+        }
+    }
+    for (const unsigned from : {8U, 16U, 32U, 64U}) {
+        const auto values = conversion_samples(from);
+        for (const bool from_signed : {false, true}) {
+            for (const unsigned to : {8U, 16U, 32U, 64U}) {
+                for (const bool to_signed : {false, true}) {
+                    const auto label = std::string(from_signed ? "int" : "uint") + std::to_string(from) +
+                                       " as " + (to_signed ? "int" : "uint") + std::to_string(to);
+                    DeviceChecker checker(conversion_circuit(from, from_signed, to, to_signed), from, make_device, label);
+                    for (const auto value : values) {
+                        checker.add(value);
+                    }
+                    checker.check_batch();
+                }
+            }
+        }
+    }
+}
+
+NEURA_TEST(layered, integer_circuit_outputs_match_reference) {
+    check_integer_graph_device([](const nvr::Image& image) { return std::make_unique<nvm::ModelDevice>(image); });
+}
 
 NEURA_TEST(circuits, exhaustive_eight_bit_operations) {
     for (const bool is_signed : {false, true}) {
@@ -277,7 +437,7 @@ NEURA_TEST(circuits, wide_operations_on_boundary_and_random_operands) {
     for (const unsigned width : {16U, 32U, 64U}) {
         // The 64-bit multiplier and divider are the largest graphs, so wider
         // types get fewer operands.
-        const auto values = width == 16 ? samples(16, 64, 2) : width == 32 ? samples(32, 40, 3) : samples(64, 16, 7);
+        const auto values = wide_operation_samples(width);
         for (const bool is_signed : {false, true}) {
             for (const auto op : all_ops) {
                 Checker checker(op, width, is_signed);
@@ -327,27 +487,11 @@ NEURA_TEST(circuits, integer_conversions_between_every_format) {
     };
     std::size_t checked = 0;
     for (const unsigned from : {8U, 16U, 32U, 64U}) {
+        const auto values = conversion_samples(from);
         for (const bool from_signed : {false, true}) {
-            const auto sources = from <= 16 ? std::vector<std::uint64_t>{} : samples(from, 64, 1);
-            std::vector<std::uint64_t> values = sources;
-            if (from <= 16) {
-                for (std::uint64_t v = 0; v <= mask(from); ++v) {
-                    values.push_back(v);
-                }
-            }
             for (const unsigned to : {8U, 16U, 32U, 64U}) {
                 for (const bool to_signed : {false, true}) {
-                    Circuit circuit;
-                    Word a;
-                    for (unsigned i = 0; i < from; ++i) {
-                        a.push_back(circuit.input());
-                    }
-                    const auto result = backend::convert_integer(circuit, a, from_signed, to, to_signed);
-                    for (const auto& lane : result.value) {
-                        circuit.output(lane);
-                    }
-                    circuit.output(result.failure);
-                    const auto graph = circuit.finish();
+                    const auto graph = conversion_circuit(from, from_signed, to, to_signed);
                     std::vector<std::int64_t> wires;
                     for (const auto bits : values) {
                         wires.assign(graph.input_lanes, 0);

@@ -14,6 +14,8 @@
 
 namespace neura::nvm {
 
+class GraphDevice;
+
 // Bounds a run enforces. Exhaustion traps at the operation that would exceed
 // the bound, before the allocation, frame, or block it would start.
 struct RunLimits {
@@ -29,6 +31,9 @@ struct RunLimits {
     // Count the steps of each function, for `neura run --profile`. Counting
     // does not change execution.
     bool profile = false;
+    // Evaluates graphs for this run, or nullptr for the reference evaluator.
+    // The device must have been created for the image the run executes.
+    GraphDevice* graph_device = nullptr;
 };
 
 enum class TrapKind {
@@ -86,6 +91,12 @@ std::string describe(const Trap& trap, const nvr::Image& image, bool include_ind
 // or nothing when evaluation succeeds.
 std::optional<std::size_t> evaluate_graph(const nvr::Graph& graph, std::vector<std::int64_t>& wires);
 
+// Evaluates the graph by reference and stores wire graph.outputs[k] in
+// outputs[k]. Returns the index of the node whose sum overflows, if any.
+// The spans must match the graph's lane counts and not alias scratch.
+std::optional<std::size_t> evaluate_outputs(const nvr::Graph& graph, std::span<const std::int64_t> inputs,
+                                            std::vector<std::int64_t>& scratch, std::span<std::int64_t> outputs);
+
 struct Event {
     enum class Kind { Completed, Trapped, HostRequest };
 
@@ -119,6 +130,20 @@ public:
     // response. Advancing a finished run returns its final event again.
     Event advance();
 
+    struct GraphStep {
+        std::uint32_t graph = 0;
+        // Valid until the step is finished.
+        std::span<const std::int64_t> inputs;
+        std::size_t output_count = 0;
+    };
+
+    // Start a block, then finish it with its graph outputs or report the
+    // reference evaluator's overflow. A begun step must be settled before
+    // advancing or beginning another one.
+    std::optional<Event> begin_step(GraphStep& step);
+    std::optional<Event> finish_step(std::span<const std::int64_t> outputs);
+    Event fail_step(std::size_t node);
+
     // Supplies the response to the pending host request. The value is
     // type-checked against the import; an ill-typed response traps. After a
     // callback ended the run, the response is ignored.
@@ -134,6 +159,7 @@ public:
                                              const std::vector<HostValue>& arguments, const HostHandler& host);
 
     std::uint64_t steps() const;
+    std::uint64_t live_heap_cells() const;
     // The largest live heap size reached so far, in the cells of
     // RunLimits::max_heap_cells.
     std::uint64_t peak_heap_cells() const;
