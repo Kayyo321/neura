@@ -1,57 +1,54 @@
 let error = import:Std.Core.Error;
 let failure = import:Std.Core.Failure;
 let optional = import:Std.Core.Optional;
-let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Result;
 
 // Assertions for `neura test` (Stdlib.md section 14.2). Each builds its
 // message in Neura and traps through Failure.trap; the runner reports the
 // message at the failing assertion's call site in the test file.
 export let Test = module (
-    export let assert = func(condition: bool) -> void {
+    export let assert = func(condition: bool) {
         if (!condition) {
             failure.trap("assertion failed");
         }
     };
 
-    export let assert_with = func(condition: bool, message: string) -> void {
+    export let assert_with = func(condition: bool, message: string) {
         if (!condition) {
             failure.trap(message);
         }
     };
 
-    export let fail = func(message: string) -> void {
-        failure.trap(message);
-    };
+    export let fail = func(message: string) => failure.trap(message);
 
-    let mismatch = func(expected: string, actual: string) -> void {
+    let mismatch = func(expected: string, actual: string) =>
         failure.trap("expected <" + expected + ">, got <" + actual + ">");
-    };
 
-    export let assert_equal_int32 = func(expected: int32, actual: int32) -> void {
+    export let assert_equal_int32 = func(expected: int32, actual: int32) {
         if (expected != actual) {
             mismatch(expected.to_string(), actual.to_string());
         }
     };
 
-    export let assert_equal_int64 = func(expected: int64, actual: int64) -> void {
+    export let assert_equal_int64 = func(expected: int64, actual: int64) {
         if (expected != actual) {
             mismatch(expected.to_string(), actual.to_string());
         }
     };
 
-    export let assert_equal_uint64 = func(expected: uint64, actual: uint64) -> void {
+    export let assert_equal_uint64 = func(expected: uint64, actual: uint64) {
         if (expected != actual) {
             mismatch(expected.to_string(), actual.to_string());
         }
     };
 
-    export let assert_equal_bool = func(expected: bool, actual: bool) -> void {
+    export let assert_equal_bool = func(expected: bool, actual: bool) {
         if (expected != actual) {
             mismatch(expected.to_string(), actual.to_string());
         }
     };
 
-    export let assert_equal_string = func(expected: string, actual: string) -> void {
+    export let assert_equal_string = func(expected: string, actual: string) {
         if (expected != actual) {
             mismatch(expected, actual);
         }
@@ -59,15 +56,15 @@ export let Test = module (
 
     // Equal bit patterns, except that every NaN equals every NaN; 0.0 and
     // -0.0 differ (Stdlib.md section 5.2).
-    export let assert_equal_float64 = func(expected: float64, actual: float64) -> void {
-        if (!expected.equals(actual)) {
+    export let assert_equal_float64 = func(expected: float64, actual: float64) {
+        if (!(expected === actual)) {
             mismatch(expected.to_string(), actual.to_string());
         }
     };
 
     // Fails when the absolute difference exceeds the tolerance or either
     // value is NaN.
-    export let assert_float_near = func(expected: float64, actual: float64, tolerance: float64) -> void {
+    export let assert_float_near = func(expected: float64, actual: float64, tolerance: float64) {
         let difference = expected - actual;
         if (difference < 0.0) {
             difference = -difference;
@@ -77,14 +74,14 @@ export let Test = module (
         }
     };
 
-    export let assert_equal = func<T>(expected: T, actual: T) -> void {
-        if (!expected.equals(actual)) {
+    export let assert_equal = func<T>(expected: T, actual: T) {
+        if (!(expected === actual)) {
             mismatch(expected.to_string(), actual.to_string());
         }
     };
 
-    export let assert_not_equal = func<T>(unexpected: T, actual: T) -> void {
-        if (unexpected.equals(actual)) {
+    export let assert_not_equal = func<T>(unexpected: T, actual: T) {
+        if (unexpected === actual) {
             failure.trap("expected a value other than <" + unexpected.to_string() + ">");
         }
     };
@@ -100,29 +97,29 @@ export let Test = module (
         }
     };
 
-    export let assert_none = func<T>(o: optional.Optional<T>) -> void {
+    export let assert_none = func<T>(o: optional.Optional<T>) {
         if (optional.is_some<T>(o)) {
             failure.trap("expected None, got Some");
         }
     };
 
-    export let assert_ok = func<T>(r: result.Result<T>) -> T {
+    export let assert_ok = func<T>(r: Result<T>) -> T {
         match (r) {
-            result.Result.Ok(value) => {
+            Result.Ok(value) => {
                 return value;
             },
-            result.Result.Err(e) => {
+            Result.Err(e) => {
                 trap_with_message("expected Ok, got Err: " + error.message(e));
             },
         }
     };
 
-    export let assert_err = func<T>(r: result.Result<T>) -> error.Error {
+    export let assert_err = func<T>(r: Result<T>) -> error.Error {
         match (r) {
-            result.Result.Ok(_) => {
+            Result.Ok(_) => {
                 trap_with_message("expected Err, got Ok");
             },
-            result.Result.Err(e) => {
+            Result.Err(e) => {
                 return e;
             },
         }
