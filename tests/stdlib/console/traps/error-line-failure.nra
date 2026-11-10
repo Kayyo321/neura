@@ -1,0 +1,13 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): console write failed
+// run-options: --replay @AREA_DIR@/traps/error-line-failure.trace
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// A failed error_line traps.
+export let ErrorLineFailure = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.error_line("lost");
+        return program.ExitCode.Ok;
+    };
+);

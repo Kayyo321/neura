@@ -1,0 +1,53 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let cell = import:Std.Core.Cell;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// An in-memory byte accumulator (Stdlib.md section 11.1). Its bound write
+// method is a byte sink.
+export let ByteBuffer = module (
+    export let ByteBuffer = class (
+        let data: uint8[list] = [];
+
+        // Appends every byte; never fails.
+        export let write = func(uint8[list] input) -> result.Result<unit.Unit> {
+            bytes.append_range(data, input, 0, input.length);
+            return bytes.ok();
+        };
+
+        // A copy of the bytes written so far.
+        export let to_list = func() -> uint8[list] {
+            return bytes.copy_range(data, 0, data.length);
+        };
+
+        export let size = func() -> int {
+            return data.length;
+        };
+
+        export let clear = func() -> void {
+            let empty: uint8[list] = [];
+            data = empty;
+        };
+
+        // A byte source over a copy of the current contents. A maximum count
+        // below 1 traps.
+        export let reader = func() -> func(int) -> result.Result<uint8[list]> {
+            let snapshot = to_list();
+            let position = cell.of<int>(0);
+            return func(int max) -> result.Result<uint8[list]> {
+                bytes.check_maximum(max);
+                let start = position.value;
+                let end = snapshot.length;
+                if (end - start > max) {
+                    end = start + max;
+                }
+                position.value = end;
+                return result.Result<uint8[list]>.Ok(bytes.copy_range(snapshot, start, end));
+            };
+        };
+    );
+
+    export let create = func() -> ByteBuffer {
+        return new ByteBuffer();
+    };
+);

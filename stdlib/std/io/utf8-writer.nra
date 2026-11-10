@@ -1,0 +1,28 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// Writes UTF-8 text to a byte sink (Stdlib.md section 11.1). The bound write
+// method is a text sink.
+export let Utf8Writer = module (
+    export let Utf8Writer = class (
+        let sink: func(uint8[list]) -> result.Result<unit.Unit>;
+
+        export let init = func(func(uint8[list]) -> result.Result<unit.Unit> output) -> void {
+            sink = output;
+        };
+
+        export let write = func(string text) -> result.Result<unit.Unit> {
+            return sink(bytes.of_string(text));
+        };
+
+        // Writes the text and one LF.
+        export let write_line = func(string text) -> result.Result<unit.Unit> {
+            return sink(bytes.of_string(text + "\n"));
+        };
+    );
+
+    export let create = func(func(uint8[list]) -> result.Result<unit.Unit> sink) -> Utf8Writer {
+        return new Utf8Writer(sink);
+    };
+);

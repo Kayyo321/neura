@@ -1,0 +1,41 @@
+neura-trace 1
+# Written by hand: failed console requests.
+request neura.console.write 1 [1, "abc"]
+error 100
+request neura.console.write_line 1 ["Other: console write failed"]
+ok 0
+request neura.console.write 1 [2, "x\n"]
+error 2
+request neura.console.write_line 1 ["PermissionDenied: console write failed"]
+ok 0
+request neura.console.write 1 [1, "zero"]
+ok 0
+request neura.console.write_line 1 ["Other: console write failed"]
+ok 0
+request neura.console.write 1 [1, "part"]
+ok 2
+request neura.console.write 1 [1, "rt"]
+error 11
+request neura.console.write_line 1 ["ConnectionReset: console write failed"]
+ok 0
+request neura.console.write_line 1 [""]
+ok 0
+request neura.console.write_line 1 ["line"]
+error 1
+request neura.console.write_line 1 ["Other: console write failed"]
+ok 0
+request neura.console.read 1 [4096]
+ok "partial "
+request neura.console.read 1 [4096]
+error 5
+request neura.console.write_line 1 ["Interrupted: console read failed"]
+ok 0
+request neura.console.read 1 [4096]
+ok "line\n"
+request neura.console.write_line 1 ["partial line"]
+ok 0
+request neura.console.read 1 [10]
+error 4
+request neura.console.write_line 1 ["InvalidInput: console read failed"]
+ok 0
+outcome completed 0

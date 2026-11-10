@@ -1,0 +1,5 @@
+neura-trace 1
+# Written by hand: the error stream write fails.
+request neura.console.write 1 [2, "lost\n"]
+error 100
+outcome trap program 3 "console write failed"

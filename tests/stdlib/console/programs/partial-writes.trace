@@ -1,0 +1,23 @@
+neura-trace 1
+# Written by hand: each neura.console.write stores only part of its bytes.
+request neura.console.write 1 [1, "hello world"]
+ok 4
+request neura.console.write 1 [1, "o world"]
+ok 3
+request neura.console.write 1 [1, "orld"]
+ok 4
+request neura.console.write_line 1 [""]
+ok 0
+request neura.console.write 1 [2, "abc\n"]
+ok 2
+request neura.console.write 1 [2, "c\n"]
+ok 2
+request neura.console.write_line 1 ["error stream ok"]
+ok 0
+request neura.console.write 1 [1, "xyz\n"]
+ok 1
+request neura.console.write 1 [1, "yz\n"]
+ok 3
+request neura.console.write_line 1 ["sink ok"]
+ok 0
+outcome completed 0

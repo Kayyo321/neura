@@ -1,0 +1,7 @@
+neura-trace 1
+# Written by hand: the write of "lost" fails.
+request neura.console.write_line 1 ["before"]
+ok 0
+request neura.console.write 1 [1, "lost"]
+error 100
+outcome trap program 3 "console write failed"

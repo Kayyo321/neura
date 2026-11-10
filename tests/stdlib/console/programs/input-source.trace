@@ -1,0 +1,19 @@
+neura-trace 1
+# Recorded with: (printf 'first\nsecond\n'; sleep 0.3; printf 'third') | neura run --record input-source.trace input-source.nvr
+request neura.console.read 1 [4096]
+ok "first\nsecond\n"
+request neura.console.write_line 1 ["first"]
+ok 0
+request neura.console.write_line 1 ["3 <sec>"]
+ok 0
+request neura.console.write_line 1 ["4 <ond\n>"]
+ok 0
+request neura.console.read 1 [100]
+ok "third"
+request neura.console.write_line 1 ["5 <third>"]
+ok 0
+request neura.console.read 1 [100]
+ok 0
+request neura.console.write_line 1 ["0 <>"]
+ok 0
+outcome completed 0

@@ -1,0 +1,19 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: maximum count below 1
+// run-options: --allow-fs=data.txt
+let file = import:Std.Fs.File;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let p = path.of("data.txt");
+        result.expect<unit.Unit>(fs.write_text(p, "data"), "write");
+        let f = result.expect<file.File>(file.open(p, file.OpenMode.Read), "open");
+        f.read(0);
+        return program.ExitCode.Ok;
+    };
+);

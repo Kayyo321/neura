@@ -1,0 +1,14 @@
+// status: 70
+// stderr: trap: explicit program failure \(trap reason 3\): recorded failure
+// run-options: --replay @AREA_DIR@/traps/replayed-trap.trace
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// A recorded trap replays as the same trap.
+export let ReplayedTrap = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("before");
+        trap_with_message("recorded failure");
+        return program.ExitCode.Ok;
+    };
+);

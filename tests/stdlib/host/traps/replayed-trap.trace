@@ -1,0 +1,4 @@
+neura-trace 1
+request neura.console.write_line 1 ["before"]
+ok 0
+outcome trap program 3 "recorded failure"

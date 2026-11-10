@@ -1,0 +1,15 @@
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let tcp_listener = import:Std.Net.TcpListener;
+let tcp_stream = import:Std.Net.TcpStream;
+let test = import:Std.Test;
+
+// Without --allow-net, connecting and binding fail with CapabilityDenied.
+let NetDeniedTests = module (
+    export let test_connect_and_bind_are_denied = func() -> void {
+        let refused = test.assert_err<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", 9, duration.of_seconds(1)));
+        test.assert_equal_string("CapabilityDenied: connect failed (127.0.0.1:9)", error.message(refused));
+        let unbound = test.assert_err<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0));
+        test.assert_equal_string("CapabilityDenied: bind failed (127.0.0.1:0)", error.message(unbound));
+    };
+);

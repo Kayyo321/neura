@@ -1,0 +1,53 @@
+// run-options: --replay @AREA_DIR@/programs/files-replayed.trace
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// File operations answered from a trace recorded with --allow-fs in a
+// scratch directory. The replay runs without the capability and without
+// the files: no service is invoked.
+export let FilesReplayed = module:program.Entry (
+    let report = func(result.Result<unit.Unit> outcome) -> void {
+        match (outcome) {
+            result.Result.Ok(_) => {
+                console.print_line("ok");
+            },
+            result.Result.Err(failure) => {
+                console.print_line(error.message(failure));
+            },
+        }
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let dir = path.of("host-data");
+        report(fs.create_directories(dir.join("nested")));
+        report(fs.write_text(dir.join("a.txt"), "alpha\n"));
+        report(fs.append_text(dir.join("a.txt"), "beta\n"));
+        report(fs.copy_file(dir.join("a.txt"), dir.join("nested/b.txt")));
+        match (fs.read_text(dir.join("nested/b.txt"))) {
+            result.Result.Ok(text) => {
+                console.print(text);
+            },
+            result.Result.Err(failure) => {
+                console.print_line(error.message(failure));
+            },
+        }
+        match (fs.list(dir)) {
+            result.Result.Ok(entries) => {
+                for (let entry in entries) {
+                    console.print_line(entry.to_string());
+                }
+            },
+            result.Result.Err(failure) => {
+                console.print_line(error.message(failure));
+            },
+        }
+        report(fs.remove_file(dir.join("missing.txt")));
+        report(fs.remove_tree(dir));
+        return program.ExitCode.Ok;
+    };
+);

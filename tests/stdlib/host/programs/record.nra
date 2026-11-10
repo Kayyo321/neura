@@ -1,0 +1,21 @@
+// run-options: --allow-fs=record-data --record recorded.trace
+// status: 3
+let console = import:Std.Io.Console;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// Recording uses the real services: the program sees and prints the same as
+// a plain run.
+export let Record = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let dir = path.of("record-data");
+        fs.remove_tree(dir);
+        result.expect<unit.Unit>(fs.create_directory(dir), "create");
+        result.expect<unit.Unit>(fs.write_text(dir.join("r.txt"), "recorded"), "write");
+        console.print_line(result.expect<string>(fs.read_text(dir.join("r.txt")), "read"));
+        return program.ExitCode.Status(3);
+    };
+);

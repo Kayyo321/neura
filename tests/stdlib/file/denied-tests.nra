@@ -1,0 +1,20 @@
+let error = import:Std.Core.Error;
+let file = import:Std.Fs.File;
+let path = import:Std.Fs.Path;
+let test = import:Std.Test;
+
+// Without --allow-fs, opening fails with CapabilityDenied in every mode.
+let FileDeniedTests = module (
+    let denied = func(file.OpenMode mode) -> void {
+        let failure = test.assert_err<file.File>(file.open(path.of("denied.txt"), mode));
+        test.assert_equal_string("CapabilityDenied: file open failed (denied.txt)", error.message(failure));
+    };
+
+    export let test_open_is_denied = func() -> void {
+        denied(file.OpenMode.Read);
+        denied(file.OpenMode.Write);
+        denied(file.OpenMode.Append);
+        denied(file.OpenMode.ReadWrite);
+        denied(file.OpenMode.CreateNew);
+    };
+);

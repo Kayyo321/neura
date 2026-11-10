@@ -1,0 +1,17 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: maximum count below 1
+// run-options: --allow-net
+let duration = import:Std.Time.Duration;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let tcp_listener = import:Std.Net.TcpListener;
+let tcp_stream = import:Std.Net.TcpStream;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let listener = result.expect<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0), "bind");
+        let stream = result.expect<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", listener.local_port(), duration.of_seconds(5)), "connect");
+        stream.read(0);
+        return program.ExitCode.Ok;
+    };
+);

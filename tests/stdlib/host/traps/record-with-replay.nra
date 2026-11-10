@@ -1,0 +1,10 @@
+// status: 1
+// stderr: neura: error: --record and --replay cannot be combined
+// run-options: --record a.trace --replay b.trace
+let program = import:Std.Program;
+
+export let RecordWithReplay = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        return program.ExitCode.Ok;
+    };
+);

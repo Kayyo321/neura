@@ -1,0 +1,6 @@
+neura-trace 1
+request neura.console.write_line 1 ["first"]
+ok 0
+request neura.console.write_line 1 ["changed"]
+ok 0
+outcome completed 0

@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: port
+let duration = import:Std.Time.Duration;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let tcp_listener = import:Std.Net.TcpListener;
+let tcp_stream = import:Std.Net.TcpStream;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        tcp_stream.connect("127.0.0.1", 65536, duration.of_seconds(1));
+        return program.ExitCode.Ok;
+    };
+);

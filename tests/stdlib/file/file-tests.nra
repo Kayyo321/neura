@@ -1,0 +1,265 @@
+// test-options: --allow-fs=file-work
+let buffered_reader = import:Std.Io.BufferedReader;
+let closeable = import:Std.Io.Closeable;
+let error = import:Std.Core.Error;
+let file = import:Std.Fs.File;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+let utf8_reader = import:Std.Io.Utf8Reader;
+let utf8_writer = import:Std.Io.Utf8Writer;
+let optional = import:Std.Core.Optional;
+
+// Runs against the real file system in file-work/ below the test's working
+// directory, the only path the capability grants.
+let FileTests = module (
+    // A fresh, empty directory for one test.
+    let fresh = func(string name) -> path.Path {
+        let root = path.of("file-work");
+        let dir = root.join(name);
+        match (fs.remove_tree(dir)) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(failure) => {
+                test.assert(kind_of(failure) == error.IoErrorKind.NotFound);
+            },
+        }
+        test.assert_ok<unit.Unit>(fs.create_directories(dir));
+        return dir;
+    };
+
+    // Removes a test's directory, so that every run starts from the same
+    // state.
+    let finish = func(path.Path dir) -> void {
+        test.assert_ok<unit.Unit>(fs.remove_tree(dir));
+        test.assert_ok<unit.Unit>(fs.remove_directory(path.of("file-work")));
+    };
+
+    let kind_of = func(error.Error e) -> error.IoErrorKind {
+        return match (e) {
+            error.Error.Io { kind, message, path } => kind,
+            _ => error.IoErrorKind.Other,
+        };
+    };
+
+    let expect_kind = func<T>(result.Result<T> r, error.IoErrorKind expected) -> void {
+        let failure = test.assert_err<T>(r);
+        test.assert_with(kind_of(failure) == expected, "expected " + expected.to_string() + ", got " + error.message(failure));
+    };
+
+    let bytes_of = func(string text) -> uint8[list] {
+        let out: uint8[list] = [];
+        let i = 0;
+        while (i < text.byte_length) {
+            out.append(text.byte_at(i));
+            i = i + 1;
+        }
+        return out;
+    };
+
+    let text_of = func(uint8[list] data) -> string {
+        let [valid, text] = string.from_utf8(data);
+        test.assert(valid);
+        return text;
+    };
+
+    let open = func(path.Path p, file.OpenMode mode) -> file.File {
+        return test.assert_ok<file.File>(file.open(p, mode));
+    };
+
+    let contents = func(path.Path p) -> string {
+        return test.assert_ok<string>(fs.read_text(p));
+    };
+
+    export let test_write_then_read = func() -> void {
+        let dir = fresh("write-read");
+        let p = dir.join("a.txt");
+        let out = open(p, file.OpenMode.Write);
+        test.assert_ok<unit.Unit>(out.write(bytes_of("héllo ")));
+        let sink = out.write;
+        test.assert_ok<unit.Unit>(sink(bytes_of("world")));
+        test.assert_ok<unit.Unit>(out.write(bytes_of("")));
+        test.assert_ok<unit.Unit>(out.close());
+        let input = open(p, file.OpenMode.Read);
+        test.assert_equal_string("hé", text_of(test.assert_ok<uint8[list]>(input.read(3))));
+        let source = input.read;
+        test.assert_equal_string("llo world", text_of(test.assert_ok<uint8[list]>(source(100))));
+        test.assert_equal_int32(0, test.assert_ok<uint8[list]>(input.read(10)).length);
+        test.assert_equal_int32(0, test.assert_ok<uint8[list]>(input.read(10)).length);
+        test.assert_ok<unit.Unit>(input.close());
+        finish(dir);
+    };
+
+    export let test_open_modes = func() -> void {
+        let dir = fresh("modes");
+        let p = dir.join("m.txt");
+        expect_kind<file.File>(file.open(p, file.OpenMode.Read), error.IoErrorKind.NotFound);
+        expect_kind<file.File>(file.open(p, file.OpenMode.ReadWrite), error.IoErrorKind.NotFound);
+        let created = open(p, file.OpenMode.CreateNew);
+        test.assert_ok<unit.Unit>(created.write(bytes_of("abcdef")));
+        test.assert_ok<int64>(created.seek(0, file.SeekOrigin.Start));
+        test.assert_equal_string("abc", text_of(test.assert_ok<uint8[list]>(created.read(3))));
+        test.assert_ok<unit.Unit>(created.close());
+        expect_kind<file.File>(file.open(p, file.OpenMode.CreateNew), error.IoErrorKind.AlreadyExists);
+        let appended = open(p, file.OpenMode.Append);
+        test.assert_ok<unit.Unit>(appended.write(bytes_of("gh")));
+        test.assert_ok<unit.Unit>(appended.close());
+        test.assert_equal_string("abcdefgh", contents(p));
+        let both = open(p, file.OpenMode.ReadWrite);
+        test.assert_equal_string("ab", text_of(test.assert_ok<uint8[list]>(both.read(2))));
+        test.assert_ok<unit.Unit>(both.write(bytes_of("XY")));
+        test.assert_ok<unit.Unit>(both.close());
+        test.assert_equal_string("abXYefgh", contents(p));
+        let truncated = open(p, file.OpenMode.Write);
+        test.assert_ok<unit.Unit>(truncated.close());
+        test.assert_equal_string("", contents(p));
+        finish(dir);
+    };
+
+    export let test_seek_and_size = func() -> void {
+        let dir = fresh("seek");
+        let p = dir.join("s.bin");
+        let f = open(p, file.OpenMode.CreateNew);
+        test.assert_ok<unit.Unit>(f.write(bytes_of("0123456789")));
+        test.assert_equal_int64(10, test.assert_ok<int64>(f.size()));
+        test.assert_equal_int64(10, test.assert_ok<int64>(f.seek(0, file.SeekOrigin.Current)));
+        test.assert_equal_int64(2, test.assert_ok<int64>(f.seek(2, file.SeekOrigin.Start)));
+        test.assert_equal_int64(5, test.assert_ok<int64>(f.seek(3, file.SeekOrigin.Current)));
+        test.assert_equal_string("56", text_of(test.assert_ok<uint8[list]>(f.read(2))));
+        test.assert_equal_int64(8, test.assert_ok<int64>(f.seek(-2, file.SeekOrigin.End)));
+        test.assert_equal_int64(10, test.assert_ok<int64>(f.size()));
+        test.assert_equal_int64(8, test.assert_ok<int64>(f.seek(0, file.SeekOrigin.Current)));
+        expect_kind<int64>(f.seek(-1, file.SeekOrigin.Start), error.IoErrorKind.InvalidInput);
+        // Seeking past the end and writing leaves a gap of zero bytes.
+        test.assert_equal_int64(12, test.assert_ok<int64>(f.seek(12, file.SeekOrigin.Start)));
+        test.assert_ok<unit.Unit>(f.write(bytes_of("!")));
+        test.assert_equal_int64(13, test.assert_ok<int64>(f.size()));
+        test.assert_ok<unit.Unit>(f.close());
+        let all = test.assert_ok<uint8[list]>(fs.read_bytes(p));
+        test.assert_equal_int32(13, all.length);
+        test.assert_equal_int32(0, all[10] as int);
+        finish(dir);
+    };
+
+    export let test_wrong_direction_is_denied = func() -> void {
+        let dir = fresh("direction");
+        let p = dir.join("d.txt");
+        test.assert_ok<unit.Unit>(fs.write_text(p, "data"));
+        let reading = open(p, file.OpenMode.Read);
+        expect_kind<unit.Unit>(reading.write(bytes_of("x")), error.IoErrorKind.PermissionDenied);
+        test.assert_ok<unit.Unit>(reading.close());
+        let writing = open(p, file.OpenMode.Append);
+        expect_kind<uint8[list]>(writing.read(4), error.IoErrorKind.PermissionDenied);
+        test.assert_ok<unit.Unit>(writing.close());
+        finish(dir);
+    };
+
+    export let test_closed_file = func() -> void {
+        let dir = fresh("closed");
+        let f = open(dir.join("c.txt"), file.OpenMode.CreateNew);
+        test.assert_ok<unit.Unit>(f.close());
+        test.assert_ok<unit.Unit>(f.close());
+        expect_kind<uint8[list]>(f.read(1), error.IoErrorKind.Closed);
+        expect_kind<unit.Unit>(f.write(bytes_of("x")), error.IoErrorKind.Closed);
+        expect_kind<int64>(f.seek(0, file.SeekOrigin.Start), error.IoErrorKind.Closed);
+        expect_kind<int64>(f.size(), error.IoErrorKind.Closed);
+        let failure = test.assert_err<uint8[list]>(f.read(1));
+        test.assert_equal_string("Closed: file is closed (file-work/closed/c.txt)", error.message(failure));
+        finish(dir);
+    };
+
+    export let test_file_is_closeable = func() -> void {
+        let dir = fresh("closeable");
+        let resource: closeable.Closeable = open(dir.join("c.txt"), file.OpenMode.CreateNew);
+        test.assert_ok<unit.Unit>(resource.close());
+        test.assert_ok<unit.Unit>(resource.close());
+        finish(dir);
+    };
+
+    export let test_open_errors = func() -> void {
+        let dir = fresh("errors");
+        expect_kind<file.File>(file.open(dir, file.OpenMode.Read), error.IoErrorKind.IsADirectory);
+        expect_kind<file.File>(file.open(dir, file.OpenMode.Write), error.IoErrorKind.IsADirectory);
+        expect_kind<file.File>(file.open(dir.join("missing/x"), file.OpenMode.Write), error.IoErrorKind.NotFound);
+        test.assert_ok<unit.Unit>(fs.write_text(dir.join("plain"), ""));
+        expect_kind<file.File>(file.open(dir.join("plain/x"), file.OpenMode.Read), error.IoErrorKind.NotADirectory);
+        let failure = test.assert_err<file.File>(file.open(dir.join("none.txt"), file.OpenMode.Read));
+        test.assert_equal_string("NotFound: file open failed (file-work/errors/none.txt)", error.message(failure));
+        finish(dir);
+    };
+
+    export let test_paths_outside_the_capability_are_denied = func() -> void {
+        let dir = fresh("outside");
+        expect_kind<file.File>(file.open(path.of("outside.txt"), file.OpenMode.Write), error.IoErrorKind.CapabilityDenied);
+        expect_kind<file.File>(file.open(path.of("file-work/../escape.txt"), file.OpenMode.Write),
+                               error.IoErrorKind.CapabilityDenied);
+        expect_kind<file.File>(file.open(path.of("/etc/hostname"), file.OpenMode.Read), error.IoErrorKind.CapabilityDenied);
+        expect_kind<file.File>(file.open(path.of("file-work-sibling/x"), file.OpenMode.Write),
+                               error.IoErrorKind.CapabilityDenied);
+        // `..` inside the granted directory stays allowed.
+        test.assert_ok<unit.Unit>(fs.write_text(dir.join("inner.txt"), "in"));
+        test.assert_equal_string("in", contents(dir.join("../outside/inner.txt")));
+        finish(dir);
+    };
+
+    export let test_streams_over_files = func() -> void {
+        let dir = fresh("streams");
+        let p = dir.join("lines.txt");
+        let out = open(p, file.OpenMode.Write);
+        let writer = utf8_writer.create(out.write);
+        let i = 0;
+        while (i < 100) {
+            test.assert_ok<unit.Unit>(writer.write_line("line " + i.to_string()));
+            i = i + 1;
+        }
+        test.assert_ok<unit.Unit>(out.close());
+        let input = open(p, file.OpenMode.Read);
+        let reader = utf8_reader.create(buffered_reader.with_capacity(input.read, 64).read);
+        let count = 0;
+        while (true) {
+            match (test.assert_ok<optional.Optional<string>>(reader.read_line())) {
+                optional.Optional.Some(line) => {
+                    test.assert_equal_string("line " + count.to_string(), line);
+                    count = count + 1;
+                },
+                optional.Optional.None => {
+                    break;
+                },
+            }
+        }
+        test.assert_equal_int32(100, count);
+        test.assert_ok<unit.Unit>(input.close());
+        finish(dir);
+    };
+
+    // At most 1,024 files are open at once; the next open fails with Other.
+    export let test_open_file_limit = func() -> void {
+        let dir = fresh("limit");
+        let p = dir.join("shared.txt");
+        test.assert_ok<unit.Unit>(fs.write_text(p, "x"));
+        let opened: file.File[list] = [];
+        while (opened.length < 1024) {
+            opened.append(open(p, file.OpenMode.Read));
+        }
+        expect_kind<file.File>(file.open(p, file.OpenMode.Read), error.IoErrorKind.Other);
+        test.assert_ok<unit.Unit>(opened[7].close());
+        let again = open(p, file.OpenMode.Read);
+        test.assert_equal_string("x", text_of(test.assert_ok<uint8[list]>(again.read(4))));
+        expect_kind<file.File>(file.open(p, file.OpenMode.Read), error.IoErrorKind.Other);
+        finish(dir);
+    };
+
+    // The previous test left 1,024 files open. Each test is a separate run,
+    // and the runner closes everything a run leaves open.
+    export let test_open_files_are_released_after_a_run = func() -> void {
+        let dir = fresh("released");
+        let p = dir.join("again.txt");
+        test.assert_ok<unit.Unit>(fs.write_text(p, "y"));
+        let opened: file.File[list] = [];
+        while (opened.length < 1023) {
+            opened.append(open(p, file.OpenMode.Read));
+        }
+        finish(dir);
+    };
+);

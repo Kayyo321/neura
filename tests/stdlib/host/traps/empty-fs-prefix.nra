@@ -1,0 +1,10 @@
+// status: 1
+// stderr: neura: error: --allow-fs= expects a comma-separated list of path prefixes
+// run-options: --allow-fs=a,,b
+let program = import:Std.Program;
+
+export let EmptyFsPrefix = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        return program.ExitCode.Ok;
+    };
+);

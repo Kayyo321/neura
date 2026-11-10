@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: capacity below 16
+let buffered_reader = import:Std.Io.BufferedReader;
+let buffered_writer = import:Std.Io.BufferedWriter;
+let byte_buffer = import:Std.Io.ByteBuffer;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let buffer = byte_buffer.create();
+        buffered_reader.with_capacity(buffer.reader(), 15);
+        return program.ExitCode.Ok;
+    };
+);

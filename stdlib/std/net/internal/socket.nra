@@ -1,0 +1,24 @@
+// The host ID of an open socket and the address text it was opened with.
+// Only Std.Net creates one; the ID never leaves the library.
+export let Socket = module (
+    export let Handle = class (
+        export let id: int64 = 0;
+        export let address: string = "";
+
+        export let init = func(int64 host_id, string address_text) -> void {
+            id = host_id;
+            address = address_text;
+        };
+    );
+
+    // A port outside 0 through 65,535 traps.
+    export let check_port = func(int port) -> void {
+        if (port < 0 || port > 65535) {
+            trap_with_message("invalid argument: port");
+        }
+    };
+
+    export let address_of = func(string host, int port) -> string {
+        return host + ":" + port.to_string();
+    };
+);

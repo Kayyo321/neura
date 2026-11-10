@@ -1,0 +1,27 @@
+neura-trace 1
+# Recorded with: printf 'one\r\ntwo\n\nbad\377\napr\303\250s\nlast' | neura run --record read-lines.trace read-lines.nvr
+request neura.console.read 1 [4096]
+ok "one\r\ntwo\n\nbad\xff\napr\xc3\xa8s\nlast"
+request neura.console.write_line 1 ["[one]"]
+ok 0
+request neura.console.write_line 1 ["[two]"]
+ok 0
+request neura.console.write_line 1 ["[]"]
+ok 0
+request neura.console.write_line 1 ["InvalidData: invalid UTF-8"]
+ok 0
+request neura.console.write_line 1 ["[apr\xc3\xa8s]"]
+ok 0
+request neura.console.read 1 [4096]
+ok 0
+request neura.console.write_line 1 ["[last]"]
+ok 0
+request neura.console.read 1 [4096]
+ok 0
+request neura.console.write_line 1 ["end of input"]
+ok 0
+request neura.console.read 1 [4096]
+ok 0
+request neura.console.write_line 1 ["true"]
+ok 0
+outcome completed 0

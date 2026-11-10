@@ -1,0 +1,36 @@
+// run-options: --replay @AREA_DIR@/programs/input-source.trace
+let console = import:Std.Io.Console;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+// read_line reads ahead in chunks; the input() source returns those bytes
+// first, then reads the host again.
+export let InputSource = module:program.Entry (
+    let show = func(result.Result<uint8[list]> read) -> void {
+        match (read) {
+            result.Result.Ok(chunk) => {
+                let [valid, text] = string.from_utf8(chunk);
+                console.print_line(chunk.length.to_string() + " <" + text + ">");
+            },
+            result.Result.Err(_) => {
+                console.print_line("error");
+            },
+        }
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        match (console.read_line()) {
+            result.Result.Ok(line) => {
+                console.print_line(optional.value_or<string>(line, "none"));
+            },
+            result.Result.Err(_) => {},
+        }
+        let source = console.input();
+        show(source(3));
+        show(source(100));
+        show(source(100));
+        show(source(100));
+        return program.ExitCode.Ok;
+    };
+);

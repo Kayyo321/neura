@@ -1,0 +1,28 @@
+let console = import:Std.Io.Console;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Console output with the real streams. Input and failure cases replay
+// checked-in traces under programs/ and traps/.
+let ConsoleTests = module (
+    export let test_print_forms = func() -> void {
+        console.print("print without a line end; ");
+        console.print_line("print_line");
+        console.error_line("error_line to the error stream");
+        test.assert_ok<unit.Unit>(console.try_print("try_print; "));
+        test.assert_ok<unit.Unit>(console.try_print_line("try_print_line"));
+        test.assert_ok<unit.Unit>(console.try_error_line("try_error_line"));
+        test.assert_ok<unit.Unit>(console.try_print(""));
+        console.print_line("é🙂");
+    };
+
+    export let test_streams_as_sinks = func() -> void {
+        let output = console.output();
+        let error = console.error();
+        let line: uint8[list] = [115, 105, 110, 107, 10];
+        test.assert_ok<unit.Unit>(output(line));
+        test.assert_ok<unit.Unit>(error(line));
+        let empty: uint8[list] = [];
+        test.assert_ok<unit.Unit>(output(empty));
+    };
+);

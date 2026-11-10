@@ -1,0 +1,85 @@
+neura-trace 1
+# Recorded with: neura run --allow-fs=host-data --record files-replayed.trace files-replayed.nvr
+request neura.fs.make_directory 1 ["host-data/nested"]
+error 1
+request neura.fs.make_directory 1 ["host-data"]
+ok 0
+request neura.fs.make_directory 1 ["host-data/nested"]
+ok 0
+request neura.console.write_line 1 ["ok"]
+ok 0
+request neura.fs.open 1 ["host-data/a.txt", 1]
+ok 1
+request neura.fs.write 1 [1, "alpha\n"]
+ok 6
+request neura.fs.close 1 [1]
+ok 0
+request neura.console.write_line 1 ["ok"]
+ok 0
+request neura.fs.open 1 ["host-data/a.txt", 2]
+ok 2
+request neura.fs.write 1 [2, "beta\n"]
+ok 5
+request neura.fs.close 1 [2]
+ok 0
+request neura.console.write_line 1 ["ok"]
+ok 0
+request neura.fs.open 1 ["host-data/a.txt", 0]
+ok 3
+request neura.fs.open 1 ["host-data/nested/b.txt", 1]
+ok 4
+request neura.fs.read 1 [3, 65536]
+ok "alpha\nbeta\n"
+request neura.fs.write 1 [4, "alpha\nbeta\n"]
+ok 11
+request neura.fs.read 1 [3, 65536]
+ok 0
+request neura.fs.close 1 [3]
+ok 0
+request neura.fs.close 1 [4]
+ok 0
+request neura.console.write_line 1 ["ok"]
+ok 0
+request neura.fs.open 1 ["host-data/nested/b.txt", 0]
+ok 5
+request neura.fs.read 1 [5, 65536]
+ok "alpha\nbeta\n"
+request neura.fs.read 1 [5, 65536]
+ok 0
+request neura.fs.close 1 [5]
+ok 0
+request neura.console.write 1 [1, "alpha\nbeta\n"]
+ok 11
+request neura.fs.list 1 ["host-data"]
+ok ["a.txt", "nested"]
+request neura.console.write_line 1 ["host-data/a.txt"]
+ok 0
+request neura.console.write_line 1 ["host-data/nested"]
+ok 0
+request neura.fs.remove 1 ["host-data/missing.txt", 0]
+error 1
+request neura.console.write_line 1 ["NotFound: remove file failed (host-data/missing.txt)"]
+ok 0
+request neura.fs.stat 1 ["host-data", 0]
+ok [1, 80, 1794270740, 750435930]
+request neura.fs.list 1 ["host-data"]
+ok ["a.txt", "nested"]
+request neura.fs.stat 1 ["host-data/a.txt", 0]
+ok [0, 11, 1794270740, 750515359]
+request neura.fs.remove 1 ["host-data/a.txt", 0]
+ok 0
+request neura.fs.stat 1 ["host-data/nested", 0]
+ok [1, 60, 1794270740, 750515359]
+request neura.fs.list 1 ["host-data/nested"]
+ok ["b.txt"]
+request neura.fs.stat 1 ["host-data/nested/b.txt", 0]
+ok [0, 11, 1794270740, 750676138]
+request neura.fs.remove 1 ["host-data/nested/b.txt", 0]
+ok 0
+request neura.fs.remove 1 ["host-data/nested", 1]
+ok 0
+request neura.fs.remove 1 ["host-data", 1]
+ok 0
+request neura.console.write_line 1 ["ok"]
+ok 0
+outcome completed 0

@@ -1,0 +1,174 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+
+// Reads UTF-8 text from a byte source (Stdlib.md section 11.1), requesting
+// up to 8,192 bytes at a time. Invalid UTF-8 fails with InvalidData.
+export let Utf8Reader = module (
+    export let Utf8Reader = class (
+        let source: func(int) -> result.Result<uint8[list]>;
+        let buffer: uint8[list] = [];
+        let start: int = 0;
+
+        export let init = func(func(int) -> result.Result<uint8[list]> input) -> void {
+            source = input;
+        };
+
+        // The next Unicode scalar value; None at the end of the stream. An
+        // invalid or truncated sequence fails with InvalidData; the bytes
+        // before the offending byte are consumed and that byte is not.
+        export let read_scalar = func() -> result.Result<optional.Optional<uint32>> {
+            match (fill()) {
+                result.Result.Ok(available) => {
+                    if (!available) {
+                        return result.Result<optional.Optional<uint32>>.Ok(optional.Optional<uint32>.None);
+                    }
+                },
+                result.Result.Err(failure) => {
+                    return result.Result<optional.Optional<uint32>>.Err(failure);
+                },
+            }
+            let lead = buffer[start] as uint32;
+            start = start + 1;
+            if (lead < 128) {
+                return some_scalar(lead);
+            }
+            let following = 0;
+            let value: uint32 = 0;
+            let minimum: uint32 = 0;
+            if (lead >= 194 && lead <= 223) {
+                following = 1;
+                value = lead & 31;
+                minimum = 128;
+            } else if (lead >= 224 && lead <= 239) {
+                following = 2;
+                value = lead & 15;
+                minimum = 2048;
+            } else if (lead >= 240 && lead <= 244) {
+                following = 3;
+                value = lead & 7;
+                minimum = 65536;
+            } else {
+                return invalid_scalar();
+            }
+            while (following > 0) {
+                match (fill()) {
+                    result.Result.Ok(available) => {
+                        if (!available) {
+                            return invalid_scalar();
+                        }
+                    },
+                    result.Result.Err(failure) => {
+                        return result.Result<optional.Optional<uint32>>.Err(failure);
+                    },
+                }
+                let next = buffer[start] as uint32;
+                if ((next & 192) != 128) {
+                    return invalid_scalar();
+                }
+                start = start + 1;
+                value = (value << 6) | (next & 63);
+                following = following - 1;
+            }
+            if (value < minimum || (value >= 55296 && value <= 57343) || value > 1114111) {
+                return invalid_scalar();
+            }
+            return some_scalar(value);
+        };
+
+        // The next line without its LF or a CR before it; None at the end of
+        // the stream. A final line without an LF is returned. Invalid UTF-8
+        // fails with InvalidData and consumes the line.
+        export let read_line = func() -> result.Result<optional.Optional<string>> {
+            let line: uint8[list] = [];
+            while (true) {
+                match (fill()) {
+                    result.Result.Ok(available) => {
+                        if (!available) {
+                            if (line.length == 0) {
+                                return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.None);
+                            }
+                            return finish_line(line);
+                        }
+                    },
+                    result.Result.Err(failure) => {
+                        return result.Result<optional.Optional<string>>.Err(failure);
+                    },
+                }
+                let end = bytes.index_of(buffer, start, 10 as uint8);
+                if (end >= 0) {
+                    bytes.append_range(line, buffer, start, end);
+                    start = end + 1;
+                    return finish_line(line);
+                }
+                bytes.append_range(line, buffer, start, buffer.length);
+                start = buffer.length;
+            }
+            return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.None);
+        };
+
+        // The rest of the stream as text.
+        export let read_to_end = func() -> result.Result<string> {
+            let all: uint8[list] = [];
+            while (true) {
+                match (fill()) {
+                    result.Result.Ok(available) => {
+                        if (!available) {
+                            let [valid, text] = string.from_utf8(all);
+                            if (!valid) {
+                                return result.Result<string>.Err(bytes.invalid_utf8(""));
+                            }
+                            return result.Result<string>.Ok(text);
+                        }
+                    },
+                    result.Result.Err(failure) => {
+                        return result.Result<string>.Err(failure);
+                    },
+                }
+                bytes.append_range(all, buffer, start, buffer.length);
+                start = buffer.length;
+            }
+            return result.Result<string>.Ok("");
+        };
+
+        // Makes at least one byte available; false at the end of the stream.
+        let fill = func() -> result.Result<bool> {
+            if (start < buffer.length) {
+                return result.Result<bool>.Ok(true);
+            }
+            return match (source(8192)) {
+                result.Result.Ok(chunk) => refilled(chunk),
+                result.Result.Err(failure) => result.Result<bool>.Err(failure),
+            };
+        };
+
+        let refilled = func(uint8[list] chunk) -> result.Result<bool> {
+            buffer = chunk;
+            start = 0;
+            return result.Result<bool>.Ok(chunk.length > 0);
+        };
+
+        let finish_line = func(uint8[list] line) -> result.Result<optional.Optional<string>> {
+            if (line.length > 0 && line[line.length - 1] == 13) {
+                line.remove_at(line.length - 1);
+            }
+            let [valid, text] = string.from_utf8(line);
+            if (!valid) {
+                return result.Result<optional.Optional<string>>.Err(bytes.invalid_utf8(""));
+            }
+            return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.Some(text));
+        };
+
+        let some_scalar = func(uint32 value) -> result.Result<optional.Optional<uint32>> {
+            return result.Result<optional.Optional<uint32>>.Ok(optional.Optional<uint32>.Some(value));
+        };
+
+        let invalid_scalar = func() -> result.Result<optional.Optional<uint32>> {
+            return result.Result<optional.Optional<uint32>>.Err(bytes.invalid_utf8(""));
+        };
+    );
+
+    export let create = func(func(int) -> result.Result<uint8[list]> source) -> Utf8Reader {
+        return new Utf8Reader(source);
+    };
+);

@@ -1,0 +1,13 @@
+// status: 1
+// stderr: diverged: request 1 \(neura\.console\.write_line\) is beyond the recorded trace
+// run-options: --replay @AREA_DIR@/traps/replay-extra-request.trace
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let ReplayExtraRequest = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("one");
+        console.print_line("two");
+        return program.ExitCode.Ok;
+    };
+);

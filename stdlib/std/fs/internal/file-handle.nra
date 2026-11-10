@@ -1,0 +1,13 @@
+// The host ID of an open file and the path it was opened with. Only
+// Std.Fs.File creates one; the ID never leaves the library.
+export let FileHandle = module (
+    export let FileHandle = class (
+        export let id: int64 = 0;
+        export let path: string = "";
+
+        export let init = func(int64 host_id, string path_text) -> void {
+            id = host_id;
+            path = path_text;
+        };
+    );
+);

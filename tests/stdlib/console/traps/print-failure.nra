@@ -1,0 +1,15 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): console write failed
+// run-options: --replay @AREA_DIR@/traps/print-failure.trace
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// A failed print traps; the trace answers the second write with an error.
+export let PrintFailure = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("before");
+        console.print("lost");
+        console.print_line("not reached");
+        return program.ExitCode.Ok;
+    };
+);

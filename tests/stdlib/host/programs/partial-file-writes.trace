@@ -1,0 +1,22 @@
+neura-trace 1
+# Edited by hand: the first write stores 3, then 4, then the last 3 bytes;
+# the second stores nothing.
+request neura.fs.open 1 ["partial.txt", 1]
+ok 1
+request neura.fs.write 1 [1, "0123456789"]
+ok 3
+request neura.fs.write 1 [1, "3456789"]
+ok 4
+request neura.fs.write 1 [1, "789"]
+ok 3
+request neura.console.write_line 1 ["ok"]
+ok 0
+request neura.fs.write 1 [1, "0123456789"]
+ok 0
+request neura.console.write_line 1 ["Other: file write failed (partial.txt)"]
+ok 0
+request neura.fs.close 1 [1]
+ok 0
+request neura.console.write_line 1 ["ok"]
+ok 0
+outcome completed 0

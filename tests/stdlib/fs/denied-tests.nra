@@ -1,0 +1,44 @@
+let error = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Without --allow-fs every operation fails with CapabilityDenied.
+let FsDeniedTests = module (
+    let denied = func<T>(result.Result<T> r) -> void {
+        let failure = test.assert_err<T>(r);
+        match (failure) {
+            error.Error.Io { kind, message, path } => {
+                test.assert(kind == error.IoErrorKind.CapabilityDenied);
+            },
+            _ => {
+                test.fail("expected an Io error");
+            },
+        }
+    };
+
+    export let test_every_operation_is_denied = func() -> void {
+        let p = path.of("denied.txt");
+        let q = path.of("other.txt");
+        denied<uint8[list]>(fs.read_bytes(p));
+        denied<string>(fs.read_text(p));
+        let empty: uint8[list] = [];
+        denied<unit.Unit>(fs.write_bytes(p, empty));
+        denied<unit.Unit>(fs.write_text(p, "x"));
+        denied<unit.Unit>(fs.append_text(p, "x"));
+        denied<bool>(fs.exists(p));
+        denied<fs.FileMetadata>(fs.metadata(p));
+        denied<path.Path[list]>(fs.list(path.of(".")));
+        denied<unit.Unit>(fs.create_directory(p));
+        denied<unit.Unit>(fs.create_directories(path.of("a/b")));
+        denied<unit.Unit>(fs.remove_file(p));
+        denied<unit.Unit>(fs.remove_directory(p));
+        denied<unit.Unit>(fs.remove_tree(p));
+        denied<unit.Unit>(fs.rename(p, q));
+        denied<unit.Unit>(fs.copy_file(p, q));
+        let failure = test.assert_err<bool>(fs.exists(p));
+        test.assert_equal_string("CapabilityDenied: metadata failed (denied.txt)", error.message(failure));
+    };
+);

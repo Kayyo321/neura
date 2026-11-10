@@ -1,0 +1,294 @@
+let buffered_reader = import:Std.Io.BufferedReader;
+let buffered_writer = import:Std.Io.BufferedWriter;
+let byte_buffer = import:Std.Io.ByteBuffer;
+let cell = import:Std.Core.Cell;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+let utf8_reader = import:Std.Io.Utf8Reader;
+let utf8_writer = import:Std.Io.Utf8Writer;
+
+let StreamsTests = module (
+    let bytes_of = func(string text) -> uint8[list] {
+        let out: uint8[list] = [];
+        let i = 0;
+        while (i < text.byte_length) {
+            out.append(text.byte_at(i));
+            i = i + 1;
+        }
+        return out;
+    };
+
+    let numbers = func(int count) -> uint8[list] {
+        let out: uint8[list] = [];
+        let i = 0;
+        while (i < count) {
+            out.append((i % 251) as uint8);
+            i = i + 1;
+        }
+        return out;
+    };
+
+    // A source that serves `data` in pieces of at most `piece` bytes and
+    // counts its calls.
+    let pieces = func(uint8[list] data, int piece, cell.Cell<int> calls) -> func(int) -> result.Result<uint8[list]> {
+        let position = cell.of<int>(0);
+        return func(int max) -> result.Result<uint8[list]> {
+            calls.value = calls.value + 1;
+            test.assert(max >= 1);
+            let end = data.length;
+            if (end - position.value > max) {
+                end = position.value + max;
+            }
+            if (end - position.value > piece) {
+                end = position.value + piece;
+            }
+            let out: uint8[list] = [];
+            while (position.value < end) {
+                out.append(data[position.value]);
+                position.value = position.value + 1;
+            }
+            return result.Result<uint8[list]>.Ok(out);
+        };
+    };
+
+    let failing_source = func(int max) -> result.Result<uint8[list]> {
+        return result.Result<uint8[list]>.Err(error.custom("test.source", "source failed"));
+    };
+
+    let kind_of = func(error.Error e) -> error.IoErrorKind {
+        return match (e) {
+            error.Error.Io { kind, message, path } => kind,
+            _ => error.IoErrorKind.Other,
+        };
+    };
+
+    let text_of = func(uint8[list] data) -> string {
+        let [valid, text] = string.from_utf8(data);
+        test.assert(valid);
+        return text;
+    };
+
+    export let test_byte_buffer_collects_and_copies = func() -> void {
+        let buffer = byte_buffer.create();
+        test.assert_equal_int32(0, buffer.size());
+        let sink = buffer.write;
+        test.assert_ok<unit.Unit>(sink(bytes_of("abc")));
+        test.assert_ok<unit.Unit>(buffer.write(bytes_of("de")));
+        test.assert_equal_int32(5, buffer.size());
+        let copy = buffer.to_list();
+        copy[0] = 90;
+        test.assert_equal_string("abcde", text_of(buffer.to_list()));
+        let source = buffer.reader();
+        buffer.clear();
+        test.assert_equal_int32(0, buffer.size());
+        test.assert_equal_string("ab", text_of(test.assert_ok<uint8[list]>(source(2))));
+        test.assert_equal_string("cde", text_of(test.assert_ok<uint8[list]>(source(10))));
+        test.assert_equal_int32(0, test.assert_ok<uint8[list]>(source(4)).length);
+        test.assert_equal_int32(0, test.assert_ok<uint8[list]>(source(4)).length);
+    };
+
+    export let test_buffered_reader_reads_through_its_buffer = func() -> void {
+        let calls = cell.of<int>(0);
+        let data = numbers(100);
+        let reader = buffered_reader.with_capacity(pieces(data, 1000, calls), 16);
+        let first = test.assert_ok<uint8[list]>(reader.read(3));
+        test.assert_equal_int32(3, first.length);
+        test.assert_equal_int32(1, calls.value);
+        let second = test.assert_ok<uint8[list]>(reader.read(100));
+        // The rest of the buffered 16 bytes, without another request.
+        test.assert_equal_int32(13, second.length);
+        test.assert_equal_int32(1, calls.value);
+        test.assert_equal_int32(3, second[0] as int);
+        // A request of at least the capacity bypasses the empty buffer.
+        let third = test.assert_ok<uint8[list]>(reader.read(50));
+        test.assert_equal_int32(50, third.length);
+        test.assert_equal_int32(2, calls.value);
+        let rest = test.assert_ok<uint8[list]>(reader.read_all());
+        test.assert_equal_int32(34, rest.length);
+        test.assert_equal_int32(99 % 251, rest[33] as int);
+        test.assert_equal_int32(0, test.assert_ok<uint8[list]>(reader.read(1)).length);
+    };
+
+    export let test_buffered_reader_default_capacity = func() -> void {
+        let calls = cell.of<int>(0);
+        let reader = buffered_reader.create(pieces(numbers(20000), 100000, calls));
+        test.assert_equal_int32(1, test.assert_ok<uint8[list]>(reader.read(1)).length);
+        test.assert_equal_int32(8191, test.assert_ok<uint8[list]>(reader.read(9000)).length);
+        test.assert_equal_int32(1, calls.value);
+        test.assert_equal_int32(8192, buffered_reader.DefaultCapacity);
+    };
+
+    export let test_buffered_reader_read_exact = func() -> void {
+        let calls = cell.of<int>(0);
+        let reader = buffered_reader.with_capacity(pieces(numbers(40), 7, calls), 16);
+        let exact = test.assert_ok<uint8[list]>(reader.read_exact(25));
+        test.assert_equal_int32(25, exact.length);
+        test.assert_equal_int32(24, exact[24] as int);
+        test.assert_equal_int32(0, test.assert_ok<uint8[list]>(reader.read_exact(0)).length);
+        let short = test.assert_err<uint8[list]>(reader.read_exact(16));
+        test.assert(kind_of(short) == error.IoErrorKind.UnexpectedEnd);
+        test.assert_equal_string("UnexpectedEnd: unexpected end of stream", error.message(short));
+    };
+
+    export let test_buffered_reader_passes_source_errors = func() -> void {
+        let reader = buffered_reader.create(failing_source);
+        let failure = test.assert_err<uint8[list]>(reader.read(4));
+        test.assert_equal_string("source failed", error.message(failure));
+        test.assert_err<uint8[list]>(reader.read_all());
+        test.assert_err<uint8[list]>(reader.read_exact(2));
+    };
+
+    export let test_buffered_writer_collects_until_full = func() -> void {
+        let target = byte_buffer.create();
+        let writer = buffered_writer.with_capacity(target.write, 16);
+        test.assert_ok<unit.Unit>(writer.write(bytes_of("0123456789")));
+        test.assert_equal_int32(0, target.size());
+        test.assert_equal_int32(10, writer.buffered());
+        test.assert_ok<unit.Unit>(writer.write(bytes_of("abcdef")));
+        test.assert_equal_int32(0, target.size());
+        // The buffer would overflow: its 16 bytes pass on first.
+        test.assert_ok<unit.Unit>(writer.write(bytes_of("x")));
+        test.assert_equal_int32(16, target.size());
+        // A write of at least the capacity follows the buffered bytes.
+        test.assert_ok<unit.Unit>(writer.write(numbers(20)));
+        test.assert_equal_int32(37, target.size());
+        test.assert_ok<unit.Unit>(writer.write(bytes_of("yz")));
+        test.assert_ok<unit.Unit>(writer.flush());
+        test.assert_ok<unit.Unit>(writer.flush());
+        let all = target.to_list();
+        test.assert_equal_int32(39, all.length);
+        test.assert_equal_int32(120, all[16] as int);
+        test.assert_equal_int32(122, all[38] as int);
+    };
+
+    export let test_buffered_writer_default_capacity_and_errors = func() -> void {
+        let target = byte_buffer.create();
+        let writer = buffered_writer.create(target.write);
+        test.assert_ok<unit.Unit>(writer.write(numbers(8192)));
+        test.assert_equal_int32(8192, target.size());
+        let failing = buffered_writer.with_capacity(func(uint8[list] data) -> result.Result<unit.Unit> {
+            return result.Result<unit.Unit>.Err(error.custom("test.sink", "sink failed"));
+        }, 16);
+        test.assert_ok<unit.Unit>(failing.write(bytes_of("abc")));
+        test.assert_err<unit.Unit>(failing.flush());
+        test.assert_equal_int32(0, failing.buffered());
+        test.assert_err<unit.Unit>(failing.write(numbers(16)));
+    };
+
+    export let test_utf8_reader_scalars = func() -> void {
+        let calls = cell.of<int>(0);
+        let reader = utf8_reader.create(pieces(bytes_of("aé€🙂"), 1, calls));
+        test.assert_equal_uint64(97, test.assert_some<uint32>(test.assert_ok<optional.Optional<uint32>>(reader.read_scalar())) as uint64);
+        test.assert_equal_uint64(233, test.assert_some<uint32>(test.assert_ok<optional.Optional<uint32>>(reader.read_scalar())) as uint64);
+        test.assert_equal_uint64(8364, test.assert_some<uint32>(test.assert_ok<optional.Optional<uint32>>(reader.read_scalar())) as uint64);
+        test.assert_equal_uint64(128578, test.assert_some<uint32>(test.assert_ok<optional.Optional<uint32>>(reader.read_scalar())) as uint64);
+        test.assert_none<uint32>(test.assert_ok<optional.Optional<uint32>>(reader.read_scalar()));
+    };
+
+    let scalar_error = func(uint8[list] data) -> error.Error {
+        let reader = utf8_reader.create(byte_source(data));
+        return test.assert_err<optional.Optional<uint32>>(reader.read_scalar());
+    };
+
+    let byte_source = func(uint8[list] data) -> func(int) -> result.Result<uint8[list]> {
+        let buffer = byte_buffer.create();
+        buffer.write(data);
+        return buffer.reader();
+    };
+
+    export let test_utf8_reader_rejects_invalid_scalars = func() -> void {
+        let overlong: uint8[list] = [192, 128];
+        let surrogate: uint8[list] = [237, 160, 128];
+        let truncated: uint8[list] = [240, 159, 153];
+        let too_large: uint8[list] = [244, 144, 128, 128];
+        let continuation: uint8[list] = [128];
+        let bad_follow: uint8[list] = [226, 65];
+        let three_overlong: uint8[list] = [224, 128, 128];
+        test.assert(kind_of(scalar_error(overlong)) == error.IoErrorKind.InvalidData);
+        test.assert(kind_of(scalar_error(surrogate)) == error.IoErrorKind.InvalidData);
+        test.assert(kind_of(scalar_error(truncated)) == error.IoErrorKind.InvalidData);
+        test.assert(kind_of(scalar_error(too_large)) == error.IoErrorKind.InvalidData);
+        test.assert(kind_of(scalar_error(continuation)) == error.IoErrorKind.InvalidData);
+        test.assert(kind_of(scalar_error(three_overlong)) == error.IoErrorKind.InvalidData);
+        test.assert_equal_string("InvalidData: invalid UTF-8", error.message(scalar_error(bad_follow)));
+        // The byte that broke the sequence is not consumed.
+        let reader = utf8_reader.create(byte_source(bad_follow));
+        test.assert_err<optional.Optional<uint32>>(reader.read_scalar());
+        test.assert_equal_uint64(65, test.assert_some<uint32>(test.assert_ok<optional.Optional<uint32>>(reader.read_scalar())) as uint64);
+    };
+
+    export let test_utf8_reader_lines = func() -> void {
+        let calls = cell.of<int>(0);
+        let reader = utf8_reader.create(pieces(bytes_of("first\r\nsé cond\n\nlast"), 3, calls));
+        test.assert_equal_string("first", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
+        test.assert_equal_string("sé cond", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
+        test.assert_equal_string("", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
+        test.assert_equal_string("last", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
+        test.assert_none<string>(test.assert_ok<optional.Optional<string>>(reader.read_line()));
+        let lone_cr = utf8_reader.create(byte_source(bytes_of("a\rb\n")));
+        test.assert_equal_string("a\rb", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(lone_cr.read_line())));
+        let invalid: uint8[list] = [104, 255, 10, 111, 107, 10];
+        let broken = utf8_reader.create(byte_source(invalid));
+        test.assert(kind_of(test.assert_err<optional.Optional<string>>(broken.read_line())) == error.IoErrorKind.InvalidData);
+        test.assert_equal_string("ok", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(broken.read_line())));
+        let failing = utf8_reader.create(failing_source);
+        test.assert_err<optional.Optional<string>>(failing.read_line());
+        test.assert_err<optional.Optional<uint32>>(failing.read_scalar());
+    };
+
+    export let test_utf8_reader_read_to_end = func() -> void {
+        let calls = cell.of<int>(0);
+        let reader = utf8_reader.create(pieces(bytes_of("héllo\nwörld"), 2, calls));
+        test.assert_equal_string("héllo", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
+        test.assert_equal_string("wörld", test.assert_ok<string>(reader.read_to_end()));
+        test.assert_equal_string("", test.assert_ok<string>(reader.read_to_end()));
+        let invalid: uint8[list] = [104, 195];
+        let broken = utf8_reader.create(byte_source(invalid));
+        test.assert(kind_of(test.assert_err<string>(broken.read_to_end())) == error.IoErrorKind.InvalidData);
+        test.assert_err<string>(utf8_reader.create(failing_source).read_to_end());
+    };
+
+    export let test_utf8_writer = func() -> void {
+        let target = byte_buffer.create();
+        let writer = utf8_writer.create(target.write);
+        let sink = writer.write;
+        test.assert_ok<unit.Unit>(sink("né"));
+        test.assert_ok<unit.Unit>(writer.write_line("🙂"));
+        test.assert_ok<unit.Unit>(writer.write(""));
+        test.assert_equal_string("né🙂\n", text_of(target.to_list()));
+        let failing = utf8_writer.create(func(uint8[list] data) -> result.Result<unit.Unit> {
+            return result.Result<unit.Unit>.Err(error.custom("test.sink", "sink failed"));
+        });
+        test.assert_err<unit.Unit>(failing.write_line("x"));
+    };
+
+    // A reader and a writer compose through bound methods.
+    export let test_streams_compose = func() -> void {
+        let target = byte_buffer.create();
+        let writer = buffered_writer.with_capacity(target.write, 32);
+        let text = utf8_writer.create(writer.write);
+        let i = 0;
+        while (i < 50) {
+            test.assert_ok<unit.Unit>(text.write_line("line " + i.to_string()));
+            i = i + 1;
+        }
+        test.assert_ok<unit.Unit>(writer.flush());
+        let reader = utf8_reader.create(buffered_reader.with_capacity(target.reader(), 16).read);
+        let count = 0;
+        while (true) {
+            match (test.assert_ok<optional.Optional<string>>(reader.read_line())) {
+                optional.Optional.Some(line) => {
+                    test.assert_equal_string("line " + count.to_string(), line);
+                    count = count + 1;
+                },
+                optional.Optional.None => {
+                    break;
+                },
+            }
+        }
+        test.assert_equal_int32(50, count);
+    };
+);

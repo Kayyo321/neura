@@ -1,0 +1,183 @@
+// test-options: --allow-net
+let closeable = import:Std.Io.Closeable;
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let tcp_listener = import:Std.Net.TcpListener;
+let tcp_stream = import:Std.Net.TcpStream;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+let utf8_reader = import:Std.Io.Utf8Reader;
+let utf8_writer = import:Std.Io.Utf8Writer;
+let optional = import:Std.Core.Optional;
+
+// Runs against real sockets on the loopback interface.
+let NetTests = module (
+    let kind_of = func(error.Error e) -> error.IoErrorKind {
+        return match (e) {
+            error.Error.Io { kind, message, path } => kind,
+            _ => error.IoErrorKind.Other,
+        };
+    };
+
+    let expect_kind = func<T>(result.Result<T> r, error.IoErrorKind expected) -> void {
+        let failure = test.assert_err<T>(r);
+        test.assert_with(kind_of(failure) == expected, "expected " + expected.to_string() + ", got " + error.message(failure));
+    };
+
+    let listen = func() -> tcp_listener.TcpListener {
+        return test.assert_ok<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0));
+    };
+
+    let connect = func(int port) -> tcp_stream.TcpStream {
+        return test.assert_ok<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", port, duration.of_seconds(5)));
+    };
+
+    let bytes_of = func(string text) -> uint8[list] {
+        let out: uint8[list] = [];
+        let i = 0;
+        while (i < text.byte_length) {
+            out.append(text.byte_at(i));
+            i = i + 1;
+        }
+        return out;
+    };
+
+    let text_of = func(uint8[list] data) -> string {
+        let [valid, text] = string.from_utf8(data);
+        test.assert(valid);
+        return text;
+    };
+
+    export let test_echo_round_trip = func() -> void {
+        let listener = listen();
+        test.assert(listener.local_port() > 0);
+        let client = connect(listener.local_port());
+        let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        test.assert_ok<unit.Unit>(client.write(bytes_of("ping é")));
+        test.assert_equal_string("ping é", text_of(test.assert_ok<uint8[list]>(server.read(64))));
+        let sink = server.write;
+        test.assert_ok<unit.Unit>(sink(bytes_of("pong")));
+        let source = client.read;
+        test.assert_equal_string("pong", text_of(test.assert_ok<uint8[list]>(source(64))));
+        test.assert_ok<unit.Unit>(server.close());
+        // The peer closed its side: the stream ends.
+        test.assert_equal_int32(0, test.assert_ok<uint8[list]>(client.read(64)).length);
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_ok<unit.Unit>(listener.close());
+    };
+
+    export let test_text_over_a_connection = func() -> void {
+        let listener = listen();
+        let client = connect(listener.local_port());
+        let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        let writer = utf8_writer.create(client.write);
+        test.assert_ok<unit.Unit>(writer.write_line("first"));
+        test.assert_ok<unit.Unit>(writer.write_line("second"));
+        test.assert_ok<unit.Unit>(client.close());
+        let reader = utf8_reader.create(server.read);
+        test.assert_equal_string("first", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
+        test.assert_equal_string("second", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
+        test.assert_none<string>(test.assert_ok<optional.Optional<string>>(reader.read_line()));
+        test.assert_ok<unit.Unit>(server.close());
+        test.assert_ok<unit.Unit>(listener.close());
+    };
+
+    export let test_read_timeout = func() -> void {
+        let listener = listen();
+        let client = connect(listener.local_port());
+        let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        server.set_read_timeout(duration.of_millis(30));
+        let failure = test.assert_err<uint8[list]>(server.read(16));
+        test.assert(kind_of(failure) == error.IoErrorKind.TimedOut);
+        test.assert_equal_string("TimedOut: stream read failed", error.message(failure));
+        test.assert_ok<unit.Unit>(client.write(bytes_of("late")));
+        test.assert_equal_string("late", text_of(test.assert_ok<uint8[list]>(server.read(16))));
+        // Zero waits without limit.
+        server.set_read_timeout(duration.of_nanos(0));
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_equal_int32(0, test.assert_ok<uint8[list]>(server.read(16)).length);
+    };
+
+    export let test_connection_refused = func() -> void {
+        let listener = listen();
+        let port = listener.local_port();
+        test.assert_ok<unit.Unit>(listener.close());
+        let failure = test.assert_err<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", port, duration.of_seconds(5)));
+        test.assert(kind_of(failure) == error.IoErrorKind.ConnectionRefused);
+        test.assert_equal_string("ConnectionRefused: connect failed (127.0.0.1:" + port.to_string() + ")", error.message(failure));
+    };
+
+    export let test_port_in_use = func() -> void {
+        let listener = listen();
+        expect_kind<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", listener.local_port()), error.IoErrorKind.AlreadyExists);
+        test.assert_ok<unit.Unit>(listener.close());
+    };
+
+    export let test_bind_to_a_name = func() -> void {
+        let listener = test.assert_ok<tcp_listener.TcpListener>(tcp_listener.bind("localhost", 0));
+        let client = test.assert_ok<tcp_stream.TcpStream>(tcp_stream.connect("localhost", listener.local_port(), duration.of_seconds(5)));
+        let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        test.assert_ok<unit.Unit>(client.write(bytes_of("n")));
+        test.assert_equal_string("n", text_of(test.assert_ok<uint8[list]>(server.read(4))));
+    };
+
+    export let test_streams_and_listeners_are_closeable = func() -> void {
+        let listener = listen();
+        let client = connect(listener.local_port());
+        let resources: closeable.Closeable[list] = [client, listener];
+        for (let resource in resources) {
+            test.assert_ok<unit.Unit>(resource.close());
+            test.assert_ok<unit.Unit>(resource.close());
+        }
+        expect_kind<unit.Unit>(client.write(bytes_of("x")), error.IoErrorKind.Closed);
+    };
+
+    export let test_closed_resources = func() -> void {
+        let listener = listen();
+        let port = listener.local_port();
+        let client = connect(port);
+        let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_ok<unit.Unit>(client.close());
+        expect_kind<uint8[list]>(client.read(1), error.IoErrorKind.Closed);
+        expect_kind<unit.Unit>(client.write(bytes_of("x")), error.IoErrorKind.Closed);
+        test.assert_ok<unit.Unit>(listener.close());
+        test.assert_ok<unit.Unit>(listener.close());
+        expect_kind<tcp_stream.TcpStream>(listener.accept(), error.IoErrorKind.Closed);
+        test.assert_equal_int32(port, listener.local_port());
+        let failure = test.assert_err<tcp_stream.TcpStream>(listener.accept());
+        test.assert_equal_string("Closed: listener is closed (127.0.0.1:0)", error.message(failure));
+        test.assert_ok<unit.Unit>(server.close());
+    };
+
+    // At most 1,024 sockets are open at once; the next one fails with
+    // Other.
+    export let test_open_socket_limit = func() -> void {
+        let listener = listen();
+        let port = listener.local_port();
+        let streams: tcp_stream.TcpStream[list] = [];
+        while (streams.length < 1022) {
+            streams.append(connect(port));
+            streams.append(test.assert_ok<tcp_stream.TcpStream>(listener.accept()));
+        }
+        let last = connect(port);
+        expect_kind<tcp_stream.TcpStream>(listener.accept(), error.IoErrorKind.Other);
+        expect_kind<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", port, duration.of_seconds(5)), error.IoErrorKind.Other);
+        expect_kind<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0), error.IoErrorKind.Other);
+        test.assert_ok<unit.Unit>(last.close());
+        test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+    };
+
+    // The previous test left 1,024 sockets open; the runner closed them when
+    // that run ended.
+    export let test_open_sockets_are_released_after_a_run = func() -> void {
+        let listener = listen();
+        let port = listener.local_port();
+        let streams: tcp_stream.TcpStream[list] = [];
+        while (streams.length < 1022) {
+            streams.append(connect(port));
+            streams.append(test.assert_ok<tcp_stream.TcpStream>(listener.accept()));
+        }
+    };
+);

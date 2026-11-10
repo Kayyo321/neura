@@ -1,0 +1,33 @@
+// run-options: --replay @AREA_DIR@/programs/partial-file-writes.trace
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let file = import:Std.Fs.File;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// The trace, edited by hand from a recording, stores only part of each
+// write; File.write repeats with the remaining bytes. A write that stores
+// nothing fails with Other.
+export let PartialFileWrites = module:program.Entry (
+    let report = func(result.Result<unit.Unit> outcome) -> void {
+        match (outcome) {
+            result.Result.Ok(_) => {
+                console.print_line("ok");
+            },
+            result.Result.Err(failure) => {
+                console.print_line(error.message(failure));
+            },
+        }
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let f = result.expect<file.File>(file.open(path.of("partial.txt"), file.OpenMode.Write), "open");
+        let data: uint8[list] = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57];
+        report(f.write(data));
+        report(f.write(data));
+        report(f.close());
+        return program.ExitCode.Ok;
+    };
+);

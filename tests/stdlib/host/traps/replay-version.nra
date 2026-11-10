@@ -1,0 +1,10 @@
+// status: 1
+// stderr: replay-version\.trace: line 1: unsupported trace version 2; expected 1
+// run-options: --replay @AREA_DIR@/traps/replay-version.trace
+let program = import:Std.Program;
+
+export let ReplayVersion = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        return program.ExitCode.Ok;
+    };
+);

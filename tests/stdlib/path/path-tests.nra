@@ -1,0 +1,146 @@
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let path = import:Std.Fs.Path;
+let test = import:Std.Test;
+
+let PathTests = module (
+    let text = func(path.Path p) -> string {
+        return p.to_string();
+    };
+
+    let normalized = func(string raw) -> string {
+        return path.of(raw).to_string();
+    };
+
+    export let test_normalization = func() -> void {
+        test.assert_equal_string("a/b", normalized("a//b/"));
+        test.assert_equal_string("a/b", normalized("./a/./b/."));
+        test.assert_equal_string("/", normalized("/"));
+        test.assert_equal_string("/", normalized("///"));
+        test.assert_equal_string("/a", normalized("//a//"));
+        test.assert_equal_string(".", normalized(""));
+        test.assert_equal_string(".", normalized("."));
+        test.assert_equal_string(".", normalized("./"));
+        test.assert_equal_string("../a/..", normalized("../a/.."));
+        test.assert_equal_string("é/🙂.txt", normalized("é//🙂.txt"));
+        test.assert_equal_string("C:/x", normalized("C:/x"));
+    };
+
+    export let test_is_absolute = func() -> void {
+        test.assert(path.of("/a").is_absolute());
+        test.assert(path.of("/").is_absolute());
+        test.assert(!path.of("a/b").is_absolute());
+        test.assert(!path.of("").is_absolute());
+        test.assert(!path.of("C:/x").is_absolute());
+    };
+
+    export let test_join = func() -> void {
+        test.assert_equal_string("a/b/c", text(path.of("a/b").join("c")));
+        test.assert_equal_string("a/b/c/d", text(path.of("a/b").join("c//d/")));
+        test.assert_equal_string("/x", text(path.of("a/b").join("/x")));
+        test.assert_equal_string("c", text(path.of(".").join("c")));
+        test.assert_equal_string("a", text(path.of("a").join("")));
+        test.assert_equal_string("/c", text(path.of("/").join("c")));
+        test.assert_equal_string("a/..", text(path.of("a").join("..")));
+    };
+
+    export let test_parent = func() -> void {
+        test.assert_equal_string("a", text(path.of("a/b").parent()));
+        test.assert_equal_string("/", text(path.of("/a").parent()));
+        test.assert_equal_string("/a", text(path.of("/a/b").parent()));
+        test.assert_equal_string("..", text(path.of("../a").parent()));
+        test.assert(path.of("a").parent() == nil);
+        test.assert(path.of("/").parent() == nil);
+        test.assert(path.of(".").parent() == nil);
+        test.assert(path.of("..").parent() == nil);
+    };
+
+    export let test_file_name_stem_extension = func() -> void {
+        let file = path.of("dir/archive.tar.gz");
+        test.assert_equal_string("archive.tar.gz", test.assert_some<string>(file.file_name()));
+        test.assert_equal_string("archive.tar", test.assert_some<string>(file.stem()));
+        test.assert_equal_string("gz", test.assert_some<string>(file.extension()));
+        let hidden = path.of("/home/.profile");
+        test.assert_equal_string(".profile", test.assert_some<string>(hidden.file_name()));
+        test.assert_equal_string(".profile", test.assert_some<string>(hidden.stem()));
+        test.assert_none<string>(hidden.extension());
+        let plain = path.of("README");
+        test.assert_equal_string("README", test.assert_some<string>(plain.stem()));
+        test.assert_none<string>(plain.extension());
+        let trailing = path.of("name.");
+        test.assert_equal_string("name", test.assert_some<string>(trailing.stem()));
+        test.assert_equal_string("", test.assert_some<string>(trailing.extension()));
+        test.assert_equal_string("é", test.assert_some<string>(path.of("é.🙂").stem()));
+        test.assert_equal_string("🙂", test.assert_some<string>(path.of("é.🙂").extension()));
+        test.assert_none<string>(path.of("/").file_name());
+        test.assert_none<string>(path.of(".").file_name());
+        test.assert_none<string>(path.of("a/..").file_name());
+        test.assert_none<string>(path.of("/").stem());
+        test.assert_none<string>(path.of("..").extension());
+    };
+
+    export let test_components = func() -> void {
+        let absolute = path.of("/usr//lib/");
+        let parts = absolute.components();
+        test.assert_equal_int32(3, parts.length);
+        test.assert_equal_string("/", parts[0]);
+        test.assert_equal_string("usr", parts[1]);
+        test.assert_equal_string("lib", parts[2]);
+        let relative = path.of("../x").components();
+        test.assert_equal_int32(2, relative.length);
+        test.assert_equal_string("..", relative[0]);
+        test.assert_equal_int32(0, path.of(".").components().length);
+        test.assert_equal_int32(1, path.of("/").components().length);
+    };
+
+    export let test_resolve_lexically = func() -> void {
+        test.assert_equal_string("b", text(path.of("a/../b").resolve_lexically()));
+        test.assert_equal_string(".", text(path.of("a/..").resolve_lexically()));
+        test.assert_equal_string("../../c", text(path.of("../a/../../c").resolve_lexically()));
+        test.assert_equal_string("/", text(path.of("/..").resolve_lexically()));
+        test.assert_equal_string("/b", text(path.of("/a/../../b").resolve_lexically()));
+        test.assert_equal_string("x/y", text(path.of("x/y").resolve_lexically()));
+    };
+
+    export let test_starts_with = func() -> void {
+        test.assert(path.of("/a/b/c").starts_with(path.of("/a/b")));
+        test.assert(path.of("/a/b").starts_with(path.of("/a/b")));
+        test.assert(path.of("/a/b").starts_with(path.of("/")));
+        test.assert(!path.of("/a/bc").starts_with(path.of("/a/b")));
+        test.assert(!path.of("/a").starts_with(path.of("/a/b")));
+        test.assert(!path.of("a/b").starts_with(path.of("/a")));
+        test.assert(!path.of("/a/b").starts_with(path.of("a")));
+        test.assert(path.of("a/b").starts_with(path.of(".")));
+    };
+
+    export let test_relative_to = func() -> void {
+        test.assert_equal_string("c/d", text(path.of("/a/b/c/d").relative_to(path.of("/a/b"))));
+        test.assert_equal_string("../b/c", text(path.of("/a/b/c").relative_to(path.of("/a/d"))));
+        test.assert_equal_string(".", text(path.of("x/y").relative_to(path.of("x/y"))));
+        test.assert_equal_string("../..", text(path.of("x").relative_to(path.of("x/y/z"))));
+        test.assert_equal_string("../../q", text(path.of("q").relative_to(path.of("x/y"))));
+        test.assert(path.of("/a").relative_to(path.of("a")) == nil);
+        test.assert(path.of("a").relative_to(path.of("/a")) == nil);
+        test.assert(path.of("a").relative_to(path.of("../b")) == nil);
+        let joined = path.of("/a/d").join(text(path.of("/a/b/c").relative_to(path.of("/a/d"))));
+        test.assert_equal_string("/a/b/c", text(joined.resolve_lexically()));
+    };
+
+    export let test_equality_hash_order = func() -> void {
+        let a = path.of("a//b");
+        let b = path.of("a/b/");
+        test.assert(a.equals(b));
+        test.assert(a != b);
+        test.assert_equal_uint64("a/b".hash_code() as uint64, a.hash_code() as uint64);
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+        test.assert(!a.equals(path.of("a/c")));
+        test.assert(!a.equals(nil));
+        test.assert(a.compare_to(b) == ordering.Ordering.Equal);
+        test.assert(path.of("a").compare_to(path.of("a/b")) == ordering.Ordering.Less);
+        test.assert(path.of("b").compare_to(path.of("a/b")) == ordering.Ordering.Greater);
+        test.assert(path.of("Z").compare_to(path.of("a")) == ordering.Ordering.Less);
+        test.assert(path.of("é").compare_to(path.of("z")) == ordering.Ordering.Greater);
+        test.assert_equal_string("a/b", a.to_string());
+        test.assert_equal<path.Path>(a, b);
+    };
+);

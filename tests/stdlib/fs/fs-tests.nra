@@ -1,0 +1,254 @@
+// test-options: --allow-fs=fs-work
+let error = import:Std.Core.Error;
+let file = import:Std.Fs.File;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Runs against the real file system in fs-work/ below the test's working
+// directory, the only path the capability grants.
+let FsTests = module (
+    let fresh = func(string name) -> path.Path {
+        let dir = path.of("fs-work").join(name);
+        match (fs.remove_tree(dir)) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(failure) => {
+                test.assert(kind_of(failure) == error.IoErrorKind.NotFound);
+            },
+        }
+        test.assert_ok<unit.Unit>(fs.create_directories(dir));
+        return dir;
+    };
+
+    // Removes a test's directory, so that every run starts from the same
+    // state.
+    let finish = func(path.Path dir) -> void {
+        test.assert_ok<unit.Unit>(fs.remove_tree(dir));
+        test.assert_ok<unit.Unit>(fs.remove_directory(path.of("fs-work")));
+    };
+
+    let kind_of = func(error.Error e) -> error.IoErrorKind {
+        return match (e) {
+            error.Error.Io { kind, message, path } => kind,
+            _ => error.IoErrorKind.Other,
+        };
+    };
+
+    let expect_kind = func<T>(result.Result<T> r, error.IoErrorKind expected) -> void {
+        let failure = test.assert_err<T>(r);
+        test.assert_with(kind_of(failure) == expected, "expected " + expected.to_string() + ", got " + error.message(failure));
+    };
+
+    let numbers = func(int count) -> uint8[list] {
+        let out: uint8[list] = [];
+        let i = 0;
+        while (i < count) {
+            out.append((i % 253) as uint8);
+            i = i + 1;
+        }
+        return out;
+    };
+
+    let names = func(path.Path[list] entries) -> string {
+        let text = "";
+        for (let entry in entries) {
+            text = text + entry.to_string() + ";";
+        }
+        return text;
+    };
+
+    export let test_text_and_bytes_round_trip = func() -> void {
+        let dir = fresh("round-trip");
+        let p = dir.join("t.txt");
+        test.assert_ok<unit.Unit>(fs.write_text(p, "première\n"));
+        test.assert_ok<unit.Unit>(fs.append_text(p, "second 🙂"));
+        test.assert_equal_string("première\nsecond 🙂", test.assert_ok<string>(fs.read_text(p)));
+        test.assert_ok<unit.Unit>(fs.write_text(p, "new"));
+        test.assert_equal_string("new", test.assert_ok<string>(fs.read_text(p)));
+        let fresh_append = dir.join("appended.txt");
+        test.assert_ok<unit.Unit>(fs.append_text(fresh_append, "made"));
+        test.assert_equal_string("made", test.assert_ok<string>(fs.read_text(fresh_append)));
+        let b = dir.join("b.bin");
+        let data = numbers(70000);
+        test.assert_ok<unit.Unit>(fs.write_bytes(b, data));
+        let back = test.assert_ok<uint8[list]>(fs.read_bytes(b));
+        test.assert(back.equals(data));
+        let empty: uint8[list] = [];
+        test.assert_ok<unit.Unit>(fs.write_bytes(b, empty));
+        test.assert_equal_int32(0, test.assert_ok<uint8[list]>(fs.read_bytes(b)).length);
+        test.assert_equal_string("", test.assert_ok<string>(fs.read_text(b)));
+        finish(dir);
+    };
+
+    export let test_read_errors = func() -> void {
+        let dir = fresh("read-errors");
+        expect_kind<uint8[list]>(fs.read_bytes(dir.join("missing")), error.IoErrorKind.NotFound);
+        expect_kind<string>(fs.read_text(dir.join("missing")), error.IoErrorKind.NotFound);
+        expect_kind<string>(fs.read_text(dir), error.IoErrorKind.IsADirectory);
+        let invalid: uint8[list] = [104, 105, 255];
+        test.assert_ok<unit.Unit>(fs.write_bytes(dir.join("bad.txt"), invalid));
+        let failure = test.assert_err<string>(fs.read_text(dir.join("bad.txt")));
+        test.assert_equal_string("InvalidData: invalid UTF-8 (fs-work/read-errors/bad.txt)", error.message(failure));
+        expect_kind<unit.Unit>(fs.write_text(dir.join("no/such.txt"), "x"), error.IoErrorKind.NotFound);
+        expect_kind<unit.Unit>(fs.append_text(dir, "x"), error.IoErrorKind.IsADirectory);
+        finish(dir);
+    };
+
+    export let test_exists = func() -> void {
+        let dir = fresh("exists");
+        test.assert(test.assert_ok<bool>(fs.exists(dir)));
+        test.assert(!test.assert_ok<bool>(fs.exists(dir.join("nothing"))));
+        test.assert_ok<unit.Unit>(fs.write_text(dir.join("plain"), "p"));
+        test.assert(test.assert_ok<bool>(fs.exists(dir.join("plain"))));
+        expect_kind<bool>(fs.exists(dir.join("plain/below")), error.IoErrorKind.NotADirectory);
+        finish(dir);
+    };
+
+    export let test_metadata = func() -> void {
+        let dir = fresh("metadata");
+        let f = dir.join("m.txt");
+        test.assert_ok<unit.Unit>(fs.write_text(f, "twelve bytes"));
+        let file_data = test.assert_ok<fs.FileMetadata>(fs.metadata(f));
+        test.assert(file_data.kind == fs.FileKind.File);
+        test.assert_equal_int64(12, file_data.size);
+        // Modified after 2020-01-01 and before 2200-01-01.
+        test.assert(file_data.modified.epoch_seconds() > 1577836800);
+        test.assert(file_data.modified.epoch_seconds() < 7258118400);
+        test.assert(file_data.modified.nanos() >= 0 && file_data.modified.nanos() < 1000000000);
+        let dir_data = test.assert_ok<fs.FileMetadata>(fs.metadata(dir));
+        test.assert(dir_data.kind == fs.FileKind.Directory);
+        let failure = test.assert_err<fs.FileMetadata>(fs.metadata(dir.join("none")));
+        test.assert_equal_string("NotFound: metadata failed (fs-work/metadata/none)", error.message(failure));
+        expect_kind<fs.FileMetadata>(fs.metadata(f.join("below")), error.IoErrorKind.NotADirectory);
+        finish(dir);
+    };
+
+    export let test_list_is_sorted_by_bytes = func() -> void {
+        let dir = fresh("list");
+        test.assert_equal_string("", names(test.assert_ok<path.Path[list]>(fs.list(dir))));
+        for (let name in ["b", "é", "a", "B", "z", "a2"]) {
+            test.assert_ok<unit.Unit>(fs.write_text(dir.join(name), name));
+        }
+        test.assert_ok<unit.Unit>(fs.create_directory(dir.join("sub")));
+        test.assert_equal_string(
+            "fs-work/list/B;fs-work/list/a;fs-work/list/a2;fs-work/list/b;fs-work/list/sub;fs-work/list/z;fs-work/list/é;",
+            names(test.assert_ok<path.Path[list]>(fs.list(dir))));
+        expect_kind<path.Path[list]>(fs.list(dir.join("missing")), error.IoErrorKind.NotFound);
+        expect_kind<path.Path[list]>(fs.list(dir.join("a")), error.IoErrorKind.NotADirectory);
+        finish(dir);
+    };
+
+    export let test_create_directories = func() -> void {
+        let dir = fresh("create");
+        let one = dir.join("one");
+        test.assert_ok<unit.Unit>(fs.create_directory(one));
+        expect_kind<unit.Unit>(fs.create_directory(one), error.IoErrorKind.AlreadyExists);
+        expect_kind<unit.Unit>(fs.create_directory(dir.join("x/y")), error.IoErrorKind.NotFound);
+        let deep = dir.join("a/b/c/d");
+        test.assert_ok<unit.Unit>(fs.create_directories(deep));
+        test.assert(test.assert_ok<bool>(fs.exists(deep)));
+        test.assert_ok<unit.Unit>(fs.create_directories(deep));
+        test.assert_ok<unit.Unit>(fs.create_directories(dir.join("a")));
+        test.assert_ok<unit.Unit>(fs.write_text(dir.join("file"), ""));
+        expect_kind<unit.Unit>(fs.create_directories(dir.join("file")), error.IoErrorKind.AlreadyExists);
+        expect_kind<unit.Unit>(fs.create_directories(dir.join("file/sub")), error.IoErrorKind.NotADirectory);
+        finish(dir);
+    };
+
+    export let test_remove = func() -> void {
+        let dir = fresh("remove");
+        let f = dir.join("f.txt");
+        test.assert_ok<unit.Unit>(fs.write_text(f, "x"));
+        expect_kind<unit.Unit>(fs.remove_directory(f), error.IoErrorKind.NotADirectory);
+        test.assert_ok<unit.Unit>(fs.remove_file(f));
+        expect_kind<unit.Unit>(fs.remove_file(f), error.IoErrorKind.NotFound);
+        let sub = dir.join("sub");
+        test.assert_ok<unit.Unit>(fs.create_directory(sub));
+        expect_kind<unit.Unit>(fs.remove_file(sub), error.IoErrorKind.IsADirectory);
+        test.assert_ok<unit.Unit>(fs.write_text(sub.join("inner"), "x"));
+        expect_kind<unit.Unit>(fs.remove_directory(sub), error.IoErrorKind.DirectoryNotEmpty);
+        test.assert_ok<unit.Unit>(fs.remove_file(sub.join("inner")));
+        test.assert_ok<unit.Unit>(fs.remove_directory(sub));
+        expect_kind<unit.Unit>(fs.remove_directory(sub), error.IoErrorKind.NotFound);
+        finish(dir);
+    };
+
+    export let test_remove_tree = func() -> void {
+        let dir = fresh("tree");
+        test.assert_ok<unit.Unit>(fs.create_directories(dir.join("a/b/c")));
+        test.assert_ok<unit.Unit>(fs.write_text(dir.join("a/one"), "1"));
+        test.assert_ok<unit.Unit>(fs.write_text(dir.join("a/b/two"), "2"));
+        test.assert_ok<unit.Unit>(fs.write_text(dir.join("a/b/c/three"), "3"));
+        test.assert_ok<unit.Unit>(fs.remove_tree(dir.join("a")));
+        test.assert(!test.assert_ok<bool>(fs.exists(dir.join("a"))));
+        test.assert_ok<unit.Unit>(fs.write_text(dir.join("single"), "s"));
+        test.assert_ok<unit.Unit>(fs.remove_tree(dir.join("single")));
+        test.assert(!test.assert_ok<bool>(fs.exists(dir.join("single"))));
+        expect_kind<unit.Unit>(fs.remove_tree(dir.join("missing")), error.IoErrorKind.NotFound);
+        test.assert_equal_string("", names(test.assert_ok<path.Path[list]>(fs.list(dir))));
+        finish(dir);
+    };
+
+    export let test_rename = func() -> void {
+        let dir = fresh("rename");
+        let a = dir.join("a.txt");
+        let b = dir.join("b.txt");
+        test.assert_ok<unit.Unit>(fs.write_text(a, "A"));
+        test.assert_ok<unit.Unit>(fs.rename(a, b));
+        test.assert(!test.assert_ok<bool>(fs.exists(a)));
+        test.assert_equal_string("A", test.assert_ok<string>(fs.read_text(b)));
+        test.assert_ok<unit.Unit>(fs.write_text(a, "second"));
+        test.assert_ok<unit.Unit>(fs.rename(a, b));
+        test.assert_equal_string("second", test.assert_ok<string>(fs.read_text(b)));
+        let failure = test.assert_err<unit.Unit>(fs.rename(a, b));
+        test.assert_equal_string("NotFound: rename failed (fs-work/rename/a.txt)", error.message(failure));
+        test.assert_ok<unit.Unit>(fs.create_directories(dir.join("full/x")));
+        test.assert_ok<unit.Unit>(fs.create_directory(dir.join("other")));
+        expect_kind<unit.Unit>(fs.rename(dir.join("other"), dir.join("full")), error.IoErrorKind.DirectoryNotEmpty);
+        expect_kind<unit.Unit>(fs.rename(b, dir.join("other")), error.IoErrorKind.IsADirectory);
+        expect_kind<unit.Unit>(fs.rename(dir.join("other"), b), error.IoErrorKind.NotADirectory);
+        finish(dir);
+    };
+
+    export let test_copy_file = func() -> void {
+        let dir = fresh("copy");
+        let source = dir.join("source.bin");
+        let target = dir.join("target.bin");
+        let data = numbers(70000);
+        test.assert_ok<unit.Unit>(fs.write_bytes(source, data));
+        test.assert_ok<unit.Unit>(fs.write_text(target, "old contents that are replaced"));
+        test.assert_ok<unit.Unit>(fs.copy_file(source, target));
+        test.assert(test.assert_ok<uint8[list]>(fs.read_bytes(target)).equals(data));
+        expect_kind<unit.Unit>(fs.copy_file(dir.join("missing"), target), error.IoErrorKind.NotFound);
+        expect_kind<unit.Unit>(fs.copy_file(source, dir.join("no/target")), error.IoErrorKind.NotFound);
+        expect_kind<unit.Unit>(fs.copy_file(dir, target), error.IoErrorKind.IsADirectory);
+        test.assert_equal_int32(65536, fs.CopyBufferSize);
+        finish(dir);
+    };
+
+    // Failed copies close the files they opened: more failures than the
+    // 1,024 open IDs leave room to open another file.
+    export let test_failed_operations_close_their_files = func() -> void {
+        let dir = fresh("closing");
+        let source = dir.join("s.txt");
+        test.assert_ok<unit.Unit>(fs.write_text(source, "s"));
+        let i = 0;
+        while (i < 1030) {
+            expect_kind<unit.Unit>(fs.copy_file(source, dir.join("none/t")), error.IoErrorKind.NotFound);
+            i = i + 1;
+        }
+        test.assert_equal_string("s", test.assert_ok<string>(fs.read_text(source)));
+        finish(dir);
+    };
+
+    export let test_paths_outside_the_capability_are_denied = func() -> void {
+        expect_kind<bool>(fs.exists(path.of("fs-other")), error.IoErrorKind.CapabilityDenied);
+        expect_kind<path.Path[list]>(fs.list(path.of(".")), error.IoErrorKind.CapabilityDenied);
+        expect_kind<path.Path[list]>(fs.list(path.of("fs-work/..")), error.IoErrorKind.CapabilityDenied);
+        expect_kind<unit.Unit>(fs.create_directory(path.of("/tmp/neura-denied")), error.IoErrorKind.CapabilityDenied);
+        expect_kind<unit.Unit>(fs.remove_tree(path.of("fs-work/../fs-other")), error.IoErrorKind.CapabilityDenied);
+        expect_kind<unit.Unit>(fs.rename(path.of("fs-work/x"), path.of("x")), error.IoErrorKind.CapabilityDenied);
+    };
+);

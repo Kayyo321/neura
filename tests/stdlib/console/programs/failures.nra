@@ -1,0 +1,58 @@
+// run-options: --replay @AREA_DIR@/programs/failures.trace
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// Failed console requests become Io errors: the trace, written by hand,
+// answers with host error codes, a write that stores nothing, and a write
+// that fails after storing part of its bytes.
+export let Failures = module:program.Entry (
+    let show = func(result.Result<unit.Unit> outcome) -> void {
+        match (outcome) {
+            result.Result.Ok(_) => {
+                console.print_line("ok");
+            },
+            result.Result.Err(failure) => {
+                console.print_line(error.message(failure));
+            },
+        }
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        show(console.try_print("abc"));
+        show(console.try_error_line("x"));
+        show(console.try_print("zero"));
+        show(console.try_print("part"));
+        console.print_line("");
+        show(console.try_print_line("line"));
+        match (console.read_line()) {
+            result.Result.Ok(_) => {
+                console.print_line("read");
+            },
+            result.Result.Err(failure) => {
+                console.print_line(error.message(failure));
+            },
+        }
+        match (console.read_line()) {
+            result.Result.Ok(line) => {
+                console.print_line(optional.value_or<string>(line, "none"));
+            },
+            result.Result.Err(failure) => {
+                console.print_line(error.message(failure));
+            },
+        }
+        let source = console.input();
+        match (source(10)) {
+            result.Result.Ok(_) => {
+                console.print_line("read");
+            },
+            result.Result.Err(failure) => {
+                console.print_line(error.message(failure));
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

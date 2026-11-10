@@ -1,0 +1,12 @@
+// status: 1
+// stderr: diverged: request 0 differs: the run requested neura\.console\.write version 1 where the trace recorded neura\.console\.write_line version 1
+// run-options: --replay @AREA_DIR@/traps/replay-other-service.trace
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let ReplayOtherService = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print("x");
+        return program.ExitCode.Ok;
+    };
+);

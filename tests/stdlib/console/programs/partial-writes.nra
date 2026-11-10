@@ -1,0 +1,34 @@
+// run-options: --replay @AREA_DIR@/programs/partial-writes.trace
+// stderr: ^abc
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+// The console service may store only part of a request; the library repeats
+// the request with the remaining bytes. The trace's counts are written by
+// hand: 4, 3, and 4 bytes of "hello world", and so on.
+export let PartialWrites = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print("hello world");
+        console.print_line("");
+        match (console.try_error_line("abc")) {
+            result.Result.Ok(_) => {
+                console.print_line("error stream ok");
+            },
+            result.Result.Err(_) => {
+                console.print_line("error stream failed");
+            },
+        }
+        let sink = console.output();
+        let data: uint8[list] = [120, 121, 122, 10];
+        match (sink(data)) {
+            result.Result.Ok(_) => {
+                console.print_line("sink ok");
+            },
+            result.Result.Err(_) => {
+                console.print_line("sink failed");
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

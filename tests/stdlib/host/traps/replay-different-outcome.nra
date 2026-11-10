@@ -1,0 +1,10 @@
+// status: 1
+// stderr: diverged: the run ended with completion with status 0 instead of completion with status 3
+// run-options: --replay @AREA_DIR@/traps/replay-different-outcome.trace
+let program = import:Std.Program;
+
+export let ReplayDifferentOutcome = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        return program.ExitCode.Ok;
+    };
+);

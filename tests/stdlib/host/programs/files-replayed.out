@@ -1,0 +1,10 @@
+ok
+ok
+ok
+ok
+alpha
+beta
+host-data/a.txt
+host-data/nested
+NotFound: remove file failed (host-data/missing.txt)
+ok

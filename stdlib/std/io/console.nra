@@ -1,0 +1,199 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let errors = import:Std.Core.Error;
+let failure = import:Std.Core.Failure;
+let host_error = import:Std.Core.Internal.HostError;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// Console input and output (Stdlib.md section 11.1). Output is unbuffered:
+// each write is one host request (repeated only to finish a partial write),
+// so output order is program order and nothing is lost when a run ends by
+// trap. Input is read in chunks of up to 4,096 bytes; read_line and the
+// input() source share the bytes read ahead.
+export let Console = module (
+    let WriteOutcome = enum (Ok, Error(uint32));
+    let CountOutcome = enum (Ok(int), Error(uint32));
+    let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+    let write_line = func(string text) -> WriteOutcome host("neura.console.write_line", 1);
+    let write_stream = func(int stream, uint8[list] data) -> CountOutcome host("neura.console.write", 1);
+    let read_stream = func(int max) -> BytesOutcome host("neura.console.read", 1);
+
+    // Input read ahead of the caller: pending[pending_start] onwards.
+    let pending: uint8[list] = [];
+    let pending_start: int = 0;
+
+    // Writes the text and one LF. A failed write traps with
+    // "console write failed".
+    export let print_line = func(string s) -> void {
+        match (write_line(s)) {
+            WriteOutcome.Ok => {},
+            WriteOutcome.Error(_) => {
+                failure.trap("console write failed");
+            },
+        }
+    };
+
+    // The same write, returning its failure. The service's error code 1
+    // maps to Other.
+    export let try_print_line = func(string s) -> result.Result<unit.Unit> {
+        return match (write_line(s)) {
+            WriteOutcome.Ok => bytes.ok(),
+            WriteOutcome.Error(_) => result.Result<unit.Unit>.Err(write_failed()),
+        };
+    };
+
+    // Writes the text to the output stream without a line end. A failed
+    // write traps with "console write failed".
+    export let print = func(string s) -> void {
+        check_written(try_print(s));
+    };
+
+    export let try_print = func(string s) -> result.Result<unit.Unit> {
+        return write_all(1, bytes.of_string(s));
+    };
+
+    // Writes the text and one LF to the error stream. A failed write traps
+    // with "console write failed".
+    export let error_line = func(string s) -> void {
+        check_written(try_error_line(s));
+    };
+
+    export let try_error_line = func(string s) -> result.Result<unit.Unit> {
+        return write_all(2, bytes.of_string(s + "\n"));
+    };
+
+    // The next line of input without its LF or a CR before it; None at the
+    // end of input. A final line without an LF is returned. Invalid UTF-8
+    // fails with InvalidData and consumes the line.
+    export let read_line = func() -> result.Result<optional.Optional<string>> {
+        let line: uint8[list] = [];
+        while (true) {
+            if (pending_start < pending.length) {
+                let end = bytes.index_of(pending, pending_start, 10 as uint8);
+                if (end >= 0) {
+                    bytes.append_range(line, pending, pending_start, end);
+                    pending_start = end + 1;
+                    return finish_line(line);
+                }
+                bytes.append_range(line, pending, pending_start, pending.length);
+                discard_pending();
+            }
+            match (read_stream(4096)) {
+                BytesOutcome.Ok(chunk) => {
+                    if (chunk.length == 0) {
+                        if (line.length == 0) {
+                            return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.None);
+                        }
+                        return finish_line(line);
+                    }
+                    pending = chunk;
+                    pending_start = 0;
+                },
+                BytesOutcome.Error(code) => {
+                    // Keep the partial line for the next read.
+                    pending = line;
+                    pending_start = 0;
+                    return result.Result<optional.Optional<string>>.Err(read_failed(code));
+                },
+            }
+        }
+        return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.None);
+    };
+
+    // The output stream as a byte sink.
+    export let output = func() -> func(uint8[list]) -> result.Result<unit.Unit> {
+        return func(uint8[list] data) -> result.Result<unit.Unit> {
+            return write_all(1, data);
+        };
+    };
+
+    // The error stream as a byte sink.
+    export let error = func() -> func(uint8[list]) -> result.Result<unit.Unit> {
+        return func(uint8[list] data) -> result.Result<unit.Unit> {
+            return write_all(2, data);
+        };
+    };
+
+    // Console input as a byte source. It first returns input that read_line
+    // read ahead.
+    export let input = func() -> func(int) -> result.Result<uint8[list]> {
+        return read_input;
+    };
+
+    let read_input = func(int max) -> result.Result<uint8[list]> {
+        bytes.check_maximum(max);
+        if (pending_start < pending.length) {
+            let end = pending.length;
+            if (end - pending_start > max) {
+                end = pending_start + max;
+            }
+            let chunk = bytes.copy_range(pending, pending_start, end);
+            pending_start = end;
+            if (pending_start == pending.length) {
+                discard_pending();
+            }
+            return result.Result<uint8[list]>.Ok(chunk);
+        }
+        return match (read_stream(max)) {
+            BytesOutcome.Ok(chunk) => result.Result<uint8[list]>.Ok(chunk),
+            BytesOutcome.Error(code) => result.Result<uint8[list]>.Err(read_failed(code)),
+        };
+    };
+
+    let discard_pending = func() -> void {
+        let empty: uint8[list] = [];
+        pending = empty;
+        pending_start = 0;
+    };
+
+    let finish_line = func(uint8[list] line) -> result.Result<optional.Optional<string>> {
+        if (line.length > 0 && line[line.length - 1] == 13) {
+            line.remove_at(line.length - 1);
+        }
+        let [valid, text] = string.from_utf8(line);
+        if (!valid) {
+            return result.Result<optional.Optional<string>>.Err(bytes.invalid_utf8(""));
+        }
+        return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.Some(text));
+    };
+
+    // Writes every byte to a stream, repeating partial writes.
+    let write_all = func(int stream, uint8[list] data) -> result.Result<unit.Unit> {
+        let remaining = data;
+        while (remaining.length > 0) {
+            match (write_stream(stream, remaining)) {
+                CountOutcome.Ok(count) => {
+                    if (count <= 0) {
+                        return result.Result<unit.Unit>.Err(bytes.no_progress("console write failed", ""));
+                    }
+                    if (count >= remaining.length) {
+                        return bytes.ok();
+                    }
+                    remaining = bytes.copy_range(remaining, count, remaining.length);
+                },
+                CountOutcome.Error(code) => {
+                    return result.Result<unit.Unit>.Err(host_error.io(code, "console write failed", ""));
+                },
+            }
+        }
+        return bytes.ok();
+    };
+
+    let check_written = func(result.Result<unit.Unit> written) -> void {
+        match (written) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(_) => {
+                failure.trap("console write failed");
+            },
+        }
+    };
+
+    let write_failed = func() -> errors.Error {
+        return errors.Error.Io { kind: errors.IoErrorKind.Other, message: "console write failed", path: "" };
+    };
+
+    let read_failed = func(uint32 code) -> errors.Error {
+        return host_error.io(code, "console read failed", "");
+    };
+);
