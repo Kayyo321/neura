@@ -509,18 +509,19 @@ std::uint32_t Converter::global(SymbolId id, const Span& where) {
     result.type = type_of(item.type, item.span);
     const auto init = global_initializers_.find(id);
     if (init == global_initializers_.end()) {
-        throw Diagnostic(where, "global '" + item.name + "' has no initializer");
+        if (item.owner == no_symbol || !is_static_scope(symbol(item.owner)))
+            throw Diagnostic(where, "global '" + item.name + "' has no initializer");
+    } else {
+        const auto& node = *init->second;
+        if (node.op == IrOp::String) {
+            result.initializer = text_constant(node.text, node.span);
+        } else if (constant_initializer(node)) {
+            const auto bits = literal(node, result.type);
+            const auto& t = image_.types[result.type];
+            result.initializer = constant(result.type, immediate_payload(t, bits.value()));
+        }
     }
-    const auto& node = *init->second;
-    if (node.op == IrOp::String) {
-        result.initializer = text_constant(node.text, node.span);
-    } else if (constant_initializer(node)) {
-        const auto bits = literal(node, result.type);
-        const auto& t = image_.types[result.type];
-        result.initializer = constant(result.type, immediate_payload(t, bits.value()));
-    }
-    // Any other global starts uninitialized; the start function assigns it,
-    // and a read before then is an NVM fault.
+    // The IR assigns other globals during startup or through a class guard.
     const auto index = static_cast<std::uint32_t>(image_.globals.size());
     image_.globals.push_back(result);
     globals_.emplace(id, index);

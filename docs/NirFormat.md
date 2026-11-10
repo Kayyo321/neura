@@ -12,12 +12,12 @@ All minor versions use the conventions of [NVR](runtime/NVR.md#encoding-and-comp
 | --- | --- | --- |
 | Magic | 4 bytes | ASCII `NEIR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0 through 4 |
+| Minor | u16 | 0 through 5 |
 | Files | vector<text> | Source paths used by spans, in order of first use: symbols first, then bodies depth first |
 | Symbols | vector<Symbol> | The symbol table in symbol-index order |
 | Bodies | vector<Body> | Bodies in program order |
 
-A file starts with these fields and ends after the last body. The reader accepts versions 1.0 through 1.4. The writer emits the earliest version that can encode the program. Version 1.1 adds loop latches and operation tags 31–33. Version 1.2 adds tuple types, enum payloads, aggregate and selection operations, comparison chains, and bitwise spellings on existing unary and binary nodes. Version 1.3 adds structural function types, generic enum applications, interfaces and intersection bounds, library and host bindings, nil references and class operations, universal value members, and text, float bit access, and message-trap operations. Version 1.4 adds repeated collection allocation, class static scopes and qualified static field access, and statements before a scoped value's result. The reader rejects features newer than the file's declared version.
+A file starts with these fields and ends after the last body. The reader accepts versions 1.0 through 1.5. The writer emits the earliest version that can encode the program. Version 1.1 adds loop latches and operation tags 31–33. Version 1.2 adds tuple types, enum payloads, aggregate and selection operations, comparison chains, and bitwise spellings on existing unary and binary nodes. Version 1.3 adds structural function types, generic enum applications, interfaces and intersection bounds, library and host bindings, nil references and class operations, universal value members, and text, float bit access, and message-trap operations. Version 1.4 adds repeated collection allocation, class static scopes and qualified static field access, and statements before a scoped value's result. Version 1.5 adds guarded static initialization using the existing operations. The reader rejects features newer than the file's declared version.
 
 ### Records
 
@@ -41,6 +41,12 @@ declarations independently of the enclosing class's generic parameters.
 A static field load or store may carry an object qualifier as an operand
 of its `load` node. The qualifier evaluates before the field access and
 the value is discarded.
+
+In 1.5, a private, receiver-free `$static_init` function in the static
+scope sets a per-type flag before calling dependency initializers and
+storing the type's field values. This function may store to static constants
+owned by the same scope. Earlier NIR files retain their encoded startup
+order when built.
 
 The tags follow the declaration order of the enumerations in [`src/neura-ir/ir.hpp`](../src/neura-ir/ir.hpp):
 

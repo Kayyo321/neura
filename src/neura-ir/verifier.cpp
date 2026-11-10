@@ -180,6 +180,12 @@ private:
                  entry.type.kind != TypeKind::Module || entry.type.symbol != id || !entry.generics.empty())) {
                 report(entry.span, "a static scope must be a non-generic module owned by a class or interface");
             }
+            if (is_static_initializer(entry) &&
+                (!valid(entry.owner) || !is_static_scope(symbol(entry.owner)) || entry.external ||
+                 !entry.has_body || entry.exported || entry.type.kind != TypeKind::Void ||
+                 !entry.generics.empty() || !entry.parameters.empty())) {
+                report(entry.span, "a class initializer must be a private receiver-free void function");
+            }
             for (const auto& [label, reference] : {std::pair{"owner", entry.owner},
                                                   std::pair{"base", entry.base},
                                                   std::pair{"overrides", entry.overrides}}) {
@@ -481,7 +487,10 @@ private:
         check_value(source, context);
         if ((destination.op == IrOp::Load || destination.op == IrOp::Field) && valid(destination.symbol) &&
             symbol(destination.symbol).constant) {
-            report(destination.span, "store writes to const " + name(destination.symbol));
+            const auto& target = symbol(destination.symbol);
+            if (target.kind != SymbolKind::Global || !valid(context.function) ||
+                !is_static_initializer(symbol(context.function)) || target.owner != symbol(context.function).owner)
+                report(destination.span, "store writes to const " + name(destination.symbol));
         }
         require_assignable(source.type, destination.type, node.span, "stored value");
     }

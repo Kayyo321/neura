@@ -5,6 +5,7 @@
 #include "integer.hpp"
 #include "ir.hpp"
 #include "nominal.hpp"
+#include "static_initialization.hpp"
 #include "parser/syntax.hpp"
 
 #include <algorithm>
@@ -3037,6 +3038,11 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files) {
         }
         if (!instructions.empty()) program_.bodies.push_back({id, std::move(instructions)});
     }
+    std::set<SymbolId> singletons;
+    for (const auto& entry : entries_) {
+        if (entry.singleton_instance != no_symbol) singletons.insert(entry.singleton_instance);
+    }
+    lower_static_initializers(program_, singletons);
     return std::move(program_);
 }
 

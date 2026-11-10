@@ -1561,7 +1561,8 @@ std::vector<Outcome> Evaluator::initialize() {
         return id;
     };
     const auto literal = [&](const IrNode& node) {
-        return node.op == IrOp::Integer || node.op == IrOp::Boolean || node.op == IrOp::String ||
+        return node.op == IrOp::Integer || node.op == IrOp::Float || node.op == IrOp::Boolean ||
+               node.op == IrOp::String || node.op == IrOp::Nil ||
                (node.op == IrOp::Reference && symbols.at(node.symbol).kind == SymbolKind::Variant);
     };
     std::vector<SymbolId> files;

@@ -1,0 +1,5 @@
+let Counter = class (
+    export static let count = 10;
+);
+
+let value = Counter.count;

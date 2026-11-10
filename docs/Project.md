@@ -23,11 +23,14 @@ Semantic analysis belongs at the boundary between the syntax tree and valid Neur
 
 Range bounds, stride, checked length arithmetic, and element generation lower to explicit NeuraIR before conversion. The executable uses circuits for the arithmetic and control flow and a deterministic NVM state operation to allocate a collection of a computed length. Allocation checks the heap budget before reserving the backing storage.
 
-Class static fields lower to global slots in a class-owned scope, and
-static functions lower to calls without an object receiver. A singleton
-lowers to one object allocation during startup and a global reference
-shared by every use. Both use the existing circuit state interfaces for
-global and object access.
+Class static fields lower to global slots in a class-owned scope. NeuraIR
+expresses first-use initialization with a guarded function and a shared
+global state slot. Active uses reach the initializer through ordinary calls
+and preserve the evaluation order of qualifiers, arguments, and operands.
+The guarded function invokes initialization dependencies before executing its
+own field initializers. A singleton lowers to one object allocation during
+startup and a global reference shared by every use. Both use the existing
+circuit state interfaces for global and object access.
 
 The stages should be inspectable independently. A diagnostic or test should be able to identify whether a discrepancy came from source analysis, an IR transformation, lowering, serialization, or circuit execution.
 

@@ -186,8 +186,8 @@ NEURA_TEST(nir, corrupt_files_are_rejected) {
     changed[4] = 2;
     expect_nir_error(changed, "NeuraIR format 2." + std::to_string(bytes[6]) + " is not supported");
     changed = bytes;
-    changed[6] = 5;
-    expect_nir_error(changed, "NeuraIR format 1.5 is not supported");
+    changed[6] = 6;
+    expect_nir_error(changed, "NeuraIR format 1.6 is not supported");
     changed = bytes;
     changed.push_back(0);
     expect_nir_error(changed, "1 unread bytes");
@@ -252,6 +252,10 @@ NEURA_TEST(nir, minor_version_follows_the_features_used) {
     check_equal(static_cast<int>(range[6]), 4, "range.nir is NeuraIR 1.4");
     range[6] = 3;
     expect_nir_error(range, "invalid operation tag 59");
+    auto statics = write_nir(lower_files({versions / "statics.nra"}));
+    check_equal(static_cast<int>(statics[6]), 5, "lazy statics require NeuraIR 1.5");
+    statics[6] = 4;
+    expect_nir_error(statics, "class initializers require NeuraIR format 1.5");
 }
 
 } // namespace neura::testing

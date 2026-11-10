@@ -100,13 +100,14 @@ public:
         u16(nir_major_version);
         std::uint16_t version = 0;
         for (const auto& item : program.symbols) {
-            if (is_static_scope(item)) {
-                version = 4;
+            if (is_static_initializer(item)) {
+                version = 5;
                 break;
             }
+            if (is_static_scope(item)) version = 4;
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
-                version = 3;
+                version = std::max<std::uint16_t>(version, 3);
             }
             version = std::max(version, required_minor(item.type));
             if (item.bound) version = std::max(version, required_minor(*item.bound));
@@ -116,7 +117,7 @@ public:
             }
         }
         for (const auto& body : program.bodies) {
-            if (version == 4) break;
+            if (version >= 4) break;
             version = std::max(version, required_minor(body.instructions));
         }
         u16(version);
@@ -285,10 +286,10 @@ public:
         minor_ = u16();
         if (major != nir_major_version || minor_ > nir_minor_version) {
             fail("NeuraIR format " + std::to_string(major) + "." + std::to_string(minor_) +
-                 " is not supported; this reader accepts 1.0 through 1.3");
+                 " is not supported; this reader accepts 1.0 through 1." + std::to_string(nir_minor_version));
         }
         constexpr std::uint8_t operation_limits[]{
-            max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4};
+            max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4};
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
@@ -452,6 +453,7 @@ private:
         value.kind = static_cast<SymbolKind>(tag(static_cast<std::uint8_t>(max_kind), "symbol kind"));
         value.name = text();
         if (minor_ < 4 && is_static_scope(value)) fail("class static scopes require NeuraIR format 1.4");
+        if (minor_ < 5 && is_static_initializer(value)) fail("class initializers require NeuraIR format 1.5");
         value.span = span();
         // References may point forward, so they are checked against the
         // symbol count rather than the symbols read so far.

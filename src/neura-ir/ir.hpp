@@ -79,6 +79,10 @@ inline bool is_static_scope(const IrSymbol& symbol) {
     return symbol.kind == SymbolKind::Module && symbol.name == static_scope_name;
 }
 
+inline bool is_static_initializer(const IrSymbol& symbol) {
+    return symbol.kind == SymbolKind::Function && symbol.name == "$static_init";
+}
+
 enum class IrOp {
     Initialize, Store, Load, Reference, Receiver, Field, Index, Collection,
     Integer, Float, String, Boolean, Unary, Binary, ShortCircuit,
