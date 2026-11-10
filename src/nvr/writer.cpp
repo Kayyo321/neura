@@ -139,6 +139,9 @@ void exit(Output& out, const Exit& item, bool returns_value) {
     case ExitKind::Trap:
         out.u32(item.reason);
         break;
+    case ExitKind::MessageTrap:
+        values(out, item.arguments);
+        break;
     }
 }
 
@@ -148,7 +151,7 @@ struct Section {
     std::vector<std::uint8_t> data;
 };
 
-std::vector<Section> sections(const Image& image) {
+std::vector<Section> sections(const Image& image, std::uint16_t minor) {
     std::vector<Section> result;
     auto add = [&](const char* tag, bool required, auto write) {
         Output out;
@@ -210,9 +213,10 @@ std::vector<Section> sections(const Image& image) {
         });
     });
     add("LAYO", true, [&](Output& out) {
-        vector(out, image.layouts, [](Output& o, const Layout& layout) {
+        vector(out, image.layouts, [&](Output& o, const Layout& layout) {
             o.u32(layout.parent);
             indices(o, layout.fields);
+            if (minor >= 2) indices(o, layout.interfaces);
         });
     });
     add("META", true, [&](Output& out) { out.u32(image.entry); });
@@ -264,30 +268,44 @@ std::vector<Section> sections(const Image& image) {
 } // namespace
 
 std::uint16_t required_minor_version(const Image& image) {
+    if (std::ranges::any_of(image.layouts, [](const Layout& layout) { return !layout.interfaces.empty(); }))
+        return 2;
+    if (std::ranges::any_of(image.constants, [&](const Constant& value) {
+            return value.type < image.types.size() && image.types[value.type].kind == TypeKind::Object;
+        })) {
+        return 2;
+    }
+    std::uint16_t version = 0;
     for (const auto& type : image.types) {
         if (type.kind == TypeKind::Float || type.kind == TypeKind::BFloat) {
-            return 1;
+            version = 1;
+            break;
         }
     }
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::MessageTrap ||
+                    (exit.kind == ExitKind::State && exit.operation >= StateOp::TextSlice)) {
+                    return 2;
+                }
                 if ((exit.kind == ExitKind::State && exit.operation == StateOp::ReadVersion) ||
                     (exit.kind == ExitKind::Trap && exit.reason == static_cast<std::uint32_t>(
                                                                       TrapReason::ModifiedDuringIteration))) {
-                    return 1;
+                    version = 1;
                 }
             }
         }
     }
-    return 0;
+    return version;
 }
 
 std::vector<std::uint8_t> encode(const Image& image) {
     if (image.minor_version > minor_version) {
         throw std::invalid_argument("the image records an unsupported minor version");
     }
-    const auto parts = sections(image);
+    const auto minor = std::max(image.minor_version, required_minor_version(image));
+    const auto parts = sections(image, minor);
     constexpr std::uint64_t header_size = 24;
     constexpr std::uint64_t directory_record_size = 24;
     std::uint64_t offset = header_size + directory_record_size * parts.size();
@@ -301,7 +319,7 @@ std::vector<std::uint8_t> encode(const Image& image) {
         out.u8(static_cast<std::uint8_t>(c));
     }
     out.u16(major_version);
-    out.u16(std::max(image.minor_version, required_minor_version(image)));
+    out.u16(minor);
     out.u32(graph_profile);
     out.u32(static_cast<std::uint32_t>(parts.size()));
     out.u64(file_size);

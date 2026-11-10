@@ -62,6 +62,7 @@ std::string constant_text(const nvr::Image& image, std::uint32_t index) {
     if (t.kind == nvr::TypeKind::Text) {
         return quoted(std::string(constant.payload.begin(), constant.payload.end()));
     }
+    if (t.kind == nvr::TypeKind::Object && constant.payload.empty()) return "nil";
     Expression e;
     e.kind = Expression::Kind::Immediate;
     e.type = constant.type;
@@ -158,6 +159,8 @@ public:
             return with(args.empty() ? "return" : "return " + value(function, args[0], lifted, inputs));
         case nvr::ExitKind::Trap:
             return with("trap " + std::to_string(exit.reason) + " (" + reason_name(exit.reason) + ")");
+        case nvr::ExitKind::MessageTrap:
+            return with(std::string("trap 3 (") + reason_name(3) + ") " + value(function, args.at(0), lifted, inputs));
         case nvr::ExitKind::Host: {
             const auto& import = image_.imports.at(exit.target);
             return with(result(exit.result_slot) + "host " + quoted(import.name) + " v" +
@@ -189,6 +192,16 @@ public:
                 operation = type_name(image_, exit.immediate) + "(" + a(0) + ")";
                 break;
             case nvr::StateOp::ReadVersion: operation = "version(" + a(0) + ")"; break;
+            case nvr::StateOp::TextSlice: operation = "text_slice(" + a(0) + ", " + a(1) + ", " + a(2) + ")"; break;
+            case nvr::StateOp::TextFromUtf8: operation = "text_from_utf8(" + a(0) + ")"; break;
+            case nvr::StateOp::TextEqual: operation = "text_equal(" + a(0) + ", " + a(1) + ")"; break;
+            case nvr::StateOp::ClassHash: operation = "class_hash(" + a(0) + ")"; break;
+            case nvr::StateOp::ClassText: operation = "class_text(" + a(0) + ", " + a(1) + ")"; break;
+            case nvr::StateOp::ClassIs: operation = a(0) + " is L" + std::to_string(exit.immediate); break;
+            case nvr::StateOp::ClassCast: operation = a(0) + " as L" + std::to_string(exit.immediate); break;
+            case nvr::StateOp::ScalarText:
+                operation = "scalar_text(" + values(function, args, lifted, inputs) + ")";
+                break;
             }
             return with(result(exit.result_slot) + operation + "; goto b" + std::to_string(exit.resume));
         }

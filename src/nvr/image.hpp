@@ -17,7 +17,7 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 1;
+inline constexpr std::uint16_t minor_version = 2;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -47,6 +47,7 @@ struct Constant {
 struct Layout {
     std::uint32_t parent = absent;
     std::vector<std::uint32_t> fields;
+    std::vector<std::uint32_t> interfaces{};
 
     bool operator==(const Layout&) const = default;
 };
@@ -100,17 +101,24 @@ struct Assignment {
     bool operator==(const Assignment&) const = default;
 };
 
-enum class ExitKind : std::uint8_t { Continue = 0, Call = 1, Return = 2, State = 3, Host = 4, Trap = 5 };
+enum class ExitKind : std::uint8_t {
+    Continue = 0, Call = 1, Return = 2, State = 3, Host = 4, Trap = 5,
+    // NVR 1.2. Program failure with one text argument.
+    MessageTrap = 6
+};
 
 enum class StateOp : std::uint8_t {
     AllocateObject = 0, ReadTag = 1, ReadField = 2, WriteField = 3, FreeObject = 4,
     ReadGlobal = 5, WriteGlobal = 6, AllocateCollection = 7, ReadLength = 8, ReadElement = 9,
     WriteElement = 10, AppendElement = 11, RemoveElement = 12, ConstructText = 13,
     // NVR 1.1.
-    ReadVersion = 14
+    ReadVersion = 14,
+    // NVR 1.2.
+    TextSlice = 15, TextFromUtf8 = 16, TextEqual = 17,
+    ClassHash = 18, ClassText = 19, ClassIs = 20, ClassCast = 21, ScalarText = 22
 };
 
-inline constexpr std::uint8_t state_op_count = 15;
+inline constexpr std::uint8_t state_op_count = 23;
 
 enum class TrapReason : std::uint32_t {
     Arithmetic = 1, Bounds = 2, ProgramFailure = 3, InvalidDispatch = 4,
@@ -129,7 +137,7 @@ struct Exit {
     StateOp operation = StateOp::AllocateObject;
     std::uint32_t immediate = 0;
     // Call, State, and Host arguments. Return holds its value here: one value
-    // for a nonvoid function and none otherwise.
+    // for a nonvoid function and none otherwise. MessageTrap has one text.
     std::vector<Value> arguments;
     // Call and State result slot, Host success slot.
     std::uint32_t result_slot = absent;

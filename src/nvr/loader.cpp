@@ -287,7 +287,7 @@ std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types)
             block.exits = b.vector(exit_size, "exit list", [&](Reader& e) {
                 Exit exit;
                 const auto kind = e.u8();
-                if (kind > static_cast<std::uint8_t>(ExitKind::Trap)) {
+                if (kind > static_cast<std::uint8_t>(ExitKind::MessageTrap)) {
                     fail(Kind::Malformed, "FUNC: invalid exit kind " + std::to_string(kind));
                 }
                 exit.kind = static_cast<ExitKind>(kind);
@@ -334,6 +334,9 @@ std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types)
                     break;
                 case ExitKind::Trap:
                     exit.reason = e.u32();
+                    break;
+                case ExitKind::MessageTrap:
+                    exit.arguments = read_values(e, "message trap argument list");
                     break;
                 }
                 return exit;
@@ -471,25 +474,38 @@ void Validator::types() {
 
 void Validator::layouts() {
     const auto count = image_.layouts.size();
+    std::vector<std::vector<std::uint32_t>> children(count);
+    std::vector<std::size_t> dependencies(count);
     for (std::size_t i = 0; i < count; ++i) {
         const auto& layout = image_.layouts[i];
         const auto where = "layout " + std::to_string(i);
         if (layout.parent != absent && layout.parent >= count) {
             invalid(where + ": parent " + std::to_string(layout.parent) + " is out of range");
         }
+        if (layout.parent != absent) {
+            children[layout.parent].push_back(static_cast<std::uint32_t>(i));
+            ++dependencies[i];
+        }
+        std::set<std::uint32_t> seen;
+        for (const auto interface : layout.interfaces) {
+            if (interface >= count || interface == layout.parent ||
+                !image_.layouts[interface].fields.empty() || !seen.insert(interface).second) {
+                invalid(where + ": invalid or repeated interface layout");
+            }
+            children[interface].push_back(static_cast<std::uint32_t>(i));
+            ++dependencies[i];
+        }
         for (auto field : layout.fields) {
             value_type(field, where + " field");
         }
     }
-    for (std::size_t i = 0; i < count; ++i) {
-        auto current = image_.layouts[i].parent;
-        for (std::size_t steps = 0; current != absent; ++steps) {
-            if (steps >= count) {
-                invalid("layout " + std::to_string(i) + ": parent links form a cycle");
-            }
-            current = image_.layouts[current].parent;
-        }
-    }
+    std::vector<std::uint32_t> ready;
+    for (std::uint32_t i = 0; i < count; ++i)
+        if (dependencies[i] == 0) ready.push_back(i);
+    for (std::size_t i = 0; i < ready.size(); ++i)
+        for (const auto child : children[ready[i]])
+            if (--dependencies[child] == 0) ready.push_back(child);
+    if (ready.size() != count) invalid("layout parent links form a cycle");
     // The type system is needed for structural field comparison; build a
     // temporary one now that types and layouts are well formed.
     const TypeSystem system(image_);
@@ -542,6 +558,9 @@ void Validator::constants() {
             }
             break;
         case TypeKind::Bytes:
+            break;
+        case TypeKind::Object:
+            if (size != 0) invalid(where + ": a nil object constant has no payload");
             break;
         default:
             invalid(where + ": constants cannot have this type");
@@ -846,6 +865,80 @@ void Validator::state(const Function& function, const Exit& exit,
         result_of(exit.immediate);
         break;
     }
+    case StateOp::TextSlice:
+        arity(3);
+        zero_immediate();
+        require_kind(0, {TypeKind::Text});
+        require_index(1);
+        require_index(2);
+        require_slot_type([&](std::uint32_t slot) { return image_.types[slot].kind == TypeKind::Text; }, "text");
+        break;
+    case StateOp::TextFromUtf8: {
+        arity(1);
+        require_kind(0, {TypeKind::Array, TypeKind::List});
+        if (!is_unsigned(element_type(0), 8)) {
+            invalid(where + ": argument must hold uint8 elements");
+        }
+        if (exit.immediate >= image_.layouts.size()) {
+            invalid(where + ": immediate must name a UTF-8 result layout");
+        }
+        const auto& layout = image_.layouts[exit.immediate];
+        if (layout.parent != absent || layout.fields.size() != 2 ||
+            image_.types[layout.fields[0]].kind != TypeKind::Bool ||
+            image_.types[layout.fields[1]].kind != TypeKind::Text) {
+            invalid(where + ": UTF-8 result layout must hold a bool and text");
+        }
+        require_slot_type([&](std::uint32_t slot) {
+            const auto& t = image_.types[slot];
+            return t.kind == TypeKind::Object && t.reference == exit.immediate;
+        }, "an object with the UTF-8 result layout");
+        break;
+    }
+    case StateOp::TextEqual:
+        arity(2);
+        zero_immediate();
+        require_kind(0, {TypeKind::Text});
+        require_kind(1, {TypeKind::Text});
+        require_slot_type([&](std::uint32_t slot) { return image_.types[slot].kind == TypeKind::Bool; }, "bool");
+        break;
+    case StateOp::ScalarText:
+        zero_immediate();
+        if (args.size() == 1) {
+            require_kind(0, {TypeKind::Bool, TypeKind::Unsigned, TypeKind::Signed, TypeKind::Float, TypeKind::BFloat});
+        } else {
+            if (args.empty()) invalid(where + ": scalar text requires at least one argument");
+            require_kind(0, {TypeKind::Unsigned, TypeKind::Signed});
+            if (image_.types[args[0].type].width != 32) invalid(where + ": enum ordinal must have width 32");
+            for (std::size_t i = 1; i < args.size(); ++i) require_kind(i, {TypeKind::Text});
+        }
+        require_slot_type([&](std::uint32_t slot) { return image_.types[slot].kind == TypeKind::Text; }, "text");
+        break;
+    case StateOp::ClassHash:
+        arity(1);
+        zero_immediate();
+        require_kind(0, {TypeKind::Object});
+        require_slot_type([&](std::uint32_t slot) {
+            return image_.types[slot].kind == TypeKind::Unsigned && image_.types[slot].width == 32;
+        }, "uint32");
+        break;
+    case StateOp::ClassText:
+        arity(2);
+        zero_immediate();
+        require_kind(0, {TypeKind::Object});
+        require_kind(1, {TypeKind::Text});
+        require_slot_type([&](std::uint32_t slot) { return image_.types[slot].kind == TypeKind::Text; }, "text");
+        break;
+    case StateOp::ClassIs:
+    case StateOp::ClassCast:
+        arity(1);
+        require_kind(0, {TypeKind::Object});
+        if (exit.immediate >= image_.layouts.size()) invalid(where + ": class layout is out of range");
+        require_slot_type([&](std::uint32_t slot) {
+            const auto& t = image_.types[slot];
+            return exit.operation == StateOp::ClassIs ? t.kind == TypeKind::Bool :
+                t.kind == TypeKind::Object && t.reference == exit.immediate;
+        }, "the result of a class test or cast");
+        break;
     }
 }
 
@@ -886,7 +979,7 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
         const auto& exit = item.exits[e];
         const auto exit_where = where + " exit " + std::to_string(e);
         std::set<std::uint32_t> destinations;
-        if (exit.kind == ExitKind::Trap && !exit.assignments.empty()) {
+        if ((exit.kind == ExitKind::Trap || exit.kind == ExitKind::MessageTrap) && !exit.assignments.empty()) {
             invalid(exit_where + ": a trap exit has no assignments");
         }
         for (const auto& assignment : exit.assignments) {
@@ -952,6 +1045,11 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
         case ExitKind::Trap:
             if (exit.reason < 1 || exit.reason > 5) {
                 invalid(exit_where + ": trap reason " + std::to_string(exit.reason) + " is not defined");
+            }
+            break;
+        case ExitKind::MessageTrap:
+            if (exit.arguments.size() != 1 || image_.types[exit.arguments[0].type].kind != TypeKind::Text) {
+                invalid(exit_where + ": a message trap requires one text argument");
             }
             break;
         }
@@ -1045,10 +1143,24 @@ TypeSystem::TypeSystem(const Image& image) : image_(&image), canonical_(image.ty
 }
 
 bool TypeSystem::derives(std::uint32_t derived, std::uint32_t base) const {
+    std::vector<std::uint32_t> pending;
     for (auto current = derived; current != absent; current = image_->layouts[current].parent) {
         if (current == base) {
             return true;
         }
+        const auto& interfaces = image_->layouts[current].interfaces;
+        pending.insert(pending.end(), interfaces.begin(), interfaces.end());
+    }
+    if (pending.empty()) return false;
+    std::set<std::uint32_t> seen;
+    while (!pending.empty()) {
+        const auto current = pending.back();
+        pending.pop_back();
+        if (current == base) return true;
+        if (!seen.insert(current).second) continue;
+        const auto& layout = image_->layouts[current];
+        pending.insert(pending.end(), layout.interfaces.begin(), layout.interfaces.end());
+        if (layout.parent != absent) pending.push_back(layout.parent);
     }
     return false;
 }
@@ -1177,10 +1289,11 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
     };
     section("TYPE", [&](Reader& in) { image.types = read_types(in); });
     section("LAYO", [&](Reader& in) {
-        image.layouts = in.vector(8, "layout table", [](Reader& r) {
+        image.layouts = in.vector(minor >= 2 ? 12 : 8, "layout table", [&](Reader& r) {
             Layout layout;
             layout.parent = r.u32();
             layout.fields = r.indices("field list");
+            if (minor >= 2) layout.interfaces = r.indices("interface list");
             return layout;
         });
     });

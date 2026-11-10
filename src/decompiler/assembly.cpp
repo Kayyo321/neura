@@ -17,11 +17,15 @@ using nvr::absent;
 
 constexpr std::array<std::string_view, 11> type_kinds{"void", "bool", "unsigned", "signed", "text", "bytes",
                                                        "object", "array", "list", "float", "bfloat"};
-constexpr std::array<std::string_view, 6> exit_kinds{"continue", "call", "return", "state", "host", "trap"};
-constexpr std::array<std::string_view, 15> state_ops{
+constexpr std::array<std::string_view, 7> exit_kinds{
+    "continue", "call", "return", "state", "host", "trap", "message-trap",
+};
+constexpr std::array<std::string_view, 23> state_ops{
     "allocate-object", "read-tag",         "read-field",    "write-field",    "free-object",
     "read-global",     "write-global",     "allocate-collection", "read-length", "read-element",
     "write-element",   "append-element",   "remove-element", "construct-text", "read-version",
+    "text-slice",      "text-from-utf8",   "text-equal",    "class-hash",     "class-text",
+    "class-is",        "class-cast",       "scalar-text",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -100,6 +104,7 @@ std::string constant_comment(const nvr::Image& image, const nvr::Constant& const
         return std::to_string(value);
     }
     case nvr::TypeKind::Text: return quoted(std::string(constant.payload.begin(), constant.payload.end()));
+    case nvr::TypeKind::Object: return constant.payload.empty() ? "nil" : std::string{};
     default: return {};
     }
 }
@@ -328,10 +333,11 @@ std::vector<nvr::Assignment> assignments(Tokens& in) {
 } // namespace
 
 std::string disassemble(const nvr::Image& image) {
+    const auto minor = std::max(image.minor_version, nvr::required_minor_version(image));
     std::ostringstream out;
     out << "; Neura assembly: the lossless text form of an NVR image.\n";
     out << "; `neura assemble` turns it back into the same image.\n";
-    out << "nvr 1." << std::max(image.minor_version, nvr::required_minor_version(image)) << " profile "
+    out << "nvr 1." << minor << " profile "
         << nvr::graph_profile << "\n";
     out << "entry " << image.entry << "\n\n";
     for (std::size_t i = 0; i < image.types.size(); ++i) {
@@ -351,7 +357,10 @@ std::string disassemble(const nvr::Image& image) {
     }
     for (std::size_t i = 0; i < image.layouts.size(); ++i) {
         out << "layout " << i << " parent " << index_or_absent(image.layouts[i].parent) << " fields "
-            << indices(image.layouts[i].fields) << "\n";
+            << indices(image.layouts[i].fields);
+        if (minor >= 2)
+            out << " interfaces " << indices(image.layouts[i].interfaces);
+        out << "\n";
     }
     for (std::size_t i = 0; i < image.constants.size(); ++i) {
         const auto& constant = image.constants[i];
@@ -419,6 +428,9 @@ std::string disassemble(const nvr::Image& image) {
                 case nvr::ExitKind::Trap:
                     out << " reason " << exit.reason;
                     break;
+                case nvr::ExitKind::MessageTrap:
+                    out << " arguments " << values(exit.arguments);
+                    break;
                 }
                 out << " assign "
                     << list(exit.assignments, [](const nvr::Assignment& assignment) {
@@ -469,10 +481,10 @@ nvr::Image assemble(std::string_view text) {
             }
             header = true;
             const auto version = in.next("format version");
-            if (version != "1.0" && version != "1.1") {
-                in.error("NVR " + version + " is not supported; this assembler writes 1.0 and 1.1");
+            if (version != "1.0" && version != "1.1" && version != "1.2") {
+                in.error("NVR " + version + " is not supported; this assembler writes 1.0 through 1.2");
             }
-            image.minor_version = version == "1.1" ? 1 : 0;
+            image.minor_version = static_cast<std::uint16_t>(version.back() - '0');
             in.keyword("profile");
             if (in.index("graph profile") != nvr::graph_profile) {
                 in.error("only graph profile 1 is supported");
@@ -505,6 +517,10 @@ nvr::Image assemble(std::string_view text) {
             layout.parent = in.index_or_absent("parent layout");
             in.keyword("fields");
             layout.fields = in.indices("field type");
+            if (image.minor_version >= 2) {
+                in.keyword("interfaces");
+                layout.interfaces = in.indices("interface layout");
+            }
             image.layouts.push_back(std::move(layout));
         } else if (record == "constant") {
             in.expect_index(static_cast<std::uint32_t>(image.constants.size()), "constant");
@@ -655,6 +671,9 @@ nvr::Image assemble(std::string_view text) {
             case nvr::ExitKind::Trap:
                 in.keyword("reason");
                 exit.reason = in.index("trap reason");
+                break;
+            case nvr::ExitKind::MessageTrap:
+                arguments();
                 break;
             }
             exit.assignments = assignments(in);
