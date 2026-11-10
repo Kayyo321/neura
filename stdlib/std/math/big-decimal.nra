@@ -115,7 +115,7 @@ export let BigDecimal = module (
             let new_scale = (scale_value as int64) - dropped;
             if (digit_count(rounded) > precision) {
                 // A carry such as 999 -> 1000: drop the extra zero.
-                rounded = rounded.divide(big_integer.Ten);
+                rounded = rounded.divide(big_integer.of_int64(10));
                 new_scale--;
             }
             return new BigDecimal(rounded, new_scale as int);
@@ -124,7 +124,7 @@ export let BigDecimal = module (
         /// @brief The numerically equal value with no trailing zeros in the unscaled value; zero has scale 0.
         export let strip_trailing_zeros = func -> BigDecimal {
             if (unscaled_value.is_zero()) {
-                return new BigDecimal(big_integer.Zero, 0);
+                return new BigDecimal(big_integer.of_int64(0), 0);
             }
             let value = unscaled_value;
             let new_scale = scale_value as int64;
@@ -138,7 +138,7 @@ export let BigDecimal = module (
                 new_scale -= 9;
             }
             do {
-                let [quotient, rest] = value.divide_and_remainder(big_integer.Ten);
+                let [quotient, rest] = value.divide_and_remainder(big_integer.of_int64(10));
                 if (!rest.is_zero()) {
                     break;
                 }
@@ -281,7 +281,7 @@ export let BigDecimal = module (
         }
         let fraction = bits & 4503599627370495;
         if (field == 0 && fraction == 0) {
-            return new BigDecimal(big_integer.Zero, 0);
+            return new BigDecimal(big_integer.of_int64(0), 0);
         }
         // v = m * 2^e
         let m = fraction;
@@ -400,7 +400,7 @@ export let BigDecimal = module (
             }
             return big_integer.of_int64(value);
         }
-        return big_integer.Ten.pow(k);
+        return big_integer.of_int64(10).pow(k);
     };
 
     /// @brief value * 10^k for k >= 0; k beyond the int range traps (reason 1).
@@ -428,7 +428,7 @@ export let BigDecimal = module (
         }
         if (k > (digit_count(value) as int64) + 1) {
             // 0 < |value| < 10^k / 2.
-            return rounded_quotient(big_integer.Zero, value.sign() < 0, Ordering.Less, mode);
+            return rounded_quotient(big_integer.of_int64(0), value.sign() < 0, Ordering.Less, mode);
         }
         return divide_rounded(value, power_of_ten(k as int), mode);
     };
@@ -468,9 +468,9 @@ export let BigDecimal = module (
             return truncated;
         }
         if (negative) {
-            return truncated.subtract(big_integer.One);
+            return truncated.subtract(big_integer.of_int64(1));
         }
-        return truncated.add(big_integer.One);
+        return truncated.add(big_integer.of_int64(1));
     };
 
     /// @brief count zeros, by doubling.

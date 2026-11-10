@@ -37,6 +37,8 @@ The following public declarations are taken from the module source; each links t
   Releases the file. Closing again does nothing and returns Ok; the file is closed even when the host reports an error.
 - **File** · [`export let open = func(path: Path, mode: OpenMode) -> result.Result<File>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L142)
   Opens the normalized path using the selected mode and returns an owned file.
+- **File** · [`export let with_open = func<T>(path: Path, mode: OpenMode, body: func(File) -> result.Result<T>) -> result.Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L157)
+  Opens the file, runs `body` with it in a scope this helper owns, and closes it exactly once on every ordinary completion (Concurrency.md section 7, "Resources"). If the open fails, returns that error and does not call the body. Otherwise returns the body's result, with two exceptions for a failed close: a body Err becomes a Context error whose cause is the body's error and whose message carries the close error's message, and a body Ok becomes the close error (Std.Io.Closeable.release does the combining). The file is closed even if the body closed it already, which reports no error. A trap in the body ends the run without cleanup, and the runner then closes the files the run left open. Needs the fs capability.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

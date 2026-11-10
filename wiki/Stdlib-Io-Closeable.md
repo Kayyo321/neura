@@ -17,8 +17,10 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Closeable** · [`export let Closeable = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/closeable.nra#L11)
+- **Closeable** · [`export let Closeable = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/closeable.nra#L12)
   The contract for a resource that callers release explicitly.
+- **Closeable** · [`export let release = func<T>(resource: Closeable, outcome: Result<T>) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/closeable.nra#L23)
+  Closes the resource and combines that with the outcome of the work that used it. This is the closing rule of the scoped helpers such as File.with_open (Concurrency.md section 7): when the close succeeds the outcome is returned unchanged; when it fails after an Ok, the close error is returned; when it fails after an Err, the result is a Context error whose cause is the outcome's error and whose message carries the close error's message. Call it exactly once, after the work, on every ordinary completion.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

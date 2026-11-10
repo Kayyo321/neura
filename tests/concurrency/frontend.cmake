@@ -409,6 +409,45 @@ if(NOT status STREQUAL "0" OR
    NOT stdout MATCHES "\n[0-9]+ function\\(s\\): [0-9]+ task-safe, of which [0-9]+ can also be the worker of a parallel map\n$")
     message(FATAL_ERROR "check --task-safety: unexpected report (status ${status})\n${stdout}\n${stderr}")
 endif()
+# The audit of section 5.2: with the modules a service needs linked (Std.Core, Std.Text, Std.Collections,
+# Std.Io.Console, Std.Net, Std.Time, Std.Log, and JSON with its big numbers), every library function is task-safe
+# except console input, whose read-ahead buffer belongs to the root task. A new entry here is a library
+# function that a spawned task can no longer call.
+file(WRITE "${TEST_DIR}/audit.nra" "let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let maps = import:Std.Collections.HashMap;
+let lists = import:Std.Collections.ArrayList;
+let trees = import:Std.Collections.TreeMap;
+let floats = import:Std.Core.Float64;
+let durations = import:Std.Time.Duration;
+let clocks = import:Std.Time.SystemClock;
+let instants = import:Std.Time.Instant;
+let loggers = import:Std.Log.Logger;
+let streams = import:Std.Net.TcpStream;
+let listeners = import:Std.Net.TcpListener;
+let strings = import:Std.Text.Strings;
+let regex = import:Std.Text.Regex;
+let random = import:Std.Random.Random;
+let json = import:Std.Encoding.Json;
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let table = maps.create<string, int>();
+        table.set(\"a\", 1);
+        console.print_line(table.to_string());
+        return program.ExitCode.Ok;
+    };
+);
+")
+execute_process(COMMAND "${NEURA}" check --task-safety audit.nra WORKING_DIRECTORY "${TEST_DIR}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+string(REGEX MATCHALL "\n  [^\n]*: not task-safe: [^\n]*" unsafe_lines "${stdout}")
+string(REGEX REPLACE ": not task-safe: [^\n;]*" "" unsafe_names "${unsafe_lines}")
+string(REGEX REPLACE "\n  " "" unsafe_names "${unsafe_names}")
+if(NOT status STREQUAL "0" OR NOT stdout MATCHES "\nstd/log/logger.nra\n" OR NOT stdout MATCHES "\nstd/net/tcp-stream.nra\n" OR
+   NOT unsafe_names STREQUAL "Console.discard_pending;Console.read_input;Console.read_line")
+    message(FATAL_ERROR "task-safety audit: expected only console input to be unsafe, got '${unsafe_names}' (status ${status})\n${unsafe_lines}\n${stderr}")
+endif()
+
 execute_process(COMMAND "${NEURA}" build --task-safety report.nra -o report.nvr WORKING_DIRECTORY "${TEST_DIR}"
     RESULT_VARIABLE status OUTPUT_QUIET ERROR_VARIABLE stderr)
 if(status STREQUAL "0" OR NOT stderr MATCHES "--task-safety applies only to check")

@@ -80,7 +80,7 @@ export let BigInteger = module (
         /// @brief Schoolbook with uint64 partial products; Karatsuba when both operands have at least 48 limbs.
         export let multiply = func(other: BigInteger) -> BigInteger {
             if (signum == 0 || other.signum == 0) {
-                return Zero;
+                return new BigInteger(0, []);
             }
             return new BigInteger(signum * other.signum, multiply_magnitudes(magnitude, other.magnitude));
         };
@@ -121,10 +121,10 @@ export let BigInteger = module (
                 trap_with_message("invalid argument: negative exponent");
             }
             if (exponent == 0) {
-                return One;
+                return new BigInteger(1, [1]);
             }
             if (signum == 0) {
-                return Zero;
+                return new BigInteger(0, []);
             }
             // The result has at least (bits - 1) * exponent + 1 bits.
             let bits = bit_length() as int64;
@@ -193,8 +193,8 @@ export let BigInteger = module (
             }
             let old_r = floor_mod(modulus);
             let r = modulus;
-            let old_s = One;
-            let s = Zero;
+            let old_s = new BigInteger(1, [1]);
+            let s = new BigInteger(0, []);
             while (r.signum != 0) {
                 let [quotient, rest] = old_r.divide_and_remainder(r);
                 old_r = r;
@@ -215,7 +215,7 @@ export let BigInteger = module (
                 trap_with_message("invalid argument: negative shift count");
             }
             if (signum == 0) {
-                return Zero;
+                return new BigInteger(0, []);
             }
             return new BigInteger(signum, shift_left_magnitude(magnitude, n));
         };
@@ -349,6 +349,8 @@ export let BigInteger = module (
         };
     );
 
+    // The methods above build their own zero and one instead of reading these constants: a constant object is
+    // module state, which a spawned task may not read (Concurrency.md section 5.2).
     /// @brief The integer zero.
     export const Zero: BigInteger = new BigInteger(0, []);
     /// @brief The integer one.
@@ -559,7 +561,7 @@ export let BigInteger = module (
         }
         let c = compare_magnitudes(a, b);
         if (c == 0) {
-            return Zero;
+            return new BigInteger(0, []);
         }
         if (c > 0) {
             return new BigInteger(sa, subtract_magnitudes(a, b));
