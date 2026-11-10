@@ -23,9 +23,14 @@ neura_target_defaults(neura_nvr)
 # The Neura Virtual Machine. It depends only on the image format, so a
 # runtime-only distribution needs no compiler code.
 add_library(neura_nvm STATIC
+    src/nvm/fs_provider.cpp
     src/nvm/host.cpp
     src/nvm/machine.cpp
+    src/nvm/net_provider.cpp
+    src/nvm/providers.cpp
+    src/nvm/scalar_text.cpp
     src/nvm/trace.cpp
+    src/nvm/trace_file.cpp
 )
 target_link_libraries(neura_nvm PUBLIC neura_nvr)
 neura_target_defaults(neura_nvm)
@@ -72,6 +77,8 @@ neura_target_defaults(neura)
 # The compiler and the runner ship as one executable: `neura run` loads
 # images through the same NVM library as any other embedder.
 install(TARGETS neura RUNTIME DESTINATION bin)
+install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL
+    FILES_MATCHING PATTERN "*.nra")
 
 include(CTest)
 if(BUILD_TESTING)
@@ -111,7 +118,9 @@ if(BUILD_TESTING)
     tests/backend/float_tests.cpp
         tests/backend/format_tests.cpp
     tests/backend/generics_tests.cpp
+        tests/backend/host_tests.cpp
         tests/backend/nir_tests.cpp
+        tests/backend/reference_tests.cpp
         tests/backend/vm_tests.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
@@ -122,10 +131,13 @@ if(BUILD_TESTING)
     target_include_directories(neura_backend_tests PRIVATE tests)
     neura_target_defaults(neura_backend_tests)
 
-    foreach(suite IN ITEMS circuits floats format vm nir conversion generics)
+    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+
+    # Standard library tests under the reference evaluator and NVM.
+    add_test(NAME backend-reference COMMAND neura_backend_tests reference "${CMAKE_CURRENT_SOURCE_DIR}")
 
     foreach(suite IN ITEMS lossless lift behavior)
         add_test(NAME decompiler-${suite}
@@ -139,6 +151,12 @@ if(BUILD_TESTING)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/cli.cmake"
     )
 
+    add_test(NAME backend-stdlib COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/stdlib-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/stdlib.cmake"
+    )
+
     add_test(NAME backend-install COMMAND ${CMAKE_COMMAND}
         "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -146,6 +164,43 @@ if(BUILD_TESTING)
         "-DCONFIG=$<CONFIG>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/install.cmake"
     )
+
+    # The standard library: one fixture installs the tool and the library
+    # into a fresh prefix, and each area of tests/stdlib runs against that
+    # installation (tests/stdlib/area.cmake describes the layout).
+    add_test(NAME stdlib-install COMMAND ${CMAKE_COMMAND}
+        "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install"
+        "-DCONFIG=$<CONFIG>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/install.cmake"
+    )
+    set_tests_properties(stdlib-install PROPERTIES FIXTURES_SETUP stdlib)
+    file(GLOB stdlib_areas LIST_DIRECTORIES true CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/*")
+    foreach(area_dir IN LISTS stdlib_areas)
+        if(NOT IS_DIRECTORY "${area_dir}")
+            continue()
+        endif()
+        get_filename_component(area "${area_dir}" NAME)
+        add_test(NAME stdlib-${area} COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/stdlib-tests/${area}"
+            "-DAREA=${area}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/area.cmake"
+        )
+        set_tests_properties(stdlib-${area} PROPERTIES FIXTURES_REQUIRED stdlib)
+    endforeach()
+
+    # Cost baseline of representative library workloads (tests/benchmarks).
+    add_test(NAME benchmarks COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/benchmarks"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks/run.cmake"
+    )
+    set_tests_properties(benchmarks PROPERTIES FIXTURES_REQUIRED stdlib)
 
     add_test(NAME ir-optimization-cli COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
