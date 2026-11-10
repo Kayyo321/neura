@@ -49,6 +49,7 @@ struct Candidate {
 
 struct Prefix {
     std::size_t graphs = 0;
+    std::size_t jobs = 0;
     double gain = 0;
     double predicted = 0;
 };
@@ -60,11 +61,21 @@ public:
     explicit PlacementWork(std::size_t graphs) : counts_(graphs), chosen_(graphs) {}
 
     void collect(std::span<const GraphJob> jobs) {
-        for (const auto graph : touched_) counts_[graph] = 0;
-        touched_.clear();
-        for (const auto& job : jobs) {
-            if (counts_[job.graph]++ == 0) touched_.push_back(job.graph);
+        reset_counts();
+        for (const auto& job : jobs) count(job.graph);
+    }
+
+    void collect(std::span<GraphJob> jobs) {
+        reset_counts();
+        for (auto& job : jobs) {
+            job.evaluated = false;
+            count(job.graph);
         }
+    }
+
+    void collect(std::span<const std::uint32_t> graphs) {
+        reset_counts();
+        for (const auto graph : graphs) count(graph);
     }
 
     double cpu_work(std::span<const GraphShape> shapes, const CpuModel& cpu) const {
@@ -91,32 +102,43 @@ public:
         });
 
         Prefix best;
+        std::size_t total_jobs = 0;
         double total_gain = 0;
         double total_incremental = 0;
         for (std::size_t i = 0; i < candidates_.size(); ++i) {
             const auto& candidate = candidates_[i];
             const auto count = static_cast<double>(counts_[candidate.graph]);
+            total_jobs += counts_[candidate.graph];
             total_gain = std::fma(count, candidate.gain_per_job, total_gain);
             total_incremental = std::fma(count, candidate.per_job, total_incremental);
             const auto base = device.a + candidate.critical;
             const auto gain = std::fma(-correction, base, total_gain);
-            if (gain > best.gain) best = {i + 1, gain, base + total_incremental};
+            if (gain > best.gain) best = {i + 1, total_jobs, gain, base + total_incremental};
         }
         return best;
     }
 
-    void select_jobs(std::span<const GraphJob> jobs, Prefix prefix, std::vector<std::size_t>& selected) {
-        selected.clear();
+    template <class GraphAt, class Select>
+    void select_jobs(std::size_t size, Prefix prefix, GraphAt graph_at, Select select) {
         if (prefix.graphs == 0) return;
         const auto chosen_graphs = std::span(candidates_).first(prefix.graphs);
         for (const auto& candidate : chosen_graphs) chosen_[candidate.graph] = true;
-        for (std::size_t i = 0; i < jobs.size(); ++i) {
-            if (chosen_[jobs[i].graph]) selected.push_back(i);
+        for (std::size_t i = 0; i < size; ++i) {
+            if (chosen_[graph_at(i)]) select(i);
         }
         for (const auto& candidate : chosen_graphs) chosen_[candidate.graph] = false;
     }
 
 private:
+    void reset_counts() {
+        for (const auto graph : touched_) counts_[graph] = 0;
+        touched_.clear();
+    }
+
+    void count(std::uint32_t graph) {
+        if (counts_[graph]++ == 0) touched_.push_back(graph);
+    }
+
     std::vector<std::size_t> counts_;
     std::vector<std::uint32_t> touched_;
     std::vector<Candidate> candidates_;
@@ -183,7 +205,9 @@ Placement place_jobs(std::span<const GraphShape> shapes, std::span<const GraphJo
     work.collect(jobs);
     const auto prefix = work.select_prefix(shapes, device, cpu, correction);
     Placement placement{{}, prefix.gain, prefix.predicted};
-    work.select_jobs(jobs, prefix, placement.jobs);
+    placement.jobs.reserve(prefix.jobs);
+    work.select_jobs(jobs.size(), prefix, [&](std::size_t i) { return jobs[i].graph; },
+                     [&](std::size_t i) { placement.jobs.push_back(i); });
     return placement;
 }
 
@@ -276,34 +300,72 @@ void AutoDevice::open() {
 
 void AutoDevice::evaluate(std::span<GraphJob> jobs) {
     validate_graph_jobs(image_, jobs);
-    for (auto& job : jobs) job.evaluated = false;
-    if (state_ == State::Rejected || jobs.empty()) return;
+    evaluate_batch(jobs, {}, nullptr);
+}
+
+bool AutoDevice::evaluate_prepared(std::span<const std::uint32_t> graphs,
+                                   const detail::MaterializeGraphJobs& materialize) {
+    evaluate_batch({}, graphs, &materialize);
+    return true;
+}
+
+void AutoDevice::evaluate_batch(std::span<GraphJob> jobs, std::span<const std::uint32_t> graphs,
+                                const detail::MaterializeGraphJobs* materialize) {
+    const auto size = materialize ? graphs.size() : jobs.size();
+    if (state_ == State::Rejected || size == 0) {
+        for (auto& job : jobs) job.evaluated = false;
+        return;
+    }
 
     auto& scratch = *scratch_;
-    scratch.placement.collect(jobs);
+    if (materialize) scratch.placement.collect(graphs);
+    else scratch.placement.collect(jobs);
     if (state_ == State::Gated) {
         const auto prefix = scratch.placement.select_prefix(shapes_, optimistic_device, nominal_cpu, 1);
         saved_ += prefix.gain;
         work_ += scratch.placement.cpu_work(shapes_, nominal_cpu);
-        declined_placement_ += jobs.size();
+        declined_placement_ += size;
         if (saved_ >= open_budget) open();
         else if (work_ >= give_up_work) reject("the workload cannot gain");
         return;
     }
 
     const auto prefix = scratch.placement.select_prefix(shapes(), device_model_, cpu_model_, correction_);
-    scratch.placement.select_jobs(jobs, prefix, scratch.selected);
-    declined_placement_ += jobs.size() - scratch.selected.size();
-    if (scratch.selected.empty()) return;
+    declined_placement_ += size - prefix.jobs;
+    if (prefix.jobs == 0) return;
 
-    scratch.forwarded.clear();
-    scratch.forwarded.reserve(scratch.selected.size());
-    for (const auto index : scratch.selected) scratch.forwarded.push_back(jobs[index]);
+    scratch.selected.clear();
+    scratch.selected.reserve(prefix.jobs);
+    std::span<GraphJob> forwarded;
+    if (materialize) {
+        scratch.placement.select_jobs(size, prefix, [&](std::size_t i) { return graphs[i]; },
+                                      [&](std::size_t i) { scratch.selected.push_back(i); });
+        forwarded = (*materialize)(scratch.selected);
+        if (forwarded.size() != scratch.selected.size()) {
+            throw std::logic_error("prepared graph batch returned the wrong number of jobs");
+        }
+        for (std::size_t i = 0; i < forwarded.size(); ++i) {
+            if (forwarded[i].graph != graphs[scratch.selected[i]]) {
+                throw std::logic_error("prepared graph batch returned the wrong graph");
+            }
+        }
+    } else {
+        scratch.forwarded.clear();
+        scratch.forwarded.reserve(prefix.jobs);
+        scratch.placement.select_jobs(size, prefix, [&](std::size_t i) { return jobs[i].graph; },
+                                      [&](std::size_t i) {
+                                          scratch.selected.push_back(i);
+                                          scratch.forwarded.push_back(jobs[i]);
+                                      });
+        forwarded = scratch.forwarded;
+    }
     const auto start = options_.now();
-    inner_->evaluate(scratch.forwarded);
+    inner_->evaluate(forwarded);
     const auto elapsed = options_.now() - start;
-    for (std::size_t i = 0; i < scratch.selected.size(); ++i) {
-        jobs[scratch.selected[i]].evaluated = scratch.forwarded[i].evaluated;
+    if (!materialize) {
+        for (std::size_t i = 0; i < scratch.selected.size(); ++i) {
+            jobs[scratch.selected[i]].evaluated = forwarded[i].evaluated;
+        }
     }
 
     if (prefix.predicted != 0 || elapsed != 0) {

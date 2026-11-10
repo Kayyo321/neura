@@ -2,7 +2,6 @@
 
 #include "machine.hpp"
 
-#include <algorithm>
 #include <string>
 
 namespace neura::nvm {
@@ -16,7 +15,11 @@ void validate_graph_jobs(const nvr::Image& image, std::span<const GraphJob> jobs
         if (job.inputs.size() != graph.input_lanes || job.outputs.size() != graph.outputs.size()) {
             throw std::invalid_argument("graph job lane count does not match the graph");
         }
-        if (std::any_of(job.inputs.begin(), job.inputs.end(), [](auto lane) { return lane != 0 && lane != 1; })) {
+        // Valid lanes only use bit zero. Reduce the input without a branch
+        // per lane so validation can scan a whole batch efficiently.
+        std::uint64_t bits = 0;
+        for (const auto lane : job.inputs) bits |= static_cast<std::uint64_t>(lane);
+        if (bits > 1) {
             throw std::invalid_argument("graph job input lane is not zero or one");
         }
     }

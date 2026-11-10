@@ -1,4 +1,6 @@
 #include "fleet_tests.hpp"
+#include "graph_test_support.hpp"
+#include "nvm/fleet.hpp"
 #include "nvm/placement.hpp"
 
 #include <algorithm>
@@ -359,6 +361,101 @@ NEURA_TEST(placement, corpus_fleets_match_serial_runs) {
         check_equal(automatic.correction(), 1.0, "scripted elapsed time matches the model throughout corpus");
     }
     check(evaluated > 0 && declined > 0, "corpus fleets exercised both device placement and CPU fallback");
+}
+
+NEURA_TEST(placement, prepared_and_eager_fleets_agree) {
+    auto image = hello_model();
+    image.graphs.push_back(wide_graph());
+    image.graphs.push_back(chain_graph(1));
+    image.constants.push_back({1, {0}});
+    image.constants.push_back({1, {1}});
+    image.constants.push_back({3, {'s', 'e', 'c', 'o', 'n', 'd'}});
+    image.constants.push_back({2, {7, 0, 0, 0}});
+    const auto trap = image.functions[0].blocks[2].exits[0];
+    const auto branch = [&](std::uint32_t graph, bool input, std::uint32_t target) {
+        nvr::Block block;
+        block.graph = graph;
+        block.inputs = {{nvr::ValueKind::Constant, 1, input ? 3U : 2U}};
+        block.exits = {trap, trap};
+        auto& success = block.exits[input ? 1 : 0];
+        success = {};
+        success.kind = nvr::ExitKind::Continue;
+        success.resume = target;
+        return block;
+    };
+    auto& first = image.functions[0];
+    auto second = first;
+    first.blocks.insert(first.blocks.begin(), {branch(1, true, 1), branch(2, false, 2)});
+    second.blocks.insert(second.blocks.begin(), {branch(2, true, 1), branch(1, false, 2)});
+    for (auto* function : {&first, &second}) {
+        auto& request = function->blocks[2].exits[0];
+        request.resume = 3;
+        request.error_resume = 4;
+    }
+    second.blocks[2].exits[0].arguments[0].index = 4;
+    second.blocks[3].exits[0].arguments[0].index = 5;
+    image.functions.push_back(std::move(second));
+    image = nvr::load(nvr::encode(image));
+
+    const auto open_model = [&](std::string&) {
+        // Sending one wide job costs a fixed 8 plus 7 I/O words. The
+        // single-neuron job loses even without the fixed dispatch cost.
+        return nvm::Opened{std::make_unique<nvm::ModelDevice>(image), {8, 0, 0, 1, 1}, {0, 0, 1}, "model"};
+    };
+    ScriptedClock prepared_clock{.elapsed = 15};
+    ScriptedClock eager_clock{.elapsed = 15};
+    AutoDevice prepared(image, open_model, {batch_size, [&] { return prepared_clock.read(); }});
+    AutoDevice eager(image, open_model, {batch_size, [&] { return eager_clock.read(); }});
+    offer_opening_work(prepared, 1);
+    offer_opening_work(eager, 1);
+    check(prepared.state() == AutoDevice::State::Active && eager.state() == AutoDevice::State::Active,
+          "both auto devices are active before the fleet starts");
+
+    // VerifyingDevice uses the eager interface. Direct AutoDevice chooses
+    // first and materializes only the wide job, at a different batch index
+    // and with a different output bit in each of the first two rounds.
+    nvm::VerifyingDevice verifying(eager);
+    nvm::RunLimits limits;
+    limits.profile = true;
+    nvm::Fleet prepared_fleet(image, {limits, &prepared, 2});
+    nvm::Fleet eager_fleet(image, {limits, &verifying, 2});
+    for (auto* fleet : {&prepared_fleet, &eager_fleet}) {
+        fleet->add(0, {});
+        fleet->add(1, {});
+    }
+    CapturingConsole prepared_console;
+    CapturingConsole eager_console;
+    constexpr std::array<std::uint64_t, 4> rounds{3, 4, 4, 5};
+    for (std::size_t i = 0; i < rounds.size(); ++i) {
+        const auto actual = prepared_fleet.advance();
+        const auto expected = eager_fleet.advance();
+        check(actual.member == i / 2 && actual.member == expected.member, "both fleets report members in order");
+        check_equal(prepared_fleet.rounds(), rounds[i], "prepared round at event");
+        check_equal(eager_fleet.rounds(), rounds[i], "eager round at event");
+        if (i % 2 == 0) {
+            check(actual.event.kind == nvm::Event::Kind::HostRequest && actual.event.kind == expected.event.kind,
+                  "each member first presents its host request");
+            check_same_request(actual.event.request, expected.event.request, "prepared host request");
+            prepared_fleet.complete(prepared_console.invoke(actual.event.request));
+            eager_fleet.complete(eager_console.invoke(expected.event.request));
+        } else {
+            const auto status = i == 1 ? 0 : 7;
+            check(actual.event.kind == nvm::Event::Kind::Completed && actual.event.kind == expected.event.kind &&
+                  actual.event.status == status && actual.event.result == expected.event.result &&
+                  actual.result.steps == 4, "both prepared and CPU-completed blocks preserve the result");
+            check_same_run(actual.result, expected.result, "prepared final result");
+        }
+    }
+    check(prepared_fleet.done() && eager_fleet.done(), "both fleets completed");
+    check_equal(prepared_console.output(), eager_console.output(), "prepared and eager console bytes");
+    check_equal(prepared_console.output(), std::string("hi\nsecond\n"), "serial console order");
+    for (auto* device : {&prepared, &eager}) {
+        const auto stats = device->statistics();
+        check(stats.evaluated == 2 && stats.declined_placement == batch_size * opening_call + 2 &&
+              stats.declined_ineligible == 0 && stats.escaped == 0 && stats.declined_failed == 0 &&
+              stats.dispatches == 2 && device->correction() == 1, "both devices count the same selected and declined jobs");
+    }
+    check(prepared_clock.reads == 4 && eager_clock.reads == 4, "only the two selected batches were timed");
 }
 
 } // namespace neura::testing

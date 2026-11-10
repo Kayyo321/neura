@@ -81,15 +81,15 @@ void usage(std::ostream& out) {
            "  --record <file>          (run) write every host request and response to a trace\n"
            "  --profile                (run) print the steps each function took\n"
            "  --replay <file>          (run) answer host requests from a trace instead of services\n"
-           "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
            "\n"
-           "graph execution: run and test use the CPU by default.\n"
-           "  --gpu=auto               decide automatically by predicted speed\n"
+           "graph execution: run and test choose between the CPU and a GPU by predicted speed.\n"
+           "  --gpu=auto               decide automatically (default)\n"
            "  --gpu=always             evaluate every eligible graph on a GPU when one is usable\n"
            "  --gpu=off, --no-gpu      evaluate graphs on the CPU\n"
            "  --require-gpu            --gpu=always, and fail unless a GPU device is available\n"
            "  --gpu-software           also accept software Vulkan implementations\n"
            "  --gpu-verify             check every GPU evaluation against the CPU\n"
+           "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
            "\n"
            "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
            "  --c-include <dir>        search a directory for C headers\n"
@@ -361,6 +361,7 @@ Options read_options(int argc, char** argv) {
     if (options.record && options.replay) {
         throw std::runtime_error("--record and --replay cannot be combined");
     }
+    if (runs) options.gpu.read_environment();
     options.gpu.validate();
     if (options.all_paths) {
         options.capabilities.fs_prefixes.clear();
@@ -787,7 +788,7 @@ int run(const Options& options) {
 #endif
     Host host(options.capabilities);
     provide_native_library(image, host.services);
-    if (options.each) return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device()));
+    if (options.each) return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device()), options.stats);
     auto limits = options.limits;
     limits.graph_device = gpu.device();
     neura::nvm::RunResult result;
@@ -827,9 +828,9 @@ int run(const Options& options) {
     }
     if (!result.completed) {
         std::cerr << path.string() << ": trap: " << neura::nvm::describe(result.trap, image) << '\n';
-        return gpu.finish(neura::nvm::exit_status(result.trap));
+        return gpu.finish(neura::nvm::exit_status(result.trap), options.stats);
     }
-    return gpu.finish(result.status);
+    return gpu.finish(result.status, options.stats);
 }
 
 // The source location of a block, when the image has a source map entry.
@@ -967,7 +968,7 @@ int run_tests(const Options& options) {
     }
     std::cout << tests.size() << " test(s), " << tests.size() - failed << " passed, " << failed << " failed\n";
     std::cout.flush();
-    return gpu.finish(failed == 0 ? 0 : 1);
+    return gpu.finish(failed == 0 ? 0 : 1, options.stats);
 }
 
 } // namespace

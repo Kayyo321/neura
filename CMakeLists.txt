@@ -387,4 +387,19 @@ if(BUILD_TESTING)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/ir-optimization-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ir-optimization/cli.cmake"
     )
+
+    get_property(neura_tests DIRECTORY PROPERTY TESTS)
+    list(REMOVE_ITEM neura_tests gpu-device gpu-cli)
+    foreach(test IN LISTS neura_tests)
+        set_property(TEST "${test}" APPEND PROPERTY ENVIRONMENT "NEURA_GPU=off")
+    endforeach()
+    # The submodule tests never invoke Neura. CMake 3.28 also allows
+    # applying the same environment to tests declared in its directory.
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.28")
+        get_property(libclang_tests DIRECTORY "${NEURA_LIBCLANG_DIR}" PROPERTY TESTS)
+        foreach(test IN LISTS libclang_tests)
+            set_property(TEST "${test}" DIRECTORY "${NEURA_LIBCLANG_DIR}"
+                APPEND PROPERTY ENVIRONMENT "NEURA_GPU=off")
+        endforeach()
+    endif()
 endif()

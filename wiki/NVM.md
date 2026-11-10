@@ -83,6 +83,8 @@ The head can always start. Other members can start while the sum of the live hea
 
 When no device is set and every member has been admitted, the reference executor can group rounds until the head reaches its next event. Other runnable members advance through the same number of rounds, stopping at their first event. Each member sees the same inputs and state, and no admission or host response can intervene during the group. The visible events and round count remain those of the individual rounds.
 
+Fleet admission tracks live heap cells as they change. Finishing a member removes its remaining cells from the total before another member is admitted. With a graph device, the fleet checks graph input reads before placement and can defer packing their lanes until evaluation. The begun frame and constants stay unchanged in between. An automatic device can request full jobs only for the graph indices it selects. Other devices receive the eager batch, and every declined step uses the reference evaluator.
+
 ## Heap and objects
 
 Objects have a runtime type tag, a layout ID, and typed field slots. Layouts preserve inherited fields at stable indices. A method receives the object handle as an explicit argument. Each object has independent storage, while calls share the compiled method graphs. Collections use typed element slots, and lengths and indices are checked before accessing storage.

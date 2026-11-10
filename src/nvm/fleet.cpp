@@ -4,7 +4,9 @@
 #include "run_support.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <limits>
+#include <ranges>
 #include <stdexcept>
 #include <variant>
 
@@ -50,10 +52,10 @@ public:
                 ++head_;
                 return event;
             }
-            if (!active_.empty() && active_.front().request) {
+            if (!active_members().empty() && active_members().front().request) {
                 // Members start in order. Once finished heads are reported,
                 // the first active member is the head.
-                auto request = std::move(active_.front().request);
+                auto request = std::move(active_members().front().request);
                 awaiting_ = true;
                 return {head_, std::move(*request), {}};
             }
@@ -64,7 +66,7 @@ public:
             if (!options_.device && next_waiting_ == members_.size()) {
                 reference_rounds();
             } else {
-                round(std::min(width, active_.size()));
+                round(std::min(width, active_members().size()));
                 ++rounds_;
             }
         }
@@ -72,15 +74,16 @@ public:
 
     void complete(const HostCompletion& completion) {
         if (!awaiting_) throw std::logic_error("complete() called without a pending host request");
-        active_.front().execution->complete(completion);
+        active_members().front().execution->complete(completion);
         awaiting_ = false;
+        ++runnable_count_;
     }
 
     std::optional<HostValue> invoke_callback(std::string_view name, std::uint32_t version,
                                              const std::vector<HostValue>& arguments,
                                              const Execution::HostHandler& host) {
         if (!awaiting_) throw std::logic_error("invoke_callback() called without a pending host request");
-        return active_.front().execution->invoke_callback(name, version, arguments, host);
+        return active_members().front().execution->invoke_callback(name, version, arguments, host);
     }
 
 private:
@@ -101,26 +104,22 @@ private:
         std::variant<std::vector<std::string>, std::vector<std::uint64_t>, Finished, std::monostate> state;
     };
 
-    struct PendingGraph {
-        Active* member;
-        Execution::GraphStep step;
-    };
-
     void require_unstarted() const {
         if (started_) throw std::logic_error("cannot add a member after advancing the fleet");
     }
 
-    void admit(std::size_t width) {
-        if (active_.size() >= width || next_waiting_ == members_.size()) return;
-        const auto limit = options_.limits.max_heap_cells;
-        std::uint64_t live_cells = 0;
-        for (const auto& live : active_) {
-            live_cells += std::min(limit - live_cells, live.execution->admission_heap_cells());
-            if (live_cells == limit) break;
-        }
+    std::span<Active> active_members() { return std::span(active_).subspan(first_active_); }
 
-        while (active_.size() < width && next_waiting_ < members_.size() &&
-               (next_waiting_ == head_ || live_cells < limit)) {
+    void admit(std::size_t width) {
+        if (active_members().size() >= width || next_waiting_ == members_.size()) return;
+        const auto limit = options_.limits.max_heap_cells;
+        while (active_members().size() < width && next_waiting_ < members_.size() &&
+               (next_waiting_ == head_ || heap_cells_.below(limit))) {
+            if (first_active_ != 0 && first_active_ >= active_members().size()) {
+                // Amortize compaction of members removed from the head.
+                active_.erase(active_.begin(), active_.begin() + static_cast<std::ptrdiff_t>(first_active_));
+                first_active_ = 0;
+            }
             auto& member = members_[next_waiting_];
             std::unique_ptr<Execution> started;
             if (const auto* arguments = std::get_if<std::vector<std::string>>(&member.state)) {
@@ -131,11 +130,11 @@ private:
             }
             // Charge argument and constant allocation before admitting the
             // next member. A startup trap is returned by the first step.
-            started->initialize();
-            live_cells += std::min(limit - live_cells, started->admission_heap_cells());
+            started->initialize(heap_cells_);
             active_.push_back({next_waiting_, std::move(started), nullptr});
             member.state = std::monostate{};
             ++next_waiting_;
+            ++runnable_count_;
         }
     }
 
@@ -143,49 +142,67 @@ private:
         if (!event) return false;
         if (event->kind == Event::Kind::HostRequest) {
             live.request = std::make_unique<Event>(std::move(*event));
+            --runnable_count_;
             return false;
         }
         auto result = detail::finished_result(*live.execution, *event);
         members_[live.member].state = std::make_unique<FleetEvent>(
             FleetEvent{live.member, std::move(*event), std::move(result)});
         live.execution.reset();
+        --runnable_count_;
         return true;
     }
 
-    std::optional<Event> reference_step(Execution& run, const Execution::GraphStep& step) {
-        reference_outputs_.resize(step.output_count);
-        if (const auto node = evaluate_outputs(image_.graphs[step.graph], step.inputs, scratch_, reference_outputs_)) {
-            return run.fail_step(*node);
-        }
-        return run.finish_step(reference_outputs_);
-    }
-
-    bool dispatch() {
+    template <class Indices>
+    std::span<GraphJob> materialize_jobs(const Indices& indices) {
         std::size_t output_count = 0;
-        for (const auto& pending : pending_graphs_) {
-            if (pending.step.output_count > arena_.max_size() - output_count) {
+        for (const auto index : indices) {
+            const auto count = image_.graphs[graph_ids_[index]].outputs.size();
+            if (count > arena_.max_size() - output_count) {
                 throw std::length_error("fleet graph output arena exceeds storage limits");
             }
-            output_count += pending.step.output_count;
+            output_count += count;
         }
-        arena_.resize(output_count);
-        auto outputs = std::span(arena_);
-        jobs_.clear();
-        jobs_.reserve(pending_graphs_.size());
-        for (const auto& pending : pending_graphs_) {
-            const auto& step = pending.step;
-            jobs_.push_back({step.graph, step.inputs, outputs.first(step.output_count)});
-            outputs = outputs.subspan(step.output_count);
+        if (arena_.size() < output_count) arena_.resize(output_count);
+        auto outputs = std::span(arena_).first(output_count);
+        jobs_.reserve(std::ranges::size(indices));
+        for (const auto index : indices) {
+            const auto graph = graph_ids_[index];
+            const auto count = image_.graphs[graph].outputs.size();
+            jobs_.push_back({graph, pending_members_[index]->execution->prepared_inputs(), outputs.first(count)});
+            outputs = outputs.subspan(count);
         }
-        options_.device->evaluate(jobs_);
+        return jobs_;
+    }
 
-        bool finished = false;
-        for (std::size_t i = 0; i < pending_graphs_.size(); ++i) {
-            const auto& pending = pending_graphs_[i];
-            const auto& job = jobs_[i];
-            auto& run = *pending.member->execution;
-            auto event = job.evaluated ? run.finish_step(job.outputs) : reference_step(run, pending.step);
-            finished |= settle(*pending.member, std::move(event));
+    std::size_t dispatch() {
+        jobs_.clear();
+        selected_.clear();
+        const bool prepared = options_.device->evaluate_prepared(graph_ids_,
+            [&](std::span<const std::size_t> indices) {
+                if (indices.empty() || !selected_.empty() || indices.back() >= pending_members_.size() ||
+                    std::ranges::adjacent_find(indices, std::greater_equal{}) != indices.end()) {
+                    throw std::logic_error("graph device selected invalid prepared jobs");
+                }
+                selected_.assign(indices.begin(), indices.end());
+                return materialize_jobs(indices);
+            });
+        if (!prepared) {
+            if (!selected_.empty()) throw std::logic_error("graph device did not finish a prepared batch");
+            options_.device->evaluate(materialize_jobs(std::views::iota(std::size_t{0}, pending_members_.size())));
+        }
+
+        std::size_t finished = 0;
+        std::size_t selected = 0;
+        for (std::size_t i = 0; i < pending_members_.size(); ++i) {
+            auto& live = *pending_members_[i];
+            const GraphJob* job = nullptr;
+            if (!prepared) job = &jobs_[i];
+            else if (selected < selected_.size() && selected_[selected] == i) job = &jobs_[selected++];
+            auto& run = *live.execution;
+            auto event = job && job->evaluated ? run.finish_step(job->outputs)
+                                               : run.finish_prepared_reference_step(scratch_);
+            finished += settle(live, std::move(event));
         }
         return finished;
     }
@@ -194,57 +211,80 @@ private:
         // With no device or admissions, consecutive rounds commute across
         // members. Run the head to its next event and give every other
         // member exactly the rounds it would get before that event.
-        auto& head = active_.front();
+        const auto runnable = runnable_count_;
+        auto& head = active_members().front();
         auto [event, count] = head.execution->advance_reference_rounds(
             scratch_, std::numeric_limits<std::uint64_t>::max());
-        bool finished = settle(head, std::move(event));
-        for (auto& live : std::span(active_).subspan(1)) {
-            if (!live.request) {
-                finished |= settle(live, live.execution->advance_reference_rounds(scratch_, count).event);
+        std::size_t finished = settle(head, std::move(event));
+        if (runnable > 1) {
+            for (auto& live : active_members().subspan(1)) {
+                if (!live.request) {
+                    finished += settle(live, live.execution->advance_reference_rounds(scratch_, count).event);
+                }
             }
         }
         rounds_ += count;
-        if (finished) remove_finished();
+        if (finished) remove_finished(finished);
     }
 
-    void remove_finished() {
-        std::erase_if(active_, [](const Active& live) { return !live.execution; });
+    void remove_finished(std::size_t count) {
+        while (count != 0 && !active_[first_active_].execution) {
+            ++first_active_;
+            --count;
+        }
+        if (first_active_ == active_.size()) {
+            active_.clear();
+            first_active_ = 0;
+        } else if (count != 0) {
+            const auto first = active_.begin() + static_cast<std::ptrdiff_t>(first_active_);
+            active_.erase(std::remove_if(first, active_.end(), [](const Active& live) { return !live.execution; }),
+                          active_.end());
+        }
     }
 
     void round(std::size_t width) {
-        bool finished = false;
-        pending_graphs_.clear();
-        for (auto& live : std::span(active_).first(width)) {
+        std::size_t finished = 0;
+        pending_members_.clear();
+        graph_ids_.clear();
+        // Only the head can be runnable when every other member is parked.
+        const auto runnable_span = active_members().first(runnable_count_ == 1 ? 1 : width);
+        for (auto& live : runnable_span) {
             if (live.request) continue;
             if (!options_.device) {
                 // Use the same step driver as Execution with the fleet's
                 // scratch and write directly to the member's output lanes.
-                finished |= settle(live, live.execution->step_with_scratch(scratch_));
+                finished += settle(live, live.execution->step_with_scratch(scratch_));
                 continue;
             }
-            Execution::GraphStep step;
-            if (auto event = live.execution->begin_step(step)) {
-                finished |= settle(live, std::move(event));
-            } else if (image_.graphs[step.graph].nodes.empty()) {
-                finished |= settle(live, reference_step(*live.execution, step));
+            std::uint32_t graph = 0;
+            if (auto event = live.execution->begin_prepared_step(graph)) {
+                finished += settle(live, std::move(event));
+            } else if (image_.graphs[graph].nodes.empty()) {
+                finished += settle(live, live.execution->finish_prepared_reference_step(scratch_));
             } else {
-                pending_graphs_.push_back({&live, step});
+                pending_members_.push_back(&live);
+                graph_ids_.push_back(graph);
             }
         }
-        if (!pending_graphs_.empty()) finished |= dispatch();
-        if (finished) remove_finished();
+        if (!pending_members_.empty()) finished += dispatch();
+        if (finished) remove_finished(finished);
     }
 
     const nvr::Image& image_;
     FleetOptions options_;
     std::vector<Member> members_;
+    // Must outlive every admitted execution that reports heap mutations.
+    Execution::FleetHeapCells heap_cells_;
     // Started, unfinished members, in index order. Keep them separate from
     // stored final results so later rounds can skip those in constant time.
     std::vector<Active> active_;
-    std::vector<PendingGraph> pending_graphs_;
+    std::size_t first_active_ = 0;
+    std::size_t runnable_count_ = 0;
+    std::vector<Active*> pending_members_;
+    std::vector<std::uint32_t> graph_ids_;
+    std::vector<std::size_t> selected_;
     std::vector<GraphJob> jobs_;
     std::vector<std::int64_t> scratch_;
-    std::vector<std::int64_t> reference_outputs_;
     std::vector<std::int64_t> arena_;
     std::size_t head_ = 0;
     std::size_t next_waiting_ = 0;

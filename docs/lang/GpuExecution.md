@@ -1,8 +1,8 @@
-# GPU execution of neuron graphs: implementation plan
+# GPU execution of neuron graphs
 
-This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The graph-device interface, step split, and CPU model are implemented in `neura_nvm`. The NVM fleet API and serial `neura run --each` are implemented. The Vulkan evaluator and the explicit `always` and `off` modes are implemented. Auto placement is available through `--gpu=auto`. The CLI defaults to `off` in this phase. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
+This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The NVM exposes graph devices and fleets to embedders. The CLI defaults to automatic placement and can also select explicit Vulkan or CPU-only execution. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
 
-## 1. How to read this plan
+## 1. How to read this specification
 
 - "Must" states a requirement on the implementation. A constant, name, message, or layout given here is fixed. An implementer who finds one unworkable stops and reports it; they do not pick a replacement.
 - Section 3 lists every decision. Section 4 gives the measurements those decisions rest on, and says which are measurements and which are estimates.
@@ -29,7 +29,7 @@ Each NVM step resolves a block's inputs, evaluates the block's graph, decodes th
 
 The GPU evaluates a graph layer by layer in exact 32-bit integer arithmetic. A static check on each graph's weights and a run-time bound on every neuron's value together guarantee that the 32-bit result equals the reference evaluator's checked 64-bit result; a request that leaves the bound is recomputed by the reference evaluator. No floating-point operation is involved in a result, so results do not depend on the device.
 
-A GPU is slower than the CPU for one graph at a time and faster when it receives hundreds or thousands of graphs in one dispatch (section 4). Two mechanisms follow from that:
+Dispatch has a fixed cost. A GPU can repay it by evaluating many requests together. Two mechanisms serve that purpose:
 
 - **Batched running** (section 10). A fleet advances many executions of one image in rounds and offers each round's graphs to the device as one batch. Host effects and results surface in member order, so a fleet cannot be told apart from running its members one after another. `neura test` runs its tests as a fleet, and `neura run --each` runs one image over many argument lists as a fleet.
 - **Auto mode** (section 11), the default. The runtime predicts the cost of each choice from a measured model of the device and of the CPU. It leaves the Vulkan loader unopened until the workload could repay opening it, discards a device that cannot beat the CPU, and afterwards sends a round's graphs to the device only when that is predicted to be clearly faster.
@@ -58,101 +58,85 @@ Whatever is chosen, a run must be indistinguishable to the program and to anyone
 | D16 | `auto` prefers the CPU when in doubt: the device must be predicted to take at most 0.75 of the CPU's time. A rejection lasts for the rest of the process. Nothing is cached on disk and no thread is created. |
 | D17 | `neura run --each <file>` is the command-line way to give one image many inputs (section 10.11). It is defined in every mode and build, including builds without the GPU. |
 
-## 4. Measurements behind the design
-
-These are observations on one machine on 2026-11-10, with throwaway prototypes that are not in the repository. They are not guarantees for other hardware. The device prototype used the kernel source and buffer layouts of sections 7 and 8 exactly and compared every output with a Python model of the reference rule. Times are medians in microseconds unless a line says otherwise.
+## 4. Release measurements
 
 ### 4.1 Machine
 
-AMD Ryzen 7 9800X3D; NVIDIA GeForce RTX 5080 (proprietary driver, Vulkan 1.4.357); AMD Radeon integrated graphics (RADV, Vulkan 1.4.305); llvmpipe software Vulkan (LLVM 19.1.7). `build/neura` was a Release build.
+Linux x86-64, AMD Ryzen 7 9800X3D, GCC 14.2.0 Release build, NVIDIA GeForce RTX 5080 with driver 620.70.06 and Vulkan 1.4.357. The single-run and standard-library timings pinned the CLI to CPU 7. Other Vulkan devices on the same host were AMD Radeon Graphics (RADV RAPHAEL_MENDOCINO) and llvmpipe (LLVM 19.1.7, 256 bits).
 
-### 4.2 Graph shapes
+### 4.2 Workloads
 
-Images built from `tests/benchmarks/sha256.nra`, `sort.nra`, `time-text.nra`, and the hello-world example hold 16 to 114 graphs each. Across them:
+The single-execution runs used every program in `tests/benchmarks`, at both sizes declared in each source file. The test runs used every top-level test source in the `array-deque`, `core`, and `integers` standard-library areas. The 65,536-member run used `tests/backend/each/collatz.nra` on decimal arguments 1 through 65,536. It ran 37,613,886 steps, made 65,536 host requests, and reported a largest member heap peak of 223 cells. The image has 50 graphs, 27,446 neurons, and 115,162 edges.
 
-| Property | Observed |
-| --- | --- |
-| Largest graph | 20,735 neurons, 90,054 edges, 128 input lanes, 4,290 layers |
-| Neurons per layer, mean | Among each image's 14 largest graphs: 1.0 to 14, with one graph at 71; 4.4 to 9.0 for the four largest graphs |
-| Widest layer | 221 neurons |
-| Largest magnitude of a weight / a bias | 64 / 64 |
-| Largest fan-in / largest sum of weight magnitudes at one neuron | 192 / 256 |
-| Largest neuron value, on random inputs to each image's 14 largest graphs | 29 |
-| Share of an image's graphs with at most 256 neurons | 80 to 100 percent |
+### 4.3 Single-execution timing
 
-Compiled graphs are deep and narrow. A layer rarely holds more than a handful of neurons, so one graph offers little work to do in parallel.
+Each row is the median of nine paired wall-time samples after warming each mode. The image was built once. Every auto run reported `gpu: auto, not used (no graph can gain at this batch size)`. Output and non-GPU statistics matched byte for byte.
 
-A static interval analysis that propagates `[low, high]` per wire proves a 31-bit bound for most graphs and fails for 3 of 80, 3 of 66, and 17 of 114 graphs in the three benchmark images, the largest ones, with proven magnitudes of up to 1,043 bits. The likely cause, which was not verified, is that intervals lose the relation between the two neurons of a threshold pair and the loss compounds through each layer. Section 6 therefore uses a static weight budget with a run-time bound instead.
+| Workload | CPU only (s) | Auto (s) | Auto / CPU |
+| --- | ---: | ---: | ---: |
+| array-list/1000 | 0.008250 | 0.008392 | 1.017127 |
+| array-list/2000 | 0.014638 | 0.014819 | 1.012362 |
+| format/100 | 0.024562 | 0.024696 | 1.005452 |
+| format/200 | 0.047325 | 0.047312 | 0.999716 |
+| hash-map/1000 | 0.031394 | 0.031346 | 0.998471 |
+| hash-map/2000 | 0.069701 | 0.069786 | 1.001219 |
+| json/100 | 0.019332 | 0.019577 | 1.012637 |
+| json/200 | 0.037311 | 0.037262 | 0.998681 |
+| sha256/10240 | 0.180542 | 0.181026 | 1.002677 |
+| sha256/20480 | 0.356972 | 0.357439 | 1.001308 |
+| sort/1000 | 0.038903 | 0.038751 | 0.996100 |
+| sort/2000 | 0.082329 | 0.082323 | 0.999927 |
+| strings/10000 | 0.044804 | 0.045229 | 1.009478 |
+| strings/20000 | 0.087473 | 0.086792 | 0.992217 |
+| time-text/100 | 0.120894 | 0.121812 | 1.007594 |
+| time-text/200 | 0.234959 | 0.235724 | 1.003257 |
+| tree-map/1000 | 0.046747 | 0.047356 | 1.013027 |
+| tree-map/2000 | 0.096395 | 0.097303 | 1.009418 |
 
-### 4.3 CPU baseline
+### 4.4 Reproducing the measurements
 
-`neura run --stats` wall time, including process start: sha256 at 10,240 bytes, 163,797 steps in 0.19 s; sort at 20,000 elements, 4,839,986 steps in 1.03 s; hash-map at 20,000, 4,642,080 steps in 0.61 s. That is 0.13 to 1.2 microseconds per step. Hello world takes 26 steps and about 1 ms.
+Use the [release measurement harness](../../tests/benchmarks/gpu-release.py) for the single-execution and test timings, and the [Collatz harness](../../tests/benchmarks/gpu-collatz.py) for the argument-list workload. Run on an idle machine with access to the discrete Vulkan device.
 
-The CPU columns below come from a C++ loop that applies the reference rule with checked 64-bit arithmetic. It is a stand-in for `evaluate_graph`, which was not timed directly.
+```sh
+env -u DISPLAY -u WAYLAND_DISPLAY taskset -c 7 python3 tests/benchmarks/gpu-release.py --neura build-gpu/neura --samples 9
+env -u DISPLAY -u WAYLAND_DISPLAY python3 tests/benchmarks/gpu-collatz.py build-gpu/neura --cpu 7
+```
 
-### 4.4 One request per dispatch
+### 4.5 Fleet timing
 
-Round trip: write inputs, submit, wait for the fence by polling, read outputs.
+The test area times include compilation and test execution. Each row is the median of nine paired samples.
 
-| Graph (neurons / edges / layers) | CPU | RTX 5080 | Radeon integrated | llvmpipe |
-| --- | --- | --- | --- | --- |
-| 24 / 47 / 24 | 0.08 | 24.7 | 40.3 | 25.7 |
-| 193 / 888 / 66 | 0.58 | 100.3 | 112.8 | 47.6 |
-| 499 / 1,373 / 7 | 1.05 | 23.5 | 40.1 | 22.2 |
-| 3,610 / 14,087 / 393 | 9.53 | 911.3 | 1,020.0 | 292.2 |
-| 20,735 / 90,054 / 4,290 | 56.5 | 6,479.2 | 6,634.0 | 2,410.6 |
+| Workload | CPU only (s) | Auto (s) | Auto / CPU |
+| --- | ---: | ---: | ---: |
+| array-deque | 2.154411 | 2.159302 | 1.002270 |
+| core | 0.019096 | 0.019206 | 1.005720 |
+| integers | 1.476595 | 1.566640 | 1.060982 |
 
-A single request is 22 to 309 times slower than the CPU on the RTX 5080. The integrated GPU's figure was not stable: in a later run, the same single request to the 24-neuron graph took 1,614 microseconds, and other small batches took 1 to 2 ms. The cause was not investigated; power management is the likely one.
+On 65,536 Collatz argument lists, CPU-only wall time was 17.072696 s and auto wall time was 18.878298 s, a ratio of 1.105760. Both exited with status 0 and matched the independent integer oracle and each other's non-GPU statistics. The pinned pair missed the 1.0 release bound.
 
-### 4.5 Many requests per dispatch
+```text
+gpu: auto, device "NVIDIA GeForce RTX 5080", eligible graphs 48 of 50, evaluated 930920, kept on cpu 32183194, ineligible 0, escaped 0, failed 0, dispatches 421, correction 1.13
+```
 
-RTX 5080, microseconds per request, by requests per dispatch:
+The pair with all eight cores available took 17.719397 s on CPU and 19.431556 s in auto, a ratio of 1.096626.
 
-| Graph | CPU | 1 | 64 | 256 | 1,024 | 4,096 | 16,384 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 24 neurons | 0.08 | 24.6 | 0.400 | 0.106 | 0.036 | 0.021 | 0.018 |
-| 193 neurons | 0.58 | 96.4 | 1.82 | 0.422 | 0.135 | 0.088 | 0.173 |
-| 499 neurons | 1.05 | 22.6 | 0.384 | 0.119 | 0.054 | 0.039 | 0.036 |
-| 3,610 neurons | 9.53 | 964 | 14.3 | 3.90 | 3.01 | 1.08 | 0.710 |
-| 20,735 neurons | 56.5 | 6,551 | 101.5 | 26.3 | 8.19 | 5.40 at 3,072 | |
+```text
+gpu: auto, device "NVIDIA GeForce RTX 5080", eligible graphs 48 of 50, evaluated 942829, kept on cpu 32171285, ineligible 0, escaped 0, failed 0, dispatches 435, correction 1.19
+```
 
-The time of a dispatch barely moves until it holds several hundred requests, then grows in proportion to them. On the discrete GPU the device overtakes the CPU between about 25 and 550 requests, depending on the graph, and ends 4 to 29 times faster per request. At 4,096 requests the integrated GPU took 0.340, 2.62, 0.385 microseconds for the first three graphs and 26.6 and 162.9 at 256 requests for the last two: slower than the CPU for all but the 499-neuron graph. llvmpipe was slower than the CPU for every graph.
+### 4.6 Calibration and fixed model fixtures
 
-### 4.6 The cost model of section 11, checked
+A release-device calibration run on the RTX 5080 reported these coefficients. The calibration test checked every probe output against reference evaluation.
 
-Section 11.2 predicts the time of a dispatch from five device parameters, and section 11.6 measures those parameters with six probe dispatches. Both were tried here. The probes gave:
+```text
+a=10.27 b0=0.3149109313 b1=0.1514894593 K=1893.394617 d=0.0006639245512 c0=0.007616667686 c1=0.0003803637066 c2=0.0008310936075
+```
 
-| Device | `a` | `b0` | `b1` | `K` | `d` |
-| --- | --- | --- | --- | --- | --- |
-| RTX 5080 | 9.2 | 0.343 | 0.135 | 2,123 | 0.000259 |
-| Radeon integrated | 22.0 | 0.306 | 0.163 | 54 | 0.000326 |
-| llvmpipe | 25.1 | 0.416 | 0.007 | 5 | 0.001895 |
+The structural model-fitting test uses the fixed design probe times 9.2, 253.9, 4605.6, 15.2, 371.9, and 152.6 µs. These are test inputs from the design measurements. The expected device coefficients are `a = 9.2`, `b0 = 0.343`, `b1 = 0.135`, `K = 2,123`, and `d = 0.000259`. The verdict tests also use the design llvmpipe coefficients `a = 25.1`, `b0 = 0.416`, `b1 = 0.007`, `K = 5`, and `d = 0.001895`.
 
-With those parameters and the CPU column of section 4.4:
+### 4.7 Correctness on devices
 
-| Device | Measured points | Predicted time ÷ measured time | Placed on the device although it was slower | Kept on the CPU although the device was at least 25% faster |
-| --- | --- | --- | --- | --- |
-| RTX 5080 | 42 (five graphs, 1 to 65,535 requests) | 0.38 to 1.18 | 0 | 0 |
-| Radeon integrated | 7 | 0.61 to 0.88 | 0 | 0 |
-| llvmpipe | 5 | 0.35 to 0.84 | 0 | 0 |
-
-The break-even batch sizes the model gives for the RTX 5080 are 549, 234, 24, 121, and 136 requests for the five graphs, in table order. For the integrated GPU only the 499-neuron graph has one, at 58. For llvmpipe no graph has one, so the verdict of section 11.7 discards it.
-
-Limits of this check: the same five graphs were used throughout; the predictions furthest from 1 were at 16,384 or more requests and at one noisy point; the model consistently predicted the integrated GPU and llvmpipe faster than they were, which section 11.9 exists to correct; and the CPU parameters came from the stand-in loop, not from the CPU probes of section 11.6, which were not prototyped.
-
-### 4.7 Start-up and correctness
-
-Creating the Vulkan instance, device, and pipeline and running six dispatches took 91 to 132 ms per process on the RTX 5080 and about 40 ms on the other two devices.
-
-There were zero output mismatches on all three devices for every dispatch above, for a mixed dispatch of 5,120 requests over five different graphs, and for a synthetic graph that leaves the wire bound, where all 512 expected escapes and no others were reported. This is an observed match on sampled random inputs, not an exhaustive check or a proof.
-
-### 4.8 What follows
-
-1. The barrier-per-layer kernel works on three independent Vulkan implementations.
-2. `wire_bound = 32767` leaves three orders of magnitude of room above the largest observed neuron value, and the weight budget of section 6 holds for every graph of the four images (64 + 32767 × 256 is under 2²⁴).
-3. One execution evaluating one graph per step cannot gain from a GPU with today's circuits. Batches of hundreds of requests can, on a discrete GPU.
-4. A five-parameter model measured in a few milliseconds separates the profitable cases from the unprofitable ones on all three devices, including the case where the right answer is not to use the device.
-5. Opening a device costs 40 to 130 ms, which is more than many whole runs. It must not be paid speculatively.
+The integer circuit suite passed on the RTX 5080 and the integrated Radeon. On both, the mixed 65,536-request call split into two dispatches. The CLI suite ran on the RTX 5080, including byte-identical trace recording and replay across evaluators. The llvmpipe context passed the startup self-test.
 
 ## 5. Contract
 
@@ -574,6 +558,8 @@ The **head** is the lowest-numbered member that is not Reported.
 
 A member holds no wire storage between rounds: its inputs are a few hundred lanes inside its `Execution`, device outputs live in the arena, and reference evaluation uses the shared scratch vector and finishes the step at once.
 
+The fleet can prepare a batch using ordered graph indices and check every input read before packing any lanes. A device with the private prepared-batch interface requests input and output views for the jobs it selects. The eager interface still builds every job for other devices and for verification. A declined step packs its lanes directly into the shared reference scratch. The frame is unchanged between checking and packing, and the fleet settles members in the same order with the same faults and counters.
+
 When no device is set and every member has been admitted, the reference executor can group rounds until the head reaches its next event. Other runnable members advance through the same number of rounds, stopping at their first event. Each member sees the same inputs and state, and no admission or host response can intervene during the group. The visible events and round count remain those of the individual rounds.
 
 ### 10.6 Why a fleet equals running its members in order
@@ -589,7 +575,7 @@ What does differ: a member may execute its pure steps earlier in wall time than 
 
 ### 10.7 Window and memory
 
-`window` bounds how many members a round considers. The default, 4,096, is above every break-even batch size measured in section 4.6. A fleet steps only the head when the width is 1.
+`window` bounds how many members a round considers. The default is 4,096. A fleet steps only the head when the width is 1.
 
 Several members' heaps are alive at once. The memory rule of step 4: the head may always start; any other Waiting member may start only while the sum of `live_heap_cells()` over started, unfinished members is below `limits.max_heap_cells`. Started members are never suspended for memory, and each still traps at its own `max_heap_cells`, so the fleet's total can exceed one member's limit by what started members go on to allocate. In the worst case that is `window` times the limit; an embedder that cannot afford this passes a smaller window.
 
@@ -706,8 +692,8 @@ gpu(S)   = a + max over g in S of crit(g) + sum over jobs j in S of each(g_j)
 | `margin` | 0.75 | The device is chosen only when `gpu` is at most `margin` times the CPU time of the same jobs. |
 | `open_budget` | 150,000 | Predicted saving, in microseconds, that must accumulate before a device is opened. About the cost of opening and calibrating one. |
 | `give_up_work` | 3,000,000 | Predicted CPU time, in microseconds, after which a workload that has not reached `open_budget` is rejected: it could save under 5 percent. |
-| Optimistic device | `a` 5, `b0` 0.17, `b1` 0.07, `K` 4000, `d` 0.00013 | Used before a device is opened. Half the costs measured for the RTX 5080 in section 4.6. |
-| Nominal CPU | `c0` 0.08, `c1` 0.0008, `c2` 0.002 | Used before a device is opened. Twice the costs fitted to the CPU column of section 4.4. |
+| Optimistic device | `a` 5, `b0` 0.17, `b1` 0.07, `K` 4000, `d` 0.00013 | Used before a device is opened. Based on half the costs from the RTX 5080 design fixture in section 4.6. |
+| Nominal CPU | `c0` 0.08, `c1` 0.0008, `c2` 0.002 | Used before a device is opened. Based on twice the costs fitted to the CPU loop used in the design measurements. |
 | Correction | starts at 1; moves one eighth of the way per dispatch; one sample may differ from the current value by at most a factor of 2; kept within 1/16 and 64 | Section 11.9. |
 
 The optimistic device and nominal CPU are deliberately generous to the GPU. They decide only whether opening a device could possibly pay; once a device is open, its own measurements replace them.
@@ -770,7 +756,7 @@ If no graph passes, the state is Rejected at once with the reason `no graph can 
 
 The jobs of the call that opens the device are declined like the others. Placement starts with the next call. The gate groups jobs by graph and sums CPU work in first-occurrence order. It sums gain in the critical-time and graph-index order of section 11.8. The calculation uses binary64 with the default rounding mode and explicit fused multiply-add operations so compiler contraction does not change the result.
 
-Opening is synchronous. Its cost, 40 to 130 ms in section 4.7 plus the calibration of section 11.6, is therefore paid at most once, and only after the workload has shown that a good device could have saved about that much already.
+Opening and calibration are synchronous. The process pays for them at most once, after the workload shows that a good device could have saved enough to cover setup.
 
 ### 11.6 Calibration
 
@@ -803,7 +789,7 @@ c0  = max(0, t(A) − c1 − c2)
 
 Every probe job must come back evaluated with the reference outputs; if one does not, or any measurement is not finite, or `a` exceeds 10,000, the opener fails with `calibration failed`. Calibration results are not stored anywhere outside the process.
 
-From the probe times of section 4.6, eight calls of each of the six measurements take about 45 ms on the discrete GPU, 90 ms on the integrated GPU, and 360 ms on llvmpipe. Most of it is probe C and the two 1,024-job measurements.
+Calibration includes the cost of calling the device and moving probe inputs and outputs.
 
 ### 11.7 Verdict
 
@@ -815,7 +801,7 @@ n × (margin × cpu(g) − each(g)) > a + crit(g)
 
 and the state becomes Active. Otherwise the inner device is destroyed and the state is Rejected with `the device cannot beat the CPU`. This test is exact for the model: if any mix of at most `n` jobs were predicted to gain, then `n` copies of the mix's most profitable graph would be too.
 
-This is where a GPU that is present but too weak is dropped. In section 4.6 it discards llvmpipe for every measured graph, and keeps the integrated GPU only for an image that has a wide, shallow graph and a fleet of at least 58.
+The fixed-model tests cover a verdict that keeps the RTX 5080 design model and rejects the llvmpipe model on the same shapes.
 
 ### 11.8 Placing the jobs of a call
 
@@ -849,15 +835,9 @@ A device that is slower than its calibration raises `s`, which shrinks the set o
 
 When both the predicted and elapsed times are zero, the sample supplies no timing evidence and leaves `s` unchanged.
 
-### 11.10 What auto mode will choose for today's programs
+### 11.10 Placement in the measured workloads
 
-From the measurements of section 4, not from a run of an implementation:
-
-- **`neura run`.** No compiled graph measured passes the prospect test with `max_jobs = 1`: the best case, the 499-neuron graph, would need about 10 microseconds on the optimistic device against a nominal 2.2 on the CPU. No device is opened and the run costs what `--no-gpu` costs.
-- **`neura test` with few tests.** A fleet forms when the image has a graph that passes the prospect test at the test count: from about seven tests for an image with a wide, shallow graph like the 499-neuron one, and from about thirty for the other graphs measured. The gate then opens a device only if enough tests are at profitable graphs in the same rounds; otherwise the workload is rejected after `give_up_work` and the rest runs one test at a time.
-- **`neura run --each` with thousands of argument lists.** This is the fleet case below whenever the program computes before it prints.
-- **Fleets of hundreds or thousands of members on a discrete GPU.** The gate opens within tens of rounds, the verdict keeps the device, and placement sends most rounds' jobs to it.
-- **An integrated or software GPU.** The verdict rejects it for the graphs measured, apart from the wide, shallow case above.
+In section 4, single executions stayed on the CPU without opening Vulkan. The test workloads either failed the prospect check or stayed below the opening budget. The larger argument-list workload opened the device and kept most jobs on the CPU. Placement depends on batch shape and measured time, so output and trace comparisons do not assert which evaluator a device uses.
 
 ## 12. The Vulkan device
 
@@ -1055,7 +1035,7 @@ graph execution: run and test choose between the CPU and a GPU by predicted spee
 
 ## 15. Existing tests
 
-`CMakeLists.txt` sets `ENVIRONMENT "NEURA_GPU=off"` on every CTest entry except `gpu-device` and `gpu-cli`, by iterating the directory's `TESTS` property. Those tests therefore keep running one execution at a time on the reference evaluator. No existing test script, fixture, expected output, or baseline should need to change: `--stats` is used only by `tests/stdlib/area.cmake`, which compares standard output, and `tests/benchmarks/run.cmake`, which extracts figures by name, so the added `gpu: off` line on standard error affects neither. `tests/benchmarks/baseline.txt` is unaffected because steps, heap cells, neurons, and image bytes do not depend on the evaluator. If an existing test does fail, the implementer reports it and does not edit the expectation.
+`CMakeLists.txt` sets `NEURA_GPU=off` on the existing Neura CTest entries by iterating the directory's `TESTS` property. The two GPU entries are exempt. With CMake 3.28 or newer, the setting also applies to the libclang submodule's own tests, which do not invoke the Neura CLI. Those tests therefore keep running one execution at a time on the reference evaluator. No existing test script, fixture, expected output, or baseline should need to change: `--stats` is used only by `tests/stdlib/area.cmake`, which compares standard output, and `tests/benchmarks/run.cmake`, which extracts figures by name, so the added `gpu: off` line on standard error affects neither. `tests/benchmarks/baseline.txt` is unaffected because steps, heap cells, neurons, and image bytes do not depend on the evaluator. If an existing test does fail, the implementer reports it and does not edit the expectation.
 
 ## 16. Verification
 
@@ -1097,25 +1077,17 @@ Each entry names what it compares, over what domain, and what kind of evidence i
 | `wiki/` | The matching pages, following [wiki maintenance](../Wiki.md). |
 | This page | Becomes the specification: remove "plan", replace section 4 with the measurements a release actually records, and keep sections 5 to 14 as the contract. |
 
-## 18. What to expect, and what is outside this plan
+## 18. What to expect
 
-By mode, from section 4:
+The single-run, test, and argument-list measurements are in section 4. A forced device pays setup and dispatch costs for each eligible graph even when a CPU would be faster. Auto estimates those costs before opening the device and again before selecting jobs.
 
-| Mode | One execution (`neura run`) | Many executions (`neura test`, `neura run --each`, `nvm::Fleet`) |
-| --- | --- | --- |
-| `off` | Today's cost. | Today's cost; one member at a time. |
-| `auto` | Today's cost for every graph measured: no device is opened. | Today's cost plus the fleet's bookkeeping until the gate opens; a device only when it is predicted to win, which on the measured hardware means a discrete GPU and rounds of hundreds of jobs. |
-| `always` | 40 to 130 ms more at start, and each step 22 to 309 times slower per graph on the measured discrete GPU. As an estimate: the sort benchmark at 20,000 elements, 1.03 s on the CPU, would take at least 110 s. | Faster than the CPU on a discrete GPU once rounds carry hundreds of jobs; slower below that. |
-
-`always` exists for testing the device path and for workloads the owner knows to be batched. It is not a sensible default, which is why D1 makes `auto` the default.
-
-The GPU becomes useful to more programs only through changes that this plan does not make. Each needs its own design:
+Further ways to use graph devices require separate design work:
 
 1. **More consumers of fleets.** The decompiler's exhaustive lifting and the exhaustive suites of the toolchain's own tests, which today call the reference evaluator one input at a time.
-2. **Shallower circuits.** Device time grows by one to two microseconds per layer, and the graphs measured in section 4 have up to 4,290 layers with fewer than ten neurons in an average layer. Parallel-prefix carries and tree reduction would trade more neurons for far fewer layers. That is an IRtoNeuronConversion change with its own cost contract; [Backend](../Backend.md#circuits) documents the ripple-carry adder and restoring division used today, and [Project](../Project.md#neurair-and-optimization) lists graph depth among the circuit costs.
+2. **Shallower circuits.** Deep circuits take more work-group barriers. The cost model includes both the layer count and critical edge work. Parallel-prefix carries and tree reduction would trade more neurons for far fewer layers. That is an IRtoNeuronConversion change with its own cost contract; [Backend](../Backend.md#circuits) documents the ripple-carry adder and restoring division used today, and [Project](../Project.md#neurair-and-optimization) lists graph depth among the circuit costs.
 3. **Parallelism in the language.** [Concurrency](ResourcesConcurrency.md) is deferred. A data-parallel construct would give one program many frames evaluating the same graph.
 
-Also outside this plan: moving frames, exits, state operations, or the heap to the GPU; stepping fleet members on several CPU threads; any change to circuits, the image format, or the graph profile; device selection by the user, several devices at once, and pipeline caches; storing calibration between runs; opening a device on a background thread; macOS, and any API other than Vulkan.
+Also outside this specification: moving frames, exits, state operations, or the heap to the GPU; stepping fleet members on several CPU threads; any change to circuits, the image format, or the graph profile; device selection by the user, several devices at once, and pipeline caches; storing calibration between runs; opening a device on a background thread; macOS, and any API other than Vulkan.
 
 ## 19. Phases
 

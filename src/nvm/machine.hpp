@@ -180,9 +180,27 @@ private:
                                          std::span<const std::string> arguments);
     static void validate_call_arguments(const nvr::Image& image, std::uint32_t function,
                                         std::span<const std::uint64_t> arguments);
-    void initialize();
-    std::uint64_t admission_heap_cells() const;
+    // The sum can exceed an individual member's uint64_t limit. Keep the
+    // carry so an over-limit fleet can become eligible after reclamation.
+    struct FleetHeapCells {
+        void add(std::uint64_t cells) {
+            low += cells;
+            high += low < cells;
+        }
+        void subtract(std::uint64_t cells) {
+            high -= low < cells;
+            low -= cells;
+        }
+        bool below(std::uint64_t limit) const { return high == 0 && low < limit; }
+
+        std::uint64_t low = 0;
+        std::uint64_t high = 0;
+    };
+    void initialize(FleetHeapCells& heap);
     std::optional<Event> step_with_scratch(std::vector<std::int64_t>& scratch);
+    std::optional<Event> begin_prepared_step(std::uint32_t& graph);
+    std::optional<Event> finish_prepared_reference_step(std::vector<std::int64_t>& scratch);
+    std::span<const std::int64_t> prepared_inputs();
     struct ReferenceRounds {
         std::optional<Event> event;
         std::uint64_t count = 0;

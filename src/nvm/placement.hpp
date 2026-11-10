@@ -73,6 +73,10 @@ public:
     std::string_view failure_reason() const override;
 
 private:
+    bool evaluate_prepared(std::span<const std::uint32_t> graphs,
+                           const detail::MaterializeGraphJobs& materialize) override;
+    void evaluate_batch(std::span<GraphJob> jobs, std::span<const std::uint32_t> graphs,
+                        const detail::MaterializeGraphJobs* materialize);
     void open();
     void reject(std::string reason);
 

@@ -4,13 +4,27 @@
 #include "gpu/calibrate.hpp"
 #endif
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace neura::cli {
+namespace {
+
+std::optional<GpuMode> parse_mode(std::string_view mode) {
+    if (mode == "auto") return GpuMode::Auto;
+    if (mode == "always") return GpuMode::Always;
+    if (mode == "off") return GpuMode::Off;
+    return std::nullopt;
+}
+
+} // namespace
 
 bool GpuOptions::parse(std::string_view arg, bool run_or_test) {
     if (!arg.starts_with("--gpu=") && arg != "--no-gpu" && arg != "--require-gpu" &&
@@ -27,20 +41,22 @@ bool GpuOptions::parse(std::string_view arg, bool run_or_test) {
     } else if (arg == "--gpu-verify") {
         verify = true;
     } else {
-        GpuMode selected;
-        if (arg == "--gpu=always") {
-            selected = GpuMode::Always;
-        } else if (arg == "--gpu=auto") {
-            selected = GpuMode::Auto;
-        } else if (arg == "--gpu=off" || arg == "--no-gpu") {
-            selected = GpuMode::Off;
-        } else {
+        const auto selected = arg == "--no-gpu" ? std::optional(GpuMode::Off) : parse_mode(arg.substr(6));
+        if (!selected) {
             throw std::runtime_error("expected --gpu=auto, --gpu=always, or --gpu=off");
         }
         if (mode && mode != selected) throw std::runtime_error("conflicting GPU modes");
         mode = selected;
     }
     return true;
+}
+
+void GpuOptions::read_environment() {
+    if (mode || required) return;
+    const auto* value = std::getenv("NEURA_GPU");
+    if (!value || *value == '\0') return;
+    mode = parse_mode(value);
+    if (!mode) throw std::runtime_error("NEURA_GPU must be auto, always, or off");
 }
 
 void GpuOptions::validate() const {
@@ -54,10 +70,12 @@ void GpuOptions::validate() const {
 }
 
 GpuRun::GpuRun(const GpuOptions& options, [[maybe_unused]] const nvr::Image& image,
-               [[maybe_unused]] std::size_t max_jobs) {
+               [[maybe_unused]] std::size_t max_jobs)
+    : mode_(options.required ? GpuMode::Always : options.mode.value_or(GpuMode::Auto)) {
 #ifdef NEURA_HAS_GPU
     required_ = options.required;
-    if (options.mode == GpuMode::Auto) {
+    if (mode_ == GpuMode::Off) return;
+    if (mode_ == GpuMode::Auto) {
         nvm::AutoOptions placement;
         placement.max_jobs = max_jobs;
         auto_ = std::make_unique<nvm::AutoDevice>(image, gpu::make_opener(image, {options.software}),
@@ -65,19 +83,17 @@ GpuRun::GpuRun(const GpuOptions& options, [[maybe_unused]] const nvr::Image& ima
         if (options.verify && auto_->state() != nvm::AutoDevice::State::Rejected) verifier_.emplace(*auto_);
         return;
     }
-    if (!required_ && options.mode != GpuMode::Always) return;
-    std::string reason;
-    context_ = gpu::Context::create({options.software}, reason);
+    context_ = gpu::Context::create({options.software}, unavailable_);
     if (context_) {
         device_ = std::make_unique<gpu::VulkanGraphDevice>(*context_, image);
         if (device_->failed()) {
-            reason = device_->reason();
+            unavailable_ = device_->reason();
             device_.reset();
         } else if (options.verify) {
             verifier_.emplace(*device_);
         }
     }
-    if (required_ && !device_) throw std::runtime_error("--require-gpu: " + reason);
+    if (required_ && !device_) throw std::runtime_error("--require-gpu: " + unavailable_);
 #else
     if (options.required) throw std::runtime_error("--require-gpu: this build has no GPU support");
 #endif
@@ -93,7 +109,50 @@ nvm::GraphDevice* GpuRun::device() {
 #endif
 }
 
-int GpuRun::finish(int status) const {
+void GpuRun::print_stats() const {
+    if (mode_ == GpuMode::Off) {
+        std::cerr << "gpu: off\n";
+        return;
+    }
+#ifdef NEURA_HAS_GPU
+    if (mode_ == GpuMode::Always && !device_) {
+        std::cerr << "gpu: always, unavailable (" << unavailable_ << ")\n";
+        return;
+    }
+    if (auto_ && auto_->device_name().empty()) {
+        auto reason = std::string_view(auto_->reason());
+        if (auto_->state() == nvm::AutoDevice::State::Gated) {
+            reason = "the workload stayed under the opening budget";
+        }
+        std::cerr << "gpu: auto, not used (" << reason << ")\n";
+        return;
+    }
+    const nvm::GraphDevice& graph_device = auto_ ? static_cast<const nvm::GraphDevice&>(*auto_) : *device_;
+    const auto& name = auto_ ? auto_->device_name() : context_->device_name();
+    const auto shapes = graph_device.graph_shapes();
+    const auto eligible = std::ranges::count_if(shapes, [](const auto& shape) { return shape.eligible; });
+    const auto stats = graph_device.statistics();
+    std::cerr << "gpu: " << (auto_ ? "auto" : "always") << ", device \"" << name
+              << "\", eligible graphs " << eligible << " of " << shapes.size() << ", evaluated " << stats.evaluated;
+    if (auto_) std::cerr << ", kept on cpu " << stats.declined_placement;
+    std::cerr << ", ineligible " << stats.declined_ineligible << ", escaped " << stats.escaped
+              << ", failed " << stats.declined_failed << ", dispatches " << stats.dispatches;
+    if (auto_) {
+        std::ostringstream correction;
+        correction << std::fixed << std::setprecision(2) << auto_->correction();
+        std::cerr << ", correction " << correction.str();
+        if (auto_->state() == nvm::AutoDevice::State::Rejected) {
+            std::cerr << ", rejected (" << auto_->reason() << ')';
+        }
+    }
+    std::cerr << '\n';
+#else
+    std::cerr << "gpu: not built\n";
+#endif
+}
+
+int GpuRun::finish(int status, bool stats) const {
+    if (stats) print_stats();
 #ifdef NEURA_HAS_GPU
     if (required_ && device_ && device_->failed()) {
         std::cout.flush();

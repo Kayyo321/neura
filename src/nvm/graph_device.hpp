@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -29,6 +30,10 @@ struct GraphJob {
     std::span<std::int64_t> outputs;
     bool evaluated = false;
 };
+
+namespace detail {
+using MaterializeGraphJobs = std::function<std::span<GraphJob>(std::span<const std::size_t>)>;
+} // namespace detail
 
 struct GraphDeviceStatistics {
     std::uint64_t evaluated = 0;
@@ -57,6 +62,14 @@ public:
     // leaves eligibility to the wrapper's static analysis of the image.
     virtual std::span<const GraphShape> graph_shapes() const { return {}; }
     virtual std::string_view failure_reason() const { return {}; }
+
+private:
+    friend class Fleet;
+    // Fleet has resolved binary inputs for every graph in this order. An
+    // opting-in device may synchronously materialize a single nonempty
+    // subset of strictly increasing job indices. Returning false without
+    // materializing leaves all work to the caller's ordinary eager batch.
+    virtual bool evaluate_prepared(std::span<const std::uint32_t>, const detail::MaterializeGraphJobs&) { return false; }
 };
 
 // Checks the caller's graph indices, lane counts, and input bits before a

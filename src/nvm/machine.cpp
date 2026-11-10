@@ -205,6 +205,20 @@ std::optional<std::size_t> evaluate_nodes(const nvr::Graph& graph, std::span<std
     return std::nullopt;
 }
 
+std::span<std::int64_t> lanes(std::vector<std::int64_t>& storage, std::size_t count) {
+    if (storage.size() < count) storage.resize(count);
+    return std::span(storage).first(count);
+}
+
+std::optional<std::size_t> evaluate_loaded_outputs(const nvr::Graph& graph, std::span<std::int64_t> wires,
+                                                   std::span<std::int64_t> outputs) {
+    if (const auto failed = evaluate_nodes(graph, wires)) return failed;
+    for (std::size_t i = 0; i < graph.outputs.size(); ++i) {
+        outputs[i] = wires[graph.outputs[i]];
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 std::optional<std::size_t> evaluate_graph(const nvr::Graph& graph, std::vector<std::int64_t>& wires) {
@@ -216,16 +230,9 @@ std::optional<std::size_t> evaluate_outputs(const nvr::Graph& graph, std::span<c
                                             std::vector<std::int64_t>& scratch, std::span<std::int64_t> outputs) {
     // Every graph wire is overwritten before it is read. Keep the scratch
     // at its largest size when alternating between different graphs.
-    const auto wire_count = std::size_t{graph.input_lanes} + graph.nodes.size();
-    if (scratch.size() < wire_count) scratch.resize(wire_count);
-    std::ranges::copy(inputs, scratch.begin());
-    if (const auto failed = evaluate_nodes(graph, std::span(scratch).first(wire_count))) {
-        return failed;
-    }
-    for (std::size_t i = 0; i < graph.outputs.size(); ++i) {
-        outputs[i] = scratch[graph.outputs[i]];
-    }
-    return std::nullopt;
+    auto wires = lanes(scratch, std::size_t{graph.input_lanes} + graph.nodes.size());
+    std::ranges::copy(inputs, wires.begin());
+    return evaluate_loaded_outputs(graph, wires, outputs);
 }
 
 class Execution::State {
@@ -246,8 +253,11 @@ public:
         start_arguments_.assign(arguments.begin(), arguments.end());
     }
 
-    void initialize() {
+    ~State() { stop_tracking_heap(); }
+
+    void initialize(FleetHeapCells& heap) {
         if (started_) return;
+        fleet_heap_ = &heap;
         try {
             start();
         } catch (const Fault& failure) {
@@ -268,16 +278,10 @@ public:
     }
 
     std::optional<Event> begin_step(GraphStep& step) {
-        if (finished_) return *finished_;
-        if (pending_) throw std::logic_error("begin_step() called while a host request is pending");
-        if (active_block_) throw std::logic_error("begin_step() called while a step is already begun");
-        try {
-            if (!started_) start();
-            prepare_step(step);
-            return std::nullopt;
-        } catch (const Fault& failure) {
-            return trap(failure);
-        }
+        if (auto event = begin_active_step(false)) return event;
+        const auto& graph = image_.graphs[active_block_->graph];
+        step = GraphStep{active_block_->graph, std::span(inputs_).first(graph.input_lanes), graph.outputs.size()};
+        return std::nullopt;
     }
 
     std::optional<Event> finish_step(std::span<const std::int64_t> outputs) {
@@ -285,19 +289,8 @@ public:
         if (outputs.size() != image_.graphs[active_block_->graph].outputs.size()) {
             throw std::invalid_argument("finish_step() received the wrong number of output lanes");
         }
-        if (outputs.data() != outputs_.data()) {
-            outputs_.assign(outputs.begin(), outputs.end());
-        }
-        const auto& block = *std::exchange(active_block_, nullptr);
-        try {
-            auto event = commit_step(block);
-            // A callback's return leaves its suspended caller's frames in
-            // place and only completes the callback, not the enclosing run.
-            if (event && event->kind == Event::Kind::Completed && frames_.empty()) finished_ = event;
-            return event;
-        } catch (const Fault& failure) {
-            return trap(failure);
-        }
+        std::ranges::copy(outputs, lanes(outputs_, outputs.size()).begin());
+        return finish_active_step();
     }
 
     Event fail_step(std::size_t node) {
@@ -335,7 +328,7 @@ public:
                 event.kind = Event::Kind::Completed;
                 event.status = status;
                 event.result = static_cast<std::uint64_t>(status);
-                finished_ = std::move(event);
+                set_finished(std::move(event));
                 return;
             }
             const auto type = completion.success ? import.success_type : import.error_type;
@@ -353,7 +346,7 @@ public:
             Event event;
             event.kind = Event::Kind::Trapped;
             event.trap = fault.trap;
-            finished_ = event;
+            set_finished(std::move(event));
         }
     }
 
@@ -418,7 +411,7 @@ public:
             Event event;
             event.kind = Event::Kind::Trapped;
             event.trap = fault.trap;
-            finished_ = event;
+            set_finished(std::move(event));
             restore();
             return std::nullopt;
         }
@@ -426,7 +419,6 @@ public:
 
     std::uint64_t steps() const { return steps_; }
     std::uint64_t live_heap_cells() const { return live_cells_; }
-    std::uint64_t admission_heap_cells() const { return finished_ ? 0 : live_cells_; }
     std::uint64_t peak_heap_cells() const { return peak_cells_; }
     const std::vector<std::uint64_t>& function_steps() const { return function_steps_; }
 
@@ -475,11 +467,20 @@ private:
         }
     }
 
+    void stop_tracking_heap() {
+        if (auto* heap = std::exchange(fleet_heap_, nullptr)) heap->subtract(live_cells_);
+    }
+
+    void set_finished(Event event) {
+        finished_ = std::move(event);
+        stop_tracking_heap();
+    }
+
     Event trap(const Fault& failure) {
         Event event;
         event.kind = Event::Kind::Trapped;
         event.trap = failure.trap;
-        finished_ = event;
+        set_finished(event);
         return event;
     }
 
@@ -502,6 +503,17 @@ private:
 
     static std::uint64_t entry_cells(const HeapEntry& entry) {
         return 1 + entry.cells.size() + entry.bytes.size();
+    }
+
+    void add_live_cells(std::uint64_t cells) {
+        live_cells_ += cells;
+        if (fleet_heap_) fleet_heap_->add(cells);
+        peak_cells_ = std::max(peak_cells_, live_cells_);
+    }
+
+    void remove_live_cells(std::uint64_t cells) {
+        live_cells_ -= cells;
+        if (fleet_heap_) fleet_heap_->subtract(cells);
     }
 
     using TracePlans = std::unordered_map<std::uint32_t, std::vector<std::size_t>>;
@@ -581,7 +593,7 @@ private:
                 it->second.marked = false;
                 ++it;
             } else {
-                live_cells_ -= entry_cells(it->second);
+                remove_live_cells(entry_cells(it->second));
                 it = heap_.erase(it);
             }
         }
@@ -630,8 +642,7 @@ private:
         const auto handle = last_handle_ + 1;
         heap_.emplace(handle, std::move(entry));
         last_handle_ = handle;
-        live_cells_ += cells;
-        peak_cells_ = std::max(peak_cells_, live_cells_);
+        add_live_cells(cells);
         return handle;
     }
 
@@ -748,12 +759,14 @@ private:
         frames_.push_back(std::move(frame));
     }
 
+    void require_initialized(const Frame& frame, std::uint32_t slot) const {
+        if (!frame.initialized[slot]) fault(TrapKind::UninitializedSlot, "slot " + std::to_string(slot));
+    }
+
     std::uint64_t read(const nvr::Value& value, const Frame& frame) {
         switch (value.kind) {
         case nvr::ValueKind::Slot:
-            if (!frame.initialized[value.index]) {
-                fault(TrapKind::UninitializedSlot, "slot " + std::to_string(value.index));
-            }
+            require_initialized(frame, value.index);
             return frame.slots[value.index];
         case nvr::ValueKind::Constant:
             return const_values_[value.index];
@@ -799,7 +812,31 @@ private:
         return index;
     }
 
-    void prepare_step(GraphStep& step) {
+    std::optional<Event> begin_active_step(bool defer_inputs) {
+        if (finished_) return *finished_;
+        if (pending_) throw std::logic_error("begin_step() called while a host request is pending");
+        if (active_block_) throw std::logic_error("begin_step() called while a step is already begun");
+        try {
+            if (!started_) start();
+            prepare_step(defer_inputs);
+            return std::nullopt;
+        } catch (const Fault& failure) {
+            return trap(failure);
+        }
+    }
+
+    void write_inputs(const nvr::Block& block, const Frame& frame, std::span<std::int64_t> inputs) {
+        std::size_t lane = 0;
+        for (const auto& input : block.inputs) {
+            const auto value = read(input, frame);
+            const auto count = nvr::lane_count(type(input.type));
+            for (unsigned bit = 0; bit < count; ++bit) {
+                inputs[lane++] = static_cast<std::int64_t>((value >> bit) & 1U);
+            }
+        }
+    }
+
+    void prepare_step(bool defer_inputs) {
         if (steps_ >= limits_.max_steps) {
             fault(TrapKind::StepLimit, std::to_string(limits_.max_steps) + " steps");
         }
@@ -811,36 +848,66 @@ private:
         }
         const auto& function = image_.functions[frame.function];
         const auto& block = function.blocks[frame.block];
-        const auto& graph = image_.graphs[block.graph];
-        // Graph inputs can only read constants or slots. A failing read
-        // leaves the partial lanes private and the VM state unchanged.
-        inputs_.resize(graph.input_lanes);
-        std::size_t lane = 0;
-        for (const auto& input : block.inputs) {
-            const auto value = read(input, frame);
-            const auto lanes = nvr::lane_count(type(input.type));
-            for (unsigned bit = 0; bit < lanes; ++bit) {
-                inputs_[lane++] = static_cast<std::int64_t>((value >> bit) & 1U);
+        if (defer_inputs) {
+            // Validated graph inputs can only read constants or slots. Check
+            // every read that can trap before offering this step to a device.
+            // The begun block's frame and constants stay unchanged until it
+            // settles, so packing their bits can wait.
+            for (const auto& input : block.inputs) {
+                if (input.kind == nvr::ValueKind::Slot) require_initialized(frame, input.index);
             }
+        } else {
+            const auto count = image_.graphs[block.graph].input_lanes;
+            write_inputs(block, frame, lanes(inputs_, count));
         }
         active_block_ = &block;
-        step = GraphStep{block.graph, inputs_, graph.outputs.size()};
+    }
+
+    std::span<const std::int64_t> materialize_inputs() {
+        const auto count = image_.graphs[active_block_->graph].input_lanes;
+        auto inputs = lanes(inputs_, count);
+        write_inputs(*active_block_, frames_.back(), inputs);
+        return inputs;
+    }
+
+    std::optional<Event> finish_active_step() {
+        const auto& block = *std::exchange(active_block_, nullptr);
+        try {
+            auto event = commit_step(block);
+            // A callback's return leaves its suspended caller's frames in
+            // place and only completes the callback, not the enclosing run.
+            if (event && event->kind == Event::Kind::Completed && frames_.empty()) set_finished(*event);
+            return event;
+        } catch (const Fault& failure) {
+            return trap(failure);
+        }
+    }
+
+    std::optional<Event> finish_reference_step(std::vector<std::int64_t>& scratch, bool deferred_inputs) {
+        const auto& graph = image_.graphs[active_block_->graph];
+        auto outputs = lanes(outputs_, graph.outputs.size());
+        std::optional<std::size_t> failed;
+        if (deferred_inputs) {
+            auto wires = lanes(scratch, std::size_t{graph.input_lanes} + graph.nodes.size());
+            write_inputs(*active_block_, frames_.back(), wires.first(graph.input_lanes));
+            failed = evaluate_loaded_outputs(graph, wires, outputs);
+        } else {
+            failed = evaluate_outputs(graph, std::span(inputs_).first(graph.input_lanes), scratch, outputs);
+        }
+        if (failed) return fail_step(*failed);
+        return finish_active_step();
     }
 
     std::optional<Event> step(std::vector<std::int64_t>& scratch) {
         GraphStep current;
         if (auto event = begin_step(current)) return event;
         const auto& graph = image_.graphs[current.graph];
-        outputs_.resize(current.output_count);
         if (limits_.graph_device && !graph.nodes.empty()) {
-            GraphJob job{current.graph, current.inputs, outputs_};
+            GraphJob job{current.graph, current.inputs, lanes(outputs_, current.output_count)};
             limits_.graph_device->evaluate(std::span{&job, 1});
-            if (job.evaluated) return finish_step(outputs_);
+            if (job.evaluated) return finish_active_step();
         }
-        if (const auto failed = evaluate_outputs(graph, current.inputs, scratch, outputs_)) {
-            return fail_step(*failed);
-        }
-        return finish_step(outputs_);
+        return finish_reference_step(scratch, false);
     }
 
     std::optional<Event> commit_step(const nvr::Block& block) {
@@ -1104,7 +1171,7 @@ private:
         }
         case nvr::StateOp::FreeObject: {
             const auto& item = typed_entry(args[0], types[0].type);
-            live_cells_ -= entry_cells(item);
+            remove_live_cells(entry_cells(item));
             heap_.erase(args[0]);
             return 0;
         }
@@ -1158,8 +1225,7 @@ private:
             const std::array roots{args[0], nvr::is_reference(type(element_type).kind) ? args[1] : std::uint64_t{0}};
             ensure_heap_cells(1, "growth by ", roots);
             item.cells.push_back(args[1]);
-            ++live_cells_;
-            peak_cells_ = std::max(peak_cells_, live_cells_);
+            add_live_cells(1);
             ++item.version;
             return 0;
         }
@@ -1167,7 +1233,7 @@ private:
             auto& item = typed_entry(args[0], types[0].type);
             const auto index = checked_index(item, args[1]);
             item.cells.erase(item.cells.begin() + static_cast<std::ptrdiff_t>(index));
-            --live_cells_;
+            remove_live_cells(1);
             ++item.version;
             return 0;
         }
@@ -1269,6 +1335,7 @@ private:
     std::uint64_t last_handle_ = 0;
     std::uint64_t last_identity_ = 0;
     std::uint64_t live_cells_ = 0;
+    FleetHeapCells* fleet_heap_ = nullptr;
     // The largest live heap size the run reached, in cells.
     std::uint64_t peak_cells_ = 0;
     std::vector<std::uint64_t> function_steps_;
@@ -1339,12 +1406,24 @@ void Execution::validate_call_arguments(const nvr::Image& image, std::uint32_t f
     }
 }
 
-void Execution::initialize() { state_->initialize(); }
-
-std::uint64_t Execution::admission_heap_cells() const { return state_->admission_heap_cells(); }
+void Execution::initialize(FleetHeapCells& heap) { state_->initialize(heap); }
 
 std::optional<Event> Execution::step_with_scratch(std::vector<std::int64_t>& scratch) {
     return state_->step(scratch);
+}
+
+std::optional<Event> Execution::begin_prepared_step(std::uint32_t& graph) {
+    if (auto event = state_->begin_active_step(true)) return event;
+    graph = state_->active_block_->graph;
+    return std::nullopt;
+}
+
+std::optional<Event> Execution::finish_prepared_reference_step(std::vector<std::int64_t>& scratch) {
+    return state_->finish_reference_step(scratch, true);
+}
+
+std::span<const std::int64_t> Execution::prepared_inputs() {
+    return state_->materialize_inputs();
 }
 
 Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::int64_t>& scratch,

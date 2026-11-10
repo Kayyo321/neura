@@ -11,8 +11,14 @@ set(tests "${SOURCE_DIR}/tests/backend")
 unset(ENV{NEURA_GPU})
 
 function(neura prefix)
+    set(command "${NEURA}")
+    if(DEFINED gpu_environment)
+        # Pass a genuinely empty value as well as nonempty values. CMake's
+        # set(ENV{NEURA_GPU} "") can remove the variable instead.
+        set(command "${CMAKE_COMMAND}" -E env "NEURA_GPU=${gpu_environment}" "${NEURA}")
+    endif()
     execute_process(
-        COMMAND "${NEURA}" ${ARGN}
+        COMMAND ${command} ${ARGN}
         WORKING_DIRECTORY "${directory}"
         RESULT_VARIABLE status
         OUTPUT_FILE "${directory}/${prefix}.out"
@@ -49,11 +55,43 @@ function(compare_run label actual expected)
     endif()
 endfunction()
 
+set(graph_counts "eligible graphs [0-9]+ of [0-9]+, evaluated [0-9]+")
+set(decline_counts "ineligible [0-9]+, escaped [0-9]+, failed [0-9]+, dispatches [0-9]+")
+set(always_device "always, device \"[^\n]+\", ${graph_counts}, ${decline_counts}")
+set(auto_device "auto, device \"[^\n]+\", ${graph_counts}, kept on cpu [0-9]+, ${decline_counts}, correction [0-9]+[.][0-9][0-9]")
+set(auto_result "auto, not used [(][^\n]+[)]|${auto_device}(, rejected [(][^\n]+[)])?")
+
+function(expect_gpu_stats prefix pattern)
+    string(REGEX MATCHALL "(^|\n)gpu: [^\n]*" lines "${${prefix}_stderr}")
+    list(LENGTH lines count)
+    if(NOT count EQUAL 1)
+        message(FATAL_ERROR "${prefix}: expected one GPU stats line\n${${prefix}_stderr}")
+    endif()
+    string(REGEX REPLACE "^\n" "" line "${lines}")
+    string(FIND "${${prefix}_stderr}" "${line}\n" terminated)
+    if(terminated EQUAL -1 OR NOT line MATCHES "^gpu: (${pattern})$")
+        message(FATAL_ERROR "${prefix}: expected GPU stats matching '${pattern}'\n${${prefix}_stderr}")
+    endif()
+    set(${prefix}_gpu "${line}" PARENT_SCOPE)
+endfunction()
+
 function(compare_modes label command)
     neura(required "${command}" --require-gpu --gpu-software --gpu-verify ${ARGN})
     compare_run("${label} with --require-gpu" required cpu)
     neura(automatic "${command}" --gpu=auto --gpu-software --gpu-verify ${ARGN})
     compare_run("${label} with --gpu=auto" automatic cpu)
+    expect_gpu_stats(cpu off)
+    expect_gpu_stats(required "${always_device}")
+    expect_gpu_stats(automatic "${auto_result}")
+    foreach(prefix IN ITEMS cpu required automatic)
+        if(command STREQUAL "run")
+            if(NOT ${prefix}_stderr MATCHES "(^|\n)stats: [^\n]*\n([^\n]*\n)*gpu: [^\n]*\n$")
+                message(FATAL_ERROR "${label}: GPU stats must follow existing run diagnostics\n${${prefix}_stderr}")
+            endif()
+        elseif(NOT ${prefix}_stderr STREQUAL "${${prefix}_gpu}\n")
+            message(FATAL_ERROR "${label}: test adds only one GPU stats line to stderr\n${${prefix}_stderr}")
+        endif()
+    endforeach()
 endfunction()
 
 set(programs_compared 0)
@@ -143,12 +181,21 @@ endfunction()
 
 neura(help --help)
 file(READ "${directory}/help.out" usage)
-foreach(option IN ITEMS --each --gpu=auto --gpu=always --gpu=off --no-gpu --require-gpu --gpu-software --gpu-verify)
-    string(FIND "${usage}" "${option}" position)
-    if(NOT help_status STREQUAL "0" OR position EQUAL -1)
-        message(FATAL_ERROR "usage is missing ${option}\n${usage}\n${help_stderr}")
-    endif()
-endforeach()
+set(gpu_help [=[graph execution: run and test choose between the CPU and a GPU by predicted speed.
+  --gpu=auto               decide automatically (default)
+  --gpu=always             evaluate every eligible graph on a GPU when one is usable
+  --gpu=off, --no-gpu      evaluate graphs on the CPU
+  --require-gpu            --gpu=always, and fail unless a GPU device is available
+  --gpu-software           also accept software Vulkan implementations
+  --gpu-verify             check every GPU evaluation against the CPU
+  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list
+]=])
+string(FIND "${usage}" "${gpu_help}" help_position)
+string(FIND "${usage}" "[--each <lists>] [--gpu=auto|always|off] [--no-gpu] [--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr>" run_position)
+string(FIND "${usage}" "[--gpu=auto|always|off] [--no-gpu]\n                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>..." test_position)
+if(NOT help_status STREQUAL "0" OR help_position EQUAL -1 OR run_position EQUAL -1 OR test_position EQUAL -1)
+    message(FATAL_ERROR "usage is missing the GPU or fleet contract\n${usage}\n${help_stderr}")
+endif()
 
 expect_error("conflicting GPU modes" run --gpu=always --gpu=off "${image}")
 expect_error("conflicting GPU modes" run --no-gpu --gpu=always "${image}")
@@ -163,12 +210,125 @@ foreach(option IN ITEMS --gpu=auto --gpu=always --gpu=off --no-gpu --require-gpu
     expect_error("${option} applies only to run and test" check "${option}" "${tests}/arguments/first-argument.nra")
 endforeach()
 
+set(no_prospect "auto, not used [(]no graph can gain at this batch size[)]")
+neura(cpu_mode run --no-gpu --stats "${image}" -- "mode test")
+expect_gpu_stats(cpu_mode off)
+neura(default_mode run --stats "${image}" -- "mode test")
+compare_run("unset environment defaults to auto" default_mode cpu_mode)
+expect_gpu_stats(default_mode "${no_prospect}")
+
+function(check_environment label environment pattern)
+    set(gpu_environment "${environment}")
+    neura(env_mode run --stats ${ARGN} "${image}" -- "mode test")
+    compare_run("${label}" env_mode cpu_mode)
+    expect_gpu_stats(env_mode "${pattern}")
+endfunction()
+
+check_environment("empty environment defaults to auto" "" "${no_prospect}")
+check_environment("environment selects auto" auto "${no_prospect}")
+check_environment("environment selects always" always "${always_device}" --gpu-software)
+check_environment("environment selects off" off off)
+check_environment("--no-gpu overrides always" always off --no-gpu)
+check_environment("--gpu=auto overrides always" always "${no_prospect}" --gpu=auto)
+check_environment("--gpu=always overrides off" off "${always_device}" --gpu=always --gpu-software)
+check_environment("--require-gpu overrides off" off "${always_device}" --require-gpu --gpu-software)
+check_environment("--gpu=off ignores an invalid environment" invalid off --gpu=off)
+check_environment("--require-gpu ignores an invalid environment" invalid "${always_device}" --require-gpu --gpu-software)
+
+list(GET suites 0 mode_suite)
+neura(cpu_suite test --no-gpu --stats "${mode_suite}")
+set(suite_combined "${directory}/suite-combined.out")
+execute_process(COMMAND "${NEURA}" test --no-gpu --stats "${mode_suite}"
+                WORKING_DIRECTORY "${directory}" RESULT_VARIABLE suite_status
+                OUTPUT_FILE "${suite_combined}" ERROR_FILE "${suite_combined}")
+file(READ "${suite_combined}" suite_output)
+if(NOT suite_status STREQUAL cpu_suite_status OR
+   NOT suite_output MATCHES "[0-9]+ test[(]s[)], [0-9]+ passed, [0-9]+ failed\ngpu: off\n$")
+    message(FATAL_ERROR "test GPU stats must follow the test summary\n${suite_output}")
+endif()
+foreach(mode IN ITEMS auto always off)
+    set(gpu_environment "${mode}")
+    if(mode STREQUAL "always")
+        neura(env_suite test --gpu-software --stats "${mode_suite}")
+        expect_gpu_stats(env_suite "${always_device}")
+    elseif(mode STREQUAL "auto")
+        neura(env_suite test --stats "${mode_suite}")
+        expect_gpu_stats(env_suite "${auto_result}")
+    else()
+        neura(env_suite test --stats "${mode_suite}")
+        expect_gpu_stats(env_suite off)
+    endif()
+    compare_run("test with NEURA_GPU=${mode}" env_suite cpu_suite)
+endforeach()
+set(gpu_environment invalid)
+expect_error("NEURA_GPU must be auto, always, or off" run "${image}" -- "mode test")
+expect_error("NEURA_GPU must be auto, always, or off" test "${mode_suite}")
+neura(check_invalid_env check "${tests}/arguments/first-argument.nra")
+if(NOT check_invalid_env_status STREQUAL "0" OR NOT check_invalid_env_stderr STREQUAL "")
+    message(FATAL_ERROR "check should ignore NEURA_GPU\n${check_invalid_env_stderr}")
+endif()
+unset(gpu_environment)
+
+# A wide graph with 4,096 constant neurons, used for eight steps per member.
+# The optimistic model gains about 25,000 microseconds for the 512-member
+# case and more than 150,000 for the 4,096-member case. The former always
+# stays gated. The latter tries opening, regardless of measured timings.
+set(gate_assembly "${directory}/gate.nvra")
+set(gate_image "${directory}/gate.nvr")
+set(assembly [=[nvr 1.0 profile 1
+entry 0
+type 0 text
+type 1 array 0
+type 2 signed 32
+constant 0 type 2 bytes 00000000
+graph 0 inputs 0 outputs [ 0 ]
+]=])
+foreach(neuron RANGE 0 4095)
+    string(APPEND assembly "  node ${neuron} identity 0 [ ]\n")
+endforeach()
+string(APPEND assembly "function 0 parameters 1 result 2 frame [ 1 ]\n")
+foreach(block RANGE 0 6)
+    math(EXPR next "${block} + 1")
+    string(APPEND assembly "  block ${block} graph 0 selector 0 inputs [ ]\n    exit continue resume ${next} assign [ ]\n")
+endforeach()
+string(APPEND assembly "  block 7 graph 0 selector 0 inputs [ ]\n    exit return arguments [ constant:2:0 ] assign [ ]\n")
+file(WRITE "${gate_assembly}" "${assembly}")
+neura(assemble_gate assemble "${gate_assembly}" -o "${gate_image}")
+if(NOT assemble_gate_status STREQUAL "0")
+    message(FATAL_ERROR "could not assemble the auto gate fixture\n${assemble_gate_stderr}")
+endif()
+set(gate_lists "${directory}/gate.txt")
+string(REPEAT "\n" 512 gate_members)
+file(WRITE "${gate_lists}" "${gate_members}")
+neura(gated run --gpu=auto --gpu-software --gpu-verify --stats --each "${gate_lists}" "${gate_image}")
+expect_gpu_stats(gated "auto, not used [(]the workload stayed under the opening budget[)]")
+if(NOT gated_status STREQUAL "0")
+    message(FATAL_ERROR "the gated run should complete\n${gated_stderr}")
+endif()
+
+string(REPEAT "\n" 4096 gate_members)
+file(WRITE "${gate_lists}" "${gate_members}")
+neura(cpu_gate run --no-gpu --stats --each "${gate_lists}" "${gate_image}")
+neura(auto_gate run --gpu=auto --gpu-software --gpu-verify --stats --each "${gate_lists}" "${gate_image}")
+compare_run("after the opening budget is crossed" auto_gate cpu_gate)
+expect_gpu_stats(auto_gate "${auto_device}(, rejected [(][^\n]+[)])?|auto, not used [(]unavailable: [^\n]+[)]")
+if(NOT cpu_gate_status STREQUAL "0")
+    message(FATAL_ERROR "the opening budget fixture should complete\n${cpu_gate_stderr}")
+endif()
+message(STATUS "${auto_gate_gpu}")
+
 if(DEFINED FAULT_LOADER_DIR)
     set(fault_image "${directory}/gpu-fault.nvr")
     neura(assemble assemble "${tests}/gpu-fault.nvra" -o "${fault_image}")
     if(NOT assemble_status STREQUAL "0")
         message(FATAL_ERROR "could not assemble the GPU fault fixture\n${assemble_stderr}")
     endif()
+    neura(known_stats run --require-gpu --gpu-software --stats "${fault_image}")
+    expect_gpu_stats(known_stats "always, device \"[^\n]+\", eligible graphs 1 of 2, evaluated 1, ineligible 0, escaped 0, failed 0, dispatches 1")
+    if(NOT known_stats_status STREQUAL "7")
+        message(FATAL_ERROR "expected status 7 from the graph stats fixture\n${known_stats_stderr}")
+    endif()
+    message(STATUS "${known_stats_gpu}")
 
     # Append the original search path only if nonempty. An empty component
     # in LD_LIBRARY_PATH would also search the working directory.
@@ -186,6 +346,11 @@ if(DEFINED FAULT_LOADER_DIR)
         message(FATAL_ERROR "fault fixture failed its CPU reference run\n${cpu_stderr}")
     endif()
     compare_run("optional GPU failure falls back" fallback cpu)
+    neura(failed_stats run --gpu=always --gpu-software --stats "${fault_image}")
+    expect_gpu_stats(failed_stats "always, device \"[^\n]+\", eligible graphs 1 of 2, evaluated 0, ineligible 0, escaped 0, failed 1, dispatches 0")
+    if(NOT failed_stats_status STREQUAL "7")
+        message(FATAL_ERROR "optional GPU failure should preserve the exit status\n${failed_stats_stderr}")
+    endif()
 
     # Capture both streams together to establish that the required-GPU
     # error follows all output, even though the program returned status 7.
@@ -227,6 +392,10 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "unavailable device did not fall back to CPU\n${fallback_stderr}")
     endif()
     compare_run("silent fallback without a GPU" fallback cpu)
+    expect_gpu_stats(fallback "always, unavailable [(]cannot create a Vulkan instance[)]")
+    neura(auto_unavailable run --gpu=auto --gpu-software --gpu-verify --stats --each "${gate_lists}" "${gate_image}")
+    compare_run("auto falls back when its opener cannot create an instance" auto_unavailable cpu_gate)
+    expect_gpu_stats(auto_unavailable "auto, not used [(]unavailable: cannot create a Vulkan instance[)]")
     expect_error("--require-gpu: cannot create a Vulkan instance" run --require-gpu --gpu-software "${image}")
     file(WRITE "${directory}/invalid.nvr" "")
     neura(error run --require-gpu --gpu-software "${directory}/invalid.nvr")

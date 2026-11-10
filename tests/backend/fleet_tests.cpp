@@ -102,6 +102,29 @@ NEURA_TEST(fleet, step_split_matches_advance) {
     check_step_split(image, {}, "checked graph overflow");
 }
 
+NEURA_TEST(fleet, graph_input_fault_precedes_device_evaluation) {
+    auto image = logic_model();
+    auto& block = image.functions[0].blocks[0];
+    block.graph = 1;
+    block.inputs = {{nvr::ValueKind::Slot, 1, 1}, {nvr::ValueKind::Constant, 1, 0}};
+    image = nvr::load(nvr::encode(image));
+    for (const auto limit : {0U, 10U}) {
+        nvm::RunLimits limits;
+        limits.max_steps = limit;
+        limits.profile = true;
+        const auto reference = nvm::run(image, {}, {}, limits);
+        nvm::ModelDevice device(image);
+        nvm::Fleet fleet(image, {limits, &device});
+        fleet.add(image.entry, {});
+        const auto event = fleet.advance();
+        check(event.event.kind == Event::Kind::Trapped, "input fault ends the fleet member");
+        check(event.result.trap.kind == (limit == 0 ? nvm::TrapKind::StepLimit : nvm::TrapKind::UninitializedSlot),
+              "the step limit precedes the graph input read");
+        check_same_run(event.result, reference, "graph input fault");
+        check_equal(device.statistics().dispatches, std::uint64_t{0}, "faulting input never reaches the device");
+    }
+}
+
 NEURA_TEST(fleet, step_split_requires_an_active_step) {
     const auto image = nvr::load(nvr::encode(hello_model()));
     nvm::Execution execution(image, {});
@@ -385,6 +408,47 @@ NEURA_TEST(fleet, live_heap_limits_admission_without_stopping_the_head) {
     const auto first = fleet.advance();
     check(first.event.kind == Event::Kind::Trapped && first.result.trap.kind == nvm::TrapKind::HeapLimit && fleet.done(),
           "the head starts and hits its own heap limit even with zero capacity");
+}
+
+NEURA_TEST(fleet, terminal_members_release_admission_cells) {
+    auto image = hello_model();
+    image.constants[1] = {2, {37, 0, 0, 0}};
+    image.imports = {{"neura.process.exit", 1, {2}, 0, 5}};
+    image.functions[0].blocks[0].exits[0].arguments = {{nvr::ValueKind::Constant, 2, 1}};
+    auto fast = image.functions[0];
+    fast.blocks = {image.functions[0].blocks[1]};
+    image.functions.push_back(std::move(fast));
+    image = nvr::load(nvr::encode(image));
+
+    nvm::RunLimits limits;
+    limits.max_heap_cells = 2;
+    nvm::Fleet startup_trap(image, {limits, nullptr, 2});
+    startup_trap.add(0, {"a", "b"});
+    startup_trap.add(1, {});
+    const auto trapped = startup_trap.advance();
+    check(trapped.member == 0 && trapped.result.trap.kind == nvm::TrapKind::HeapLimit &&
+          trapped.result.peak_heap_cells == 2 && trapped.result.steps == 0,
+          "the first text fills the heap and the second traps before entry");
+    const auto after_trap = startup_trap.advance();
+    check(after_trap.member == 1 && after_trap.result.completed && startup_trap.done(), "the next member completes");
+    check_equal(startup_trap.rounds(), std::uint64_t{1}, "a startup trap releases its partial heap before admission");
+
+    limits.max_heap_cells = 8;
+    nvm::Fleet process_exit(image, {limits, nullptr, 2});
+    process_exit.add(0, {"12345"});
+    process_exit.add(1, {});
+    const auto request = process_exit.advance();
+    check(request.member == 0 && request.event.kind == nvm::Event::Kind::HostRequest &&
+          request.event.request.arguments.size() == 1 && request.event.request.arguments[0].bits == 37,
+          "the head reaches process exit while occupying all eight cells");
+    check_equal(process_exit.rounds(), std::uint64_t{1}, "the host request occupies the first round");
+    process_exit.complete(nvm::HostCompletion::terminate(37));
+    const auto exited = process_exit.advance();
+    check(exited.member == 0 && exited.result.completed && exited.result.status == 37 &&
+          exited.result.peak_heap_cells == 8 && exited.result.steps == 1, "the terminal completion leaves its steps and peak intact");
+    const auto after_exit = process_exit.advance();
+    check(after_exit.member == 1 && after_exit.result.completed && process_exit.done(), "the waiting member completes");
+    check_equal(process_exit.rounds(), std::uint64_t{2}, "the next member starts in the round that observes the terminal completion");
 }
 
 NEURA_TEST(fleet, exhaustive_two_byte_arguments) {
