@@ -30,7 +30,10 @@ Each feature of this release with the tests that establish it. A feature counts 
 | Objects, construction, destruction | [Object lifecycle](lang/ObjectLifecycle.md) | `programs/objects.nra`; `backend-conversion.structures_agree…` (`two_counters`, `construction_order`); `traps/use-after-destroy.nra`, `uninitialized-field.nra` | Exhaustive (8-bit), end to end |
 | Collections and `length` | [Collections](lang/Collections.md) | `programs/collections.nra`; `examples/collections` driver; `backend-conversion` (`element`, `remove`); `traps/index-out-of-bounds.nra`, `negative-index.nra` | Exhaustive (8-bit), end to end |
 | Errors | [Errors](lang/Errors.md) | Trap programs above; `backend-vm` faults | End to end |
-| Test runner | [Testing](lang/Testing.md) | `backend-cli` (`math-tests`, `testing/suite.nra` with passes, failures, a trap, isolation, and an optimized and an unoptimized build; no tests found) | End to end |
+| Test runner | [Testing](lang/Testing.md) | `backend-cli` (`math-tests`, `testing/suite.nra` with passes, failures, a trap, isolation, and an optimized and an unoptimized build; `testing/exit-suite.nra`; no tests found); `stdlib-std-test` (every assertion's message) | End to end |
+| Program entry and exit codes | [Modules](lang/Modules.md#program-entry) | `stdlib-program` (Ok, Failure, Status bounds, invalid statuses); `stdlib-process`; `backend-stdlib` (trusted roots, two entries rejected) | End to end |
+| Retired `SysIo` and `Test` | [Modules](lang/Modules.md#program-entry) | `backend-stdlib` (both imports rejected with their replacements); `backend-cli` (legacy images: a SysIo Hello World runs, an image using the retired assertion services fails to bind) | End to end |
+| Initialization with import cycles | [Modules](lang/Modules.md#initialization) | `backend-cli` (`initialization-cycle` in both build modes; `initialization` with library imports); `backend-conversion.initialization_order_matches_the_evaluator` | End to end |
 | Runnable examples | [Status](lang/Status.md#examples) | `backend-cli`; `frontend`; `ir-optimization-cli` | End to end |
 
 ## Toolchain and formats
@@ -40,10 +43,27 @@ Each feature of this release with the tests that establish it. A feature counts 
 | Build routes give identical bytes; builds are reproducible | [Tooling](lang/Tooling.md) | `backend-nir.both_build_routes_emit_identical_images`; `backend-cli` (Hello World, initialization, programs built twice) | Structural |
 | `.nir` 1.2 and minimal versions | [NeuraIR file format](NirFormat.md) | `backend-nir` (round trips, `minor_version_follows_the_features_used`, corrupt files, 1.3 rejected) | Structural |
 | Tracing garbage collection | [NVM](runtime/NVM.md) | `backend-vm` (unreachable cycles, typed roots and parallel assignments under heap pressure) | Runtime |
-| NVR 1.1: float types, `ReadVersion`, reason 5, minimal versions | [NVR](runtime/NVR.md#versions-10-and-11) | `backend-format.version_1_1_features`, `float_types_and_constants` (hand-assembled fixtures, 1.1 features in 1.0 images rejected, 1.2 rejected); `backend-cli` (Hello World still 1.0) | Structural |
+| NVR 1.1: float types, `ReadVersion`, reason 5, minimal versions | [NVR](runtime/NVR.md#versions-10-and-11) | `backend-format.version_1_1_features`, `float_types_and_constants` (hand-assembled fixtures, 1.1 features in 1.0 images rejected, 1.2 rejected); `backend-cli` (the legacy 1.0 Hello World image; Hello World with `Std.Program` is 1.2); `backend-nir` (import-free modules in `nir-versions`) | Structural |
 | Malformed image rejection | [NVR](runtime/NVR.md#writer-and-loader-requirements) | `backend-format` (every truncation and the validation cases) | Exhaustive (truncations), structural |
-| Installed toolchain | [Tooling](lang/Tooling.md) | `backend-install` | End to end |
-| Host services and traces | [NVM](runtime/NVM.md#host-services) | `backend-vm`; `decompiler-behavior` (record and replay) | End to end |
+| Installed toolchain | [Tooling](lang/Tooling.md) | `backend-install`; `stdlib-install` (the installed library matches `stdlib/`; `Std` imports resolve with no `-I`; images carry no installation path) | End to end |
+| Host services, capabilities, and traces | [NVM](runtime/NVM.md#host-services) | `backend-host` (every provider, error code, denial, partial I/O, limits, cleanup at run end, trace files); `stdlib-console`, `-io`, `-file`, `-fs`, `-net`, `-environment`, `-process`, `-system-clock`, `-host` (denied and allowed runs, replayed traces); `backend-vm`; `decompiler-behavior` (record and replay) | End to end, replay |
+
+## Standard library
+
+Every module of the [implementation plan](lang/Stdlib.md) has a test area `stdlib-<area>` that runs its tests optimized twice (identical output and step counts) and unoptimized, and builds and runs its trap and output programs in both modes; program images also round-trip through assembly and decompile.
+
+| Feature | Specification | Tests | Kind |
+| --- | --- | --- | --- |
+| Core values | [Stdlib 5–6](lang/Stdlib.md#5-core-contracts) | `stdlib-core`, `-comparators`, `-int-range` | End to end |
+| Integer, Bool, and float companions | [Stdlib 7](lang/Stdlib.md#7-primitive-companion-modules) | `stdlib-integers` (every 7.2 recipe at its boundaries, Python vectors), `-bool`, `-floats` (an exact Fraction model, parse corpus), `-floats-exhaustive` (every `float16` and `bfloat16` round trip) | Exhaustive (16-bit floats), sampled |
+| Text | [Stdlib 8](lang/Stdlib.md#8-stdtext) | `stdlib-strings` (Python UTF-8 vectors; agreement with the NVM validator), `-scalars`, `-regex` (Python `re` and ECMAScript corpora), `-string-builder` | Sampled, exhaustive (2- and 3-byte UTF-8 prefixes) |
+| Collections | [Stdlib 9](lang/Stdlib.md#9-stdcollections) | `stdlib-<collection>` for every collection: seeded model tests of at least 10,000 operations with `validate()`, fail-fast iterators through aliases, reclamation under a heap limit | Sampled (seeded), end to end |
+| Math | [Stdlib 10](lang/Stdlib.md#10-stdmath) | `stdlib-math`, `-big-integer`, `-big-decimal` (Python reference vectors) | Sampled |
+| Time and randomness | [Stdlib 12](lang/Stdlib.md#12-time-and-randomness) | `stdlib-duration`, `-instant`, `-clock`, `-local-date`, `-local-time`, `-local-date-time`, `-zone-offset`, `-random`, `-uuid` (Python models; replayed entropy) | Sampled |
+| Data formats and digests | [Stdlib 13](lang/Stdlib.md#13-data-formats) | `stdlib-utf8`, `-hex`, `-base64`, `-csv`, `-json`, `-crc32`, `-sha256` (published vectors) | Published vectors, sampled |
+| Logging | [Stdlib 14.1](lang/Stdlib.md#141-stdlog) | `stdlib-logger` | End to end |
+| Reference evaluator agreement | [Stdlib 17](lang/Stdlib.md#17-verification) | `backend-reference` (every library test function under the NeuraIR reference evaluator and NVM; tests that need host responses or exceed the evaluator's budget are counted, not compared) | Differential |
+| Cost baseline | [Stdlib 17](lang/Stdlib.md#17-verification) | `benchmarks` (steps, peak heap cells, neurons, and image bytes against `tests/benchmarks/baseline.txt`; step growth between two sizes) | Measured |
 
 ## Decompiler
 
@@ -56,4 +76,4 @@ Each feature of this release with the tests that establish it. A feature counts 
 
 ## Not in this release
 
-The standard library beyond `println`, `Entry`, and `Test`; concurrency; foreign interop; and packages ([Status](lang/Status.md#outside-this-release)). MSVC builds are not verified.
+The deferred standard library areas of [Stdlib section 15.1](lang/Stdlib.md#151-deferred-and-excluded); concurrency; foreign interop; and packages ([Status](lang/Status.md#outside-this-release)). MSVC builds are not verified.

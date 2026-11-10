@@ -61,6 +61,8 @@ Direct calls name a function in execution metadata. Dynamic dispatch reads the r
 
 Objects have a runtime type tag, a layout ID, and typed field slots. Layouts preserve inherited fields at stable indices. A method receives the object handle as an explicit argument. Each object has independent storage, while calls share the compiled method graphs. Collections use typed element slots, and lengths and indices are checked before accessing storage.
 
+Object and interface references can carry nil as handle zero. The collector skips it, and field access, virtual dispatch, and destruction fault when they try to dereference it. A type test returns false for nil, and a checked cast preserves it. Class identity operations give a live object a sequence number when its default hash or text is first requested. The number stays with the object and depends on request order.
+
 An allocation creates a fresh handle and uninitialized fields. Compiler-generated constructor control flow performs base initialization, field initialization, and the declared constructor body in language order. It exposes the result of `new` on successful completion. If the language permits a field to be initialized later, its slot remains uninitialized until a store. A premature load traps. Field and collection stores validate the handle, layout, index, and value type before changing storage. Compiler-generated destruction calls the required cleanup methods and then invalidates the handle. Freed handles cannot name later allocations. These rules define runtime checks. The language specification defines which source operations are legal and the ordering of language-visible initialization and cleanup.
 
 For example, incrementing a counter runs a block that requests a field read, a graph that adds to the returned value, and a block that requests a field write. The heap handler performs the read and write. The graph supplies the new value.
@@ -81,23 +83,56 @@ A host import declares a service name, interface version, typed arguments, and t
 
 A request contains the import, resolved arguments, and an execution-local sequence number. NVM issues the request once on entering the selected exit. A completion supplies either the success or error value. The runtime type-checks that value, writes the designated result slot, and enters the corresponding resume block. A suspended run keeps the pending request and resumes from its completion. The execution contract covers a live run. Durable recovery across a process crash requires a separate persistence protocol.
 
+Host services receive copied values. Booleans, integers, and floating-point values keep their slot bit encodings. Strings, byte arrays, and byte lists use byte sequences. Other arrays and lists transfer their elements in index order, and tuples transfer their fields in declaration order. Host signatures describe these shapes recursively without image-local type indices. The runner limits copied elements and bytes using the heap-cell budget and bounds the nesting depth. Handles remain inside NVM, and a compound completion allocates fresh VM storage with its partially constructed values rooted until completion.
+
+A terminal completion from `neura.process.exit` version 1 ends only the current NVM execution with the supplied status from 0 through 255. A recorder stores that completion and replay returns the same terminal result without invoking the service. The runner must register the service before an image can call it.
+
 The standard console service is `neura.console.write_line` version 1. It takes a UTF-8 string and returns either success with no payload or an unsigned 32-bit error code. Error code 1 denotes a failed write. It emits the string's bytes followed by a single LF byte, independent of platform newline conventions. A host write can partially succeed before reporting failure. The runtime reports the failure without retrying. The language library determines how that result appears to source code.
 
 ### Host services
 
-| Service | Version | Parameters | Success | Error | Behavior |
-| --- | --- | --- | --- | --- | --- |
-| `neura.console.write_line` | 1 | text | void | uint32 | Writes the text and an LF; error 1 when the write fails |
-| `neura.test.assert` | 1 | bool | void | uint32 | Succeeds for true; for false, records "assertion failed" and returns error 1 |
-| `neura.test.assert_equal_int32` | 1 | int32 expected, int32 actual | void | uint32 | Succeeds when equal; otherwise records the expected and actual values and returns error 1 |
+`neura run` and `neura test` register these services. Each is version 1, and each failure is a `uint32` error code: 1 `NotFound`, 2 `PermissionDenied`, 3 `AlreadyExists`, 4 `InvalidInput`, 5 `Interrupted`, 6 `UnexpectedEnd`, 7 `NotADirectory`, 8 `IsADirectory`, 9 `DirectoryNotEmpty`, 10 `ConnectionRefused`, 11 `ConnectionReset`, 12 `TimedOut`, 13 `Unsupported`, 14 `CapabilityDenied`, and 100 for any other failure ([Stdlib](../lang/Stdlib.md#45-host-services) maps codes to `IoErrorKind`). File and socket IDs are opaque `int64` values numbered from 1 in each run and never reused within it.
 
-The compiler binds `SysIo.println`, `Test.assert`, and `Test.assert_equal_int32` to these imports. Each call's error continuation traps with reason 3, so a failed write ends the run and a failed assertion ends the test. `neura run` and `neura test` both register all three services; the test services report the recorded failure with the trap.
+| Service | Parameters | Success | Behavior |
+| --- | --- | --- | --- |
+| `neura.console.write_line` | text | void | Writes the text and an LF; error 1 when the write fails |
+| `neura.console.write` | int32 stream (1 output, 2 error), uint8 list | int32 | Writes a prefix of the bytes and returns its length; the library repeats partial writes |
+| `neura.console.read` | int32 maximum | uint8 list | At most the maximum, at least one byte; empty at end of input |
+| `neura.fs.open` | text path, int32 mode | int64 ID | Mode is the `OpenMode` ordinal: Read, Write, Append, ReadWrite, CreateNew |
+| `neura.fs.read` | int64 ID, int32 maximum | uint8 list | Empty at end of file |
+| `neura.fs.write` | int64 ID, uint8 list | int32 | The count written |
+| `neura.fs.seek` | int64 ID, int64 offset, int32 origin | int64 | Origin is the `SeekOrigin` ordinal: Start, Current, End |
+| `neura.fs.close` | int64 ID | void | Releases the ID |
+| `neura.fs.stat` | text path, bool follow links | [int32 kind, int64 size, int64 seconds, int32 nanoseconds] | Kind is the `FileKind` ordinal: File, Directory, Other |
+| `neura.fs.list` | text path | text list | Entry names sorted by their UTF-8 bytes |
+| `neura.fs.make_directory` | text path | void | |
+| `neura.fs.remove` | text path, bool directory | void | Removes a file, or an empty directory when the flag is set |
+| `neura.fs.rename` | text from, text to | void | |
+| `neura.clock.wall` | | [int64 seconds, int32 nanoseconds] | Since 1970-01-01T00:00:00Z |
+| `neura.clock.monotonic` | | int64 nanoseconds | Never decreases within a run |
+| `neura.clock.sleep` | int64 nanoseconds | void | |
+| `neura.entropy.fill` | int32 count | uint8 list | Operating-system entropy |
+| `neura.env.get` | text name | [bool found, text value] | |
+| `neura.process.exit` | int32 status | void | Terminal: ends the run with the status |
+| `neura.net.connect` | text host, int32 port, int64 timeout nanoseconds | int64 ID | Blocking TCP connect; 0 means no timeout |
+| `neura.net.listen` | text host, int32 port | int64 ID | Port 0 asks for a free port |
+| `neura.net.local_port` | int64 ID | int32 | The listener's bound port |
+| `neura.net.accept` | int64 ID | int64 ID | |
+| `neura.net.read` | int64 ID, int32 maximum, int64 timeout nanoseconds | uint8 list | Empty at end of stream |
+| `neura.net.write` | int64 ID, uint8 list | int32 | The count written |
+| `neura.net.close` | int64 ID | void | Closes a stream or a listener |
 
-For `io.println("Hello, World!")`, the image stores the string in its constant pool. The entry graph selects a host-call exit whose argument names that constant. The bound console handler writes the line and NVM resumes at the exit's success block. The entry function returns a signed 32-bit status. The launcher maps that status to the platform process result. A trap yields a diagnostic and a nonzero process result. The embedding API exposes the full status or structured trap independently of the platform's exit-code range.
+A read requests at most 1 MiB, and so does an entropy request. A run holds at most 1,024 open file IDs and 1,024 open socket IDs; an open beyond that fails with code 100. When a run ends, by completion, trap, or process exit, the runner closes every file and socket it left open. `neura test` does the same after each test.
+
+**Capabilities.** The console services and `neura.process.exit` are always available. Every other service belongs to a group that the runner grants with an option: `--allow-fs` (optionally `--allow-fs=prefix,...`), `--allow-net`, `--allow-env`, `--allow-clock`, and `--allow-entropy`. A service that is not granted still binds, and each call fails with code 14. With path prefixes, the provider resolves each path to an absolute path the way the operating system would, following symbolic links, and allows it only at or below a resolved prefix; operations on an entry itself (remove, rename, make directory, stat without following links, create) check the resolved parent and the final name. The check and the operating-system call are not atomic.
+
+A failed console write traps with reason 3 when it comes from `Console.print_line`; the other console forms return the failure as an `Io` error. For `console.print_line("Hello, World!")`, the image stores the string in its constant pool. A graph selects a host-call exit whose argument names that constant. The bound console handler writes the line and NVM resumes at the exit's success block. The entry function's `ExitCode` becomes the process status. A trap yields a diagnostic and a nonzero process result. The embedding API exposes the full status or structured trap independently of the platform's exit-code range.
+
+The test assertion services `neura.test.assert` and `neura.test.assert_equal_int32` are retired along with the built-in `Test` module. An image built earlier that imports them fails to bind, before it runs; an earlier image whose only import is `neura.console.write_line` still runs.
 
 ## Determinism, limits, and observability
 
-Given the same validated image, initial inputs, resource limits, and host completion trace, a run yields the same exit selections, effects, state updates, and terminal outcome. Clock readings, file contents, and similar external responses enter through the host boundary. Tests can supply those responses from a trace and verify the emitted request sequence. `nvm::record` runs an image with bound services and records each request, as the import's name and version with its arguments, together with the response and the terminal outcome. `nvm::replay` runs an image, answering each request from a recorded trace instead of real services, and reports whether the image made the same requests in the same order and ended the same way. Requests match by import name and version, not table index, so two images that number their imports differently can be compared. The decompiler tests use this to compare an image with one regenerated from its decompilation. The reference executor runs one block at a time and waits for each selected host call before resuming. A faster executor must preserve that order where it is observable.
+Given the same validated image, initial inputs, resource limits, and host completion trace, a run yields the same exit selections, effects, state updates, and terminal outcome. Clock readings, file contents, and similar external responses enter through the host boundary. Tests can supply those responses from a trace and verify the emitted request sequence. `nvm::record` runs an image with bound services and records each request, as the import's name and version with its arguments, together with the response and the terminal outcome. `neura run --record <file>` writes such a trace as text, and `neura run --replay <file>` answers every request from one without invoking any service or needing any capability. The text form starts with `neura-trace 1`; each `request <import> <version> <arguments>` line is followed by `ok <value>`, `error <value>`, or `exit <status>`, and the file ends with `outcome completed <status>` or `outcome trap <kind> <reason> "<message>"`. Values are unsigned decimal slot bits, quoted byte strings with `\xHH`, `\n`, `\r`, `\t`, `\"`, and `\\` escapes, or bracketed lists; `#` lines are comments. A replay reproduces the console output the recorded requests wrote, and a divergence ends with status 1 and a description of the first differing request. `nvm::replay` runs an image, answering each request from a recorded trace instead of real services, and reports whether the image made the same requests in the same order and ended the same way. Requests match by import name and version, not table index, so two images that number their imports differently can be compared. The decompiler tests use this to compare an image with one regenerated from its decompilation. The reference executor runs one block at a time and waits for each selected host call before resuming. A faster executor must preserve that order where it is observable.
 
 The loader applies size and count limits before allocating image structures. The runner enforces declared bounds on frame depth, live heap storage, and execution steps. Exhaustion traps at the operation that exceeds the configured limit. Limit checks occur before the affected allocation or state mutation. A trap stops further program execution and leaves any completed external effects visible.
 

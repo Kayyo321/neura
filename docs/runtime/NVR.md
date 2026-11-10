@@ -21,12 +21,12 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 
 The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four printable ASCII characters and compare bytewise. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
 
-### Versions 1.0 and 1.1
+### Versions 1.0 through 1.2
 
-Minor version 1 adds three features, marked "1.1" below: the float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Nothing else changes, and a 1.0 image is a valid 1.1 image.
+Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. The graph profile remains 1.
 
-- A writer emits the lowest minor version whose features the image uses, so an image that uses none of the 1.1 features is a 1.0 image byte for byte. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
-- A loader of this version accepts major version 1 with minor version 0 or 1, and rejects any other version as unsupported, naming the versions it accepts. An image that declares 1.0 but uses a 1.1 feature is malformed.
+- A writer emits the lowest minor version whose features the image uses. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
+- The loader accepts major version 1 with minor version 0, 1, or 2. A feature newer than the version declared by the image makes the image malformed.
 - An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
@@ -62,13 +62,13 @@ A type record starts with `kind:u8`. Its remaining fields depend on that tag.
 | Float (1.1) | 9 | `width:u8`, one of 16, 32, 64: IEEE 754 binary16, binary32, binary64 | Width |
 | BFloat (1.1) | 10 | `width:u8`, which is 16: an 8-bit exponent and a 7-bit fraction | 16 |
 
-Void is valid as a result type and has no slot, constant, or value descriptor. Signedness and width are part of the type. Assignments and calls require structural type equality, or a declared object subtype where a base type is expected. Arrays and lists are invariant in their element type. Object inheritance follows layout parent links. Profile 1 uses bit vectors at graph ports, including for opaque handles. A float value's lanes are its IEEE encoding, least significant bit first, so graphs compute float arithmetic bit by bit and the graph profile is unchanged ([Numbers](../lang/Numbers.md)). Additional numeric encodings require a profile or type-format revision with explicit evaluation rules.
+Void is valid as a result type and has no slot, constant, or value descriptor. Signedness and width are part of the type. Assignments and calls require structural type equality, or a declared object subtype where a base type is expected. Arrays and lists are invariant in their element type. Object subtyping follows parent and interface links. Profile 1 uses bit vectors at graph ports, including for opaque handles. A float value's lanes are its IEEE encoding, least significant bit first, so graphs compute float arithmetic bit by bit ([Numbers](../lang/Numbers.md)).
 
-A constant record contains `type:u32, payload:bytes`. A Boolean payload contains one byte, zero or one. An integer or float payload contains exactly its declared width in bits divided by eight, little-endian; every float bit pattern, including any NaN, is a valid payload. Text and bytes use their literal contents. Object and collection handles cannot occur in constant payloads. Text and byte constants are exposed as immutable runtime values.
+A constant record contains `type:u32, payload:bytes`. A Boolean payload contains one byte, zero or one. An integer or float payload contains exactly its declared width in bits divided by eight, little-endian. Every float bit pattern, including any NaN, is a valid payload. Text and bytes use their literal contents and are immutable. In 1.2, an empty payload for an object type denotes nil. Nonzero object handles and collection handles are runtime values.
 
-A layout record contains `parent:u32 optional, field_types:vector<u32>`. The field vector includes inherited fields as a prefix with identical types and indices. The layout index is its runtime type tag. A global record contains `type:u32, initializer:u32 optional`. An initializer names a matching constant. A global without one begins uninitialized. Compiler-generated entry blocks perform nonconstant program initialization before invoking application logic.
+A layout record contains `parent:u32 optional, field_types:vector<u32>`. Version 1.2 appends `interfaces:vector<u32>` to every layout record. Each interface link is a unique fieldless layout other than the parent. The union of both link kinds is acyclic. The field vector includes the parent's fields as a prefix with identical types and indices. The layout index is its runtime type tag. A global record contains `type:u32, initializer:u32 optional`. An initializer names a matching constant. A global without one begins uninitialized. Compiler-generated entry blocks perform nonconstant program initialization before invoking application logic.
 
-NVM assigns reference handles in a deterministic order, starting with materialized reference constants in table order, then each launch argument's text in order, then the argument array, and then allocations in execution order. Zero is reserved. A destroyed handle cannot be assigned again during the run. The runner traps if its handle space is exhausted.
+NVM assigns reference handles in a deterministic order, starting with materialized reference constants in table order, then each launch argument's text in order, then the argument array, and then allocations in execution order. Zero is reserved for absence and never allocated. In 1.2 an object-typed descriptor may transport zero as nil. Operations that dereference it trap, except the explicit type test and cast described below. The runner never reuses a destroyed handle and traps if its handle space is exhausted.
 
 ## Graphs, functions, and exits
 
@@ -90,6 +90,7 @@ An exit begins with `kind:u8, assignments:vector<Assignment>`. An assignment is 
 | State operation | 3 | `operation:u8, immediate:u32, arguments:vector<Value>, result_slot:u32 optional, resume_block:u32` |
 | Host call | 4 | `import:u32, arguments:vector<Value>, success_slot:u32 optional, success_block:u32, error_slot:u32 optional, error_block:u32` |
 | Trap | 5 | `reason:u32` |
+| Message trap (1.2) | 6 | `arguments:vector<Value>`, exactly one text value, implicit reason 3 |
 
 Resume blocks belong to the current function. For every exit that produces a result (a call, a state operation, and both continuations of a host call), a void result requires an absent slot, and a nonvoid result requires a slot to which the result is assignable. Return values and arguments must be assignable to their declared types. A trap exit has no assignments. Reason codes 1 through 4 designate source arithmetic failure, source bounds failure, explicit program failure, and invalid dispatch. Reason 5 (1.1) designates a list modified during for-each. Other codes require a format revision. Loader and runtime faults have separate diagnostics.
 
@@ -114,6 +115,14 @@ The state-operation exit provides checked storage primitives. Its immediate is z
 | 12 | Remove element | Zero | List reference, index | Void |
 | 13 | Construct text or bytes | Text or bytes type ID | Array or list of unsigned 8-bit values | Immutable copy of the selected type |
 | 14 (1.1) | Read version | Zero | List reference | Unsigned 64-bit structural version |
+| 15 (1.2) | Slice text | Zero | Text, start and end byte offsets | UTF-8 text for the checked half-open range |
+| 16 (1.2) | Decode UTF-8 | Layout ID with exactly a Boolean and a text field | Array or list of unsigned 8-bit values | Reference to a pair of validity and decoded text |
+| 17 (1.2) | Compare text | Zero | Two text references | Bytewise equality as a Boolean |
+| 18 (1.2) | Class hash | Zero | Live object reference | Unsigned 32-bit identity hash |
+| 19 (1.2) | Class text | Zero | Live object reference, qualified class name as text | Name and identity number separated by `#` |
+| 20 (1.2) | Class test | Target layout ID | Object reference | Boolean, false for nil |
+| 21 (1.2) | Class cast | Target layout ID | Object reference | Same handle at the target type, preserving nil |
+| 22 (1.2) | Scalar text | Zero | Boolean, integer or float, optionally an unsigned 32-bit ordinal followed by text variants | Deterministically formatted text or the variant name |
 
 Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a list because operation 7 takes its elements as exit arguments, so a list is the only way to collect bytes whose number is known only at run time. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Every list carries a structural version that starts at zero when the list is allocated and grows by one, modulo 2^64, with each successful append or removal; writing an element does not change it. A for-each loop compares versions to detect modification. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Freeing an object invalidates its handle after language cleanup has completed.
 

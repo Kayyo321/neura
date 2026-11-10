@@ -37,6 +37,7 @@ Conversion lowers an operation only where the language defines its result. Where
 | --- | --- |
 | `boolean`, `integer` literals | Constant lanes folded into neuron biases, or constant-pool entries when an exit needs the value. |
 | `string` literal | A UTF-8 text constant. |
+| `nil`, class identity, type tests and casts | A zero reference constant, lane comparison for reference identity, and typed layout checks in NVM. |
 | `load`, `store`, `initialize` of locals and parameters | Typed frame slots. Assignments become parallel slot assignments on the block's exits. |
 | `load`, `store` of module globals | `ReadGlobal` and `WriteGlobal` state operations. |
 | `unary !`, `binary == !=` on `bool` | Graph gadgets. |
@@ -54,7 +55,10 @@ Conversion lowers an operation only where the language defines its result. Where
 | `call` | A `Call` exit. Module functions are specialized for their module. |
 | `virtual_call` on a module | Resolved statically: the most derived implementation in the concrete module, specialized for that module. |
 | `virtual_call` on an object | `ReadTag`, then a dispatch block whose graph compares the tag with each instantiated class that can reach the call site. |
-| `external_call` to `SysIo.println`, `Test.assert`, `Test.assert_equal_int32` | A `Host` exit to `neura.console.write_line`, `neura.test.assert`, or `neura.test.assert_equal_int32`, version 1. The error continuation traps with reason 3. |
+| Interface dispatch | The same receiver and tag as class dispatch. Layout links identify interface supertypes. A concrete method wins over a default, and inherited defaults follow the specificity rules. |
+| `external_call` to a declared host binding | A versioned `Host` exit whose typed continuations construct the declared success or error variant. |
+| Value members, text primitives, and float bit access | Scalar comparisons and hashes use graph circuits, text uses checked state operations, and structural aggregates use generated typed functions. Raw float reinterpretation reuses the input lanes. |
+| `trap_message` | A reason-3 message trap carrying one text value. |
 | `allocate`, `base_initialize` | `AllocateObject`, then a generated constructor function. |
 | `field` | `ReadField` and `WriteField` with the field's index in its declaring class's layout. |
 | `collection`, `index`, `append`, `remove_at` | `AllocateCollection`, `ReadElement`, `WriteElement`, `AppendElement`, and `RemoveElement`. |
@@ -63,13 +67,13 @@ Conversion lowers an operation only where the language defines its result. Where
 
 The build stops with a source diagnostic, before any output is written, for:
 
-- Programs with no function overriding `SysIo.Entry.main`, or more than one.
+- Programs without a unique entry override from `Std.Program.Entry`.
 - A module call that resolves to an interface function without a body.
 - Generic specialization that does not terminate ([Polymorphism](lang/Polymorphism.md#type-arguments-and-specialization)).
 
 ## Generics
 
-Specialization (`src/neura-ir/specialize.cpp`) is a NeuraIR-to-NeuraIR rewrite that runs on verified IR in both build routes. It walks every non-generic body and symbol type. Each concrete generic class type it meets, such as `Box<int32>`, becomes a class instance: a new class symbol named after its arguments, with copies of the generic class's fields and non-generic methods, and its field initializers. Each call to a generic function or method becomes a call to a function instance, a copy with its type parameters substituted. Copies are appended to the symbol table and keep their declarations' spans. A map from declaration and canonical argument types to the instance makes each combination one copy, and argument types are canonical because `int` and `byte` lower to `int32` and `uint8`. Field, call, allocation, receiver, and destroy references inside copies and in the rest of the program are rewritten to the instances' members. Afterward no reachable body or symbol mentions a type parameter, and the converter sees only concrete types. The generic declarations stay in the program, unreachable. The verifier rechecks bounds, because a `.nir` file reaches the backend without lowering.
+Specialization (`src/neura-ir/specialize.cpp`) runs on verified IR in both build routes. Each concrete application of a generic class, interface, enum, function, or method gets one copy, keyed by declaration and canonical arguments. A copy retains its declaration's span and substitutes types in members, fields, interface edges, variant payloads, and bodies. The rewriter remaps variant and member references to their instances. A structural callable becomes a signature layout with an invoke method, and each closure's capture layout implements that method. After specialization the reachable program has concrete types. The verifier rechecks bounds because a `.nir` file reaches the backend without lowering.
 
 ## Loops
 
@@ -77,7 +81,7 @@ A three-part `for` lowers to a block holding the initializer and a NeuraIR loop 
 
 ## Initialization
 
-When the program has top-level statements or initializers that are not literals, the image's entry is a generated start function instead of `main`. It runs each initialization statement in the [documented order](lang/Modules.md#initialization), writing globals with `WriteGlobal`, then calls `main` with the arguments and returns its status. Literal initializers stay image constants, so their globals are initialized at load. A program without such statements has no start function, and its image is unchanged from earlier releases. Under `neura test`, each test gets a start function that runs the same initialization, calls the test, and returns 0.
+The image's entry is a generated start function. It runs each initialization statement in the [documented order](lang/Modules.md#initialization), writing globals with `WriteGlobal`, then calls `main` with the arguments and maps the `Std.Program.ExitCode` it returns to the process status: `Ok` to 0, `Failure` to 1, and `Status(n)` to `n` after two blocks check `n < 0` and then `n > 255`, each a comparison with one constant, and trap with `invalid argument: exit status` otherwise. Literal initializers stay image constants, so their globals are initialized at load. Under `neura test`, each test gets a start function that runs the same initialization, calls the test, and returns 0. Files that import each other form a cycle that starts once the files it imports from outside have run.
 
 ## Semantic decisions
 
@@ -90,15 +94,15 @@ These choices follow the existing contracts where they apply. Where the language
 | Floating point | Specified | IEEE 754 with ties-to-even rounding, subnormals, and no traps. Every NaN result is the canonical quiet NaN. The optimizer does not fold float arithmetic. |
 | Conversions | Specified | Checked: out-of-range integer results and float-to-integer conversions of NaN, infinities, and out-of-range values trap with reason 1. |
 | Negative index | Bounds error | A signed index is checked for a negative value in the graph, which traps with reason 2 before the value is converted to the `uint64` index of the state operation. NVM reports an index at or beyond the length as a bounds fault. |
-| Entry point | Discovery is open | The unique function that overrides `SysIo.Entry.main`. `Entry.ExitCode` is `int32`, and `Ok` is 0. |
+| Entry point | [Specified](lang/Modules.md) | The unique function that overrides `Std.Program.Entry.main`. The entry maps `Ok`, `Failure`, and checked `Status(int)` to a process status. The built-in `SysIo` entry is retired. |
 | Module receivers | Dispatch by override chain | Static. A module function is converted once for each concrete module through which it is called. Inside it, calls and global accesses on the module receiver resolve in that module's chain. |
 | Module globals | Storage is open | One storage location per declared global. An inherited global that is not overridden is the same storage through the base and the derived module. An override has its own storage. The IR reference evaluator uses the same rule. |
 | Initialization order | [Specified](lang/Modules.md#initialization) | Literal initializers become NVR global initializers. Other initializers and top-level statements run in a generated start function, files after their imports and each file in source order. A read before initialization is an NVM fault. Optimization keeps the root form of every global initializer, so `2 * 3` is not folded into a literal that would change when its global is set. |
-| Enums | [Specified](lang/Types.md#enums) | `uint32` ordinals in declaration order. `ExitCode` stays `int32` with `Ok` = 0. |
+| Enums | [Specified](lang/Types.md#enums) | Fieldless enums use `uint32` ordinals. Payload enums use typed layouts with an ordinal tag and the active fields. The legacy exit enum uses `int32`. |
 | Construction | Proposed in [Object lifecycle](lang/ObjectLifecycle.md) | The base constructor runs, then this class's field initializers, then the rest of the declared `init`. Fields without an initializer start uninitialized; reading one before a store traps. |
 | Destruction | Proposed | Cleanup dispatches on the runtime class and runs each `deinit` from the most derived class toward the bases. Then the object is freed. A later use of the handle traps. |
-| `println` failure | Open | After a failed or partial write, the run traps with reason 3. The language has no error result for `println` yet. |
-| Assertions | [Specified](lang/Testing.md) | A failed `Test` assertion traps with reason 3 after the test service records the failure. |
+| Console write failure | [Specified](lang/Stdlib.md#111-stdio) | `Console.print_line` traps with reason 3 and `console write failed`; `try_print_line` and the other console forms return an `Io` error. |
+| Assertions | [Specified](lang/Testing.md) | A failed `Std.Test` assertion is a message trap (reason 3) whose message the test runner reports. |
 | For-each modification | [Specified](lang/CoreLanguage.md#loops) | A changed list version traps with reason 5 at the `for` statement. |
 | Short-circuit operands | Specified | The right operand is speculated in the graph only when the optimizer's `pure_and_total` predicate holds: it cannot fail, change state, or request an effect. Otherwise it gets a block of its own, reached only when the left operand does not decide the result. |
 
@@ -158,9 +162,11 @@ Integer `*`, `/`, and `%` and float arithmetic between two variables get a block
 
 A block's graph computes every pure operation of a straight-line region, the selector, and its checks. The block ends at the first effect, call, state operation, or control-flow decision. Statements record slot assignments as pending and do not write them. Every non-trap exit commits them in parallel, so a later read in the same block uses the computed lanes, and a swap through a temporary is correct. A graph value that must outlive its block is assigned to a temporary slot by that block's exits.
 
+A block that evaluates nothing and only continues to another block, such as the header of `while (true)` or the join after an `if`, would cost a step and do no work. After every function is converted, exits that resume at such a block resume at the end of its chain instead, and the bypassed blocks are dropped with the other unreachable blocks; a chain that cycles, such as an empty endless loop, is kept. This removed 2 to 16 percent of the steps of the standard library benchmarks (`tests/benchmarks`).
+
 Checks are kept in evaluation order. The first failing check selects a trap exit with its reason, and each normal exit's indicator also requires that no check failed. The selector is the sum of the indicators of the exits whose index has that bit set, so exactly one exit is selected and every selector lane is 0 or 1.
 
-Each source-map entry gives a block's first failing check, else the operation that ends it, else its first statement. A trap diagnostic therefore points at the expression that failed. Paths are relative to the deepest directory that contains every source file, so images carry no build-machine directories. `--no-source-map` omits the optional `SMAP` section without changing any other byte.
+Each source-map entry gives a block's first failing check, else the operation that ends it, else its first statement. A trap diagnostic therefore points at the expression that failed. Paths of program files are relative to the deepest directory that contains every program file, and standard library files are labeled by their path below the library root (`std/core/optional.nra`), so images carry no build-machine directories. `--no-source-map` omits the optional `SMAP` section without changing any other byte.
 
 Classes become layouts whose inherited fields form a prefix. A method takes its receiver as parameter 0, typed with its declaring class. A dispatch block passes the receiver handle through 64 graph lanes, so each `Call` exit can pass it at the parameter type of its target. NVM checks the handle against that type when it decodes the lanes, which serves as a checked downcast. Dispatch targets are computed after every reachable function is converted, from the classes the program actually allocates. A tag that matches none of them selects a trap with reason 4.
 
