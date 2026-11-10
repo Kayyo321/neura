@@ -4,6 +4,7 @@
 #include "decompiler/decompile.hpp"
 #include "gpu_run.hpp"
 #include "ir-optimization/optimizer.hpp"
+#include "launcher/container.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/reference_storage.hpp"
@@ -13,10 +14,8 @@
 #include "nvm/host.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
-#include "nvm/trace.hpp"
-#include "nvm/trace_file.hpp"
 #include "nvr/format.hpp"
-#include "nvr/names.hpp"
+#include "runner/runner.hpp"
 #include "source_docs.hpp"
 #include "source_loader.hpp"
 
@@ -51,6 +50,12 @@ namespace {
 
 namespace fs = std::filesystem;
 
+using neura::runner::Host;
+using neura::runner::image_costs;
+using neura::runner::provide_native_library;
+using neura::runner::read_file;
+using neura::runner::write_file;
+
 void usage(std::ostream& out) {
     out << "usage: neura check [-I source-root] <file.nra>...\n"
            "       neura docs <file.nra>... [-o <file.json>]\n"
@@ -59,6 +64,7 @@ void usage(std::ostream& out) {
            "       neura emit-ir [--no-optimize] <file.nir>\n"
            "       neura build [-I source-root] [--no-optimize] [--no-source-map] <file.nra>... -o <file.nvr>\n"
            "       neura build [--no-optimize] [--no-source-map] <file.nir> -o <file.nvr>\n"
+           "       neura build --native <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
            "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [capabilities] "
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
@@ -110,11 +116,13 @@ struct Options {
     bool source_map = true;
     bool provenance = true;
     bool doxygen = false;
+    bool native_executable = false;
     // Report execution costs: steps, peak heap cells, and image size.
     bool stats = false;
     std::vector<fs::path> files;
     std::vector<fs::path> roots;
     fs::path library;
+    fs::path executable;
     std::optional<fs::path> output;
     std::vector<std::string> arguments;
     neura::nvm::RunLimits limits;
@@ -160,8 +168,7 @@ fs::path executable_path(const fs::path& launch) {
     }
 }
 
-fs::path standard_library(const fs::path& launch) {
-    const auto executable = executable_path(launch);
+fs::path standard_library(const fs::path& executable) {
     if (executable.empty()) return {};
     const auto prefix = executable.parent_path().parent_path();
     std::error_code error;
@@ -186,7 +193,8 @@ Options read_options(int argc, char** argv) {
         throw std::runtime_error(commands);
     }
     Options options;
-    options.library = standard_library(argv[0]);
+    options.executable = executable_path(argv[0]);
+    options.library = standard_library(options.executable);
     const std::string_view command = argv[1];
     if (command == "check") {
         options.command = Command::Check;
@@ -257,6 +265,9 @@ Options read_options(int argc, char** argv) {
             if (options.command != Command::Docs)
                 throw std::runtime_error("--doxygen applies only to docs");
             options.doxygen = true;
+        } else if (arg == "--native") {
+            if (options.command != Command::Build) throw std::runtime_error("--native applies only to build");
+            options.native_executable = true;
         } else if (arg == "--no-source-map") {
             if (options.command != Command::Build) {
                 throw std::runtime_error("--no-source-map applies only to build");
@@ -345,7 +356,7 @@ Options read_options(int argc, char** argv) {
                                                                 : "expected at least one input file");
     }
     if (options.command == Command::Build && !options.output) {
-        throw std::runtime_error("build requires -o <file.nvr>");
+        throw std::runtime_error(options.native_executable ? "build --native requires -o <file>" : "build requires -o <file.nvr>");
     }
     if (options.doxygen && options.files.size() != 1) {
         throw std::runtime_error("--doxygen requires one source file");
@@ -367,38 +378,6 @@ Options read_options(int argc, char** argv) {
         options.capabilities.fs_prefixes.clear();
     }
     return options;
-}
-
-std::vector<std::uint8_t> read_file(const fs::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        throw std::runtime_error("cannot read " + path.string());
-    }
-    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-    if (input.bad()) {
-        throw std::runtime_error("error reading " + path.string());
-    }
-    return bytes;
-}
-
-// Writes through a temporary file and renames it into place, so a failed
-// build never leaves a partial output.
-void write_file(const fs::path& path, const std::vector<std::uint8_t>& bytes) {
-    auto temporary = path;
-    temporary += ".tmp";
-    {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-        if (!output) {
-            throw std::runtime_error("cannot write " + path.string());
-        }
-        output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        output.close();
-        if (!output) {
-            fs::remove(temporary);
-            throw std::runtime_error("error writing " + path.string());
-        }
-    }
-    fs::rename(temporary, path);
 }
 
 bool is_nir_input(const fs::path& path) {
@@ -506,15 +485,6 @@ int c_bindings(const Options& options) {
     return 0;
 }
 
-// Gives the runner the image's embedded native library when it was linked
-// for this target; otherwise neura.ffi.library.embedded fails when used.
-void provide_native_library(const neura::nvr::Image& image, neura::nvm::StandardServices& services) {
-    if (image.native_library && image.native_library->triple == neura::nvm::native_target_triple()) {
-        const auto& object = image.native_library->object;
-        services.set_embedded_object(std::string(object.begin(), object.end()));
-    }
-}
-
 // Loads the program from source files or from one .nir file.
 neura::IrProgram load_program(const Options& options) {
     const bool nir = std::any_of(options.files.begin(), options.files.end(), is_nir_input);
@@ -554,12 +524,89 @@ int emit_ir(const Options& options) {
     return 0;
 }
 
-int build(const Options& options) {
+std::vector<std::uint8_t> build_image_bytes(const Options& options) {
+    const bool nvr_input = std::ranges::any_of(options.files, [](const fs::path& file) { return file.extension() == ".nvr"; });
+    if (nvr_input) {
+        if (!options.native_executable) {
+            throw std::runtime_error("build takes sources or one .nir file; packaging a .nvr needs --native");
+        }
+        if (options.files.size() != 1) throw std::runtime_error("a .nvr input must be the only input file");
+        if (!options.roots.empty()) throw std::runtime_error("-I applies only to source inputs");
+        if (!options.optimize) throw std::runtime_error("--no-optimize cannot be applied to an image that is already built");
+        if (!options.source_map) throw std::runtime_error("--no-source-map cannot be applied to an image that is already built");
+        if (fs::file_size(options.files.front()) >= (std::uint64_t{1} << 32)) {
+            throw std::runtime_error("native executable: image must be smaller than 4 GiB");
+        }
+        return read_file(options.files.front());
+    }
     neura::backend::BuildOptions build_options;
     build_options.optimize = options.optimize;
     build_options.source_map = options.source_map;
     const auto conversion = neura::backend::build(load_program(options), build_options);
-    const auto bytes = neura::nvr::encode(conversion.image);
+    return neura::nvr::encode(conversion.image);
+}
+
+void note_denied_imports(const neura::nvr::Image& image, const neura::nvm::Capabilities& capabilities) {
+    struct Group {
+        std::string_view flag;
+        std::string_view prefix;
+        bool granted;
+    };
+    const Group groups[] = {
+        {"fs", "neura.fs.", capabilities.fs}, {"net", "neura.net.", capabilities.net},
+        {"env", "neura.env.", capabilities.env}, {"clock", "neura.clock.", capabilities.clock},
+        {"entropy", "neura.entropy.", capabilities.entropy}, {"native", "neura.ffi.", capabilities.native},
+    };
+    for (const auto& group : groups) {
+        if (!group.granted && std::ranges::any_of(image.imports, [&](const auto& import) {
+            return import.name.starts_with(group.prefix);
+        })) {
+            std::cerr << "neura: note: the image uses " << group.flag << " services; without --allow-"
+                      << group.flag << " they fail with CapabilityDenied\n";
+        }
+    }
+}
+
+void package_native(const Options& options, std::span<const std::uint8_t> bytes) {
+    const auto triple = neura::nvm::native_target_triple();
+    auto prefix = options.executable.parent_path();
+    if (prefix.filename() == "bin") prefix = prefix.parent_path();
+    const auto directory = prefix / "lib/neura/launchers" / triple;
+    const auto file = directory / "neura-launcher";
+    if (!fs::is_regular_file(file)) {
+        throw std::runtime_error("--native: no launcher for " + triple + " in " + directory.string() +
+                                 "; pass --launcher or install one");
+    }
+    const auto launcher = read_file(file);
+    const auto descriptor = neura::launcher::read_descriptor(launcher);
+    if (!descriptor || descriptor->triple != triple || descriptor->flavor != 0 ||
+        descriptor->nvr_major != neura::nvr::major_version) {
+        throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
+    }
+    if (bytes.size() >= 8 && std::ranges::equal(bytes.first(4), std::string_view("NEUR"))) {
+        const unsigned major = bytes[4] | (unsigned{bytes[5]} << 8);
+        const unsigned minor = bytes[6] | (unsigned{bytes[7]} << 8);
+        if (major == 1 && minor > descriptor->nvr_minor) {
+            throw std::runtime_error("--native: the image is NVR 1." + std::to_string(minor) +
+                                     "; this launcher runs up to 1." + std::to_string(descriptor->nvr_minor));
+        }
+    }
+    const auto image = neura::nvr::load(bytes);
+    if (image.native_library && image.native_library->triple != descriptor->triple) {
+        throw std::runtime_error("--native: the image's native library is for " + image.native_library->triple +
+                                 "; the launcher is for " + descriptor->triple);
+    }
+    const neura::launcher::Policy policy;
+    neura::launcher::write_executable(*options.output, launcher, bytes, policy);
+    note_denied_imports(image, policy.capabilities);
+}
+
+int build(const Options& options) {
+    const auto bytes = build_image_bytes(options);
+    if (options.native_executable) {
+        package_native(options, bytes);
+        return 0;
+    }
     // Load the encoded image before publishing it, so that a writer or
     // converter fault cannot produce an executable the runtime rejects.
     neura::nvr::load(bytes);
@@ -628,75 +675,6 @@ int assemble(const Options& options) {
     }
     write_file(*options.output, encoded);
     return 0;
-}
-
-// The size of an image's executable circuits: graph, neuron, and edge counts.
-std::string image_costs(const neura::nvr::Image& image) {
-    std::uint64_t neurons = 0;
-    std::uint64_t edges = 0;
-    for (const auto& graph : image.graphs) {
-        neurons += graph.nodes.size();
-        for (const auto& node : graph.nodes) edges += node.edges.size();
-    }
-    return "graphs " + std::to_string(image.graphs.size()) + ", neurons " + std::to_string(neurons) + ", edges " +
-           std::to_string(edges);
-}
-
-// The host services of neura run and neura test: the console line writer and
-// the standard providers under the granted capabilities.
-struct Host {
-    neura::nvm::StreamSink output{stdout};
-    neura::nvm::StreamSink error{stderr};
-    neura::nvm::DescriptorSource input{0};
-    neura::nvm::ConsoleWriteLine console{output};
-    neura::nvm::StandardServices services;
-    neura::nvm::HostRegistry registry;
-
-    explicit Host(const neura::nvm::Capabilities& capabilities)
-        : services(output, error, input, capabilities) {
-        registry.add(console);
-        services.register_all(registry);
-    }
-};
-
-neura::nvm::RunResult result_of(const neura::nvm::Trace& trace) {
-    neura::nvm::RunResult result;
-    result.completed = trace.outcome.completed;
-    result.status = trace.outcome.status;
-    result.trap = trace.trap;
-    result.steps = trace.steps;
-    result.host_requests = trace.entries.size();
-    result.peak_heap_cells = trace.peak_heap_cells;
-    return result;
-}
-
-neura::nvm::Trace read_trace_file(const fs::path& path) {
-    const auto bytes = read_file(path);
-    try {
-        return neura::nvm::read_trace(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
-    } catch (const neura::nvm::TraceFormatError& error) {
-        throw std::runtime_error(path.string() + ": " + error.what());
-    }
-}
-
-// The functions that took the most steps, with names from the image's NAME
-// section when it has one.
-void print_profile(const neura::nvr::Image& image, const neura::nvm::RunResult& result) {
-    const auto names = neura::nvr::decode_names(image);
-    std::vector<std::pair<std::uint64_t, std::size_t>> ranked;
-    for (std::size_t f = 0; f < result.function_steps.size(); ++f) {
-        if (result.function_steps[f] != 0) ranked.emplace_back(result.function_steps[f], f);
-    }
-    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
-        return a.first != b.first ? a.first > b.first : a.second < b.second;
-    });
-    std::cerr << "profile: steps by function\n";
-    for (std::size_t i = 0; i < ranked.size() && i < 25; ++i) {
-        const auto [steps, f] = ranked[i];
-        std::cerr << "  " << steps << "  f" << f;
-        if (names && f < names->functions.size()) std::cerr << "  " << names->functions[f];
-        std::cerr << '\n';
-    }
 }
 
 // The exact sum of up to 1,048,576 uint64 counters fits in these two decimal parts.
@@ -789,48 +767,10 @@ int run(const Options& options) {
     Host host(options.capabilities);
     provide_native_library(image, host.services);
     if (options.each) return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device()), options.stats);
-    auto limits = options.limits;
-    limits.graph_device = gpu.device();
-    neura::nvm::RunResult result;
-    if (options.replay) {
-        // No service runs: every response comes from the trace. Console
-        // output is reproduced from the recorded requests so that the
-        // replayed run prints what the recorded one printed.
-        const auto expected = read_trace_file(*options.replay);
-        const auto replayed = neura::nvm::replay(
-            image, expected, options.arguments, limits, [&](const neura::nvm::TraceEntry& entry) {
-                neura::nvm::replay_console_output(entry.import, entry.version, entry.arguments, entry.completion,
-                                                  host.output, host.error);
-            });
-        if (!replayed.matches) {
-            throw std::runtime_error("replay of " + options.replay->string() + " diverged: " + replayed.difference);
-        }
-        result = result_of(replayed.trace);
-    } else if (options.record) {
-        const auto bindings = neura::nvm::bind(image, host.registry);
-        const auto trace = neura::nvm::record(image, bindings, options.arguments, limits);
-        host.services.end_run();
-        const auto text = neura::nvm::write_trace(trace);
-        write_file(*options.record, std::vector<std::uint8_t>(text.begin(), text.end()));
-        result = result_of(trace);
-    } else {
-        const auto bindings = neura::nvm::bind(image, host.registry);
-        result = neura::nvm::run(image, bindings, options.arguments, limits);
-        host.services.end_run();
-    }
-    if (options.stats) {
-        std::cerr << "stats: steps " << result.steps << ", peak heap cells " << result.peak_heap_cells
-                  << ", host requests " << result.host_requests << ", " << image_costs(image)
-                  << ", image bytes " << fs::file_size(path) << '\n';
-    }
-    if (options.limits.profile) {
-        print_profile(image, result);
-    }
-    if (!result.completed) {
-        std::cerr << path.string() << ": trap: " << neura::nvm::describe(result.trap, image) << '\n';
-        return gpu.finish(neura::nvm::exit_status(result.trap), options.stats);
-    }
-    return gpu.finish(result.status, options.stats);
+    neura::runner::RunOptions run_options{options.limits, options.stats, options.record, options.replay};
+    run_options.limits.graph_device = gpu.device();
+    const auto status = neura::runner::run(image, host, options.arguments, run_options, path.string(), image_bytes);
+    return gpu.finish(status, options.stats);
 }
 
 // The source location of a block, when the image has a source map entry.

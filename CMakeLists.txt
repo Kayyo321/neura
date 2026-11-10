@@ -47,6 +47,35 @@ if(NOT WIN32)
 endif()
 neura_target_defaults(neura_nvm)
 
+add_library(neura_runner STATIC src/runner/runner.cpp src/launcher/container.cpp)
+target_link_libraries(neura_runner PUBLIC neura_nvm)
+neura_target_defaults(neura_runner)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" neura_launcher_arch)
+    if(neura_launcher_arch MATCHES "^(x86_64|amd64)$")
+        set(neura_launcher_arch x86_64)
+    elseif(neura_launcher_arch MATCHES "^(aarch64|arm64)$")
+        set(neura_launcher_arch aarch64)
+    elseif(neura_launcher_arch MATCHES "^i[3-6]86$")
+        set(neura_launcher_arch i386)
+    elseif(neura_launcher_arch MATCHES "^arm")
+        set(neura_launcher_arch arm)
+    elseif(NOT neura_launcher_arch STREQUAL "riscv64")
+        set(neura_launcher_arch unknown)
+    endif()
+    set(neura_launcher_triple "${neura_launcher_arch}-linux-gnu")
+    set(neura_launcher_directory "lib/neura/launchers/${neura_launcher_triple}")
+    find_library(NEURA_STATIC_LIBFFI NAMES libffi.a HINTS ${LIBFFI_LIBRARY_DIRS} REQUIRED)
+    add_executable(neura_launcher src/launcher/main.cpp)
+    target_compile_definitions(neura_launcher PRIVATE NEURA_LAUNCHER_TRIPLE="${neura_launcher_triple}")
+    target_link_libraries(neura_launcher PRIVATE neura_runner neura_nvm "${NEURA_STATIC_LIBFFI}")
+    target_link_options(neura_launcher PRIVATE -static-libstdc++ -static-libgcc -s)
+    set_target_properties(neura_launcher PROPERTIES OUTPUT_NAME neura-launcher
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${neura_launcher_directory}")
+    neura_target_defaults(neura_launcher)
+endif()
+
 set(NEURA_GPU "AUTO" CACHE STRING "GPU graph execution: AUTO, ON, or OFF")
 set_property(CACHE NEURA_GPU PROPERTY STRINGS AUTO ON OFF)
 if(NOT NEURA_GPU MATCHES "^(AUTO|ON|OFF)$")
@@ -138,8 +167,11 @@ add_library(neura_decompiler STATIC
 target_link_libraries(neura_decompiler PUBLIC neura_compiler neura_nvm)
 neura_target_defaults(neura_decompiler)
 
-add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run.cpp)
-target_link_libraries(neura PRIVATE neura_compiler neura_nvm neura_decompiler)
+add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run.cpp src/launcher/descriptor.cpp)
+target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler)
+if(TARGET neura_launcher)
+    add_dependencies(neura neura_launcher)
+endif()
 if(NEURA_HAS_GPU)
     target_link_libraries(neura PRIVATE neura_gpu)
     target_compile_definitions(neura PRIVATE NEURA_HAS_GPU=1)
@@ -170,6 +202,22 @@ set(NEURA_LIBCLANG_TESTS ${BUILD_TESTING})
 add_subdirectory(third_party/neura-libclang)
 
 if(BUILD_TESTING)
+    if(TARGET neura_launcher)
+        add_executable(neura_native_container_tests tests/native/container_cases.cpp)
+        neura_target_defaults(neura_native_container_tests)
+        foreach(suite IN ITEMS build run container)
+            add_test(NAME native-${suite} COMMAND ${CMAKE_COMMAND}
+                "-DNEURA=$<TARGET_FILE:neura>"
+                "-DLAUNCHER=$<TARGET_FILE:neura_launcher>"
+                "-DCONTAINER_TESTS=$<TARGET_FILE:neura_native_container_tests>"
+                "-DSTRIP=${CMAKE_STRIP}"
+                "-DSUITE=${suite}"
+                "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+                "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-executable-${suite}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/executable.cmake")
+        endforeach()
+    endif()
+
     add_test(NAME frontend COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"

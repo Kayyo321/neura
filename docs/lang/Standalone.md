@@ -1,6 +1,6 @@
 # Native executables: implementation plan for `neura build --native`
 
-This page is a plan. Nothing in it is implemented: `neura build` writes only `.nvr` images, and running one needs `neura run`. The plan specifies a `--native` flag that makes `neura build` write a single executable file containing the program's image and the runtime that executes it, so a Neura program can be copied to a machine with no Neura toolchain and started like any other program.
+Phase 1 implements `neura build --native` with the default launcher and policy on Linux x86-64. The remaining phases add build-time policy options, executable inspection, and launcher variants. A native executable contains the program's image and the runtime that executes it, so the file can run on a machine without an installed Neura toolchain.
 
 ## 1. How to read this plan
 
@@ -231,7 +231,7 @@ Dynamic loading needs a dynamic C library, which is why native interop and a ful
 
 `neura build --native` uses `--launcher <file>` when given. Otherwise it looks in the launcher directory of the `neura` that is running, under the triple from `--target` or its own. A launcher for another target comes from building Neura for that target and copying its launcher directory; the image needs no rebuilding, because an image moves between hosts unchanged ([NVM](../runtime/NVM.md#toolchain-and-distribution)).
 
-As an indication of size only: on the machine where this plan was written, a Release build's `neura` is 3.4 MB with the compiler and decompiler, and the NVM and NVR libraries it would keep are 1.5 MB as unlinked archives. Phase 1 measures and reports the launcher itself.
+The phase 1 Release build on Linux x86-64 with GCC 14.2.0 produced a stripped default launcher of 1,999,344 bytes and a packaged Hello World of 2,012,899 bytes. On the Ryzen 7 9800X3D pinned to CPU 7, the median of 21 paired launches after warming both modes was 0.418 ms for the executable and 0.644 ms for `neura run --no-gpu`. The descriptor uses `development` as the toolchain version for this unversioned build.
 
 ## 8. Reading an executable back
 
