@@ -294,6 +294,8 @@ if(BUILD_TESTING)
 
     add_executable(neura_ir_tests
         tests/ir-optimization/behavior_tests.cpp
+        tests/ir-optimization/concurrency_support.cpp
+        tests/ir-optimization/concurrency_tests.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
         tests/ir-optimization/main.cpp
@@ -307,7 +309,7 @@ if(BUILD_TESTING)
 
     # Each suite is a separate test, so a failure names the kind of evidence
     # that broke.
-    foreach(suite IN ITEMS structure verifier behavior)
+    foreach(suite IN ITEMS structure verifier behavior concurrency)
         add_test(NAME ir-optimization-${suite}
             COMMAND neura_ir_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
@@ -315,6 +317,7 @@ if(BUILD_TESTING)
     add_executable(neura_backend_tests
         tests/backend/assembler.cpp
         tests/backend/circuit_tests.cpp
+        tests/backend/concurrency_evidence_tests.cpp
         tests/backend/concurrency_tests.cpp
         tests/backend/conversion_tests.cpp
     tests/backend/decompiler_tests.cpp
@@ -330,6 +333,7 @@ if(BUILD_TESTING)
         tests/backend/placement_tests.cpp
         tests/backend/reference_tests.cpp
         tests/backend/vm_tests.cpp
+        tests/ir-optimization/concurrency_support.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
         tests/ir-optimization/main.cpp

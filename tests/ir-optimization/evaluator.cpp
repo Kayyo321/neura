@@ -13,7 +13,11 @@
 #include <cstring>
 
 #include <algorithm>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <limits>
 #include <sstream>
 #include <utility>
@@ -130,7 +134,12 @@ struct Stop {
     std::string reason;
     Span location;
     std::uint32_t trap_reason = 0;
+    std::uint64_t exit_status = 0;
 };
+
+// Unwinds a task's interpretation when the run ended in another task. It is
+// not a Stop: it carries no outcome.
+struct Abandon {};
 
 enum class Flow { Next, Return, Break, Continue };
 
@@ -141,6 +150,9 @@ struct Frame {
     std::optional<Value> self;
     std::map<SymbolId, Value> locals;
     std::optional<Value> result;
+    // Scopes this activation has open, innermost last (indexes into the
+    // machine's scope table).
+    std::vector<std::size_t> scopes;
 };
 
 } // namespace
@@ -217,6 +229,7 @@ std::string describe(Status status) {
     case Status::Faulted: return "faulted";
     case Status::Unsupported: return "unsupported";
     case Status::LimitReached: return "limit reached";
+    case Status::Exited: return "exited";
     }
     return "<invalid>";
 }
@@ -227,7 +240,10 @@ std::string describe(const Outcome& outcome) {
     if (outcome.result) {
         out << ' ' << describe(*outcome.result);
     }
-    if (outcome.status != Status::Returned) {
+    if (outcome.status == Status::Exited) {
+        out << " with status " << outcome.exit_status;
+    }
+    if (outcome.status != Status::Returned && outcome.status != Status::Exited) {
         out << " (" << outcome.reason;
         if (outcome.status == Status::Trapped) {
             out << ", reason " << outcome.trap_reason;
@@ -243,6 +259,13 @@ std::string describe(const Outcome& outcome) {
         out << ')';
     }
     out << "], " << outcome.globals.size() << " global(s)";
+    if (!outcome.schedule.empty()) {
+        out << ", schedule [";
+        for (std::size_t i = 0; i < outcome.schedule.size(); ++i) {
+            out << (i == 0 ? "" : " ") << outcome.schedule[i];
+        }
+        out << ']';
+    }
     return out.str();
 }
 
@@ -254,7 +277,17 @@ std::string difference(const Outcome& left, const Outcome& right) {
          !same_span(left.location, right.location))) {
         return "stop reason or location differs";
     }
+    if (left.exit_status != right.exit_status) return "exit status differs";
     if (left.effects != right.effects) return "effects differ";
+    if (left.schedule != right.schedule) {
+        std::size_t tick = 0;
+        while (tick < left.schedule.size() && tick < right.schedule.size() &&
+               left.schedule[tick] == right.schedule[tick]) {
+            ++tick;
+        }
+        return "schedules differ at tick " + std::to_string(tick) + " (" + std::to_string(left.schedule.size()) +
+               " and " + std::to_string(right.schedule.size()) + " decisions)";
+    }
     if (left.globals != right.globals) return "final global state differs";
     return {};
 }
@@ -300,6 +333,21 @@ public:
         });
     }
 
+    Outcome call_entry(SymbolId function) {
+        return guarded([&]() -> std::optional<Value> {
+            const auto& parameters = symbol(function).parameters;
+            if (parameters.size() != 1) {
+                throw Stop{Status::Unsupported, "an entry that does not take one argument list", symbol(function).span};
+            }
+            heap_.entries.push_back({HeapEntry::Kind::Array, no_symbol, {}, {}, 0, false, 0});
+            Value empty;
+            empty.kind = Value::Kind::Reference;
+            empty.type = symbol(parameters.front()).type;
+            empty.handle = heap_.entries.size() - 1;
+            return invoke(function, no_symbol, {empty}, symbol(function).span);
+        });
+    }
+
     Outcome evaluate_closed(const IrNode& expression) {
         return guarded([&]() -> std::optional<Value> {
             Frame frame;
@@ -335,22 +383,294 @@ private:
         return position;
     }
 
+    // ---- Reference scheduler (Concurrency.md section 10.2) ----
+    //
+    // One thread per started task; `turn_` names the task allowed to run and
+    // every other thread waits on its own condition variable. All scheduler
+    // state is touched only by the task holding the turn, and each hand-off
+    // goes through `mutex_`, which orders the memory.
+
+    enum class TaskState { Runnable, Running, Joining, Leaving, Finished };
+
+    struct TaskRecord {
+        std::uint64_t id = 0;
+        std::uint64_t parent = 0;
+        // Index in scopes_ of the scope that owns this task.
+        std::size_t scope = 0;
+        // A discarded spawn has no handle and keeps no result.
+        bool handle = true;
+        bool started = false;
+        TaskState state = TaskState::Runnable;
+        std::uint64_t waiting_for = 0;
+        std::size_t leaving = 0;
+        std::optional<Value> result;
+        Value function;
+        SymbolId method = no_symbol;
+        Span site;
+        std::condition_variable wake;
+    };
+
+    struct ScopeRecord {
+        std::uint64_t owner = 0;
+        bool open = true;
+        std::size_t live = 0;
+    };
+
+    std::mutex mutex_;
+    bool ended_ = false;
+    std::uint64_t turn_ = 0;
+    std::uint64_t current_ = 0;
+    std::uint64_t next_task_ = 1;
+    std::size_t live_tasks_ = 1;
+    std::size_t polls_ = 0;
+    std::deque<std::uint64_t> runnable_;
+    std::map<std::uint64_t, std::unique_ptr<TaskRecord>> tasks_;
+    std::vector<ScopeRecord> scopes_;
+    std::map<std::uint64_t, std::thread> threads_;
+    std::vector<std::uint64_t> finished_threads_;
+    std::vector<std::uint64_t> schedule_;
+    std::optional<Stop> stop_;
+
+    void reset_scheduler() {
+        ended_ = false;
+        turn_ = current_ = 0;
+        next_task_ = 1;
+        live_tasks_ = 1;
+        polls_ = 0;
+        runnable_.clear();
+        tasks_.clear();
+        scopes_.clear();
+        threads_.clear();
+        finished_threads_.clear();
+        schedule_.clear();
+        stop_.reset();
+        auto root = std::make_unique<TaskRecord>();
+        root->state = TaskState::Running;
+        root->started = true;
+        tasks_.emplace(0, std::move(root));
+    }
+
+    TaskRecord& task(std::uint64_t id) { return *tasks_.at(id); }
+
+    // Ends the run: no task runs again, and every waiting thread unwinds.
+    // Called with the lock held by the task that stopped.
+    void end_run(const std::lock_guard<std::mutex>&) {
+        ended_ = true;
+        for (auto& [id, record] : tasks_) record->wake.notify_all();
+    }
+
+    // Takes the front of the runnable queue as the next task (one tick) and
+    // hands it the turn, starting its thread on its first turn. The caller
+    // then waits for its own turn or leaves.
+    void choose_next() {
+        if (runnable_.empty()) {
+            throw Stop{Status::Faulted, "deadlock: all tasks are parked", {}};
+        }
+        const auto next = runnable_.front();
+        runnable_.pop_front();
+        schedule_.push_back(next);
+        polls_ = 0;
+        turn_ = current_ = next;
+        auto& record = task(next);
+        record.state = TaskState::Running;
+        if (!record.started) {
+            record.started = true;
+            threads_.emplace(next, std::thread([this, &record] { run_task(record); }));
+        } else {
+            record.wake.notify_one();
+        }
+    }
+
+    void await_turn(std::unique_lock<std::mutex>& lock, TaskRecord& me) {
+        me.wake.wait(lock, [&] { return ended_ || turn_ == me.id; });
+        if (ended_) throw Abandon{};
+    }
+
+    // Joins the threads of finished tasks. Each has already handed over its
+    // turn, so this waits at most for the thread to leave its function.
+    void reap() {
+        std::vector<std::thread> done;
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            for (const auto id : finished_threads_) {
+                done.push_back(std::move(threads_.at(id)));
+                threads_.erase(id);
+            }
+            finished_threads_.clear();
+        }
+        for (auto& thread : done) thread.join();
+    }
+
+    // The running task stops running until it is chosen again. The caller has
+    // set its state and, for a yield, put it on the queue.
+    void suspend(TaskRecord& me) {
+        const auto depth = depth_;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            choose_next();
+            await_turn(lock, me);
+        }
+        depth_ = depth;
+        reap();
+    }
+
+    void run_task(TaskRecord& me) {
+        try {
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                await_turn(lock, me);
+            }
+            depth_ = 0;
+            reap();
+            auto result = invoke(me.method, no_symbol, {}, me.site, me.function);
+            finish_task(me, std::move(result));
+        } catch (const Abandon&) {
+        } catch (const Stop& stop) {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            if (!stop_) stop_ = stop;
+            end_run(lock);
+        } catch (const std::exception& error) {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            if (!stop_) stop_ = Stop{Status::Unsupported, std::string("internal error: ") + error.what(), me.site};
+            end_run(lock);
+        }
+    }
+
+    void finish_task(TaskRecord& me, Value result) {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        me.state = TaskState::Finished;
+        if (me.handle) me.result = std::move(result);
+        --live_tasks_;
+        auto& scope = scopes_.at(me.scope);
+        --scope.live;
+        auto& parent = task(me.parent);
+        if (parent.state == TaskState::Joining && parent.waiting_for == me.id) {
+            parent.state = TaskState::Runnable;
+            runnable_.push_back(parent.id);
+        } else if (parent.state == TaskState::Leaving && parent.leaving == me.scope && scope.live == 0) {
+            parent.state = TaskState::Runnable;
+            runnable_.push_back(parent.id);
+        }
+        finished_threads_.push_back(me.id);
+        choose_next();
+    }
+
+    // A poll counts one toward the running task's quantum. A task that has
+    // spent it goes to the back of the queue when another task is runnable.
+    void poll() {
+        if (++polls_ < limits_.quantum) return;
+        if (runnable_.empty()) {
+            polls_ = 0;
+            return;
+        }
+        auto& me = task(current_);
+        me.state = TaskState::Runnable;
+        runnable_.push_back(me.id);
+        suspend(me);
+    }
+
+    Value spawn_task(const IrNode& node, Frame& frame, bool handle) {
+        const auto function = evaluate(node.operands.at(0), frame);
+        if (node.operands.front().op != IrOp::Allocate || function.kind != Value::Kind::Reference) {
+            unsupported(node, "a spawn whose operand is not the allocation of a capture layout");
+        }
+        if (frame.scopes.empty()) {
+            fault(node, "invalid task operation: spawn outside a task scope of its function");
+        }
+        if (live_tasks_ + 1 > limits_.max_tasks) {
+            throw Stop{Status::LimitReached, "task limit", node.span};
+        }
+        const auto method = own_member(object(function, node).cls, "$invoke");
+        if (method == no_symbol || !symbol(method).has_body) {
+            unsupported(node, "a spawned function value without a body");
+        }
+        auto record = std::make_unique<TaskRecord>();
+        record->id = next_task_++;
+        record->parent = current_;
+        record->scope = frame.scopes.back();
+        record->handle = handle;
+        record->function = function;
+        record->method = method;
+        record->site = node.span;
+        const auto id = integer_value(node.type, false, record->id);
+        ++scopes_.at(record->scope).live;
+        ++live_tasks_;
+        runnable_.push_back(record->id);
+        tasks_.emplace(record->id, std::move(record));
+        return id;
+    }
+
+    // The record behind a task number, if the current task may use it: only
+    // the task that owns the scope, and only while the scope is open.
+    TaskRecord& owned_task(const Value& id, const IrNode& node) {
+        const auto found = id.kind == Value::Kind::Integer && !id.negative ? tasks_.find(id.magnitude) : tasks_.end();
+        if (found == tasks_.end() || found->first == 0 || !found->second->handle) {
+            fault(node, "invalid task operation: unknown task handle");
+        }
+        const auto& scope = scopes_.at(found->second->scope);
+        if (!scope.open || scope.owner != current_) {
+            fault(node, "invalid task operation: task handle is outside its owning scope");
+        }
+        return *found->second;
+    }
+
+    // Every exit from a scope's body waits for the tasks it owns, then closes
+    // the scope and, with it, their handles.
+    void close_scope(Frame& frame) {
+        const auto index = frame.scopes.back();
+        if (scopes_.at(index).live > 0) {
+            auto& me = task(current_);
+            me.state = TaskState::Leaving;
+            me.leaving = index;
+            suspend(me);
+        }
+        scopes_.at(index).open = false;
+        frame.scopes.pop_back();
+    }
+
+    // Stops every task and joins every thread.
+    void shut_down() {
+        std::map<std::uint64_t, std::thread> threads;
+        {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            end_run(lock);
+            threads.swap(threads_);
+        }
+        for (auto& [id, thread] : threads) {
+            if (thread.joinable()) thread.join();
+        }
+    }
+
     template <typename Run>
     Outcome guarded(Run run) {
         effects_.clear();
         spent_ = 0;
         depth_ = 0;
+        reset_scheduler();
         Outcome outcome;
         try {
             outcome.result = run();
         } catch (const Stop& stop) {
-            outcome.status = stop.status;
-            outcome.reason = stop.reason;
-            outcome.trap_reason = stop.trap_reason;
-            outcome.location = stop.location;
+            const std::lock_guard<std::mutex> lock(mutex_);
+            if (!stop_) stop_ = stop;
+        } catch (const Abandon&) {
+            // Another task ended the run.
+        } catch (...) {
+            shut_down();
+            throw;
+        }
+        shut_down();
+        if (stop_) {
+            outcome.result.reset();
+            outcome.status = stop_->status;
+            outcome.reason = stop_->reason;
+            outcome.trap_reason = stop_->trap_reason;
+            outcome.location = stop_->location;
+            outcome.exit_status = stop_->exit_status;
         }
         outcome.effects = effects_;
         outcome.globals = globals_;
+        outcome.schedule = schedule_;
         return outcome;
     }
 
@@ -473,8 +793,22 @@ private:
             return Flow::Next;
         }
         case IrOp::Discard:
+            if (node.operands.at(0).op == IrOp::Spawn) {
+                // The task has no handle: nothing can join it.
+                spawn_task(node.operands.at(0), frame, false);
+                return Flow::Next;
+            }
             evaluate(node.operands.at(0), frame);
             return Flow::Next;
+        case IrOp::TaskScope: {
+            scopes_.push_back({current_, true, 0});
+            frame.scopes.push_back(scopes_.size() - 1);
+            // Falling off the end, return (its value already evaluated),
+            // break, and continue all leave through the same wait.
+            const auto flow = run_region(node.body, frame);
+            close_scope(frame);
+            return flow;
+        }
         case IrOp::Block:
             return run_region(node.body, frame);
         case IrOp::Branch:
@@ -491,6 +825,7 @@ private:
                 }
                 // The latch runs after the body completes or continues.
                 run_region(node.alternative, frame);
+                if (node.poll) poll();
             }
             return Flow::Next;
         case IrOp::Fail:
@@ -723,11 +1058,34 @@ private:
         case IrOp::ComparisonChain:
             run_statement(node.body.at(0), frame);
             return evaluate(node.body.at(1), frame);
-        case IrOp::Call:
-            return invoke(node.symbol, no_symbol, arguments(node, 0, frame), node.span);
+        case IrOp::Call: {
+            auto values = arguments(node, 0, frame);
+            if (node.poll) poll();
+            return invoke(node.symbol, no_symbol, std::move(values), node.span);
+        }
+        case IrOp::Spawn:
+            return spawn_task(node, frame, true);
+        case IrOp::SchedulerCall: {
+            if (node.text != "join" && node.text != "is_finished") {
+                unsupported(node, "scheduler operation " + node.text);
+            }
+            const auto id = evaluate(node.operands.at(0), frame);
+            auto& child = owned_task(id, node);
+            if (node.text == "is_finished") {
+                return bool_value(child.state == TaskState::Finished);
+            }
+            if (child.state != TaskState::Finished) {
+                auto& me = task(current_);
+                me.state = TaskState::Joining;
+                me.waiting_for = child.id;
+                suspend(me);
+            }
+            return child.result.value_or(Value{});
+        }
         case IrOp::VirtualCall: {
             const auto receiver = evaluate(node.operands.at(0), frame);
             auto values = arguments(node, 1, frame);
+            if (node.poll) poll();
             if (receiver.kind == Value::Kind::Reference) {
                 // Dispatch on the runtime class, by name, as overrides match.
                 const auto cls = object(receiver, node).cls;
@@ -740,7 +1098,14 @@ private:
         }
         case IrOp::ExternalCall: {
             auto values = arguments(node, 0, frame);
-            effects_.push_back({qualified_name(program_, node.symbol), std::move(values)});
+            effects_.push_back({qualified_name(program_, node.symbol), values});
+            if (const auto& binding = symbol(node.symbol).host_binding;
+                binding && binding->name == "neura.process.exit") {
+                // The host ends the run; no task continues.
+                Stop exit{Status::Exited, "process exit", node.span};
+                exit.exit_status = values.at(0).magnitude;
+                throw exit;
+            }
             const auto& result = symbol(node.symbol).type;
             if (result.kind == TypeKind::Void) {
                 return Value{};
@@ -1721,6 +2086,11 @@ std::vector<Outcome> Evaluator::initialize() {
 Outcome Evaluator::call(SymbolId function, const std::vector<Value>& arguments) {
     Machine machine(program_, limits_, initial_globals_, initial_heap_ ? *initial_heap_ : Heap{});
     return machine.call(function, arguments);
+}
+
+Outcome Evaluator::call_entry(SymbolId function) {
+    Machine machine(program_, limits_, initial_globals_, initial_heap_ ? *initial_heap_ : Heap{});
+    return machine.call_entry(function);
 }
 
 Outcome Evaluator::evaluate(const IrNode& expression) {
