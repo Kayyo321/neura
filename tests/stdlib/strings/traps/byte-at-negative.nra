@@ -1,4 +1,4 @@
-// status: 70
+// status: 139
 // stderr: source bounds failure \(trap reason 2\)
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

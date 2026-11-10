@@ -1,0 +1,29 @@
+// run-options: --allow-native
+// args: @NATIVE_DIR@/libmathops.so
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let arenas = import:Std.DynamicForeign.Arena;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let segments = import:Std.DynamicForeign.MemorySegment;
+let values = import:Std.DynamicForeign.ForeignValue;
+
+// The Java FFM example: load a C library, find `add`, describe int(int, int),
+// link it, and call it.
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        let lib = result.expect<lookups.SymbolLookup>(lookups.library_lookup(args[0], arena), "load libmathops");
+        let function = optional.expect<segments.MemorySegment>(lib.find("add"), "find add");
+        let signature = descriptors.of(layouts.Int32, layouts.Int32, layouts.Int32);
+        let add = linkers.native_linker().downcall_handle(function, signature);
+        console.print_line(values.as_int32(add.invoke(5, 3)).to_string());
+        console.print_line(values.describe(add.invoke(-7, 2)));
+        arena.close();
+        return program.ExitCode.Ok;
+    };
+);

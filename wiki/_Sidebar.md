@@ -19,6 +19,7 @@
 - [Errors](Errors)
 - [Testing](Testing)
 - [Resources and concurrency](ResourcesConcurrency)
+- [Foreign interop](ForeignInterop)
 - [Project structure](ProjectStructure)
 
 **Standard library**

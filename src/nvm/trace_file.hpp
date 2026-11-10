@@ -32,7 +32,8 @@ namespace neura::nvm {
 // starting with `#` and blank lines are ignored. The writer emits one space
 // between fields, `, ` between list elements, and LF line ends, so the same
 // trace always produces the same bytes.
-inline constexpr int trace_file_version = 1;
+// Version 2 adds callbacks; a reader accepts 1 and 2.
+inline constexpr int trace_file_version = 2;
 
 class TraceFormatError : public std::runtime_error {
 public:

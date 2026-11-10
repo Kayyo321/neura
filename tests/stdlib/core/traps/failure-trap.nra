@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): custom stop in function [0-9]+ block [0-9]+ at std/core/failure[.]nra:[0-9]+:[0-9]+
 let program = import:Std.Program;
 let console = import:Std.Io.Console;

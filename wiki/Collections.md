@@ -1,3 +1,5 @@
+
+The same loop visits any value that implements `Std.Collections.Iterable<T>`, calling `iterator()` once and then `has_next()` and `next()` ([Core language](https://github.com/Kayyo321/neura/wiki/CoreLanguage#loops)). Every standard-library collection, `Sequence`, and `Std.Core.IntRange` implement it, and a program's own classes can too. A source that is not an array, list, or `Iterable<T>` is rejected, as is an element annotation that differs from `T`.
 # Arrays and lists
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
@@ -55,7 +57,7 @@ Collection operations must also check length and allocation arithmetic for overf
 
 The spelling of bounds and allocation errors, error handling, ownership and aliasing, collection equality, and general allocation APIs remain to be specified. In particular, a fixed array length does not imply immutable elements or exclusive ownership.
 
-A negative index fails with trap reason 2 (bounds failure); an index at or past the length is a bounds fault detected by NVM. Both end the run with status 70.
+A negative index fails with trap reason 2 (bounds failure); an index at or past the length is a bounds fault detected by NVM. Both end the run with status 139, `ExitCode.SegmentationFault` ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)).
 
 ## Iteration
 

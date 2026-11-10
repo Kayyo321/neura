@@ -1,0 +1,12 @@
+// status: 134
+let program = import:Std.Program;
+let console = import:Std.Io.Console;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        program.Process.exit(program.ExitCode.Abort);
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

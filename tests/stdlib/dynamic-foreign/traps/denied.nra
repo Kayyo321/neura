@@ -1,0 +1,16 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid state: native access denied: run with --allow-native
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let arenas = import:Std.DynamicForeign.Arena;
+
+// Without --allow-native, the first native operation traps.
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        console.print_line("created");
+        arena.allocate(8, 8);
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

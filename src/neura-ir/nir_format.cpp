@@ -1,4 +1,5 @@
 #include "nir_format.hpp"
+#include "host_binding.hpp"
 #include "integer.hpp"
 
 #include <algorithm>
@@ -108,6 +109,7 @@ public:
         }
         u16(nir_major_version);
         std::uint16_t version = program.static_constants.empty() ? 0 : 6;
+        if (program.native_library) version = 8;
         for (const auto& item : program.symbols) {
             if (item.variadic != VariadicKind::None || item.user_cast ||
                 item.overload_group != no_symbol || item.singleton_instance != no_symbol) {
@@ -115,6 +117,7 @@ public:
             }
             if (is_static_initializer(item)) version = std::max<std::uint16_t>(version, 5);
             if (is_static_scope(item)) version = std::max<std::uint16_t>(version, 4);
+            if (host_callback(item)) version = std::max<std::uint16_t>(version, 8);
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
                 version = std::max<std::uint16_t>(version, 3);
@@ -127,7 +130,7 @@ public:
             }
         }
         for (const auto& body : program.bodies) {
-            if (version == 7) break;
+            if (version >= 7) break;
             version = std::max(version, required_minor(body.instructions));
         }
         u16(version);
@@ -149,6 +152,16 @@ public:
             for (const auto& constant : program.static_constants) {
                 reference(constant.field);
                 node(constant.value);
+            }
+        }
+        if (version >= 8) {
+            u8(program.native_library ? 1 : 0);
+            if (program.native_library) {
+                text(program.native_library->triple);
+                count(program.native_library->object.size());
+                for (const auto byte : program.native_library->object) u8(byte);
+                count(program.native_library->symbols.size());
+                for (const auto& symbol : program.native_library->symbols) text(symbol);
             }
         }
         return std::move(bytes_);
@@ -314,7 +327,8 @@ public:
                  " is not supported; this reader accepts 1.0 through 1." + std::to_string(nir_minor_version));
         }
         constexpr std::uint8_t operation_limits[]{
-            max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7};
+            max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
+            max_op_1_7};
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
@@ -342,6 +356,17 @@ public:
             program.static_constants.reserve(constants);
             for (std::uint32_t i = 0; i < constants; ++i)
                 program.static_constants.push_back({required_reference(), node(0)});
+        }
+        if (minor_ >= 8 && u8() != 0) {
+            IrNativeLibrary library;
+            library.triple = text();
+            const auto size = count(1);
+            library.object.reserve(size);
+            for (std::uint32_t i = 0; i < size; ++i) library.object.push_back(u8());
+            const auto symbols = count(4);
+            for (std::uint32_t i = 0; i < symbols; ++i) library.symbols.push_back(text());
+            if (library.triple.empty() || library.object.empty()) fail("a native library needs a triple and an object");
+            program.native_library = std::move(library);
         }
         if (position_ != bytes_.size()) {
             fail(std::to_string(bytes_.size() - position_) + " unread bytes at the end of the file");
@@ -516,7 +541,11 @@ private:
             value.payload_types = types(0);
             if (value.payload_types.empty()) fail("a payload flag requires at least one payload type");
         }
-        if ((flags & HostBound) != 0) value.host_binding = IrHostBinding{text(), u32()};
+        if ((flags & HostBound) != 0) {
+            value.host_binding = IrHostBinding{text(), u32()};
+            // NIR 1.8: a host binding on a function with a body is a callback.
+            if (value.has_body && minor_ < 8) fail("a host callback needs NIR 1.8");
+        }
         if ((flags & LibraryFile) != 0) {
             value.library_path = text();
             if (value.library_path.empty()) fail("a library file needs a nonempty identity");

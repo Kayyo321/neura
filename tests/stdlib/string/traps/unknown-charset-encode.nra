@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: encode text: unsupported charset: unknown
 let program = import:Std.Program;
 

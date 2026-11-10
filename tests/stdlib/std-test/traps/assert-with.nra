@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): custom message
 let program = import:Std.Program;
 let error = import:Std.Core.Error;

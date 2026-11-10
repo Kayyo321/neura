@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: invalid date
 let console = import:Std.Io.Console;
 let local_date = import:Std.Time.LocalDate;

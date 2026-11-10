@@ -30,7 +30,7 @@ A literal is a sequence of decimal digits. It takes the integer type that its co
 | `a / b` | The quotient rounded toward zero | Traps when `b` is zero, and for `MIN / -1` of a signed type |
 | `a % b` | `a - (a / b) * b`: the remainder has the sign of `a`, or is zero | Traps when `b` is zero. `MIN % -1` is 0 |
 
-Nothing wraps or saturates: an operation either produces its exact mathematical result or traps. A trap ends the run with trap reason 1 (arithmetic failure) and process status 70 ([NVM](https://github.com/Kayyo321/neura/wiki/NVM)). For example, `7 / 2` is 3, `-7 / 2` is -3, `-7 % 2` is -1, and `7 % -2` is 1.
+Nothing wraps or saturates: an operation either produces its exact mathematical result or traps. A trap ends the run with trap reason 1 (arithmetic failure) and process status 136, `ExitCode.ArithmeticError` ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). For example, `7 / 2` is 3, `-7 / 2` is -3, `-7 % 2` is -1, and `7 % -2` is 1.
 
 **Compatibility.** Before this release, a division whose remainder was not zero trapped, because the rounding rule was open. It now truncates toward zero. A program that relied on that trap now receives the truncated quotient. Overflow and division by zero trap as before.
 

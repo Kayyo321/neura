@@ -1,4 +1,4 @@
-// status: 70
+// status: 137
 // stderr: heap limit exceeded.*allocation of 101 cells
 // run-options: --max-heap-cells 32
 let program = import:Std.Program;

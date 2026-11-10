@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): collection modified during iteration
 let int_map = import:Std.Collections.IntMap;
 let program = import:Std.Program;

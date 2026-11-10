@@ -1,4 +1,4 @@
-// status: 70
+// status: 139
 // stderr: bounds failure \(trap reason 2\)
 let lists = import:Std.Collections.Lists;
 let program = import:Std.Program;

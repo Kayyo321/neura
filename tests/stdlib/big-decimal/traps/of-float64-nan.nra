@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: not a finite value
 let big = import:Std.Math.BigInteger;
 let console = import:Std.Io.Console;

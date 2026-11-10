@@ -1,0 +1,34 @@
+let.promote _ = import:Std.DynamicForeign.MemoryLayout;
+
+/// @brief The scalar layouts of fixed width (ForeignInterop.md), the counterparts of Java's ValueLayout
+/// constants such as JAVA_INT.
+///
+/// Platform-sized C types (int, long, size_t, and the rest) come from Linker.canonical_layout, which asks the
+/// runner for their sizes.
+/// @see [Std.DynamicForeign.ValueLayout](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-ValueLayout)
+export let ValueLayout = module (
+    /// @brief A C `_Bool`, one byte that is 0 or 1, carried as bool.
+    export const Bool = value(Carrier.Bool);
+    /// @brief A signed byte, carried as int8.
+    export const Int8 = value(Carrier.Int8);
+    /// @brief An unsigned byte, carried as uint8.
+    export const UInt8 = value(Carrier.UInt8);
+    /// @brief A 16-bit signed integer, carried as int16.
+    export const Int16 = value(Carrier.Int16);
+    /// @brief A 16-bit unsigned integer, carried as uint16.
+    export const UInt16 = value(Carrier.UInt16);
+    /// @brief A 32-bit signed integer, carried as int32 (Java's JAVA_INT).
+    export const Int32 = value(Carrier.Int32);
+    /// @brief A 32-bit unsigned integer, carried as uint32.
+    export const UInt32 = value(Carrier.UInt32);
+    /// @brief A 64-bit signed integer, carried as int64 (Java's JAVA_LONG).
+    export const Int64 = value(Carrier.Int64);
+    /// @brief A 64-bit unsigned integer, carried as uint64.
+    export const UInt64 = value(Carrier.UInt64);
+    /// @brief An IEEE binary32 float, carried as float32 (Java's JAVA_FLOAT).
+    export const Float32 = value(Carrier.Float32);
+    /// @brief An IEEE binary64 float, carried as float64 (Java's JAVA_DOUBLE).
+    export const Float64 = value(Carrier.Float64);
+    /// @brief A native pointer, carried as a MemorySegment (Java's ADDRESS).
+    export const Address = value(Carrier.Address);
+);

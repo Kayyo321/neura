@@ -1,3 +1,7 @@
+
+A callback record contains `name:text, interface_version:u32, function:u32`. A callback is a function the runner may call while a host request is in progress, named like an import; [NVM](https://github.com/Kayyo321/neura/wiki/NVM#callbacks) defines the protocol. The tuple of name and version is unique, the function exists and is not the entry function, and its parameters and result use host data. `CALB` is required for execution when present: a runner that does not know it rejects the image instead of running without its callbacks.
+
+The `NATV` section contains `triple:text, object:bytes, symbols:vector<text>`: the target triple the shared object was linked for, the object's bytes, and the symbols the image's C imports use, unique and in ascending byte order. A runner loads the object only when the program first asks for the embedded library, and only on a matching target; on any other target that request fails and the rest of the image runs. The object is native code: the decompiler shows it as an opaque region with its triple, size, and symbols ([Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop)).
 # Neura Virtual Runtime image format
 
 An NVR image is a binary executable for the [Neura Virtual Machine](NVM). The file extension is `.nvr`. The image is the output of `IRtoNeuronConversion` and serialization. Its executable records contain everything needed to evaluate the compiled program with a compatible NVM and its declared host services.
@@ -12,6 +16,7 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 
 | Field | Type | Value |
 | --- | --- | --- |
+| `CALB` | Callback records (1.4); present only when the image has callbacks | Yes, when present |
 | Magic | 4 bytes | ASCII `NEUR` |
 | Major | u16 | 1 |
 | Minor | u16 | 0 or 1 |
@@ -21,12 +26,12 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 
 The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four printable ASCII characters and compare bytewise. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
 
-### Versions 1.0 through 1.3
+### Versions 1.0 through 1.4
 
-Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). The graph profile remains 1.
+Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. The graph profile remains 1.
 
 - A writer emits the lowest minor version whose features the image uses. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
-- The loader accepts major version 1 with minor versions 0 through 3. A feature newer than the version declared by the image makes the image malformed.
+- The loader accepts major version 1 with minor versions 0 through 4. A feature newer than the version declared by the image makes the image malformed.
 - An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
@@ -38,6 +43,7 @@ Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-versi
 | `IMPT` | Host import declarations | Yes |
 | `LAYO` | Object layout records | Yes |
 | `META` | Entry function index as one `u32` | Yes |
+| `NATV` | The embedded native library (1.4); present only when the image has C imports | Yes, when present |
 | `NAME` | Source names for tools (provenance; not interpreted by the loader) | Optional |
 | `SMAP` | Source locations for function blocks | Optional |
 | `TYPE` | Type records | Yes |

@@ -136,7 +136,7 @@ Trusted library source can bind a bodyless function with the suffix `host("servi
 
 #### P3. Entry point from the library
 
-An override of `Std.Program.Entry.main` can be the image entry point. Its `ExitCode` maps `Ok` to 0, `Failure` to 1, and `Status(int)` to the validated process status. The compiler still accepts the legacy `SysIo.Entry` route for migration and rejects an image with two entry points.
+An override of `Std.Program.Entry.main` can be the image entry point. Its `ExitCode` maps `Ok` to 0, `Failure` to 1, `Status(int)` to the validated process status, and each named variant to its fixed status. The compiler still accepts the legacy `SysIo.Entry` route for migration and rejects an image with two entry points.
 
 ### 3.4 Optional accelerations
 
@@ -172,6 +172,7 @@ None of these blocks anything. Each replaces a loop of storage operations with o
 | `Std.Digest` | `Crc32`, `Sha256` | [13.2](#132-stddigest) |
 | `Std.Log` | `Logger` | [14.1](#141-stdlog) |
 | `Std.Test` | Assertions | [14.2](#142-stdtest) |
+| `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` | [Foreign interop](ForeignInterop) |
 | `Std.Concurrent` | Reserved; not designed | [15.1](#151-deferred-and-excluded) |
 
 `Std.Program`, `Std.Io.Console`, and `Std.Test` replace the built-in `SysIo` and `Test` modules, which are deleted ([section 4.6](#46-retiring-sysio-and-test)).
@@ -196,10 +197,10 @@ A module may import only modules above it. Cycles are forbidden.
 4. `Std.Math`
 5. `Std.Text.Regex`, `Std.Encoding`, `Std.Digest`, `Std.Random`, `Std.Time`
 6. `Std.Io`, `Std.Program`
-7. `Std.Fs`, `Std.Net`
+7. `Std.Fs`, `Std.Net`, `Std.DynamicForeign`
 8. `Std.Log`, `Std.Test`
 
-`StringBuilder` is in `Std.Core` because number formatting needs it. `Std.Core` never names a collection class: where a core function returns several values it returns a tuple or a built-in list. The `String` companion is an exception to the order above. It depends on `Std.Text` and the pure formatting module in `Std.Io.Internal`. `Std.Test` is last in the import order but early in the schedule: its assertions for built-in types import only `Std.Core`.
+`StringBuilder` is in `Std.Core` because number formatting needs it. `IntRange` imports the `Iterable` and `Iterator` interfaces from `Std.Collections` so that for-each can visit a range; those two modules import nothing, so no cycle forms. `Std.Core` never names a collection class: where a core function returns several values it returns a tuple or a built-in list. The `String` companion is an exception to the order above. It depends on `Std.Text` and the pure formatting module in `Std.Io.Internal`. `Std.Test` is last in the import order but early in the schedule: its assertions for built-in types import only `Std.Core`.
 
 
 ### 4.4 Built-in floor
@@ -224,10 +225,11 @@ Every interaction with the outside world is a host service with a name, a versio
 | `neura.env.get` | 1 | name text | found flag and value text | `Environment` |
 | `neura.process.exit` | 1 | status | does not return | `Process.exit` |
 | `neura.net.connect`, `listen`, `local_port`, `accept`, `read`, `write`, `close` | 1 | [section 11.4](#114-stdnet) | socket ID, port, bytes, or count | `Std.Net` |
+| `neura.ffi.abi`, `arena.open`, `arena.close`, `alloc`, `library.open`, `library.default`, `library.embedded`, `symbol`, `read`, `write`, `strlen`, `call` | 1 | [NVM](NVM#host-services) | layouts, IDs, addresses, bytes, or packed results | `Std.DynamicForeign` |
 
 The exact signatures are in [NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services). The retired `neura.test.assert` and `neura.test.assert_equal_int32` services are no longer registered.
 
-- **Capabilities.** `neura run` and `neura test` allow only the console group and `neura.process.exit` by default. `--allow-fs`, `--allow-net`, `--allow-env`, `--allow-clock`, and `--allow-entropy` enable groups; `--allow-fs` takes an optional list of path prefixes. A denied service still binds, and each call returns error 14.
+- **Capabilities.** `neura run` and `neura test` allow only the console group and `neura.process.exit` by default. `--allow-fs`, `--allow-net`, `--allow-env`, `--allow-clock`, `--allow-entropy`, and `--allow-native` enable groups; `--allow-fs` takes an optional list of path prefixes. A denied service still binds, and each call returns error 14.
 - **Replay.** The NVM library already records and replays host interactions (`nvm::record`, `nvm::replay`). `neura run --record file` and `--replay file` expose that. Tests of I/O, time, and entropy run under replay.
 - **Ordering.** `neura.fs.list` returns names sorted by their UTF-8 bytes. The host sorts.
 - Host IDs are opaque `int64` values that the library wraps in classes and never exposes.
@@ -267,7 +269,7 @@ There are two kinds of failure and they never mix.
 
 **Returned errors.** A function whose failure depends on input text, input bytes, or the outside world returns `Result<T>` ([section 6.2](#62-resultt)). The caller reads it with `match`. There is no propagation shorthand and no exception; passing an error up is an explicit `match` arm that returns it.
 
-**Traps.** A function whose precondition is violated ends the run. The run stops at once with process status 70; no library or user code runs afterwards; nothing can observe or recover it ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). The module `Failure` in `Std.Core` has one function:
+**Traps.** A function whose precondition is violated ends the run. The run stops at once with the process status of the trap's class, 134 (`Abort`) for a message trap; no library or user code runs afterwards; nothing can observe or recover it ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). The module `Failure` in `Std.Core` has one function:
 
 | Member | Behavior |
 | --- | --- |
@@ -356,7 +358,7 @@ The loop form depends on the source value.
 | For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Today | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
 | An index loop over `size()` and `get(index)` | Today | For lists and deques. No modification check. |
 | The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Today, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
-| For-each directly over the collection | G4 and G5 | Lowers to the iterator protocol when the source implements `Iterable<T>`. |
+| For-each directly over the collection | Today | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
 
 - **Decision: iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
 - **Map iteration yields tuples.** A map's iterator returns `[K, V]`. The tuple is an immutable snapshot of the entry, which is the contract the first plan's `Entry` class existed to state.
@@ -486,7 +488,7 @@ Use `nil` for an internal absent reference when it cannot be confused with a rea
 | --- | --- | --- |
 | `Unit` | A fieldless enum with the single variant `Value`. | Today |
 | `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Today |
-| `IntRange` | An immutable class: `start` (inclusive), `end` (exclusive), `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, and `to_list()`. `size` is computed in `int64` so that no intermediate overflows. | Today |
+| `IntRange` | An immutable class: `start` (inclusive), `end` (exclusive), `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Today |
 
 Removed from the first plan:
 
@@ -1097,9 +1099,10 @@ Needs P2 for every host operation and T1 for `Path`.
 This module replaces `SysIo.Entry` ([section 4.6](#46-retiring-sysio-and-test)). It needs P3.
 
 - **`Entry`** is a module with one requirement, `main(args: string[]) → ExitCode`. A program's entry module inherits it and overrides `main`, exactly as programs inherit `SysIo.Entry` today. Program arguments arrive only through this parameter.
-- **`ExitCode`** is a payload enum: `Ok`, `Failure`, and `Status(int)`. They map to process statuses 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. The first plan kept the old one-variant enum; a payload enum lets a program return any status without a host call.
+- **`ExitCode`** is a payload enum: `Ok`, `Failure`, `Status(int)`, and the named statuses `SeriousFailure` (2), `CommandNotFound` (127), `IllegalInstruction` (132), `Breakpoint` (133), `Abort` (134), `ArithmeticError` (136), `OutOfMemory` (137), `BusError` (138), `SegmentationFault` (139), `CpuTimeExceeded` (152), and `FileSizeExceeded` (153). `Ok`, `Failure`, and `Status` map to 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. The first plan kept the old one-variant enum; a payload enum lets a program return any status without a host call. Neura enums cannot carry explicit integer values, so the compiler and `status_of(code) → int` hold the table; the named variants follow declaration order after `Status`, so the original three keep their ordinals.
+- **`status_of(code: ExitCode) → int`** returns the status a variant stands for, trapping for an invalid `Status`.
 - **`Environment.get(name: string) → Lookup`**, where `Lookup` is a payload enum: `Found(string)`, `Missing`, and `Failed(Error)`. A purpose-built enum reads better here than a `Result` of an `Optional`. Needs P2.
-- **`Process.exit(status: int)`** ends the run with that status through `neura.process.exit` and does not return. A status outside 0 through 255 traps. Needs P2. Returning from `main` is preferred; `exit` is for leaving from deep inside a program.
+- **`Process.exit(status: int)`** ends the run with that status through `neura.process.exit` and does not return. A status outside 0 through 255 traps. The overload `Process.exit(code: ExitCode)` exits with `status_of(code)`. Needs P2. Returning from `main` is preferred; `exit` is for leaving from deep inside a program.
 
 ### 11.4 `Std.Net`
 

@@ -95,4 +95,33 @@ let IntRangeTests = module (
         let negative_huge = ranges.stepped(max, min, min);
         check_values(negative_huge, "[2147483647, -1]");
     };
+    let collect = func(r: ranges.IntRange) -> string {
+        let values: int[list] = [];
+        for (let value in r) {
+            values.append(value);
+        }
+        return values.to_string();
+    };
+
+    export let test_for_each = func {
+        test.assert_equal_string(collect(ranges.stepped(1, 10, 3)), "[1, 4, 7]");
+        test.assert_equal_string(collect(ranges.stepped(5, -1, -2)), "[5, 3, 1]");
+        test.assert_equal_string(collect(ranges.of(3, 3)), "[]");
+        test.assert_equal_string(collect(ranges.stepped(0, 5, -1)), "[]");
+        test.assert_equal_string(collect(ranges.of(2147483646, 2147483647)), "[2147483646]");
+        test.assert_equal_string(collect(ranges.stepped(-2147483647, -2147483648, -5)), "[-2147483647]");
+        test.assert_equal_string(collect(ranges.stepped(2147483640, 2147483647, 2147483647)), "[2147483640]");
+        for (let r in [ranges.stepped(1, 10, 3), ranges.stepped(9, -4, -4), ranges.of(0, 0)]) {
+            test.assert_equal_string(r.to_list().to_string(), collect(r));
+        }
+    };
+
+    export let test_iterator_protocol = func {
+        let values = ranges.of(0, 2).iterator();
+        test.assert(values.has_next());
+        test.assert_equal_int32(0, values.next());
+        test.assert_equal_int32(1, values.next());
+        test.assert(!values.has_next());
+        test.assert(!values.has_next());
+    };
 );

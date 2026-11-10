@@ -1,4 +1,4 @@
-// status: 70
+// status: 136
 // stderr: source arithmetic failure \(trap reason 1\) in function [0-9]+ block [0-9]+ at std/core/int-range[.]nra
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

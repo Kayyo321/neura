@@ -1,0 +1,113 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.DynamicForeign.FunctionDescriptor;
+let.promote _ = import:Std.DynamicForeign.MemoryLayout;
+let.promote _ = import:Std.DynamicForeign.MemorySegment;
+let.promote _ = import:Std.DynamicForeign.MethodHandle;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let.promote _ = import:Std.DynamicForeign.Arena;
+let.promote _ = import:Std.DynamicForeign.ForeignValue;
+let codec = import:Std.DynamicForeign.Internal.Codec;
+let native = import:Std.DynamicForeign.Internal.Native;
+let upcalls = import:Std.DynamicForeign.Internal.Upcalls;
+let strings = import:Std.Text.Strings;
+
+/// @brief Links native functions for calls from Neura (ForeignInterop.md), the counterpart of Java's Linker.
+///
+/// There is one linker, for the runner's platform C ABI. Needs the native capability.
+/// @see [Std.DynamicForeign.Linker](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-Linker)
+export let Linker = module (
+    /// @brief The platform's C calling convention.
+    export let Linker = class (
+        /// @brief Use native_linker.
+        export let init = func {};
+
+        /// @brief A handle that calls the function at `symbol` with the C signature `descriptor` (Java's
+        /// Linker.downcallHandle).
+        export let downcall_handle = func(symbol: MemorySegment, descriptor: FunctionDescriptor) -> MethodHandle =>
+            new MethodHandle(symbol, descriptor, -1)
+        /// @brief A handle for a variadic C function such as printf. The descriptor lists every argument of the
+        /// calls the handle makes; arguments from `first_variadic` on are the variadic ones and must be promoted
+        /// layouts (int or wider integers, double, or addresses), as C's default argument promotions require.
+        or func(symbol: MemorySegment, descriptor: FunctionDescriptor, first_variadic: int) -> MethodHandle {
+            if (first_variadic < 0) {
+                trap_with_message("invalid argument: negative first variadic index");
+            }
+            return new MethodHandle(symbol, descriptor, first_variadic);
+        };
+
+        /// @brief A native function pointer that calls `target` with the C signature `descriptor` (Java's
+        /// Linker.upcallStub), owned by `arena`. Native code may call it only during a downcall from this program
+        /// and while the arena is open; a call at any other time ends the process with status 134. `target`
+        /// receives the arguments as ForeignValues and returns the result, or ForeignValue.Void for a void
+        /// descriptor; a struct argument is a copy that lives until `target` returns. A trap in `target` ends the run
+        /// when the downcall returns. A variadic signature cannot be an upcall.
+        export let upcall_stub = func(target: func(ForeignValue[list]) -> ForeignValue,
+                                      descriptor: FunctionDescriptor, arena: Arena) -> MemorySegment {
+            let signature = codec.signature(descriptor, -1);
+            let stub = upcalls.register(target, descriptor);
+            let address = native.create_upcall(arena.scope().id(), stub, signature);
+            return new MemorySegment(address, 0, arena.scope());
+        };
+
+        /// @brief The libraries already loaded into the process, including the C library (Java's
+        /// Linker.defaultLookup).
+        export let default_lookup = func -> lookups.SymbolLookup => lookups.default_lookup();
+
+        /// @brief The layout of a C type on the runner's platform (Java's Linker.canonicalLayouts): "bool",
+        /// "char", "short", "int", "long", "long long", "float", "double", "void*", "size_t", or "wchar_t".
+        /// None for any other name.
+        export let canonical_layout = func(name: string) -> Optional<MemoryLayout> {
+            let names = ["bool", "char", "short", "int", "long", "long long", "float", "double", "void*", "size_t",
+                         "wchar_t"];
+            for (let i = 0; i < names.length; i++) {
+                if (names[i] == name) {
+                    return Optional<MemoryLayout>.Some(canonical(i).with_name(name));
+                }
+            }
+            return Optional<MemoryLayout>.None;
+        };
+
+        /// @brief The layout of the C type at `index` in the provider's table.
+        let canonical = func(index: int) -> MemoryLayout {
+            let size = native.c_size(index);
+            let alignment = native.c_alignment(index);
+            let carrier = signed_of(size);
+            if (index == 0) {
+                carrier = Carrier.Bool;
+            } else if (index == 1) {
+                carrier = native.char_signed() ? Carrier.Int8 : Carrier.UInt8;
+            } else if (index == 6) {
+                carrier = Carrier.Float32;
+            } else if (index == 7) {
+                carrier = Carrier.Float64;
+            } else if (index == 8) {
+                carrier = Carrier.Address;
+            } else if (index == 9 || (index == 10 && !wide_signed())) {
+                carrier = unsigned_of(size);
+            }
+            return value_sized(carrier, size, alignment);
+        };
+
+        /// @brief Whether wchar_t is signed: it is on Linux and macOS, and unsigned on Windows.
+        let wide_signed = func -> bool => !strings.ends_with(native.triple(), "windows-msvc");
+    );
+
+    /// @brief The signed carrier of a size in bytes.
+    let signed_of = func(size: int64) -> Carrier =>
+        (size == 1) ? Carrier.Int8 : (size == 2) ? Carrier.Int16 : (size == 4) ? Carrier.Int32 : Carrier.Int64;
+
+    /// @brief The unsigned carrier of a size in bytes.
+    let unsigned_of = func(size: int64) -> Carrier =>
+        (size == 1) ? Carrier.UInt8 : (size == 2) ? Carrier.UInt16 : (size == 4) ? Carrier.UInt32 : Carrier.UInt64;
+
+    /// @brief The single linker (Java's Linker.nativeLinker).
+    let shared: Linker = nil;
+
+    /// @brief The linker for the runner's platform C ABI.
+    export let native_linker = func -> Linker {
+        if (shared == nil) {
+            shared = new Linker();
+        }
+        return shared;
+    };
+);

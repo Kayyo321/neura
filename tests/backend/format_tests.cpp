@@ -65,7 +65,7 @@ NEURA_TEST(format, version_1_1_features) {
     check(nvr::load(nvr::encode(recorded)).minor_version == 1, "the loader records the minor version");
 
     expect_rejected(version_bytes(0), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
-    expect_rejected(version_bytes(4), Kind::Unsupported, "format version 1.4 is not supported");
+    expect_rejected(version_bytes(5), Kind::Unsupported, "format version 1.5 is not supported");
     auto reason_only = version_model();
     reason_only.functions[0].blocks[1] = reason_only.functions[0].blocks[2];
     reason_only.minor_version = 0;
@@ -80,6 +80,37 @@ NEURA_TEST(format, version_1_1_features) {
     auto wrong_slot = version_model();
     wrong_slot.functions[0].frame_types[2] = 2;
     expect_invalid(wrong_slot, "result slot must have type uint64");
+}
+
+NEURA_TEST(format, callbacks_and_native_libraries_require_version_1_4) {
+    // CALB and NATV round-trip, raise the image to 1.4, and are required for
+    // execution when present.
+    auto image = logic_model();
+    image.functions.push_back(image.functions.front());
+    image.callbacks.push_back({"neura.ffi.upcall", 1, 1});
+    image.native_library = nvr::NativeLibrary{"x86_64-linux-gnu", {0x7f, 'E', 'L', 'F'}, {"add", "scale"}};
+    const auto bytes = nvr::encode(image);
+    check_equal(bytes[6], std::uint8_t{4}, "callbacks and a native library make the writer emit 1.4");
+    auto decoded = nvr::load(bytes);
+    image.minor_version = 4;
+    check(decoded == image, "CALB and NATV round-trip");
+    check(nvr::load(nvr::encode(logic_model())).callbacks.empty(), "an image without them omits both sections");
+
+    mutate_logic([](nvr::Image& model) { model.callbacks.push_back({"neura.ffi.upcall", 1, 9}); },
+                 "callback 0: function 9 is out of range");
+    mutate_logic([](nvr::Image& model) { model.callbacks.push_back({"neura.ffi.upcall", 1, 0}); },
+                 "the entry function cannot be a callback");
+    mutate_logic(
+        [](nvr::Image& model) {
+            model.functions.push_back(model.functions.front());
+            model.callbacks.push_back({"a.b", 1, 1});
+            model.callbacks.push_back({"a.b", 1, 1});
+        },
+        "duplicate callback a.b version 1");
+    mutate_logic([](nvr::Image& model) { model.native_library = nvr::NativeLibrary{"", {1}, {}}; },
+                 "a target triple and an object are required");
+    mutate_logic([](nvr::Image& model) { model.native_library = nvr::NativeLibrary{"t", {1}, {"b", "a"}}; },
+                 "symbols are not unique and in ascending order");
 }
 
 NEURA_TEST(format, message_trap_requires_version_1_2_and_text) {
@@ -258,9 +289,9 @@ NEURA_TEST(format, header_errors) {
     bad_magic.magic = "NEUX";
     expect_rejected(assemble(sections, bad_magic), Kind::Malformed, "not an NVR image");
     Header newer_minor;
-    newer_minor.minor = 4;
+    newer_minor.minor = 5;
     expect_rejected(assemble(sections, newer_minor), Kind::Unsupported,
-                    "format version 1.4 is not supported; this loader accepts 1.0 through 1.3");
+                    "format version 1.5 is not supported; this loader accepts 1.0 through 1.4");
     Header newer_major;
     newer_major.major = 2;
     expect_rejected(assemble(sections, newer_major), Kind::Unsupported, "format version 2.0");

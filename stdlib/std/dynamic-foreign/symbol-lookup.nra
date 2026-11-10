@@ -1,0 +1,82 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.DynamicForeign.Arena;
+let.promote _ = import:Std.DynamicForeign.MemorySegment;
+let native = import:Std.DynamicForeign.Internal.Native;
+let scopes = import:Std.DynamicForeign.Internal.Scope;
+
+/// @brief Finds the addresses of native symbols (ForeignInterop.md), the counterpart of Java's SymbolLookup.
+///
+/// A library loaded through an arena stays loaded until the arena closes; finding a symbol after that traps.
+/// Needs the native capability.
+/// @see [Std.DynamicForeign.SymbolLookup](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-SymbolLookup)
+export let SymbolLookup = module (
+    /// @brief A loaded library, the process's default lookup, or the image's embedded library.
+    export let SymbolLookup = class (
+        /// @brief The provider's library identifier.
+        let library: int64;
+        /// @brief The scope that keeps the library loaded.
+        let owner: scopes.Scope;
+        /// @brief The lookup tried when this library has no match, or nil.
+        let fallback: SymbolLookup = nil;
+
+        /// @brief Use library_lookup, Linker.default_lookup, or embedded.
+        export let init = func(library_id: int64, scope: scopes.Scope) {
+            library = library_id;
+            owner = scope;
+        };
+
+        /// @brief The address of `name` as a segment of size 0, or None when the library has no such symbol.
+        export let find = func(name: string) -> Optional<MemorySegment> {
+            owner.check_alive();
+            let address = native.find_symbol(library, name);
+            if (address == 0) {
+                return (fallback == nil) ? Optional<MemorySegment>.None : fallback.find(name);
+            }
+            return Optional<MemorySegment>.Some(new MemorySegment(address, 0, owner));
+        };
+
+        /// @brief The address of `name`. Traps with "invalid argument: no symbol <name>" when it is missing.
+        export let find_or_trap = func(name: string) -> MemorySegment {
+            return match (find(name)) {
+                Optional.Some(symbol) => symbol,
+                Optional.None => missing(name),
+            };
+        };
+
+        /// @brief Traps for a missing symbol and satisfies the result type.
+        let missing = func(name: string) -> MemorySegment {
+            trap_with_message("invalid argument: no symbol " + name);
+        };
+
+        /// @brief A lookup that tries this one, then `other` (Java's SymbolLookup.or).
+        export let or_else = func(other: SymbolLookup) -> SymbolLookup {
+            let chained = new SymbolLookup(library, owner);
+            chained.fallback = (fallback == nil) ? other : fallback.or_else(other);
+            return chained;
+        };
+    );
+
+    /// @brief Loads the library at `path`, or by name through the platform's search when `path` has no slash
+    /// (such as "libm.so.6"), owned by `arena` (Java's SymbolLookup.libraryLookup). A library that cannot be
+    /// loaded is an Io error of kind NotFound.
+    export let library_lookup = func(path: string, arena: Arena) -> Result<SymbolLookup> {
+        let scope = arena.scope();
+        let id = native.open_library(scope.id(), path);
+        if (id == 0) {
+            return Result<SymbolLookup>.Err(Error.Io {
+                kind: IoErrorKind.NotFound,
+                message: "cannot load native library",
+                path: path,
+            });
+        }
+        return Result<SymbolLookup>.Ok(new SymbolLookup(id, scope));
+    };
+
+    /// @brief The libraries already loaded into the process, including the C library.
+    export let default_lookup = func -> SymbolLookup => new SymbolLookup(native.default_library(), scopes.global());
+
+    /// @brief The native library linked into the image from C imports (ForeignInterop.md).
+    export let embedded = func -> SymbolLookup => new SymbolLookup(native.embedded_library(), scopes.global());
+);

@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): console write failed
 // run-options: --replay @AREA_DIR@/traps/error-line-failure.trace
 let console = import:Std.Io.Console;

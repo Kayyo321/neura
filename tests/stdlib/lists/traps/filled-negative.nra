@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: negative count
 let lists = import:Std.Collections.Lists;
 let program = import:Std.Program;

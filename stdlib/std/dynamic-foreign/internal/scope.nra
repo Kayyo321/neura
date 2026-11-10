@@ -1,0 +1,70 @@
+let native = import:Std.DynamicForeign.Internal.Native;
+
+/// @brief The lifetime shared by an arena and the segments and libraries it owns (ForeignInterop.md).
+///
+/// A scope opens its host arena on first use, so creating an arena needs no capability. Closing frees the
+/// arena's memory and unloads its libraries; every later access through the scope traps.
+export let Scope = module (
+    /// @brief One arena's lifetime. The global scope is never closed.
+    export let Scope = class (
+        /// @brief The host arena identifier: 0 for the global arena, -1 until a confined arena first allocates.
+        let host_id: int64 = -1;
+        /// @brief Whether the scope may still be used.
+        let open_now: bool = true;
+        /// @brief Whether this is the global scope.
+        let global_scope: bool = false;
+
+        /// @brief A confined scope when `global` is false, otherwise the global scope.
+        export let init = func(global: bool) {
+            global_scope = global;
+            if (global) {
+                host_id = 0;
+            }
+        };
+
+        /// @brief Whether the scope is still open.
+        export let is_alive = func -> bool => open_now;
+
+        /// @brief Whether this is the global scope.
+        export let is_global = func -> bool => global_scope;
+
+        /// @brief Traps with "invalid state: arena closed" after close.
+        export let check_alive = func {
+            if (!open_now) {
+                trap_with_message("invalid state: arena closed");
+            }
+        };
+
+        /// @brief The host arena identifier, opening the host arena on first use.
+        export let id = func -> int64 {
+            check_alive();
+            if (host_id < 0) {
+                host_id = native.open_arena();
+            }
+            return host_id;
+        };
+
+        /// @brief Closes the scope. Closing twice or closing the global scope traps.
+        export let close = func {
+            if (global_scope) {
+                trap_with_message("invalid state: the global arena cannot be closed");
+            }
+            check_alive();
+            if (host_id > 0) {
+                native.close_arena(host_id);
+            }
+            open_now = false;
+        };
+    );
+
+    /// @brief The single global scope of the run.
+    let shared: Scope = nil;
+
+    /// @brief The global scope, whose memory lives until the end of the run.
+    export let global = func -> Scope {
+        if (shared == nil) {
+            shared = new Scope(true);
+        }
+        return shared;
+    };
+);

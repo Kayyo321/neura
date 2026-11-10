@@ -37,6 +37,7 @@ export let App = module:program.Entry (
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` |
 | `Std.Log` | `Logger` |
 | `Std.Test` | The assertions of [Testing](Testing.md) |
+| `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` ([Foreign interop](ForeignInterop.md)) |
 
 Expected failures are `Result<T>` values whose error is the `Error` enum; absent values are `Optional<T>`. A violated precondition traps with one of the messages of [section 5.1](Stdlib.md#51-failure-model).
 

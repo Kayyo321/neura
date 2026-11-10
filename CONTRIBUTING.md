@@ -2,6 +2,32 @@
 
 Read the [project design](docs/Project.md) for the compiler and circuit model, the [language overview](docs/lang/Overview.md) for source-level behavior, and the [coding style guide](docs/style/CodingStyle.md) when writing `.nra` files. Check [language design decisions](docs/lang/Status.md) before treating a proposed feature or illustrative example as a conformance requirement. Follow the [repository rules](README.md#rules-for-agents) when using a coding agent.
 
+## Set up a checkout
+
+Neura has one submodule, [`third_party/neura-libclang`](https://github.com/Kayyo321/neura-libclang). It contains the pinned libclang C API headers and a loader that opens the system libclang at run time, so the build never links libclang. CMake configuration fails, printing the commands below, when the submodule has not been fetched.
+
+| Situation | Command |
+| --- | --- |
+| New clone | `git clone --recursive https://github.com/Kayyo321/neura.git` |
+| After a plain `git clone` | `git submodule update --init --recursive` |
+| Shallow clone | `git clone --depth 1 --recursive --shallow-submodules https://github.com/Kayyo321/neura.git`, or `git submodule update --init --recursive --depth 1` in an existing shallow checkout |
+| After pulling a commit that moves the submodule | `git submodule update --init --recursive` |
+| After the submodule URL changes | `git submodule sync --recursive`, then the update command |
+
+`.gitmodules` marks the submodule `shallow`, so `git submodule update` fetches only the pinned commit by default.
+
+Building needs the libffi development package (found with pkg-config), which the runner uses for native calls. C header imports need the libclang shared library from LLVM 14 or newer (19 or newer recommended). On Debian and Ubuntu, install them with `sudo apt install libclang1-19 libffi-dev`. The libclang development package is not needed. Set `NEURA_LIBCLANG` to a library's path to use it instead of the one found by the default search. The `neura-libclang-load` test loads libclang and reads a small header through it; CTest reports it as skipped when no libclang is installed, and `NEURA_LIBCLANG_REQUIRED=1` turns that into a failure.
+
+To move Neura to a newer neura-libclang commit, update the submodule in its own commit and describe the header or loader change it brings in:
+
+```sh
+git -C third_party/neura-libclang fetch --depth 1 origin main
+git -C third_party/neura-libclang checkout FETCH_HEAD
+git add third_party/neura-libclang
+```
+
+Change the headers and loader in the neura-libclang repository, following its README, rather than in the submodule checkout.
+
 ## Define the change
 
 - For a bug, provide the smallest input that reproduces it, the expected behavior, and the actual behavior. Include the first stage where the result diverges if you can identify it. For a runtime issue, include the circuit artifact or its build inputs, the initial state, and any external inputs needed to replay it.

@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid regular expression
 let program = import:Std.Program;
 let text = import:Std.Core.String;

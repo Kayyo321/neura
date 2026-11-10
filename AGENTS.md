@@ -16,6 +16,7 @@ Lexer -> Parser -> NeuraIR -> IR optimization -> IRtoNeuronConversion -> output
 
 | Stage | Agent rule |
 | --- | --- |
+| C import | Before parsing, turn an `import:c(...)` header into ordinary Neura source that calls `Std.DynamicForeign`. Add no language rules of its own, and name the reason when a program uses a C declaration it could not map. |
 | Lexer | Preserve source locations while recognizing tokens. Report lexical failures with the offending span. |
 | Parser | Build syntax from tokens. Keep grammar, precedence, and syntax recovery separate from typing and name resolution. |
 | NeuraIR | Resolve and check language semantics during lowering. Make the types, control flow, state, and effects needed for later stages explicit. Diagnose unsupported constructs before they reach circuit conversion. |

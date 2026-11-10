@@ -366,6 +366,19 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
         out << ") -> " << type_name(image, import.success_type) << " | error " << type_name(image, import.error_type)
             << "\n";
     }
+    for (std::uint32_t i = 0; i < image.callbacks.size(); ++i) {
+        const auto& callback = image.callbacks[i];
+        out << "callback " << quoted(callback.name) << " v" << callback.interface_version << " -> "
+            << printer.function_name(callback.function) << "  [decoded]\n";
+    }
+    if (image.native_library) {
+        // Native code is outside the circuit: it is shown as an opaque region
+        // that only the runner's native provider executes.
+        const auto& library = *image.native_library;
+        out << "native library " << quoted(library.triple) << ", " << library.object.size()
+            << " bytes  [opaque: native code is not lifted]\n";
+        for (const auto& symbol : library.symbols) out << "  native symbol " << quoted(symbol) << "\n";
+    }
     for (std::uint32_t i = 0; i < image.layouts.size(); ++i) {
         const auto& layout = image.layouts[i];
         out << "layout L" << i;

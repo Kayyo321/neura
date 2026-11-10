@@ -1,4 +1,4 @@
-// status: 70
+// status: 139
 // stderr: index out of bounds: index 2 for length 2
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

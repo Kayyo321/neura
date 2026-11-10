@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): collection modified during iteration
 let ordering = import:Std.Core.Ordering;
 let program = import:Std.Program;

@@ -1,3 +1,11 @@
+
+## C imports
+
+`check`, `emit-ir`, `build`, and `test` read the headers of [`import:c(...)`](https://github.com/Kayyo321/neura/wiki/ForeignInterop#c-imports) with libclang. The tool loads libclang when the first C import is compiled, from `--libclang <file>`, else the `NEURA_LIBCLANG` environment variable, else the platform's usual names, such as `libclang-19.so.1` and `/usr/lib/llvm-19/lib`. Builds without C imports never load it. `--c-include <dir>` adds a header search directory, and `--c-define <name[=value]>` defines a macro while reading headers.
+
+`emit-ir`, `build`, and `test` link the libraries of C imports with the system C compiler: `--cc <compiler>`, else `$CC`, else `cc`. `--c-link-arg <arg>` passes an argument to that link. `check` reads headers but does not link.
+
+`neura c-bindings [--linked] [c-options] <header.h>` prints the module that a C import of the header generates. `--linked` generates it as an import that names libraries does.
 # Tooling and project workflow
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
@@ -5,7 +13,7 @@
 
 ## Build the compiler
 
-Build with CMake 3.20 or newer and a C++20 compiler.
+Build with CMake 3.20 or newer and C and C++20 compilers, from a checkout that includes the `third_party/neura-libclang` submodule. [Contributing](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md#set-up-a-checkout) lists the commands for fetching it, the libffi development package the build needs for native calls, and the libclang library that C header imports load.
 
 ```sh
 cmake -S . -B build
@@ -51,7 +59,7 @@ Sources can [import prebuilt modules](https://github.com/Kayyo321/neura/wiki/Mod
 
 `neura docs <file.nra>...` exports declaration documentation and source ranges as JSON for IDE tooling. Pass `-o <file.json>` to save the index. `neura docs --doxygen <file.nra>` emits a declaration view for Doxygen's input filter. [Documentation comments](https://github.com/Kayyo321/neura/wiki/CoreLanguage#documentation-comments)
 
-`run` loads and validates an image, binds its host imports to the runner's services ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services)), and passes the arguments after `--` to the entry function as UTF-8 text. The image needs no source files. The exit status is the `ExitCode` that `main` returns, or the status given to `Std.Program.Process.exit`. A runtime trap prints its reason and source location, when the image has a source map, to standard error and exits with status 70. Load, bind, and usage errors exit with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` bound a run. `--stats` prints the run's step count, peak heap cells, host requests, graph, neuron, and edge counts, and image bytes to standard error. `cmake --install build --prefix <dir>` installs the `neura` executable, which contains both the compiler and the runner, and the standard library below `<dir>/share/neura/stdlib`, where the installed tool finds it without any `-I` option.
+`run` loads and validates an image, binds its host imports to the runner's services ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services)), and passes the arguments after `--` to the entry function as UTF-8 text. The image needs no source files. The exit status is the `ExitCode` that `main` returns, or the status given to `Std.Program.Process.exit`. A runtime trap prints its reason and source location, when the image has a source map, to standard error and exits with the status of its class, such as 136 for an arithmetic trap or 134 for a message trap ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). Load, bind, and usage errors exit with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` bound a run. `--stats` prints the run's step count, peak heap cells, host requests, graph, neuron, and edge counts, and image bytes to standard error. `cmake --install build --prefix <dir>` installs the `neura` executable, which contains both the compiler and the runner, and the standard library below `<dir>/share/neura/stdlib`, where the installed tool finds it without any `-I` option.
 
 Console input and output and `Std.Program.Process.exit` are always available. Other host services need a capability option; without it, every call returns the `CapabilityDenied` error:
 
@@ -63,6 +71,7 @@ Console input and output and `Std.Program.Process.exit` are always available. Ot
 | `--allow-env` | Environment variables (`Std.Program.Environment`) |
 | `--allow-clock` | The wall and monotonic clocks and sleeping (`Std.Time.SystemClock`) |
 | `--allow-entropy` | Operating-system entropy (`Std.Random.Random.from_entropy`) |
+| `--allow-native` | Native libraries, memory, and calls ([`Std.DynamicForeign`](https://github.com/Kayyo321/neura/wiki/ForeignInterop)); native code runs outside Neura's safety guarantees |
 
 `neura run --record trace.txt` writes every host request and response, and how the run ended, to a text trace. `neura run --replay trace.txt` runs the image answering each request from the trace instead of calling any service, so it needs no capability, and reproduces the console output of the recorded run. A replay whose requests differ from the trace stops with status 1 and names the first difference. [NVM](https://github.com/Kayyo321/neura/wiki/NVM#determinism-limits-and-observability) describes the trace format.
 

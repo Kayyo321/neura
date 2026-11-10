@@ -1,4 +1,4 @@
-// status: 70
+// status: 136
 // stderr: arithmetic failure
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

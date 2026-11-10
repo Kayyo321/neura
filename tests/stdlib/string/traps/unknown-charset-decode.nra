@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: decode bytes: unsupported charset: unknown
 let program = import:Std.Program;
 

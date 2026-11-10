@@ -1,4 +1,6 @@
 let hashing = import:Std.Core.Hash;
+let iterables = import:Std.Collections.Iterable;
+let iterators = import:Std.Collections.Iterator;
 
 /// @brief An immutable arithmetic progression of int values (Stdlib.md section 6.5): `start` inclusive, `end`
 /// exclusive, and a nonzero `step`.
@@ -8,7 +10,7 @@ let hashing = import:Std.Core.Hash;
 /// @see [Std.Core.IntRange](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-IntRange)
 export let IntRange = module (
     /// @brief An immutable half-open arithmetic progression with a nonzero stride.
-    export let IntRange = class (
+    export let IntRange = class implements iterables.Iterable<int> (
         /// @brief The inclusive start bound.
         let first: int;
         /// @brief The exclusive end bound.
@@ -101,6 +103,9 @@ export let IntRange = module (
             return values;
         };
 
+        /// @brief An iterator over the values in order, for for-each and other Iterable consumers.
+        export let iterator = func -> iterators.Iterator<int> => new IntRangeIterator(first, limit, increment);
+
         /// @brief The exact number of values as an int64.
         let count = func -> int64 {
             if (is_empty()) {
@@ -113,6 +118,36 @@ export let IntRange = module (
                 stride = -stride;
             }
             return (distance + stride - 1) / stride;
+        };
+    );
+
+    /// @brief Steps through a progression's values. Positions are int64, so the last step cannot overflow.
+    let IntRangeIterator = class implements iterators.Iterator<int> (
+        /// @brief The next value to return.
+        let current: int64;
+        /// @brief The exclusive end bound.
+        let stop: int64;
+        /// @brief The signed stride.
+        let stride: int64;
+
+        /// @brief Starts before the first value of `start_value..end_value:step_value`.
+        export let init = func(start_value: int, end_value: int, step_value: int) {
+            current = start_value as int64;
+            stop = end_value as int64;
+            stride = step_value as int64;
+        };
+
+        /// @brief Reports whether another value remains.
+        export let has_next = func -> bool => (stride > 0) ? current < stop : current > stop;
+
+        /// @brief Returns the next value and advances. Traps with `no such element` at exhaustion.
+        export let next = func -> int {
+            if (!has_next()) {
+                trap_with_message("no such element");
+            }
+            let value = current as int;
+            current += stride;
+            return value;
         };
     );
 

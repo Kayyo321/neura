@@ -1,0 +1,16 @@
+Int64(8999999999)
+Float64(6.0)
+UInt8(255)
+Int8(-128)
+Int8(-5)
+Bool(true)
+Bool(false)
+Int32(6)
+hello from C
+Void
+3 r 2
+Int32(60)
+counter 2
+Int32(41)
+-2 65535 0.5 18446744073709551615
+-1 255

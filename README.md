@@ -32,7 +32,45 @@ Pure computations can use feedforward circuits. Stateful execution carries mutab
 
 ## Getting started
 
-Build the compiler with CMake 3.20 or newer and a C++20 compiler:
+Clone the repository with its submodule. [`third_party/neura-libclang`](https://github.com/Kayyo321/neura-libclang) holds the libclang C API headers that C header imports are built against, and the build stops with the commands to fetch it if it is missing.
+
+```sh
+git clone --recursive https://github.com/Kayyo321/neura.git
+```
+
+After a plain `git clone`, fetch the submodule from the checkout:
+
+```sh
+git submodule update --init --recursive
+```
+
+For a shallow clone, fetch the submodule shallowly as well:
+
+```sh
+git clone --depth 1 --recursive --shallow-submodules https://github.com/Kayyo321/neura.git
+```
+
+In a shallow checkout made without `--recursive`, fetch the submodule with:
+
+```sh
+git submodule update --init --recursive --depth 1
+```
+
+After pulling a change that moves the submodule to a new commit, update your checkout of it:
+
+```sh
+git submodule update --init --recursive
+```
+
+The build needs the libffi development package, which the runner uses to call native code, and finds it with pkg-config. Neura loads libclang when it runs instead of linking it, so the build does not need the libclang development package; importing C headers needs the libclang shared library from LLVM 14 or newer (19 or newer recommended). On Debian and Ubuntu:
+
+```sh
+sudo apt install libclang1-19 libffi-dev
+```
+
+Neura looks for libclang under its usual names. Set `NEURA_LIBCLANG` to the library's path to choose a specific one.
+
+Build the compiler with CMake 3.20 or newer and C and C++20 compilers:
 
 ```sh
 cmake -S . -B build

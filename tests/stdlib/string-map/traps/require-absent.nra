@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): no such element
 let program = import:Std.Program;
 let string_map = import:Std.Collections.StringMap;

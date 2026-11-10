@@ -1,0 +1,26 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: argument does not fit i32
+// run-options: --allow-native
+// args: @NATIVE_DIR@/libmathops.so
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let arenas = import:Std.DynamicForeign.Arena;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let values = import:Std.DynamicForeign.ForeignValue;
+
+// An argument that does not fit its layout traps before the native call.
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        let lib = result.expect<lookups.SymbolLookup>(lookups.library_lookup(args[0], arena), "load libmathops");
+        let add = linkers.native_linker().downcall_handle(lib.find_or_trap("add"),
+            descriptors.of(layouts.Int32, layouts.Int32, layouts.Int32));
+        console.print_line(values.describe(add.invoke(1, 2)));
+        console.print_line(values.describe(add.invoke(1, 2.5)));
+        return program.ExitCode.Ok;
+    };
+);

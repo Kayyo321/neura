@@ -1,4 +1,4 @@
-// status: 70
+// status: 132
 // stderr: text is not valid UTF-8: text slice endpoints must be on UTF-8 boundaries
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

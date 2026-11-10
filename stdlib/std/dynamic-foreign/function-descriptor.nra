@@ -1,0 +1,94 @@
+let.promote _ = import:Std.DynamicForeign.MemoryLayout;
+let.promote _ = import:Std.Core.Optional;
+
+/// @brief The C signature of a native function (ForeignInterop.md), the counterpart of Java's
+/// FunctionDescriptor: an optional result layout and the argument layouts.
+/// @see [Std.DynamicForeign.FunctionDescriptor](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-FunctionDescriptor)
+export let FunctionDescriptor = module (
+    /// @brief A result layout, or none for void, and the argument layouts in order.
+    export let FunctionDescriptor = class (
+        /// @brief The result layout, or None for a void function.
+        let result: Optional<MemoryLayout> = Optional<MemoryLayout>.None;
+        /// @brief The argument layouts.
+        let arguments: MemoryLayout[list] = [];
+
+        /// @brief Use of or of_void.
+        export let init = func(result_layout: Optional<MemoryLayout>, argument_layouts: MemoryLayout[list]) {
+            result = result_layout;
+            for (let layout in argument_layouts) {
+                check_argument(layout);
+                arguments.append(layout);
+            }
+        };
+
+        /// @brief The result layout, or None for void.
+        export let return_layout = func -> Optional<MemoryLayout> => result;
+
+        /// @brief A copy of the argument layouts.
+        export let argument_layouts = func -> MemoryLayout[list] {
+            let copy: MemoryLayout[list] = [];
+            for (let layout in arguments) {
+                copy.append(layout);
+            }
+            return copy;
+        };
+
+        /// @brief A descriptor with `more` appended to the arguments.
+        export let append_argument_layouts = func(more: ...MemoryLayout) -> FunctionDescriptor {
+            let all: MemoryLayout[list] = argument_layouts();
+            for (let layout in more) {
+                all.append(layout);
+            }
+            return new FunctionDescriptor(result, all);
+        };
+
+        /// @brief Descriptors with the same layouts are equal.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is FunctionDescriptor)) {
+                return false;
+            }
+            return to_string() == (other as FunctionDescriptor).to_string();
+        };
+
+        /// @brief Hashes the text form.
+        export let.override hash_code = func -> uint32 => to_string().hash_code();
+
+        /// @brief A form such as `(i32i32)i32` or `(a)v`.
+        export let.override to_string = func -> string {
+            let text = "(";
+            for (let layout in arguments) {
+                text = text + layout.to_string();
+            }
+            return text + ")" + match (result) {
+                Optional.Some(layout) => layout.to_string(),
+                Optional.None => "v",
+            };
+        };
+    );
+
+    /// @brief Traps for a layout that cannot be an argument or result: padding.
+    let check_argument = func(layout: MemoryLayout) {
+        if (layout.shape() == Shape.Padding) {
+            trap_with_message("invalid argument: a padding layout cannot be an argument or result");
+        }
+    };
+
+    /// @brief A function returning `result` and taking `arguments` (Java's FunctionDescriptor.of).
+    export let of = func(result: MemoryLayout, arguments: ...MemoryLayout) -> FunctionDescriptor {
+        check_argument(result);
+        return new FunctionDescriptor(Optional<MemoryLayout>.Some(result), listed(arguments));
+    };
+
+    /// @brief A void function taking `arguments` (Java's FunctionDescriptor.ofVoid).
+    export let of_void = func(arguments: ...MemoryLayout) -> FunctionDescriptor =>
+        new FunctionDescriptor(Optional<MemoryLayout>.None, listed(arguments));
+
+    /// @brief The layouts of an array as a list.
+    let listed = func(layouts: MemoryLayout[]) -> MemoryLayout[list] {
+        let list: MemoryLayout[list] = [];
+        for (let layout in layouts) {
+            list.append(layout);
+        }
+        return list;
+    };
+);

@@ -1,0 +1,49 @@
+// run-options: --allow-native
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let optional = import:Std.Core.Optional;
+let arenas = import:Std.DynamicForeign.Arena;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.MemoryLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let values = import:Std.DynamicForeign.ForeignValue;
+let segments = import:Std.DynamicForeign.MemorySegment;
+let result = import:Std.Core.Result;
+let errors = import:Std.Core.Error;
+
+// The C library through the default lookup, the platform's canonical layouts,
+// a missing symbol, and a library that cannot be loaded.
+export let Main = module:program.Entry (
+    let canonical = func(name: string) -> layouts.MemoryLayout =>
+        optional.expect<layouts.MemoryLayout>(linkers.native_linker().canonical_layout(name), name);
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let linker = linkers.native_linker();
+        for (let name in ["int", "long", "void*", "size_t", "double"]) {
+            let layout = canonical(name);
+            console.print_line(layout.to_string() + " " + layout.byte_size().to_string() + " " +
+                               layout.byte_alignment().to_string());
+        }
+        console.print_line(optional.is_none<layouts.MemoryLayout>(linker.canonical_layout("int128")).to_string());
+        let strlen = linker.downcall_handle(linker.default_lookup().find_or_trap("strlen"),
+                                            descriptors.of(canonical("size_t"), canonical("void*")));
+        console.print_line(values.describe(strlen.invoke("Neura")));
+        let abs = linker.downcall_handle(linker.default_lookup().find_or_trap("abs"),
+                                         descriptors.of(canonical("int"), canonical("int")));
+        console.print_line(values.describe(abs.invoke(-12)));
+        console.print_line(optional.is_none<segments.MemorySegment>(linker.default_lookup().find("no_such_symbol_x"))
+                               .to_string());
+        let arena = arenas.of_confined();
+        match (lookups.library_lookup("./no-such-library.so", arena)) {
+            result.Result.Ok(_) => {
+                console.print_line("loaded?");
+            },
+            result.Result.Err(failure) => {
+                console.print_line(errors.message(failure));
+            },
+        }
+        arena.close();
+        return program.ExitCode.Ok;
+    };
+);

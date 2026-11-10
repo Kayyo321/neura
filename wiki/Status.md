@@ -18,6 +18,7 @@ This release carries the language below from source through NeuraIR, optimizatio
 | Collections | Arrays, lists, stepped ranges, `length`, indexing, `append`, `remove_at`, structural versions, and for-each over built-ins or `Iterable<T>` | [Collections](https://github.com/Kayyo321/neura/wiki/Collections) |
 | Errors | Expected failures as returned values, plus runtime traps and explicit message traps | [Errors](https://github.com/Kayyo321/neura/wiki/Errors) |
 | Testing | `neura test` with the `Std.Test` assertions | [Testing](https://github.com/Kayyo321/neura/wiki/Testing) |
+| Foreign interop | `Std.DynamicForeign`: native libraries, symbol lookup, arena-owned native memory, layouts, downcalls through the platform C ABI, and upcalls, under `--allow-native`. `import:c(...)` C header imports that link static libraries into the image | [Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop) |
 | Tooling | `check`, `docs` for `///` comments, `emit-ir`, `build`, `run` (with capabilities, `--record`, `--replay`, `--stats`, `--profile`), `test`, `disassemble`, `assemble`, `decompile` | [Tooling](https://github.com/Kayyo321/neura/wiki/Tooling), [Decompiler](https://github.com/Kayyo321/neura/wiki/Decompiler) |
 | Standard library | The `Std` source modules of the [implementation plan](https://github.com/Kayyo321/neura/wiki/Stdlib-Design), installed with the tool, and the host providers they bind; see [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary) for the module list and [section 18 of the plan](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#18-implementation-decisions) for decisions made while implementing it | [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary) |
 
@@ -27,7 +28,7 @@ This release carries the language below from source through NeuraIR, optimizatio
 | --- | --- |
 | Standard library extensions | `Std.Concurrent`, time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
 | Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](https://github.com/Kayyo321/neura/wiki/ResourcesConcurrency)). |
-| Foreign interop | Java and other foreign-function interop are not part of the language. |
+| Foreign interop | Interop with Java and other managed runtimes. Native code runs only on Linux x86-64 in this release's tests; other platforms build the same provider but are unverified. |
 | Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure)). |
 
 ## Open language decisions
@@ -54,9 +55,9 @@ These remain open. The compiler rejects or does not offer the affected construct
 
 [Neuron conversion and execution](https://github.com/Kayyo321/neura/wiki/Backend#semantic-decisions) records how conversion implements each rule.
 
-- Integer overflow, a zero divisor, `MIN / -1`, and an out-of-range conversion trap with reason 1. Division truncates toward zero.
+- Integer overflow, a zero divisor, `MIN / -1`, and an out-of-range conversion trap with reason 1. Division truncates toward zero. Each class of trap ends the run with its own process status ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). Each class of trap ends the run with its own process status ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)).
 - A negative index traps with reason 2; a list modified during for-each traps with reason 5.
-- The entry point is the unique override of `Std.Program.Entry.main`. `Ok` is status 0, `Failure` 1, and `Status(n)` is `n` for 0 through 255; any other `n` traps. The built-in `SysIo` and `Test` modules are retired, and importing either is an error that names its replacement.
+- The entry point is the unique override of `Std.Program.Entry.main`. `Ok` is status 0, `Failure` 1, and `Status(n)` is `n` for 0 through 255; any other `n` traps. The named variants from `SeriousFailure` (2) to `FileSizeExceeded` (153) have fixed statuses ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#program-entry)). The built-in `SysIo` and `Test` modules are retired, and importing either is an error that names its replacement.
 - An instance field without an initializer starts uninitialized, and reading it before a store faults. Static fields follow the preparation and first-use rules in [Static initialization](https://github.com/Kayyo321/neura/wiki/Types#static-initialization). Construction and `destroy` follow the order in [Object lifecycle](https://github.com/Kayyo321/neura/wiki/ObjectLifecycle).
 - `Console.print_line` traps with reason 3 when the write fails, and a failed `Std.Test` assertion is a message trap with reason 3.
 
@@ -70,4 +71,5 @@ These remain open. The compiler rejects or does not offer the affected construct
 | `types/primitive-references.nra` | Library example of a constructor-bound reference field and a reference parameter. |
 | `guide/errors.nra` | A library that reads a count from a file with `Std.Fs` and `Std.Core.Int32.parse` and returns a `Result`; `tests/backend/examples/errors-driver.nra` runs it without the file capability. |
 | `guide/resources.nra` | Top-level statements; runs with the test driver `tests/backend/examples/resources-driver.nra`, built together with it. |
+| `foreign/native.nra` | Compiles and runs with `--allow-native`: `strlen` through `Std.DynamicForeign` and `qsort` with an upcall through `import:c("stdlib.h")`. Not run by the test suite, which covers the same calls in `tests/stdlib/dynamic-foreign` and `tests/c-import`. |
 | `testing/math-tests.nra` | Tests with `Std.Test`; `neura test -I examples/guide examples/testing/math-tests.nra` passes. |

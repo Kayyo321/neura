@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: trap: explicit program failure \(trap reason 3\): recorded failure
 // run-options: --replay @AREA_DIR@/traps/replayed-trap.trace
 let console = import:Std.Io.Console;

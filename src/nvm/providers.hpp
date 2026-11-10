@@ -60,7 +60,14 @@ struct Capabilities {
     bool env = false;
     bool clock = false;
     bool entropy = false;
+    // Native libraries, memory, and calls (Std.DynamicForeign). Native code
+    // runs outside Neura's memory-safety and determinism guarantees.
+    bool native = false;
 };
+
+// The target triple of this runner, such as x86_64-linux-gnu; an image's
+// embedded native library must name the same one.
+std::string native_target_triple();
 
 // Resolves `path` against the current directory to an absolute path whose
 // existing components contain no symbolic links and no `.` or `..`. Links
@@ -156,6 +163,18 @@ private:
 //   neura.net.read(int64 socket, int32 max, int64 timeout_nanos) -> uint8[list]
 //   neura.net.write(int64 socket, uint8[list] bytes) -> int32 count
 //   neura.net.close(int64 socket) -> void
+//   neura.ffi.abi() -> [string triple, uint8[list] layouts]
+//   neura.ffi.arena.open() -> int64 arena
+//   neura.ffi.arena.close(int64 arena) -> void
+//   neura.ffi.alloc(int64 arena, int64 size, int64 alignment) -> int64 address
+//   neura.ffi.library.open(int64 arena, string path) -> int64 library
+//   neura.ffi.library.default() -> int64 library
+//   neura.ffi.library.embedded() -> int64 library
+//   neura.ffi.symbol(int64 library, string name) -> int64 address
+//   neura.ffi.read(int64 address, int64 length) -> uint8[list]
+//   neura.ffi.write(int64 address, uint8[list] bytes) -> void
+//   neura.ffi.strlen(int64 address, int64 max) -> int64 length
+//   neura.ffi.call(int64 function, uint8[list] signature, uint8[list] arguments) -> uint8[list] result
 //
 // All are version 1 with a uint32 error. IDs are opaque, numbered from 1 in
 // each run, and never reused within a run. end_run() closes every file and
@@ -176,6 +195,10 @@ public:
     std::size_t open_files() const;
     std::size_t open_sockets() const;
     const Capabilities& capabilities() const { return capabilities_; }
+    // The shared object from the image's NATV section, which
+    // neura.ffi.library.embedded loads on first use. The services keep a
+    // copy.
+    void set_embedded_object(std::string object);
 
     struct Tables;
 
@@ -188,6 +211,7 @@ private:
     Capabilities capabilities_;
     std::vector<ResolvedPath> prefixes_;
     std::unique_ptr<Tables> tables_;
+    std::string embedded_object_;
     std::vector<std::unique_ptr<FunctionService>> services_;
 };
 

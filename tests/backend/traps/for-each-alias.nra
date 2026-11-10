@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: collection modified during iteration \(trap reason 5\) .* at for-each-alias\.nra:19:9
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

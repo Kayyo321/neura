@@ -1,4 +1,4 @@
-// status: 70
+// status: 139
 // stderr: read of an uninitialized field
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

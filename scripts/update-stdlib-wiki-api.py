@@ -93,6 +93,11 @@ def declaration(lines, start):
     raise ValueError(f"Unterminated declaration at line {start + 1}")
 
 
+def area_name(directory):
+    """The PascalCase area of a library directory: dynamic-foreign is DynamicForeign."""
+    return "".join(word.capitalize() for word in directory.split("-"))
+
+
 def exports(path, module):
     """Yield publicly reachable exported declarations and adjacent comments."""
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -158,8 +163,8 @@ def main():
         module = match.group(1)
         parts = source.relative_to(STDLIB).parts
         if len(parts) > 1:
-            areas.add(parts[0].capitalize())
-        name = f"Stdlib-{parts[0].capitalize()}-{module}.md" if len(parts) > 1 else f"Stdlib-{module}.md"
+            areas.add(area_name(parts[0]))
+        name = f"Stdlib-{area_name(parts[0])}-{module}.md" if len(parts) > 1 else f"Stdlib-{module}.md"
         expected.add(name)
         page = WIKI / name
         if not page.exists():

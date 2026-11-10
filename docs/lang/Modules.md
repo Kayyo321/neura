@@ -49,6 +49,15 @@ file, and module bindings. Each occurrence has no name to read or redeclare.
 
 For project-local modules, the proposed qualified-name and file layout convention is described in [Project structure](ProjectStructure.md). The [multi-file example](../../examples/modules/multi-file/main.nra) shows a project module importing another project module.
 
+### C headers
+
+`import:c("header.h", "library.a", ...)` imports a C header and links any static libraries or object files named after it. The compiler generates the module from the header's declarations; [Foreign interop](ForeignInterop.md#c-imports) defines the mapping and the native library the image carries.
+
+```neura
+let mathops = import:c("mathops.h", "libmathops.a");
+let clib = import:c("stdlib.h");
+```
+
 ### Prebuilt NeuraIR modules
 
 Use a quoted path to import a module from a prebuilt `.nir` artifact. Select a top-level project module after the closing quote when the artifact bundles several.
@@ -78,6 +87,16 @@ let write_line = func(message: string) -> WriteResult host("neura.console.write_
 ```
 
 The result enum has exactly two variants. `Ok` represents success without a value and `Ok(T)` represents success with one value. `Error(uint32)` carries the host error code. Supported host data include Boolean and numeric values, strings, arrays, lists, and tuples made of supported types. The runner must register the named service with the matching version and signature. The compiler emits imports only for bindings reached by the built program. [NVM](../runtime/NVM.md#host-calls-and-standard-output) defines value transfer and continuation behavior.
+
+A module in that tree may also mark a function with a block body as a host callback, which a host service may call while it serves a request:
+
+```neura
+let dispatch = func(stub: int64, arguments: uint8[list]) -> uint8[list] {
+    ...
+} callback("neura.ffi.upcall", 1);
+```
+
+A callback is a non-generic module function whose parameters are host data and whose result is host data or void. The image includes a callback when the built program reaches a member of the module that declares it, and records it in the `CALB` table ([NVR](../runtime/NVR.md#imports-and-optional-source-maps)). `Std.DynamicForeign` uses one for [upcalls](ForeignInterop.md#upcalls).
 
 ## Interfaces and inheritance
 
@@ -121,7 +140,23 @@ See `examples/modules/module-interface.nra` for an interface with exported data,
 
 ### Program entry
 
-A program implements the standard library requirement `Std.Program.Entry.main(string[]) -> ExitCode`. The compiler maps the library's `ExitCode.Ok` to process status 0, `ExitCode.Failure` to 1, and `ExitCode.Status(int)` to the supplied status. An explicit status outside 0 through 255 traps with `invalid argument: exit status`. A program with more than one entry override is rejected.
+A program implements the standard library requirement `Std.Program.Entry.main(string[]) -> ExitCode`. The compiler maps the library's `ExitCode.Ok` to process status 0, `ExitCode.Failure` to 1, and `ExitCode.Status(int)` to the supplied status. An explicit status outside 0 through 255 traps with `invalid argument: exit status`. The other variants name conventional statuses; most follow the shell convention of 128 plus the Linux number of the signal that would end a native process:
+
+| Variant | Status | Meaning |
+| --- | --- | --- |
+| `SeriousFailure` | 2 | A serious failure, such as misuse of the program |
+| `CommandNotFound` | 127 | A requested command was not found |
+| `IllegalInstruction` | 132 | SIGILL: an illegal instruction or damaged program |
+| `Breakpoint` | 133 | SIGTRAP: a breakpoint or trace trap |
+| `Abort` | 134 | SIGABRT: a failed assertion or forced abort |
+| `ArithmeticError` | 136 | SIGFPE: an arithmetic error, including integer division by zero and overflow |
+| `OutOfMemory` | 137 | SIGKILL, as sent by an out-of-memory killer |
+| `BusError` | 138 | SIGBUS: a misaligned or invalid memory access |
+| `SegmentationFault` | 139 | SIGSEGV: an access to memory the program does not own |
+| `CpuTimeExceeded` | 152 | SIGXCPU: the CPU time limit was exceeded |
+| `FileSizeExceeded` | 153 | SIGXFSZ: the file size limit was exceeded |
+
+SIGXCPU and SIGXFSZ are signals 24 and 25 on Linux for x86, Arm, and RISC-V, and 30 and 31 on MIPS, where a shell reports 158 and 159; Neura always uses 152 and 153. Integer division by zero raises SIGFPE (136), not SIGTRAP (133). `Std.Program.status_of(code)` returns the status a variant stands for, and `Std.Program.Process.exit` accepts either a status or an `ExitCode`. A runtime trap ends the run with the status of the variant that names its class ([Errors](Errors.md)). A program with more than one entry override is rejected.
 
 The former built-in `SysIo` and `Test` modules are retired. Importing either is an error that names the replacement: `Std.Io.Console` and `Std.Program` for `SysIo`, and `Std.Test` for `Test`. Images built while they existed keep running under `neura run` as long as they import only `neura.console.write_line`; images that called the retired assertion services `neura.test.assert` or `neura.test.assert_equal_int32` no longer bind, because the runner no longer provides those services.
 
@@ -165,7 +200,7 @@ let Counter = class ( export let value: int32 = 0; );
 let shared = new Counter();                   // runs fourth
 ```
 
-Whether an initializer is a literal is decided by how it is written, not by its value: `let size: int32 = 2 * 3;` is computed at program start in source order, while `let size: int32 = 6;` is set when the image loads. Reading a global before its initializer has run, for example from a file-level statement that precedes the declaration of a module whose member it reads, is a fault that ends the run with status 70. Within one module or file, a global cannot be read before its declaration; the frontend rejects that.
+Whether an initializer is a literal is decided by how it is written, not by its value: `let size: int32 = 2 * 3;` is computed at program start in source order, while `let size: int32 = 6;` is set when the image loads. Reading a global before its initializer has run, for example from a file-level statement that precedes the declaration of a module whose member it reads, is a fault that ends the run with status 139 (`SegmentationFault`, [Errors](Errors.md)). Within one module or file, a global cannot be read before its declaration; the frontend rejects that.
 
 A startup trap ends the run before `main`. If a static initializer traps
 during an active use, execution ends before that use completes. Cyclic imports

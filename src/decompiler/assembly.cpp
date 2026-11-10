@@ -440,6 +440,21 @@ std::string disassemble(const nvr::Image& image) {
             }
         }
     }
+    if (!image.callbacks.empty()) {
+        out << "\n";
+        for (std::size_t i = 0; i < image.callbacks.size(); ++i) {
+            const auto& callback = image.callbacks[i];
+            out << "callback " << i << " " << quoted(callback.name) << " version " << callback.interface_version
+                << " function " << callback.function << "\n";
+        }
+    }
+    if (image.native_library) {
+        const auto& library = *image.native_library;
+        out << "\nnative-library " << quoted(library.triple) << " " << hex(library.object) << "\n";
+        for (const auto& symbol : library.symbols) {
+            out << "native-symbol " << quoted(symbol) << "\n";
+        }
+    }
     if (image.source_map) {
         out << "\nsource-map\n";
         for (const auto& location : *image.source_map) {
@@ -680,6 +695,28 @@ nvr::Image assemble(std::string_view text) {
             }
             exit.assignments = assignments(in);
             image.functions.back().blocks.back().exits.push_back(std::move(exit));
+        } else if (record == "callback") {
+            in.expect_index(static_cast<std::uint32_t>(image.callbacks.size()), "callback");
+            nvr::Callback callback;
+            callback.name = in.string("callback name");
+            in.keyword("version");
+            callback.interface_version = in.index("interface version");
+            in.keyword("function");
+            callback.function = in.index("function");
+            image.callbacks.push_back(std::move(callback));
+        } else if (record == "native-library") {
+            if (image.native_library) {
+                in.error("a second native library");
+            }
+            nvr::NativeLibrary library;
+            library.triple = in.string("target triple");
+            library.object = in.bytes();
+            image.native_library = std::move(library);
+        } else if (record == "native-symbol") {
+            if (!image.native_library) {
+                in.error("a native symbol before 'native-library'");
+            }
+            image.native_library->symbols.push_back(in.string("native symbol"));
         } else if (record == "source-map") {
             if (image.source_map) {
                 in.error("a second source map");

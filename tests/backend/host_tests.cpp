@@ -13,6 +13,7 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 
 #ifndef _WIN32
@@ -179,11 +180,88 @@ NEURA_TEST(host, ungranted_groups_return_capability_denied) {
     denied("neura.net.read", {i64(1), i32(4), i64(0)});
     denied("neura.net.write", {i64(1), bytes("x")});
     denied("neura.net.close", {i64(1)});
+    denied("neura.ffi.abi", {});
+    denied("neura.ffi.arena.open", {});
+    denied("neura.ffi.arena.close", {i64(1)});
+    denied("neura.ffi.alloc", {i64(0), i64(8), i64(8)});
+    denied("neura.ffi.library.open", {i64(0), text("libc.so.6")});
+    denied("neura.ffi.library.default", {});
+    denied("neura.ffi.library.embedded", {});
+    denied("neura.ffi.symbol", {i64(0), text("abs")});
+    denied("neura.ffi.read", {i64(1), i64(1)});
+    denied("neura.ffi.write", {i64(1), bytes("x")});
+    denied("neura.ffi.strlen", {i64(1), i64(1)});
+    denied("neura.ffi.call", {i64(1), bytes(""), bytes("")});
+    denied("neura.ffi.upcall.create", {i64(0), i64(0), bytes("")});
     // Denial comes first, whatever the arguments.
     denied("neura.entropy.fill", {i32(-1)});
     // Console output and process exit need no capability.
     expect_ok(host.call("neura.console.write", {i32(1), bytes("x")}), "console");
     check(host.call("neura.process.exit", {i32(0)}).exit_status == 0, "process exit");
+}
+
+NEURA_TEST(host, native_services_allocate_read_write_and_call) {
+    nvm::Capabilities capabilities;
+    capabilities.native = true;
+    Host host(capabilities);
+    const auto abi = host.call("neura.ffi.abi", {});
+    expect_ok(abi, "abi");
+    check(abi.value.elements.size() == 2 && abi.value.elements[1].bytes.size() == 24, "abi layout bytes");
+    check(abi.value.elements[0].bytes == nvm::native_target_triple(), "abi triple");
+
+    const auto arena = host.call("neura.ffi.arena.open", {});
+    expect_ok(arena, "arena");
+    const auto block = host.call("neura.ffi.alloc", {arena.value, i64(16), i64(8)});
+    expect_ok(block, "alloc");
+    check(as_i64(block.value) % 8 == 0, "aligned allocation");
+    expect_error(host.call("neura.ffi.alloc", {arena.value, i64(8), i64(3)}), host_error::invalid_input,
+                 "alignment not a power of two");
+    expect_error(host.call("neura.ffi.alloc", {i64(99), i64(8), i64(8)}), host_error::invalid_input,
+                 "unknown arena");
+    const auto zeroed = host.call("neura.ffi.read", {block.value, i64(4)});
+    check(zeroed.success && zeroed.value.bytes == std::string(4, '\0'), "allocations are zeroed");
+    expect_ok(host.call("neura.ffi.write", {block.value, bytes(std::string("hi\0", 3))}), "write");
+    const auto length = host.call("neura.ffi.strlen", {block.value, i64(16)});
+    check(length.success && as_i64(length.value) == 2, "strlen stops at the NUL");
+
+    const auto lookup = host.call("neura.ffi.library.default", {});
+    expect_ok(lookup, "default lookup");
+    const auto abs = host.call("neura.ffi.symbol", {lookup.value, text("abs")});
+    expect_ok(abs, "abs symbol");
+    expect_error(host.call("neura.ffi.symbol", {lookup.value, text("no_such_symbol_neura")}), host_error::not_found,
+                 "missing symbol");
+    expect_error(host.call("neura.ffi.library.open", {i64(0), text("/no/such/library.so")}), host_error::not_found,
+                 "missing library");
+    expect_error(host.call("neura.ffi.library.embedded", {}), host_error::not_found, "no embedded library");
+
+    // int abs(int): version 1, not variadic (0xffff), one argument, int32 result, int32 argument.
+    const std::string signature{'\x01', '\xff', '\xff', '\x01', '\x00', '\x06', '\x06'};
+    const std::int32_t argument = -42;
+    std::string packed(4, '\0');
+    std::memcpy(packed.data(), &argument, 4);
+    const auto called = host.call("neura.ffi.call", {abs.value, bytes(signature), bytes(packed)});
+    expect_ok(called, "abs call");
+    std::int32_t answer = 0;
+    std::memcpy(&answer, called.value.bytes.data(), 4);
+    check(answer == 42, "abs(-42) is 42");
+    expect_error(host.call("neura.ffi.call", {abs.value, bytes(signature), bytes("x")}), host_error::invalid_input,
+                 "short arguments");
+    expect_error(host.call("neura.ffi.call", {abs.value, bytes(std::string{'\x02'}), bytes("")}),
+                 host_error::invalid_input, "unknown signature version");
+    // A float in a variadic position is rejected: fixed count 1, two arguments.
+    const std::string variadic{'\x01', '\x01', '\x00', '\x02', '\x00', '\x06', '\x0c', '\x0a'};
+    expect_error(host.call("neura.ffi.call", {abs.value, bytes(variadic), bytes(std::string(12, '\0'))}),
+                 host_error::invalid_input, "unpromoted variadic float");
+
+    const auto math = host.call("neura.ffi.library.open", {arena.value, text("libm.so.6")});
+    expect_ok(math, "libm through the arena");
+    expect_ok(host.call("neura.ffi.symbol", {math.value, text("cos")}), "cos in libm");
+
+    expect_ok(host.call("neura.ffi.arena.close", {arena.value}), "arena close");
+    expect_error(host.call("neura.ffi.arena.close", {arena.value}), host_error::invalid_input, "second close");
+    expect_error(host.call("neura.ffi.symbol", {math.value, text("cos")}), host_error::invalid_input,
+                 "a library unloaded with its arena");
+    host.services.end_run();
 }
 
 NEURA_TEST(host, process_exit_is_terminal) {
@@ -563,7 +641,36 @@ NEURA_TEST(host, trace_files_round_trip) {
         fail("accepted malformed trace: " + std::string(text));
     };
     rejects("", 0, "missing the header");
-    rejects("neura-trace 2\n", 1, "unsupported trace version 2");
+    rejects("neura-trace 3\n", 1, "unsupported trace version 3");
+    rejects("neura-trace 2\nrequest a.b 1 []\ncallback c.d 1 []\nok 0\noutcome completed 0\n", 4,
+            "expected 'request', 'return', or 'ended'");
+    rejects("neura-trace 2\nrequest a.b 1 []\ncallback c.d 1 []\n", 3, "no return");
+
+    // Callbacks nest inside the request that made them.
+    nvm::Trace with_callbacks;
+    nvm::TraceEntry outer;
+    outer.import = "neura.ffi.call";
+    outer.version = 1;
+    outer.arguments = {i64(5)};
+    nvm::TraceCallback callback;
+    callback.name = "neura.ffi.upcall";
+    callback.version = 1;
+    callback.arguments = {i64(1), bytes("ab")};
+    nvm::TraceEntry inner;
+    inner.import = "neura.console.write_line";
+    inner.version = 1;
+    inner.arguments = {text("in callback")};
+    callback.entries.push_back(inner);
+    callback.result = bytes("r");
+    outer.callbacks.push_back(callback);
+    callback.entries.clear();
+    callback.result.reset();
+    outer.callbacks.push_back(callback);
+    outer.completion = HostCompletion::ok(bytes("done"));
+    with_callbacks.entries.push_back(outer);
+    const auto nested_text = nvm::write_trace(with_callbacks);
+    check(nested_text.starts_with("neura-trace 2\n"), "a trace with callbacks is version 2");
+    check(nvm::read_trace(nested_text).entries == with_callbacks.entries, "callbacks round-trip: " + nested_text);
     rejects("trace 1\n", 1, "expected the header");
     rejects("neura-trace 1\n", 1, "missing the outcome");
     rejects("neura-trace 1\nrequest a 1 []\n", 2, "no completion");
@@ -695,6 +802,26 @@ let program = import:Std.Program;
         uses += "        let clock = system_clock.create();\n        clock.now();\n        clock.monotonic();\n"
                 "        clock.sleep(duration.of_nanos(0));\n";
     }
+    if (fs::exists(environment.source_dir / "stdlib/std/dynamic-foreign/linker.nra")) {
+        imports += "let arenas = import:Std.DynamicForeign.Arena;\n"
+                   "let descriptors = import:Std.DynamicForeign.FunctionDescriptor;\n"
+                   "let layouts = import:Std.DynamicForeign.ValueLayout;\n"
+                   "let linkers = import:Std.DynamicForeign.Linker;\n"
+                   "let lookups = import:Std.DynamicForeign.SymbolLookup;\n"
+                   "let values_module = import:Std.DynamicForeign.ForeignValue;\n";
+        uses += "        let arena = arenas.of_confined();\n"
+                "        let segment = arena.allocate_utf8(\"x\");\n"
+                "        segment.get_utf8(0);\n"
+                "        lookups.library_lookup(\"x\", arena);\n"
+                "        lookups.embedded().find(\"x\");\n"
+                "        let linker = linkers.native_linker();\n"
+                "        linker.canonical_layout(\"int\");\n"
+                "        linker.downcall_handle(linker.default_lookup().find_or_trap(\"abs\"),\n"
+                "            descriptors.of(layouts.Int32, layouts.Int32)).invoke(1);\n"
+                "        linker.upcall_stub(func(values: values_module.ForeignValue[list]) -> values_module.ForeignValue\n"
+                "            => values[0], descriptors.of(layouts.Int32, layouts.Int32), arena);\n"
+                "        arena.close();\n";
+    }
     write_text_file(source, imports + R"(
 export let All = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {)" +
@@ -706,6 +833,15 @@ export let All = module:program.Entry (
     Host host({});
     nvm::bind(image, host.registry);
     check(image.imports.size() >= 12, "the program reaches the bindings: " + std::to_string(image.imports.size()));
+    std::size_t native_imports = 0;
+    for (const auto& import : image.imports) {
+        if (import.name.starts_with("neura.ffi.")) ++native_imports;
+    }
+    if (fs::exists(environment.source_dir / "stdlib/std/dynamic-foreign/linker.nra")) {
+        check(native_imports == 13, "every native binding is reached: " + std::to_string(native_imports));
+        check(image.callbacks.size() == 1 && image.callbacks[0].name == "neura.ffi.upcall",
+              "the upcall dispatcher is the image's callback");
+    }
 }
 
 #endif

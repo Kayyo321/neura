@@ -1,0 +1,324 @@
+/// @brief Descriptions of native memory: scalar values, structs, unions, sequences, and padding
+/// (ForeignInterop.md), the counterpart of Java's MemoryLayout.
+///
+/// Sizes and alignments are in bytes. A struct places each member at the next offset aligned for it and pads its
+/// size to a multiple of its alignment, as C does; explicit padding members may add more space.
+/// @see [Std.DynamicForeign.MemoryLayout](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-MemoryLayout)
+export let MemoryLayout = module (
+    /// @brief The Neura type that carries a scalar value. Address carries a MemorySegment.
+    export let Carrier = enum (
+        Bool,
+        Int8,
+        UInt8,
+        Int16,
+        UInt16,
+        Int32,
+        UInt32,
+        Int64,
+        UInt64,
+        Float32,
+        Float64,
+        Address
+    );
+
+    /// @brief The kind of a layout.
+    export let Shape = enum (Value, Struct, Union, Sequence, Padding);
+
+    /// @brief An immutable description of a region of native memory.
+    export let MemoryLayout = class (
+        /// @brief The layout's kind.
+        let kind: Shape;
+        /// @brief The scalar carrier of a Value layout; Bool otherwise.
+        let value_carrier: Carrier = Carrier.Bool;
+        /// @brief The size in bytes.
+        let size: int64;
+        /// @brief The alignment in bytes, a power of two.
+        let alignment: int64;
+        /// @brief The optional name, empty when unnamed.
+        let label: string = "";
+        /// @brief Struct and union members, or the one element layout of a sequence.
+        let parts: MemoryLayout[list] = [];
+        /// @brief The byte offset of each part: member offsets, or 0 for a sequence element.
+        let offsets: int64[list] = [];
+        /// @brief The element count of a sequence.
+        let count: int64 = 0;
+
+        /// @brief Use the module functions; this constructor stores precomputed fields.
+        export let init = func(shape: Shape, carrier: Carrier, byte_size: int64, byte_alignment: int64,
+                               members: MemoryLayout[list], member_offsets: int64[list], elements: int64) {
+            kind = shape;
+            value_carrier = carrier;
+            size = byte_size;
+            alignment = byte_alignment;
+            for (let member in members) {
+                parts.append(member);
+            }
+            for (let offset in member_offsets) {
+                offsets.append(offset);
+            }
+            count = elements;
+        };
+
+        /// @brief The kind of the layout.
+        export let shape = func -> Shape => kind;
+
+        /// @brief The size in bytes.
+        export let byte_size = func -> int64 => size;
+
+        /// @brief The alignment in bytes.
+        export let byte_alignment = func -> int64 => alignment;
+
+        /// @brief The name, or the empty string when unnamed.
+        export let name = func -> string => label;
+
+        /// @brief The scalar carrier. Traps with "invalid argument: not a value layout" for other shapes.
+        export let carrier = func -> Carrier {
+            if (kind != Shape.Value) {
+                trap_with_message("invalid argument: not a value layout");
+            }
+            return value_carrier;
+        };
+
+        /// @brief A copy of this layout with the name `text`.
+        export let with_name = func(text: string) -> MemoryLayout {
+            let copy = new MemoryLayout(kind, value_carrier, size, alignment, parts, offsets, count);
+            copy.label = text;
+            return copy;
+        };
+
+        /// @brief A copy of this layout with a larger alignment. Traps unless `bytes` is a power of two no smaller
+        /// than the size's natural alignment requirement allows.
+        export let with_byte_alignment = func(bytes: int64) -> MemoryLayout {
+            if (bytes < 1 || (bytes & (bytes - 1)) != 0) {
+                trap_with_message("invalid argument: alignment is not a power of two");
+            }
+            let copy = new MemoryLayout(kind, value_carrier, size, bytes, parts, offsets, count);
+            copy.label = label;
+            return copy;
+        };
+
+        /// @brief The members of a struct or union in order, or the element of a sequence.
+        export let member_layouts = func -> MemoryLayout[list] {
+            let copy: MemoryLayout[list] = [];
+            for (let part in parts) {
+                copy.append(part);
+            }
+            return copy;
+        };
+
+        /// @brief The offsets of the members of a struct or union, in the order of member_layouts.
+        export let member_offsets = func -> int64[list] {
+            let copy: int64[list] = [];
+            for (let offset in offsets) {
+                copy.append(offset);
+            }
+            return copy;
+        };
+
+        /// @brief The number of elements of a sequence; 0 for other shapes.
+        export let element_count = func -> int64 => count;
+
+        /// @brief The member named `member`. Traps with "invalid argument: no member <name>" when absent.
+        export let member = func(member_name: string) -> MemoryLayout => parts[member_index(member_name)];
+
+        /// @brief The offset of the member reached by following `path` through named struct and union members.
+        export let byte_offset = func(path: ...string) -> int64 {
+            if (path.length == 0) {
+                return 0;
+            }
+            let first = member_index(path[0]);
+            let offset = offsets[first];
+            let current = parts[first];
+            for (let i = 1; i < path.length; i++) {
+                let index = current.member_index(path[i]);
+                offset += current.offsets[index];
+                current = current.parts[index];
+            }
+            return offset;
+        };
+
+        /// @brief The offset of element `index` of a sequence. Traps outside 0 through element_count() - 1.
+        export let element_offset = func(index: int64) -> int64 {
+            if (kind != Shape.Sequence) {
+                trap_with_message("invalid argument: not a sequence layout");
+            }
+            if (index < 0 || index >= count) {
+                trap_with_message("invalid argument: index out of range");
+            }
+            return index * parts[0].size;
+        };
+
+        /// @brief The position of the member named `member_name`.
+        let member_index = func(member_name: string) -> int {
+            if (kind != Shape.Struct && kind != Shape.Union) {
+                trap_with_message("invalid argument: not a struct or union layout");
+            }
+            for (let i = 0; i < parts.length; i++) {
+                if (parts[i].label == member_name) {
+                    return i;
+                }
+            }
+            trap_with_message("invalid argument: no member " + member_name);
+        };
+
+        /// @brief Layouts compare by shape, carrier, size, alignment, name, and members.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is MemoryLayout)) {
+                return false;
+            }
+            let that = other as MemoryLayout;
+            return to_string() == that.to_string() && alignment == that.alignment;
+        };
+
+        /// @brief Hashes the text form.
+        export let.override hash_code = func -> uint32 => to_string().hash_code();
+
+        /// @brief A compact form such as `i32`, `[i32(x)i32(y)](point)`, or `4:i8`.
+        export let.override to_string = func -> string {
+            let text = match (kind) {
+                Shape.Value => carrier_name(value_carrier),
+                Shape.Padding => "x" + size.to_string(),
+                Shape.Sequence => count.to_string() + ":" + parts[0].to_string(),
+                Shape.Struct => "[" + joined(parts, "") + "]",
+                Shape.Union => "[" + joined(parts, "|") + "]",
+            };
+            return (label == "") ? text : text + "(" + label + ")";
+        };
+    );
+
+    /// @brief The text of each layout joined by `separator`.
+    let joined = func(layouts: MemoryLayout[list], separator: string) -> string {
+        let text = "";
+        for (let i = 0; i < layouts.length; i++) {
+            if (i > 0) {
+                text = text + separator;
+            }
+            text = text + layouts[i].to_string();
+        }
+        return text;
+    };
+
+    /// @brief The short name of a carrier.
+    export let carrier_name = func(carrier: Carrier) -> string => match (carrier) {
+        Carrier.Bool => "z",
+        Carrier.Int8 => "i8",
+        Carrier.UInt8 => "u8",
+        Carrier.Int16 => "i16",
+        Carrier.UInt16 => "u16",
+        Carrier.Int32 => "i32",
+        Carrier.UInt32 => "u32",
+        Carrier.Int64 => "i64",
+        Carrier.UInt64 => "u64",
+        Carrier.Float32 => "f32",
+        Carrier.Float64 => "f64",
+        Carrier.Address => "a",
+    };
+
+    /// @brief The fixed size of a carrier; an address has the runner's pointer size, 8 here.
+    export let carrier_size = func(carrier: Carrier) -> int64 => match (carrier) {
+        Carrier.Bool => 1,
+        Carrier.Int8 => 1,
+        Carrier.UInt8 => 1,
+        Carrier.Int16 => 2,
+        Carrier.UInt16 => 2,
+        Carrier.Int32 => 4,
+        Carrier.UInt32 => 4,
+        Carrier.Int64 => 8,
+        Carrier.UInt64 => 8,
+        Carrier.Float32 => 4,
+        Carrier.Float64 => 8,
+        Carrier.Address => 8,
+    };
+
+    /// @brief A scalar layout with its natural size and alignment.
+    export let value = func(carrier: Carrier) -> MemoryLayout {
+        let size = carrier_size(carrier);
+        return new MemoryLayout(Shape.Value, carrier, size, size, [], [], 0);
+    };
+
+    /// @brief A scalar layout with an explicit size and alignment, for C types whose size the runner reports.
+    export let value_sized = func(carrier: Carrier, size: int64, alignment: int64) -> MemoryLayout {
+        if (size != carrier_size(carrier) || alignment < 1 || (alignment & (alignment - 1)) != 0) {
+            trap_with_message("invalid argument: value layout size or alignment");
+        }
+        return new MemoryLayout(Shape.Value, carrier, size, alignment, [], [], 0);
+    };
+
+    /// @brief `bytes` bytes of padding with alignment 1.
+    export let padding_layout = func(bytes: int64) -> MemoryLayout {
+        if (bytes < 1) {
+            trap_with_message("invalid argument: padding size");
+        }
+        return new MemoryLayout(Shape.Padding, Carrier.Bool, bytes, 1, [], [], 0);
+    };
+
+    /// @brief A struct with C's natural layout: each member at the next offset aligned for it, the size rounded
+    /// up to the largest member alignment. Traps when two members share a nonempty name.
+    export let struct_layout = func(members: ...MemoryLayout) -> MemoryLayout {
+        check_names(members);
+        let offsets: int64[list] = [];
+        let offset: int64 = 0;
+        let alignment: int64 = 1;
+        let list_members: MemoryLayout[list] = [];
+        for (let member in members) {
+            offset = align_up(offset, member.byte_alignment());
+            offsets.append(offset);
+            offset += member.byte_size();
+            if (member.byte_alignment() > alignment) {
+                alignment = member.byte_alignment();
+            }
+            list_members.append(member);
+        }
+        return new MemoryLayout(Shape.Struct, Carrier.Bool, align_up(offset, alignment), alignment, list_members,
+                                offsets, 0);
+    };
+
+    /// @brief A union: every member at offset 0, the size the largest member's rounded up to the largest
+    /// alignment.
+    export let union_layout = func(members: ...MemoryLayout) -> MemoryLayout {
+        check_names(members);
+        let offsets: int64[list] = [];
+        let size: int64 = 0;
+        let alignment: int64 = 1;
+        let list_members: MemoryLayout[list] = [];
+        for (let member in members) {
+            offsets.append(0);
+            if (member.byte_size() > size) {
+                size = member.byte_size();
+            }
+            if (member.byte_alignment() > alignment) {
+                alignment = member.byte_alignment();
+            }
+            list_members.append(member);
+        }
+        return new MemoryLayout(Shape.Union, Carrier.Bool, align_up(size, alignment), alignment, list_members,
+                                offsets, 0);
+    };
+
+    /// @brief `elements` consecutive copies of `element`, a C array.
+    export let sequence_layout = func(elements: int64, element: MemoryLayout) -> MemoryLayout {
+        if (elements < 0) {
+            trap_with_message("invalid argument: negative element count");
+        }
+        if (element.byte_size() % element.byte_alignment() != 0) {
+            trap_with_message("invalid argument: element size is not a multiple of its alignment");
+        }
+        return new MemoryLayout(Shape.Sequence, Carrier.Bool, elements * element.byte_size(),
+                                element.byte_alignment(), [element], [0], elements);
+    };
+
+    /// @brief `offset` rounded up to a multiple of `alignment`.
+    export let align_up = func(offset: int64, alignment: int64) -> int64 =>
+        (offset + alignment - 1) / alignment * alignment;
+
+    /// @brief Traps when two members share a nonempty name.
+    let check_names = func(members: MemoryLayout[]) {
+        for (let i = 0; i < members.length; i++) {
+            for (let j = i + 1; j < members.length; j++) {
+                if (members[i].name() != "" && members[i].name() == members[j].name()) {
+                    trap_with_message("invalid argument: duplicate member name " + members[i].name());
+                }
+            }
+        }
+    };
+);

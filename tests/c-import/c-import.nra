@@ -1,0 +1,50 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let arenas = import:Std.DynamicForeign.Arena;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let mathops = import:c("mathops.h", "libmathops.a");
+
+// A C header and a static library imported together: functions, structs by
+// value, macros, enumerators, globals, out-parameters, strings, variadic
+// calls, and a static inline function.
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(mathops.add(5, 3).to_string());
+        let big: int64 = 9000000000;
+        console.print_line(mathops.add64(big, 1).to_string());
+        console.print_line(mathops.scale(1.5, 2.0 as float32).to_string());
+        console.print_line(mathops.low_byte(511).to_string());
+        console.print_line(mathops.negate8(-128 as int8).to_string());
+        console.print_line(mathops.is_even(4).to_string());
+
+        let point = mathops.make_point(3, 4);
+        console.print_line(point.x.to_string() + "," + point.y.to_string());
+        console.print_line(mathops.point_sum(mathops.mathops_point.of(10, -2)).to_string());
+        let mixed = mathops.make_mixed(65 as int8, 0.5, 6 as int16);
+        console.print_line(mixed.tag.to_string() + " " + mixed.weight.to_string() + " " + mixed.count.to_string());
+        console.print_line(mathops.mixed_weight(mixed).to_string());
+        console.print_line(mathops.mathops_mixed.layout().byte_size().to_string());
+
+        console.print_line(mathops.MATHOPS_VERSION.to_string() + " " + mathops.MATHOPS_LIMIT.to_string() + " " +
+                           mathops.MATHOPS_SCALE.to_string() + " " + mathops.MATHOPS_NAME);
+        console.print_line(mathops.MATHOPS_RED.to_string() + " " + mathops.MATHOPS_GREEN.to_string() + " " +
+                           mathops.MATHOPS_BLUE.to_string());
+
+        let arena = arenas.of_confined();
+        let quotient = arena.allocate(layouts.Int32);
+        let remainder = arena.allocate(layouts.Int32);
+        mathops.divide(17, 5, quotient, remainder);
+        console.print_line(quotient.get_int32(0).to_string() + " r " + remainder.get_int32(0).to_string());
+        console.print_line(mathops.string_length("héllo").to_string());
+        console.print_line(mathops.greeting().reinterpret(64).get_utf8(0));
+        console.print_line(mathops.sum_ints(4, 1, 2, 3, 4).to_string());
+        console.print_line(mathops.mathops_square(12).to_string());
+
+        mathops.bump_counter();
+        console.print_line(mathops.get_mathops_counter().to_string());
+        mathops.set_mathops_counter(100);
+        console.print_line(mathops.bump_counter().to_string());
+        arena.close();
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): expected <1[.]0>, got <1[.]25>
 let program = import:Std.Program;
 let error = import:Std.Core.Error;

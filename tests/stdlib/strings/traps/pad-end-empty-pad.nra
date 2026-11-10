@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: pad is not one scalar value
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

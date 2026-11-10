@@ -1,0 +1,260 @@
+let int64s = import:Std.Core.Int64;
+let uint64s = import:Std.Core.UInt64;
+
+/// @brief The host bindings of Std.DynamicForeign (ForeignInterop.md) and the byte codec for native values.
+///
+/// Every service needs the native capability (`--allow-native`). Without it, or when a service fails, the
+/// wrappers here trap: a native operation that cannot run is a programming or configuration error, not an
+/// expected outcome. Loading a library is the exception; its caller reports a missing library as a Result.
+export let Native = module (
+    /// @brief The provider's target triple and layout bytes, or an error code.
+    let AbiOutcome = enum (Ok([string, uint8[list]]), Error(uint32));
+    /// @brief A host identifier, address, or length, or an error code.
+    let IdOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief Bytes from the host, or an error code.
+    let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+    /// @brief Host success without a value, or an error code.
+    let DoneOutcome = enum (Ok, Error(uint32));
+
+    /// @brief Reports the target triple and the sizes and alignments of the C scalar types.
+    let query_abi = func -> AbiOutcome host("neura.ffi.abi", 1);
+    /// @brief Opens a host arena.
+    let open_arena_id = func -> IdOutcome host("neura.ffi.arena.open", 1);
+    /// @brief Frees an arena's memory and unloads its libraries.
+    let close_arena_id = func(arena: int64) -> DoneOutcome host("neura.ffi.arena.close", 1);
+    /// @brief Allocates zeroed memory in an arena; arena 0 is the global arena.
+    let alloc = func(arena: int64, size: int64, alignment: int64) -> IdOutcome host("neura.ffi.alloc", 1);
+    /// @brief Loads a library, owned by an arena.
+    let library_open = func(arena: int64, path: string) -> IdOutcome host("neura.ffi.library.open", 1);
+    /// @brief The lookup of the libraries already in the process.
+    let library_default = func -> IdOutcome host("neura.ffi.library.default", 1);
+    /// @brief The image's embedded native library.
+    let library_embedded = func -> IdOutcome host("neura.ffi.library.embedded", 1);
+    /// @brief The address of a symbol in a library.
+    let symbol = func(library: int64, name: string) -> IdOutcome host("neura.ffi.symbol", 1);
+    /// @brief Copies bytes out of native memory.
+    let read_bytes = func(address: int64, length: int64) -> BytesOutcome host("neura.ffi.read", 1);
+    /// @brief Copies bytes into native memory.
+    let write_bytes = func(address: int64, bytes: uint8[list]) -> DoneOutcome host("neura.ffi.write", 1);
+    /// @brief The length of a NUL-terminated byte string, at most `max`.
+    let string_length = func(address: int64, max: int64) -> IdOutcome host("neura.ffi.strlen", 1);
+    /// @brief Calls a native function with an encoded signature and arguments.
+    let call_function = func(function: int64, signature: uint8[list], arguments: uint8[list]) -> BytesOutcome
+        host("neura.ffi.call", 1);
+
+    /// @brief Creates a native function pointer that calls back the upcall stub `stub`.
+    let upcall_create = func(arena: int64, stub: int64, signature: uint8[list]) -> IdOutcome
+        host("neura.ffi.upcall.create", 1);
+
+    /// @brief Whether the ABI description has been read from the provider.
+    let abi_loaded: bool = false;
+    /// @brief The provider's target triple.
+    let abi_triple: string = "";
+    /// @brief The provider's layout bytes: size and alignment pairs, then char signedness and byte order.
+    let abi_layouts: uint8[list] = [];
+
+    /// @brief Traps for a failed native operation, naming the capability when it was denied.
+    export let fail = func(operation: string, code: uint32) {
+        if (code == 14) {
+            trap_with_message("invalid state: native access denied: run with --allow-native");
+        }
+        trap_with_message("invalid state: native " + operation + " failed with code " + code.to_string());
+    };
+
+    /// @brief Reads and caches the provider's ABI description.
+    let load_abi = func {
+        if (abi_loaded) {
+            return;
+        }
+        match (query_abi()) {
+            AbiOutcome.Ok(description) => {
+                abi_triple = description[0];
+                abi_layouts = description[1];
+                abi_loaded = true;
+            },
+            AbiOutcome.Error(code) => {
+                fail("ABI query", code);
+            },
+        }
+    };
+
+    /// @brief The runner's target triple, such as `x86_64-linux-gnu`.
+    export let triple = func -> string {
+        load_abi();
+        return abi_triple;
+    };
+
+    /// @brief The size in bytes of the C scalar at `index` in the provider's table: bool, char, short, int,
+    /// long, long long, float, double, pointer, size_t, wchar_t.
+    export let c_size = func(index: int) -> int64 {
+        load_abi();
+        return abi_layouts[index * 2] as int64;
+    };
+
+    /// @brief The alignment in bytes of the C scalar at `index`, in the order of c_size.
+    export let c_alignment = func(index: int) -> int64 {
+        load_abi();
+        return abi_layouts[index * 2 + 1] as int64;
+    };
+
+    /// @brief Whether plain C char is signed on the runner's target.
+    export let char_signed = func -> bool {
+        load_abi();
+        return abi_layouts[22] == 1;
+    };
+
+    /// @brief Whether native integers are stored least significant byte first.
+    export let little_endian = func -> bool {
+        load_abi();
+        return abi_layouts[23] == 1;
+    };
+
+    /// @brief Opens a host arena and returns its identifier.
+    export let open_arena = func -> int64 {
+        return match (open_arena_id()) {
+            IdOutcome.Ok(id) => id,
+            IdOutcome.Error(code) => failed_id("arena open", code),
+        };
+    };
+
+    /// @brief Frees a host arena's memory and unloads its libraries.
+    export let close_arena = func(arena: int64) {
+        match (close_arena_id(arena)) {
+            DoneOutcome.Ok => {},
+            DoneOutcome.Error(code) => {
+                fail("arena close", code);
+            },
+        }
+    };
+
+    /// @brief Allocates zeroed native memory owned by `arena` and returns its address.
+    export let allocate = func(arena: int64, size: int64, alignment: int64) -> int64 {
+        return match (alloc(arena, size, alignment)) {
+            IdOutcome.Ok(address) => address,
+            IdOutcome.Error(code) => failed_id("allocation", code),
+        };
+    };
+
+    /// @brief Loads the library at `path`, owned by `arena`. Returns 0 when it cannot be loaded.
+    export let open_library = func(arena: int64, path: string) -> int64 {
+        return match (library_open(arena, path)) {
+            IdOutcome.Ok(id) => id,
+            IdOutcome.Error(code) => (code == 14) ? failed_id("library load", code) : 0,
+        };
+    };
+
+    /// @brief The identifier of the process's default lookup.
+    export let default_library = func -> int64 {
+        return match (library_default()) {
+            IdOutcome.Ok(id) => id,
+            IdOutcome.Error(code) => failed_id("default lookup", code),
+        };
+    };
+
+    /// @brief The identifier of the image's embedded native library.
+    export let embedded_library = func -> int64 {
+        return match (library_embedded()) {
+            IdOutcome.Ok(id) => id,
+            IdOutcome.Error(code) => failed_id("embedded library load", code),
+        };
+    };
+
+    /// @brief The address of `name` in `library`, or 0 when it has no such symbol.
+    export let find_symbol = func(library: int64, name: string) -> int64 {
+        return match (symbol(library, name)) {
+            IdOutcome.Ok(address) => address,
+            IdOutcome.Error(code) => (code == 1) ? 0 : failed_id("symbol lookup", code),
+        };
+    };
+
+    /// @brief Copies `length` bytes from native memory.
+    export let read = func(address: int64, length: int64) -> uint8[list] {
+        return match (read_bytes(address, length)) {
+            BytesOutcome.Ok(bytes) => bytes,
+            BytesOutcome.Error(code) => failed_bytes("read", code),
+        };
+    };
+
+    /// @brief Copies `bytes` into native memory at `address`.
+    export let write = func(address: int64, bytes: uint8[list]) {
+        match (write_bytes(address, bytes)) {
+            DoneOutcome.Ok => {},
+            DoneOutcome.Error(code) => {
+                fail("write", code);
+            },
+        }
+    };
+
+    /// @brief The number of bytes before the first NUL at `address`, at most `max`.
+    export let c_string_length = func(address: int64, max: int64) -> int64 {
+        return match (string_length(address, max)) {
+            IdOutcome.Ok(length) => length,
+            IdOutcome.Error(code) => failed_id("string read", code),
+        };
+    };
+
+    /// @brief Calls the native function at `function` and returns the result bytes.
+    export let call = func(function: int64, signature: uint8[list], arguments: uint8[list]) -> uint8[list] {
+        return match (call_function(function, signature, arguments)) {
+            BytesOutcome.Ok(bytes) => bytes,
+            BytesOutcome.Error(code) => failed_bytes("call", code),
+        };
+    };
+
+    /// @brief A native function pointer, owned by `arena`, that calls the upcall stub `stub` with the C
+    /// signature `signature`.
+    export let create_upcall = func(arena: int64, stub: int64, signature: uint8[list]) -> int64 {
+        return match (upcall_create(arena, stub, signature)) {
+            IdOutcome.Ok(address) => address,
+            IdOutcome.Error(code) => failed_id("upcall stub creation", code),
+        };
+    };
+
+    /// @brief Appends the low `size` bytes of `bits` in native byte order.
+    export let put = func(bytes: uint8[list], bits: uint64, size: int) {
+        let little = little_endian();
+        for (let i = 0; i < size; i++) {
+            let shift = little ? i * 8 : (size - 1 - i) * 8;
+            bytes.append(((bits >> shift) & 255) as uint8);
+        }
+    };
+
+    /// @brief Reads `size` bytes at `offset` in native byte order as the low bytes of a uint64.
+    export let get = func(bytes: uint8[list], offset: int, size: int) -> uint64 {
+        let little = little_endian();
+        let bits: uint64 = 0;
+        for (let i = 0; i < size; i++) {
+            let shift = little ? i * 8 : (size - 1 - i) * 8;
+            bits = bits | ((bytes[offset + i] as uint64) << shift);
+        }
+        return bits;
+    };
+
+    /// @brief The two's complement bits of a signed value.
+    export let signed_bits = func(value: int64) -> uint64 => int64s.to_unsigned(value);
+
+    /// @brief Sign-extends the low `size` bytes of `bits`.
+    export let sign_extend = func(bits: uint64, size: int) -> int64 {
+        if (size >= 8) {
+            return uint64s.to_signed(bits);
+        }
+        let width = size * 8;
+        let limit: uint64 = (1 as uint64) << width;
+        if (bits < (limit >> 1)) {
+            return bits as int64;
+        }
+        return (bits as int64) - (limit as int64);
+    };
+
+    /// @brief Traps through fail and satisfies an int64 result.
+    let failed_id = func(operation: string, code: uint32) -> int64 {
+        fail(operation, code);
+        return 0;
+    };
+
+    /// @brief Traps through fail and satisfies a byte-list result.
+    let failed_bytes = func(operation: string, code: uint32) -> uint8[list] {
+        fail(operation, code);
+        return [];
+    };
+);
