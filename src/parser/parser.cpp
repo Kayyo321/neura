@@ -153,7 +153,7 @@ private:
 
     std::vector<Parameter> parameters() {
         std::vector<Parameter> result;
-        expect("(");
+        if (!match("(")) return result;
         if (!at(")")) {
             do {
                 const auto& name = identifier();
@@ -166,10 +166,30 @@ private:
         return result;
     }
 
+    // Return true when an expression body still needs its terminating semicolon.
+    bool function_body(Declaration& result) {
+        result.parameters = parameters();
+        result.type = match("->") ? type() : TypeSyntax{current().span, "void", {}, {}};
+        result.has_body = at("{") || at("=>");
+        if (!result.has_body) return false;
+        if (!match("=>")) {
+            result.body = block();
+            return false;
+        }
+        Statement statement{};
+        statement.kind = result.type->name == "void" && result.type->collections.empty()
+            ? Statement::Kind::Expression : Statement::Kind::Return;
+        statement.expressions.push_back(expression());
+        statement.span = statement.expressions.front().span;
+        result.body.push_back(std::move(statement));
+        return true;
+    }
+
     bool at_declaration() const { return at("export") || at("let") || at("const"); }
 
     Declaration declaration(bool member) {
         const auto start = cursor_;
+        bool expression_body = false;
         Declaration result{};
         result.kind = Declaration::Kind::Binding;
         result.exported = match("export");
@@ -192,13 +212,8 @@ private:
                 definition_has_no_annotation(result);
                 result.kind = Declaration::Kind::Function;
                 result.generics = generic_parameters();
-                result.parameters = parameters();
-                expect("->");
-                result.type = type();
-                result.has_body = at("{");
-                if (result.has_body) {
-                    result.body = block();
-                } else if (current().kind == TokenKind::Identifier && current().text == "host") {
+                expression_body = function_body(result);
+                if (!result.has_body && current().kind == TokenKind::Identifier && current().text == "host") {
                     advance();
                     expect("(");
                     const auto& service = current();
@@ -216,7 +231,7 @@ private:
                     expect(")");
                     result.host_binding.emplace(service.text.substr(1, service.text.size() - 2), number);
                 }
-                if (result.has_body && result.generics.empty() && !result.override_member &&
+                if (result.has_body && !expression_body && result.generics.empty() && !result.override_member &&
                     (at("(") || at("[") || at(".") || at("as") || precedence() != 0)) {
                     auto lambda = std::make_shared<Declaration>();
                     lambda->kind = Declaration::Kind::Function;
@@ -306,7 +321,7 @@ private:
         }
 
         // Aggregate members can omit the semicolon after a function body.
-        if (member && result.has_body) {
+        if (member && result.has_body && !expression_body) {
             match(";");
         } else {
             expect(";");
@@ -379,6 +394,13 @@ private:
             result.kind = Statement::Kind::While;
             result.expressions.push_back(condition());
             result.body = block();
+        } else if (match("do")) {
+            result.kind = Statement::Kind::Do;
+            result.body = block();
+            if (match("while")) {
+                result.expressions.push_back(condition());
+                expect(";");
+            }
         } else if (match("for")) {
             result = for_statement();
         } else {
@@ -508,8 +530,10 @@ private:
         } else {
             result.kind = Statement::Kind::Expression;
             result.expressions.push_back(expression());
-            if (match("=")) {
+            if (at("=") || at("+=") || at("-=") || at("*=") || at("/=") || at("%=") ||
+                at("&=") || at("^=") || at("|=") || at("<<=") || at(">>=")) {
                 result.kind = Statement::Kind::Assignment;
+                result.assignment_operator = advance().text;
                 result.expressions.push_back(expression());
             }
         }
@@ -532,7 +556,7 @@ private:
     int precedence() const {
         if (at("||")) return 1;
         if (at("&&")) return 2;
-        if (at("==") || at("!=")) return equality_precedence;
+        if (at("==") || at("!=") || at("===")) return equality_precedence;
         if (at_shift()) return 8;
         if (at("<") || at("<=") || at(">") || at(">=")) return ordering_precedence;
         if (at("|")) return 5;
@@ -557,7 +581,7 @@ private:
                 op += advance().text;
             }
             auto right = expression(priority + 1);
-            if ((priority == equality_precedence || priority == ordering_precedence) &&
+            if (op != "===" && (priority == equality_precedence || priority == ordering_precedence) &&
                 (at("and") || at("or"))) {
                 left = comparison_chain(start, std::move(op), std::move(left), std::move(right));
                 continue;
@@ -566,6 +590,16 @@ private:
             binary.operands.push_back(std::move(left));
             binary.operands.push_back(std::move(right));
             left = std::move(binary);
+        }
+        if (minimum_precedence == 1 && match("?")) {
+            auto when_true = expression();
+            expect(":");
+            auto when_false = expression();
+            auto conditional = make_expression(Expr::Kind::Conditional, span_from(start));
+            conditional.operands.push_back(std::move(left));
+            conditional.operands.push_back(std::move(when_true));
+            conditional.operands.push_back(std::move(when_false));
+            return conditional;
         }
         return left;
     }
@@ -612,6 +646,13 @@ private:
 
     Expr unary() {
         const auto start = cursor_;
+        if (at("++") || at("--")) {
+            const auto op = advance().text;
+            auto operand = unary();
+            auto result = make_expression(Expr::Kind::PrefixUpdate, span_from(start), op);
+            result.operands.push_back(std::move(operand));
+            return result;
+        }
         if (at("!") || at("-") || at("~")) {
             const auto op = advance().text;
             auto operand = unary();
@@ -619,7 +660,14 @@ private:
             result.operands.push_back(std::move(operand));
             return result;
         }
-        return postfix();
+        auto operand = postfix();
+        if (at("++") || at("--")) {
+            const auto op = advance().text;
+            auto result = make_expression(Expr::Kind::PostfixUpdate, span_from(start), op);
+            result.operands.push_back(std::move(operand));
+            return result;
+        }
+        return operand;
     }
 
     std::vector<Expr> expression_list(std::string_view close) {
@@ -723,11 +771,9 @@ private:
         if (match("func")) {
             auto lambda = std::make_shared<Declaration>();
             lambda->kind = Declaration::Kind::Function;
-            lambda->parameters = parameters();
-            expect("->");
-            lambda->type = type();
-            lambda->body = block();
-            lambda->has_body = true;
+            function_body(*lambda);
+            if (!lambda->has_body)
+                throw Diagnostic(current().span, "expected a function body");
             lambda->span = span_from(start);
             auto result = make_expression(Expr::Kind::Lambda, lambda->span);
             result.lambda = std::move(lambda);

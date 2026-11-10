@@ -1,0 +1,110 @@
+let program = import:Std.Program;
+let test = import:Std.Test;
+
+let Point = class (
+    export let x = 0;
+    export let.override equals = func(other: class) -> bool {
+        if (!(other is Point)) {
+            return false;
+        }
+        return x == (other as Point).x;
+    }
+);
+
+let Main = module:program.Entry (
+    let once = func -> int {
+        do {
+            return 3;
+        } while (1 / 0 > 0);
+    };
+
+    let verify_loops = func {
+        let visited = 0;
+        let checked = 0;
+        do {
+            visited++;
+            if (visited == 1) {
+                continue;
+            }
+            do {
+                break;
+            }
+            if (visited == 3) {
+                break;
+            }
+        } while (++checked < 3);
+        test.assert_equal_int32(3, visited);
+        test.assert_equal_int32(2, checked);
+
+        do {
+            visited++;
+        } while (false);
+        test.assert_equal_int32(4, visited);
+        test.assert_equal_int32(3, once());
+    };
+
+    let verify_updates = func {
+        let value = 2;
+        test.assert_equal_int32(2, value++);
+        test.assert_equal_int32(4, ++value);
+        test.assert_equal_int32(4, value--);
+        test.assert_equal_int32(2, --value);
+
+        let fraction: float16 = 1.5;
+        test.assert_equal_float64(1.5, fraction++ as float64);
+        test.assert_equal_float64(2.5, fraction as float64);
+
+        value += 8;
+        value -= 2;
+        value *= 3;
+        value /= 4;
+        value %= 4;
+        value <<= 3;
+        value >>= 1;
+        value ^= 9;
+        value |= 6;
+        value &= 13;
+        test.assert_equal_int32(5, value);
+
+        let items = [2, 7];
+        let index = 0;
+        items[index++] += ++items[0];
+        test.assert_equal_int32(1, index);
+        test.assert_equal_int32(5, items[0]);
+        test.assert_equal_int32(7, items[1]);
+
+        let point = new Point();
+        let receiver = func(p: Point, counts: int[]) -> Point {
+            counts[0]++;
+            return p;
+        };
+        let counts = [0];
+        test.assert_equal_int32(0, receiver(point, counts).x++);
+        test.assert_equal_int32(1, counts[0]);
+        test.assert_equal_int32(1, point.x);
+    };
+
+    let verify_selection_and_equality = func {
+        let value = 0;
+        let result: int = true ? false ? 17 : ++value : 1 / 0;
+        test.assert_equal_int32(1, result);
+        test.assert_equal_int32(1, value);
+        test.assert([1, 2] === [1, 2]);
+        test.assert(!("one" === "two"));
+
+        let a = new Point();
+        let b = new Point();
+        test.assert(a === b);
+        test.assert(a.equals(b));
+        test.assert(a != b);
+        b.x++;
+        test.assert(!(a === b));
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        verify_loops();
+        verify_updates();
+        verify_selection_and_equality();
+        return program.ExitCode.Ok;
+    }
+);

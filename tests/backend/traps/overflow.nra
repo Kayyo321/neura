@@ -5,7 +5,7 @@ let program = import:Std.Program;
 
 let Overflow = module:program.Entry (
     let increment = func(value: int8) -> int8 {
-        return value + 1;
+        return ++value;
     };
 
     export let.override main = func(args: string[]) -> program.ExitCode {

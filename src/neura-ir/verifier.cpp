@@ -105,6 +105,7 @@ private:
         SymbolId owner = no_symbol;
         SymbolId function = no_symbol;
         unsigned loops = 0;
+        bool scoped_value = false;
     };
 
     const IrProgram& program_;
@@ -447,6 +448,8 @@ private:
             report(node.span, "initialize targets " + name(node.symbol) + ", which is not a binding");
             return;
         }
+        if (context.scoped_value && target.kind != SymbolKind::Local)
+            report(node.span, "a scoped value can initialize only local bindings");
         if (target.owner != context.owner) {
             report(node.span, "initialize of " + name(node.symbol) + " appears outside its owner's body");
         }
@@ -479,6 +482,10 @@ private:
     }
 
     void check_return(const IrNode& node, Context& context) {
+        if (context.scoped_value) {
+            report(node.span, "return cannot leave a scoped value");
+            return;
+        }
         if (context.function == no_symbol) {
             report(node.span, "return appears outside a function body");
             return;
@@ -649,7 +656,7 @@ private:
             }
             break;
         case IrOp::ScopedValue:
-            check_scoped_value(node, context);
+            check_scoped_value(node, context, allow_void);
             break;
         case IrOp::SelectValue:
             check_select_value(node, context);
@@ -945,22 +952,19 @@ private:
         }
     }
 
-    void check_scoped_value(const IrNode& node, Context& context) {
+    void check_scoped_value(const IrNode& node, Context& context, bool allow_void) {
         expect_operands(node, 0, "scoped value");
         if (node.body.empty()) {
             report(node.span, "a scoped value needs a result expression");
             return;
         }
         scopes_.emplace_back();
-        for (std::size_t i = 0; i + 1 < node.body.size(); ++i) {
-            const auto& init = node.body[i];
-            if (init.op != IrOp::Initialize || !check_symbol_kind(init, {SymbolKind::Local}, "scoped value binding")) {
-                report(init.span, "a scoped value can only declare local bindings before its result");
-            } else {
-                check_statement(init, context);
-            }
-        }
-        check_value(node.body.back(), context);
+        auto nested = context;
+        nested.loops = 0;
+        nested.scoped_value = true;
+        for (std::size_t i = 0; i + 1 < node.body.size(); ++i)
+            check_statement(node.body[i], nested);
+        check_expression(node.body.back(), nested, allow_void);
         require_assignable(node.body.back().type, node.type, node.span, "scoped value result");
         scopes_.pop_back();
     }

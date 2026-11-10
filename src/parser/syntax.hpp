@@ -42,7 +42,7 @@ struct Expr {
         Index, Collection, New, Import,
         // `operand as type`: the target type is in `type`.
         Cast, NamedVariant, Match,
-        ComparisonChain,
+        ComparisonChain, Conditional, PrefixUpdate, PostfixUpdate,
         Lambda, Nil, TypeTest, TypeApplication,
     };
 
@@ -69,7 +69,7 @@ struct Statement {
         For,
         // for (let name: Type in collection) body. `declaration` names the
         // element binding; `expressions` holds the collection.
-        ForEach, Destructure, Match,
+        ForEach, Destructure, Match, Do,
     };
 
     Kind kind;
@@ -83,6 +83,8 @@ struct Statement {
     std::vector<Token> bindings;
     bool constant_bindings{};
     std::vector<MatchArm> arms;
+    // Empty for other statements. Holds the operator for an assignment.
+    std::string assignment_operator{};
 };
 
 struct MatchArm {

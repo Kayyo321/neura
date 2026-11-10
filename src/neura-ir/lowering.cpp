@@ -209,16 +209,22 @@ private:
     IrNode allocate(const Expr& expr, Context& context);
     IrNode binary(const Expr& expr, Context& context, const IrType* expected);
     IrNode comparison_chain(const Expr& expr, Context& context);
+    IrNode conditional(const Expr& expr, Context& context, const IrType* expected);
+    IrNode update(const Expr& expr, Context& context);
     IrNode number(const Expr& expr, const IrType* expected, bool negative = false);
     void arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
                    const Substitution& replacements, Context& context);
     void place(const IrNode& destination) const;
+    IrNode save_temporary(IrNode initializer, std::vector<IrNode>& instructions,
+                          Context& context, std::string name, bool constant = true);
+    IrNode capture_place(const Expr& expr, std::vector<IrNode>& instructions, Context& context);
     IrNode statement(const Statement& stmt, Context& context);
     void append_statement(std::vector<IrNode>& instructions, const Statement& stmt, Context& context);
     void destructure(std::vector<IrNode>& instructions, const Statement& stmt, Context& context,
                      const std::vector<SymbolId>* globals = nullptr);
     void resolve_destructure(const Statement& stmt, SymbolId file);
     IrNode lower_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected = nullptr);
+    IrNode do_loop(const Statement& stmt, Context& context);
     IrNode for_loop(const Statement& stmt, Context& context);
     IrNode for_each(const Statement& stmt, Context& context);
     IrNode for_each_iterable(const Statement& stmt, Context& context, IrNode items);
@@ -1445,8 +1451,32 @@ bool comparable(const IrProgram& program, const IrType& type, std::string_view o
                          (type.kind == TypeKind::Enum && !has_enum_payload(program, type.symbol))));
 }
 
+IrNode arithmetic(std::string op, const Span& span, IrNode left, IrNode right) {
+    const auto kind = left.type.kind;
+    const bool valid = op == "%" || is_bitwise_binary(op) ? kind == TypeKind::Integer
+        : kind == TypeKind::Integer || kind == TypeKind::Float ||
+          (kind == TypeKind::String && op == "+");
+    if (!valid)
+        throw Diagnostic(span, "operator '" + op + "' is not defined for " + describe(left.type));
+    if (is_shift(op) && right.type.kind != TypeKind::Integer)
+        throw Diagnostic(right.span, "a shift count must be an integer");
+    auto result = node(IrOp::Binary, span, left.type);
+    result.text = std::move(op);
+    result.operands.push_back(std::move(left));
+    result.operands.push_back(std::move(right));
+    return result;
+}
+
 IrNode Lowering::binary(const Expr& expr, Context& context, const IrType* expected) {
     const auto& op = expr.text;
+    if (op == "===") {
+        // Use the same lookup, dispatch, and argument checks as an explicit call.
+        Expr member{ExprKind::Member, expr.span, "equals", {expr.operands[0]}, {}, {}};
+        Expr invocation{ExprKind::Call, expr.span, {}, {std::move(member), expr.operands[1]}, {}, {}};
+        auto result = call(invocation, context);
+        require_type(result.type, bool_type, expr.span);
+        return result;
+    }
     if (op == "&&" || op == "||") {
         auto result = node(IrOp::ShortCircuit, expr.span, bool_type);
         result.text = op;
@@ -1463,8 +1493,6 @@ IrNode Lowering::binary(const Expr& expr, Context& context, const IrType* expect
     if (is_shift(op)) {
         left = value(lhs, context, expected);
         right = value(rhs, context);
-        if (right.type.kind != TypeKind::Integer)
-            throw Diagnostic(rhs.span, "a shift count must be an integer");
     } else if (numeric_literal(lhs) && !numeric_literal(rhs)) {
         right = value(rhs, context, comparison ? nullptr : expected);
         left = value(lhs, context, &right.type);
@@ -1477,17 +1505,35 @@ IrNode Lowering::binary(const Expr& expr, Context& context, const IrType* expect
             right = value(rhs, context, &left.type);
         }
     }
-    const bool valid = comparison ? comparable(program_, receiver_type(left.type), op)
-        : op == "%" || is_bitwise_binary(op) ? left.type.kind == TypeKind::Integer
-        : left.type.kind == TypeKind::Integer || left.type.kind == TypeKind::Float ||
-          (left.type.kind == TypeKind::String && op == "+");
-    if (!valid)
+    if (!comparison)
+        return arithmetic(op, expr.span, std::move(left), std::move(right));
+    if (!comparable(program_, receiver_type(left.type), op))
         throw Diagnostic(expr.span, "operator '" + op + "' is not defined for " + describe(left.type));
     const auto op_kind = equality && left.type.kind == TypeKind::String ? IrOp::TextEqual : IrOp::Binary;
-    auto result = node(op_kind, expr.span, comparison ? bool_type : left.type);
+    auto result = node(op_kind, expr.span, bool_type);
     result.text = op;
     result.operands.push_back(std::move(left));
     result.operands.push_back(std::move(right));
+    return result;
+}
+
+IrNode Lowering::conditional(const Expr& expr, Context& context, const IrType* expected) {
+    auto condition = value(expr.operands[0], context, &bool_type);
+    const auto& yes = expr.operands[1];
+    const auto& no = expr.operands[2];
+    auto result = node(IrOp::SelectValue, expr.span);
+    result.operands.push_back(std::move(condition));
+    if (!expected && ((numeric_literal(yes) && !numeric_literal(no)) || yes.kind == ExprKind::Nil)) {
+        auto when_false = value(no, context);
+        result.type = when_false.type;
+        result.body.push_back(value(yes, context, &result.type));
+        result.alternative.push_back(std::move(when_false));
+    } else {
+        auto when_true = value(yes, context, expected);
+        result.type = expected ? *expected : when_true.type;
+        result.body.push_back(std::move(when_true));
+        result.alternative.push_back(value(no, context, &result.type));
+    }
     return result;
 }
 
@@ -1615,6 +1661,11 @@ IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* ex
     }
     case ExprKind::Binary:
         return binary(expr, context, expected);
+    case ExprKind::Conditional:
+        return conditional(expr, context, expected);
+    case ExprKind::PrefixUpdate:
+    case ExprKind::PostfixUpdate:
+        return update(expr, context);
     case ExprKind::ComparisonChain:
         return comparison_chain(expr, context);
     case ExprKind::Member:
@@ -1736,6 +1787,62 @@ void Lowering::place(const IrNode& destination) const {
         throw Diagnostic(destination.span, "cannot assign to const '" + symbol(destination.symbol).name + "'");
 }
 
+IrNode Lowering::save_temporary(IrNode initializer, std::vector<IrNode>& instructions,
+                                Context& context, std::string name, bool constant) {
+    auto owner = context.owner;
+    if (symbol(owner).kind == SymbolKind::Global || symbol(owner).kind == SymbolKind::Field)
+        owner = symbol(owner).owner;
+    const auto id = add(SymbolKind::Local, std::move(name), initializer.span, owner);
+    symbol(id).type = initializer.type;
+    symbol(id).constant = constant;
+    auto load = node(IrOp::Load, initializer.span, initializer.type);
+    load.symbol = id;
+    auto init = node(IrOp::Initialize, initializer.span);
+    init.symbol = id;
+    init.operands.push_back(std::move(initializer));
+    instructions.push_back(std::move(init));
+    return load;
+}
+
+IrNode Lowering::capture_place(const Expr& expr, std::vector<IrNode>& instructions, Context& context) {
+    auto destination = expression(expr, context);
+    place(destination);
+    if (destination.op == IrOp::Load && !destination.operands.empty() &&
+        destination.operands.front().type.kind != TypeKind::Module) {
+        auto discard = node(IrOp::Discard, destination.operands.front().span);
+        discard.operands.push_back(std::move(destination.operands.front()));
+        instructions.push_back(std::move(discard));
+        destination.operands.clear();
+    } else if (destination.op == IrOp::Index || destination.op == IrOp::Field) {
+        for (auto& operand : destination.operands)
+            operand = save_temporary(std::move(operand), instructions, context, "$update_place");
+    }
+    return destination;
+}
+
+IrNode Lowering::update(const Expr& expr, Context& context) {
+    auto result = node(IrOp::ScopedValue, expr.span);
+    auto destination = capture_place(expr.operands.front(), result.body, context);
+    const auto kind = destination.type.kind;
+    if (kind != TypeKind::Integer && kind != TypeKind::Float)
+        throw Diagnostic(expr.span, "'" + expr.text + "' requires a mutable numeric operand");
+    result.type = destination.type;
+
+    const bool postfix = expr.kind == ExprKind::PostfixUpdate;
+    auto previous = postfix ? save_temporary(destination, result.body, context, "$update_old") : destination;
+    auto one = node(kind == TypeKind::Integer ? IrOp::Integer : IrOp::Float, expr.span, result.type);
+    one.text = "1";
+    auto updated = arithmetic(expr.text == "++" ? "+" : "-", expr.span, previous, std::move(one));
+    if (!postfix)
+        updated = save_temporary(std::move(updated), result.body, context, "$update_new");
+    auto store = node(IrOp::Store, expr.span);
+    store.operands.push_back(std::move(destination));
+    store.operands.push_back(updated);
+    result.body.push_back(std::move(store));
+    result.body.push_back(postfix ? std::move(previous) : std::move(updated));
+    return result;
+}
+
 IrNode Lowering::statement(const Statement& stmt, Context& context) {
     switch (stmt.kind) {
     case StmtKind::Binding: {
@@ -1795,6 +1902,18 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return result;
     }
     case StmtKind::Assignment: {
+        if (stmt.assignment_operator != "=") {
+            auto result = node(IrOp::Block, stmt.span);
+            auto destination = capture_place(stmt.expressions[0], result.body, context);
+            const auto op = stmt.assignment_operator.substr(0, stmt.assignment_operator.size() - 1);
+            auto right = value(stmt.expressions[1], context, is_shift(op) ? nullptr : &destination.type);
+            auto source = arithmetic(op, stmt.span, destination, std::move(right));
+            auto store = node(IrOp::Store, stmt.span);
+            store.operands.push_back(std::move(destination));
+            store.operands.push_back(std::move(source));
+            result.body.push_back(std::move(store));
+            return result;
+        }
         auto destination = expression(stmt.expressions[0], context);
         place(destination);
         auto source = value(stmt.expressions[1], context, &destination.type);
@@ -1827,6 +1946,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         --context.loops;
         return result;
     }
+    case StmtKind::Do:
+        return do_loop(stmt, context);
     case StmtKind::For:
         return for_loop(stmt, context);
     case StmtKind::ForEach:
@@ -1867,6 +1988,53 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     }
     }
     throw std::logic_error("invalid statement kind");
+}
+
+bool has_loop_transfer(const std::vector<IrNode>& region) {
+    return std::ranges::any_of(region, [](const IrNode& item) {
+        return item.op == IrOp::Break || item.op == IrOp::Continue ||
+            ((item.op == IrOp::Block || item.op == IrOp::Branch) &&
+             (has_loop_transfer(item.body) || has_loop_transfer(item.alternative)));
+    });
+}
+
+IrNode Lowering::do_loop(const Statement& stmt, Context& context) {
+    std::optional<IrNode> condition;
+    if (!stmt.expressions.empty())
+        condition = value(stmt.expressions.front(), context, &bool_type);
+    ++context.loops;
+    auto instructions = body(stmt.body, context);
+    --context.loops;
+    auto always = node(IrOp::Boolean, stmt.span, bool_type);
+    always.text = "true";
+    auto loop = node(IrOp::Loop, stmt.span);
+    if (!condition || (condition->op == IrOp::Boolean && condition->text == "true") ||
+        (always_returns(instructions) && !has_loop_transfer(instructions))) {
+        // The last case cannot reach the test, but it was still type-checked.
+        loop.operands.push_back(std::move(always));
+        loop.body = std::move(instructions);
+        return loop;
+    }
+
+    // The first visit to the head bypasses the condition. Normal fallthrough
+    // and continue re-enter the head after the body has cleared the flag.
+    auto result = node(IrOp::Block, stmt.span);
+    auto first = save_temporary(std::move(always), result.body, context, "$do_first", false);
+    auto test = node(IrOp::ShortCircuit, condition->span, bool_type);
+    test.text = "||";
+    test.operands.push_back(first);
+    test.body.push_back(std::move(*condition));
+    loop.operands.push_back(std::move(test));
+    auto no = node(IrOp::Boolean, stmt.span, bool_type);
+    no.text = "false";
+    auto clear = node(IrOp::Store, stmt.span);
+    clear.operands.push_back(std::move(first));
+    clear.operands.push_back(std::move(no));
+    loop.body.push_back(std::move(clear));
+    for (auto& instruction : instructions)
+        loop.body.push_back(std::move(instruction));
+    result.body.push_back(std::move(loop));
+    return result;
 }
 
 IrNode Lowering::for_loop(const Statement& stmt, Context& context) {

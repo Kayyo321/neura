@@ -8,8 +8,8 @@ let Loop = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("looping");
         let count: uint64 = 0;
-        while (true) {
-            count = count + 1;
+        do {
+            count++;
         }
     }
 );

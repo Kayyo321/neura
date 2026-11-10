@@ -77,6 +77,8 @@ Specialization (`src/neura-ir/specialize.cpp`) runs on verified IR in both build
 
 ## Loops
 
+A post-test loop with a trailing condition uses a private first-iteration flag. Its first trip through the loop head bypasses the condition. The body clears the flag so that fallthrough and `continue` test the condition before another iteration. An unconditional `do` loop uses the existing constant-true loop.
+
 A three-part `for` lowers to a block holding the initializer and a NeuraIR loop whose latch region holds the step. The converter gives the latch its own block: the body's end and every `continue` jump to it, and it jumps to the loop head. A for-each lowers to hidden locals for the collection, its version (for a list), and an `int32` index, and a `while (true)` loop whose body checks the version, compares the index with the length, binds the element, advances the index, and then runs the user's statements. `continue` therefore re-enters the check and the advance, and `break` and `return` leave without them. NVM keeps each list's version and `ReadVersion` reads it.
 
 ## Initialization

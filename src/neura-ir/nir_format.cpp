@@ -19,6 +19,7 @@ constexpr std::uint8_t max_op_1_0 = static_cast<std::uint8_t>(IrOp::Discard);
 constexpr std::uint8_t max_op_1_1 = static_cast<std::uint8_t>(IrOp::Fail);
 constexpr std::uint8_t max_op_1_2 = static_cast<std::uint8_t>(IrOp::SelectValue);
 constexpr std::uint8_t max_op_1_3 = static_cast<std::uint8_t>(IrOp::ValueText);
+constexpr std::uint8_t max_op_1_4 = max_op_1_3;
 
 std::uint16_t type_minor(const IrType& type) {
     if (is_function_value(type) || (type.kind == TypeKind::Enum && !type.arguments.empty())) return 3;
@@ -38,12 +39,20 @@ bool new_operator(const IrNode& node) {
            (node.op == IrOp::Binary && is_bitwise_binary(node.text));
 }
 
+bool scoped_statements(const IrNode& node) {
+    return node.op == IrOp::ScopedValue && !node.body.empty() &&
+        std::any_of(node.body.begin(), node.body.end() - 1,
+                    [](const IrNode& prefix) { return prefix.op != IrOp::Initialize; });
+}
+
 std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (op > max_op_1_2) return 3;
-        if (op > max_op_1_1 || new_operator(node)) {
+        if (op > max_op_1_3 || scoped_statements(node)) return 4;
+        if (op > max_op_1_2) {
+            version = 3;
+        } else if (op > max_op_1_1 || new_operator(node)) {
             version = std::max<std::uint16_t>(version, 2);
         } else if (op > max_op_1_0 || (node.op == IrOp::Loop && !node.alternative.empty())) {
             version = std::max<std::uint16_t>(version, 1);
@@ -55,7 +64,7 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
         for (const auto* region : {&node.operands, &node.body, &node.alternative}) {
             version = std::max(version, required_minor(*region));
         }
-        if (version == 3) return version;
+        if (version == 4) return version;
     }
     return version;
 }
@@ -89,7 +98,6 @@ public:
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
                 version = 3;
-                break;
             }
             version = std::max(version, required_minor(item.type));
             if (item.bound) version = std::max(version, required_minor(*item.bound));
@@ -99,7 +107,7 @@ public:
             }
         }
         for (const auto& body : program.bodies) {
-            if (version == 3) break;
+            if (version == 4) break;
             version = std::max(version, required_minor(body.instructions));
         }
         u16(version);
@@ -270,7 +278,9 @@ public:
             fail("NeuraIR format " + std::to_string(major) + "." + std::to_string(minor_) +
                  " is not supported; this reader accepts 1.0 through 1.3");
         }
-        max_op_ = minor_ == 0 ? max_op_1_0 : minor_ == 1 ? max_op_1_1 : minor_ == 2 ? max_op_1_2 : max_op_1_3;
+        constexpr std::uint8_t operation_limits[]{
+            max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4};
+        max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
         const auto file_count = count(4);
@@ -498,6 +508,8 @@ private:
         value.operands = nodes(depth + 1);
         value.body = nodes(depth + 1);
         value.alternative = nodes(depth + 1);
+        if (minor_ < 4 && scoped_statements(value))
+            fail("statements in a scoped value require NeuraIR format 1.4");
         if (value.op == IrOp::Loop && !value.alternative.empty() && !latches_) {
             fail("a loop latch requires NeuraIR format 1.1");
         }

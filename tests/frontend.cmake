@@ -77,6 +77,7 @@ endif()
 
 check_rejection(lexical "let count = @;" "2:13" "[@]")
 check_rejection(syntax "let count: int32 = ;" "2:20" "expected")
+check_rejection(old-parameter-syntax "let f = func(int value) {};" "2:18" "expected ':'")
 check_rejection(type "let count: int32 = true;" "2:[1-9][0-9]*" "int32|bool|type")
 check_rejection(import "let missing = import:Missing.Module;" "2:[1-9][0-9]*" "Missing|import")
 check_rejection(return [=[
@@ -147,6 +148,16 @@ if(loop_ir MATCHES "[:<, ]int[^0-9a-z_]" OR loop_ir MATCHES "byte")
 endif()
 
 check_rejection(float-remainder "let r: float64 = 1.5 % 2.0;" "2:[1-9][0-9]*" "operator '%' is not defined for float64")
+check_rejection(do-condition "do {} while (1);" "2:14" "expected bool, got int32")
+check_rejection(conditional-arm "let result: int = true ? 1 : false;" "2:30" "expected int32, got bool")
+check_rejection(const-update [=[
+const Fixed = 1;
+Fixed++;
+]=] "3:1" "cannot assign to const 'Fixed'")
+check_rejection(compound-remainder [=[
+let value: float64 = 2.0;
+value %= 1.0;
+]=] "3:1" "operator '%' is not defined for float64")
 check_rejection(bool-conversion "let n: int32 = true as int32;" "2:[1-9][0-9]*" "cannot convert bool to int32")
 check_rejection(string-conversion [=[
 let n = func(text: string) -> int32 {

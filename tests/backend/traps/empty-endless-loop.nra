@@ -9,7 +9,7 @@ let program = import:Std.Program;
 let EmptyLoop = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("looping");
-        while (true) {
+        do {
         }
         return program.ExitCode.Ok;
     }

@@ -16,7 +16,7 @@ Bindings are visible from their declaration to the end of their enclosing block;
 
 ## Functions and control flow
 
-Functions declare parameter and return types. Arguments are evaluated left to right; `return` exits the function. A non-`void` function must return a value on every reachable path. A `void` function may fall through. Function overloading and default arguments are not specified.
+Function parameters use `name: Type`. Arguments are evaluated left to right. A function with no parameters may omit `()`, and a `void` function may omit `-> void`. A block body uses `return` to exit the function. A non-`void` function must return a value on every reachable path. A `void` function may fall through.
 
 ```neura
 let sum_to = func(limit: int32) -> int32 {
@@ -28,7 +28,15 @@ let sum_to = func(limit: int32) -> int32 {
     }
     return total;
 };
+
+let twice = func(value: int) -> int => value * 2;
+let forty_two = func -> int => twice(21);
+let reset = func {
+    // A zero-parameter void function.
+};
 ```
+
+`=> expression` gives a function an expression body. The expression supplies the result of a non-`void` function. A `void` function evaluates the expression for its effects. A named declaration with an expression body ends with `;`.
 
 `if (condition) { ... } else { ... }` selects a branch; `while (condition) { ... }` repeats while its Boolean condition is true. `break` exits the innermost loop and `continue` starts its next iteration. Conditions must be `bool`; there is no implicit truthiness. See [core.nra](../../examples/guide/core.nra).
 
@@ -55,17 +63,23 @@ Signatures, captures, and local types in a closure can mention the type paramete
 
 ## Loops
 
-Neura has three loop statements. The `for`-each form accepts an array, list, or an implementation of `Iterable<T>`.
+Neura supports pre-test, post-test, infinite, three-part, and for-each loops. The `for`-each form accepts an array, list, or an implementation of `Iterable<T>`.
 
 ```neura
-for (let i: int32 = 0; i < limit; i = i + 1) {
-    total = total + i;
+do {
+    total += current++;
+} while (current <= limit);
+
+for (let i: int32 = 0; i < limit; i++) {
+    total += i;
 }
 
 for (let name in names) {
     console.print_line(name);
 }
 ```
+
+**Post-test and infinite loops.** `do { body } while (condition);` runs the body at least once. The Boolean condition is evaluated after the body falls through or executes `continue`. The body's local bindings are scoped to the body. A `break` or `return` skips the condition. With no trailing `while` clause, `do { body }` repeats indefinitely until a `break`, a `return`, or a trap.
 
 **Three-part `for`.** `for (initializer; condition; step) { body }` runs the initializer once, then tests the condition before each iteration and runs the step after each iteration. The initializer is a binding, an assignment, an expression, or empty; a binding declared there is visible in the condition, the step, and the body, and not after the loop. The condition must be `bool`; when it is omitted, as in `for (;;)`, it is `true`. The step is an assignment, an expression, or empty, and cannot contain `break`, `continue`, or `return`. `continue` runs the step and then tests the condition; `break` leaves without running the step.
 
@@ -76,29 +90,37 @@ for (let name in names) {
 - Assigning to an element by index during the loop is allowed. A later iteration sees the new value.
 - For a list, the loop captures the list's *structural version* when it starts. Every successful `append` or `remove_at` on the list, through any alias, changes the version. Before each advance, including the one that would end the loop, the loop compares the current version with the captured one. If they differ, the run traps at the `for` statement with trap reason 5 ("collection modified during iteration"). A removal followed by an append therefore traps even though the length is unchanged. Arrays cannot change length, so a for-each over an array needs no check.
 
-Both loops lower to NeuraIR's existing loop and branch operations ([Backend](../Backend.md#loops)).
+These loop forms lower to NeuraIR's loop and branch operations. See [Backend](../Backend.md#loops).
 
 For an `Iterable<T>`, the loop evaluates its source once and calls `iterator()` once. It calls the iterator's `has_next()` before each advance, and calls `next()` to get each element. A `continue` returns to `has_next()`. A `break` or `return` leaves without another call. A library iterator enforces its collection's modification rules in these methods.
 
 ## Expressions
 
-The operators include arithmetic `+ - * / %`, comparisons `== != < <= > >=`, Boolean `&& || !`, integer bitwise operators `~ & ^ | << >>`, unary `-`, the conversion `as`, and assignment `=`. Arithmetic operands must have the same type. Remainder applies to integers. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. Precedence, from tightest to loosest:
+Arithmetic operands must have the same type. Remainder applies to integers. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. The operator levels from tightest to loosest are
 
 1. member access, indexing, and calls
-2. unary `!`, `-`, and `~`
-3. `as`
-4. `*`, `/`, `%`
-5. `+`, `-`
-6. `<<`, `>>`
-7. `&`
-8. `^`
-9. `|`
-10. `<`, `<=`, `>`, `>=`
-11. `==`, `!=`
-12. `&&`
-13. `||`
+2. postfix `++` and `--`
+3. prefix `++`, `--`, `!`, `-`, and `~`
+4. `as` and `is`
+5. `*`, `/`, `%`
+6. `+`, `-`
+7. `<<`, `>>`
+8. `&`
+9. `^`
+10. `|`
+11. `<`, `<=`, `>`, `>=`
+12. `==`, `!=`, `===`
+13. `&&`
+14. `||`
+15. `? :`
 
-Assignment is a statement, not a value. [Numbers](Numbers.md) specifies integer and floating-point literals, arithmetic, overflow, division, rounding, and conversions. String concatenation with `+` accepts two strings; implicit conversion to string is not specified.
+Assignments are statements. `=` stores a value and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `^=`, `|=`, `<<=`, and `>>=` apply the corresponding binary operator before storing its result. Each compound assignment evaluates the destination's receiver and index once, reads the old value, then evaluates the right operand and stores the result. An operation that traps leaves the final store unexecuted.
+
+Prefix and postfix increment and decrement require a mutable numeric binding, field, or element. They evaluate the destination once and add or subtract a one of its type. `++x` and `--x` yield the updated value. `x++` and `x--` yield the previous value. The usual arithmetic rules apply, including checked integer overflow. [Numbers](Numbers.md) specifies integer and floating-point arithmetic. `+` and `+=` can also concatenate strings.
+
+`a === b` calls `a.equals(b)` and requires its result to be Boolean. This uses the normal method selection and dispatch rules, including class overrides and value members on built-in types.
+
+A conditional expression `condition ? when_true : when_false` evaluates its Boolean condition and then evaluates only the selected arm. Both arm types must be assignable to the expression's expected type when one is available. Otherwise the first arm supplies the type, with contextual typing from the second arm for a first-arm `nil` or a numeric literal paired with a nonliteral. The conditional operator associates to the right.
 
 ### Comparison chains
 

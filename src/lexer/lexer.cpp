@@ -21,11 +21,15 @@ constexpr bool is_name_char(char c) {
 
 constexpr auto keywords = std::to_array<std::string_view>({
     "let", "const", "export", "override", "func", "module", "class", "import", "new",
-    "destroy", "if", "else", "while", "for", "in", "break", "continue", "return", "true", "false",
+    "destroy", "if", "else", "while", "do", "for", "in", "break", "continue", "return", "true", "false",
     "as", "is", "nil", "enum", "match", "and", "or", "interface", "implements",
 });
 
-constexpr auto pairs = std::to_array<std::string_view>({"->", "=>", "==", "!=", "<=", ">=", "&&", "||"});
+constexpr auto compound_symbols = std::to_array<std::string_view>({
+    "===", "<<=", ">>=",
+    "->", "=>", "==", "!=", "<=", ">=", "&&", "||",
+    "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=",
+});
 
 class Lexer {
 public:
@@ -118,13 +122,14 @@ private:
         if (peek() == '"') {
             return string(start);
         }
-        const auto pair = source_.substr(offset_, 2);
-        if (std::ranges::find(pairs, pair) != pairs.end()) {
-            advance();
-            advance();
-            return TokenKind::Symbol;
+        const auto remaining = source_.substr(offset_);
+        for (const auto op : compound_symbols) {
+            if (remaining.starts_with(op)) {
+                for (std::size_t i = 0; i < op.size(); ++i) advance();
+                return TokenKind::Symbol;
+            }
         }
-        constexpr std::string_view symbols = "(){}[]:;,.=+-*/%!<>&|^~";
+        constexpr std::string_view symbols = "(){}[]:;,.?=+-*/%!<>&|^~";
         if (symbols.find(peek()) != std::string_view::npos) {
             advance();
             return TokenKind::Symbol;

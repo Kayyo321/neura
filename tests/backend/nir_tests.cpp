@@ -169,7 +169,9 @@ NEURA_TEST(nir, both_build_routes_emit_identical_images) {
 }
 
 NEURA_TEST(nir, corrupt_files_are_rejected) {
-    const auto bytes = write_nir(lower_files({environment.examples() / "hello-world" / "hello-world.nra"}));
+    // Keep the exhaustive truncation check independent of the amount of
+    // standard library source imported by Hello World.
+    const auto bytes = write_nir(lower_files({backend_dir(environment) / "nir-versions" / "loops.nra"}));
     for (std::size_t size = 0; size < bytes.size(); ++size) {
         try {
             read_nir(std::vector<std::uint8_t>(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(size)), "x");
@@ -184,8 +186,8 @@ NEURA_TEST(nir, corrupt_files_are_rejected) {
     changed[4] = 2;
     expect_nir_error(changed, "NeuraIR format 2." + std::to_string(bytes[6]) + " is not supported");
     changed = bytes;
-    changed[6] = 4;
-    expect_nir_error(changed, "NeuraIR format 1.4 is not supported");
+    changed[6] = 5;
+    expect_nir_error(changed, "NeuraIR format 1.5 is not supported");
     changed = bytes;
     changed.push_back(0);
     expect_nir_error(changed, "1 unread bytes");
@@ -246,6 +248,7 @@ NEURA_TEST(nir, minor_version_follows_the_features_used) {
         expect_nir_error(current, std::string_view(fixture) == "operators"
                           ? "bitwise operations require NeuraIR format 1.2" : "invalid");
     }
+
 }
 
 } // namespace neura::testing

@@ -12,12 +12,12 @@ All minor versions use the conventions of [NVR](runtime/NVR.md#encoding-and-comp
 | --- | --- | --- |
 | Magic | 4 bytes | ASCII `NEIR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0, 1, 2, or 3 |
+| Minor | u16 | 0 through 4 |
 | Files | vector<text> | Source paths used by spans, in order of first use: symbols first, then bodies depth first |
 | Symbols | vector<Symbol> | The symbol table in symbol-index order |
 | Bodies | vector<Body> | Bodies in program order |
 
-A file starts with these fields and ends after the last body. The reader accepts versions 1.0 through 1.3. The writer emits the earliest version that can encode the program. Version 1.1 adds loop latches and operation tags 31–33. Version 1.2 adds tuple types, enum payloads, aggregate and selection operations, comparison chains, and bitwise spellings on existing unary and binary nodes. Version 1.3 adds structural function types, generic enum applications, interfaces and intersection bounds, library and host bindings, nil references and class operations, universal value members, and text, float bit access, and message-trap operations. The reader rejects features newer than the file's declared version.
+A file starts with these fields and ends after the last body. The reader accepts versions 1.0 through 1.4. The writer emits the earliest version that can encode the program. Version 1.1 adds loop latches and operation tags 31–33. Version 1.2 adds tuple types, enum payloads, aggregate and selection operations, comparison chains, and bitwise spellings on existing unary and binary nodes. Version 1.3 adds structural function types, generic enum applications, interfaces and intersection bounds, library and host bindings, nil references and class operations, universal value members, and text, float bit access, and message-trap operations. Version 1.4 adds statements before a scoped value's result. The reader rejects features newer than the file's declared version.
 
 ### Records
 
@@ -47,7 +47,7 @@ Adding an operation, symbol kind, or type kind changes these tables and requires
 
 Type names in `.nir` files are those lowering writes. Integer types are spelled by their sized names; files written before `int` and `byte` became aliases may still spell them `int` and `byte`, and the backend reads those as `int32` and `uint8`.
 
-A tuple type stores its ordered element types in `arguments`. Tuple construction evaluates its operands in order. Tuple projection reads a field by its zero-based decimal `text` index. Enum construction names a variant in `symbol` and evaluates its operands in written order. Its `text` is empty for positional payloads, or a comma-separated permutation of field indices for named payloads. Enum tag reads the unsigned 32-bit discriminant. Enum projection names the variant and a decimal field index. Scoped values put local initializers before the result expression in `body`. A select-value node evaluates its Boolean operand, then evaluates the sole expression in either `body` or `alternative`. A comparison chain initializes its subject in the first item in `body`, then evaluates its Boolean result in the second.
+A tuple type stores its ordered element types in `arguments`. Tuple construction evaluates its operands in order. Tuple projection reads a field by its zero-based decimal `text` index. Enum construction names a variant in `symbol` and evaluates its operands in written order. Its `text` is empty for positional payloads, or a comma-separated permutation of field indices for named payloads. Enum tag reads the unsigned 32-bit discriminant. Enum projection names the variant and a decimal field index. Scoped values execute local statements before evaluating the final expression in `body`. Those statements can initialize only local bindings and can transfer control only within the scoped value. A select-value node evaluates its Boolean operand, then evaluates the sole expression in either `body` or `alternative`. A comparison chain initializes its subject in the first item in `body`, then evaluates its Boolean result in the second.
 
 Structural callable types have an absent `symbol` and carry their parameter types followed by the result type. A closure constructor names its capture initializer in `symbol`, stores capture expressions in `operands`, and carries the capture layout's generic arguments in `type_arguments`. A call closure evaluates its function value, then its arguments. Specialization lowers both operations to allocation and virtual dispatch. Enum types carry the application arguments, while enum construct and project nodes continue to name the declaration's variant. Specialization remaps both the enum and variant symbols.
 

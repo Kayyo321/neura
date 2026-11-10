@@ -3,18 +3,15 @@ let Core = module (
     export let sum_to = func(limit: int32) -> int32 {
         let total: int32 = 0;
         let current: int32 = 1;
-        while (current <= limit) {
-            total = total + current;
-            current = current + 1;
+        if (limit < current) {
+            return total;
         }
+        do {
+            total += current++;
+        } while (current <= limit);
         return total;
     };
 
-    export let describe = func(value: int32) -> string {
-        if (value > 0) {
-            return "positive";
-        } else {
-            return "zero or negative";
-        }
-    };
+    export let describe = func(value: int32) -> string =>
+        (value > 0) ? "positive" : "zero or negative";
 );

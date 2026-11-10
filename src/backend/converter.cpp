@@ -1847,7 +1847,12 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         statement(node.body.front());
         return expression(node.body.back());
     case IrOp::ScopedValue:
-        for (std::size_t i = 0; i + 1 < node.body.size(); ++i) statement(node.body[i]);
+        for (std::size_t i = 0; i + 1 < node.body.size(); ++i) {
+            statement(node.body[i]);
+            // An unconditional trap can make the remaining expression
+            // unreachable. Its disconnected blocks are removed at the end.
+            if (!open()) begin(new_block(), node.span);
+        }
         return expression(node.body.back());
     case IrOp::SelectValue:
         return select_value(node);
