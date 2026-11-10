@@ -69,7 +69,7 @@ let FoldDeclines = module (
         return (100 + 27) + 1;
     };
 
-    export let parameter_overflow = func(int8 value) -> int8 {
+    export let parameter_overflow = func(value: int8) -> int8 {
         return value + (100 + 27);
     };
 );

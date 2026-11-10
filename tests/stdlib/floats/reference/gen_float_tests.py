@@ -317,13 +317,13 @@ let {module}Tests = module (
     const_checks = "\n".join(
         f"        test.assert(floats.to_bits(floats.{k}) == {v});" for k, v in constants.items())
     out.append(f"""
-    let check = func(bool holds, string what, int index) -> void {{
+    let check = func(holds: bool, what: string, index: int) -> void {{
         if (!holds) {{
             test.fail(what + " differs from the reference for case " + index.to_string());
         }}
     }};
 
-    let same = func({T} actual, {bt} expected) -> bool {{
+    let same = func(actual: {T}, expected: {bt}) -> bool {{
         return actual.to_bits() == expected;
     }};
 
@@ -461,7 +461,7 @@ let {module}Tests = module (
     }};
 """)
     out.append(f"""
-    let check_parse = func(int k) -> void {{
+    let check_parse = func(k: int) -> void {{
         match (floats.parse(parse_inputs[k])) {{
             result.Result.Ok(value) => {{
                 check(parse_ok[k] && same(value, parse_bits[k]), "parse value", k);

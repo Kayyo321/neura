@@ -5,7 +5,7 @@ let program = import:Std.Program;
 // BigInteger end to end: 100!, a toy RSA round trip with mod_pow and
 // mod_inverse, and text in two radices.
 export let FactorialRsa = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let factorial = big.One;
         for (let i: int64 = 2; i <= 100; i = i + 1) {
             factorial = factorial.multiply(big.of_int64(i));

@@ -524,13 +524,13 @@ let UInt8Tests = module (
         243, 1, 10, 100
     ];
 
-    let check = func(bool holds, string what, int index) -> void {
+    let check = func(holds: bool, what: string, index: int) -> void {
         if (!holds) {
             test.fail(what + " differs from the reference for case " + index.to_string());
         }
     };
 
-    let check_optional = func(optional.Optional<uint8> actual, bool present, uint8 expected, string what, int index) -> void {
+    let check_optional = func(actual: optional.Optional<uint8>, present: bool, expected: uint8, what: string, index: int) -> void {
         match (actual) {
             optional.Optional.None => {
                 check(!present, what, index);
@@ -541,7 +541,7 @@ let UInt8Tests = module (
         }
     };
 
-    let check_parse = func(result.Result<uint8> actual, int index) -> void {
+    let check_parse = func(actual: result.Result<uint8>, index: int) -> void {
         match (actual) {
             result.Result.Ok(value) => {
                 check(parse_ok[index] && value == parse_values[index], "parse value", index);

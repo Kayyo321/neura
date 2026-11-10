@@ -13,7 +13,7 @@ export let Main = module:program.Entry (
     let Blob = class (
         export let rank: int;
         export let data: int[list] = [];
-        export let init = func(int order, int size) -> void {
+        export let init = func(order: int, size: int) -> void {
             rank = order;
             let i = 0;
             while (i < size) {
@@ -23,8 +23,8 @@ export let Main = module:program.Entry (
         };
     );
 
-    export let.override main = func(string[] args) -> program.ExitCode {
-        let set = tree_set.create<Blob>(func(Blob a, Blob b) -> ordering.Ordering {
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let set = tree_set.create<Blob>(func(a: Blob, b: Blob) -> ordering.Ordering {
             if (a.rank < b.rank) {
                 return ordering.Ordering.Less;
             }
@@ -51,7 +51,7 @@ export let Main = module:program.Entry (
                     set.remove_last();
                     set.remove(new Blob(previous, 0));
                 } else {
-                    set.retain_if(func(Blob item) -> bool {
+                    set.retain_if(func(item: Blob) -> bool {
                         return item.rank != previous;
                     });
                 }

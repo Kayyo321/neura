@@ -9,7 +9,7 @@ let utf8 = import:Std.Encoding.Utf8;
 // (Unicode's maximal subpart practice) for decode_lossy. The exhaustive and
 // grid tests compare validate with the NVM's string.from_utf8.
 let Utf8Tests = module (
-    let check = func(uint8[list] bytes, int offset, string reason, uint32[list] lossy) -> void {
+    let check = func(bytes: uint8[list], offset: int, reason: string, lossy: uint32[list]) -> void {
         test.assert_equal_int32(offset, utf8.validate(bytes));
         test.assert_equal<uint32[list]>(lossy, strings.scalars(utf8.decode_lossy(bytes)));
         match (utf8.decode(bytes)) {
@@ -33,7 +33,7 @@ let Utf8Tests = module (
 
     // validate agrees with string.from_utf8, and its offset is the one
     // decode reports.
-    let agree = func(uint8[list] bytes) -> void {
+    let agree = func(bytes: uint8[list]) -> void {
         let [valid, _] = string.from_utf8(bytes);
         let at = utf8.validate(bytes);
         test.assert_equal_bool(valid, at == -1);

@@ -5,9 +5,9 @@ let program = import:Std.Program;
 let sorting = import:Std.Collections.Sorting;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let items: int[list] = [3, 2, 1];
-        sorting.sort<int>(items, func(int a, int b) -> ordering.Ordering {
+        sorting.sort<int>(items, func(a: int, b: int) -> ordering.Ordering {
             items.append(a);
             return ordering.Ordering.Less;
         });

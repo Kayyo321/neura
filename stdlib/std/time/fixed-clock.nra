@@ -12,7 +12,7 @@ export let FixedClock = module (
         // The monotonic reading: the total of every advance and sleep.
         let elapsed: duration.Duration = duration.Zero;
 
-        export let init = func(instant.Instant start) -> void {
+        export let init = func(start: instant.Instant) -> void {
             current = start;
         };
 
@@ -28,7 +28,7 @@ export let FixedClock = module (
 
         // Advances by a positive duration and returns at once; a zero or
         // negative duration does nothing.
-        export let sleep = func(duration.Duration span) -> result.Result<unit.Unit> {
+        export let sleep = func(span: duration.Duration) -> result.Result<unit.Unit> {
             if (span.to_nanos() > 0) {
                 advance(span);
             }
@@ -36,14 +36,14 @@ export let FixedClock = module (
         };
 
         // Replaces the instant; the monotonic reading does not change.
-        export let set = func(instant.Instant moment) -> void {
+        export let set = func(moment: instant.Instant) -> void {
             current = moment;
         };
 
         // Moves the instant and the monotonic reading forward. A negative
         // duration traps with "invalid argument: negative duration", since
         // the monotonic reading never decreases.
-        export let advance = func(duration.Duration span) -> void {
+        export let advance = func(span: duration.Duration) -> void {
             if (span.is_negative()) {
                 trap_with_message("invalid argument: negative duration");
             }
@@ -52,7 +52,7 @@ export let FixedClock = module (
         };
     );
 
-    export let of = func(instant.Instant start) -> FixedClock {
+    export let of = func(start: instant.Instant) -> FixedClock {
         return new FixedClock(start);
     };
 );

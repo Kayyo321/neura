@@ -5,7 +5,7 @@ let test = import:Std.Test;
 
 // Environment.get against the real environment of the test run.
 let EnvironmentTests = module (
-    let failure_kind = func(program.Environment.Lookup lookup) -> error.IoErrorKind {
+    let failure_kind = func(lookup: program.Environment.Lookup) -> error.IoErrorKind {
         match (lookup) {
             program.Environment.Lookup.Failed(failure) => {
                 return match (failure) {

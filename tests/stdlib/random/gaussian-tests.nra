@@ -7,7 +7,7 @@ let test = import:Std.Test;
 // six values must match exactly, which checks every rejection and the
 // cached second value.
 let GaussianTests = module (
-    let check_gaussian = func(uint64 seed, float64[] expected, uint64 after) -> void {
+    let check_gaussian = func(seed: uint64, expected: float64[], after: uint64) -> void {
         let r = randoms.seeded(seed);
         let again = randoms.seeded(seed);
         for (let value in expected) {

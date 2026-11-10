@@ -16,7 +16,7 @@ let optional = import:Std.Core.Optional;
 // directory, the only path the capability grants.
 let FileTests = module (
     // A fresh, empty directory for one test.
-    let fresh = func(string name) -> path.Path {
+    let fresh = func(name: string) -> path.Path {
         let root = path.of("file-work");
         let dir = root.join(name);
         match (fs.remove_tree(dir)) {
@@ -31,24 +31,24 @@ let FileTests = module (
 
     // Removes a test's directory, so that every run starts from the same
     // state.
-    let finish = func(path.Path dir) -> void {
+    let finish = func(dir: path.Path) -> void {
         test.assert_ok<unit.Unit>(fs.remove_tree(dir));
         test.assert_ok<unit.Unit>(fs.remove_directory(path.of("file-work")));
     };
 
-    let kind_of = func(error.Error e) -> error.IoErrorKind {
+    let kind_of = func(e: error.Error) -> error.IoErrorKind {
         return match (e) {
             error.Error.Io { kind, message, path } => kind,
             _ => error.IoErrorKind.Other,
         };
     };
 
-    let expect_kind = func<T>(result.Result<T> r, error.IoErrorKind expected) -> void {
+    let expect_kind = func<T>(r: result.Result<T>, expected: error.IoErrorKind) -> void {
         let failure = test.assert_err<T>(r);
         test.assert_with(kind_of(failure) == expected, "expected " + expected.to_string() + ", got " + error.message(failure));
     };
 
-    let bytes_of = func(string text) -> uint8[list] {
+    let bytes_of = func(text: string) -> uint8[list] {
         let out: uint8[list] = [];
         let i = 0;
         while (i < text.byte_length) {
@@ -58,17 +58,17 @@ let FileTests = module (
         return out;
     };
 
-    let text_of = func(uint8[list] data) -> string {
+    let text_of = func(data: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(data);
         test.assert(valid);
         return text;
     };
 
-    let open = func(path.Path p, file.OpenMode mode) -> file.File {
+    let open = func(p: path.Path, mode: file.OpenMode) -> file.File {
         return test.assert_ok<file.File>(file.open(p, mode));
     };
 
-    let contents = func(path.Path p) -> string {
+    let contents = func(p: path.Path) -> string {
         return test.assert_ok<string>(fs.read_text(p));
     };
 

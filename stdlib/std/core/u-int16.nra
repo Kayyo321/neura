@@ -11,21 +11,21 @@ export let UInt16 = module (
     export const Max: uint16 = 65535;
     export const Bits: int = 16;
 
-    export let sign = func(uint16 v) -> int {
+    export let sign = func(v: uint16) -> int {
         if (v == 0) {
             return 0;
         }
         return 1;
     };
 
-    export let min = func(uint16 a, uint16 b) -> uint16 {
+    export let min = func(a: uint16, b: uint16) -> uint16 {
         if (b < a) {
             return b;
         }
         return a;
     };
 
-    export let max = func(uint16 a, uint16 b) -> uint16 {
+    export let max = func(a: uint16, b: uint16) -> uint16 {
         if (b > a) {
             return b;
         }
@@ -33,7 +33,7 @@ export let UInt16 = module (
     };
 
     // Traps with "invalid argument: low exceeds high".
-    export let clamp = func(uint16 v, uint16 low, uint16 high) -> uint16 {
+    export let clamp = func(v: uint16, low: uint16, high: uint16) -> uint16 {
         if (low > high) {
             trap_with_message("invalid argument: low exceeds high");
         }
@@ -47,7 +47,7 @@ export let UInt16 = module (
     };
 
     // The natural order; usable as a comparator.
-    export let compare = func(uint16 a, uint16 b) -> ordering.Ordering {
+    export let compare = func(a: uint16, b: uint16) -> ordering.Ordering {
         if (a < b) {
             return ordering.Ordering.Less;
         }
@@ -61,7 +61,7 @@ export let UInt16 = module (
     // with reason 1). The factor is squared only while exponent bits remain,
     // so each intermediate divides the result. A negative exponent traps;
     // pow(0, 0) is 1.
-    export let pow = func(uint16 base, int exponent) -> uint16 {
+    export let pow = func(base: uint16, exponent: int) -> uint16 {
         if (exponent < 0) {
             trap_with_message("invalid argument: negative exponent");
         }
@@ -81,7 +81,7 @@ export let UInt16 = module (
     };
 
     // Euclid's algorithm. gcd(0, 0) is 0.
-    export let gcd = func(uint16 a, uint16 b) -> uint16 {
+    export let gcd = func(a: uint16, b: uint16) -> uint16 {
         let x = a;
         let y = b;
         while (y != 0) {
@@ -94,35 +94,35 @@ export let UInt16 = module (
 
     // None where the operator would trap. Each test runs before the
     // operation, so nothing overflows.
-    export let checked_add = func(uint16 a, uint16 b) -> optional.Optional<uint16> {
+    export let checked_add = func(a: uint16, b: uint16) -> optional.Optional<uint16> {
         if (b > Max - a) {
             return optional.Optional<uint16>.None;
         }
         return optional.Optional<uint16>.Some(a + b);
     };
 
-    export let checked_sub = func(uint16 a, uint16 b) -> optional.Optional<uint16> {
+    export let checked_sub = func(a: uint16, b: uint16) -> optional.Optional<uint16> {
         if (a < b) {
             return optional.Optional<uint16>.None;
         }
         return optional.Optional<uint16>.Some(a - b);
     };
 
-    export let checked_mul = func(uint16 a, uint16 b) -> optional.Optional<uint16> {
+    export let checked_mul = func(a: uint16, b: uint16) -> optional.Optional<uint16> {
         if (a != 0 && b > Max / a) {
             return optional.Optional<uint16>.None;
         }
         return optional.Optional<uint16>.Some(a * b);
     };
 
-    export let checked_div = func(uint16 a, uint16 b) -> optional.Optional<uint16> {
+    export let checked_div = func(a: uint16, b: uint16) -> optional.Optional<uint16> {
         if (b == 0) {
             return optional.Optional<uint16>.None;
         }
         return optional.Optional<uint16>.Some(a / b);
     };
 
-    export let checked_rem = func(uint16 a, uint16 b) -> optional.Optional<uint16> {
+    export let checked_rem = func(a: uint16, b: uint16) -> optional.Optional<uint16> {
         if (b == 0) {
             return optional.Optional<uint16>.None;
         }
@@ -132,40 +132,40 @@ export let UInt16 = module (
     // The result modulo 2^Bits (section 7.2): the operands are widened to
     // uint64, where a sum is below 2^33 and a product below 2^64, and the
     // result is masked to the width.
-    export let wrapping_add = func(uint16 a, uint16 b) -> uint16 {
+    export let wrapping_add = func(a: uint16, b: uint16) -> uint16 {
         return (((a as uint64) + (b as uint64)) & 65535) as uint16;
     };
 
     // 2^Bits is added before subtracting, so the uint64 difference stays
     // non-negative.
-    export let wrapping_sub = func(uint16 a, uint16 b) -> uint16 {
+    export let wrapping_sub = func(a: uint16, b: uint16) -> uint16 {
         return (((a as uint64) + 65536 - (b as uint64)) & 65535) as uint16;
     };
 
-    export let wrapping_mul = func(uint16 a, uint16 b) -> uint16 {
+    export let wrapping_mul = func(a: uint16, b: uint16) -> uint16 {
         return (((a as uint64) * (b as uint64)) & 65535) as uint16;
     };
 
-    export let wrapping_neg = func(uint16 a) -> uint16 {
+    export let wrapping_neg = func(a: uint16) -> uint16 {
         return wrapping_sub(0, a);
     };
 
     // Clamp to Min or Max instead of overflowing.
-    export let saturating_add = func(uint16 a, uint16 b) -> uint16 {
+    export let saturating_add = func(a: uint16, b: uint16) -> uint16 {
         if (b > Max - a) {
             return Max;
         }
         return a + b;
     };
 
-    export let saturating_sub = func(uint16 a, uint16 b) -> uint16 {
+    export let saturating_sub = func(a: uint16, b: uint16) -> uint16 {
         if (a < b) {
             return Min;
         }
         return a - b;
     };
 
-    export let saturating_mul = func(uint16 a, uint16 b) -> uint16 {
+    export let saturating_mul = func(a: uint16, b: uint16) -> uint16 {
         if (a != 0 && b > Max / a) {
             return Max;
         }
@@ -174,18 +174,18 @@ export let UInt16 = module (
 
     // For unsigned operands these are the ordinary quotient and remainder.
     // A zero divisor traps (reason 1).
-    export let floor_div = func(uint16 a, uint16 b) -> uint16 {
+    export let floor_div = func(a: uint16, b: uint16) -> uint16 {
         return a / b;
     };
 
-    export let floor_mod = func(uint16 a, uint16 b) -> uint16 {
+    export let floor_mod = func(a: uint16, b: uint16) -> uint16 {
         return a % b;
     };
 
     // Bit counts over Bits bits by masks and shifts. Each step adds
     // neighbouring fields whose sums fit in the wider field, so nothing
     // overflows.
-    export let count_ones = func(uint16 v) -> int {
+    export let count_ones = func(v: uint16) -> int {
         let x = v;
         x = (x & 21845) + ((x >> 1) & 21845);
         x = (x & 13107) + ((x >> 2) & 13107);
@@ -196,7 +196,7 @@ export let UInt16 = module (
 
     // A binary search for the highest set bit: a left shift only discards
     // bits already known to be zero.
-    export let leading_zeros = func(uint16 v) -> int {
+    export let leading_zeros = func(v: uint16) -> int {
         if (v == 0) {
             return Bits;
         }
@@ -221,7 +221,7 @@ export let UInt16 = module (
         return count;
     };
 
-    export let trailing_zeros = func(uint16 v) -> int {
+    export let trailing_zeros = func(v: uint16) -> int {
         if (v == 0) {
             return Bits;
         }
@@ -248,7 +248,7 @@ export let UInt16 = module (
 
     // `n` is reduced to 0 through Bits - 1 first. A rotation by 0 returns
     // `v`; otherwise both shift counts are between 1 and Bits - 1.
-    export let rotate_left = func(uint16 v, int n) -> uint16 {
+    export let rotate_left = func(v: uint16, n: int) -> uint16 {
         let count = rotation(n);
         if (count == 0) {
             return v;
@@ -256,7 +256,7 @@ export let UInt16 = module (
         return (v << count) | (v >> (Bits - count));
     };
 
-    export let rotate_right = func(uint16 v, int n) -> uint16 {
+    export let rotate_right = func(v: uint16, n: int) -> uint16 {
         let count = rotation(n);
         if (count == 0) {
             return v;
@@ -265,12 +265,12 @@ export let UInt16 = module (
     };
 
     // The identity: every integer module has both conversions.
-    export let to_unsigned = func(uint16 v) -> uint16 {
+    export let to_unsigned = func(v: uint16) -> uint16 {
         return v;
     };
 
     // The same-width signed type with the same bit pattern (section 7.2).
-    export let to_signed = func(uint16 v) -> int16 {
+    export let to_signed = func(v: uint16) -> int16 {
         if (v < 32768) {
             return v as int16;
         }
@@ -280,17 +280,17 @@ export let UInt16 = module (
 
     // Section 5.2: the two's complement pattern as a uint32; the 64-bit types
     // fold the high half into the low half.
-    export let hash = func(uint16 v) -> uint32 {
+    export let hash = func(v: uint16) -> uint32 {
         return v.hash_code();
     };
 
     // Decimal, with `-` for negative values (section 5.2).
-    export let to_string = func(uint16 v) -> string {
+    export let to_string = func(v: uint16) -> string {
         return v.to_string();
     };
 
     // Lowercase digits. A radix outside 2 through 36 traps.
-    export let to_string_radix = func(uint16 v, int radix) -> string {
+    export let to_string_radix = func(v: uint16, radix: int) -> string {
         integer_text.check_radix(radix);
         if (radix == 10) {
             return v.to_string();
@@ -311,11 +311,11 @@ export let UInt16 = module (
     // to_string_radix, left-padded with copies of `pad` to `min_width`
     // characters, sign included. A `0` pad goes after the sign. `pad` must be
     // one scalar value.
-    export let format = func(uint16 v, int radix, int min_width, string pad) -> string {
+    export let format = func(v: uint16, radix: int, min_width: int, pad: string) -> string {
         return integer_text.pad_number(to_string_radix(v, radix), min_width, pad);
     };
 
-    export let parse = func(string text) -> result.Result<uint16> {
+    export let parse = func(text: string) -> result.Result<uint16> {
         return parse_radix(text, 10);
     };
 
@@ -324,7 +324,7 @@ export let UInt16 = module (
     // end, InvalidCharacter at the offending byte); a well-formed value
     // outside the type fails with OutOfRange at offset 0. A `-` is accepted
     // only for zero. A radix outside 2 through 36 traps.
-    export let parse_radix = func(string text, int radix) -> result.Result<uint16> {
+    export let parse_radix = func(text: string, radix: int) -> result.Result<uint16> {
         integer_text.check_radix(radix);
         match (integer_text.syntax_error(text, radix)) {
             optional.Optional.Some(failure) => {
@@ -351,7 +351,7 @@ export let UInt16 = module (
     };
 
     // `n` modulo Bits, between 0 and Bits - 1.
-    let rotation = func(int n) -> int {
+    let rotation = func(n: int) -> int {
         let count = n % Bits;
         if (count < 0) {
             return count + Bits;

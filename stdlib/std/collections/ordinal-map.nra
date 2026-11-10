@@ -22,7 +22,7 @@ export let OrdinalMap = module (
 
         // An empty map for the keys 0 through `limit` - 1. Traps with
         // "invalid argument: negative size".
-        export let init = func(int limit) -> void {
+        export let init = func(limit: int) -> void {
             if (limit < 0) {
                 trap_with_message("invalid argument: negative size");
             }
@@ -39,14 +39,14 @@ export let OrdinalMap = module (
             modifications.value = modifications.value + 1;
         };
 
-        let check = func(uint64 expected) -> void {
+        let check = func(expected: uint64) -> void {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
             }
         };
 
         // Appends a new entry for an absent key.
-        let insert = func(int key, V value) -> void {
+        let insert = func(key: int, value: V) -> void {
             position[key] = dense_keys.length;
             dense_keys.append(key);
             dense_values.append(value);
@@ -55,7 +55,7 @@ export let OrdinalMap = module (
 
         // Removes the entry at dense place `slot`, moving the last entry into
         // it.
-        let release = func(int slot) -> void {
+        let release = func(slot: int) -> void {
             let last = dense_keys.length - 1;
             position[dense_keys[slot]] = -1;
             if (slot != last) {
@@ -88,11 +88,11 @@ export let OrdinalMap = module (
             changed();
         };
 
-        export let contains_key = func(int key) -> bool {
+        export let contains_key = func(key: int) -> bool {
             return position[key] >= 0;
         };
 
-        export let get = func(int key) -> optional.Optional<V> {
+        export let get = func(key: int) -> optional.Optional<V> {
             let slot = position[key];
             if (slot < 0) {
                 return optional.Optional<V>.None;
@@ -100,7 +100,7 @@ export let OrdinalMap = module (
             return optional.Optional<V>.Some(dense_values[slot]);
         };
 
-        export let get_or = func(int key, V fallback) -> V {
+        export let get_or = func(key: int, fallback: V) -> V {
             let slot = position[key];
             if (slot < 0) {
                 return fallback;
@@ -109,7 +109,7 @@ export let OrdinalMap = module (
         };
 
         // Traps with "no such element" when the key is absent.
-        export let require = func(int key) -> V {
+        export let require = func(key: int) -> V {
             let slot = position[key];
             if (slot < 0) {
                 trap_with_message("no such element");
@@ -119,7 +119,7 @@ export let OrdinalMap = module (
 
         // Associates the value, replacing any previous one. Replacing is not
         // structural.
-        export let set = func(int key, V value) -> void {
+        export let set = func(key: int, value: V) -> void {
             let slot = position[key];
             if (slot >= 0) {
                 dense_values[slot] = value;
@@ -129,7 +129,7 @@ export let OrdinalMap = module (
         };
 
         // Removes the key; returns whether it was present.
-        export let delete = func(int key) -> bool {
+        export let delete = func(key: int) -> bool {
             let slot = position[key];
             if (slot < 0) {
                 return false;
@@ -139,7 +139,7 @@ export let OrdinalMap = module (
         };
 
         // The previous value.
-        export let put = func(int key, V value) -> optional.Optional<V> {
+        export let put = func(key: int, value: V) -> optional.Optional<V> {
             let slot = position[key];
             if (slot >= 0) {
                 let previous = dense_values[slot];
@@ -150,7 +150,7 @@ export let OrdinalMap = module (
             return optional.Optional<V>.None;
         };
 
-        export let remove = func(int key) -> optional.Optional<V> {
+        export let remove = func(key: int) -> optional.Optional<V> {
             let slot = position[key];
             if (slot < 0) {
                 return optional.Optional<V>.None;
@@ -210,14 +210,14 @@ export let OrdinalMap = module (
 
         // Sets every entry of the other map, in its key order. A key at or
         // beyond this map's size is a bounds trap.
-        export let put_all = func(OrdinalMap<V> other) -> void {
+        export let put_all = func(other: OrdinalMap<V>) -> void {
             for (let entry in other.entries()) {
                 set(entry[0], entry[1]);
             }
         };
 
         // By equals, with `value` as the receiver.
-        export let contains_value = func(V value) -> bool {
+        export let contains_value = func(value: V) -> bool {
             for (let element in dense_values) {
                 if (value.equals(element)) {
                     return true;
@@ -227,7 +227,7 @@ export let OrdinalMap = module (
         };
 
         // In key order. The action must not change the map structurally.
-        export let for_each = func(func(int, V) -> void action) -> void {
+        export let for_each = func(action: func(int, V) -> void) -> void {
             let expected = modifications.value;
             let limit = position.length;
             let key = 0;
@@ -243,7 +243,7 @@ export let OrdinalMap = module (
 
         // Calls `drop` once per entry in key order and removes the matches.
         // Returns how many were removed.
-        export let remove_if = func(func(int, V) -> bool drop) -> int {
+        export let remove_if = func(drop: func(int, V) -> bool) -> int {
             let expected = modifications.value;
             let removed = 0;
             let limit = position.length;
@@ -266,7 +266,7 @@ export let OrdinalMap = module (
 
         // The existing value, or the result of `make`, stored. `make` must not
         // change the map.
-        export let get_or_put = func(int key, func() -> V make) -> V {
+        export let get_or_put = func(key: int, make: func() -> V) -> V {
             let slot = position[key];
             if (slot >= 0) {
                 return dense_values[slot];
@@ -280,7 +280,7 @@ export let OrdinalMap = module (
 
         // Stores `value` when the key is absent, otherwise the combination of
         // the old and the new value; returns what was stored.
-        export let merge = func(int key, V value, func(V, V) -> V combine) -> V {
+        export let merge = func(key: int, value: V, combine: func(V, V) -> V) -> V {
             let slot = position[key];
             if (slot < 0) {
                 insert(key, value);
@@ -295,7 +295,7 @@ export let OrdinalMap = module (
 
         // Stores a Some result and removes the key for None; returns the
         // result.
-        export let compute = func(int key, func(int, optional.Optional<V>) -> optional.Optional<V> f) -> optional.Optional<V> {
+        export let compute = func(key: int, f: func(int, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V> {
             let expected = modifications.value;
             let result = f(key, get(key));
             check(expected);
@@ -312,7 +312,7 @@ export let OrdinalMap = module (
 
         // Another OrdinalMap with the same value type and size that holds an
         // equal value for each of this map's keys.
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is OrdinalMap<V>)) {
                 return false;
             }
@@ -385,7 +385,7 @@ export let OrdinalMap = module (
         let expected: uint64;
         let key: int = 0;
 
-        export let init = func(int[list] slots, V[list] values, cell.Cell<uint64> counter) -> void {
+        export let init = func(slots: int[list], values: V[list], counter: cell.Cell<uint64>) -> void {
             position = slots;
             dense_values = values;
             modifications = counter;
@@ -422,7 +422,7 @@ export let OrdinalMap = module (
 
     // An empty map for the keys 0 through `size` - 1. Traps with "invalid
     // argument: negative size".
-    export let create = func<V>(int size) -> OrdinalMap<V> {
+    export let create = func<V>(size: int) -> OrdinalMap<V> {
         return new OrdinalMap<V>(size);
     };
 );

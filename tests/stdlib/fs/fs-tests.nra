@@ -10,7 +10,7 @@ let unit = import:Std.Core.Unit;
 // Runs against the real file system in fs-work/ below the test's working
 // directory, the only path the capability grants.
 let FsTests = module (
-    let fresh = func(string name) -> path.Path {
+    let fresh = func(name: string) -> path.Path {
         let dir = path.of("fs-work").join(name);
         match (fs.remove_tree(dir)) {
             result.Result.Ok(_) => {},
@@ -24,24 +24,24 @@ let FsTests = module (
 
     // Removes a test's directory, so that every run starts from the same
     // state.
-    let finish = func(path.Path dir) -> void {
+    let finish = func(dir: path.Path) -> void {
         test.assert_ok<unit.Unit>(fs.remove_tree(dir));
         test.assert_ok<unit.Unit>(fs.remove_directory(path.of("fs-work")));
     };
 
-    let kind_of = func(error.Error e) -> error.IoErrorKind {
+    let kind_of = func(e: error.Error) -> error.IoErrorKind {
         return match (e) {
             error.Error.Io { kind, message, path } => kind,
             _ => error.IoErrorKind.Other,
         };
     };
 
-    let expect_kind = func<T>(result.Result<T> r, error.IoErrorKind expected) -> void {
+    let expect_kind = func<T>(r: result.Result<T>, expected: error.IoErrorKind) -> void {
         let failure = test.assert_err<T>(r);
         test.assert_with(kind_of(failure) == expected, "expected " + expected.to_string() + ", got " + error.message(failure));
     };
 
-    let numbers = func(int count) -> uint8[list] {
+    let numbers = func(count: int) -> uint8[list] {
         let out: uint8[list] = [];
         let i = 0;
         while (i < count) {
@@ -51,7 +51,7 @@ let FsTests = module (
         return out;
     };
 
-    let names = func(path.Path[list] entries) -> string {
+    let names = func(entries: path.Path[list]) -> string {
         let text = "";
         for (let entry in entries) {
             text = text + entry.to_string() + ";";

@@ -8,15 +8,15 @@ let test = import:Std.Test;
 
 // BigInteger members with literal expectations (Stdlib.md section 10.2).
 let BigIntegerTests = module (
-    let of = func(string text) -> big.BigInteger {
+    let of = func(text: string) -> big.BigInteger {
         return result.expect<big.BigInteger>(big.parse(text), text);
     };
 
-    let check = func(string expected, big.BigInteger actual) -> void {
+    let check = func(expected: string, actual: big.BigInteger) -> void {
         test.assert_equal_string(expected, actual.to_string());
     };
 
-    let parse_failure = func(string text, int radix, error.ParseErrorKind kind, int offset) -> void {
+    let parse_failure = func(text: string, radix: int, kind: error.ParseErrorKind, offset: int) -> void {
         let failure = test.assert_err<big.BigInteger>(big.parse_radix(text, radix));
         match (failure) {
             error.Error.Parse { kind: actual_kind, offset: actual_offset, message: _ } => {
@@ -29,7 +29,7 @@ let BigIntegerTests = module (
         }
     };
 
-    let larger = func<T: comparable.Comparable<T>>(T a, T b) -> T {
+    let larger = func<T: comparable.Comparable<T>>(a: T, b: T) -> T {
         if (a.compare_to(b) == ordering.Ordering.Less) {
             return b;
         }

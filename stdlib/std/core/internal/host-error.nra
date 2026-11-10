@@ -4,7 +4,7 @@ let error = import:Std.Core.Error;
 // 4.5). Codes 1 through 14 are the first fourteen IoErrorKind values in
 // order; every other code is Other.
 export let HostError = module (
-    export let kind_of = func(uint32 code) -> error.IoErrorKind {
+    export let kind_of = func(code: uint32) -> error.IoErrorKind {
         if (code == 1) { return error.IoErrorKind.NotFound; }
         if (code == 2) { return error.IoErrorKind.PermissionDenied; }
         if (code == 3) { return error.IoErrorKind.AlreadyExists; }
@@ -22,7 +22,7 @@ export let HostError = module (
         return error.IoErrorKind.Other;
     };
 
-    export let io = func(uint32 code, string message, string path) -> error.Error {
+    export let io = func(code: uint32, message: string, path: string) -> error.Error {
         return error.Error.Io { kind: kind_of(code), message: message, path: path };
     };
 );

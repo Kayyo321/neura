@@ -20,7 +20,7 @@ export let Random = module (
         let has_spare: bool = false;
         let spare: float64 = 0.0;
 
-        export let init = func(Seal seal, uint64 a, uint64 b, uint64 c, uint64 d) -> void {
+        export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64) -> void {
             s0 = a;
             s1 = b;
             s2 = c;
@@ -54,7 +54,7 @@ export let Random = module (
         // the smallest all-ones mask covering bound - 1, drawn until below
         // bound. A bound below 1 traps with "invalid argument: bound must be
         // positive".
-        export let next_int_below = func(int bound) -> int {
+        export let next_int_below = func(bound: int) -> int {
             if (bound < 1) {
                 trap_with_message("invalid argument: bound must be positive");
             }
@@ -64,7 +64,7 @@ export let Random = module (
         // Uniform from `low` up to but excluding `high`, with the span in
         // int64. Traps with "invalid argument: low must be below high"
         // unless low < high.
-        export let next_int_between = func(int low, int high) -> int {
+        export let next_int_between = func(low: int, high: int) -> int {
             if (low >= high) {
                 trap_with_message("invalid argument: low must be below high");
             }
@@ -106,7 +106,7 @@ export let Random = module (
         // A new list of `count` bytes. Each step supplies 8 bytes, least
         // significant first; a final partial group uses the low bytes. A
         // negative count traps with "invalid argument: negative count".
-        export let fill_bytes = func(int count) -> uint8[list] {
+        export let fill_bytes = func(count: int) -> uint8[list] {
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
             }
@@ -125,7 +125,7 @@ export let Random = module (
 
         // Fisher-Yates: for i from the last index down to 1, swaps i with
         // next_int_below(i + 1).
-        export let shuffle = func<T>(T[list] items) -> void {
+        export let shuffle = func<T>(items: T[list]) -> void {
             let i = items.length - 1;
             while (i >= 1) {
                 let j = next_int_below(i + 1);
@@ -138,7 +138,7 @@ export let Random = module (
 
         // An element chosen with next_int_below. An empty list traps with
         // "no such element".
-        export let choose = func<T>(T[list] items) -> T {
+        export let choose = func<T>(items: T[list]) -> T {
             if (items.length == 0) {
                 trap_with_message("no such element");
             }
@@ -146,7 +146,7 @@ export let Random = module (
         };
 
         // Uniform below a bound from 1 through 2^32 - 1.
-        let below = func(uint32 bound) -> uint32 {
+        let below = func(bound: uint32) -> uint32 {
             let mask = bound - 1;
             mask = mask | (mask >> 1);
             mask = mask | (mask >> 2);
@@ -165,7 +165,7 @@ export let Random = module (
 
     // The four words are successive outputs of SplitMix64 started at the
     // seed.
-    export let seeded = func(uint64 seed) -> Random {
+    export let seeded = func(seed: uint64) -> Random {
         let state = seed;
         state = uint64s.wrapping_add(state, 11400714819323198485);
         let a = mix(state);
@@ -179,7 +179,7 @@ export let Random = module (
     };
 
     let FillOutcome = enum (Ok(uint8[list]), Error(uint32));
-    let fill_entropy = func(int count) -> FillOutcome host("neura.entropy.fill", 1);
+    let fill_entropy = func(count: int) -> FillOutcome host("neura.entropy.fill", 1);
 
     // Seeds with 8 bytes from neura.entropy.fill, read as a little-endian
     // uint64. Needs the entropy capability; a denied or failed request is
@@ -191,7 +191,7 @@ export let Random = module (
         };
     };
 
-    let seeded_from = func(uint8[list] bytes) -> result.Result<Random> {
+    let seeded_from = func(bytes: uint8[list]) -> result.Result<Random> {
         if (bytes.length != 8) {
             let wrong = error.Error.Io {
                 kind: error.IoErrorKind.InvalidData, message: "entropy source returned " + bytes.length.to_string() + " bytes",
@@ -209,7 +209,7 @@ export let Random = module (
     };
 
     // The SplitMix64 output function for a state.
-    let mix = func(uint64 state) -> uint64 {
+    let mix = func(state: uint64) -> uint64 {
         let z = state;
         z = uint64s.wrapping_mul(z ^ (z >> 30), 13787848793156543929);
         z = uint64s.wrapping_mul(z ^ (z >> 27), 10723151780598845931);
@@ -217,16 +217,16 @@ export let Random = module (
     };
 
     // x * 5 and x * 9 modulo 2^64 as a shift and a wrapping add.
-    let times5 = func(uint64 x) -> uint64 {
+    let times5 = func(x: uint64) -> uint64 {
         return uint64s.wrapping_add(x << 2, x);
     };
 
-    let times9 = func(uint64 x) -> uint64 {
+    let times9 = func(x: uint64) -> uint64 {
         return uint64s.wrapping_add(x << 3, x);
     };
 
     // A rotation by 1 through 63.
-    let rotate = func(uint64 x, int count) -> uint64 {
+    let rotate = func(x: uint64, count: int) -> uint64 {
         return (x << count) | (x >> (64 - count));
     };
 );

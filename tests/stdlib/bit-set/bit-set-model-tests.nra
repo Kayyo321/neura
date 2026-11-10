@@ -18,7 +18,7 @@ let BitSetModelTests = module (
         return result;
     };
 
-    let members = func(bool[list] model) -> int[list] {
+    let members = func(model: bool[list]) -> int[list] {
         let result: int[list] = [];
         let i = 0;
         while (i < Limit) {
@@ -30,7 +30,7 @@ let BitSetModelTests = module (
         return result;
     };
 
-    let check = func(bit_set.BitSet actual, bool[list] model) -> void {
+    let check = func(actual: bit_set.BitSet, model: bool[list]) -> void {
         let expected = members(model);
         test.assert_equal_int32(expected.length, actual.size());
         test.assert_equal_bool(expected.length == 0, actual.is_empty());
@@ -44,7 +44,7 @@ let BitSetModelTests = module (
     };
 
     // A random set with its model.
-    let random_pair = func(model_random.Generator random) -> [bit_set.BitSet, bool[list]] {
+    let random_pair = func(random: model_random.Generator) -> [bit_set.BitSet, bool[list]] {
         let model = empty_model();
         let result = bit_set.create();
         let count = random.below(25);
@@ -58,7 +58,7 @@ let BitSetModelTests = module (
         return [result, model];
     };
 
-    let run = func(uint64 seed, int operations) -> void {
+    let run = func(seed: uint64, operations: int) -> void {
         let random = model_random.seeded(seed);
         let actual = bit_set.create();
         let model = empty_model();
@@ -100,11 +100,11 @@ let BitSetModelTests = module (
                 let remove = choice < 70;
                 let removed = 0;
                 if (remove) {
-                    removed = actual.remove_if(func(int element) -> bool {
+                    removed = actual.remove_if(func(element: int) -> bool {
                         return element % divisor == 0;
                     });
                 } else {
-                    removed = actual.retain_if(func(int element) -> bool {
+                    removed = actual.retain_if(func(element: int) -> bool {
                         return element % divisor == 0;
                     });
                 }
@@ -181,7 +181,7 @@ let BitSetModelTests = module (
                 test.assert_equal_string("{" + text.slice(1, text.byte_length - 1) + "}", actual.to_string());
             } else {
                 let seen: int[list] = [];
-                actual.for_each(func(int element) -> void {
+                actual.for_each(func(element: int) -> void {
                     seen.append(element);
                 });
                 test.assert(seen.equals(members(model)));

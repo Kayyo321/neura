@@ -5,11 +5,11 @@ let result = import:Std.Core.Result;
 let test = import:Std.Test;
 
 let ResultTests = module (
-    let ok = func(int value) -> result.Result<int> {
+    let ok = func(value: int) -> result.Result<int> {
         return result.Result<int>.Ok(value);
     };
 
-    let err = func(string text) -> result.Result<int> {
+    let err = func(text: string) -> result.Result<int> {
         return result.Result<int>.Err(error.custom("test.failure", text));
     };
 
@@ -45,16 +45,16 @@ let ResultTests = module (
     };
 
     export let test_map_and_then_map_error = func() -> void {
-        let double = func(int v) -> int { return v * 2; };
+        let double = func(v: int) -> int { return v * 2; };
         test.assert_equal_int32(8, test.assert_ok<int>(result.map<int, int>(ok(4), double)));
         let calls = cell.of<int>(0);
-        let counted = func(int v) -> int {
+        let counted = func(v: int) -> int {
             calls.value = calls.value + 1;
             return v;
         };
         test.assert(result.is_err<int>(result.map<int, int>(err("x"), counted)));
         test.assert_equal_int32(0, calls.value);
-        let checked = func(int v) -> result.Result<string> {
+        let checked = func(v: int) -> result.Result<string> {
             if (v > 0) {
                 return result.Result<string>.Ok(v.to_string());
             }
@@ -65,7 +65,7 @@ let ResultTests = module (
         test.assert_equal_string("not positive", error.message(e));
         let first = test.assert_err<string>(result.and_then<int, string>(err("early"), checked));
         test.assert_equal_string("early", error.message(first));
-        let wrap = func(error.Error e) -> error.Error { return error.context(e, "wrapped"); };
+        let wrap = func(e: error.Error) -> error.Error { return error.context(e, "wrapped"); };
         let mapped = test.assert_err<int>(result.map_error<int>(err("inner"), wrap));
         test.assert_equal_string("wrapped: inner", error.message(mapped));
         test.assert_equal_int32(2, test.assert_ok<int>(result.map_error<int>(ok(2), wrap)));

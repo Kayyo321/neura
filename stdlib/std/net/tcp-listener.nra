@@ -12,10 +12,10 @@ export let TcpListener = module (
     let IdOutcome = enum (Ok(int64), Error(uint32));
     let PortOutcome = enum (Ok(int), Error(uint32));
     let DoneOutcome = enum (Ok, Error(uint32));
-    let listen_socket = func(string host, int port) -> IdOutcome host("neura.net.listen", 1);
-    let socket_port = func(int64 socket) -> PortOutcome host("neura.net.local_port", 1);
-    let accept_socket = func(int64 listener) -> IdOutcome host("neura.net.accept", 1);
-    let close_socket = func(int64 socket) -> DoneOutcome host("neura.net.close", 1);
+    let listen_socket = func(host: string, port: int) -> IdOutcome host("neura.net.listen", 1);
+    let socket_port = func(socket: int64) -> PortOutcome host("neura.net.local_port", 1);
+    let accept_socket = func(listener: int64) -> IdOutcome host("neura.net.accept", 1);
+    let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
     export let TcpListener = class implements closeable.Closeable (
         let handle: socket.Handle = nil;
@@ -23,7 +23,7 @@ export let TcpListener = module (
         let open_now: bool = true;
 
         // Use bind; the handle comes from the library.
-        export let init = func(socket.Handle opened, int bound_port) -> void {
+        export let init = func(opened: socket.Handle, bound_port: int) -> void {
             handle = opened;
             port = bound_port;
         };
@@ -60,7 +60,7 @@ export let TcpListener = module (
     // Listens on `host` (a name or an address; empty for every interface)
     // and `port`; port 0 asks the host for a free port. A port outside 0
     // through 65,535 traps with "invalid argument: port".
-    export let bind = func(string host, int port) -> result.Result<TcpListener> {
+    export let bind = func(host: string, port: int) -> result.Result<TcpListener> {
         socket.check_port(port);
         let address = socket.address_of(host, port);
         let id: int64 = 0;
@@ -78,7 +78,7 @@ export let TcpListener = module (
         };
     };
 
-    let close_after = func(int64 id, uint32 code, string address) -> result.Result<TcpListener> {
+    let close_after = func(id: int64, code: uint32, address: string) -> result.Result<TcpListener> {
         close_socket(id);
         return result.Result<TcpListener>.Err(host_error.io(code, "bind failed", address));
     };

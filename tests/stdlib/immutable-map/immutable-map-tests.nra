@@ -34,7 +34,7 @@ let ImmutableMapTests = module (
         test.assert(!map.contains_value(4));
         test.assert_equal_string("{b: 2, a: 1, c: 3}", map.to_string());
         let seen = cell.of<string>("");
-        map.for_each(func(string key, int value) -> void {
+        map.for_each(func(key: string, value: int) -> void {
             seen.value = seen.value + key + value.to_string();
         });
         test.assert_equal_string("b2a1c3", seen.value);

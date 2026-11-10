@@ -13,7 +13,7 @@ let DeferredGenericMethods = module:program.Entry (
 
     let Box = class<T> implements Named (
         export let value: T;
-        export let init = func(T item) -> void {
+        export let init = func(item: T) -> void {
             value = item;
         };
         export let pair = func() -> Box<[int, T]> {
@@ -32,11 +32,11 @@ let DeferredGenericMethods = module:program.Entry (
         };
     );
 
-    let describe = func(Named item) -> string {
+    let describe = func(item: Named) -> string {
         return item.name();
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let box = new Box<int>(7);
         let paired = box.pair();
         console.print_line(paired.value.to_string());

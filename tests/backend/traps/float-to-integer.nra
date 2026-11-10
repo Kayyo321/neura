@@ -4,11 +4,11 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Truncate = module:program.Entry (
-    let whole = func(float64 value) -> int8 {
+    let whole = func(value: float64) -> int8 {
         return value as int8;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (whole(-128.9) == -128) {
             console.print_line("-128.9 truncates to -128");
         }

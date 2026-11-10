@@ -8,7 +8,7 @@ let ordering = import:Std.Core.Ordering;
 let test = import:Std.Test;
 
 let ImmutableListTests = module (
-    let compare = func(int a, int b) -> ordering.Ordering {
+    let compare = func(a: int, b: int) -> ordering.Ordering {
         if (a < b) {
             return ordering.Ordering.Less;
         }
@@ -51,10 +51,10 @@ let ImmutableListTests = module (
         test.assert_equal_int32(3, items.last_index_of(1));
         test.assert_equal_int32(-1, items.index_of(7));
         test.assert_equal_int32(-1, items.last_index_of(7));
-        test.assert_equal_int32(2, items.index_where(func(int value) -> bool {
+        test.assert_equal_int32(2, items.index_where(func(value: int) -> bool {
             return value > 3;
         }));
-        test.assert_equal_int32(-1, items.index_where(func(int value) -> bool {
+        test.assert_equal_int32(-1, items.index_where(func(value: int) -> bool {
             return value > 5;
         }));
         test.assert(items.contains_all([1, 5]));
@@ -74,7 +74,7 @@ let ImmutableListTests = module (
         for (let value in items) {
             seen.append(value);
         }
-        items.for_each(func(int value) -> void {
+        items.for_each(func(value: int) -> void {
             seen.append(value);
         });
         test.assert_equal_string("[3, 1, 4, 3, 1, 4]", seen.to_string());

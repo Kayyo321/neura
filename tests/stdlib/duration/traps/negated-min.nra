@@ -5,7 +5,7 @@ let duration = import:Std.Time.Duration;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let low = duration.of_nanos(-9223372036854775807 - 1);
         console.print_line("before");
         console.print_line(low.negated().to_string());

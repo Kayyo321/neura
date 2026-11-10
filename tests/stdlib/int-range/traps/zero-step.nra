@@ -5,7 +5,7 @@ let program = import:Std.Program;
 let ranges = import:Std.Core.IntRange;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(ranges.stepped(0, 3, -1).size().to_string());
         let r = ranges.stepped(0, 3, 0);
         console.print_line("unreachable");

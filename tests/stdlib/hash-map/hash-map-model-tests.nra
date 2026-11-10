@@ -5,7 +5,7 @@ let map_model = import:MapModel;
 // against an association list in insertion order, calling validate() after
 // every operation.
 let HashMapModelTests = module (
-    let identity = func(int id) -> int {
+    let identity = func(id: int) -> int {
         return id;
     };
 
@@ -17,9 +17,9 @@ let HashMapModelTests = module (
     // Three hash values for every key: long probe chains and many equal
     // cached hashes, so lookups depend on the stored equality function.
     export let test_model_colliding_keys = func() -> void {
-        let map = hash_map.with_keys<int, int>(func(int key) -> uint32 {
+        let map = hash_map.with_keys<int, int>(func(key: int) -> uint32 {
             return (key % 3) as uint32;
-        }, func(int a, int b) -> bool {
+        }, func(a: int, b: int) -> bool {
             return a == b;
         });
         map_model.run<int>(map, identity, map.validate, map.trim, false, 2, 3000, 12, 40);
@@ -27,12 +27,12 @@ let HashMapModelTests = module (
 
     // String keys through with_keys_and_capacity.
     export let test_model_string_keys = func() -> void {
-        let map = hash_map.with_keys_and_capacity<string, int>(func(string key) -> uint32 {
+        let map = hash_map.with_keys_and_capacity<string, int>(func(key: string) -> uint32 {
             return key.hash_code();
-        }, func(string a, string b) -> bool {
+        }, func(a: string, b: string) -> bool {
             return a == b;
         }, 100);
-        map_model.run<string>(map, func(int id) -> string {
+        map_model.run<string>(map, func(id: int) -> string {
             return "key" + id.to_string();
         }, map.validate, map.trim, false, 3, 3000, 24, 160);
     };

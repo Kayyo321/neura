@@ -5,14 +5,14 @@ let optional = import:Std.Core.Optional;
 // 7.1): radix checks, digit bytes, padding, and the parsing grammar's
 // syntax errors. The value accumulation stays in each type's module.
 export let IntegerText = module (
-    export let check_radix = func(int radix) -> void {
+    export let check_radix = func(radix: int) -> void {
         if (radix < 2 || radix > 36) {
             trap_with_message("invalid argument: radix outside 2 through 36");
         }
     };
 
     // The lowercase ASCII digit for a value from 0 through 35.
-    export let digit_byte = func(int value) -> uint8 {
+    export let digit_byte = func(value: int) -> uint8 {
         if (value < 10) {
             return (value + 48) as uint8;
         }
@@ -21,7 +21,7 @@ export let IntegerText = module (
 
     // The value of an ASCII digit byte, letters in either case, or 36 when
     // the byte is not a digit of any radix.
-    export let digit_value = func(uint8 b) -> int {
+    export let digit_value = func(b: uint8) -> int {
         if (b >= 48 && b <= 57) {
             return (b - 48) as int;
         }
@@ -36,7 +36,7 @@ export let IntegerText = module (
 
     // The text of digits stored least significant first, with a leading
     // `-` when `negative` is set.
-    export let digits_text = func(uint8[list] reversed, bool negative) -> string {
+    export let digits_text = func(reversed: uint8[list], negative: bool) -> string {
         let bytes: uint8[list] = [];
         if (negative) {
             bytes.append(45);
@@ -50,7 +50,7 @@ export let IntegerText = module (
 
     // Left-pads `text` with copies of `pad` to `min_width` characters. A
     // `0` pad goes after a leading `-`. `pad` must be one scalar value.
-    export let pad_number = func(string text, int min_width, string pad) -> string {
+    export let pad_number = func(text: string, min_width: int, pad: string) -> string {
         let pad_length = pad.byte_length;
         if (pad_length == 0 || sequence_length(pad.byte_at(0)) != pad_length) {
             trap_with_message("invalid argument: pad is not one scalar value");
@@ -71,7 +71,7 @@ export let IntegerText = module (
 
     // The first error of the grammar: an optional `+` or `-`, then one or
     // more digits of the radix. None when the text matches.
-    export let syntax_error = func(string text, int radix) -> optional.Optional<error.Error> {
+    export let syntax_error = func(text: string, radix: int) -> optional.Optional<error.Error> {
         let length = text.byte_length;
         if (length == 0) {
             return optional.Optional<error.Error>.Some(parse_error(error.ParseErrorKind.Empty, 0, "empty input"));
@@ -91,7 +91,7 @@ export let IntegerText = module (
     };
 
     // 1 when the text starts with `+` or `-`, otherwise 0.
-    export let sign_length = func(string text) -> int {
+    export let sign_length = func(text: string) -> int {
         let first = text.byte_at(0);
         if (first == 43 || first == 45) {
             return 1;
@@ -99,16 +99,16 @@ export let IntegerText = module (
         return 0;
     };
 
-    export let out_of_range = func(string type_name) -> error.Error {
+    export let out_of_range = func(type_name: string) -> error.Error {
         return parse_error(error.ParseErrorKind.OutOfRange, 0, "value out of range for " + type_name);
     };
 
-    let parse_error = func(error.ParseErrorKind kind, int offset, string message) -> error.Error {
+    let parse_error = func(kind: error.ParseErrorKind, offset: int, message: string) -> error.Error {
         return error.Error.Parse { kind: kind, offset: offset, message: message };
     };
 
     // The length of the UTF-8 sequence that a lead byte starts.
-    let sequence_length = func(uint8 lead) -> int {
+    let sequence_length = func(lead: uint8) -> int {
         if (lead < 128) {
             return 1;
         }

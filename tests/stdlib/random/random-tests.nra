@@ -4,14 +4,14 @@ let test = import:Std.Test;
 let RandomTests = module (
     // Expected values come from a Python implementation of SplitMix64 and
     // xoshiro256** with each member's algorithm from Stdlib.md 12.2.
-    let check_uint64 = func(uint64 seed, uint64[] expected) -> void {
+    let check_uint64 = func(seed: uint64, expected: uint64[]) -> void {
         let r = randoms.seeded(seed);
         for (let value in expected) {
             test.assert_equal_uint64(value, r.next_uint64());
         }
     };
 
-    let check_small = func(uint64 seed, uint32[] words, bool[] bits) -> void {
+    let check_small = func(seed: uint64, words: uint32[], bits: bool[]) -> void {
         let r = randoms.seeded(seed);
         for (let value in words) {
             test.assert_equal_uint64(value as uint64, r.next_uint32() as uint64);
@@ -21,7 +21,7 @@ let RandomTests = module (
         }
     };
 
-    let check_below = func(uint64 seed, int[] expected) -> void {
+    let check_below = func(seed: uint64, expected: int[]) -> void {
         let bounds: int[] = [1, 2, 3, 7, 10, 100, 1000, 2147483647, 1073741824, 1073741825];
         let r = randoms.seeded(seed);
         for (let i = 0; i < 10; i = i + 1) {
@@ -29,7 +29,7 @@ let RandomTests = module (
         }
     };
 
-    let check_between = func(uint64 seed, int[] expected) -> void {
+    let check_between = func(seed: uint64, expected: int[]) -> void {
         let lows: int[] = [-5, -2147483648, 0, -2147483648, 100, 2147483646];
         let highs: int[] = [5, 2147483647, 1, -2147483647, 1000, 2147483647];
         let r = randoms.seeded(seed);
@@ -38,7 +38,7 @@ let RandomTests = module (
         }
     };
 
-    let check_float = func(uint64 seed, float64[] expected) -> void {
+    let check_float = func(seed: uint64, expected: float64[]) -> void {
         let r = randoms.seeded(seed);
         for (let value in expected) {
             test.assert_equal_float64(value, r.next_float64());
@@ -46,7 +46,7 @@ let RandomTests = module (
     };
 
     // fill_bytes(0), (5), (8), and (13) in turn.
-    let check_fill = func(uint64 seed, uint8[] expected) -> void {
+    let check_fill = func(seed: uint64, expected: uint8[]) -> void {
         let r = randoms.seeded(seed);
         let bytes: uint8[list] = [];
         let counts: int[] = [0, 5, 8, 13];
@@ -64,7 +64,7 @@ let RandomTests = module (
 
     // Shuffles 0 through 9, then a one-element list (no draw), then
     // chooses four times from five names.
-    let check_shuffle = func(uint64 seed, int[] expected, string[] chosen) -> void {
+    let check_shuffle = func(seed: uint64, expected: int[], chosen: string[]) -> void {
         let r = randoms.seeded(seed);
         let items: int[list] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         r.shuffle<int>(items);

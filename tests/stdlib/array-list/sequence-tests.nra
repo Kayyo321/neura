@@ -7,8 +7,8 @@ let test = import:Std.Test;
 let SequenceTests = module (
     export let test_array_list_sequence = func() -> void {
         let items = array_list.of<int>([1, 2, 3, 4, 5]);
-        let evens = items.sequence().filter(func(int v) -> bool { return v % 2 == 0; })
-            .map<string>(func(int v) -> string { return v.to_string(); }).to_list();
+        let evens = items.sequence().filter(func(v: int) -> bool { return v % 2 == 0; })
+            .map<string>(func(v: int) -> string { return v.to_string(); }).to_list();
         test.assert_equal<string[list]>(["2", "4"], evens);
         test.assert_equal_int32(5, items.sequence().count());
         test.assert_equal_int32(0, array_list.create<int>().sequence().count());
@@ -16,7 +16,7 @@ let SequenceTests = module (
 
     export let test_linked_list_sequence = func() -> void {
         let items = linked_list.of<string>(["a", "b", "c"]);
-        let joined = items.sequence().fold<string>("", func(string text, string item) -> string {
+        let joined = items.sequence().fold<string>("", func(text: string, item: string) -> string {
             return text + item;
         });
         test.assert_equal_string("abc", joined);

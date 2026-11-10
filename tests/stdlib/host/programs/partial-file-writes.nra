@@ -11,7 +11,7 @@ let unit = import:Std.Core.Unit;
 // write; File.write repeats with the remaining bytes. A write that stores
 // nothing fails with Other.
 export let PartialFileWrites = module:program.Entry (
-    let report = func(result.Result<unit.Unit> outcome) -> void {
+    let report = func(outcome: result.Result<unit.Unit>) -> void {
         match (outcome) {
             result.Result.Ok(_) => {
                 console.print_line("ok");
@@ -22,7 +22,7 @@ export let PartialFileWrites = module:program.Entry (
         }
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let f = result.expect<file.File>(file.open(path.of("partial.txt"), file.OpenMode.Write), "open");
         let data: uint8[list] = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57];
         report(f.write(data));

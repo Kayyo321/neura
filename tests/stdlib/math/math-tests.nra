@@ -19,11 +19,11 @@ let MathTests = module (
         return zero() / zero();
     };
 
-    let exact = func(float64 expected, float64 actual) -> void {
+    let exact = func(expected: float64, actual: float64) -> void {
         test.assert_equal_float64(expected, actual);
     };
 
-    let canonical_nan = func(float64 actual) -> void {
+    let canonical_nan = func(actual: float64) -> void {
         test.assert_equal_uint64(NaN, actual.to_bits());
     };
 

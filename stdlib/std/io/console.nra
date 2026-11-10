@@ -15,9 +15,9 @@ export let Console = module (
     let WriteOutcome = enum (Ok, Error(uint32));
     let CountOutcome = enum (Ok(int), Error(uint32));
     let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
-    let write_line = func(string text) -> WriteOutcome host("neura.console.write_line", 1);
-    let write_stream = func(int stream, uint8[list] data) -> CountOutcome host("neura.console.write", 1);
-    let read_stream = func(int max) -> BytesOutcome host("neura.console.read", 1);
+    let write_line = func(text: string) -> WriteOutcome host("neura.console.write_line", 1);
+    let write_stream = func(stream: int, data: uint8[list]) -> CountOutcome host("neura.console.write", 1);
+    let read_stream = func(max: int) -> BytesOutcome host("neura.console.read", 1);
 
     // Input read ahead of the caller: pending[pending_start] onwards.
     let pending: uint8[list] = [];
@@ -25,7 +25,7 @@ export let Console = module (
 
     // Writes the text and one LF. A failed write traps with
     // "console write failed".
-    export let print_line = func(string s) -> void {
+    export let print_line = func(s: string) -> void {
         match (write_line(s)) {
             WriteOutcome.Ok => {},
             WriteOutcome.Error(_) => {
@@ -36,7 +36,7 @@ export let Console = module (
 
     // The same write, returning its failure. The service's error code 1
     // maps to Other.
-    export let try_print_line = func(string s) -> result.Result<unit.Unit> {
+    export let try_print_line = func(s: string) -> result.Result<unit.Unit> {
         return match (write_line(s)) {
             WriteOutcome.Ok => bytes.ok(),
             WriteOutcome.Error(_) => result.Result<unit.Unit>.Err(write_failed()),
@@ -45,21 +45,21 @@ export let Console = module (
 
     // Writes the text to the output stream without a line end. A failed
     // write traps with "console write failed".
-    export let print = func(string s) -> void {
+    export let print = func(s: string) -> void {
         check_written(try_print(s));
     };
 
-    export let try_print = func(string s) -> result.Result<unit.Unit> {
+    export let try_print = func(s: string) -> result.Result<unit.Unit> {
         return write_all(1, bytes.of_string(s));
     };
 
     // Writes the text and one LF to the error stream. A failed write traps
     // with "console write failed".
-    export let error_line = func(string s) -> void {
+    export let error_line = func(s: string) -> void {
         check_written(try_error_line(s));
     };
 
-    export let try_error_line = func(string s) -> result.Result<unit.Unit> {
+    export let try_error_line = func(s: string) -> result.Result<unit.Unit> {
         return write_all(2, bytes.of_string(s + "\n"));
     };
 
@@ -103,14 +103,14 @@ export let Console = module (
 
     // The output stream as a byte sink.
     export let output = func() -> func(uint8[list]) -> result.Result<unit.Unit> {
-        return func(uint8[list] data) -> result.Result<unit.Unit> {
+        return func(data: uint8[list]) -> result.Result<unit.Unit> {
             return write_all(1, data);
         };
     };
 
     // The error stream as a byte sink.
     export let error = func() -> func(uint8[list]) -> result.Result<unit.Unit> {
-        return func(uint8[list] data) -> result.Result<unit.Unit> {
+        return func(data: uint8[list]) -> result.Result<unit.Unit> {
             return write_all(2, data);
         };
     };
@@ -121,7 +121,7 @@ export let Console = module (
         return read_input;
     };
 
-    let read_input = func(int max) -> result.Result<uint8[list]> {
+    let read_input = func(max: int) -> result.Result<uint8[list]> {
         bytes.check_maximum(max);
         if (pending_start < pending.length) {
             let end = pending.length;
@@ -147,7 +147,7 @@ export let Console = module (
         pending_start = 0;
     };
 
-    let finish_line = func(uint8[list] line) -> result.Result<optional.Optional<string>> {
+    let finish_line = func(line: uint8[list]) -> result.Result<optional.Optional<string>> {
         if (line.length > 0 && line[line.length - 1] == 13) {
             line.remove_at(line.length - 1);
         }
@@ -159,7 +159,7 @@ export let Console = module (
     };
 
     // Writes every byte to a stream, repeating partial writes.
-    let write_all = func(int stream, uint8[list] data) -> result.Result<unit.Unit> {
+    let write_all = func(stream: int, data: uint8[list]) -> result.Result<unit.Unit> {
         let remaining = data;
         while (remaining.length > 0) {
             match (write_stream(stream, remaining)) {
@@ -180,7 +180,7 @@ export let Console = module (
         return bytes.ok();
     };
 
-    let check_written = func(result.Result<unit.Unit> written) -> void {
+    let check_written = func(written: result.Result<unit.Unit>) -> void {
         match (written) {
             result.Result.Ok(_) => {},
             result.Result.Err(_) => {
@@ -193,7 +193,7 @@ export let Console = module (
         return errors.Error.Io { kind: errors.IoErrorKind.Other, message: "console write failed", path: "" };
     };
 
-    let read_failed = func(uint32 code) -> errors.Error {
+    let read_failed = func(code: uint32) -> errors.Error {
         return host_error.io(code, "console read failed", "");
     };
 );

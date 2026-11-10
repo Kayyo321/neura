@@ -5,7 +5,7 @@ let map_model = import:MapModel;
 // against an association list in insertion order, calling validate() after
 // every operation.
 let IntMapModelTests = module (
-    let identity = func(int id) -> int {
+    let identity = func(id: int) -> int {
         return id;
     };
 
@@ -17,7 +17,7 @@ let IntMapModelTests = module (
     // Negative keys and keys that differ only in high bits.
     export let test_model_spread_keys = func() -> void {
         let map = int_map.with_capacity<int>(10);
-        map_model.run<int>(map, func(int id) -> int {
+        map_model.run<int>(map, func(id: int) -> int {
             return (id - 20) * 65536;
         }, map.validate, map.trim, false, 22, 3000, 24, 80);
     };

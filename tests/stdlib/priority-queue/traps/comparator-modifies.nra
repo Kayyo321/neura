@@ -6,9 +6,9 @@ let priority_queue = import:Std.Collections.PriorityQueue;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let holder: priority_queue.PriorityQueue<int>[list] = [];
-        let items = priority_queue.create<int>(func(int a, int b) -> ordering.Ordering {
+        let items = priority_queue.create<int>(func(a: int, b: int) -> ordering.Ordering {
             holder[0].clear();
             return ordering.Ordering.Less;
         });

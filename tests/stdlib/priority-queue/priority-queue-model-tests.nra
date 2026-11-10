@@ -10,7 +10,7 @@ let test = import:Std.Test;
 let PriorityQueueModelTests = module (
     const Values: int = 100;
 
-    let compare = func(int a, int b) -> ordering.Ordering {
+    let compare = func(a: int, b: int) -> ordering.Ordering {
         if (a < b) {
             return ordering.Ordering.Less;
         }
@@ -20,7 +20,7 @@ let PriorityQueueModelTests = module (
         return ordering.Ordering.Equal;
     };
 
-    let least = func(int[list] counts) -> int {
+    let least = func(counts: int[list]) -> int {
         let v = 0;
         while (counts[v] == 0) {
             v = v + 1;
@@ -28,7 +28,7 @@ let PriorityQueueModelTests = module (
         return v;
     };
 
-    let check = func(priority_queue.PriorityQueue<int> actual, int[list] counts, int size) -> void {
+    let check = func(actual: priority_queue.PriorityQueue<int>, counts: int[list], size: int) -> void {
         actual.validate();
         test.assert_equal_int32(size, actual.size());
         test.assert_equal_bool(size == 0, actual.is_empty());
@@ -51,7 +51,7 @@ let PriorityQueueModelTests = module (
         }
     };
 
-    let run = func(uint64 seed, int operations) -> void {
+    let run = func(seed: uint64, operations: int) -> void {
         let random = model_random.seeded(seed);
         let actual = priority_queue.create<int>(compare);
         let counts: int[list] = [];
@@ -122,7 +122,7 @@ let PriorityQueueModelTests = module (
                 size = 0;
             } else if (choice < 98) {
                 let seen: int[list] = [];
-                actual.for_each(func(int element) -> void {
+                actual.for_each(func(element: int) -> void {
                     seen.append(element);
                 });
                 test.assert(seen.equals(actual.to_list()));

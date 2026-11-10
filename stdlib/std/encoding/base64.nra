@@ -31,7 +31,7 @@ export let Base64 = module (
     let standard_values: uint8[list] = [];
     let url_values: uint8[list] = [];
 
-    let values_of = func(string alphabet) -> uint8[list] {
+    let values_of = func(alphabet: string) -> uint8[list] {
         let values: uint8[list] = [];
         for (let b = 0; b < 256; b = b + 1) {
             values.append(255);
@@ -56,43 +56,43 @@ export let Base64 = module (
         return url_values;
     };
 
-    export let encode = func(uint8[list] bytes) -> string {
+    export let encode = func(bytes: uint8[list]) -> string {
         return encode_with(bytes, StandardAlphabet, true);
     };
 
-    export let encode_unpadded = func(uint8[list] bytes) -> string {
+    export let encode_unpadded = func(bytes: uint8[list]) -> string {
         return encode_with(bytes, StandardAlphabet, false);
     };
 
-    export let encode_url = func(uint8[list] bytes) -> string {
+    export let encode_url = func(bytes: uint8[list]) -> string {
         return encode_with(bytes, UrlAlphabet, true);
     };
 
-    export let encode_url_unpadded = func(uint8[list] bytes) -> string {
+    export let encode_url_unpadded = func(bytes: uint8[list]) -> string {
         return encode_with(bytes, UrlAlphabet, false);
     };
 
     // Strict decoding of padded standard text.
-    export let decode = func(string text) -> result.Result<uint8[list]> {
+    export let decode = func(text: string) -> result.Result<uint8[list]> {
         return decode_with(text, ready_standard(), true);
     };
 
     // Strict decoding of unpadded standard text.
-    export let decode_unpadded = func(string text) -> result.Result<uint8[list]> {
+    export let decode_unpadded = func(text: string) -> result.Result<uint8[list]> {
         return decode_with(text, ready_standard(), false);
     };
 
     // Strict decoding of padded URL-safe text.
-    export let decode_url = func(string text) -> result.Result<uint8[list]> {
+    export let decode_url = func(text: string) -> result.Result<uint8[list]> {
         return decode_with(text, ready_url(), true);
     };
 
     // Strict decoding of unpadded URL-safe text.
-    export let decode_url_unpadded = func(string text) -> result.Result<uint8[list]> {
+    export let decode_url_unpadded = func(text: string) -> result.Result<uint8[list]> {
         return decode_with(text, ready_url(), false);
     };
 
-    let encode_with = func(uint8[list] bytes, string alphabet, bool padded) -> string {
+    let encode_with = func(bytes: uint8[list], alphabet: string, padded: bool) -> string {
         let chars: uint8[list] = [];
         let count = bytes.length;
         let i = 0;
@@ -129,7 +129,7 @@ export let Base64 = module (
         return text;
     };
 
-    let decode_with = func(string text, uint8[list] values, bool padded) -> result.Result<uint8[list]> {
+    let decode_with = func(text: string, values: uint8[list], padded: bool) -> result.Result<uint8[list]> {
         let count = text.byte_length;
         let bytes: uint8[list] = [];
         // Whole groups of four alphabet characters.
@@ -205,7 +205,7 @@ export let Base64 = module (
         return result.Result<uint8[list]>.Ok(bytes);
     };
 
-    let failure = func(int offset, string message) -> result.Result<uint8[list]> {
+    let failure = func(offset: int, message: string) -> result.Result<uint8[list]> {
         return result.Result<uint8[list]>.Err(error.Error.Encoding { offset: offset, message: message });
     };
 );

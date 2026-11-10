@@ -7,7 +7,7 @@ export let Maps = module (
     // Whether the maps have the same size and, for each entry of `b`, `a`
     // holds a value for the key (by `a`'s own key lookup) that equals the
     // entry's value, with `a`'s value as the receiver.
-    export let same_entries = func<K, V>(map.Map<K, V> a, map.Map<K, V> b) -> bool {
+    export let same_entries = func<K, V>(a: map.Map<K, V>, b: map.Map<K, V>) -> bool {
         if (a.size() != b.size()) {
             return false;
         }

@@ -4,7 +4,7 @@ let program = import:Std.Program;
 let overlay = import:Overlay;
 
 let OverlayDriver = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (overlay.next_user_id(overlay.default_user_id) == 2) {
             console.print_line("next_user_id(default_user_id) = 2");
         }

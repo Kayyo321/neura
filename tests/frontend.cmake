@@ -51,7 +51,7 @@ set(core "${SOURCE_DIR}/examples/guide/core.nra")
 set(types "${SOURCE_DIR}/examples/types")
 set(predicate "${TEST_DIR}/predicate.nra")
 file(WRITE "${predicate}" [=[
-let both = func(bool left, bool right) -> bool {
+let both = func(left: bool, right: bool) -> bool {
     return left && right;
 };
 ]=])
@@ -103,7 +103,7 @@ let make = func() -> func() -> int {
 ]=] "5:[1-9][0-9]*" "a captured binding cannot be reassigned")
 check_rejection(closure-argument-type [=[
 let run = func() -> int {
-    let callback = func(int number) -> int { return number; };
+    let callback = func(number: int) -> int { return number; };
     return callback(true);
 };
 ]=] "4:[1-9][0-9]*" "expected int32, got bool")
@@ -125,7 +125,7 @@ let Derived = class:Base (
 # NeuraIR 1.1 operations; a for loop's step is a latch.
 set(loops "${TEST_DIR}/loops.nra")
 file(WRITE "${loops}" [=[
-let count = func(int32[list] values, int limit) -> int {
+let count = func(values: int32[list], limit: int) -> int {
     let total: int = 0;
     for (let i: int = 0; i < limit; i = i + 1) {
         total = total + i % 3;
@@ -149,18 +149,18 @@ endif()
 check_rejection(float-remainder "let r: float64 = 1.5 % 2.0;" "2:[1-9][0-9]*" "operator '%' is not defined for float64")
 check_rejection(bool-conversion "let n: int32 = true as int32;" "2:[1-9][0-9]*" "cannot convert bool to int32")
 check_rejection(string-conversion [=[
-let n = func(string text) -> int32 {
+let n = func(text: string) -> int32 {
     return text as int32;
 };
 ]=] "3:[1-9][0-9]*" "cannot convert string to int32")
 check_rejection(for-each-scalar [=[
-let f = func(int32 value) -> void {
+let f = func(value: int32) -> void {
     for (let item in value) {
     }
 };
 ]=] "3:22" "for-each requires an array or list or Iterable<T>, got int32")
 check_rejection(for-each-element-type [=[
-let f = func(int32[] values) -> void {
+let f = func(values: int32[]) -> void {
     for (let item: string in values) {
     }
 };
@@ -179,14 +179,14 @@ let f = func() -> int32 {
 };
 ]=] "5:12" "unknown name 'i'")
 check_rejection(element-scope [=[
-let f = func(int32[] values) -> int32 {
+let f = func(values: int32[]) -> int32 {
     for (let value in values) {
     }
     return value;
 };
 ]=] "5:12" "unknown name 'value'")
 check_rejection(for-each-const [=[
-let f = func(int32[] values) -> void {
+let f = func(values: int32[]) -> void {
     for (const value in values) {
         value = 1;
     }
@@ -202,7 +202,7 @@ let Shape = class (
         return 0;
     };
 );
-let count = func<T:Shape>(T item) -> int32 {
+let count = func<T:Shape>(item: T) -> int32 {
     return item.sides();
 };
 let use = func() -> int32 {
@@ -229,7 +229,7 @@ let Derived = class:Base (
 );
 ]=] "8:5" "override does not match inherited member 'make'")
 check_rejection(missing-type-arguments [=[
-let identity = func<T>(T value) -> T {
+let identity = func<T>(value: T) -> T {
     return value;
 };
 let use = func() -> int32 {
@@ -248,7 +248,7 @@ let pick = func() -> Light {
 check_rejection(empty-enum "let Nothing = enum ();" "2:21" "an enum needs at least one variant")
 check_rejection(enum-ordering [=[
 let Light = enum (Red, Green);
-let before = func(Light a, Light b) -> bool {
+let before = func(a: Light, b: Light) -> bool {
     return a < b;
 };
 ]=] "4:12" "operator '<' is not defined for Light")
@@ -262,7 +262,7 @@ check_rejection(duplicate-variant "let Light = enum (Red, Red);" "2:24" "duplica
 
 check_rejection(nonexhaustive-match [=[
 let Option = enum (None, Some(int));
-let unwrap = func(Option value) -> int {
+let unwrap = func(value: Option) -> int {
     return match (value) { Option.Some(n) => n };
 };
 ]=] "4:12" "non-exhaustive match, missing variant 'None'")
@@ -276,24 +276,24 @@ let [value] = f();
 ]=] "3:1" "destructuring requires a tuple with one element per binding")
 
 check_rejection(chain-with-comparison [=[
-let wrong = func(int x, int y) -> bool {
+let wrong = func(x: int, y: int) -> bool {
     return x == 0 and y == 1;
 };
 ]=] "3:25" "a comparison chain expects another value")
 check_rejection(mixed-chain-connectors [=[
-let wrong = func(int x) -> bool {
+let wrong = func(x: int) -> bool {
     return x == 1 or 2 and 3;
 };
 ]=] "3:24" "a comparison chain must use only")
 check_rejection(noninteger-shift-count [=[
-let wrong = func(int x) -> int {
+let wrong = func(x: int) -> int {
     return x << true;
 };
 ]=] "3:17" "a shift count must be an integer")
 
 check_rejection(implicit-base-constructor [=[
 let Base = class (
-    export let init = func(int value) -> void {}
+    export let init = func(value: int) -> void {}
 );
 let Middle = class:Base ();
 let Derived = class:Middle (
@@ -310,7 +310,7 @@ check_rejection(float64-overflow "let big: float64 = 1e309;" "2:20" "float liter
 check_rejection(float32-underflow "let tiny: float32 = 1e-50;" "2:21" "nonzero float literal rounds to zero in float32")
 check_rejection(mixed-float "let x: float32 = 1.0; let y: float64 = x;" "2:40" "expected float64, got float32")
 check_rejection(float-int-mix [=[
-let f = func(float32 x, int32 n) -> float32 {
+let f = func(x: float32, n: int32) -> float32 {
     return x * n;
 };
 ]=] "3:16" "expected float32, got int32")

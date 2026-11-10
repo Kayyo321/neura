@@ -8,7 +8,7 @@ let result = import:Std.Core.Result;
 // from_entropy answered from a recorded trace: the 8 bytes are read as a
 // little-endian seed, so the output equals seeded() with that seed.
 export let ReplayedEntropy = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         match (randoms.from_entropy()) {
             result.Result.Ok(r) => {
                 console.print_line(r.next_uint64().to_string());

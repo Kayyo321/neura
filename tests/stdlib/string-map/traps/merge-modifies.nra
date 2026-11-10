@@ -4,11 +4,11 @@ let program = import:Std.Program;
 let string_map = import:Std.Collections.StringMap;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let map = string_map.create<int>();
         map.set("a", 1);
         map.set("b", 2);
-        map.merge("a", 5, func(int a, int b) -> int {
+        map.merge("a", 5, func(a: int, b: int) -> int {
             map.delete("b");
             return a + b;
         });

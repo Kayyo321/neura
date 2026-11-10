@@ -5,7 +5,7 @@ let uint8s = import:Std.Core.UInt8;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(uint8s.floor_mod(7, 3).to_string());
         console.print_line(uint8s.floor_mod(7, 0).to_string());
         console.print_line("unreachable");

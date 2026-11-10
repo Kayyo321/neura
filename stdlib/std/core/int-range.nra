@@ -8,7 +8,7 @@ export let IntRange = module (
         let limit: int;
         let increment: int;
 
-        export let init = func(int start_value, int end_value, int step_value) -> void {
+        export let init = func(start_value: int, end_value: int, step_value: int) -> void {
             if (step_value == 0) {
                 trap_with_message("invalid argument: zero step");
             }
@@ -42,7 +42,7 @@ export let IntRange = module (
             return first <= limit;
         };
 
-        export let contains = func(int value) -> bool {
+        export let contains = func(value: int) -> bool {
             let offset = (value as int64) - (first as int64);
             let stride = increment as int64;
             if (increment > 0) {
@@ -53,7 +53,7 @@ export let IntRange = module (
 
         // The value at `index`. An index outside 0 through size() - 1 traps
         // with "invalid argument: index out of range".
-        export let get = func(int index) -> int {
+        export let get = func(index: int) -> int {
             if (index < 0 || (index as int64) >= count()) {
                 trap_with_message("invalid argument: index out of range");
             }
@@ -96,12 +96,12 @@ export let IntRange = module (
     );
 
     // The values from `start` up to, but not including, `end`.
-    export let of = func(int start, int end) -> IntRange {
+    export let of = func(start: int, end: int) -> IntRange {
         return new IntRange(start, end, 1);
     };
 
     // A zero step traps with "invalid argument: zero step".
-    export let stepped = func(int start, int end, int step) -> IntRange {
+    export let stepped = func(start: int, end: int, step: int) -> IntRange {
         return new IntRange(start, end, step);
     };
 );

@@ -8,15 +8,15 @@ let test = import:Std.Test;
 let tree_map = import:Std.Collections.TreeMap;
 
 let SequenceTests = module (
-    let list = func(int[list] items) -> sequence.Sequence<int> {
+    let list = func(items: int[list]) -> sequence.Sequence<int> {
         return sequence.from_list<int>(items);
     };
 
-    let even = func(int v) -> bool {
+    let even = func(v: int) -> bool {
         return v % 2 == 0;
     };
 
-    let text = func(optional.Optional<int> o) -> string {
+    let text = func(o: optional.Optional<int>) -> string {
         return optional.to_string<int>(o);
     };
 
@@ -35,7 +35,7 @@ let SequenceTests = module (
         test.assert_equal_int32(3, counter.value);
         // iterate calls step only when the next element is pulled.
         let steps = cell.of<int>(0);
-        let powers = sequence.iterate<int>(1, func(int v) -> int {
+        let powers = sequence.iterate<int>(1, func(v: int) -> int {
             steps.value = steps.value + 1;
             return v * 3;
         }).take(4).to_list();
@@ -46,13 +46,13 @@ let SequenceTests = module (
     };
 
     export let test_map_filter_flat_map = func() -> void {
-        let squares = list([1, 2, 3, 4]).map<int>(func(int v) -> int {
+        let squares = list([1, 2, 3, 4]).map<int>(func(v: int) -> int {
             return v * v;
         }).to_list();
         test.assert_equal_string("[1, 4, 9, 16]", squares.to_string());
         test.assert_equal_string("[2, 4, 6]", sequence.range(1, 7).filter(even).to_list().to_string());
         test.assert_equal_string("[]", list([1, 3]).filter(even).to_list().to_string());
-        let spread = list([0, 2, 1]).flat_map<string>(func(int v) -> string[list] {
+        let spread = list([0, 2, 1]).flat_map<string>(func(v: int) -> string[list] {
             let result: string[list] = [];
             let i = 0;
             while (i < v) {
@@ -73,12 +73,12 @@ let SequenceTests = module (
         test.assert_equal_string("[0, 1]", sequence.range(0, 2).skip(0).to_list().to_string());
         // take stops pulling after the n-th element.
         let pulled = cell.of<int>(0);
-        let firsts = sequence.range(0, 100).peek(func(int v) -> void {
+        let firsts = sequence.range(0, 100).peek(func(v: int) -> void {
             pulled.value = pulled.value + 1;
         }).take(3).to_list();
         test.assert_equal_string("[0, 1, 2]", firsts.to_string());
         test.assert_equal_int32(3, pulled.value);
-        let small = func(int v) -> bool {
+        let small = func(v: int) -> bool {
             return v < 3;
         };
         test.assert_equal_string("[0, 1, 2]", list([0, 1, 2, 5, 1]).take_while(small).to_list().to_string());
@@ -116,7 +116,7 @@ let SequenceTests = module (
         test.assert_equal_string("[1, 2, 3, 5]", list([3, 5, 1, 2]).sorted(int32.compare).to_list().to_string());
         // Stable: equal keys keep their order.
         let pairs = sequence.from_list<[int, string]>([[2, "a"], [1, "b"], [2, "c"], [1, "d"]]).sorted(
-            func([int, string] x, [int, string] y) -> ordering.Ordering {
+            func(x: [int, string], y: [int, string]) -> ordering.Ordering {
                 return int32.compare(x[0], y[0]);
             }).to_list();
         test.assert_equal_string("[[1, b], [1, d], [2, a], [2, c]]", pairs.to_string());
@@ -132,16 +132,16 @@ let SequenceTests = module (
     // through the whole pipeline before the next is requested.
     export let test_lazy_pull_order = func() -> void {
         let log = cell.of<string>("");
-        let pipeline = sequence.range(0, 3).peek(func(int v) -> void {
+        let pipeline = sequence.range(0, 3).peek(func(v: int) -> void {
             log.value = log.value + "a" + v.to_string();
-        }).map<int>(func(int v) -> int {
+        }).map<int>(func(v: int) -> int {
             log.value = log.value + "m" + v.to_string();
             return v * 10;
-        }).peek(func(int v) -> void {
+        }).peek(func(v: int) -> void {
             log.value = log.value + "b" + v.to_string();
         });
         test.assert_equal_string("", log.value);
-        pipeline.for_each(func(int v) -> void {
+        pipeline.for_each(func(v: int) -> void {
             log.value = log.value + ";";
         });
         test.assert_equal_string("a0m0b0;a1m1b10;a2m2b20;", log.value);
@@ -153,14 +153,14 @@ let SequenceTests = module (
         let parts = sequence.range(0, 7).partition(even);
         test.assert_equal_string("[0, 2, 4, 6]", parts[0].to_string());
         test.assert_equal_string("[1, 3, 5]", parts[1].to_string());
-        let text = list([1, 2, 3]).fold<string>("x", func(string acc, int v) -> string {
+        let text = list([1, 2, 3]).fold<string>("x", func(acc: string, v: int) -> string {
             return acc + v.to_string();
         });
         test.assert_equal_string("x123", text);
         test.assert_equal_int32(4, sequence.range(0, 4).count());
         test.assert_equal_int32(0, sequence.empty<int>().count());
         let total = cell.of<int>(0);
-        list([4, 5]).for_each(func(int v) -> void {
+        list([4, 5]).for_each(func(v: int) -> void {
             total.value = total.value + v;
         });
         test.assert_equal_int32(9, total.value);
@@ -174,8 +174,8 @@ let SequenceTests = module (
     // any, all, and none stop at the first deciding element.
     export let test_any_all_none = func() -> void {
         let pulled = cell.of<int>(0);
-        let counted = func(int[list] items) -> sequence.Sequence<int> {
-            return sequence.from_list<int>(items).peek(func(int v) -> void {
+        let counted = func(items: int[list]) -> sequence.Sequence<int> {
+            return sequence.from_list<int>(items).peek(func(v: int) -> void {
                 pulled.value = pulled.value + 1;
             });
         };
@@ -196,7 +196,7 @@ let SequenceTests = module (
     };
 
     export let test_optional_terminals = func() -> void {
-        let plus = func(int a, int b) -> int {
+        let plus = func(a: int, b: int) -> int {
             return a * 10 + b;
         };
         test.assert_equal_string("Some(123)", text(list([1, 2, 3]).reduce(plus)));
@@ -212,7 +212,7 @@ let SequenceTests = module (
         test.assert_equal_string("Some(4)", text(list([3, 1, 4, 1]).max(int32.compare)));
         test.assert_equal_string("None", text(sequence.empty<int>().max(int32.compare)));
         // The first of several equal extremes.
-        let by_first = func([int, string] x, [int, string] y) -> ordering.Ordering {
+        let by_first = func(x: [int, string], y: [int, string]) -> ordering.Ordering {
             return int32.compare(x[0], y[0]);
         };
         let items: [int, string][list] = [[2, "a"], [1, "b"], [2, "c"], [1, "d"]];
@@ -225,13 +225,13 @@ let SequenceTests = module (
     export let test_collections = func() -> void {
         let set = list([3, 1, 3, 2]).to_set();
         test.assert_equal_string("{3, 1, 2}", set.to_string());
-        let map = sequence.from_list<string>(["one", "three"]).to_map<string, int>(func(string s) -> string {
+        let map = sequence.from_list<string>(["one", "three"]).to_map<string, int>(func(s: string) -> string {
             return s;
-        }, func(string s) -> int {
+        }, func(s: string) -> int {
             return s.byte_length;
         });
         test.assert_equal_string("{one: 3, three: 5}", map.to_string());
-        let groups = sequence.from_list<string>(["bb", "a", "cc", "d", "eee"]).group_by<int>(func(string s) -> int {
+        let groups = sequence.from_list<string>(["bb", "a", "cc", "d", "eee"]).group_by<int>(func(s: string) -> int {
             return s.byte_length;
         });
         test.assert_equal_string("{2: [bb, cc], 1: [a, d], 3: [eee]}", groups.to_string());
@@ -259,7 +259,7 @@ let SequenceTests = module (
         let map = tree_map.create<int, string>(int32.compare);
         map.set(2, "b");
         map.set(1, "a");
-        let keys = sequence.from_iterator<int>(map.key_iterator()).map<int>(func(int k) -> int {
+        let keys = sequence.from_iterator<int>(map.key_iterator()).map<int>(func(k: int) -> int {
             return k * 100;
         }).to_list();
         test.assert_equal_string("[100, 200]", keys.to_string());

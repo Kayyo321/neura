@@ -20,24 +20,24 @@ export let File = module (
     let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
     let CountOutcome = enum (Ok(int), Error(uint32));
     let DoneOutcome = enum (Ok, Error(uint32));
-    let open_file = func(string path, int mode) -> IdOutcome host("neura.fs.open", 1);
-    let read_file = func(int64 file, int max) -> BytesOutcome host("neura.fs.read", 1);
-    let write_file = func(int64 file, uint8[list] data) -> CountOutcome host("neura.fs.write", 1);
-    let seek_file = func(int64 file, int64 offset, int origin) -> IdOutcome host("neura.fs.seek", 1);
-    let close_file = func(int64 file) -> DoneOutcome host("neura.fs.close", 1);
+    let open_file = func(path: string, mode: int) -> IdOutcome host("neura.fs.open", 1);
+    let read_file = func(file: int64, max: int) -> BytesOutcome host("neura.fs.read", 1);
+    let write_file = func(file: int64, data: uint8[list]) -> CountOutcome host("neura.fs.write", 1);
+    let seek_file = func(file: int64, offset: int64, origin: int) -> IdOutcome host("neura.fs.seek", 1);
+    let close_file = func(file: int64) -> DoneOutcome host("neura.fs.close", 1);
 
     export let File = class implements closeable.Closeable (
         let handle: file_handle.FileHandle = nil;
         let open_now: bool = true;
 
         // Use File.open; the handle comes from the library.
-        export let init = func(file_handle.FileHandle opened) -> void {
+        export let init = func(opened: file_handle.FileHandle) -> void {
             handle = opened;
         };
 
         // Up to `max` bytes from the current position; an empty list at the
         // end of the file. A maximum below 1 traps.
-        export let read = func(int max) -> result.Result<uint8[list]> {
+        export let read = func(max: int) -> result.Result<uint8[list]> {
             bytes.check_maximum(max);
             if (!open_now) {
                 return result.Result<uint8[list]>.Err(bytes.closed("file", handle.path));
@@ -49,7 +49,7 @@ export let File = module (
         };
 
         // Writes every byte, repeating partial host writes.
-        export let write = func(uint8[list] data) -> result.Result<unit.Unit> {
+        export let write = func(data: uint8[list]) -> result.Result<unit.Unit> {
             if (!open_now) {
                 return result.Result<unit.Unit>.Err(bytes.closed("file", handle.path));
             }
@@ -74,7 +74,7 @@ export let File = module (
         };
 
         // Moves the position and returns it, counted from the start.
-        export let seek = func(int64 offset, SeekOrigin origin) -> result.Result<int64> {
+        export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64> {
             if (!open_now) {
                 return result.Result<int64>.Err(bytes.closed("file", handle.path));
             }
@@ -124,7 +124,7 @@ export let File = module (
         };
     );
 
-    export let open = func(paths.Path path, OpenMode mode) -> result.Result<File> {
+    export let open = func(path: paths.Path, mode: OpenMode) -> result.Result<File> {
         let text = path.to_string();
         return match (open_file(text, mode as int)) {
             IdOutcome.Ok(id) => result.Result<File>.Ok(new File(new file_handle.FileHandle(id, text))),

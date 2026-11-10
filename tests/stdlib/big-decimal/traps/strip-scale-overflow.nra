@@ -9,7 +9,7 @@ let result = import:Std.Core.Result;
 export let Main = module:program.Entry (
     let zero: float64 = 0.0;
 
-    let of = func(string text) -> decimals.BigDecimal {
+    let of = func(text: string) -> decimals.BigDecimal {
         return result.expect<decimals.BigDecimal>(decimals.parse(text), text);
     };
 
@@ -17,7 +17,7 @@ export let Main = module:program.Entry (
         return nil;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("before");
         console.print_line(decimals.of_big_integer(big.Ten, -2147483648).strip_trailing_zeros().to_string());
         console.print_line("unreachable");

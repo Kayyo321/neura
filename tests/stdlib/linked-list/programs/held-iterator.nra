@@ -7,7 +7,7 @@ let program = import:Std.Program;
 // node's links, so the held node does not keep the 2,000 later nodes (100
 // cells each) reachable.
 export let Main = module:program.Entry (
-    let block = func(int seed) -> int[list] {
+    let block = func(seed: int) -> int[list] {
         let values: int[list] = [];
         let i = 0;
         while (i < 100) {
@@ -17,7 +17,7 @@ export let Main = module:program.Entry (
         return values;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let items = linked_list.create<int[list]>();
         items.add(block(0));
         let walk = items.iterator();

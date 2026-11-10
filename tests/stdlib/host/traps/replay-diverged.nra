@@ -7,7 +7,7 @@ let program = import:Std.Program;
 // The trace's second request has a different argument: replay stops with a
 // diagnostic after reproducing the output before it.
 export let ReplayDiverged = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("first");
         console.print_line("second");
         return program.ExitCode.Ok;

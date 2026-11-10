@@ -7,7 +7,7 @@ let program = import:Std.Program;
 // word lists stayed reachable the 100 rounds would need about 100,000
 // cells, far above the limit.
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let items = bit_set.create();
         let total = 0;
         let round = 0;

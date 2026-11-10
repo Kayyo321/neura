@@ -10,7 +10,7 @@ let stopwatch = import:Std.Time.Stopwatch;
 let unit = import:Std.Core.Unit;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let watch = stopwatch.create(fixed_clock.of(instant.Epoch));
         result.expect<unit.Unit>(watch.start(), "start");
         console.print_line("before");

@@ -19,7 +19,7 @@ Bindings are visible from their declaration to the end of their enclosing block;
 Functions declare parameter and return types. Arguments are evaluated left to right; `return` exits the function. A non-`void` function must return a value on every reachable path. A `void` function may fall through. Function overloading and default arguments are not specified.
 
 ```neura
-let sum_to = func(int32 limit) -> int32 {
+let sum_to = func(limit: int32) -> int32 {
     let total: int32 = 0;
     let current: int32 = 1;
     while (current <= limit) {
@@ -37,8 +37,8 @@ let sum_to = func(int32 limit) -> int32 {
 A lambda is a function expression with typed parameters and a body. Its type lists the parameter types in order, followed by the result. An invocation evaluates the callable expression first and its arguments from left to right.
 
 ```neura
-let make_adder = func(int offset) -> func(int) -> int {
-    return func(int value) -> int {
+let make_adder = func(offset: int) -> func(int) -> int {
+    return func(value: int) -> int {
         return value + offset;
     };
 };

@@ -6,7 +6,7 @@ let regex = import:Std.Text.Regex;
 let result = import:Std.Core.Result;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         match (regex.compile("a")) {
             result.Result.Ok(r) => {
                 console.print_line("before");

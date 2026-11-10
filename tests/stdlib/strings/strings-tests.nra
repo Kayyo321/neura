@@ -4,7 +4,7 @@ let strings = import:Std.Text.Strings;
 let test = import:Std.Test;
 
 let StringsTests = module (
-    let check_list = func(string[list] expected, string[list] actual) -> void {
+    let check_list = func(expected: string[list], actual: string[list]) -> void {
         test.assert_equal<string[list]>(expected, actual);
     };
 

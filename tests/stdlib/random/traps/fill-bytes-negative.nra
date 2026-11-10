@@ -5,7 +5,7 @@ let program = import:Std.Program;
 let randoms = import:Std.Random.Random;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let r = randoms.seeded(1);
         console.print_line("before");
         console.print_line(r.fill_bytes(-1).to_string());

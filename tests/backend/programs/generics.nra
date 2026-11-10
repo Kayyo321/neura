@@ -5,7 +5,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Generics = module:program.Entry (
-    let report = func(bool holds, string label) -> void {
+    let report = func(holds: bool, label: string) -> void {
         if (holds) {
             console.print_line(label);
         } else {
@@ -34,11 +34,11 @@ let Generics = module:program.Entry (
         export let get = func() -> T {
             return value;
         };
-        export let put = func(T next) -> void {
+        export let put = func(next: T) -> void {
             value = next;
         };
         // A generic method of a generic class.
-        export let pair = func<U>(U other) -> Pair<T, U> {
+        export let pair = func<U>(other: U) -> Pair<T, U> {
             let result = new Pair<T, U>();
             result.first = value;
             result.second = other;
@@ -53,22 +53,22 @@ let Generics = module:program.Entry (
 
     // A generic method of a plain class.
     let Tools = class (
-        export let twice = func<T>(T value) -> T[] {
+        export let twice = func<T>(value: T) -> T[] {
             return [value, value];
         };
     );
 
-    let identity = func<T>(T value) -> T {
+    let identity = func<T>(value: T) -> T {
         return value;
     };
 
-    let box_of = func<T>(T value) -> Box<T> {
+    let box_of = func<T>(value: T) -> Box<T> {
         let box = new Box<T>();
         box.put(value);
         return box;
     };
 
-    let total_sides = func<T:Shape>(T[] shapes) -> int32 {
+    let total_sides = func<T:Shape>(shapes: T[]) -> int32 {
         let total: int32 = 0;
         for (let shape in shapes) {
             total = total + shape.sides();
@@ -76,7 +76,7 @@ let Generics = module:program.Entry (
         return total;
     };
 
-    let count = func<T>(T[list] items) -> int {
+    let count = func<T>(items: T[list]) -> int {
         let result: int = 0;
         for (let item in items) {
             result = result + 1;
@@ -84,7 +84,7 @@ let Generics = module:program.Entry (
         return result;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         report(identity<int32>(7) == 7, "identity<int32>");
         console.print_line(identity<string>("identity<string>"));
         report(identity<bool>(true), "identity<bool>");

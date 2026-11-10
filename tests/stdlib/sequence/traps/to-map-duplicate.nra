@@ -4,10 +4,10 @@ let program = import:Std.Program;
 let sequence = import:Std.Collections.Sequence;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
-        sequence.range(0, 5).to_map<int, int>(func(int v) -> int {
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        sequence.range(0, 5).to_map<int, int>(func(v: int) -> int {
             return v % 3;
-        }, func(int v) -> int {
+        }, func(v: int) -> int {
             return v;
         });
         return program.ExitCode.Ok;

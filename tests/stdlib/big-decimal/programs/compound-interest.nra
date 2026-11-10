@@ -6,11 +6,11 @@ let result = import:Std.Core.Result;
 // BigDecimal end to end: monthly compound interest rounded to cents each
 // month, a ratio at fixed scale, and conversions to float64 and back.
 export let CompoundInterest = module:program.Entry (
-    let of = func(string text) -> decimals.BigDecimal {
+    let of = func(text: string) -> decimals.BigDecimal {
         return result.expect<decimals.BigDecimal>(decimals.parse(text), text);
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let balance = of("1000.00");
         let monthly = of("0.05").divide(of("12"), 10, decimals.RoundingMode.HalfEven);
         console.print_line(monthly.to_string());

@@ -7,7 +7,7 @@ let result = import:Std.Core.Result;
 let test = import:Std.Test;
 
 let DurationTests = module (
-    let nanos = func(duration.Duration d) -> int64 {
+    let nanos = func(d: duration.Duration) -> int64 {
         return d.to_nanos();
     };
 
@@ -15,14 +15,14 @@ let DurationTests = module (
     // with Python as float(count) / 1e9: the count rounded to float64, then
     // divided. Up to 2^53 the conversion is exact, so the result is the
     // correctly rounded quotient.
-    let check_text = func(string text, int64 count, float64 seconds) -> void {
+    let check_text = func(text: string, count: int64, seconds: float64) -> void {
         let d = duration.of_nanos(count);
         test.assert_equal_string(text, d.to_string());
         test.assert_equal_int64(count, nanos(test.assert_ok<duration.Duration>(duration.parse(text))));
         test.assert_equal_float64(seconds, d.to_seconds_float64());
     };
 
-    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+    let check_error = func(text: string, kind: error.ParseErrorKind, offset: int) -> void {
         let failure = test.assert_err<duration.Duration>(duration.parse(text));
         match (failure) {
             error.Error.Parse { kind: actual, offset: at, message: _ } => {
@@ -35,7 +35,7 @@ let DurationTests = module (
         }
     };
 
-    let parsed = func(string text) -> int64 {
+    let parsed = func(text: string) -> int64 {
         return nanos(test.assert_ok<duration.Duration>(duration.parse(text)));
     };
 

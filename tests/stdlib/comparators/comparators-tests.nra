@@ -7,7 +7,7 @@ let test = import:Std.Test;
 
 let ComparatorsTests = module (
     // Insertion sort by a comparator, so the tests see the order it defines.
-    let sorted = func(int[list] input, func(int, int) -> ordering.Ordering c) -> int[list] {
+    let sorted = func(input: int[list], c: func(int, int) -> ordering.Ordering) -> int[list] {
         let output: int[list] = [];
         for (let value in input) {
             output.append(value);
@@ -22,7 +22,7 @@ let ComparatorsTests = module (
         return output;
     };
 
-    let text = func(int[list] values) -> string {
+    let text = func(values: int[list]) -> string {
         return values.to_string();
     };
 
@@ -37,13 +37,13 @@ let ComparatorsTests = module (
     };
 
     export let test_by_key = func() -> void {
-        let by_length = comparators.by_key<string, int>(func(string s) -> int { return s.byte_length; }, int32s.compare);
+        let by_length = comparators.by_key<string, int>(func(s: string) -> int { return s.byte_length; }, int32s.compare);
         test.assert(by_length("ab", "c") == ordering.Ordering.Greater);
         test.assert(by_length("ab", "cd") == ordering.Ordering.Equal);
         test.assert(by_length("", "c") == ordering.Ordering.Less);
         // Absolute value as the key; the key runs once per operand.
         let calls = cell.of<int>(0);
-        let magnitude = func(int v) -> int {
+        let magnitude = func(v: int) -> int {
             calls.value = calls.value + 1;
             if (v < 0) {
                 return -v;
@@ -53,16 +53,16 @@ let ComparatorsTests = module (
         let by_magnitude = comparators.by_key<int, int>(magnitude, int32s.compare);
         test.assert(by_magnitude(-5, 3) == ordering.Ordering.Greater);
         test.assert_equal_int32(2, calls.value);
-        let by_flag = comparators.by_key<int, bool>(func(int v) -> bool { return v % 2 == 0; }, bools.compare);
+        let by_flag = comparators.by_key<int, bool>(func(v: int) -> bool { return v % 2 == 0; }, bools.compare);
         test.assert(by_flag(2, 3) == ordering.Ordering.Greater);
     };
 
     export let test_then = func() -> void {
-        let parity = comparators.by_key<int, int>(func(int v) -> int { return int32s.floor_mod(v, 2); }, int32s.compare);
+        let parity = comparators.by_key<int, int>(func(v: int) -> int { return int32s.floor_mod(v, 2); }, int32s.compare);
         let combined = comparators.then<int>(parity, int32s.compare);
         test.assert_equal_string("[-4, 0, 2, 6, -3, 1, 5]", text(sorted([5, 2, -3, 0, 6, 1, -4], combined)));
         let second_calls = cell.of<int>(0);
-        let counted = func(int a, int b) -> ordering.Ordering {
+        let counted = func(a: int, b: int) -> ordering.Ordering {
             second_calls.value = second_calls.value + 1;
             return int32s.compare(a, b);
         };

@@ -4,7 +4,7 @@ let test = import:Std.Test;
 let ScalarsTests = module (
     // A reference classification of one ASCII value, written as a table of
     // the characters in each class rather than as ranges.
-    let in_text = func(uint32 value, string members) -> bool {
+    let in_text = func(value: uint32, members: string) -> bool {
         let i = 0;
         while (i < members.byte_length) {
             if ((members.byte_at(i) as uint32) == value) {

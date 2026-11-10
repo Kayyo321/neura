@@ -3,15 +3,15 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Shared = module:program.Entry (
-    let area = func(int32 width, int32 height) -> int32 {
+    let area = func(width: int32, height: int32) -> int32 {
         return width * height;
     };
 
-    let volume = func(int32 base, int32 depth) -> int32 {
+    let volume = func(base: int32, depth: int32) -> int32 {
         return base * depth;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (volume(area(2, 3), 4) == 24) {
             console.print_line("24");
         }

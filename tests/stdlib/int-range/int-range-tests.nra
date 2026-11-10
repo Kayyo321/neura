@@ -2,7 +2,7 @@ let ranges = import:Std.Core.IntRange;
 let test = import:Std.Test;
 
 let IntRangeTests = module (
-    let check_values = func(ranges.IntRange r, string expected) -> void {
+    let check_values = func(r: ranges.IntRange, expected: string) -> void {
         let values = r.to_list();
         test.assert_equal_string(expected, values.to_string());
         test.assert_equal_int32(values.length, r.size());

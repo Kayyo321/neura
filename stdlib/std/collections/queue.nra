@@ -5,7 +5,7 @@ let optional = import:Std.Core.Optional;
 // PriorityQueue.
 export let Queue = module (
     export let Queue = interface<T>:collection.Collection<T> (
-        let enqueue = func(T value) -> void;
+        let enqueue = func(value: T) -> void;
         // Traps with "no such element" when empty.
         let dequeue = func() -> T;
         let peek = func() -> optional.Optional<T>;

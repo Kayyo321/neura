@@ -5,10 +5,10 @@ let program = import:Std.Program;
 let sequence = import:Std.Collections.Sequence;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let set = hash_set.create<int>();
         set.add_all([1, 2]);
-        sequence.from_iterator<int>(set.iterator()).for_each(func(int v) -> void {
+        sequence.from_iterator<int>(set.iterator()).for_each(func(v: int) -> void {
             set.add(v + 10);
         });
         return program.ExitCode.Ok;

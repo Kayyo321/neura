@@ -32,7 +32,7 @@ export let ArrayDeque = module (
 
         // The element at `index` from the first, in constant time. A bounds
         // trap for an index outside 0 through size() - 1.
-        export let get = func(int index) -> T {
+        export let get = func(index: int) -> T {
             let split = front.length;
             if (index < split) {
                 return front[split - 1 - index];
@@ -40,18 +40,18 @@ export let ArrayDeque = module (
             return back[index - split];
         };
 
-        export let add_first = func(T value) -> void {
+        export let add_first = func(value: T) -> void {
             front.append(value);
             changed();
         };
 
-        export let add_last = func(T value) -> void {
+        export let add_last = func(value: T) -> void {
             back.append(value);
             changed();
         };
 
         // add_last.
-        export let enqueue = func(T value) -> void {
+        export let enqueue = func(value: T) -> void {
             back.append(value);
             changed();
         };
@@ -177,7 +177,7 @@ export let ArrayDeque = module (
         };
 
         // By equals, with `value` as the receiver.
-        export let contains = func(T value) -> bool {
+        export let contains = func(value: T) -> bool {
             for (let element in front) {
                 if (value.equals(element)) {
                     return true;
@@ -211,7 +211,7 @@ export let ArrayDeque = module (
         };
 
         // First to last. The action must not change the deque structurally.
-        export let for_each = func(func(T) -> void action) -> void {
+        export let for_each = func(action: func(T) -> void) -> void {
             let expected = modifications.value;
             let i = 0;
             while (i < front.length + back.length) {
@@ -267,7 +267,7 @@ export let ArrayDeque = module (
         let expected: uint64;
         let position: int = 0;
 
-        export let init = func(T[list] first_part, T[list] rest, cell.Cell<uint64> count) -> void {
+        export let init = func(first_part: T[list], rest: T[list], count: cell.Cell<uint64>) -> void {
             front = first_part;
             back = rest;
             modifications = count;
@@ -303,7 +303,7 @@ export let ArrayDeque = module (
     };
 
     // A deque of `items` from first to last; copies.
-    export let of = func<T>(T[list] items) -> ArrayDeque<T> {
+    export let of = func<T>(items: T[list]) -> ArrayDeque<T> {
         let result = new ArrayDeque<T>();
         for (let item in items) {
             result.add_last(item);

@@ -7,7 +7,7 @@ let test = import:Std.Test;
 // congruential generator in both programs.
 let Crc32Tests = module (
     // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
-    let seeded = func(int length, uint64 seed) -> uint8[list] {
+    let seeded = func(length: int, seed: uint64) -> uint8[list] {
         let bytes: uint8[list] = [];
         let x = seed;
         for (let i = 0; i < length; i = i + 1) {
@@ -17,11 +17,11 @@ let Crc32Tests = module (
         return bytes;
     };
 
-    let check_text = func(string text, uint64 expected) -> void {
+    let check_text = func(text: string, expected: uint64) -> void {
         test.assert_equal_uint64(expected, crc32s.of(strings.to_bytes(text)) as uint64);
     };
 
-    let check_lcg = func(int length, uint64 seed, uint64 expected) -> void {
+    let check_lcg = func(length: int, seed: uint64, expected: uint64) -> void {
         let bytes = seeded(length, seed);
         test.assert_equal_uint64(expected, crc32s.of(bytes) as uint64);
         // The same bytes added one at a time and in two uneven pieces.

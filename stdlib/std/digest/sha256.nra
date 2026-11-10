@@ -41,7 +41,7 @@ export let Sha256 = module (
 
         // Adds the bytes to the message. Whole blocks are read in place from
         // `bytes`; only the bytes of an incomplete block are copied.
-        export let update = func(uint8[list] bytes) -> void {
+        export let update = func(bytes: uint8[list]) -> void {
             if (finished) {
                 trap_with_message("invalid state: digest finished");
             }
@@ -106,7 +106,7 @@ export let Sha256 = module (
         // from about 140,000 to about 33,000 but multiplies the neurons and
         // the image size by four, and the measured run time does not change.
         // The rolled loops are kept.
-        let compress = func(uint8[list] block, int offset) -> void {
+        let compress = func(block: uint8[list], offset: int) -> void {
             let w = schedule;
             let p = offset;
             for (let t = 0; t < 16; t = t + 1) {
@@ -165,7 +165,7 @@ export let Sha256 = module (
     };
 
     // The 32-byte hash of the bytes.
-    export let of = func(uint8[list] bytes) -> uint8[list] {
+    export let of = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha256();
         digest.update(bytes);
         return digest.finish();

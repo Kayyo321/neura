@@ -5,7 +5,7 @@ let linked_list = import:Std.Collections.LinkedList;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let part = linked_list.of<int>([1, 2]).slice(1, 0);
         return program.ExitCode.Ok;
     };

@@ -5,9 +5,9 @@ let program = import:Std.Program;
 let sorting = import:Std.Collections.Sorting;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let items: int[list] = [1, 2, 3];
-        let found = sorting.binary_search<int>(items, 2, func(int a, int b) -> ordering.Ordering {
+        let found = sorting.binary_search<int>(items, 2, func(a: int, b: int) -> ordering.Ordering {
             items.remove_at(0);
             return ordering.Ordering.Less;
         });

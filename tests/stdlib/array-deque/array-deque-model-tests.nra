@@ -7,7 +7,7 @@ let test = import:Std.Test;
 // element) with the same seeded operations, comparing size, contents,
 // iteration order, and results and calling validate() after every one.
 let ArrayDequeModelTests = module (
-    let check = func(array_deque.ArrayDeque<int> actual, int[list] model) -> void {
+    let check = func(actual: array_deque.ArrayDeque<int>, model: int[list]) -> void {
         actual.validate();
         test.assert_equal_int32(model.length, actual.size());
         test.assert_equal_bool(model.length == 0, actual.is_empty());
@@ -20,7 +20,7 @@ let ArrayDequeModelTests = module (
         test.assert_equal_int32(model.length, i);
     };
 
-    let without = func(int[list] model, int index) -> int[list] {
+    let without = func(model: int[list], index: int) -> int[list] {
         let result: int[list] = [];
         let i = 0;
         while (i < model.length) {
@@ -32,7 +32,7 @@ let ArrayDequeModelTests = module (
         return result;
     };
 
-    let prepended = func(int[list] model, int value) -> int[list] {
+    let prepended = func(model: int[list], value: int) -> int[list] {
         let result: int[list] = [value];
         for (let element in model) {
             result.append(element);
@@ -40,7 +40,7 @@ let ArrayDequeModelTests = module (
         return result;
     };
 
-    let run = func(uint64 seed, int operations) -> void {
+    let run = func(seed: uint64, operations: int) -> void {
         let random = model_random.seeded(seed);
         let actual = array_deque.create<int>();
         let model: int[list] = [];
@@ -119,7 +119,7 @@ let ArrayDequeModelTests = module (
                 test.assert_equal_string(model.to_string(), actual.to_string());
             } else {
                 let seen: int[list] = [];
-                actual.for_each(func(int element) -> void {
+                actual.for_each(func(element: int) -> void {
                     seen.append(element);
                 });
                 test.assert(seen.equals(model));
@@ -130,7 +130,7 @@ let ArrayDequeModelTests = module (
     };
 
     // A value present about half the time.
-    let model_value = func(int[list] model, model_random.Generator random) -> int {
+    let model_value = func(model: int[list], random: model_random.Generator) -> int {
         if (model.length > 0 && random.below(2) == 0) {
             return model[random.below(model.length)];
         }

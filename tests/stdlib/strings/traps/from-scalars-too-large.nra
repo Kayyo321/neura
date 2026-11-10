@@ -5,7 +5,7 @@ let program = import:Std.Program;
 let strings = import:Std.Text.Strings;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("before");
         let value = strings.from_scalars([1114112]);
         console.print_line("after");

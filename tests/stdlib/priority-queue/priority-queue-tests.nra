@@ -6,7 +6,7 @@ let queue = import:Std.Collections.Queue;
 let test = import:Std.Test;
 
 let PriorityQueueTests = module (
-    let compare = func(int a, int b) -> ordering.Ordering {
+    let compare = func(a: int, b: int) -> ordering.Ordering {
         if (a < b) {
             return ordering.Ordering.Less;
         }
@@ -17,11 +17,11 @@ let PriorityQueueTests = module (
     };
 
     // [key, id] pairs ordered by key only.
-    let by_key = func([int, int] a, [int, int] b) -> ordering.Ordering {
+    let by_key = func(a: [int, int], b: [int, int]) -> ordering.Ordering {
         return compare(a[0], b[0]);
     };
 
-    let ids = func([int, int][list] pairs) -> string {
+    let ids = func(pairs: [int, int][list]) -> string {
         let result: int[list] = [];
         for (let pair in pairs) {
             result.append(pair[1]);
@@ -56,7 +56,7 @@ let PriorityQueueTests = module (
         test.assert(items.is_empty());
         test.assert_none<int>(items.peek());
         test.assert_none<int>(items.try_dequeue());
-        let reversed = priority_queue.create<int>(func(int a, int b) -> ordering.Ordering {
+        let reversed = priority_queue.create<int>(func(a: int, b: int) -> ordering.Ordering {
             return ordering.reverse(compare(a, b));
         });
         reversed.enqueue(1);
@@ -129,7 +129,7 @@ let PriorityQueueTests = module (
         for (let value in items) {
             again.append(value);
         }
-        items.for_each(func(int value) -> void {
+        items.for_each(func(value: int) -> void {
             again.append(value);
         });
         test.assert_equal_int32(8, again.length);
@@ -164,7 +164,7 @@ let PriorityQueueTests = module (
         let all: collection.Collection<int> = items;
         test.assert_equal_int32(1, all.size());
         let total = cell.of<int>(0);
-        all.for_each(func(int value) -> void {
+        all.for_each(func(value: int) -> void {
             total.value = total.value + value;
         });
         test.assert_equal_int32(3, total.value);

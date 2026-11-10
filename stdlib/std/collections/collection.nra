@@ -6,7 +6,7 @@ let iterable = import:Std.Collections.Iterable;
 export let Collection = module (
     export let Collection = interface<T>:iterable.Iterable<T> (
         let size = func() -> int;
-        let contains = func(T value) -> bool;
+        let contains = func(value: T) -> bool;
         // A new built-in list of the elements in iteration order.
         let to_list = func() -> T[list];
 
@@ -14,7 +14,7 @@ export let Collection = module (
             return size() == 0;
         };
 
-        let contains_all = func(T[list] items) -> bool {
+        let contains_all = func(items: T[list]) -> bool {
             for (let item in items) {
                 if (!contains(item)) {
                     return false;
@@ -24,7 +24,7 @@ export let Collection = module (
         };
 
         // Calls `action` with each element in iteration order.
-        let for_each = func(func(T) -> void action) -> void {
+        let for_each = func(action: func(T) -> void) -> void {
             let items = iterator();
             while (items.has_next()) {
                 action(items.next());

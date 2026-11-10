@@ -5,7 +5,7 @@ export let FileHandle = module (
         export let id: int64 = 0;
         export let path: string = "";
 
-        export let init = func(int64 host_id, string path_text) -> void {
+        export let init = func(host_id: int64, path_text: string) -> void {
             id = host_id;
             path = path_text;
         };

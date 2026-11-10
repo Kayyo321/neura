@@ -45,14 +45,14 @@ let Objects = module:program.Entry (
         }
     );
 
-    let total_sides = func(Shape first, Shape second) -> int32 {
+    let total_sides = func(first: Shape, second: Shape) -> int32 {
         return first.sides() + second.sides();
     };
 
     let Labeled = class (
         export let label: string;
 
-        export let init = func(string text) -> void {
+        export let init = func(text: string) -> void {
             label = text;
         }
     );
@@ -60,7 +60,7 @@ let Objects = module:program.Entry (
     let Loud = class:Labeled (
         export let suffix: string = "!";
 
-        export let init = func(string text) -> void {
+        export let init = func(text: string) -> void {
             super.init(text);
             label = label + suffix;
         }
@@ -80,7 +80,7 @@ let Objects = module:program.Entry (
         }
     );
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let first = new Counter();
         let second = new Counter();
         first.increment();

@@ -13,7 +13,7 @@ let Overlay = module (
     export let default_name: DisplayName = "Guest";
     export let enabled: Enabled = true;
 
-    export let next_user_id = func(UserId user_id) -> UserId {
+    export let next_user_id = func(user_id: UserId) -> UserId {
         return user_id + 1;
     };
 );

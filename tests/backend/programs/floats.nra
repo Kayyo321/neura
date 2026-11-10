@@ -5,7 +5,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Floats = module:program.Entry (
-    let report = func(bool holds, string label) -> void {
+    let report = func(holds: bool, label: string) -> void {
         if (holds) {
             console.print_line(label);
         } else {
@@ -13,27 +13,27 @@ let Floats = module:program.Entry (
         }
     };
 
-    let add = func(float64 a, float64 b) -> float64 {
+    let add = func(a: float64, b: float64) -> float64 {
         return a + b;
     };
 
-    let divide = func(float32 a, float32 b) -> float32 {
+    let divide = func(a: float32, b: float32) -> float32 {
         return a / b;
     };
 
-    let half_sum = func(float16 a, float16 b) -> float16 {
+    let half_sum = func(a: float16, b: float16) -> float16 {
         return a + b;
     };
 
-    let brain = func(bfloat16 a, bfloat16 b) -> bfloat16 {
+    let brain = func(a: bfloat16, b: bfloat16) -> bfloat16 {
         return a * b;
     };
 
-    let reciprocal = func(float64 x) -> float64 {
+    let reciprocal = func(x: float64) -> float64 {
         return 1.0 / x;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         report(add(0.1, 0.2) == 0.30000000000000004, "0.1 + 0.2 rounds like IEEE binary64");
         report(add(0.1, 0.2) != 0.3, "0.1 + 0.2 is not 0.3");
         report(divide(1.0, 3.0) == 0.33333334, "1 / 3 in float32");

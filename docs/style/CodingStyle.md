@@ -67,13 +67,13 @@ const DefaultTimeoutMs = 5000;
 #### Functions and Methods (`snake_case`)
 All function definitions, exported routines, and class methods must use `snake_case`:
 ```neura
-export let log = func(string message) -> void;
+export let log = func(message: string) -> void;
 
-export let log_entry = func(LogEntry entry) -> void {
+export let log_entry = func(entry: LogEntry) -> void {
     log(entry.format());
 }
 
-export let.override main = func(string[] args) -> program.ExitCode {
+export let.override main = func(args: string[]) -> program.ExitCode {
     return program.ExitCode.Ok;
 }
 ```
@@ -106,7 +106,7 @@ let optional = import:Std.Core.Optional;
 #### Function Parameters (`snake_case`)
 All function parameters must use `snake_case`:
 ```neura
-export let format_log = func(string log_message, int log_level) -> string {
+export let format_log = func(log_message: string, log_level: int) -> string {
     // ...
 }
 ```
@@ -145,7 +145,7 @@ export let format_log = func(string log_message, int log_level) -> string {
   ```
 - Terminate statements, variable bindings, and function signatures with a semicolon `;`:
   ```neura
-  export let log = func(string message) -> void;
+  export let log = func(message: string) -> void;
   console.print_line(prefix + " -> " + message);
   ```
 
@@ -155,7 +155,7 @@ export let format_log = func(string log_message, int log_level) -> string {
   ```neura
   let HelloWorld = module:program.Entry ( // Inherits from Std.Program.Entry
       // Implementation of entrypoint
-      export let.override main = func(string[] args) -> program.ExitCode {
+      export let.override main = func(args: string[]) -> program.ExitCode {
           // ...
       }
   );
@@ -195,9 +195,9 @@ let ServiceMonitor = module (
     );
 
     // Functions: snake_case
-    export let ping_service = func(string target_host, int timeout_seconds) -> void;
+    export let ping_service = func(target_host: string, timeout_seconds: int) -> void;
 
-    export let run_health_check = func(ServiceConfig config) -> void {
+    export let run_health_check = func(config: ServiceConfig) -> void {
         console.print_line("Running check for: " + config.get_connection_info());
     }
 );
@@ -205,7 +205,7 @@ let ServiceMonitor = module (
 // Module inheritance: PascalCase
 let App = module:program.Entry (
     // Main entrypoint: snake_case
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let monitor_config = new ServiceMonitor.ServiceConfig();
         ServiceMonitor.run_health_check(monitor_config);
 
@@ -225,6 +225,6 @@ let App = module:program.Entry (
 | `let ConsoleLogger = module ( ... );` | `let console_logger = module ( ... );` | Modules use `PascalCase`. |
 | `export let log_message = func(...)` | `export let logMessage = func(...)` | Functions use `snake_case`. |
 | `let default_level: string = "INFO";` | `let DefaultLevel: string = "INFO";` | Variables use `snake_case`. |
-| `func(string target_host)` | `func(string targetHost)` | Parameters use `snake_case`. |
+| `func(target_host: string)` | `func(targetHost: string)` | Parameters use `snake_case`. |
 | `program.ExitCode.Ok` | `program.exit_code.ok` | Enums and variants use `PascalCase`. |
 

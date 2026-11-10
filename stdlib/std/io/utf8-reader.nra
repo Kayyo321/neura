@@ -10,7 +10,7 @@ export let Utf8Reader = module (
         let buffer: uint8[list] = [];
         let start: int = 0;
 
-        export let init = func(func(int) -> result.Result<uint8[list]> input) -> void {
+        export let init = func(input: func(int) -> result.Result<uint8[list]>) -> void {
             source = input;
         };
 
@@ -142,13 +142,13 @@ export let Utf8Reader = module (
             };
         };
 
-        let refilled = func(uint8[list] chunk) -> result.Result<bool> {
+        let refilled = func(chunk: uint8[list]) -> result.Result<bool> {
             buffer = chunk;
             start = 0;
             return result.Result<bool>.Ok(chunk.length > 0);
         };
 
-        let finish_line = func(uint8[list] line) -> result.Result<optional.Optional<string>> {
+        let finish_line = func(line: uint8[list]) -> result.Result<optional.Optional<string>> {
             if (line.length > 0 && line[line.length - 1] == 13) {
                 line.remove_at(line.length - 1);
             }
@@ -159,7 +159,7 @@ export let Utf8Reader = module (
             return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.Some(text));
         };
 
-        let some_scalar = func(uint32 value) -> result.Result<optional.Optional<uint32>> {
+        let some_scalar = func(value: uint32) -> result.Result<optional.Optional<uint32>> {
             return result.Result<optional.Optional<uint32>>.Ok(optional.Optional<uint32>.Some(value));
         };
 
@@ -168,7 +168,7 @@ export let Utf8Reader = module (
         };
     );
 
-    export let create = func(func(int) -> result.Result<uint8[list]> source) -> Utf8Reader {
+    export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader {
         return new Utf8Reader(source);
     };
 );

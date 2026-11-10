@@ -5,7 +5,7 @@ let immutable_list = import:Std.Collections.ImmutableList;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let walk = immutable_list.of<int>([1]).iterator();
         console.print_line(walk.next().to_string());
         console.print_line(walk.next().to_string());

@@ -5,7 +5,7 @@ A module groups related values, functions, and types under a name. Members marke
 ```neura
 let Logger = module (
     export let default_level: string = "INFO";
-    export let log = func(string message) -> void;
+    export let log = func(message: string) -> void;
 );
 ```
 
@@ -32,7 +32,7 @@ A module in that source tree may bind a bodyless, non-generic function to a vers
 
 ```neura
 let WriteResult = enum (Ok, Error(uint32));
-let write_line = func(string message) -> WriteResult host("neura.console.write_line", 1);
+let write_line = func(message: string) -> WriteResult host("neura.console.write_line", 1);
 ```
 
 The result enum has exactly two variants. `Ok` represents success without a value and `Ok(T)` represents success with one value. `Error(uint32)` carries the host error code. Supported host data include Boolean and numeric values, strings, arrays, lists, and tuples made of supported types. The runner must register the named service with the matching version and signature. The compiler emits imports only for bindings reached by the built program. [NVM](../runtime/NVM.md#host-calls-and-standard-output) defines value transfer and continuation behavior.
@@ -43,7 +43,7 @@ A module can inherit another module with `module:Base`. Its interface includes t
 
 ```neura
 let ConsoleLogger = module:Logger (
-    export let.override log = func(string message) -> void {
+    export let.override log = func(message: string) -> void {
         // Write the message to the console.
     }
 );
@@ -55,7 +55,7 @@ Use `let.override` or `const.override` when defining an inherited member, includ
 let program = import:Std.Program;
 
 let App = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
     }
 );

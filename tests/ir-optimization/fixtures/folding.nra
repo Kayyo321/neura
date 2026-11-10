@@ -60,11 +60,11 @@ let Folding = module (
         return !false;
     };
 
-    export let scaled = func(int8 value) -> int8 {
+    export let scaled = func(value: int8) -> int8 {
         return value * (2 + 1) - 10 / 5;
     };
 
-    export let condition = func(int32 value) -> int32 {
+    export let condition = func(value: int32) -> int32 {
         if (2 * 3 == 6) {
             return value;
         } else {

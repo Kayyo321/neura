@@ -9,7 +9,7 @@ let StringBuilderTests = module (
         };
     );
 
-    let bytes_of = func(builders.StringBuilder b) -> string {
+    let bytes_of = func(b: builders.StringBuilder) -> string {
         return b.to_string();
     };
 
@@ -55,7 +55,7 @@ let StringBuilderTests = module (
         test.assert_equal_string("Aé🙂", b.to_string());
     };
 
-    let utf8 = func(uint8[list] bytes) -> string {
+    let utf8 = func(bytes: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(bytes);
         test.assert(valid);
         return text;

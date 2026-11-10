@@ -1016,13 +1016,13 @@ let BFloat16Tests = module (
         "invalid character", "invalid character", "invalid character"
     ];
 
-    let check = func(bool holds, string what, int index) -> void {
+    let check = func(holds: bool, what: string, index: int) -> void {
         if (!holds) {
             test.fail(what + " differs from the reference for case " + index.to_string());
         }
     };
 
-    let same = func(bfloat16 actual, uint16 expected) -> bool {
+    let same = func(actual: bfloat16, expected: uint16) -> bool {
         return actual.to_bits() == expected;
     };
 
@@ -1190,7 +1190,7 @@ let BFloat16Tests = module (
         }
     };
 
-    let check_parse = func(int k) -> void {
+    let check_parse = func(k: int) -> void {
         match (floats.parse(parse_inputs[k])) {
             result.Result.Ok(value) => {
                 check(parse_ok[k] && same(value, parse_bits[k]), "parse value", k);

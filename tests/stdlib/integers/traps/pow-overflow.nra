@@ -5,7 +5,7 @@ let uint16s = import:Std.Core.UInt16;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(uint16s.pow(2, 15).to_string());
         console.print_line(uint16s.pow(2, 16).to_string());
         console.print_line("unreachable");

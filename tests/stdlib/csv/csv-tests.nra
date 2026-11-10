@@ -5,11 +5,11 @@ let test = import:Std.Test;
 
 // CSV (RFC 4180) as Stdlib.md section 13.1 specifies it.
 let CsvTests = module (
-    let parsed = func(string text) -> string[list][list] {
+    let parsed = func(text: string) -> string[list][list] {
         return test.assert_ok<string[list][list]>(csv.parse(text));
     };
 
-    let check_error = func(string text, error.ParseErrorKind kind, int offset, string message) -> void {
+    let check_error = func(text: string, kind: error.ParseErrorKind, offset: int, message: string) -> void {
         match (test.assert_err<string[list][list]>(csv.parse(text))) {
             error.Error.Parse { kind: actual, offset: at, message: reason } => {
                 test.assert_equal_string(message, reason);

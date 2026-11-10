@@ -11,14 +11,14 @@ let test = import:Std.Test;
 let zone_offset = import:Std.Time.ZoneOffset;
 
 let InstantTests = module (
-    let check_parts = func(int64 seconds, int nanos, instant.Instant moment) -> void {
+    let check_parts = func(seconds: int64, nanos: int, moment: instant.Instant) -> void {
         test.assert_equal_int64(seconds, moment.epoch_seconds());
         test.assert_equal_int32(nanos, moment.nanos());
     };
 
     // Text computed with Python: dates through datetime, shifted by whole
     // 400-year cycles for years outside 1 through 9999.
-    let check_text = func(int64 seconds, int nanos, string text, bool parses) -> void {
+    let check_text = func(seconds: int64, nanos: int, text: string, parses: bool) -> void {
         let moment = instant.of_epoch_seconds(seconds, nanos);
         test.assert_equal_string(text, moment.to_string());
         if (parses) {
@@ -29,7 +29,7 @@ let InstantTests = module (
         }
     };
 
-    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+    let check_error = func(text: string, kind: error.ParseErrorKind, offset: int) -> void {
         let failure = test.assert_err<instant.Instant>(instant.parse(text));
         match (failure) {
             error.Error.Parse { kind: actual, offset: at, message: _ } => {
@@ -42,7 +42,7 @@ let InstantTests = module (
         }
     };
 
-    let parsed = func(string text) -> instant.Instant {
+    let parsed = func(text: string) -> instant.Instant {
         return test.assert_ok<instant.Instant>(instant.parse(text));
     };
 

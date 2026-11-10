@@ -5,9 +5,9 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let items = array_list.of<int>([1, 2]);
-        let removed = items.remove_if(func(int value) -> bool {
+        let removed = items.remove_if(func(value: int) -> bool {
             items.add(value);
             return false;
         });

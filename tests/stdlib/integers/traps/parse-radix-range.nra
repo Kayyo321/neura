@@ -5,7 +5,7 @@ let uint8s = import:Std.Core.UInt8;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("radix 1");
         let parsed = uint8s.parse_radix("0", 1);
         console.print_line("unreachable");

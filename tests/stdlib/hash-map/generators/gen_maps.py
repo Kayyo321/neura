@@ -16,22 +16,17 @@ body = src[:start] + '@@FACTORIES@@' + src[end:]
 def variant(name, key_type, header, factories):
     s = body
     s = s.replace('        let hash_of: func(K) -> uint32;\n        let same: func(K, K) -> bool;\n', '')
-    s = s.replace('export let init = func(Seal seal, hash_core.HashCore table, func(K) -> uint32 hash, func(K, K) -> bool equal) -> void {\n            core = table;\n            hash_of = hash;\n            same = equal;\n        };',
-                  'export let init = func(Seal seal, hash_core.HashCore table) -> void {\n            core = table;\n        };')
+    s = s.replace('export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(K) -> uint32, equal: func(K, K) -> bool) -> void {\n            core = table;\n            hash_of = hash;\n            same = equal;\n        };',
+                  'export let init = func(seal: Seal, table: hash_core.HashCore) -> void {\n            core = table;\n        };')
     s = s.replace('HashMapIterator<K, V>', name + 'Iterator<V>')
     s = s.replace('HashMapIterator', name + 'Iterator')
     s = s.replace('HashMap<K, V>', name + '<V>')
     s = s.replace('class<K, V>', 'class<V>')
-    s = s.replace('[K, V]', '[' + key_type + ', V]')
-    s = s.replace('K[list]', key_type + '[list]')
-    s = s.replace('MutableMap<K, V>', 'MutableMap<' + key_type + ', V>')
-    s = s.replace('(K key', '(' + key_type + ' key')
-    s = s.replace('func(K, ', 'func(' + key_type + ', ')
+    s = re.sub(r'\bK\b', key_type, s)
     s = s.replace('spread(hash_of(key))', 'spread(key.hash_code())')
     s = s.replace('hash_of(stored_keys[entry])', 'stored_keys[entry].hash_code()')
     s = s.replace('same(key, stored_keys[entry])', 'key == stored_keys[entry]')
     s = s.replace('export let HashMap = module (', 'export let ' + name + ' = module (')
-    s = s.replace('reordered<K>(', 'reordered<' + key_type + '>(')
     # header comment
     s = s[s.index('export let ' + name + ' = module ('):]
     imports = src[:src.index('\n\n')] + '\n\n'
@@ -58,7 +53,7 @@ int_factories = '''    export let create = func<V>() -> IntMap<V> {
 
     // A table sized for `capacity` entries. Traps with "invalid argument:
     // capacity" for a negative capacity or one above 2^29.
-    export let with_capacity = func<V>(int capacity) -> IntMap<V> {
+    export let with_capacity = func<V>(capacity: int) -> IntMap<V> {
         return new IntMap<V>(Seal.Token, hash_core.with_capacity(capacity));
     };
 

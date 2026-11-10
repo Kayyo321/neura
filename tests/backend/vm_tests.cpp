@@ -595,7 +595,7 @@ NEURA_TEST(vm, list_versions_count_structural_changes) {
     std::ofstream(path) << R"(let console = import:Std.Io.Console;
 let program = import:Std.Program;
 let App = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let values: int32[list] = [1, 2];
         let seen: int32 = 0;
         for (let value in values) {

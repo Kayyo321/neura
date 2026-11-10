@@ -9,7 +9,7 @@ let test = import:Std.Test;
 // Fraction reference (generated with Python; digest = 31 * digest + the
 // text's hash, wrapping, as Hash.combine).
 let Float16RoundTripTests = module (
-    let check_range = func(int start, int end, uint32 expected_digest) -> void {
+    let check_range = func(start: int, end: int, expected_digest: uint32) -> void {
         let digest: uint32 = 0;
         for (let i = start; i < end; i = i + 1) {
             let v = floats.from_bits(i as uint16);

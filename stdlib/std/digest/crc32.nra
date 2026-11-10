@@ -30,7 +30,7 @@ export let Crc32 = module (
 
     // Advances the running register (kept without the final exclusive-or)
     // over the bytes.
-    let advance = func(uint32 register, uint8[list] bytes) -> uint32 {
+    let advance = func(register: uint32, bytes: uint8[list]) -> uint32 {
         let entries = ready_table();
         let c = register;
         let count = bytes.length;
@@ -58,7 +58,7 @@ export let Crc32 = module (
         };
 
         // Adds the bytes to the checksum.
-        export let update = func(uint8[list] bytes) -> void {
+        export let update = func(bytes: uint8[list]) -> void {
             register = advance(register, bytes);
         };
 
@@ -79,7 +79,7 @@ export let Crc32 = module (
     };
 
     // The checksum of the bytes.
-    export let of = func(uint8[list] bytes) -> uint32 {
+    export let of = func(bytes: uint8[list]) -> uint32 {
         return advance(AllOnes, bytes) ^ AllOnes;
     };
 );

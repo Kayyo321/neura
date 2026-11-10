@@ -28,7 +28,7 @@ let ImmutableSetTests = module (
         test.assert_equal_string("c", items.next());
         test.assert(!items.has_next());
         let seen = cell.of<string>("");
-        set.for_each(func(string s) -> void {
+        set.for_each(func(s: string) -> void {
             seen.value = seen.value + s;
         });
         test.assert_equal_string("bac", seen.value);

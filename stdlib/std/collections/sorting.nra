@@ -11,8 +11,8 @@ export let Sorting = module (
     // Sorts items[start, end) in place with binary insertion. Each element
     // goes after the last element of the sorted prefix that is not Greater
     // than it, which keeps equal elements in their original order.
-    let insertion_sort = func<T>(T[list] items, int start, int end, func(T, T) -> ordering.Ordering c,
-                                 uint64 version) -> void {
+    let insertion_sort = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering,
+                                 version: uint64) -> void {
         let i = start + 1;
         while (i < end) {
             let value = items[i];
@@ -43,9 +43,9 @@ export let Sorting = module (
     // Merges every adjacent pair of runs of `width` elements from
     // source[source_start, source_start + count) into the same positions of
     // destination, which starts at destination_start.
-    let merge_pass = func<T>(T[list] source, int source_start, T[list] destination, int destination_start,
-                             int count, int width, func(T, T) -> ordering.Ordering c, T[list] items,
-                             uint64 version) -> void {
+    let merge_pass = func<T>(source: T[list], source_start: int, destination: T[list], destination_start: int,
+                             count: int, width: int, c: func(T, T) -> ordering.Ordering, items: T[list],
+                             version: uint64) -> void {
         let left = 0;
         while (left < count) {
             let middle = left + width;
@@ -110,8 +110,8 @@ export let Sorting = module (
     // Merges the sorted blocks of items[start, end) bottom-up. The buffer
     // lives only in this helper's frame, so it is unreachable once the
     // helper returns (section 5.5).
-    let merge_blocks = func<T>(T[list] items, int start, int end, func(T, T) -> ordering.Ordering c,
-                               uint64 version) -> void {
+    let merge_blocks = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering,
+                               version: uint64) -> void {
         let count = end - start;
         // The buffer holds references the list already holds, so it keeps
         // nothing extra alive and needs no "empty" element.
@@ -148,7 +148,7 @@ export let Sorting = module (
 
     // Sorts items[start, end) stably. Traps with "invalid argument: range"
     // unless 0 <= start <= end <= items.length.
-    export let sort_range = func<T>(T[list] items, int start, int end, func(T, T) -> ordering.Ordering c) -> void {
+    export let sort_range = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering) -> void {
         if (start < 0 || start > end || end > items.length) {
             trap_with_message("invalid argument: range");
         }
@@ -169,14 +169,14 @@ export let Sorting = module (
 
     // Sorts the whole list stably with at most about n log2 n comparator
     // calls.
-    export let sort = func<T>(T[list] items, func(T, T) -> ordering.Ordering c) -> void {
+    export let sort = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) -> void {
         sort_range<T>(items, 0, items.length, c);
     };
 
     // `items` must be sorted by `c`. Returns the lowest index whose element is
     // not Less than `value` when that element compares Equal, and otherwise
     // -(insertion point) - 1.
-    export let binary_search = func<T>(T[list] items, T value, func(T, T) -> ordering.Ordering c) -> int {
+    export let binary_search = func<T>(items: T[list], value: T, c: func(T, T) -> ordering.Ordering) -> int {
         let version = items.version;
         let low = 0;
         let high = items.length;

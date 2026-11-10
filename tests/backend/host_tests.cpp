@@ -599,7 +599,7 @@ let result = import:Std.Core.Result;
 let unit = import:Std.Core.Unit;
 
 export let Files = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let dir = path.of(args[0]);
         result.expect<unit.Unit>(fs.write_text(dir.join("data.txt"), "recorded text"), "write");
         console.print_line(result.expect<string>(fs.read_text(dir.join("data.txt")), "read"));
@@ -697,7 +697,7 @@ let program = import:Std.Program;
     }
     write_text_file(source, imports + R"(
 export let All = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {)" +
+    export let.override main = func(args: string[]) -> program.ExitCode {)" +
                                 uses + R"(        return program.ExitCode.Ok;
     };
 );

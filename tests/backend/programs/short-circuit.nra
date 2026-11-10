@@ -6,17 +6,17 @@ let program = import:Std.Program;
 let ShortCircuit = module:program.Entry (
     let evaluated: int32 = 0;
 
-    let noisy = func(bool value, string label) -> bool {
+    let noisy = func(value: bool, label: string) -> bool {
         console.print_line("evaluated " + label);
         evaluated = evaluated + 1;
         return value;
     };
 
-    let increments = func(int8 value) -> bool {
+    let increments = func(value: int8) -> bool {
         return value + 1 > value;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (noisy(false, "left of &&") && noisy(true, "right of &&")) {
             console.print_line("unexpected");
         }

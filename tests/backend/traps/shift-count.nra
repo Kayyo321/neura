@@ -4,7 +4,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let ShiftTrap = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("before shift");
         let value: byte = 1;
         let count: int = -1;

@@ -8,7 +8,7 @@ let result = import:Std.Core.Result;
 export let Main = module:program.Entry (
     let test_bit_probe: int64 = 5;
 
-    let parse_probe = func(int radix) -> big.BigInteger {
+    let parse_probe = func(radix: int) -> big.BigInteger {
         return result.value_or<big.BigInteger>(big.parse_radix("1", radix), big.Zero);
     };
 
@@ -17,7 +17,7 @@ export let Main = module:program.Entry (
         return limbs;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("before");
         console.print_line(big.Ten.shift_left(-1).to_string());
         console.print_line("unreachable");

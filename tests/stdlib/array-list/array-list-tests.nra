@@ -11,13 +11,13 @@ let ArrayListTests = module (
         export let key: int;
         export let order: int;
 
-        export let init = func(int k, int o) -> void {
+        export let init = func(k: int, o: int) -> void {
             key = k;
             order = o;
         };
     );
 
-    let compare = func(int a, int b) -> ordering.Ordering {
+    let compare = func(a: int, b: int) -> ordering.Ordering {
         if (a < b) {
             return ordering.Ordering.Less;
         }
@@ -31,7 +31,7 @@ let ArrayListTests = module (
         return array_list.of<int>([3, 1, 4, 1, 5]);
     };
 
-    let text = func(array_list.ArrayList<int> items) -> string {
+    let text = func(items: array_list.ArrayList<int>) -> string {
         return items.to_string();
     };
 
@@ -223,7 +223,7 @@ let ArrayListTests = module (
 
     export let test_for_each_order = func() -> void {
         let seen: int[list] = [];
-        numbers().for_each(func(int value) -> void {
+        numbers().for_each(func(value: int) -> void {
             seen.append(value);
         });
         test.assert_equal_string("[3, 1, 4, 1, 5]", seen.to_string());
@@ -232,22 +232,22 @@ let ArrayListTests = module (
     export let test_remove_if_and_retain_if = func() -> void {
         let items = numbers();
         let seen: int[list] = [];
-        let removed = items.remove_if(func(int value) -> bool {
+        let removed = items.remove_if(func(value: int) -> bool {
             seen.append(value);
             return value == 1;
         });
         test.assert_equal_int32(2, removed);
         test.assert_equal_string("[3, 4, 5]", text(items));
         test.assert_equal_string("[3, 1, 4, 1, 5]", seen.to_string());
-        let dropped = items.retain_if(func(int value) -> bool {
+        let dropped = items.retain_if(func(value: int) -> bool {
             return value > 3;
         });
         test.assert_equal_int32(1, dropped);
         test.assert_equal_string("[4, 5]", text(items));
-        test.assert_equal_int32(0, items.remove_if(func(int value) -> bool {
+        test.assert_equal_int32(0, items.remove_if(func(value: int) -> bool {
             return false;
         }));
-        test.assert_equal_int32(2, items.retain_if(func(int value) -> bool {
+        test.assert_equal_int32(2, items.retain_if(func(value: int) -> bool {
             return false;
         }));
         test.assert(items.is_empty());
@@ -256,13 +256,13 @@ let ArrayListTests = module (
     export let test_index_where = func() -> void {
         let items = numbers();
         let calls = cell.of<int>(0);
-        let found = items.index_where(func(int value) -> bool {
+        let found = items.index_where(func(value: int) -> bool {
             calls.value = calls.value + 1;
             return value > 3;
         });
         test.assert_equal_int32(2, found);
         test.assert_equal_int32(3, calls.value);
-        test.assert_equal_int32(-1, items.index_where(func(int value) -> bool {
+        test.assert_equal_int32(-1, items.index_where(func(value: int) -> bool {
             return value > 9;
         }));
     };
@@ -274,7 +274,7 @@ let ArrayListTests = module (
             items.add(new Tagged((i * 7) % 5, i));
             i = i + 1;
         }
-        items.sort(func(Tagged a, Tagged b) -> ordering.Ordering {
+        items.sort(func(a: Tagged, b: Tagged) -> ordering.Ordering {
             return compare(a.key, b.key);
         });
         i = 1;
@@ -374,7 +374,7 @@ let ArrayListTests = module (
         test.assert_equal_int32(24, total);
         test.assert(!view.is_empty());
         let sum = cell.of<int>(0);
-        view.for_each(func(int value) -> void {
+        view.for_each(func(value: int) -> void {
             sum.value = sum.value + value;
         });
         test.assert_equal_int32(24, sum.value);

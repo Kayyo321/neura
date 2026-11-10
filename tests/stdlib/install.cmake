@@ -35,7 +35,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 export let Hello = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("installed library");
         return program.ExitCode.Ok;
     };

@@ -9,7 +9,7 @@ let test = import:Std.Test;
 // results and calling validate() after every operation (Stdlib.md section
 // 17).
 let LinkedListModelTests = module (
-    let compare = func(int a, int b) -> ordering.Ordering {
+    let compare = func(a: int, b: int) -> ordering.Ordering {
         if (a < b) {
             return ordering.Ordering.Less;
         }
@@ -19,7 +19,7 @@ let LinkedListModelTests = module (
         return ordering.Ordering.Equal;
     };
 
-    let check = func(linked_list.LinkedList<int> actual, int[list] model) -> void {
+    let check = func(actual: linked_list.LinkedList<int>, model: int[list]) -> void {
         actual.validate();
         test.assert_equal_int32(model.length, actual.size());
         let walk = actual.iterator();
@@ -31,7 +31,7 @@ let LinkedListModelTests = module (
         test.assert_equal_int32(model.length, i);
     };
 
-    let inserted = func(int[list] model, int index, int value) -> int[list] {
+    let inserted = func(model: int[list], index: int, value: int) -> int[list] {
         let result: int[list] = [];
         let i = 0;
         while (i < model.length) {
@@ -47,7 +47,7 @@ let LinkedListModelTests = module (
         return result;
     };
 
-    let without = func(int[list] model, int index) -> int[list] {
+    let without = func(model: int[list], index: int) -> int[list] {
         let result: int[list] = [];
         let i = 0;
         while (i < model.length) {
@@ -59,7 +59,7 @@ let LinkedListModelTests = module (
         return result;
     };
 
-    let first_index = func(int[list] model, int value) -> int {
+    let first_index = func(model: int[list], value: int) -> int {
         let i = 0;
         while (i < model.length) {
             if (model[i] == value) {
@@ -70,7 +70,7 @@ let LinkedListModelTests = module (
         return -1;
     };
 
-    let last_index = func(int[list] model, int value) -> int {
+    let last_index = func(model: int[list], value: int) -> int {
         let i = model.length - 1;
         while (i >= 0) {
             if (model[i] == value) {
@@ -81,7 +81,7 @@ let LinkedListModelTests = module (
         return -1;
     };
 
-    let sorted = func(int[list] model) -> int[list] {
+    let sorted = func(model: int[list]) -> int[list] {
         let result: int[list] = [];
         for (let value in model) {
             result.append(value);
@@ -100,7 +100,7 @@ let LinkedListModelTests = module (
         return result;
     };
 
-    let search = func(int[list] model, int value) -> int {
+    let search = func(model: int[list], value: int) -> int {
         let i = 0;
         while (i < model.length && model[i] < value) {
             i = i + 1;
@@ -111,7 +111,7 @@ let LinkedListModelTests = module (
         return -i - 1;
     };
 
-    let run = func(uint64 seed, int operations) -> void {
+    let run = func(seed: uint64, operations: int) -> void {
         let random = model_random.seeded(seed);
         let actual = linked_list.create<int>();
         let model: int[list] = [];
@@ -217,11 +217,11 @@ let LinkedListModelTests = module (
                 }
                 let removed = 0;
                 if (remove) {
-                    removed = actual.remove_if(func(int element) -> bool {
+                    removed = actual.remove_if(func(element: int) -> bool {
                         return element % divisor == 0;
                     });
                 } else {
-                    removed = actual.retain_if(func(int element) -> bool {
+                    removed = actual.retain_if(func(element: int) -> bool {
                         return element % divisor == 0;
                     });
                 }
@@ -236,7 +236,7 @@ let LinkedListModelTests = module (
                     }
                     i = i + 1;
                 }
-                test.assert_equal_int32(expected, actual.index_where(func(int element) -> bool {
+                test.assert_equal_int32(expected, actual.index_where(func(element: int) -> bool {
                     return element > value;
                 }));
             } else if (choice < 79) {

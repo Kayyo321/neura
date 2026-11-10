@@ -4,11 +4,11 @@ let path = import:Std.Fs.Path;
 let test = import:Std.Test;
 
 let PathTests = module (
-    let text = func(path.Path p) -> string {
+    let text = func(p: path.Path) -> string {
         return p.to_string();
     };
 
-    let normalized = func(string raw) -> string {
+    let normalized = func(raw: string) -> string {
         return path.of(raw).to_string();
     };
 

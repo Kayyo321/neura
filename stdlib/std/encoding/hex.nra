@@ -27,7 +27,7 @@ export let Hex = module (
     };
 
     // Two lowercase hex digits per byte, most significant first.
-    export let encode = func(uint8[list] bytes) -> string {
+    export let encode = func(bytes: uint8[list]) -> string {
         let digits: uint8[list] = [];
         for (let b in bytes) {
             // 0 through 9 become 48 through 57 and 10 through 15 become 97
@@ -45,7 +45,7 @@ export let Hex = module (
     // with an Encoding error at its offset ("invalid hex digit"); an odd
     // number of digits fails at the text's length ("odd number of hex
     // digits").
-    export let decode = func(string text) -> result.Result<uint8[list]> {
+    export let decode = func(text: string) -> result.Result<uint8[list]> {
         let values = ready_values();
         let count = text.byte_length;
         let bytes: uint8[list] = [];
@@ -71,7 +71,7 @@ export let Hex = module (
         return result.Result<uint8[list]>.Ok(bytes);
     };
 
-    let failure = func(int offset, string message) -> result.Result<uint8[list]> {
+    let failure = func(offset: int, message: string) -> result.Result<uint8[list]> {
         return result.Result<uint8[list]>.Err(error.Error.Encoding { offset: offset, message: message });
     };
 );

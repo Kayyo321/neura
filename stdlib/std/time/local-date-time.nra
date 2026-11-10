@@ -15,7 +15,7 @@ export let LocalDateTime = module (
         let date_value: local_date.LocalDate;
         let time_value: local_time.LocalTime;
 
-        export let init = func(local_date.LocalDate on, local_time.LocalTime at) -> void {
+        export let init = func(on: local_date.LocalDate, at: local_time.LocalTime) -> void {
             date_value = on;
             time_value = at;
         };
@@ -30,7 +30,7 @@ export let LocalDateTime = module (
 
         // Carries whole days into the date. Traps with "invalid argument:
         // date out of range" when the date leaves its range.
-        export let plus = func(duration.Duration span) -> LocalDateTime {
+        export let plus = func(span: duration.Duration) -> LocalDateTime {
             let nanos = span.to_nanos();
             let days = calendar.floor_div(nanos, calendar.NanosPerDay);
             let time_of_day = time_value.to_nano_of_day() + calendar.floor_mod(nanos, calendar.NanosPerDay);
@@ -43,14 +43,14 @@ export let LocalDateTime = module (
 
         // The instant at which UTC reads this date and time minus the
         // offset.
-        export let at_offset = func(zone_offset.ZoneOffset offset) -> instant.Instant {
+        export let at_offset = func(offset: zone_offset.ZoneOffset) -> instant.Instant {
             let time_of_day = time_value.to_nano_of_day();
             let seconds = date_value.to_epoch_day() * calendar.SecondsPerDay + time_of_day / calendar.NanosPerSecond -
                 (offset.total_seconds() as int64);
             return instant.of_epoch_seconds(seconds, (time_of_day % calendar.NanosPerSecond) as int);
         };
 
-        export let compare_to = func(LocalDateTime other) -> ordering.Ordering {
+        export let compare_to = func(other: LocalDateTime) -> ordering.Ordering {
             let by_date = date_value.compare_to(other.date_value);
             if (by_date != ordering.Ordering.Equal) {
                 return by_date;
@@ -58,7 +58,7 @@ export let LocalDateTime = module (
             return time_value.compare_to(other.time_value);
         };
 
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is LocalDateTime)) {
                 return false;
             }
@@ -76,12 +76,12 @@ export let LocalDateTime = module (
         };
     );
 
-    export let of = func(local_date.LocalDate on, local_time.LocalTime at) -> LocalDateTime {
+    export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime {
         return new LocalDateTime(on, at);
     };
 
     // The LocalDate form, T, and the LocalTime form, with their errors.
-    export let parse = func(string text) -> result.Result<LocalDateTime> {
+    export let parse = func(text: string) -> result.Result<LocalDateTime> {
         let scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);
         scan.expect(84, "'T'");

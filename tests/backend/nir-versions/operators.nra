@@ -1,6 +1,6 @@
 // Bitwise operations, which need NeuraIR 1.2.
 export let Operators = module (
-    export let low_bits = func(uint32 value) -> uint32 {
+    export let low_bits = func(value: uint32) -> uint32 {
         return value & 255;
     };
 );

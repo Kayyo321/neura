@@ -12,7 +12,7 @@ export let ImmutableSet = module (
     export let ImmutableSet = class<T> implements set.Set<T> (
         let elements: hash_set.HashSet<T>;
 
-        export let init = func(Seal seal, T[list] values) -> void {
+        export let init = func(seal: Seal, values: T[list]) -> void {
             elements = hash_set.create<T>();
             elements.add_all(values);
         };
@@ -25,7 +25,7 @@ export let ImmutableSet = module (
             return elements.size() == 0;
         };
 
-        export let contains = func(T value) -> bool {
+        export let contains = func(value: T) -> bool {
             return elements.contains(value);
         };
 
@@ -38,13 +38,13 @@ export let ImmutableSet = module (
             return elements.iterator();
         };
 
-        export let for_each = func(func(T) -> void action) -> void {
+        export let for_each = func(action: func(T) -> void) -> void {
             elements.for_each(action);
         };
 
         // Another ImmutableSet of the same size whose elements this set all
         // contains.
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is ImmutableSet<T>)) {
                 return false;
             }
@@ -77,7 +77,7 @@ export let ImmutableSet = module (
     );
 
     // Copies `items`; a later duplicate of an earlier element is dropped.
-    export let of = func<T>(T[list] items) -> ImmutableSet<T> {
+    export let of = func<T>(items: T[list]) -> ImmutableSet<T> {
         return new ImmutableSet<T>(Seal.Token, items);
     };
 );

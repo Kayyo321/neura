@@ -5,7 +5,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let walk = bit_set.of([4]).iterator();
         console.print_line(walk.next().to_string());
         console.print_line(walk.next().to_string());

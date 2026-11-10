@@ -1,6 +1,6 @@
 // Core syntax: functions, loops, and branches. tests/backend/examples/core-driver.nra runs it.
 let Core = module (
-    export let sum_to = func(int32 limit) -> int32 {
+    export let sum_to = func(limit: int32) -> int32 {
         let total: int32 = 0;
         let current: int32 = 1;
         while (current <= limit) {
@@ -10,7 +10,7 @@ let Core = module (
         return total;
     };
 
-    export let describe = func(int32 value) -> string {
+    export let describe = func(value: int32) -> string {
         if (value > 0) {
             return "positive";
         } else {

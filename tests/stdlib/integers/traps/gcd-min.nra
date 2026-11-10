@@ -5,7 +5,7 @@ let int64s = import:Std.Core.Int64;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(int64s.gcd(int64s.Min, 6).to_string());
         console.print_line(int64s.gcd(int64s.Min, 0).to_string());
         console.print_line("unreachable");

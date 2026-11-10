@@ -2,56 +2,56 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Closures = module:program.Entry (
-    let assert_equal = func(int expected, int actual) -> void {
+    let assert_equal = func(expected: int, actual: int) -> void {
         if (expected != actual) {
             console.print_line("closure result differed");
         }
     };
 
     let global_offset: int = 1;
-    let global_callback: func(int) -> int = func(int n) -> int {
+    let global_callback: func(int) -> int = func(n: int) -> int {
         return n + global_offset;
     };
-    let immediate_value = func(int n) -> int { return n; }(20) + 2;
+    let immediate_value = func(n: int) -> int { return n; }(20) + 2;
 
-    let twice = func(int value) -> int {
+    let twice = func(value: int) -> int {
         return value + value;
     };
 
-    let apply = func(func(int) -> int callback, int value) -> int {
+    let apply = func(callback: func(int) -> int, value: int) -> int {
         return callback(value);
     };
 
-    let make_adder = func(int offset) -> func(int) -> int {
-        return func(int value) -> int {
+    let make_adder = func(offset: int) -> func(int) -> int {
+        return func(value: int) -> int {
             return offset + value;
         };
     };
 
     let Counter = class (
         let value: int = 0;
-        export let stored: func(int) -> int = func(int by) -> int {
+        export let stored: func(int) -> int = func(by: int) -> int {
             return increment(by);
         };
-        export let increment = func(int by) -> int {
+        export let increment = func(by: int) -> int {
             value = value + by;
             return value;
         };
         export let callback = func() -> func(int) -> int {
-            return func(int by) -> int {
+            return func(by: int) -> int {
                 return increment(by);
             };
         };
-        export let read_other = func(Counter other) -> func() -> int {
+        export let read_other = func(other: Counter) -> func() -> int {
             return func() -> int {
                 return other.value;
             };
         };
     );
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let seed: int = 10;
-        let add_seed = func(int value) -> int {
+        let add_seed = func(value: int) -> int {
             return value + seed;
         };
         seed = 100;
@@ -73,14 +73,14 @@ let Closures = module:program.Entry (
         assert_equal(8, counter.stored(1));
         assert_equal(8, counter.read_other(counter)());
 
-        let nested = func(int outer) -> func(int) -> int {
-            return func(int inner) -> int {
+        let nested = func(outer: int) -> func(int) -> int {
+            return func(inner: int) -> int {
                 return seed + outer + inner;
             };
         };
         assert_equal(105, nested(2)(3));
-        assert_equal(12, func(int x) -> int { return x * 2; }(6));
-        let [callback, argument] = func(int offset) -> [func(int) -> int, int] {
+        assert_equal(12, func(x: int) -> int { return x * 2; }(6));
+        let [callback, argument] = func(offset: int) -> [func(int) -> int, int] {
             return [make_adder(offset), 3];
         }(9);
         assert_equal(12, callback(argument));

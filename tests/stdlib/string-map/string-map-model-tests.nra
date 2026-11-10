@@ -7,7 +7,7 @@ let string_map = import:Std.Collections.StringMap;
 let StringMapModelTests = module (
     export let test_model = func() -> void {
         let map = string_map.create<int>();
-        map_model.run<string>(map, func(int id) -> string {
+        map_model.run<string>(map, func(id: int) -> string {
             return "k" + id.to_string();
         }, map.validate, map.trim, false, 31, 10000, 24, 160);
     };
@@ -16,7 +16,7 @@ let StringMapModelTests = module (
     export let test_model_varied_keys = func() -> void {
         let map = string_map.with_capacity<int>(40);
         let keys: string[list] = ["", "a", "b", "ab", "ba", "é", "日本", "Ω", "zz"];
-        map_model.run<string>(map, func(int id) -> string {
+        map_model.run<string>(map, func(id: int) -> string {
             return keys[id % 9] + (id / 9).to_string();
         }, map.validate, map.trim, false, 32, 3000, 20, 60);
     };

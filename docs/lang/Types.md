@@ -4,7 +4,7 @@ Types describe values used in declarations, parameters, and return values. A dec
 
 ```neura
 let count: int32 = 1;
-let advance = func(int32 count) -> int32 {
+let advance = func(count: int32) -> int32 {
     return count + 1;
 };
 ```
@@ -72,7 +72,7 @@ let Types = module (
     export let DisplayName = string;
     export let default_user_id: UserId = 1;
 
-    export let next_user_id = func(UserId user_id) -> UserId {
+    export let next_user_id = func(user_id: UserId) -> UserId {
         return user_id + 1;
     };
 );
@@ -137,7 +137,7 @@ An enum declares a closed set of named variants. Variants are written qualified 
 ```neura
 export let Light = enum (Red, Yellow, Green);
 
-let next = func(Light current) -> Light {
+let next = func(current: Light) -> Light {
     if (current == Light.Red) {
         return Light.Green;
     }
@@ -163,7 +163,7 @@ a match. An enum with payloads has no built-in equality or numeric cast.
 ```neura
 let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });
 
-let sum = func(Tree tree) -> int {
+let sum = func(tree: Tree) -> int {
     return match (tree) {
         Tree.Empty => 0,
         Tree.Leaf(value) => value,

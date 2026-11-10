@@ -4,7 +4,7 @@ let test = import:Std.Test;
 let ErrorTests = module (
     let Declined = class:error.ErrorDetail (
         export let amount: int;
-        export let init = func(int value) -> void {
+        export let init = func(value: int) -> void {
             super.init();
             amount = value;
         };
@@ -16,7 +16,7 @@ let ErrorTests = module (
         };
     );
 
-    let io_error = func(error.IoErrorKind kind, string text, string path) -> error.Error {
+    let io_error = func(kind: error.IoErrorKind, text: string, path: string) -> error.Error {
         return error.Error.Io { kind: kind, message: text, path: path };
     };
 

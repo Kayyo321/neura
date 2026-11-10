@@ -21,7 +21,7 @@ export let PriorityQueue = module (
 
         // Copies `items` and heapifies them: sifts down each index from
         // size / 2 - 1 to 0.
-        export let init = func(T[list] items, func(T, T) -> ordering.Ordering c) -> void {
+        export let init = func(items: T[list], c: func(T, T) -> ordering.Ordering) -> void {
             comparator = c;
             let values: T[list] = [];
             let count = items.length;
@@ -39,7 +39,7 @@ export let PriorityQueue = module (
             }
         };
 
-        let less = func(T a, T b, uint64 expected) -> bool {
+        let less = func(a: T, b: T, expected: uint64) -> bool {
             let order = comparator(a, b);
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
@@ -49,7 +49,7 @@ export let PriorityQueue = module (
 
         // While the item is not at the root and is Less than its parent,
         // moves the parent down.
-        let sift_up = func(int start, T item, uint64 expected) -> void {
+        let sift_up = func(start: int, item: T, expected: uint64) -> void {
             let index = start;
             while (index > 0) {
                 let parent = (index - 1) / 2;
@@ -66,7 +66,7 @@ export let PriorityQueue = module (
         // Picks the left child, or the right child when it exists and is
         // Less than the left; moves that child up while it is Less than the
         // item.
-        let sift_down = func(int start, T item, uint64 expected) -> void {
+        let sift_down = func(start: int, item: T, expected: uint64) -> void {
             let count = heap.length;
             let index = start;
             while (true) {
@@ -96,7 +96,7 @@ export let PriorityQueue = module (
             return heap.length == 0;
         };
 
-        export let enqueue = func(T value) -> void {
+        export let enqueue = func(value: T) -> void {
             let expected = modifications.value;
             heap.append(value);
             sift_up(heap.length - 1, value, expected);
@@ -152,7 +152,7 @@ export let PriorityQueue = module (
         };
 
         // By equals, with `value` as the receiver.
-        export let contains = func(T value) -> bool {
+        export let contains = func(value: T) -> bool {
             for (let element in heap) {
                 if (value.equals(element)) {
                     return true;
@@ -176,7 +176,7 @@ export let PriorityQueue = module (
         };
 
         // Heap order. The action must not change the queue structurally.
-        export let for_each = func(func(T) -> void action) -> void {
+        export let for_each = func(action: func(T) -> void) -> void {
             let expected = modifications.value;
             let i = 0;
             while (i < heap.length) {
@@ -224,7 +224,7 @@ export let PriorityQueue = module (
         let expected: uint64;
         let position: int = 0;
 
-        export let init = func(T[list] values, cell.Cell<uint64> counter) -> void {
+        export let init = func(values: T[list], counter: cell.Cell<uint64>) -> void {
             source = values;
             modifications = counter;
             expected = counter.value;
@@ -251,13 +251,13 @@ export let PriorityQueue = module (
     );
 
     // An empty queue ordered by `c`.
-    export let create = func<T>(func(T, T) -> ordering.Ordering c) -> PriorityQueue<T> {
+    export let create = func<T>(c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T> {
         let empty: T[list] = [];
         return new PriorityQueue<T>(empty, c);
     };
 
     // A queue of a copy of `items`, heapified in linear time.
-    export let from_list = func<T>(T[list] items, func(T, T) -> ordering.Ordering c) -> PriorityQueue<T> {
+    export let from_list = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T> {
         return new PriorityQueue<T>(items, c);
     };
 );

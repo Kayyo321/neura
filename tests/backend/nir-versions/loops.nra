@@ -1,6 +1,6 @@
 // A three-part for loop, whose latch needs NeuraIR 1.1, and nothing newer.
 export let Loops = module (
-    export let sum_below = func(int32 limit) -> int32 {
+    export let sum_below = func(limit: int32) -> int32 {
         let total: int32 = 0;
         for (let i: int32 = 0; i < limit; i = i + 1) {
             total = total + i;

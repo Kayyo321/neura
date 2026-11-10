@@ -7,7 +7,7 @@ let result = import:Std.Core.Result;
 // read_line reads ahead in chunks; the input() source returns those bytes
 // first, then reads the host again.
 export let InputSource = module:program.Entry (
-    let show = func(result.Result<uint8[list]> read) -> void {
+    let show = func(read: result.Result<uint8[list]>) -> void {
         match (read) {
             result.Result.Ok(chunk) => {
                 let [valid, text] = string.from_utf8(chunk);
@@ -19,7 +19,7 @@ export let InputSource = module:program.Entry (
         }
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         match (console.read_line()) {
             result.Result.Ok(line) => {
                 console.print_line(optional.value_or<string>(line, "none"));

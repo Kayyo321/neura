@@ -10,7 +10,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 export let App = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let names = array_list.create<string>();
         names.add("Ada");
         for (let name in names) {

@@ -13,7 +13,7 @@ export let ImmutableMap = module (
     export let ImmutableMap = class<K, V> implements map.Map<K, V> (
         let associations: hash_map.HashMap<K, V>;
 
-        export let init = func(Seal seal, hash_map.HashMap<K, V> contents) -> void {
+        export let init = func(seal: Seal, contents: hash_map.HashMap<K, V>) -> void {
             associations = contents;
         };
 
@@ -25,20 +25,20 @@ export let ImmutableMap = module (
             return associations.size() == 0;
         };
 
-        export let contains_key = func(K key) -> bool {
+        export let contains_key = func(key: K) -> bool {
             return associations.contains_key(key);
         };
 
-        export let get = func(K key) -> optional.Optional<V> {
+        export let get = func(key: K) -> optional.Optional<V> {
             return associations.get(key);
         };
 
-        export let get_or = func(K key, V fallback) -> V {
+        export let get_or = func(key: K, fallback: V) -> V {
             return associations.get_or(key, fallback);
         };
 
         // Traps with "no such element" when the key is absent.
-        export let require = func(K key) -> V {
+        export let require = func(key: K) -> V {
             return associations.require(key);
         };
 
@@ -54,11 +54,11 @@ export let ImmutableMap = module (
             return associations.entries();
         };
 
-        export let contains_value = func(V value) -> bool {
+        export let contains_value = func(value: V) -> bool {
             return associations.contains_value(value);
         };
 
-        export let for_each = func(func(K, V) -> void action) -> void {
+        export let for_each = func(action: func(K, V) -> void) -> void {
             associations.for_each(action);
         };
 
@@ -69,7 +69,7 @@ export let ImmutableMap = module (
 
         // Another ImmutableMap of the same size in which, for each of its
         // entries, this map holds an equal value for the key.
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is ImmutableMap<K, V>)) {
                 return false;
             }
@@ -112,7 +112,7 @@ export let ImmutableMap = module (
 
     // Copies `entries`. Traps with "invalid argument: duplicate key" when two
     // entries have equal keys.
-    export let of = func<K, V>([K, V][list] entries) -> ImmutableMap<K, V> {
+    export let of = func<K, V>(entries: [K, V][list]) -> ImmutableMap<K, V> {
         let contents = hash_map.with_capacity<K, V>(entries.length);
         let count = entries.length;
         let i = 0;

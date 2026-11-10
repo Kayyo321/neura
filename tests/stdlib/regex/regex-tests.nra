@@ -11,11 +11,11 @@ let test = import:Std.Test;
 // differences from other engines. reference-tests.nra and random-tests.nra
 // compare matches with python3's re module, ecmascript-tests.nra with node.
 let RegexTests = module (
-    let compiled = func(string pattern) -> regex.Regex {
+    let compiled = func(pattern: string) -> regex.Regex {
         return regex_check.compile_flags(pattern, 0);
     };
 
-    let check_error = func(string pattern, error.ParseErrorKind kind, int offset, string message) -> void {
+    let check_error = func(pattern: string, kind: error.ParseErrorKind, offset: int, message: string) -> void {
         match (regex.compile(pattern)) {
             result.Result.Ok(_) => {
                 test.fail(pattern + ": expected a parse error");
@@ -35,19 +35,19 @@ let RegexTests = module (
         }
     };
 
-    let syntax = func(string pattern, int offset, string message) -> void {
+    let syntax = func(pattern: string, offset: int, message: string) -> void {
         check_error(pattern, error.ParseErrorKind.Syntax, offset, message);
     };
 
-    let unexpected_end = func(string pattern, string message) -> void {
+    let unexpected_end = func(pattern: string, message: string) -> void {
         check_error(pattern, error.ParseErrorKind.UnexpectedEnd, pattern.byte_length, message);
     };
 
-    let out_of_range = func(string pattern, int offset, string message) -> void {
+    let out_of_range = func(pattern: string, offset: int, message: string) -> void {
         check_error(pattern, error.ParseErrorKind.OutOfRange, offset, message);
     };
 
-    let texts = func(regex.RegexMatch[list] matches) -> string[list] {
+    let texts = func(matches: regex.RegexMatch[list]) -> string[list] {
         let values: string[list] = [];
         for (let m in matches) {
             values.append(m.text());

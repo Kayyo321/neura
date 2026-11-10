@@ -10,7 +10,7 @@ file(WRITE "${library}/program.nra" [=[
 export let Program = module (
     export let ExitCode = enum (Ok, Failure, Status(int));
     export let Entry = module (
-        export let main = func(string[] args) -> ExitCode;
+        export let main = func(args: string[]) -> ExitCode;
     );
 );
 ]=])
@@ -25,10 +25,10 @@ let helper = import:Std.Internal.Helper;
 export let Services = module (
     export let Outcome = enum (Ok, Error(uint32));
     let Lookup = enum (Ok([bool, string]), Error(uint32));
-    export let write = func(string message) -> Outcome host("neura.console.write_line", 1);
+    export let write = func(message: string) -> Outcome host("neura.console.write_line", 1);
     // Environment access is not granted by default, so the call takes its
     // error continuation with code 14 (CapabilityDenied).
-    let try_environment = func(string name) -> Lookup host("neura.env.get", 1);
+    let try_environment = func(name: string) -> Lookup host("neura.env.get", 1);
     let unused = func() -> Outcome host("neura.unavailable.service", 1);
 
     export let verify_failure = func() -> bool {
@@ -45,7 +45,7 @@ let program = import:Std.Program;
 let services = import:Std.Services;
 
 export let App = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (args.length == 1) {
             return program.ExitCode.Failure;
         }
@@ -103,7 +103,7 @@ expect(1 "" "host bindings are only allowed in standard library modules" check "
 file(WRITE "${TEST_DIR}/legacy.nra" [=[
 let io = import:SysIo;
 export let Legacy = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(args: string[]) -> Entry.ExitCode {
         return Entry.ExitCode.Ok;
     }
 );
@@ -123,7 +123,7 @@ expect(1 "" "cannot resolve import 'Test': the built-in Test module was removed;
 file(WRITE "${TEST_DIR}/second.nra" [=[
 let program = import:Std.Program;
 export let Second = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
     }
 );
@@ -133,14 +133,14 @@ expect(1 "" "more than one entry point" build "${TEST_DIR}/main.nra" "${TEST_DIR
 file(WRITE "${library}/wrong-signature.nra" [=[
 export let WrongSignature = module (
     export let Outcome = enum (Ok, Error(uint32));
-    export let write = func(int message) -> Outcome host("neura.console.write_line", 1);
+    export let write = func(message: int) -> Outcome host("neura.console.write_line", 1);
 );
 ]=])
 file(WRITE "${TEST_DIR}/bad-binding.nra" [=[
 let program = import:Std.Program;
 let wrong = import:Std.WrongSignature;
 export let App = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         wrong.write(1);
         return program.ExitCode.Ok;
     }

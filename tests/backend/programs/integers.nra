@@ -5,7 +5,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Integers = module:program.Entry (
-    let report = func(bool holds, string label) -> void {
+    let report = func(holds: bool, label: string) -> void {
         if (holds) {
             console.print_line(label);
         } else {
@@ -13,45 +13,45 @@ let Integers = module:program.Entry (
         }
     };
 
-    let quotient = func(int32 a, int32 b) -> int32 {
+    let quotient = func(a: int32, b: int32) -> int32 {
         return a / b;
     };
 
-    let rest = func(int32 a, int32 b) -> int32 {
+    let rest = func(a: int32, b: int32) -> int32 {
         return a % b;
     };
 
-    let unsigned_rest = func(uint16 a, uint16 b) -> uint16 {
+    let unsigned_rest = func(a: uint16, b: uint16) -> uint16 {
         return a % b;
     };
 
-    let narrow = func(int64 value) -> int8 {
+    let narrow = func(value: int64) -> int8 {
         return value as int8;
     };
 
-    let widen = func(int8 value) -> int64 {
+    let widen = func(value: int8) -> int64 {
         return value as int64;
     };
 
-    let to_unsigned = func(int32 value) -> uint32 {
+    let to_unsigned = func(value: int32) -> uint32 {
         return value as uint32;
     };
 
-    let count = func(byte[] values) -> int {
+    let count = func(values: byte[]) -> int {
         return values.length;
     };
 
-    let pick = func(int32 a, int32 b) -> int32 {
+    let pick = func(a: int32, b: int32) -> int32 {
         return a - b;
     };
 
     // The product of two parameters gets a block of its own; the sum computed
     // before it must survive that block.
-    let combine = func(int32 x, int32 y, int32 z) -> int32 {
+    let combine = func(x: int32, y: int32, z: int32) -> int32 {
         return pick(x + 1, y * z);
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         report(quotient(7, 2) == 3, "7 / 2 = 3");
         report(quotient(-7, 2) == -3, "-7 / 2 = -3");
         report(quotient(7, -2) == -3, "7 / -2 = -3");

@@ -13,15 +13,15 @@ let test = import:Std.Test;
 // the expected compact and pretty text is json.dumps with
 // separators=(",", ":") and with indent=2, both with ensure_ascii=False.
 let JsonTests = module (
-    let parsed = func(string text) -> json.JsonValue {
+    let parsed = func(text: string) -> json.JsonValue {
         return test.assert_ok<json.JsonValue>(json.parse(text));
     };
 
-    let accept = func(string text, string expected) -> void {
+    let accept = func(text: string, expected: string) -> void {
         test.assert_equal_string(expected, json.write(parsed(text)));
     };
 
-    let reject = func(string text, error.ParseErrorKind kind, int offset, string message) -> void {
+    let reject = func(text: string, kind: error.ParseErrorKind, offset: int, message: string) -> void {
         match (test.assert_err<json.JsonValue>(json.parse(text))) {
             error.Error.Parse { kind: actual, offset: at, message: reason } => {
                 test.assert_equal_string(message, reason);
@@ -34,7 +34,7 @@ let JsonTests = module (
         }
     };
 
-    let check_round_trip = func(string source, string compact, string pretty) -> void {
+    let check_round_trip = func(source: string, compact: string, pretty: string) -> void {
         let value = parsed(source);
         test.assert_equal_string(compact, json.write(value));
         test.assert_equal_string(pretty, json.write_pretty(value, 2));
@@ -44,22 +44,22 @@ let JsonTests = module (
         test.assert_equal_string(compact, json.write(parsed(pretty)));
     };
 
-    let number = func(string text) -> json.JsonValue {
+    let number = func(text: string) -> json.JsonValue {
         return json.JsonValue.Number(text);
     };
 
-    let same = func(json.JsonValue a, json.JsonValue b) -> void {
+    let same = func(a: json.JsonValue, b: json.JsonValue) -> void {
         test.assert(json.equals(a, b));
         test.assert(json.equals(b, a));
         test.assert_equal_uint64(json.hash(a) as uint64, json.hash(b) as uint64);
     };
 
-    let different = func(json.JsonValue a, json.JsonValue b) -> void {
+    let different = func(a: json.JsonValue, b: json.JsonValue) -> void {
         test.assert(!json.equals(a, b));
         test.assert(!json.equals(b, a));
     };
 
-    let nested = func(string open, string close, int depth) -> string {
+    let nested = func(open: string, close: string, depth: int) -> string {
         return strings.repeat(open, depth) + strings.repeat(close, depth);
     };
 
@@ -502,7 +502,7 @@ let JsonTests = module (
         test.assert_equal_float64(-0.0, json.number_to_float64("-1e-400"));
     };
 
-    let check_decimal = func(string text, string unscaled, int scale, string plain) -> void {
+    let check_decimal = func(text: string, unscaled: string, scale: int, plain: string) -> void {
         let value = json.number_to_big_decimal(text);
         test.assert_equal_string(unscaled, value.unscaled().to_string());
         test.assert_equal_int32(scale, value.scale());

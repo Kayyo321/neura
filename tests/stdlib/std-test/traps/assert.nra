@@ -7,7 +7,7 @@ let result = import:Std.Core.Result;
 let test = import:Std.Test;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         test.assert(1 > 2);
 
         return program.ExitCode.Ok;

@@ -8,15 +8,15 @@ let test = import:Std.Test;
 
 // BigDecimal members with literal expectations (Stdlib.md section 10.3).
 let BigDecimalTests = module (
-    let of = func(string text) -> decimals.BigDecimal {
+    let of = func(text: string) -> decimals.BigDecimal {
         return result.expect<decimals.BigDecimal>(decimals.parse(text), text);
     };
 
-    let check = func(string expected, decimals.BigDecimal actual) -> void {
+    let check = func(expected: string, actual: decimals.BigDecimal) -> void {
         test.assert_equal_string(expected, actual.to_string());
     };
 
-    let parse_failure = func(string text, error.ParseErrorKind kind, int offset) -> void {
+    let parse_failure = func(text: string, kind: error.ParseErrorKind, offset: int) -> void {
         match (test.assert_err<decimals.BigDecimal>(decimals.parse(text))) {
             error.Error.Parse { kind: actual_kind, offset: actual_offset, message: _ } => {
                 test.assert_equal_string(kind.to_string(), actual_kind.to_string());
@@ -28,7 +28,7 @@ let BigDecimalTests = module (
         }
     };
 
-    let larger = func<T: comparable.Comparable<T>>(T a, T b) -> T {
+    let larger = func<T: comparable.Comparable<T>>(a: T, b: T) -> T {
         if (a.compare_to(b) == ordering.Ordering.Less) {
             return b;
         }

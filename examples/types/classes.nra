@@ -23,7 +23,7 @@ let Classes = module (
 
     // A base-typed parameter accepts instances of derived classes.
     // The call dispatches to the method of the actual instance.
-    export let describe = func(Animal animal) -> string {
+    export let describe = func(animal: Animal) -> string {
         return animal.speak();
     };
 

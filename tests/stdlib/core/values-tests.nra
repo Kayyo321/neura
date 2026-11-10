@@ -45,7 +45,7 @@ let ValuesTests = module (
 
     export let test_cell_shares_state_with_closures = func() -> void {
         let total = cell.of<int64>(0);
-        let add = func(int64 value) -> void {
+        let add = func(value: int64) -> void {
             total.value = total.value + value;
         };
         add(2);

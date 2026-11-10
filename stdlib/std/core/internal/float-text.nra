@@ -30,29 +30,29 @@ export let FloatText = module (
 
     // Bit-level classification. -------------------------------------------
 
-    export let sign_mask = func(int f, int w) -> uint64 {
+    export let sign_mask = func(f: int, w: int) -> uint64 {
         let one: uint64 = 1;
         return one << (f + w);
     };
 
-    export let exponent_mask = func(int f, int w) -> uint64 {
+    export let exponent_mask = func(f: int, w: int) -> uint64 {
         let one: uint64 = 1;
         return ((one << w) - 1) << f;
     };
 
-    export let fraction_mask = func(int f) -> uint64 {
+    export let fraction_mask = func(f: int) -> uint64 {
         let one: uint64 = 1;
         return (one << f) - 1;
     };
 
-    export let is_nan_bits = func(uint64 bits, int f, int w) -> bool {
+    export let is_nan_bits = func(bits: uint64, f: int, w: int) -> bool {
         let exponent = exponent_mask(f, w);
         return (bits & exponent) == exponent && (bits & fraction_mask(f)) != 0;
     };
 
     // The format's canonical quiet NaN: sign 0, every exponent bit, and only
     // the top fraction bit.
-    export let nan_bits = func(int f, int w) -> uint64 {
+    export let nan_bits = func(f: int, w: int) -> uint64 {
         let one: uint64 = 1;
         return exponent_mask(f, w) | (one << (f - 1));
     };
@@ -60,7 +60,7 @@ export let FloatText = module (
     // floor (0), ceil (1), trunc (2), round half away from zero (3), and
     // round half to even (4) on a bit pattern. The sign of zero is kept; a
     // NaN becomes the canonical NaN.
-    export let round_bits = func(uint64 bits, int f, int w, int mode) -> uint64 {
+    export let round_bits = func(bits: uint64, f: int, w: int, mode: int) -> uint64 {
         let exponent_field = ((bits & exponent_mask(f, w)) >> f) as int;
         let bias = (1 << (w - 1)) - 1;
         let fraction = bits & fraction_mask(f);
@@ -128,7 +128,7 @@ export let FloatText = module (
     // `digits` fraction digits, correctly rounded, ties to even. NaN and the
     // infinities print as in to_string; a negative value keeps its `-` even
     // when it rounds to zero.
-    export let to_fixed = func(uint64 bits, int f, int w, int digits) -> string {
+    export let to_fixed = func(bits: uint64, f: int, w: int, digits: int) -> string {
         check_digits(digits);
         let special = special_text(bits, f, w);
         if (special != "") {
@@ -157,7 +157,7 @@ export let FloatText = module (
     // One digit, a point and `digits` more digits (no point when `digits` is
     // 0), `e`, and the decimal exponent with `-` when negative. Correctly
     // rounded, ties to even.
-    export let to_exponential = func(uint64 bits, int f, int w, int digits) -> string {
+    export let to_exponential = func(bits: uint64, f: int, w: int, digits: int) -> string {
         check_digits(digits);
         let special = special_text(bits, f, w);
         if (special != "") {
@@ -209,7 +209,7 @@ export let FloatText = module (
     // exponent (`e` or `E`, an optional sign, and digits). The value is
     // rounded once, ties to even; too large becomes an infinity and too
     // small a signed zero.
-    export let parse = func(string text, int f, int w) -> Parsed {
+    export let parse = func(text: string, f: int, w: int) -> Parsed {
         let length = text.byte_length;
         if (length == 0) {
             return Parsed.Failure(parse_error(error.ParseErrorKind.Empty, 0, "empty input"));
@@ -329,7 +329,7 @@ export let FloatText = module (
     // the float64 result is within 3 units in its last place of the exact
     // value (at most three roundings), so when no midpoint of the format lies
     // within 16 units, both round to the same value.
-    let fast_path = func(uint8[list] digits, int64 scale, bool sticky, int f, int w) -> float64 {
+    let fast_path = func(digits: uint8[list], scale: int64, sticky: bool, f: int, w: int) -> float64 {
         if (sticky || digits.length > 15) {
             return 0.0;
         }
@@ -373,7 +373,7 @@ export let FloatText = module (
 
     // Whether a midpoint between two values of the format lies within 16
     // float64 units of `near`, a positive normal float64.
-    let near_midpoint = func(float64 near, int f, int w) -> bool {
+    let near_midpoint = func(near: float64, f: int, w: int) -> bool {
         let bits = near.to_bits();
         let one: uint64 = 1;
         let leading = (((bits >> 52) & 2047) as int) - 1023;
@@ -401,7 +401,7 @@ export let FloatText = module (
 
     // The magnitude bits of digits * 10^scale (plus a positive tail when
     // `sticky`), rounded once to the format, ties to even.
-    let exact_bits = func(uint8[list] digits, int64 scale, bool sticky, int f, int w) -> uint64 {
+    let exact_bits = func(digits: uint8[list], scale: int64, sticky: bool, f: int, w: int) -> uint64 {
         let bias = (1 << (w - 1)) - 1;
         let precision = f + 1;
         let count = digits.length as int64;
@@ -457,7 +457,7 @@ export let FloatText = module (
     // Rounds (value + tail) * 2^scale to the format, where the tail is in
     // [0, 1) and positive when `sticky`. The value has enough bits that the
     // tail lies below the rounding position.
-    let round_to_bits = func(wide.WideUint value, bool sticky, int scale, int f, int w) -> uint64 {
+    let round_to_bits = func(value: wide.WideUint, sticky: bool, scale: int, f: int, w: int) -> uint64 {
         let bias = (1 << (w - 1)) - 1;
         let one: uint64 = 1;
         let leading = value.bit_length() - 1 + scale;
@@ -500,14 +500,14 @@ export let FloatText = module (
 
     // Helpers. --------------------------------------------------------------
 
-    let check_digits = func(int digits) -> void {
+    let check_digits = func(digits: int) -> void {
         if (digits < 0 || digits > 100) {
             trap_with_message("invalid argument: digits outside 0 through 100");
         }
     };
 
     // "NaN", "Infinity", "-Infinity", or "" for a finite value.
-    let special_text = func(uint64 bits, int f, int w) -> string {
+    let special_text = func(bits: uint64, f: int, w: int) -> string {
         let exponent = exponent_mask(f, w);
         if ((bits & exponent) != exponent) {
             return "";
@@ -518,7 +518,7 @@ export let FloatText = module (
         return sign_text(bits, f, w) + "Infinity";
     };
 
-    let sign_text = func(uint64 bits, int f, int w) -> string {
+    let sign_text = func(bits: uint64, f: int, w: int) -> string {
         if ((bits & sign_mask(f, w)) != 0) {
             return "-";
         }
@@ -527,7 +527,7 @@ export let FloatText = module (
 
     // The integer significand of a finite value: value = significand *
     // 2^exponent_of.
-    let significand_of = func(uint64 bits, int f, int w) -> uint64 {
+    let significand_of = func(bits: uint64, f: int, w: int) -> uint64 {
         let fraction = bits & fraction_mask(f);
         if ((bits & exponent_mask(f, w)) == 0) {
             return fraction;
@@ -536,7 +536,7 @@ export let FloatText = module (
         return fraction | (one << f);
     };
 
-    let exponent_of = func(uint64 bits, int f, int w) -> int {
+    let exponent_of = func(bits: uint64, f: int, w: int) -> int {
         let field = ((bits & exponent_mask(f, w)) >> f) as int;
         let bias = (1 << (w - 1)) - 1;
         if (field == 0) {
@@ -546,7 +546,7 @@ export let FloatText = module (
     };
 
     // floor(2 * significand * 2^exponent * 10^power) and whether it is exact.
-    let scale_doubled = func(uint64 significand, int exponent, int power) -> [wide.WideUint, bool] {
+    let scale_doubled = func(significand: uint64, exponent: int, power: int) -> [wide.WideUint, bool] {
         let value = wide.of(significand);
         value.shift_left(1);
         if (exponent > 0) {
@@ -576,7 +576,7 @@ export let FloatText = module (
     };
 
     // Shifts right by `count` bits, rounding half to even.
-    let round_shift_right = func(wide.WideUint value, int count) -> void {
+    let round_shift_right = func(value: wide.WideUint, count: int) -> void {
         let versus = value.low_bits_versus_half(count);
         value.shift_right(count);
         if (versus > 0 || (versus == 0 && value.is_odd())) {
@@ -585,14 +585,14 @@ export let FloatText = module (
     };
 
     // The first digit, then a point and the rest when there is a rest.
-    let with_point = func(string digits) -> string {
+    let with_point = func(digits: string) -> string {
         if (digits.byte_length == 1) {
             return digits;
         }
         return digits.slice(0, 1) + "." + digits.slice(1, digits.byte_length);
     };
 
-    let zeros = func(int count) -> string {
+    let zeros = func(count: int) -> string {
         let text = "";
         for (let i = 0; i < count; i = i + 1) {
             text = text + "0";
@@ -600,7 +600,7 @@ export let FloatText = module (
         return text;
     };
 
-    let floor_div = func(int a, int b) -> int {
+    let floor_div = func(a: int, b: int) -> int {
         let quotient = a / b;
         if (a % b != 0 && (a < 0) != (b < 0)) {
             return quotient - 1;
@@ -608,7 +608,7 @@ export let FloatText = module (
         return quotient;
     };
 
-    let parse_error = func(error.ParseErrorKind kind, int offset, string message) -> error.Error {
+    let parse_error = func(kind: error.ParseErrorKind, offset: int, message: string) -> error.Error {
         return error.Error.Parse { kind: kind, offset: offset, message: message };
     };
 );

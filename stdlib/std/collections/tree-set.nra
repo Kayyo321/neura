@@ -20,7 +20,7 @@ export let TreeSet = module (
         let compare: func(T, T) -> ordering.Ordering;
         let printing_depth: int = 0;
 
-        export let init = func(Seal seal, func(T, T) -> ordering.Ordering comparator) -> void {
+        export let init = func(seal: Seal, comparator: func(T, T) -> ordering.Ordering) -> void {
             compare = comparator;
             map = tree_map.create<T, unit.Unit>(comparator);
         };
@@ -37,20 +37,20 @@ export let TreeSet = module (
             map.clear();
         };
 
-        export let contains = func(T value) -> bool {
+        export let contains = func(value: T) -> bool {
             return map.contains_key(value);
         };
 
         // False when the set already holds an element the comparator calls
         // Equal; the set keeps the element it holds.
-        export let add = func(T value) -> bool {
+        export let add = func(value: T) -> bool {
             let before = map.size();
             map.set(value, unit.Unit.Value);
             return map.size() != before;
         };
 
         // Adds each element in order.
-        export let add_all = func(T[list] items) -> void {
+        export let add_all = func(items: T[list]) -> void {
             let total = items.length;
             let i = 0;
             while (i < total) {
@@ -59,7 +59,7 @@ export let TreeSet = module (
             }
         };
 
-        export let remove = func(T value) -> bool {
+        export let remove = func(value: T) -> bool {
             return map.delete(value);
         };
 
@@ -74,22 +74,22 @@ export let TreeSet = module (
 
         // In ascending order. The action must not change the set
         // structurally.
-        export let for_each = func(func(T) -> void action) -> void {
-            map.for_each(func(T value, unit.Unit ignored) -> void {
+        export let for_each = func(action: func(T) -> void) -> void {
+            map.for_each(func(value: T, ignored: unit.Unit) -> void {
                 action(value);
             });
         };
 
         // The callback runs once per element in ascending order; the chosen
         // elements are removed afterwards. Returns how many were removed.
-        export let remove_if = func(func(T) -> bool drop) -> int {
-            return map.remove_if(func(T value, unit.Unit ignored) -> bool {
+        export let remove_if = func(drop: func(T) -> bool) -> int {
+            return map.remove_if(func(value: T, ignored: unit.Unit) -> bool {
                 return drop(value);
             });
         };
 
-        export let retain_if = func(func(T) -> bool keep) -> int {
-            return map.remove_if(func(T value, unit.Unit ignored) -> bool {
+        export let retain_if = func(keep: func(T) -> bool) -> int {
+            return map.remove_if(func(value: T, ignored: unit.Unit) -> bool {
                 return !keep(value);
             });
         };
@@ -118,7 +118,7 @@ export let TreeSet = module (
         };
 
         // Elements from `from` inclusive to `to` exclusive, ascending.
-        export let range = func(T from, T to) -> T[list] {
+        export let range = func(from: T, to: T) -> T[list] {
             return map.key_range(from, to);
         };
 
@@ -126,25 +126,25 @@ export let TreeSet = module (
             return map.descending_keys();
         };
 
-        export let floor = func(T value) -> optional.Optional<T> {
+        export let floor = func(value: T) -> optional.Optional<T> {
             return map.floor(value);
         };
 
-        export let ceiling = func(T value) -> optional.Optional<T> {
+        export let ceiling = func(value: T) -> optional.Optional<T> {
             return map.ceiling(value);
         };
 
-        export let lower = func(T value) -> optional.Optional<T> {
+        export let lower = func(value: T) -> optional.Optional<T> {
             return map.lower(value);
         };
 
-        export let higher = func(T value) -> optional.Optional<T> {
+        export let higher = func(value: T) -> optional.Optional<T> {
             return map.higher(value);
         };
 
         // Whether every element of this set is in `other`, by the other
         // set's comparator.
-        export let is_subset_of = func(TreeSet<T> other) -> bool {
+        export let is_subset_of = func(other: TreeSet<T>) -> bool {
             if (map.size() > other.size()) {
                 return false;
             }
@@ -160,7 +160,7 @@ export let TreeSet = module (
             return true;
         };
 
-        export let is_disjoint_from = func(TreeSet<T> other) -> bool {
+        export let is_disjoint_from = func(other: TreeSet<T>) -> bool {
             let items = map.keys();
             let total = items.length;
             let i = 0;
@@ -174,7 +174,7 @@ export let TreeSet = module (
         };
 
         // A new set with this set's comparator holding the elements of both.
-        export let union = func(TreeSet<T> other) -> TreeSet<T> {
+        export let union = func(other: TreeSet<T>) -> TreeSet<T> {
             let result = new TreeSet<T>(Seal.Token, compare);
             result.add_all(map.keys());
             result.add_all(other.to_list());
@@ -182,12 +182,12 @@ export let TreeSet = module (
         };
 
         // This set's elements that are in `other`.
-        export let intersection = func(TreeSet<T> other) -> TreeSet<T> {
+        export let intersection = func(other: TreeSet<T>) -> TreeSet<T> {
             return selected(other, true);
         };
 
         // This set's elements that are not in `other`.
-        export let difference = func(TreeSet<T> other) -> TreeSet<T> {
+        export let difference = func(other: TreeSet<T>) -> TreeSet<T> {
             return selected(other, false);
         };
 
@@ -198,7 +198,7 @@ export let TreeSet = module (
 
         // Another TreeSet of the same size whose elements this set all
         // contains.
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is TreeSet<T>)) {
                 return false;
             }
@@ -245,7 +245,7 @@ export let TreeSet = module (
             return "{" + text.slice(1, text.byte_length - 1) + "}";
         };
 
-        let selected = func(TreeSet<T> other, bool present) -> TreeSet<T> {
+        let selected = func(other: TreeSet<T>, present: bool) -> TreeSet<T> {
             let result = new TreeSet<T>(Seal.Token, compare);
             let items = map.keys();
             let total = items.length;
@@ -261,7 +261,7 @@ export let TreeSet = module (
     );
 
     // An empty set ordered by `comparator`, which must define a total order.
-    export let create = func<T>(func(T, T) -> ordering.Ordering comparator) -> TreeSet<T> {
+    export let create = func<T>(comparator: func(T, T) -> ordering.Ordering) -> TreeSet<T> {
         return new TreeSet<T>(Seal.Token, comparator);
     };
 );

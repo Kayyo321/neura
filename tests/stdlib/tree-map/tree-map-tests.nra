@@ -17,11 +17,11 @@ let TreeMapTests = module (
         return map;
     };
 
-    let key_text = func(optional.Optional<int> key) -> string {
+    let key_text = func(key: optional.Optional<int>) -> string {
         return optional.to_string<int>(key);
     };
 
-    let entry_text = func(optional.Optional<[int, string]> entry) -> string {
+    let entry_text = func(entry: optional.Optional<[int, string]>) -> string {
         return match (entry) {
             optional.Optional.None => "None",
             optional.Optional.Some(item) => item.to_string(),
@@ -118,7 +118,7 @@ let TreeMapTests = module (
         test.assert(!keys.has_next());
         test.assert_equal_string("[10, e]", items.next().to_string());
         let text = cell.of<string>("");
-        map.for_each(func(int key, string value) -> void {
+        map.for_each(func(key: int, value: string) -> void {
             text.value = text.value + value;
             map.set(key, value + value);
         });
@@ -129,7 +129,7 @@ let TreeMapTests = module (
         }
         test.assert_equal_int32(65, total);
         let calls = cell.of<int>(0);
-        test.assert_equal_int32(2, map.remove_if(func(int key, string value) -> bool {
+        test.assert_equal_int32(2, map.remove_if(func(key: int, value: string) -> bool {
             calls.value = calls.value + 1;
             return key % 10 == 0 && key < 30;
         }));
@@ -146,12 +146,12 @@ let TreeMapTests = module (
         test.assert_equal_string("n", map.get_or_put(7, func() -> string {
             return "n";
         }));
-        let join = func(string a, string b) -> string {
+        let join = func(a: string, b: string) -> string {
             return a + b;
         };
         test.assert_equal_string("fx", map.merge(5, "x", join));
         test.assert_equal_string("y", map.merge(8, "y", join));
-        let bump = func(int key, optional.Optional<string> current) -> optional.Optional<string> {
+        let bump = func(key: int, current: optional.Optional<string>) -> optional.Optional<string> {
             return match (current) {
                 optional.Optional.None => optional.Optional<string>.Some(key.to_string()),
                 optional.Optional.Some(text) => optional.Optional<string>.None,
@@ -166,7 +166,7 @@ let TreeMapTests = module (
     // Keys the comparator calls Equal are the same key: the first key
     // stays, and setting replaces only the value.
     export let test_comparator_defines_sameness = func() -> void {
-        let map = tree_map.create<string, int>(func(string a, string b) -> ordering.Ordering {
+        let map = tree_map.create<string, int>(func(a: string, b: string) -> ordering.Ordering {
             return int32.compare(a.byte_length, b.byte_length);
         });
         map.set("aa", 1);

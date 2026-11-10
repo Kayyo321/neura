@@ -5,7 +5,7 @@ let floats = import:Std.Core.Float16;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(floats.clamp(3.0, 1.0, 2.0).to_string());
         console.print_line(floats.clamp(1.5, 1.0, floats.NaN).to_string());
         console.print_line("unreachable");

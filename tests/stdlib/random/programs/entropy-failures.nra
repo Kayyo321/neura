@@ -19,7 +19,7 @@ export let EntropyFailures = module:program.Entry (
         }
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         attempt();
         attempt();
         attempt();

@@ -9,7 +9,7 @@ let strings = import:Std.Text.Strings;
 // Parses key=value fields with named groups, rewrites them, and splits a
 // list. Checks the Regex path end to end, including the image round trip.
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let line = "user=ada level=3 tag=é🙂 empty=";
         match (regex.compile("(?<key>\\w+)=(?<value>\\S*)")) {
             result.Result.Ok(field) => {

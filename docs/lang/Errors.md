@@ -7,7 +7,7 @@ Neura distinguishes expected failures, which a program handles, from runtime fai
 ```neura
 export let Parse = enum (Ok, Empty, TooLong);
 
-let check = func(string[] words, int limit) -> Parse {
+let check = func(words: string[], limit: int) -> Parse {
     if (words.length == 0) {
         return Parse.Empty;
     }

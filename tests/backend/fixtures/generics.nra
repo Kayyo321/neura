@@ -5,49 +5,49 @@ let program = import:Std.Program;
 let Generic = module (
     let Box = class<T> (
         export let value: T;
-        export let swap = func(T next) -> T {
+        export let swap = func(next: T) -> T {
             let previous: T = value;
             value = next;
             return previous;
         };
     );
 
-    let larger = func<T>(T a, T b, bool first_wins) -> T {
+    let larger = func<T>(a: T, b: T, first_wins: bool) -> T {
         if (first_wins) {
             return a;
         }
         return b;
     };
 
-    let sum = func<T>(T[list] values, T zero) -> T {
+    let sum = func<T>(values: T[list], zero: T) -> T {
         return zero;
     };
 
-    export let box_swap_i8 = func(int8 a, int8 b) -> int8 {
+    export let box_swap_i8 = func(a: int8, b: int8) -> int8 {
         let box = new Box<int8>();
         box.value = a;
         let previous: int8 = box.swap(b);
         return previous - box.value;
     };
 
-    export let nested_u8 = func(uint8 a) -> uint8 {
+    export let nested_u8 = func(a: uint8) -> uint8 {
         let outer = new Box<Box<uint8>>();
         outer.value = new Box<uint8>();
         outer.value.value = a;
         return outer.value.swap(a / 2) + outer.value.value;
     };
 
-    export let choose_i8 = func(int8 a, int8 b) -> int8 {
+    export let choose_i8 = func(a: int8, b: int8) -> int8 {
         return larger<int8>(a, b, a > b);
     };
 
-    export let choose_flag = func(bool a, bool b) -> bool {
+    export let choose_flag = func(a: bool, b: bool) -> bool {
         return larger<bool>(a, b, b);
     };
 );
 
 let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
     }
 );

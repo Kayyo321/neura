@@ -4,7 +4,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Computation = module:program.Entry (
-    let sum_to = func(int32 limit) -> int32 {
+    let sum_to = func(limit: int32) -> int32 {
         let total: int32 = 0;
         let current: int32 = 1;
         while (current <= limit) {
@@ -14,7 +14,7 @@ let Computation = module:program.Entry (
         return total;
     };
 
-    let factorial = func(int64 n) -> int64 {
+    let factorial = func(n: int64) -> int64 {
         if (n <= 1) {
             return 1;
         }
@@ -22,7 +22,7 @@ let Computation = module:program.Entry (
     };
 
     // Euclid's algorithm by subtraction.
-    let gcd = func(uint32 a, uint32 b) -> uint32 {
+    let gcd = func(a: uint32, b: uint32) -> uint32 {
         while (a != b) {
             if (a > b) {
                 a = a - b;
@@ -33,7 +33,7 @@ let Computation = module:program.Entry (
         return a;
     };
 
-    let first_square_above = func(int16 limit) -> int16 {
+    let first_square_above = func(limit: int16) -> int16 {
         let n: int16 = 0;
         while (true) {
             n = n + 1;
@@ -45,7 +45,7 @@ let Computation = module:program.Entry (
         return n;
     };
 
-    let parity = func(uint8 value) -> bool {
+    let parity = func(value: uint8) -> bool {
         let odd: bool = false;
         while (value != 0) {
             odd = !odd;
@@ -54,7 +54,7 @@ let Computation = module:program.Entry (
         return odd;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (sum_to(10) == 55) {
             console.print_line("sum_to(10) = 55");
         }

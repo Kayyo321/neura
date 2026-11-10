@@ -5,7 +5,7 @@ let set = import:Std.Collections.Set;
 export let Sets = module (
     // Whether the sets have the same size and `a` contains each element of
     // `b`, by `a`'s own membership test.
-    export let same_elements = func<T>(set.Set<T> a, set.Set<T> b) -> bool {
+    export let same_elements = func<T>(a: set.Set<T>, b: set.Set<T>) -> bool {
         if (a.size() != b.size()) {
             return false;
         }

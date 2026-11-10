@@ -5,7 +5,7 @@ let console = import:Std.Io.Console;
 let failure = import:Std.Core.Failure;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("before");
         failure.trap("custom stop");
         console.print_line("after");

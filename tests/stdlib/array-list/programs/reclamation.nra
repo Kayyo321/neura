@@ -7,7 +7,7 @@ let program = import:Std.Program;
 // removal. If removed elements stayed reachable the loop would need about
 // 200,000 cells, far above the limit.
 export let Main = module:program.Entry (
-    let block = func(int seed) -> int[list] {
+    let block = func(seed: int) -> int[list] {
         let values: int[list] = [];
         let i = 0;
         while (i < 100) {
@@ -17,7 +17,7 @@ export let Main = module:program.Entry (
         return values;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let items = array_list.create<int[list]>();
         let total: int64 = 0;
         let round = 0;
@@ -33,7 +33,7 @@ export let Main = module:program.Entry (
             if (round % 2 == 0) {
                 items.truncate(0);
             } else {
-                let removed = items.remove_if(func(int[list] values) -> bool {
+                let removed = items.remove_if(func(values: int[list]) -> bool {
                     return true;
                 });
             }

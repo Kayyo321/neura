@@ -9,7 +9,7 @@ let OptionalTests = module (
         export let label: string = "node";
     );
 
-    let some = func(int value) -> optional.Optional<int> {
+    let some = func(value: int) -> optional.Optional<int> {
         return optional.Optional<int>.Some(value);
     };
 
@@ -43,11 +43,11 @@ let OptionalTests = module (
     };
 
     export let test_map_and_then_filter = func() -> void {
-        let text = optional.map<int, string>(some(12), func(int v) -> string { return v.to_string(); });
+        let text = optional.map<int, string>(some(12), func(v: int) -> string { return v.to_string(); });
         test.assert_equal_string("12", optional.value_or<string>(text, ""));
-        let missing = optional.map<int, string>(none(), func(int v) -> string { return "called"; });
+        let missing = optional.map<int, string>(none(), func(v: int) -> string { return "called"; });
         test.assert(optional.is_none<string>(missing));
-        let halve = func(int v) -> optional.Optional<int> {
+        let halve = func(v: int) -> optional.Optional<int> {
             if (v % 2 == 0) {
                 return optional.Optional<int>.Some(v / 2);
             }
@@ -56,7 +56,7 @@ let OptionalTests = module (
         test.assert_equal_int32(3, optional.value_or<int>(optional.and_then<int, int>(some(6), halve), 0));
         test.assert(optional.is_none<int>(optional.and_then<int, int>(some(5), halve)));
         test.assert(optional.is_none<int>(optional.and_then<int, int>(none(), halve)));
-        let positive = func(int v) -> bool { return v > 0; };
+        let positive = func(v: int) -> bool { return v > 0; };
         test.assert(optional.is_some<int>(optional.filter<int>(some(2), positive)));
         test.assert(optional.is_none<int>(optional.filter<int>(some(-2), positive)));
         test.assert(optional.is_none<int>(optional.filter<int>(none(), positive)));

@@ -11,9 +11,9 @@ let test = import:Std.Test;
 // keeps ids ascending (TreeSet with ascending int elements); otherwise new
 // elements go to the end (insertion order).
 export let SetModel = module (
-    export let run = func<T>(mutable_set.MutableSet<T> set, func(int) -> T element_of, func() -> void check,
-                             func() -> void trim, bool sorted, uint64 seed, int operations, int small_domain,
-                             int large_domain) -> void {
+    export let run = func<T>(set: mutable_set.MutableSet<T>, element_of: func(int) -> T, check: func() -> void,
+                             trim: func() -> void, sorted: bool, seed: uint64, operations: int, small_domain: int,
+                             large_domain: int) -> void {
         let generator = random.seeded(seed);
         let ids: int[list] = [];
         let step = 0;
@@ -42,7 +42,7 @@ export let SetModel = module (
                 let divisor = 2 + generator.next_int_below(6);
                 let calls = cell.of<int>(0);
                 let retain = generator.next_int_below(2) == 0;
-                let test_element = func(T e) -> bool {
+                let test_element = func(e: T) -> bool {
                     calls.value = calls.value + 1;
                     return position_of<T>(e, ids, element_of) % divisor == 0;
                 };
@@ -94,7 +94,7 @@ export let SetModel = module (
                 }
             } else {
                 let seen = cell.of<int>(0);
-                set.for_each(func(T e) -> void {
+                set.for_each(func(e: T) -> void {
                     test.assert(e.equals(element_of(ids[seen.value])));
                     seen.value = seen.value + 1;
                 });
@@ -106,7 +106,7 @@ export let SetModel = module (
         }
     };
 
-    let compare = func<T>(mutable_set.MutableSet<T> set, int[list] ids, func(int) -> T element_of) -> void {
+    let compare = func<T>(set: mutable_set.MutableSet<T>, ids: int[list], element_of: func(int) -> T) -> void {
         test.assert_equal_int32(ids.length, set.size());
         test.assert_equal_bool(ids.length == 0, set.is_empty());
         let items = set.iterator();
@@ -121,7 +121,7 @@ export let SetModel = module (
     };
 
     // The position in `ids` of the element, found by equals.
-    let position_of = func<T>(T element, int[list] ids, func(int) -> T element_of) -> int {
+    let position_of = func<T>(element: T, ids: int[list], element_of: func(int) -> T) -> int {
         let i = 0;
         while (i < ids.length) {
             if (element.equals(element_of(ids[i]))) {
@@ -133,7 +133,7 @@ export let SetModel = module (
     };
 
     // The id below `domain` whose element equals `element`.
-    let position_id = func<T>(T element, int domain, func(int) -> T element_of) -> int {
+    let position_id = func<T>(element: T, domain: int, element_of: func(int) -> T) -> int {
         let id = 0;
         while (id < domain) {
             if (element.equals(element_of(id))) {
@@ -144,7 +144,7 @@ export let SetModel = module (
         return -1;
     };
 
-    let position = func(int[list] items, int item) -> int {
+    let position = func(items: int[list], item: int) -> int {
         let i = 0;
         while (i < items.length) {
             if (items[i] == item) {
@@ -155,7 +155,7 @@ export let SetModel = module (
         return -1;
     };
 
-    let insert = func(int[list] ids, int id, bool sorted) -> void {
+    let insert = func(ids: int[list], id: int, sorted: bool) -> void {
         ids.append(id);
         if (sorted) {
             let i = ids.length - 1;
@@ -167,7 +167,7 @@ export let SetModel = module (
         }
     };
 
-    let replace = func(int[list] target, int[list] source) -> void {
+    let replace = func(target: int[list], source: int[list]) -> void {
         while (target.length > 0) {
             target.remove_at(target.length - 1);
         }

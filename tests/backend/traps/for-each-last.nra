@@ -6,7 +6,7 @@ let program = import:Std.Program;
 // The check also runs before the advance that would end the loop, so a
 // change made while visiting the last element still fails.
 let Last = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let values: int32[list] = [7];
         for (let value in values) {
             console.print_line("visit last");

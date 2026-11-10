@@ -10,15 +10,15 @@ export let SortedMap = module (
         let first = func() -> [K, V];
         let last = func() -> [K, V];
         // Entries with keys from `from` inclusive to `to` exclusive.
-        let range = func(K from, K to) -> [K, V][list];
+        let range = func(from: K, to: K) -> [K, V][list];
         let descending = func() -> [K, V][list];
-        let floor = func(K key) -> optional.Optional<K>;
-        let ceiling = func(K key) -> optional.Optional<K>;
-        let lower = func(K key) -> optional.Optional<K>;
-        let higher = func(K key) -> optional.Optional<K>;
-        let floor_entry = func(K key) -> optional.Optional<[K, V]>;
-        let ceiling_entry = func(K key) -> optional.Optional<[K, V]>;
-        let lower_entry = func(K key) -> optional.Optional<[K, V]>;
-        let higher_entry = func(K key) -> optional.Optional<[K, V]>;
+        let floor = func(key: K) -> optional.Optional<K>;
+        let ceiling = func(key: K) -> optional.Optional<K>;
+        let lower = func(key: K) -> optional.Optional<K>;
+        let higher = func(key: K) -> optional.Optional<K>;
+        let floor_entry = func(key: K) -> optional.Optional<[K, V]>;
+        let ceiling_entry = func(key: K) -> optional.Optional<[K, V]>;
+        let lower_entry = func(key: K) -> optional.Optional<[K, V]>;
+        let higher_entry = func(key: K) -> optional.Optional<[K, V]>;
     );
 );

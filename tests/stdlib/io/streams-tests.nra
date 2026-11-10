@@ -11,7 +11,7 @@ let utf8_reader = import:Std.Io.Utf8Reader;
 let utf8_writer = import:Std.Io.Utf8Writer;
 
 let StreamsTests = module (
-    let bytes_of = func(string text) -> uint8[list] {
+    let bytes_of = func(text: string) -> uint8[list] {
         let out: uint8[list] = [];
         let i = 0;
         while (i < text.byte_length) {
@@ -21,7 +21,7 @@ let StreamsTests = module (
         return out;
     };
 
-    let numbers = func(int count) -> uint8[list] {
+    let numbers = func(count: int) -> uint8[list] {
         let out: uint8[list] = [];
         let i = 0;
         while (i < count) {
@@ -33,9 +33,9 @@ let StreamsTests = module (
 
     // A source that serves `data` in pieces of at most `piece` bytes and
     // counts its calls.
-    let pieces = func(uint8[list] data, int piece, cell.Cell<int> calls) -> func(int) -> result.Result<uint8[list]> {
+    let pieces = func(data: uint8[list], piece: int, calls: cell.Cell<int>) -> func(int) -> result.Result<uint8[list]> {
         let position = cell.of<int>(0);
-        return func(int max) -> result.Result<uint8[list]> {
+        return func(max: int) -> result.Result<uint8[list]> {
             calls.value = calls.value + 1;
             test.assert(max >= 1);
             let end = data.length;
@@ -54,18 +54,18 @@ let StreamsTests = module (
         };
     };
 
-    let failing_source = func(int max) -> result.Result<uint8[list]> {
+    let failing_source = func(max: int) -> result.Result<uint8[list]> {
         return result.Result<uint8[list]>.Err(error.custom("test.source", "source failed"));
     };
 
-    let kind_of = func(error.Error e) -> error.IoErrorKind {
+    let kind_of = func(e: error.Error) -> error.IoErrorKind {
         return match (e) {
             error.Error.Io { kind, message, path } => kind,
             _ => error.IoErrorKind.Other,
         };
     };
 
-    let text_of = func(uint8[list] data) -> string {
+    let text_of = func(data: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(data);
         test.assert(valid);
         return text;
@@ -169,7 +169,7 @@ let StreamsTests = module (
         let writer = buffered_writer.create(target.write);
         test.assert_ok<unit.Unit>(writer.write(numbers(8192)));
         test.assert_equal_int32(8192, target.size());
-        let failing = buffered_writer.with_capacity(func(uint8[list] data) -> result.Result<unit.Unit> {
+        let failing = buffered_writer.with_capacity(func(data: uint8[list]) -> result.Result<unit.Unit> {
             return result.Result<unit.Unit>.Err(error.custom("test.sink", "sink failed"));
         }, 16);
         test.assert_ok<unit.Unit>(failing.write(bytes_of("abc")));
@@ -188,12 +188,12 @@ let StreamsTests = module (
         test.assert_none<uint32>(test.assert_ok<optional.Optional<uint32>>(reader.read_scalar()));
     };
 
-    let scalar_error = func(uint8[list] data) -> error.Error {
+    let scalar_error = func(data: uint8[list]) -> error.Error {
         let reader = utf8_reader.create(byte_source(data));
         return test.assert_err<optional.Optional<uint32>>(reader.read_scalar());
     };
 
-    let byte_source = func(uint8[list] data) -> func(int) -> result.Result<uint8[list]> {
+    let byte_source = func(data: uint8[list]) -> func(int) -> result.Result<uint8[list]> {
         let buffer = byte_buffer.create();
         buffer.write(data);
         return buffer.reader();
@@ -259,7 +259,7 @@ let StreamsTests = module (
         test.assert_ok<unit.Unit>(writer.write_line("🙂"));
         test.assert_ok<unit.Unit>(writer.write(""));
         test.assert_equal_string("né🙂\n", text_of(target.to_list()));
-        let failing = utf8_writer.create(func(uint8[list] data) -> result.Result<unit.Unit> {
+        let failing = utf8_writer.create(func(data: uint8[list]) -> result.Result<unit.Unit> {
             return result.Result<unit.Unit>.Err(error.custom("test.sink", "sink failed"));
         });
         test.assert_err<unit.Unit>(failing.write_line("x"));

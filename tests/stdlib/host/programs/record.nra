@@ -10,7 +10,7 @@ let unit = import:Std.Core.Unit;
 // Recording uses the real services: the program sees and prints the same as
 // a plain run.
 export let Record = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let dir = path.of("record-data");
         fs.remove_tree(dir);
         result.expect<unit.Unit>(fs.create_directory(dir), "create");

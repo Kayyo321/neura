@@ -12,7 +12,7 @@ let program = import:Std.Program;
 // needs about 24,500 cells. One more retained value would need about 26,600,
 // and waiting for a table-full compaction would retain hundreds.
 export let Main = module:program.Entry (
-    let block = func(int seed) -> int[list] {
+    let block = func(seed: int) -> int[list] {
         let values: int[list] = [];
         let i = 0;
         while (i < 2000) {
@@ -22,7 +22,7 @@ export let Main = module:program.Entry (
         return values;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let map = int_map.with_capacity<int[list]>(1000);
         let i = 0;
         while (i < 7) {

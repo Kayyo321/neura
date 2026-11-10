@@ -5,7 +5,7 @@ let errors = import:Errors;
 let program = import:Std.Program;
 
 export let ErrorsDriver = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(errors.describe(errors.read_count("does-not-exist.cfg")));
         for (let argument in args) {
             console.print_line(errors.describe(errors.read_count(argument)));

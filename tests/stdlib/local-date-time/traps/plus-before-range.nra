@@ -8,7 +8,7 @@ let local_time = import:Std.Time.LocalTime;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let first = local_date_time.of(local_date.of(-999999, 1, 1), local_time.Midnight);
         console.print_line("before");
         console.print_line(first.plus(duration.of_nanos(-1)).to_string());

@@ -6,7 +6,7 @@ let ordering = import:Std.Core.Ordering;
 let test = import:Std.Test;
 
 let LocalTimeTests = module (
-    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+    let check_error = func(text: string, kind: error.ParseErrorKind, offset: int) -> void {
         let failure = test.assert_err<local_time.LocalTime>(local_time.parse(text));
         match (failure) {
             error.Error.Parse { kind: actual, offset: at, message: _ } => {
@@ -20,7 +20,7 @@ let LocalTimeTests = module (
     };
 
     // Expected text computed with Python: (start + shift) mod one day.
-    let check_plus = func(int64 start, int64 shift, string text) -> void {
+    let check_plus = func(start: int64, shift: int64, text: string) -> void {
         let moved = local_time.of_nano_of_day(start).plus(duration.of_nanos(shift));
         test.assert_equal_string(text, moved.to_string());
         test.assert(test.assert_ok<local_time.LocalTime>(local_time.parse(text)).equals(moved));

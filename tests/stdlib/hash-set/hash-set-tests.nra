@@ -8,10 +8,10 @@ let HashSetTests = module (
     // Value equality on the code; the hash keeps only its parity.
     let Code = class (
         export let code: int;
-        export let init = func(int value) -> void {
+        export let init = func(value: int) -> void {
             code = value;
         };
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             return other is Code && (other as Code).code == code;
         };
         export let.override hash_code = func() -> uint32 {
@@ -22,7 +22,7 @@ let HashSetTests = module (
         };
     );
 
-    let of = func(int[list] items) -> hash_set.HashSet<int> {
+    let of = func(items: int[list]) -> hash_set.HashSet<int> {
         let set = hash_set.create<int>();
         set.add_all(items);
         return set;
@@ -70,7 +70,7 @@ let HashSetTests = module (
         test.assert_equal_int32(7, items.next());
         test.assert(!items.has_next());
         let total = cell.of<int>(0);
-        set.for_each(func(int v) -> void {
+        set.for_each(func(v: int) -> void {
             total.value = total.value * 10 + v;
         });
         test.assert_equal_int32(57, total.value);
@@ -84,17 +84,17 @@ let HashSetTests = module (
     export let test_remove_if_and_retain_if = func() -> void {
         let set = of([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         let calls = cell.of<int>(0);
-        test.assert_equal_int32(6, set.remove_if(func(int v) -> bool {
+        test.assert_equal_int32(6, set.remove_if(func(v: int) -> bool {
             calls.value = calls.value + 1;
             return v % 2 == 0;
         }));
         test.assert_equal_int32(12, calls.value);
         test.assert_equal_string("{1, 3, 5, 7, 9, 11}", set.to_string());
-        test.assert_equal_int32(4, set.retain_if(func(int v) -> bool {
+        test.assert_equal_int32(4, set.retain_if(func(v: int) -> bool {
             return v % 3 == 0;
         }));
         test.assert_equal_string("{3, 9}", set.to_string());
-        test.assert_equal_int32(0, set.retain_if(func(int v) -> bool {
+        test.assert_equal_int32(0, set.retain_if(func(v: int) -> bool {
             return true;
         }));
         set.validate();
@@ -121,9 +121,9 @@ let HashSetTests = module (
 
     // Results keep this set's element operations.
     export let test_algebra_keeps_element_operations = func() -> void {
-        let by_parity = hash_set.with_keys<int>(func(int v) -> uint32 {
+        let by_parity = hash_set.with_keys<int>(func(v: int) -> uint32 {
             return (v % 2) as uint32;
-        }, func(int x, int y) -> bool {
+        }, func(x: int, y: int) -> bool {
             return x % 2 == y % 2;
         });
         by_parity.add_all([1, 2]);
@@ -193,9 +193,9 @@ let HashSetTests = module (
         test.assert(set.is_empty());
         set.validate();
         test.assert(set.add(1));
-        let sized = hash_set.with_keys_and_capacity<int>(func(int v) -> uint32 {
+        let sized = hash_set.with_keys_and_capacity<int>(func(v: int) -> uint32 {
             return v as uint32;
-        }, func(int x, int y) -> bool {
+        }, func(x: int, y: int) -> bool {
             return x == y;
         }, 64);
         sized.add_all([4, 5]);

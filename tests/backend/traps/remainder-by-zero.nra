@@ -4,11 +4,11 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Remainder = module:program.Entry (
-    let rest = func(int32 a, int32 b) -> int32 {
+    let rest = func(a: int32, b: int32) -> int32 {
         return a % b;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("before");
         if (rest(5, 0) == 0) {
             console.print_line("unreachable");

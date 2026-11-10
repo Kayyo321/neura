@@ -18,12 +18,12 @@ let Aggregates = module:program.Entry (
         return [default_code, default_weight, "neura"];
     };
 
-    let leaf = func(int value) -> Tree {
+    let leaf = func(value: int) -> Tree {
         calls = calls * 10 + value;
         return Tree.Leaf(value);
     };
 
-    let sum = func(Tree tree) -> int {
+    let sum = func(tree: Tree) -> int {
         match (tree) {
             Tree.Empty => { return 0; },
             Tree.Leaf(value) => { return value; },
@@ -33,9 +33,9 @@ let Aggregates = module:program.Entry (
         }
     };
 
-    let identity = func<T>(T value) -> T { return value; };
+    let identity = func<T>(value: T) -> T { return value; };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let [code, weight, _] = identity<[int, float, string]>(sample());
         test.assert_equal_int32(1, calls);
         test.assert_equal_int32(4, code);

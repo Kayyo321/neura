@@ -12,7 +12,7 @@ let program = import:Std.Program;
 let result = import:Std.Core.Result;
 
 export let HashMapBenchmark = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let n = result.value_or<int32>(int32s.parse(args[0]), 0);
         let map = hash_map.create<int32, int64>();
         for (let i = 0; i < n; i = i + 1) {

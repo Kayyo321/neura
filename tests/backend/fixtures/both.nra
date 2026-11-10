@@ -3,13 +3,13 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Logic = module (
-    export let both = func(bool left, bool right) -> bool {
+    export let both = func(left: bool, right: bool) -> bool {
         return left && right;
     };
 );
 
 let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (Logic.both(true, true)) {
             console.print_line("both");
         }

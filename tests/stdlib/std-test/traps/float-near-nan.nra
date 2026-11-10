@@ -7,7 +7,7 @@ let result = import:Std.Core.Result;
 let test = import:Std.Test;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         test.assert_float_near(1.0, 0.0 / 0.0, 1000.0);
 
         return program.ExitCode.Ok;

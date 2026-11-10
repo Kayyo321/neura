@@ -5,7 +5,7 @@ let int32s = import:Std.Core.Int32;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(int32s.to_string_radix(35, 36));
         console.print_line(int32s.to_string_radix(35, 37));
         console.print_line("unreachable");

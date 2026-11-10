@@ -5,7 +5,7 @@ let test = import:Std.Test;
 let zone_offset = import:Std.Time.ZoneOffset;
 
 let ZoneOffsetTests = module (
-    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+    let check_error = func(text: string, kind: error.ParseErrorKind, offset: int) -> void {
         let failure = test.assert_err<zone_offset.ZoneOffset>(zone_offset.parse(text));
         match (failure) {
             error.Error.Parse { kind: actual, offset: at, message: _ } => {
@@ -18,7 +18,7 @@ let ZoneOffsetTests = module (
         }
     };
 
-    let seconds_of = func(string text) -> int {
+    let seconds_of = func(text: string) -> int {
         return test.assert_ok<zone_offset.ZoneOffset>(zone_offset.parse(text)).total_seconds();
     };
 

@@ -10,7 +10,7 @@ let test = import:Std.Test;
 // boundaries.
 let Sha256Tests = module (
     // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
-    let seeded = func(int length, uint64 seed) -> uint8[list] {
+    let seeded = func(length: int, seed: uint64) -> uint8[list] {
         let bytes: uint8[list] = [];
         let x = seed;
         for (let i = 0; i < length; i = i + 1) {
@@ -20,13 +20,13 @@ let Sha256Tests = module (
         return bytes;
     };
 
-    let check_text = func(string text, string expected) -> void {
+    let check_text = func(text: string, expected: string) -> void {
         test.assert_equal_string(expected, hex.encode(sha256s.of(strings.to_bytes(text))));
     };
 
     // The digest of the bytes in one update, in updates of `piece` bytes,
     // and in two updates split at `piece`.
-    let check_pieces = func(uint8[list] bytes, int piece, string expected) -> void {
+    let check_pieces = func(bytes: uint8[list], piece: int, expected: string) -> void {
         let digest = sha256s.create();
         let chunk: uint8[list] = [];
         for (let b in bytes) {
@@ -53,7 +53,7 @@ let Sha256Tests = module (
         test.assert_equal_string(expected, hex.encode(halves.finish()));
     };
 
-    let check_lcg = func(int length, uint64 seed, string expected) -> void {
+    let check_lcg = func(length: int, seed: uint64, expected: string) -> void {
         let bytes = seeded(length, seed);
         let digest = sha256s.of(bytes);
         test.assert_equal_int32(32, digest.length);

@@ -10,7 +10,7 @@ let test = import:Std.Test;
 // is_match, matches_fully, find, and split against the same matches.
 export let RegexCheck = module (
     // Flags: 1 ignore_ascii_case, 2 multi_line, 4 dot_all.
-    export let compile_flags = func(string pattern, int flags) -> regex.Regex {
+    export let compile_flags = func(pattern: string, flags: int) -> regex.Regex {
         let options = new regex.RegexFlags();
         options.ignore_ascii_case = (flags & 1) != 0;
         options.multi_line = (flags & 2) != 0;
@@ -25,7 +25,7 @@ export let RegexCheck = module (
         }
     };
 
-    export let spans = func(regex.Regex r, regex.RegexMatch m) -> int[list] {
+    export let spans = func(r: regex.Regex, m: regex.RegexMatch) -> int[list] {
         let values: int[list] = [];
         let g = 0;
         while (g <= r.group_count()) {
@@ -46,7 +46,7 @@ export let RegexCheck = module (
         return values;
     };
 
-    export let check = func(string pattern, int flags, string input, bool full, int[list] expected) -> void {
+    export let check = func(pattern: string, flags: int, input: string, full: bool, expected: int[list]) -> void {
         let r = compile_flags(pattern, flags);
         let actual: int[list] = [];
         let all = r.find_all(input);

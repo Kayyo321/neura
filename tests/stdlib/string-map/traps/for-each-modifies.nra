@@ -4,11 +4,11 @@ let program = import:Std.Program;
 let string_map = import:Std.Collections.StringMap;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let map = string_map.create<int>();
         map.set("a", 1);
         map.set("b", 2);
-        map.for_each(func(string key, int value) -> void {
+        map.for_each(func(key: string, value: int) -> void {
             map.set("c", 3);
         });
         return program.ExitCode.Ok;

@@ -20,7 +20,7 @@ export let Fs = module (
         export let size: int64 = 0;
         export let modified: instant.Instant = nil;
 
-        export let init = func(FileKind entry_kind, int64 byte_size, instant.Instant modified_at) -> void {
+        export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant) -> void {
             kind = entry_kind;
             size = byte_size;
             modified = modified_at;
@@ -30,16 +30,16 @@ export let Fs = module (
     let StatOutcome = enum (Ok([int, int64, int64, int]), Error(uint32));
     let NamesOutcome = enum (Ok(string[list]), Error(uint32));
     let DoneOutcome = enum (Ok, Error(uint32));
-    let stat_path = func(string path, bool follow_links) -> StatOutcome host("neura.fs.stat", 1);
-    let list_names = func(string path) -> NamesOutcome host("neura.fs.list", 1);
-    let make_directory = func(string path) -> DoneOutcome host("neura.fs.make_directory", 1);
-    let remove_path = func(string path, bool directory) -> DoneOutcome host("neura.fs.remove", 1);
-    let rename_path = func(string from, string to) -> DoneOutcome host("neura.fs.rename", 1);
+    let stat_path = func(path: string, follow_links: bool) -> StatOutcome host("neura.fs.stat", 1);
+    let list_names = func(path: string) -> NamesOutcome host("neura.fs.list", 1);
+    let make_directory = func(path: string) -> DoneOutcome host("neura.fs.make_directory", 1);
+    let remove_path = func(path: string, directory: bool) -> DoneOutcome host("neura.fs.remove", 1);
+    let rename_path = func(from: string, to: string) -> DoneOutcome host("neura.fs.rename", 1);
 
     // Bytes per read and write of copy_file and read_bytes.
     export const CopyBufferSize: int = 65536;
 
-    export let read_bytes = func(paths.Path path) -> result.Result<uint8[list]> {
+    export let read_bytes = func(path: paths.Path) -> result.Result<uint8[list]> {
         match (files.open(path, files.OpenMode.Read)) {
             result.Result.Ok(file) => {
                 return read_open(file);
@@ -51,7 +51,7 @@ export let Fs = module (
     };
 
     // The file's text; invalid UTF-8 fails with InvalidData.
-    export let read_text = func(paths.Path path) -> result.Result<string> {
+    export let read_text = func(path: paths.Path) -> result.Result<string> {
         match (read_bytes(path)) {
             result.Result.Ok(data) => {
                 let [valid, text] = string.from_utf8(data);
@@ -67,21 +67,21 @@ export let Fs = module (
     };
 
     // Creates or truncates the file and writes the bytes.
-    export let write_bytes = func(paths.Path path, uint8[list] data) -> result.Result<unit.Unit> {
+    export let write_bytes = func(path: paths.Path, data: uint8[list]) -> result.Result<unit.Unit> {
         return write_mode(path, data, files.OpenMode.Write);
     };
 
-    export let write_text = func(paths.Path path, string text) -> result.Result<unit.Unit> {
+    export let write_text = func(path: paths.Path, text: string) -> result.Result<unit.Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Write);
     };
 
     // Creates the file if needed and writes the text at its end.
-    export let append_text = func(paths.Path path, string text) -> result.Result<unit.Unit> {
+    export let append_text = func(path: paths.Path, text: string) -> result.Result<unit.Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Append);
     };
 
     // Ok(false) for NotFound; other failures are errors. Follows links.
-    export let exists = func(paths.Path path) -> result.Result<bool> {
+    export let exists = func(path: paths.Path) -> result.Result<bool> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(_) => result.Result<bool>.Ok(true),
             StatOutcome.Error(code) => missing_or_error(code, path.to_string()),
@@ -90,7 +90,7 @@ export let Fs = module (
 
     // The kind, size in bytes, and last modification time of an entry,
     // following links.
-    export let metadata = func(paths.Path path) -> result.Result<FileMetadata> {
+    export let metadata = func(path: paths.Path) -> result.Result<FileMetadata> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(status) => result.Result<FileMetadata>.Ok(metadata_of(status)),
             StatOutcome.Error(code) => result.Result<FileMetadata>.Err(host_error.io(code, "metadata failed", path.to_string())),
@@ -98,7 +98,7 @@ export let Fs = module (
     };
 
     // The directory's entries joined to `path`, sorted by name bytes.
-    export let list = func(paths.Path path) -> result.Result<paths.Path[list]> {
+    export let list = func(path: paths.Path) -> result.Result<paths.Path[list]> {
         match (list_names(path.to_string())) {
             NamesOutcome.Ok(names) => {
                 let entries: paths.Path[list] = [];
@@ -113,13 +113,13 @@ export let Fs = module (
         }
     };
 
-    export let create_directory = func(paths.Path path) -> result.Result<unit.Unit> {
+    export let create_directory = func(path: paths.Path) -> result.Result<unit.Unit> {
         return done(make_directory(path.to_string()), "create directory failed", path.to_string());
     };
 
     // Creates the directory and any missing parents; succeeds when the
     // directory already exists.
-    export let create_directories = func(paths.Path path) -> result.Result<unit.Unit> {
+    export let create_directories = func(path: paths.Path) -> result.Result<unit.Unit> {
         let text = path.to_string();
         match (make_directory(text)) {
             DoneOutcome.Ok => {
@@ -149,19 +149,19 @@ export let Fs = module (
 
     // Removes a file or another entry that is not a directory, such as a
     // link (the link, not its target).
-    export let remove_file = func(paths.Path path) -> result.Result<unit.Unit> {
+    export let remove_file = func(path: paths.Path) -> result.Result<unit.Unit> {
         return done(remove_path(path.to_string(), false), "remove file failed", path.to_string());
     };
 
     // Removes an empty directory.
-    export let remove_directory = func(paths.Path path) -> result.Result<unit.Unit> {
+    export let remove_directory = func(path: paths.Path) -> result.Result<unit.Unit> {
         return done(remove_path(path.to_string(), true), "remove directory failed", path.to_string());
     };
 
     // Removes `path` and, for a directory, everything below it: depth first,
     // in sorted order. Links and other entries of kind Other are removed
     // without descending into them. Stops at the first error.
-    export let remove_tree = func(paths.Path path) -> result.Result<unit.Unit> {
+    export let remove_tree = func(path: paths.Path) -> result.Result<unit.Unit> {
         let text = path.to_string();
         match (stat_path(text, false)) {
             StatOutcome.Ok(status) => {
@@ -192,13 +192,13 @@ export let Fs = module (
     };
 
     // Renames or moves an entry, replacing an existing file at `to`.
-    export let rename = func(paths.Path from, paths.Path to) -> result.Result<unit.Unit> {
+    export let rename = func(from: paths.Path, to: paths.Path) -> result.Result<unit.Unit> {
         return done(rename_path(from.to_string(), to.to_string()), "rename failed", from.to_string());
     };
 
     // Copies a file's bytes through a 65,536-byte buffer, replacing an
     // existing target. Both files are closed on every path.
-    export let copy_file = func(paths.Path from, paths.Path to) -> result.Result<unit.Unit> {
+    export let copy_file = func(from: paths.Path, to: paths.Path) -> result.Result<unit.Unit> {
         let source: files.File = nil;
         match (files.open(from, files.OpenMode.Read)) {
             result.Result.Ok(opened) => {
@@ -250,7 +250,7 @@ export let Fs = module (
         return target.close();
     };
 
-    let read_open = func(files.File file) -> result.Result<uint8[list]> {
+    let read_open = func(file: files.File) -> result.Result<uint8[list]> {
         let data: uint8[list] = [];
         while (true) {
             match (file.read(CopyBufferSize)) {
@@ -277,7 +277,7 @@ export let Fs = module (
     };
 
     // A failed write is reported after the file is closed.
-    let write_mode = func(paths.Path path, uint8[list] data, files.OpenMode mode) -> result.Result<unit.Unit> {
+    let write_mode = func(path: paths.Path, data: uint8[list], mode: files.OpenMode) -> result.Result<unit.Unit> {
         match (files.open(path, mode)) {
             result.Result.Ok(file) => {
                 match (file.write(data)) {
@@ -296,7 +296,7 @@ export let Fs = module (
         }
     };
 
-    let metadata_of = func([int, int64, int64, int] status) -> FileMetadata {
+    let metadata_of = func(status: [int, int64, int64, int]) -> FileMetadata {
         let kind = FileKind.Other;
         if (status[0] == 0) {
             kind = FileKind.File;
@@ -306,35 +306,35 @@ export let Fs = module (
         return new FileMetadata(kind, status[1], instant.of_epoch_seconds(status[2], status[3]));
     };
 
-    let missing_or_error = func(uint32 code, string path) -> result.Result<bool> {
+    let missing_or_error = func(code: uint32, path: string) -> result.Result<bool> {
         if (code == 1) {
             return result.Result<bool>.Ok(false);
         }
         return result.Result<bool>.Err(host_error.io(code, "metadata failed", path));
     };
 
-    let existing_directory = func(string text) -> result.Result<unit.Unit> {
+    let existing_directory = func(text: string) -> result.Result<unit.Unit> {
         return match (stat_path(text, true)) {
             StatOutcome.Ok(status) => directory_or_exists(status[0], text),
             StatOutcome.Error(code) => result.Result<unit.Unit>.Err(host_error.io(code, "create directory failed", text)),
         };
     };
 
-    let directory_or_exists = func(int kind, string text) -> result.Result<unit.Unit> {
+    let directory_or_exists = func(kind: int, text: string) -> result.Result<unit.Unit> {
         if (kind == 1) {
             return bytes.ok();
         }
         return result.Result<unit.Unit>.Err(host_error.io(3, "create directory failed", text));
     };
 
-    let retry_failed = func(uint32 code, string text) -> result.Result<unit.Unit> {
+    let retry_failed = func(code: uint32, text: string) -> result.Result<unit.Unit> {
         if (code == 3) {
             return existing_directory(text);
         }
         return result.Result<unit.Unit>.Err(host_error.io(code, "create directory failed", text));
     };
 
-    let done = func(DoneOutcome outcome, string message, string path) -> result.Result<unit.Unit> {
+    let done = func(outcome: DoneOutcome, message: string, path: string) -> result.Result<unit.Unit> {
         return match (outcome) {
             DoneOutcome.Ok => bytes.ok(),
             DoneOutcome.Error(code) => result.Result<unit.Unit>.Err(host_error.io(code, message, path)),

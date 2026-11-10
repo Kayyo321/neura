@@ -8,7 +8,7 @@ let result = import:Std.Core.Result;
 // the request with the remaining bytes. The trace's counts are written by
 // hand: 4, 3, and 4 bytes of "hello world", and so on.
 export let PartialWrites = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print("hello world");
         console.print_line("");
         match (console.try_error_line("abc")) {

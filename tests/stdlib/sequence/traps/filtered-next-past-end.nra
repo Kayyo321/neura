@@ -4,8 +4,8 @@ let program = import:Std.Program;
 let sequence = import:Std.Collections.Sequence;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
-        let items = sequence.range(0, 4).filter(func(int v) -> bool {
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let items = sequence.range(0, 4).filter(func(v: int) -> bool {
             return v > 2;
         }).iterator();
         items.next();

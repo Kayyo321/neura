@@ -4,11 +4,11 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Narrow = module:program.Entry (
-    let to_byte = func(int32 value) -> byte {
+    let to_byte = func(value: int32) -> byte {
         return value as byte;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (to_byte(255) == 255) {
             console.print_line("255 fits in a byte");
         }

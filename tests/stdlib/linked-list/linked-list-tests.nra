@@ -13,13 +13,13 @@ let LinkedListTests = module (
         export let key: int;
         export let order: int;
 
-        export let init = func(int k, int o) -> void {
+        export let init = func(k: int, o: int) -> void {
             key = k;
             order = o;
         };
     );
 
-    let compare = func(int a, int b) -> ordering.Ordering {
+    let compare = func(a: int, b: int) -> ordering.Ordering {
         if (a < b) {
             return ordering.Ordering.Less;
         }
@@ -33,7 +33,7 @@ let LinkedListTests = module (
         return linked_list.of<int>([3, 1, 4, 1, 5]);
     };
 
-    let text = func(linked_list.LinkedList<int> items) -> string {
+    let text = func(items: linked_list.LinkedList<int>) -> string {
         items.validate();
         return items.to_string();
     };
@@ -170,7 +170,7 @@ let LinkedListTests = module (
             // Replacing values is not structural.
             items.set(0, value);
         }
-        items.for_each(func(int value) -> void {
+        items.for_each(func(value: int) -> void {
             seen.append(value);
         });
         test.assert_equal_string("[1, 2, 2, 2]", seen.to_string());
@@ -185,26 +185,26 @@ let LinkedListTests = module (
     export let test_callbacks = func() -> void {
         let items = numbers();
         let seen: int[list] = [];
-        test.assert_equal_int32(2, items.remove_if(func(int value) -> bool {
+        test.assert_equal_int32(2, items.remove_if(func(value: int) -> bool {
             seen.append(value);
             return value == 1;
         }));
         test.assert_equal_string("[3, 1, 4, 1, 5]", seen.to_string());
         test.assert_equal_string("[3, 4, 5]", text(items));
-        test.assert_equal_int32(1, items.retain_if(func(int value) -> bool {
+        test.assert_equal_int32(1, items.retain_if(func(value: int) -> bool {
             return value > 3;
         }));
         test.assert_equal_string("[4, 5]", text(items));
         let calls = cell.of<int>(0);
-        test.assert_equal_int32(1, items.index_where(func(int value) -> bool {
+        test.assert_equal_int32(1, items.index_where(func(value: int) -> bool {
             calls.value = calls.value + 1;
             return value == 5;
         }));
         test.assert_equal_int32(2, calls.value);
-        test.assert_equal_int32(-1, items.index_where(func(int value) -> bool {
+        test.assert_equal_int32(-1, items.index_where(func(value: int) -> bool {
             return false;
         }));
-        test.assert_equal_int32(2, items.retain_if(func(int value) -> bool {
+        test.assert_equal_int32(2, items.retain_if(func(value: int) -> bool {
             return false;
         }));
         test.assert_equal_string("[]", text(items));
@@ -218,7 +218,7 @@ let LinkedListTests = module (
             i = i + 1;
         }
         let walk_before = items.iterator();
-        items.sort(func(Tagged a, Tagged b) -> ordering.Ordering {
+        items.sort(func(a: Tagged, b: Tagged) -> ordering.Ordering {
             return compare(a.key, b.key);
         });
         // Sorting rewrites values only, so an earlier iterator stays valid.

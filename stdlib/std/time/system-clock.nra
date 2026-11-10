@@ -13,7 +13,7 @@ export let SystemClock = module (
     let DoneOutcome = enum (Ok, Error(uint32));
     let wall_clock = func() -> WallOutcome host("neura.clock.wall", 1);
     let monotonic_clock = func() -> NanosOutcome host("neura.clock.monotonic", 1);
-    let sleep_for = func(int64 nanos) -> DoneOutcome host("neura.clock.sleep", 1);
+    let sleep_for = func(nanos: int64) -> DoneOutcome host("neura.clock.sleep", 1);
 
     export let SystemClock = class implements clock.Clock (
         // The host's wall clock as an instant.
@@ -34,7 +34,7 @@ export let SystemClock = module (
 
         // Waits for the duration; a zero or negative duration asks the host
         // to wait for zero nanoseconds.
-        export let sleep = func(duration.Duration span) -> result.Result<unit.Unit> {
+        export let sleep = func(span: duration.Duration) -> result.Result<unit.Unit> {
             let nanos = span.to_nanos();
             if (nanos < 0) {
                 nanos = 0;

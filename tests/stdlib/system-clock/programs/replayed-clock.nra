@@ -11,7 +11,7 @@ let unit = import:Std.Core.Unit;
 // across a sleep, and a sleep's requested nanoseconds. The wall reading was
 // edited by hand to a fixed instant.
 export let ReplayedClock = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let source = system_clock.create();
         console.print_line(result.expect<instant.Instant>(source.now(), "now").to_string());
         let before = result.expect<duration.Duration>(source.monotonic(), "monotonic");

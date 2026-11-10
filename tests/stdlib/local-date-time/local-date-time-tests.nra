@@ -9,7 +9,7 @@ let test = import:Std.Test;
 let zone_offset = import:Std.Time.ZoneOffset;
 
 let LocalDateTimeTests = module (
-    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+    let check_error = func(text: string, kind: error.ParseErrorKind, offset: int) -> void {
         let failure = test.assert_err<local_date_time.LocalDateTime>(local_date_time.parse(text));
         match (failure) {
             error.Error.Parse { kind: actual, offset: at, message: _ } => {
@@ -22,12 +22,12 @@ let LocalDateTimeTests = module (
         }
     };
 
-    let at = func(int year, int month, int day, int hour, int minute, int second, int nano) -> local_date_time.LocalDateTime {
+    let at = func(year: int, month: int, day: int, hour: int, minute: int, second: int, nano: int) -> local_date_time.LocalDateTime {
         return local_date_time.of(local_date.of(year, month, day), local_time.of(hour, minute, second, nano));
     };
 
     // Expected text computed with Python over the total nanoseconds.
-    let check_plus = func(int year, int month, int day, int64 time_of_day, int64 shift, string text) -> void {
+    let check_plus = func(year: int, month: int, day: int, time_of_day: int64, shift: int64, text: string) -> void {
         let start = local_date_time.of(local_date.of(year, month, day), local_time.of_nano_of_day(time_of_day));
         let moved = start.plus(duration.of_nanos(shift));
         test.assert_equal_string(text, moved.to_string());

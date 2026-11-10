@@ -5,8 +5,8 @@ let result = import:Std.Core.Result;
 let test = import:Std.Test;
 
 let BoolTests = module (
-    let check_error = func(result.Result<bool> parsed, error.ParseErrorKind expected_kind, int expected_offset,
-                           string expected_message) -> void {
+    let check_error = func(parsed: result.Result<bool>, expected_kind: error.ParseErrorKind, expected_offset: int,
+                           expected_message: string) -> void {
         let failure = test.assert_err<bool>(parsed);
         match (failure) {
             error.Error.Parse { kind, offset, message } => {

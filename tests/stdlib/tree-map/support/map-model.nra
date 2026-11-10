@@ -12,13 +12,13 @@ let test = import:Std.Test;
 // A sorted model keeps key ids ascending (TreeMap with ascending int keys);
 // otherwise new keys go to the end (insertion order).
 export let MapModel = module (
-    export let run = func<K>(mutable_map.MutableMap<K, int> map, func(int) -> K key_of, func() -> void check,
-                             func() -> void trim, bool sorted, uint64 seed, int operations, int small_domain,
-                             int large_domain) -> void {
+    export let run = func<K>(map: mutable_map.MutableMap<K, int>, key_of: func(int) -> K, check: func() -> void,
+                             trim: func() -> void, sorted: bool, seed: uint64, operations: int, small_domain: int,
+                             large_domain: int) -> void {
         let generator = random.seeded(seed);
         let ids: int[list] = [];
         let values: int[list] = [];
-        let plus = func(int a, int b) -> int {
+        let plus = func(a: int, b: int) -> int {
             return a + b;
         };
         let step = 0;
@@ -74,7 +74,7 @@ export let MapModel = module (
                 test.assert_equal_int32(expected, map.merge(key, value, plus));
                 store(ids, values, id, expected, at, sorted);
             } else if (choice < 82) {
-                let outcome = map.compute(key, func(K ignored, optional.Optional<int> current) -> optional.Optional<int> {
+                let outcome = map.compute(key, func(ignored: K, current: optional.Optional<int>) -> optional.Optional<int> {
                     return adjusted(current, value);
                 });
                 let current = optional.Optional<int>.None;
@@ -94,7 +94,7 @@ export let MapModel = module (
             } else if (choice < 85) {
                 let divisor = 2 + generator.next_int_below(6);
                 let calls = cell.of<int>(0);
-                let removed = map.remove_if(func(K ignored, int v) -> bool {
+                let removed = map.remove_if(func(ignored: K, v: int) -> bool {
                     calls.value = calls.value + 1;
                     return v % divisor == 0;
                 });
@@ -143,7 +143,7 @@ export let MapModel = module (
                 }
             } else {
                 let seen = cell.of<int>(0);
-                map.for_each(func(K k, int v) -> void {
+                map.for_each(func(k: K, v: int) -> void {
                     let i = seen.value;
                     test.assert(k.equals(key_of(ids[i])));
                     test.assert_equal_int32(values[i], v);
@@ -160,28 +160,28 @@ export let MapModel = module (
     // None leaves the key absent; Some(c) becomes absent when c is a
     // multiple of 3 and c + 1 otherwise; an absent key gets the value when it
     // is even.
-    let adjusted = func(optional.Optional<int> current, int value) -> optional.Optional<int> {
+    let adjusted = func(current: optional.Optional<int>, value: int) -> optional.Optional<int> {
         return match (current) {
             optional.Optional.None => even(value),
             optional.Optional.Some(c) => next_unless_third(c),
         };
     };
 
-    let even = func(int value) -> optional.Optional<int> {
+    let even = func(value: int) -> optional.Optional<int> {
         if (value % 2 == 0) {
             return optional.Optional<int>.Some(value);
         }
         return optional.Optional<int>.None;
     };
 
-    let next_unless_third = func(int c) -> optional.Optional<int> {
+    let next_unless_third = func(c: int) -> optional.Optional<int> {
         if (c % 3 == 0) {
             return optional.Optional<int>.None;
         }
         return optional.Optional<int>.Some(c + 1);
     };
 
-    let compare = func<K>(mutable_map.MutableMap<K, int> map, int[list] ids, int[list] values, func(int) -> K key_of) -> void {
+    let compare = func<K>(map: mutable_map.MutableMap<K, int>, ids: int[list], values: int[list], key_of: func(int) -> K) -> void {
         test.assert_equal_int32(ids.length, map.size());
         test.assert_equal_bool(ids.length == 0, map.is_empty());
         let items = map.iterator();
@@ -196,7 +196,7 @@ export let MapModel = module (
         test.assert_equal_int32(ids.length, i);
     };
 
-    let expect_previous = func(optional.Optional<int> actual, int[list] values, int at) -> void {
+    let expect_previous = func(actual: optional.Optional<int>, values: int[list], at: int) -> void {
         if (at >= 0) {
             test.assert_equal_int32(values[at], test.assert_some<int>(actual));
         } else {
@@ -204,7 +204,7 @@ export let MapModel = module (
         }
     };
 
-    let position = func(int[list] items, int item) -> int {
+    let position = func(items: int[list], item: int) -> int {
         let i = 0;
         while (i < items.length) {
             if (items[i] == item) {
@@ -217,7 +217,7 @@ export let MapModel = module (
 
     // Overwrites in place, or adds the key at the end (or at its ascending
     // place for a sorted model).
-    let store = func(int[list] ids, int[list] values, int id, int value, int at, bool sorted) -> void {
+    let store = func(ids: int[list], values: int[list], id: int, value: int, at: int, sorted: bool) -> void {
         if (at >= 0) {
             values[at] = value;
             return;
@@ -236,14 +236,14 @@ export let MapModel = module (
         }
     };
 
-    let drop = func(int[list] ids, int[list] values, int at) -> void {
+    let drop = func(ids: int[list], values: int[list], at: int) -> void {
         if (at >= 0) {
             ids.remove_at(at);
             values.remove_at(at);
         }
     };
 
-    let replace = func(int[list] target, int[list] source) -> void {
+    let replace = func(target: int[list], source: int[list]) -> void {
         while (target.length > 0) {
             target.remove_at(target.length - 1);
         }

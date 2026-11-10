@@ -8,8 +8,8 @@ let weekdays = import:Std.Time.DayOfWeek;
 let LocalDateTests = module (
     // Expected values computed with Python: datetime for the date of the
     // same position in the 400-year cycle, shifted by whole cycles.
-    let check_day = func(int64 epoch_day, int year, int month, int day, weekdays.DayOfWeek weekday, int day_of_year,
-            bool leap, int month_length, string text) -> void {
+    let check_day = func(epoch_day: int64, year: int, month: int, day: int, weekday: weekdays.DayOfWeek, day_of_year: int,
+            leap: bool, month_length: int, text: string) -> void {
         let date = local_date.of_epoch_day(epoch_day);
         test.assert_equal_int32(year, date.year());
         test.assert_equal_int32(month, date.month());
@@ -23,8 +23,8 @@ let LocalDateTests = module (
         test.assert(test.assert_ok<local_date.LocalDate>(local_date.parse(text)).equals(date));
     };
 
-    let check_shift = func(int year, int month, int day, int64 months, string months_text, int64 years, string years_text,
-            int64 days, string days_text, int64 until) -> void {
+    let check_shift = func(year: int, month: int, day: int, months: int64, months_text: string, years: int64, years_text: string,
+            days: int64, days_text: string, until: int64) -> void {
         let date = local_date.of(year, month, day);
         test.assert_equal_string(months_text, date.plus_months(months).to_string());
         test.assert_equal_string(years_text, date.plus_years(years).to_string());
@@ -34,7 +34,7 @@ let LocalDateTests = module (
         test.assert_equal_int64(-until, other.days_until(date));
     };
 
-    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+    let check_error = func(text: string, kind: error.ParseErrorKind, offset: int) -> void {
         let failure = test.assert_err<local_date.LocalDate>(local_date.parse(text));
         match (failure) {
             error.Error.Parse { kind: actual, offset: at, message: _ } => {

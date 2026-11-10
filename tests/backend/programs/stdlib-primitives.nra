@@ -4,17 +4,17 @@ let program = import:Std.Program;
 let Primitives = module:program.Entry (
     let Light = enum (Red, Green, Blue);
 
-    let check = func(bool condition) -> void {
+    let check = func(condition: bool) -> void {
         if (!condition) {
             trap_with_message("primitive check failed");
         }
     };
 
-    let round_trip = func(uint64 bits) -> uint64 {
+    let round_trip = func(bits: uint64) -> uint64 {
         return float64.from_bits(bits).to_bits();
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let text = "Aé🙂";
         check(text.byte_length == 7);
         check(text.byte_at(1) == 195);

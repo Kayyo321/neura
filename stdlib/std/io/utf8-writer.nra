@@ -8,21 +8,21 @@ export let Utf8Writer = module (
     export let Utf8Writer = class (
         let sink: func(uint8[list]) -> result.Result<unit.Unit>;
 
-        export let init = func(func(uint8[list]) -> result.Result<unit.Unit> output) -> void {
+        export let init = func(output: func(uint8[list]) -> result.Result<unit.Unit>) -> void {
             sink = output;
         };
 
-        export let write = func(string text) -> result.Result<unit.Unit> {
+        export let write = func(text: string) -> result.Result<unit.Unit> {
             return sink(bytes.of_string(text));
         };
 
         // Writes the text and one LF.
-        export let write_line = func(string text) -> result.Result<unit.Unit> {
+        export let write_line = func(text: string) -> result.Result<unit.Unit> {
             return sink(bytes.of_string(text + "\n"));
         };
     );
 
-    export let create = func(func(uint8[list]) -> result.Result<unit.Unit> sink) -> Utf8Writer {
+    export let create = func(sink: func(uint8[list]) -> result.Result<unit.Unit>) -> Utf8Writer {
         return new Utf8Writer(sink);
     };
 );

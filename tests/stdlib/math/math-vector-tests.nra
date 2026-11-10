@@ -11,7 +11,7 @@ let MathVectorTests = module (
 
     // Distance in ulps between two float64 bit patterns, with -0.0 and 0.0
     // at distance 0; a NaN differs from everything but itself.
-    let distance = func(uint64 a, uint64 b) -> uint64 {
+    let distance = func(a: uint64, b: uint64) -> uint64 {
         if (a == b) {
             return 0;
         }
@@ -29,7 +29,7 @@ let MathVectorTests = module (
         return ma + mb;
     };
 
-    let check = func(string name, uint64 x, uint64 got, uint64 expected, uint64 libm, uint64 libm_ulps, bool compare_libm) -> void {
+    let check = func(name: string, x: uint64, got: uint64, expected: uint64, libm: uint64, libm_ulps: uint64, compare_libm: bool) -> void {
         if (got != expected) {
             test.fail(name + " of bits " + x.to_string() + ": expected bits " + expected.to_string() + " ("
                 + float64.from_bits(expected).to_string() + "), got " + got.to_string() + " ("
@@ -41,7 +41,7 @@ let MathVectorTests = module (
         }
     };
 
-    let check_unary = func(string name, func(float64) -> float64 f, uint64[list] cases, uint64 libm_ulps) -> void {
+    let check_unary = func(name: string, f: func(float64) -> float64, cases: uint64[list], libm_ulps: uint64) -> void {
         test.assert(cases.length > 0);
         let i = 0;
         while (i < cases.length) {
@@ -51,7 +51,7 @@ let MathVectorTests = module (
         }
     };
 
-    let check_binary = func(string name, func(float64, float64) -> float64 f, uint64[list] cases, uint64 libm_ulps) -> void {
+    let check_binary = func(name: string, f: func(float64, float64) -> float64, cases: uint64[list], libm_ulps: uint64) -> void {
         test.assert(cases.length > 0);
         let i = 0;
         while (i < cases.length) {

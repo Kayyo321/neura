@@ -4,7 +4,7 @@ let program = import:Std.Program;
 let sequence = import:Std.Collections.Sequence;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         sequence.range(0, 3).windowed(0);
         return program.ExitCode.Ok;
     };

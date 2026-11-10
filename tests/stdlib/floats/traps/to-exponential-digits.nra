@@ -5,7 +5,7 @@ let floats = import:Std.Core.Float32;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(floats.to_exponential(1.5, 0));
         console.print_line(floats.to_exponential(1.5, 101));
         console.print_line("unreachable");

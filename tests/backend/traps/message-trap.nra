@@ -3,11 +3,11 @@
 let program = import:Std.Program;
 
 let Main = module:program.Entry (
-    let stop = func(string reason) -> int {
+    let stop = func(reason: string) -> int {
         trap_with_message("rejected: " + reason);
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         stop("café");
         return program.ExitCode.Ok;
     };

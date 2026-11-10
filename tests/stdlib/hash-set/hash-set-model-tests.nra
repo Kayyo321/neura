@@ -5,7 +5,7 @@ let set_model = import:SetModel;
 // against a list of ids in insertion order, calling validate() after every
 // operation.
 let HashSetModelTests = module (
-    let identity = func(int id) -> int {
+    let identity = func(id: int) -> int {
         return id;
     };
 
@@ -16,9 +16,9 @@ let HashSetModelTests = module (
 
     // Four hash values for every element: long probe chains.
     export let test_model_colliding_elements = func() -> void {
-        let set = hash_set.with_keys<int>(func(int value) -> uint32 {
+        let set = hash_set.with_keys<int>(func(value: int) -> uint32 {
             return (value % 4) as uint32;
-        }, func(int a, int b) -> bool {
+        }, func(a: int, b: int) -> bool {
             return a == b;
         });
         set_model.run<int>(set, identity, set.validate, set.trim, false, 12, 3000, 12, 40);
@@ -26,7 +26,7 @@ let HashSetModelTests = module (
 
     export let test_model_string_elements = func() -> void {
         let set = hash_set.with_capacity<string>(50);
-        set_model.run<string>(set, func(int id) -> string {
+        set_model.run<string>(set, func(id: int) -> string {
             return "s" + id.to_string();
         }, set.validate, set.trim, false, 13, 3000, 24, 160);
     };

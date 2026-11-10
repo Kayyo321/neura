@@ -5,11 +5,11 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Recursion = module:program.Entry (
-    let depth = func(uint32 n) -> uint32 {
+    let depth = func(n: uint32) -> uint32 {
         return depth(n + 1);
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (depth(0) == 0) {
             console.print_line("unreachable");
         }

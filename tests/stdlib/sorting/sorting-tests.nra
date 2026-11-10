@@ -5,7 +5,7 @@ let sorting = import:Std.Collections.Sorting;
 let test = import:Std.Test;
 
 let SortingTests = module (
-    let compare = func(int a, int b) -> ordering.Ordering {
+    let compare = func(a: int, b: int) -> ordering.Ordering {
         if (a < b) {
             return ordering.Ordering.Less;
         }
@@ -16,20 +16,20 @@ let SortingTests = module (
     };
 
     // Orders [key, position] pairs by key only.
-    let by_key = func([int, int] a, [int, int] b) -> ordering.Ordering {
+    let by_key = func(a: [int, int], b: [int, int]) -> ordering.Ordering {
         return compare(a[0], b[0]);
     };
 
     // A comparator that counts its calls.
-    let counting = func(cell.Cell<int> calls) -> func(int, int) -> ordering.Ordering {
-        return func(int a, int b) -> ordering.Ordering {
+    let counting = func(calls: cell.Cell<int>) -> func(int, int) -> ordering.Ordering {
+        return func(a: int, b: int) -> ordering.Ordering {
             calls.value = calls.value + 1;
             return compare(a, b);
         };
     };
 
     // Insertion sort by adjacent exchanges: the trivially correct reference.
-    let reference = func(int[list] items) -> int[list] {
+    let reference = func(items: int[list]) -> int[list] {
         let result: int[list] = [];
         for (let value in items) {
             result.append(value);
@@ -48,7 +48,7 @@ let SortingTests = module (
         return result;
     };
 
-    let random_list = func(model_random.Generator random, int count, int limit) -> int[list] {
+    let random_list = func(random: model_random.Generator, count: int, limit: int) -> int[list] {
         let result: int[list] = [];
         let i = 0;
         while (i < count) {
@@ -59,7 +59,7 @@ let SortingTests = module (
     };
 
     // The smallest k with 2^k >= n.
-    let ceiling_log2 = func(int n) -> int {
+    let ceiling_log2 = func(n: int) -> int {
         let k = 0;
         let power = 1;
         while (power < n) {
@@ -203,7 +203,7 @@ let SortingTests = module (
 
     export let test_other_element_types = func() -> void {
         let words: string[list] = ["pear", "apple", "fig", "apple", "banana"];
-        sorting.sort<string>(words, func(string a, string b) -> ordering.Ordering {
+        sorting.sort<string>(words, func(a: string, b: string) -> ordering.Ordering {
             if (a == b) {
                 return ordering.Ordering.Equal;
             }
@@ -224,7 +224,7 @@ let SortingTests = module (
         });
         test.assert_equal_string("[apple, apple, banana, fig, pear]", words.to_string());
         let reversed: int[list] = [1, 3, 2];
-        sorting.sort<int>(reversed, func(int a, int b) -> ordering.Ordering {
+        sorting.sort<int>(reversed, func(a: int, b: int) -> ordering.Ordering {
             return ordering.reverse(compare(a, b));
         });
         test.assert_equal_string("[3, 2, 1]", reversed.to_string());

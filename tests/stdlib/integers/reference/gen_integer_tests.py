@@ -311,13 +311,13 @@ let {M}Tests = module (
     out.append(decl("pow_values", T, [lit(c[2]) for c in pow_cases]))
 
     out.append(f"""
-    let check = func(bool holds, string what, int index) -> void {{
+    let check = func(holds: bool, what: string, index: int) -> void {{
         if (!holds) {{
             test.fail(what + " differs from the reference for case " + index.to_string());
         }}
     }};
 
-    let check_optional = func(optional.Optional<{T}> actual, bool present, {T} expected, string what, int index) -> void {{
+    let check_optional = func(actual: optional.Optional<{T}>, present: bool, expected: {T}, what: string, index: int) -> void {{
         match (actual) {{
             optional.Optional.None => {{
                 check(!present, what, index);
@@ -328,7 +328,7 @@ let {M}Tests = module (
         }}
     }};
 
-    let check_parse = func(result.Result<{T}> actual, int index) -> void {{
+    let check_parse = func(actual: result.Result<{T}>, index: int) -> void {{
         match (actual) {{
             result.Result.Ok(value) => {{
                 check(parse_ok[index] && value == parse_values[index], "parse value", index);

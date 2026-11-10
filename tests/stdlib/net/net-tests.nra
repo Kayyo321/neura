@@ -13,14 +13,14 @@ let optional = import:Std.Core.Optional;
 
 // Runs against real sockets on the loopback interface.
 let NetTests = module (
-    let kind_of = func(error.Error e) -> error.IoErrorKind {
+    let kind_of = func(e: error.Error) -> error.IoErrorKind {
         return match (e) {
             error.Error.Io { kind, message, path } => kind,
             _ => error.IoErrorKind.Other,
         };
     };
 
-    let expect_kind = func<T>(result.Result<T> r, error.IoErrorKind expected) -> void {
+    let expect_kind = func<T>(r: result.Result<T>, expected: error.IoErrorKind) -> void {
         let failure = test.assert_err<T>(r);
         test.assert_with(kind_of(failure) == expected, "expected " + expected.to_string() + ", got " + error.message(failure));
     };
@@ -29,11 +29,11 @@ let NetTests = module (
         return test.assert_ok<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0));
     };
 
-    let connect = func(int port) -> tcp_stream.TcpStream {
+    let connect = func(port: int) -> tcp_stream.TcpStream {
         return test.assert_ok<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", port, duration.of_seconds(5)));
     };
 
-    let bytes_of = func(string text) -> uint8[list] {
+    let bytes_of = func(text: string) -> uint8[list] {
         let out: uint8[list] = [];
         let i = 0;
         while (i < text.byte_length) {
@@ -43,7 +43,7 @@ let NetTests = module (
         return out;
     };
 
-    let text_of = func(uint8[list] data) -> string {
+    let text_of = func(data: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(data);
         test.assert(valid);
         return text;

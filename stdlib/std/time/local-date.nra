@@ -13,7 +13,7 @@ export let LocalDate = module (
         let month_value: int;
         let day_value: int;
 
-        export let init = func(int year, int month, int day) -> void {
+        export let init = func(year: int, month: int, day: int) -> void {
             year_value = year;
             month_value = month;
             day_value = day;
@@ -39,24 +39,24 @@ export let LocalDate = module (
 
         // These trap with "invalid argument: date out of range" when the
         // result's year is outside -999,999 through 999,999.
-        export let plus_days = func(int64 days) -> LocalDate {
+        export let plus_days = func(days: int64) -> LocalDate {
             return of_epoch_day(to_epoch_day() + days);
         };
 
         // Month and year changes clamp the day to the end of the target
         // month.
-        export let plus_months = func(int64 months) -> LocalDate {
+        export let plus_months = func(months: int64) -> LocalDate {
             let total = (year_value as int64) * 12 + ((month_value - 1) as int64) + months;
             let target_month = (calendar.floor_mod(total, 12) + 1) as int;
             return clamped(calendar.floor_div(total, 12), target_month, day_value);
         };
 
-        export let plus_years = func(int64 years) -> LocalDate {
+        export let plus_years = func(years: int64) -> LocalDate {
             return clamped((year_value as int64) + years, month_value, day_value);
         };
 
         // other's epoch day minus this one's.
-        export let days_until = func(LocalDate other) -> int64 {
+        export let days_until = func(other: LocalDate) -> int64 {
             return other.to_epoch_day() - to_epoch_day();
         };
 
@@ -79,7 +79,7 @@ export let LocalDate = module (
             return calendar.month_length(year_value as int64, month_value);
         };
 
-        export let compare_to = func(LocalDate other) -> ordering.Ordering {
+        export let compare_to = func(other: LocalDate) -> ordering.Ordering {
             if (year_value != other.year_value) {
                 return order(year_value < other.year_value);
             }
@@ -92,7 +92,7 @@ export let LocalDate = module (
             return ordering.Ordering.Equal;
         };
 
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is LocalDate)) {
                 return false;
             }
@@ -116,7 +116,7 @@ export let LocalDate = module (
     // Traps with "invalid argument: invalid date" for a year outside
     // -999,999 through 999,999, a month outside 1 through 12, or a day
     // outside the month.
-    export let of = func(int year, int month, int day) -> LocalDate {
+    export let of = func(year: int, month: int, day: int) -> LocalDate {
         if (!valid(year, month, day)) {
             trap_with_message("invalid argument: invalid date");
         }
@@ -124,7 +124,7 @@ export let LocalDate = module (
     };
 
     // nil for invalid components.
-    export let try_of = func(int year, int month, int day) -> LocalDate {
+    export let try_of = func(year: int, month: int, day: int) -> LocalDate {
         if (!valid(year, month, day)) {
             return nil;
         }
@@ -133,7 +133,7 @@ export let LocalDate = module (
 
     // Traps with "invalid argument: date out of range" outside
     // -999999-01-01 through 999999-12-31.
-    export let of_epoch_day = func(int64 epoch_day) -> LocalDate {
+    export let of_epoch_day = func(epoch_day: int64) -> LocalDate {
         if (epoch_day < calendar.MinEpochDay || epoch_day > calendar.MaxEpochDay) {
             trap_with_message("invalid argument: date out of range");
         }
@@ -145,7 +145,7 @@ export let LocalDate = module (
     // digits. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first
     // byte that does not fit; OutOfRange at the first byte of a year beyond
     // 999,999, a month outside 1 through 12, or a day outside the month.
-    export let parse = func(string text) -> result.Result<LocalDate> {
+    export let parse = func(text: string) -> result.Result<LocalDate> {
         let scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);
         scan.finish();
@@ -155,14 +155,14 @@ export let LocalDate = module (
         return result.Result<LocalDate>.Ok(new LocalDate(year as int, month, day));
     };
 
-    let valid = func(int year, int month, int day) -> bool {
+    let valid = func(year: int, month: int, day: int) -> bool {
         if (year < -999999 || year > 999999 || month < 1 || month > 12) {
             return false;
         }
         return day >= 1 && day <= calendar.month_length(year as int64, month);
     };
 
-    let clamped = func(int64 year, int month, int day) -> LocalDate {
+    let clamped = func(year: int64, month: int, day: int) -> LocalDate {
         if (year < calendar.MinYear || year > calendar.MaxYear) {
             trap_with_message("invalid argument: date out of range");
         }
@@ -173,7 +173,7 @@ export let LocalDate = module (
         return new LocalDate(year as int, month, day);
     };
 
-    let order = func(bool less) -> ordering.Ordering {
+    let order = func(less: bool) -> ordering.Ordering {
         if (less) {
             return ordering.Ordering.Less;
         }

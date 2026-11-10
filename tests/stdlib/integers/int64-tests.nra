@@ -696,13 +696,13 @@ let Int64Tests = module (
         2187, 1, 10, 100, 1000, 100000, 10000000
     ];
 
-    let check = func(bool holds, string what, int index) -> void {
+    let check = func(holds: bool, what: string, index: int) -> void {
         if (!holds) {
             test.fail(what + " differs from the reference for case " + index.to_string());
         }
     };
 
-    let check_optional = func(optional.Optional<int64> actual, bool present, int64 expected, string what, int index) -> void {
+    let check_optional = func(actual: optional.Optional<int64>, present: bool, expected: int64, what: string, index: int) -> void {
         match (actual) {
             optional.Optional.None => {
                 check(!present, what, index);
@@ -713,7 +713,7 @@ let Int64Tests = module (
         }
     };
 
-    let check_parse = func(result.Result<int64> actual, int index) -> void {
+    let check_parse = func(actual: result.Result<int64>, index: int) -> void {
         match (actual) {
             result.Result.Ok(value) => {
                 check(parse_ok[index] && value == parse_values[index], "parse value", index);

@@ -28,7 +28,7 @@ let ClockTests = module (
             return result.Result<duration.Duration>.Ok(duration.of_nanos(reading));
         };
 
-        export let sleep = func(duration.Duration span) -> result.Result<unit.Unit> {
+        export let sleep = func(span: duration.Duration) -> result.Result<unit.Unit> {
             return result.Result<unit.Unit>.Err(failure());
         };
     );
@@ -37,15 +37,15 @@ let ClockTests = module (
         return error.Error.Io { kind: error.IoErrorKind.CapabilityDenied, message: "clock denied", path: "" };
     };
 
-    let now_of = func(clock.Clock source) -> instant.Instant {
+    let now_of = func(source: clock.Clock) -> instant.Instant {
         return test.assert_ok<instant.Instant>(source.now());
     };
 
-    let monotonic_of = func(clock.Clock source) -> int64 {
+    let monotonic_of = func(source: clock.Clock) -> int64 {
         return test.assert_ok<duration.Duration>(source.monotonic()).to_nanos();
     };
 
-    let elapsed_of = func(stopwatch.Stopwatch watch) -> int64 {
+    let elapsed_of = func(watch: stopwatch.Stopwatch) -> int64 {
         return test.assert_ok<duration.Duration>(watch.elapsed()).to_nanos();
     };
 

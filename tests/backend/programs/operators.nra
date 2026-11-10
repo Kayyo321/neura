@@ -19,17 +19,17 @@ let Operators = module:program.Entry (
         return 1 / 0;
     };
 
-    let bit_ops = func(byte value, uint64 count, int8 signed_value) -> bool {
+    let bit_ops = func(value: byte, count: uint64, signed_value: int8) -> bool {
         return (value & 10) == 8 && (value | 1) == 13 && (value ^ 3) == 15 &&
             (~value == 243) && (value << count) == 128 && (value >> count) == 0 &&
             (signed_value >> count) == -1 && ((1 as byte) << 7) == 128;
     };
 
-    let wide_shift = func(uint64 value, int8 count) -> uint64 {
+    let wide_shift = func(value: uint64, count: int8) -> uint64 {
         return value << count;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (subject() == change_subject() or 2 or 3 or fail() && reads == 1 && current == 2) {
             console.print_line("or captures the subject and short-circuits");
         }

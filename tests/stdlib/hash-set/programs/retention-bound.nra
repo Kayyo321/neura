@@ -12,7 +12,7 @@ let program = import:Std.Program;
 export let Main = module:program.Entry (
     let Blob = class (
         export let data: int[list] = [];
-        export let init = func(int seed, int size) -> void {
+        export let init = func(seed: int, size: int) -> void {
             let i = 0;
             while (i < size) {
                 data.append(seed + i);
@@ -21,7 +21,7 @@ export let Main = module:program.Entry (
         };
     );
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let set = hash_set.with_capacity<Blob>(1000);
         let i = 0;
         while (i < 7) {
@@ -40,7 +40,7 @@ export let Main = module:program.Entry (
                     set.remove(previous);
                 } else {
                     let target = previous;
-                    set.remove_if(func(Blob item) -> bool {
+                    set.remove_if(func(item: Blob) -> bool {
                         return item == target;
                     });
                 }

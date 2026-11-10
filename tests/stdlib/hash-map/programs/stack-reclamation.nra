@@ -9,7 +9,7 @@ let program = import:Std.Program;
 // removes it again. The run needs about 8,500 cells; keeping even the 7 dead
 // entries that compaction rule 2 would allow needs about 23,000.
 export let Main = module:program.Entry (
-    let block = func(int seed) -> int[list] {
+    let block = func(seed: int) -> int[list] {
         let values: int[list] = [];
         let i = 0;
         while (i < 2000) {
@@ -19,7 +19,7 @@ export let Main = module:program.Entry (
         return values;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let map = hash_map.with_capacity<int, int[list]>(1000);
         let i = 0;
         while (i < 7) {
@@ -37,7 +37,7 @@ export let Main = module:program.Entry (
                 total = total + (map.require(round)[2] as int64);
                 let removed = map.remove(round);
             } else {
-                map.remove_if(func(int key, int[list] value) -> bool {
+                map.remove_if(func(key: int, value: int[list]) -> bool {
                     return key >= 0;
                 });
             }

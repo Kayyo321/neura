@@ -4,7 +4,7 @@ let int_map = import:Std.Collections.IntMap;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let map = int_map.create<int>();
         map.set(1, 1);
         map.set(2, 2);

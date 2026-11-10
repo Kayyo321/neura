@@ -23,36 +23,36 @@ export let Float32 = module (
     const SignBit: uint32 = 2147483648;
     const Magnitude: uint32 = 2147483647;
 
-    export let is_nan = func(float32 v) -> bool {
+    export let is_nan = func(v: float32) -> bool {
         return v != v;
     };
 
-    export let is_infinite = func(float32 v) -> bool {
+    export let is_infinite = func(v: float32) -> bool {
         return (v.to_bits() & Magnitude) == 2139095040;
     };
 
-    export let is_finite = func(float32 v) -> bool {
+    export let is_finite = func(v: float32) -> bool {
         return (v.to_bits() & 2139095040) != 2139095040;
     };
 
     // Reads the sign bit, so it is true for -0.0 and for a NaN with the sign
     // bit set.
-    export let is_negative = func(float32 v) -> bool {
+    export let is_negative = func(v: float32) -> bool {
         return (v.to_bits() & SignBit) != 0;
     };
 
     // Clears the sign bit; never rounds.
-    export let abs = func(float32 v) -> float32 {
+    export let abs = func(v: float32) -> float32 {
         return float32.from_bits(v.to_bits() & Magnitude);
     };
 
     // The magnitude of `magnitude` with the sign bit of `sign`.
-    export let copy_sign = func(float32 magnitude, float32 sign) -> float32 {
+    export let copy_sign = func(magnitude: float32, sign: float32) -> float32 {
         return float32.from_bits((magnitude.to_bits() & Magnitude) | (sign.to_bits() & SignBit));
     };
 
     // NaN (canonical) if either operand is NaN; -0.0 is less than 0.0.
-    export let min = func(float32 a, float32 b) -> float32 {
+    export let min = func(a: float32, b: float32) -> float32 {
         if (a != a || b != b) {
             return NaN;
         }
@@ -68,7 +68,7 @@ export let Float32 = module (
         return b;
     };
 
-    export let max = func(float32 a, float32 b) -> float32 {
+    export let max = func(a: float32, b: float32) -> float32 {
         if (a != a || b != b) {
             return NaN;
         }
@@ -86,7 +86,7 @@ export let Float32 = module (
 
     // max(v, low), then min with high, so a NaN `v` gives NaN. Traps when
     // either bound is NaN or `low` exceeds `high` (-0.0 is below 0.0).
-    export let clamp = func(float32 v, float32 low, float32 high) -> float32 {
+    export let clamp = func(v: float32, low: float32, high: float32) -> float32 {
         if (low != low || high != high) {
             trap_with_message("invalid argument: NaN bound");
         }
@@ -98,39 +98,39 @@ export let Float32 = module (
 
     // Rounding to an integral value. All keep the sign of zero (ceil(-0.5)
     // is -0.0); infinities are unchanged and a NaN becomes the canonical NaN.
-    export let floor = func(float32 v) -> float32 {
+    export let floor = func(v: float32) -> float32 {
         return round_with(v, 0);
     };
 
-    export let ceil = func(float32 v) -> float32 {
+    export let ceil = func(v: float32) -> float32 {
         return round_with(v, 1);
     };
 
-    export let trunc = func(float32 v) -> float32 {
+    export let trunc = func(v: float32) -> float32 {
         return round_with(v, 2);
     };
 
     // Halves round away from zero.
-    export let round = func(float32 v) -> float32 {
+    export let round = func(v: float32) -> float32 {
         return round_with(v, 3);
     };
 
     // Halves round to the even neighbour.
-    export let round_even = func(float32 v) -> float32 {
+    export let round_even = func(v: float32) -> float32 {
         return round_with(v, 4);
     };
 
-    export let to_bits = func(float32 v) -> uint32 {
+    export let to_bits = func(v: float32) -> uint32 {
         return v.to_bits();
     };
 
-    export let from_bits = func(uint32 bits) -> float32 {
+    export let from_bits = func(bits: uint32) -> float32 {
         return float32.from_bits(bits);
     };
 
     // The total order of section 5.3: -Infinity, negative values, -0.0,
     // 0.0, positive values, Infinity, then every NaN (all NaNs equal).
-    export let total_compare = func(float32 a, float32 b) -> ordering.Ordering {
+    export let total_compare = func(a: float32, b: float32) -> ordering.Ordering {
         let a_nan = a != a;
         let b_nan = b != b;
         if (a_nan || b_nan) {
@@ -160,34 +160,34 @@ export let Float32 = module (
 
     // Same bit pattern, except that every NaN equals every NaN; 0.0 and
     // -0.0 differ (section 5.2).
-    export let equals = func(float32 a, float32 b) -> bool {
+    export let equals = func(a: float32, b: float32) -> bool {
         return a.equals(b);
     };
 
-    export let hash = func(float32 v) -> uint32 {
+    export let hash = func(v: float32) -> uint32 {
         return v.hash_code();
     };
 
     // The shortest text that parses back to the same value (section 7.5).
-    export let to_string = func(float32 v) -> string {
+    export let to_string = func(v: float32) -> string {
         return v.to_string();
     };
 
     // Exactly `digits` fraction digits (0 through 100; no point for 0),
     // correctly rounded, ties to even. Other digit counts trap.
-    export let to_fixed = func(float32 v, int digits) -> string {
+    export let to_fixed = func(v: float32, digits: int) -> string {
         return float_text.to_fixed(v.to_bits() as uint64, 23, 8, digits);
     };
 
     // `d.ddd` with `digits` fraction digits (0 through 100), `e`, and the
     // decimal exponent; correctly rounded, ties to even.
-    export let to_exponential = func(float32 v, int digits) -> string {
+    export let to_exponential = func(v: float32, digits: int) -> string {
         return float_text.to_exponential(v.to_bits() as uint64, 23, 8, digits);
     };
 
     // The grammar of section 7.5, converted exactly and rounded once, ties
     // to even. Too large becomes an infinity and too small a signed zero.
-    export let parse = func(string text) -> result.Result<float32> {
+    export let parse = func(text: string) -> result.Result<float32> {
         return match (float_text.parse(text, 23, 8)) {
             float_text.Parsed.Failure(failure) => result.Result<float32>.Err(failure),
             float_text.Parsed.Bits(bits) => result.Result<float32>.Ok(float32.from_bits(bits as uint32)),
@@ -195,7 +195,7 @@ export let Float32 = module (
         };
     };
 
-    let round_with = func(float32 v, int mode) -> float32 {
+    let round_with = func(v: float32, mode: int) -> float32 {
         return float32.from_bits(float_text.round_bits(v.to_bits() as uint64, 23, 8, mode) as uint32);
     };
 );

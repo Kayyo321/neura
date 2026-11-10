@@ -12,7 +12,7 @@ let zone_offset = import:Std.Time.ZoneOffset;
 // A program over the time types; its image also round-trips through the
 // assembler.
 export let CalendarTour = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let start = result.expect<instant.Instant>(instant.parse("2024-02-28T22:30:00-01:30"), "start");
         console.print_line(start.to_string());
         let clock = fixed_clock.of(start);

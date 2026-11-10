@@ -52,7 +52,7 @@ export let HashCore = module (
         let tombstones: int = 0;
         let initial_size: int = 8;
 
-        export let init = func(int table_size) -> void {
+        export let init = func(table_size: int) -> void {
             initial_size = table_size;
             index = empty_index(table_size);
             mask = table_size - 1;
@@ -68,7 +68,7 @@ export let HashCore = module (
             return hashes.length;
         };
 
-        export let home = func(uint32 hash) -> int {
+        export let home = func(hash: uint32) -> int {
             return (hash & (mask as uint32)) as int;
         };
 
@@ -93,7 +93,7 @@ export let HashCore = module (
 
         // The first Empty slot from the hash's home. Used after a compaction,
         // when the index has no tombstones.
-        export let free_slot = func(uint32 hash) -> int {
+        export let free_slot = func(hash: uint32) -> int {
             let slot = (hash & (mask as uint32)) as int;
             while (index[slot] != Empty) {
                 slot = (slot + 1) & mask;
@@ -102,7 +102,7 @@ export let HashCore = module (
         };
 
         // The slot that holds a live entry.
-        export let slot_of = func(int entry) -> int {
+        export let slot_of = func(entry: int) -> int {
             let slot = (hashes[entry] & (mask as uint32)) as int;
             while (index[slot] != entry) {
                 slot = (slot + 1) & mask;
@@ -112,7 +112,7 @@ export let HashCore = module (
 
         // Stores a new entry in `slot`, a Tombstone or Empty slot that the
         // owner's probe chose, and returns its entry number.
-        export let claim = func(int slot, uint32 hash) -> int {
+        export let claim = func(slot: int, hash: uint32) -> int {
             let entry = hashes.length;
             if (index[slot] == Tombstone) {
                 tombstones = tombstones - 1;
@@ -128,7 +128,7 @@ export let HashCore = module (
         // Releases the entry in `slot`. When it was the last entry, it and
         // the dead entries before it leave the dense lists. Returns the new
         // `used`; the owner shortens its lists to it.
-        export let release = func(int slot) -> int {
+        export let release = func(slot: int) -> int {
             let entry = index[slot];
             index[slot] = Tombstone;
             tombstones = tombstones + 1;
@@ -169,7 +169,7 @@ export let HashCore = module (
         // Rebuilds the dense lists and the index from `order` (from
         // live_entries) for a table of `table_size` slots, by probing from
         // each cached hash for the first Empty slot.
-        export let rebuild = func(int[list] order, int table_size) -> void {
+        export let rebuild = func(order: int[list], table_size: int) -> void {
             hashes = reordered_hashes(hashes, order);
             live = all_live(order.length);
             index = filled_index(hashes, table_size);
@@ -256,7 +256,7 @@ export let HashCore = module (
     // The table size for `capacity` entries: the smallest power of two at
     // least max(8, 2 * capacity). Traps with "invalid argument: capacity" for
     // a negative capacity or one above 2^29.
-    export let table_size_for = func(int capacity) -> int {
+    export let table_size_for = func(capacity: int) -> int {
         if (capacity < 0 || capacity > MaximumCapacity) {
             trap_with_message("invalid argument: capacity");
         }
@@ -271,11 +271,11 @@ export let HashCore = module (
         return new HashCore(MinimumSize);
     };
 
-    export let with_capacity = func(int capacity) -> HashCore {
+    export let with_capacity = func(capacity: int) -> HashCore {
         return new HashCore(table_size_for(capacity));
     };
 
-    let empty_index = func(int size) -> int[list] {
+    let empty_index = func(size: int) -> int[list] {
         let slots: int[list] = [];
         let i = 0;
         while (i < size) {
@@ -285,7 +285,7 @@ export let HashCore = module (
         return slots;
     };
 
-    let reordered_hashes = func(uint32[list] old, int[list] order) -> uint32[list] {
+    let reordered_hashes = func(old: uint32[list], order: int[list]) -> uint32[list] {
         let result: uint32[list] = [];
         let count = order.length;
         let i = 0;
@@ -296,7 +296,7 @@ export let HashCore = module (
         return result;
     };
 
-    let all_live = func(int count) -> bool[list] {
+    let all_live = func(count: int) -> bool[list] {
         let result: bool[list] = [];
         let i = 0;
         while (i < count) {
@@ -306,7 +306,7 @@ export let HashCore = module (
         return result;
     };
 
-    let filled_index = func(uint32[list] spread_hashes, int size) -> int[list] {
+    let filled_index = func(spread_hashes: uint32[list], size: int) -> int[list] {
         let slots = empty_index(size);
         let mask = size - 1;
         let count = spread_hashes.length;

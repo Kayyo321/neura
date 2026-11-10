@@ -8,7 +8,7 @@ let test = import:Std.Test;
 // the lossy decoding (Unicode's maximal subpart practice) and
 // UnicodeDecodeError.start and .reason for from_bytes.
 let Utf8Tests = module (
-    let check_bytes = func(uint8[list] bytes, uint32[list] lossy, int offset, string reason) -> void {
+    let check_bytes = func(bytes: uint8[list], lossy: uint32[list], offset: int, reason: string) -> void {
         let text = strings.from_bytes_lossy(bytes);
         test.assert_equal<uint32[list]>(lossy, strings.scalars(text));
         let [valid, _] = string.from_utf8(bytes);
@@ -107,7 +107,7 @@ let Utf8Tests = module (
     // rejects the whole input and the library decodes the candidate itself:
     // from_bytes must report the error at the candidate's end exactly when
     // the NVM accepts the candidate alone. The lossy totals are python3's.
-    let check_candidate = func(uint8[list] candidate) -> void {
+    let check_candidate = func(candidate: uint8[list]) -> void {
         let [valid, _] = string.from_utf8(candidate);
         let probe: uint8[list] = [];
         for (let b in candidate) {
@@ -131,7 +131,7 @@ let Utf8Tests = module (
         }
     };
 
-    let add_lossy = func(uint8[list] candidate, int[] totals) -> void {
+    let add_lossy = func(candidate: uint8[list], totals: int[]) -> void {
         let probe: uint8[list] = [];
         for (let b in candidate) {
             probe.append(b);

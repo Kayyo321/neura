@@ -13,6 +13,6 @@ export let Clock = module (
         let monotonic = func() -> result.Result<duration.Duration>;
         // Waits for the duration; a zero or negative duration returns at
         // once.
-        let sleep = func(duration.Duration span) -> result.Result<unit.Unit>;
+        let sleep = func(span: duration.Duration) -> result.Result<unit.Unit>;
     );
 );

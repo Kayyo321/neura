@@ -13,7 +13,7 @@ export let Uuid = module (
         let high: uint64;
         let low: uint64;
 
-        export let init = func(uint64 first, uint64 last) -> void {
+        export let init = func(first: uint64, last: uint64) -> void {
             high = first;
             low = last;
         };
@@ -27,7 +27,7 @@ export let Uuid = module (
         };
 
         // Lexicographic over the bytes, each unsigned.
-        export let compare_to = func(Uuid other) -> ordering.Ordering {
+        export let compare_to = func(other: Uuid) -> ordering.Ordering {
             if (high != other.high) {
                 return order(high < other.high);
             }
@@ -37,7 +37,7 @@ export let Uuid = module (
             return ordering.Ordering.Equal;
         };
 
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is Uuid)) {
                 return false;
             }
@@ -73,7 +73,7 @@ export let Uuid = module (
 
     // A version 4 identifier from 16 bytes of random.fill_bytes, with the
     // version bits set to 0100 and the variant bits to 10.
-    export let random = func(randoms.Random source) -> Uuid {
+    export let random = func(source: randoms.Random) -> Uuid {
         let bytes = source.fill_bytes(16);
         bytes[6] = (bytes[6] & 15) | 64;
         bytes[8] = (bytes[8] & 63) | 128;
@@ -84,7 +84,7 @@ export let Uuid = module (
     // Errors: Empty; InvalidCharacter at the first byte that is not a hex
     // digit or a hyphen in its place, or at offset 36 when text follows;
     // UnexpectedEnd at the length for shorter text.
-    export let parse = func(string text) -> result.Result<Uuid> {
+    export let parse = func(text: string) -> result.Result<Uuid> {
         let length = text.byte_length;
         if (length == 0) {
             return failed(error.ParseErrorKind.Empty, 0, "empty input");
@@ -116,11 +116,11 @@ export let Uuid = module (
         return result.Result<Uuid>.Ok(new Uuid(words[0], words[1]));
     };
 
-    let failed = func(error.ParseErrorKind kind, int offset, string message) -> result.Result<Uuid> {
+    let failed = func(kind: error.ParseErrorKind, offset: int, message: string) -> result.Result<Uuid> {
         return result.Result<Uuid>.Err(error.Error.Parse { kind: kind, offset: offset, message: message });
     };
 
-    let hex_value = func(int b) -> int {
+    let hex_value = func(b: int) -> int {
         if (b >= 48 && b <= 57) {
             return b - 48;
         }
@@ -134,7 +134,7 @@ export let Uuid = module (
     };
 
     // Eight bytes from `start`, big-endian.
-    let word_at = func(uint8[list] bytes, int start) -> uint64 {
+    let word_at = func(bytes: uint8[list], start: int) -> uint64 {
         let word: uint64 = 0;
         for (let i = start; i < start + 8; i = i + 1) {
             word = (word << 8) | (bytes[i] as uint64);
@@ -142,7 +142,7 @@ export let Uuid = module (
         return word;
     };
 
-    let append_word = func(uint8[list] bytes, uint64 word) -> void {
+    let append_word = func(bytes: uint8[list], word: uint64) -> void {
         let shift = 56;
         while (shift >= 0) {
             bytes.append(((word >> shift) & 255) as uint8);
@@ -150,7 +150,7 @@ export let Uuid = module (
         }
     };
 
-    let order = func(bool less) -> ordering.Ordering {
+    let order = func(less: bool) -> ordering.Ordering {
         if (less) {
             return ordering.Ordering.Less;
         }

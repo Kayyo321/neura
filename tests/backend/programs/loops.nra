@@ -5,7 +5,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Loops = module:program.Entry (
-    let report = func(bool holds, string label) -> void {
+    let report = func(holds: bool, label: string) -> void {
         if (holds) {
             console.print_line(label);
         } else {
@@ -13,7 +13,7 @@ let Loops = module:program.Entry (
         }
     };
 
-    let sum_below = func(int32 limit) -> int32 {
+    let sum_below = func(limit: int32) -> int32 {
         let total: int32 = 0;
         for (let i: int32 = 0; i < limit; i = i + 1) {
             total = total + i;
@@ -22,7 +22,7 @@ let Loops = module:program.Entry (
     };
 
     // continue runs the step before the condition is tested again.
-    let sum_odd_below = func(int32 limit) -> int32 {
+    let sum_odd_below = func(limit: int32) -> int32 {
         let total: int32 = 0;
         for (let i: int32 = 0; i < limit; i = i + 1) {
             if (i % 2 == 0) {
@@ -33,7 +33,7 @@ let Loops = module:program.Entry (
         return total;
     };
 
-    let pairs_until = func(int32 stop) -> int32 {
+    let pairs_until = func(stop: int32) -> int32 {
         let count: int32 = 0;
         for (let row: int32 = 0; row < 10; row = row + 1) {
             for (let column: int32 = 0; column < 10; column = column + 1) {
@@ -49,7 +49,7 @@ let Loops = module:program.Entry (
         return count;
     };
 
-    let first_power_above = func(int32 limit) -> int32 {
+    let first_power_above = func(limit: int32) -> int32 {
         let power: int32 = 1;
         for (;;) {
             if (power > limit) {
@@ -59,7 +59,7 @@ let Loops = module:program.Entry (
         }
     };
 
-    let sum = func(int32[] values) -> int32 {
+    let sum = func(values: int32[]) -> int32 {
         let total: int32 = 0;
         for (let value in values) {
             total = total + value;
@@ -67,7 +67,7 @@ let Loops = module:program.Entry (
         return total;
     };
 
-    let first_negative = func(int32[list] values) -> int32 {
+    let first_negative = func(values: int32[list]) -> int32 {
         for (let value: int32 in values) {
             if (value < 0) {
                 return value;
@@ -76,7 +76,7 @@ let Loops = module:program.Entry (
         return 0;
     };
 
-    let count_until_zero = func(int32[list] values) -> int32 {
+    let count_until_zero = func(values: int32[list]) -> int32 {
         let count: int32 = 0;
         for (let value in values) {
             if (value == 0) {
@@ -107,7 +107,7 @@ let Loops = module:program.Entry (
         return total;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         report(sum_below(5) == 10, "for: sum below 5 is 10");
         report(sum_below(0) == 0, "for: no iterations below 0");
         report(sum_odd_below(10) == 25, "for: continue runs the step");

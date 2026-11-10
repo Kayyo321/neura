@@ -8,18 +8,18 @@ let test = import:Std.Test;
 let tree_set = import:Std.Collections.TreeSet;
 
 let TreeSetTests = module (
-    let of = func(int[list] items) -> tree_set.TreeSet<int> {
+    let of = func(items: int[list]) -> tree_set.TreeSet<int> {
         let set = tree_set.create<int>(int32.compare);
         set.add_all(items);
         return set;
     };
 
-    let text = func(optional.Optional<int> value) -> string {
+    let text = func(value: optional.Optional<int>) -> string {
         return optional.to_string<int>(value);
     };
 
     export let test_empty = func() -> void {
-        let set = tree_set.create<string>(func(string a, string b) -> ordering.Ordering {
+        let set = tree_set.create<string>(func(a: string, b: string) -> ordering.Ordering {
             if (a == b) {
                 return ordering.Ordering.Equal;
             }
@@ -87,7 +87,7 @@ let TreeSetTests = module (
         test.assert_equal_int32(1, items.next());
         test.assert_equal_int32(2, items.next());
         let seen = cell.of<int>(0);
-        set.for_each(func(int v) -> void {
+        set.for_each(func(v: int) -> void {
             seen.value = seen.value * 10 + v;
         });
         test.assert_equal_int32(123456, seen.value);
@@ -96,10 +96,10 @@ let TreeSetTests = module (
             total = total + v;
         }
         test.assert_equal_int32(21, total);
-        test.assert_equal_int32(3, set.remove_if(func(int v) -> bool {
+        test.assert_equal_int32(3, set.remove_if(func(v: int) -> bool {
             return v % 2 == 0;
         }));
-        test.assert_equal_int32(1, set.retain_if(func(int v) -> bool {
+        test.assert_equal_int32(1, set.retain_if(func(v: int) -> bool {
             return v > 1;
         }));
         test.assert_equal_string("{3, 5}", set.to_string());
@@ -126,7 +126,7 @@ let TreeSetTests = module (
         test.assert_equal_uint64(6, a.hash_code() as uint64);
         b.add(4);
         test.assert(!a.equals(b));
-        let other: class = tree_set.create<string>(func(string x, string y) -> ordering.Ordering {
+        let other: class = tree_set.create<string>(func(x: string, y: string) -> ordering.Ordering {
             return ordering.Ordering.Equal;
         });
         test.assert(!a.equals(other));
@@ -135,7 +135,7 @@ let TreeSetTests = module (
 
     // Elements the comparator calls Equal are the same element.
     export let test_comparator_defines_sameness = func() -> void {
-        let set = tree_set.create<int>(func(int a, int b) -> ordering.Ordering {
+        let set = tree_set.create<int>(func(a: int, b: int) -> ordering.Ordering {
             return int32.compare(a / 10, b / 10);
         });
         test.assert(set.add(15));

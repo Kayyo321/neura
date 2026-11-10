@@ -4,11 +4,11 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Overflow = module:program.Entry (
-    let increment = func(int8 value) -> int8 {
+    let increment = func(value: int8) -> int8 {
         return value + 1;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("before overflow");
         if (increment(127) > 0) {
             console.print_line("unreachable");

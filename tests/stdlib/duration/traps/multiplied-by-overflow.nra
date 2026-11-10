@@ -5,7 +5,7 @@ let duration = import:Std.Time.Duration;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let d = duration.of_seconds(5000000000);
         console.print_line("before");
         console.print_line(d.multiplied_by(2).to_string());

@@ -26,7 +26,7 @@ export let HashMap = module (
         let same: func(K, K) -> bool;
         let printing_depth: int = 0;
 
-        export let init = func(Seal seal, hash_core.HashCore table, func(K) -> uint32 hash, func(K, K) -> bool equal) -> void {
+        export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(K) -> uint32, equal: func(K, K) -> bool) -> void {
             core = table;
             hash_of = hash;
             same = equal;
@@ -47,11 +47,11 @@ export let HashMap = module (
             stored_values = [];
         };
 
-        export let contains_key = func(K key) -> bool {
+        export let contains_key = func(key: K) -> bool {
             return find(key, spread(hash_of(key))) >= 0;
         };
 
-        export let get = func(K key) -> optional.Optional<V> {
+        export let get = func(key: K) -> optional.Optional<V> {
             let slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 return optional.Optional<V>.None;
@@ -59,7 +59,7 @@ export let HashMap = module (
             return optional.Optional<V>.Some(stored_values[core.index[slot]]);
         };
 
-        export let get_or = func(K key, V fallback) -> V {
+        export let get_or = func(key: K, fallback: V) -> V {
             let slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 return fallback;
@@ -68,7 +68,7 @@ export let HashMap = module (
         };
 
         // Traps with "no such element" when the key is absent.
-        export let require = func(K key) -> V {
+        export let require = func(key: K) -> V {
             let slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 trap_with_message("no such element");
@@ -76,7 +76,7 @@ export let HashMap = module (
             return stored_values[core.index[slot]];
         };
 
-        export let set = func(K key, V value) -> void {
+        export let set = func(key: K, value: V) -> void {
             let hash = spread(hash_of(key));
             let slot = find(key, hash);
             if (slot >= 0) {
@@ -87,7 +87,7 @@ export let HashMap = module (
         };
 
         // The previous value.
-        export let put = func(K key, V value) -> optional.Optional<V> {
+        export let put = func(key: K, value: V) -> optional.Optional<V> {
             let hash = spread(hash_of(key));
             let slot = find(key, hash);
             if (slot >= 0) {
@@ -101,7 +101,7 @@ export let HashMap = module (
         };
 
         // Removes the key; returns whether it was present.
-        export let delete = func(K key) -> bool {
+        export let delete = func(key: K) -> bool {
             let slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 return false;
@@ -111,7 +111,7 @@ export let HashMap = module (
         };
 
         // The removed value.
-        export let remove = func(K key) -> optional.Optional<V> {
+        export let remove = func(key: K) -> optional.Optional<V> {
             let slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 return optional.Optional<V>.None;
@@ -170,7 +170,7 @@ export let HashMap = module (
         };
 
         // Sets each entry of `other` in its iteration order.
-        export let put_all = func(HashMap<K, V> other) -> void {
+        export let put_all = func(other: HashMap<K, V>) -> void {
             let items = other.entries();
             let count = items.length;
             let i = 0;
@@ -183,7 +183,7 @@ export let HashMap = module (
 
         // In insertion order. The action must not change the map
         // structurally.
-        export let for_each = func(func(K, V) -> void action) -> void {
+        export let for_each = func(action: func(K, V) -> void) -> void {
             let expected = core.modifications;
             let entry = 0;
             while (entry < core.live.length) {
@@ -199,7 +199,7 @@ export let HashMap = module (
 
         // Calls `drop` once per entry in order, then removes the entries it
         // chose. Returns how many were removed.
-        export let remove_if = func(func(K, V) -> bool drop) -> int {
+        export let remove_if = func(drop: func(K, V) -> bool) -> int {
             let expected = core.modifications;
             let chosen: int[list] = [];
             let length = core.live.length;
@@ -231,7 +231,7 @@ export let HashMap = module (
 
         // The existing value, or the result of `make`, stored. `make` must
         // not change the map structurally.
-        export let get_or_put = func(K key, func() -> V make) -> V {
+        export let get_or_put = func(key: K, make: func() -> V) -> V {
             let hash = spread(hash_of(key));
             let slot = find(key, hash);
             if (slot >= 0) {
@@ -248,7 +248,7 @@ export let HashMap = module (
 
         // Stores `value` when the key is absent, otherwise combine(old,
         // value). Returns the stored value.
-        export let merge = func(K key, V value, func(V, V) -> V combine) -> V {
+        export let merge = func(key: K, value: V, combine: func(V, V) -> V) -> V {
             let hash = spread(hash_of(key));
             let slot = find(key, hash);
             if (slot < 0) {
@@ -267,7 +267,7 @@ export let HashMap = module (
 
         // Stores a Some result of `f`, or removes the key for None. Returns
         // the result.
-        export let compute = func(K key, func(K, optional.Optional<V>) -> optional.Optional<V> f) -> optional.Optional<V> {
+        export let compute = func(key: K, f: func(K, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V> {
             let hash = spread(hash_of(key));
             let slot = find(key, hash);
             let current = optional.Optional<V>.None;
@@ -297,7 +297,7 @@ export let HashMap = module (
         };
 
         // By the values' equals, with `value` as the receiver.
-        export let contains_value = func(V value) -> bool {
+        export let contains_value = func(value: V) -> bool {
             let live = core.live;
             let length = live.length;
             let entry = 0;
@@ -334,7 +334,7 @@ export let HashMap = module (
 
         // Another HashMap with the same size in which, for each of its
         // entries, this map holds an equal value for the key.
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is HashMap<K, V>)) {
                 return false;
             }
@@ -398,7 +398,7 @@ export let HashMap = module (
         // The slot holding the key when present; otherwise -1 minus the slot
         // a new entry takes (the first Tombstone passed, else the Empty slot
         // that ended the search).
-        let find = func(K key, uint32 hash) -> int {
+        let find = func(key: K, hash: uint32) -> int {
             let slots = core.index;
             let cached = core.hashes;
             let mask = core.mask;
@@ -424,7 +424,7 @@ export let HashMap = module (
             return -1;
         };
 
-        let insert = func(K key, V value, uint32 hash, int slot) -> void {
+        let insert = func(key: K, value: V, hash: uint32, slot: int) -> void {
             let target = slot;
             if (core.is_full()) {
                 compact(core.grown_size());
@@ -435,7 +435,7 @@ export let HashMap = module (
             stored_values.append(value);
         };
 
-        let release = func(int slot) -> void {
+        let release = func(slot: int) -> void {
             shorten(core.release(slot));
             if (core.needs_compaction()) {
                 compact(core.table_size());
@@ -444,7 +444,7 @@ export let HashMap = module (
 
         // Drops owner entries above `length` after the core removed trailing
         // dead entries.
-        let shorten = func(int length) -> void {
+        let shorten = func(length: int) -> void {
             while (stored_keys.length > length) {
                 let last = stored_keys.length - 1;
                 stored_keys.remove_at(last);
@@ -452,7 +452,7 @@ export let HashMap = module (
             }
         };
 
-        let compact = func(int table_size) -> void {
+        let compact = func(table_size: int) -> void {
             let order = core.live_entries();
             stored_keys = reordered<K>(stored_keys, order);
             stored_values = reordered<V>(stored_values, order);
@@ -468,7 +468,7 @@ export let HashMap = module (
         let expected: uint64;
         let position: int = 0;
 
-        export let init = func(hash_core.HashCore table, K[list] keys, V[list] values) -> void {
+        export let init = func(table: hash_core.HashCore, keys: K[list], values: V[list]) -> void {
             core = table;
             source_keys = keys;
             source_values = values;
@@ -503,37 +503,37 @@ export let HashMap = module (
 
     // A table sized for `capacity` entries. Traps with "invalid argument:
     // capacity" for a negative capacity or one above 2^29.
-    export let with_capacity = func<K, V>(int capacity) -> HashMap<K, V> {
+    export let with_capacity = func<K, V>(capacity: int) -> HashMap<K, V> {
         return with_keys_and_capacity<K, V>(universal_hash<K>(), universal_same<K>(), capacity);
     };
 
     // Keys hashed and compared with the given functions. Equal keys must
     // have equal hashes.
-    export let with_keys = func<K, V>(func(K) -> uint32 hash, func(K, K) -> bool same) -> HashMap<K, V> {
+    export let with_keys = func<K, V>(hash: func(K) -> uint32, same: func(K, K) -> bool) -> HashMap<K, V> {
         return with_keys_and_capacity<K, V>(hash, same, 0);
     };
 
-    export let with_keys_and_capacity = func<K, V>(func(K) -> uint32 hash, func(K, K) -> bool same, int capacity) -> HashMap<K, V> {
+    export let with_keys_and_capacity = func<K, V>(hash: func(K) -> uint32, same: func(K, K) -> bool, capacity: int) -> HashMap<K, V> {
         return new HashMap<K, V>(Seal.Token, hash_core.with_capacity(capacity), hash, same);
     };
 
     let universal_hash = func<K>() -> func(K) -> uint32 {
-        return func(K key) -> uint32 {
+        return func(key: K) -> uint32 {
             return key.hash_code();
         };
     };
 
     let universal_same = func<K>() -> func(K, K) -> bool {
-        return func(K a, K b) -> bool {
+        return func(a: K, b: K) -> bool {
             return a.equals(b);
         };
     };
 
-    let spread = func(uint32 hash) -> uint32 {
+    let spread = func(hash: uint32) -> uint32 {
         return hash ^ (hash >> 16);
     };
 
-    let reordered = func<T>(T[list] old, int[list] order) -> T[list] {
+    let reordered = func<T>(old: T[list], order: int[list]) -> T[list] {
         let result: T[list] = [];
         let count = order.length;
         let i = 0;
@@ -545,7 +545,7 @@ export let HashMap = module (
     };
 
     // `[a, b]` text of the parts with braces in place of the brackets.
-    let braced = func(string[list] parts) -> string {
+    let braced = func(parts: string[list]) -> string {
         let text = parts.to_string();
         return "{" + text.slice(1, text.byte_length - 1) + "}";
     };

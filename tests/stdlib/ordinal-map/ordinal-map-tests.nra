@@ -91,21 +91,21 @@ let OrdinalMapTests = module (
         test.assert_equal_int32(7, items.get_or_put(1, make));
         test.assert_equal_int32(7, items.get_or_put(1, make));
         test.assert_equal_int32(1, calls.value);
-        let add = func(int a, int b) -> int {
+        let add = func(a: int, b: int) -> int {
             return a + b;
         };
         test.assert_equal_int32(3, items.merge(2, 3, add));
         test.assert_equal_int32(8, items.merge(2, 5, add));
-        let doubled = items.compute(2, func(int key, optional.Optional<int> current) -> optional.Optional<int> {
+        let doubled = items.compute(2, func(key: int, current: optional.Optional<int>) -> optional.Optional<int> {
             return optional.Optional<int>.Some(optional.value_or<int>(current, 0) * 2);
         });
         test.assert_equal_int32(16, test.assert_some<int>(doubled));
-        let dropped = items.compute(2, func(int key, optional.Optional<int> current) -> optional.Optional<int> {
+        let dropped = items.compute(2, func(key: int, current: optional.Optional<int>) -> optional.Optional<int> {
             return optional.Optional<int>.None;
         });
         test.assert_none<int>(dropped);
         test.assert(!items.contains_key(2));
-        let absent = items.compute(3, func(int key, optional.Optional<int> current) -> optional.Optional<int> {
+        let absent = items.compute(3, func(key: int, current: optional.Optional<int>) -> optional.Optional<int> {
             test.assert_none<int>(current);
             return optional.Optional<int>.None;
         });
@@ -113,11 +113,11 @@ let OrdinalMapTests = module (
         items.set(4, 40);
         items.set(5, 50);
         let seen: [int, int][list] = [];
-        items.for_each(func(int key, int value) -> void {
+        items.for_each(func(key: int, value: int) -> void {
             seen.append([key, value]);
         });
         test.assert_equal_string("[[1, 7], [4, 40], [5, 50]]", seen.to_string());
-        test.assert_equal_int32(2, items.remove_if(func(int key, int value) -> bool {
+        test.assert_equal_int32(2, items.remove_if(func(key: int, value: int) -> bool {
             return key > 3;
         }));
         test.assert_equal_string("{1: 7}", items.to_string());

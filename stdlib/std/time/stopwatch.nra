@@ -12,7 +12,7 @@ export let Stopwatch = module (
         let started_at: duration.Duration = duration.Zero;
         let accumulated: duration.Duration = duration.Zero;
 
-        export let init = func(clock.Clock time_source) -> void {
+        export let init = func(time_source: clock.Clock) -> void {
             source = time_source;
         };
 
@@ -78,7 +78,7 @@ export let Stopwatch = module (
     );
 
     // A stopped stopwatch over `time_source`.
-    export let create = func(clock.Clock time_source) -> Stopwatch {
+    export let create = func(time_source: clock.Clock) -> Stopwatch {
         return new Stopwatch(time_source);
     };
 );

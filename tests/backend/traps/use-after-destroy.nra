@@ -8,7 +8,7 @@ let Lifetime = module:program.Entry (
         export let text: string = "note";
     );
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let note = new Note();
         console.print_line(note.text);
         destroy note;

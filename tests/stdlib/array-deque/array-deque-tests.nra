@@ -108,7 +108,7 @@ let ArrayDequeTests = module (
         for (let value in items) {
             seen.append(value);
         }
-        items.for_each(func(int value) -> void {
+        items.for_each(func(value: int) -> void {
             seen.append(value);
         });
         test.assert_equal_string("[1, 2, 3, 1, 2, 3]", seen.to_string());
@@ -152,7 +152,7 @@ let ArrayDequeTests = module (
         test.assert_equal_int32(2, all.size());
         test.assert(!all.is_empty());
         let total = cell.of<int>(0);
-        all.for_each(func(int value) -> void {
+        all.for_each(func(value: int) -> void {
             total.value = total.value + value;
         });
         test.assert_equal_int32(7, total.value);

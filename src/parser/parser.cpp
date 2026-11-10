@@ -156,8 +156,9 @@ private:
         expect("(");
         if (!at(")")) {
             do {
-                auto parameter_type = type();
                 const auto& name = identifier();
+                expect(":");
+                auto parameter_type = type();
                 result.push_back({name.span, name.text, std::move(parameter_type)});
             } while (match(","));
         }

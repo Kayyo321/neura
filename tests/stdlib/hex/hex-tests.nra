@@ -8,7 +8,7 @@ let test = import:Std.Test;
 // value comes from python3's bytes.hex().
 let HexTests = module (
     // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
-    let seeded_bytes = func(int length, uint64 seed) -> uint8[list] {
+    let seeded_bytes = func(length: int, seed: uint64) -> uint8[list] {
         let bytes: uint8[list] = [];
         let x = seed;
         for (let i = 0; i < length; i = i + 1) {
@@ -18,14 +18,14 @@ let HexTests = module (
         return bytes;
     };
 
-    let check_seeded = func(int length, uint64 seed, string expected) -> void {
+    let check_seeded = func(length: int, seed: uint64, expected: string) -> void {
         let bytes = seeded_bytes(length, seed);
         test.assert_equal_string(expected, hex.encode(bytes));
         test.assert_equal<uint8[list]>(bytes, test.assert_ok<uint8[list]>(hex.decode(expected)));
         test.assert_equal<uint8[list]>(bytes, test.assert_ok<uint8[list]>(hex.decode(strings.to_ascii_upper(expected))));
     };
 
-    let check_error = func(string text, int offset, string message) -> void {
+    let check_error = func(text: string, offset: int, message: string) -> void {
         match (test.assert_err<uint8[list]>(hex.decode(text))) {
             error.Error.Encoding { offset: at, message: reason } => {
                 test.assert_equal_string(message, reason);

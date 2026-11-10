@@ -53,7 +53,7 @@ export let RegexParser = module (
         let length: int = 0;
         let last_was_assertion: bool = false;
 
-        export let init = func(string text) -> void {
+        export let init = func(text: string) -> void {
             pattern = text;
             length = text.byte_length;
         };
@@ -71,7 +71,7 @@ export let RegexParser = module (
             size = node_size;
         };
 
-        let fail = func(error.ParseErrorKind kind, int offset, string message) -> void {
+        let fail = func(kind: error.ParseErrorKind, offset: int, message: string) -> void {
             if (!failed) {
                 failed = true;
                 error_kind = kind;
@@ -80,11 +80,11 @@ export let RegexParser = module (
             }
         };
 
-        let fail_syntax = func(int offset, string message) -> void {
+        let fail_syntax = func(offset: int, message: string) -> void {
             fail(error.ParseErrorKind.Syntax, offset, message);
         };
 
-        let fail_end = func(string message) -> void {
+        let fail_end = func(message: string) -> void {
             fail(error.ParseErrorKind.UnexpectedEnd, length, message);
         };
 
@@ -97,7 +97,7 @@ export let RegexParser = module (
         };
 
         // Fails when a node's instruction count leaves no room in a program.
-        let check_size = func(int node_size, int offset) -> void {
+        let check_size = func(node_size: int, offset: int) -> void {
             if (node_size > MaxBody) {
                 fail(error.ParseErrorKind.OutOfRange, offset, "pattern exceeds 10000 instructions");
             }
@@ -200,7 +200,7 @@ export let RegexParser = module (
 
         // A quantifier after an atom, with its lazy form. A second
         // quantifier, a possessive +, or a quantified assertion fails.
-        let parse_quantifiers = func(Node atom, int atom_size, int atom_start) -> [Node, int] {
+        let parse_quantifiers = func(atom: Node, atom_size: int, atom_start: int) -> [Node, int] {
             if (at_end()) {
                 return [atom, atom_size];
             }
@@ -485,7 +485,7 @@ export let RegexParser = module (
 
         // One class member: a scalar value, returned, or a shorthand class,
         // whose ranges are appended and which returns -1.
-        let parse_class_atom = func(uint32[list] ranges) -> int {
+        let parse_class_atom = func(ranges: uint32[list]) -> int {
             if (peek() != 92) {
                 let value = strings.scalar_at(pattern, position);
                 position = position + scalar_values.utf8_length(value);
@@ -545,7 +545,7 @@ export let RegexParser = module (
         };
 
         // The scalar an escape denotes; the position is after the backslash.
-        let parse_escaped_scalar = func(int escape_start) -> int {
+        let parse_escaped_scalar = func(escape_start: int) -> int {
             let b = peek();
             if (b == 116) {
                 position = position + 1;
@@ -580,7 +580,7 @@ export let RegexParser = module (
         };
 
         // \u{X} with one through six hexadecimal digits naming a scalar value.
-        let parse_unicode_escape = func(int escape_start) -> int {
+        let parse_unicode_escape = func(escape_start: int) -> int {
             if (at_end()) {
                 fail_end("incomplete escape");
                 return 0;
@@ -621,7 +621,7 @@ export let RegexParser = module (
 
     // The ranges of \d, \w, and \s (by their lowercase letter) or of their
     // negations (by the uppercase letter, as complements); empty otherwise.
-    export let shorthand_ranges = func(uint8 letter) -> uint32[list] {
+    export let shorthand_ranges = func(letter: uint8) -> uint32[list] {
         if (letter == 100) {
             return [48, 57];
         }
@@ -647,7 +647,7 @@ export let RegexParser = module (
     // The instruction count of a repetition, saturated above the limit.
     // Each optional copy of an item that can match empty also saves its
     // entry position and checks for progress (two more instructions).
-    export let repeat_size = func(int item, int min, int max, bool item_nullable) -> int {
+    export let repeat_size = func(item: int, min: int, max: int, item_nullable: bool) -> int {
         let limit = MaxInstructions + 1;
         if (max < 0) {
             if (min == 0) {
@@ -668,7 +668,7 @@ export let RegexParser = module (
     };
 
     // Whether the node can match the empty string.
-    export let nullable = func(Node node) -> bool {
+    export let nullable = func(node: Node) -> bool {
         return match (node) {
             Node.Empty => true,
             Node.Literal(_) => false,
@@ -682,7 +682,7 @@ export let RegexParser = module (
         };
     };
 
-    let all_nullable = func(Node[list] items) -> bool {
+    let all_nullable = func(items: Node[list]) -> bool {
         for (let item in items) {
             if (!nullable(item)) {
                 return false;
@@ -691,7 +691,7 @@ export let RegexParser = module (
         return true;
     };
 
-    let any_nullable = func(Node[list] items) -> bool {
+    let any_nullable = func(items: Node[list]) -> bool {
         for (let item in items) {
             if (nullable(item)) {
                 return true;
@@ -700,7 +700,7 @@ export let RegexParser = module (
         return false;
     };
 
-    let saturate = func(int value, int limit) -> int {
+    let saturate = func(value: int, limit: int) -> int {
         if (value > limit) {
             return limit;
         }

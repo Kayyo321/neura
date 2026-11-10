@@ -7,20 +7,20 @@ let strings = import:Std.Text.Strings;
 // Strings.from_bytes reports.
 export let Utf8 = module (
     // A copy of the string's bytes.
-    export let encode = func(string s) -> uint8[list] {
+    export let encode = func(s: string) -> uint8[list] {
         return strings.to_bytes(s);
     };
 
     // The text, or an Encoding error at the offset `validate` returns. The
     // message is "invalid start byte", "invalid continuation byte", or
     // "unexpected end of data".
-    export let decode = func(uint8[list] bytes) -> result.Result<string> {
+    export let decode = func(bytes: uint8[list]) -> result.Result<string> {
         return strings.from_bytes(bytes);
     };
 
     // The text with each maximal ill-formed subsequence (Unicode's maximal
     // subpart practice) replaced by one U+FFFD.
-    export let decode_lossy = func(uint8[list] bytes) -> string {
+    export let decode_lossy = func(bytes: uint8[list]) -> string {
         return strings.from_bytes_lossy(bytes);
     };
 
@@ -28,7 +28,7 @@ export let Utf8 = module (
     // byte that cannot begin or continue a valid sequence's prefix, which is
     // the length of the longest valid prefix. Valid input costs one
     // string.from_utf8 call; invalid input is rescanned here.
-    export let validate = func(uint8[list] bytes) -> int {
+    export let validate = func(bytes: uint8[list]) -> int {
         let [valid, _] = string.from_utf8(bytes);
         if (valid) {
             return -1;

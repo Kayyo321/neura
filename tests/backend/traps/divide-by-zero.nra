@@ -4,11 +4,11 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Division = module:program.Entry (
-    let divide = func(uint16 a, uint16 b) -> uint16 {
+    let divide = func(a: uint16, b: uint16) -> uint16 {
         return a / b;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         if (divide(0, 0) == 0) {
             console.print_line("unreachable");
         }

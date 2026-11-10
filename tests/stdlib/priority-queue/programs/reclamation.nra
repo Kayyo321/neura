@@ -8,7 +8,7 @@ let program = import:Std.Program;
 // elements stayed reachable the loop would need about 200,000 cells, far
 // above the limit.
 export let Main = module:program.Entry (
-    let block = func(int seed) -> int[list] {
+    let block = func(seed: int) -> int[list] {
         let values: int[list] = [];
         let i = 0;
         while (i < 100) {
@@ -18,7 +18,7 @@ export let Main = module:program.Entry (
         return values;
     };
 
-    let by_first = func(int[list] a, int[list] b) -> ordering.Ordering {
+    let by_first = func(a: int[list], b: int[list]) -> ordering.Ordering {
         if (a[0] < b[0]) {
             return ordering.Ordering.Less;
         }
@@ -28,7 +28,7 @@ export let Main = module:program.Entry (
         return ordering.Ordering.Equal;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let items = priority_queue.create<int[list]>(by_first);
         let total: int64 = 0;
         let round = 0;

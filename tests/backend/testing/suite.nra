@@ -40,7 +40,7 @@ let Suite = module (
         test.assert(false);
     };
 
-    export let test_with_argument = func(int32 value) -> void {
+    export let test_with_argument = func(value: int32) -> void {
         test.assert(false);
     };
 

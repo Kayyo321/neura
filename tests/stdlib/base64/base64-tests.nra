@@ -10,7 +10,7 @@ let test = import:Std.Test;
 // cases below follow Stdlib.md section 13.1.
 let Base64Tests = module (
     // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
-    let seeded_bytes = func(int length, uint64 seed) -> uint8[list] {
+    let seeded_bytes = func(length: int, seed: uint64) -> uint8[list] {
         let bytes: uint8[list] = [];
         let x = seed;
         for (let i = 0; i < length; i = i + 1) {
@@ -20,11 +20,11 @@ let Base64Tests = module (
         return bytes;
     };
 
-    let unpad = func(string text) -> string {
+    let unpad = func(text: string) -> string {
         return strings.replace(text, "=", "");
     };
 
-    let check_all = func(uint8[list] bytes, string standard, string url) -> void {
+    let check_all = func(bytes: uint8[list], standard: string, url: string) -> void {
         test.assert_equal_string(standard, base64s.encode(bytes));
         test.assert_equal_string(url, base64s.encode_url(bytes));
         test.assert_equal_string(unpad(standard), base64s.encode_unpadded(bytes));
@@ -35,15 +35,15 @@ let Base64Tests = module (
         test.assert_equal<uint8[list]>(bytes, test.assert_ok<uint8[list]>(base64s.decode_url_unpadded(unpad(url))));
     };
 
-    let check_text = func(string text, string standard) -> void {
+    let check_text = func(text: string, standard: string) -> void {
         check_all(strings.to_bytes(text), standard, standard);
     };
 
-    let check_seeded = func(int length, uint64 seed, string standard, string url) -> void {
+    let check_seeded = func(length: int, seed: uint64, standard: string, url: string) -> void {
         check_all(seeded_bytes(length, seed), standard, url);
     };
 
-    let check_error = func(result.Result<uint8[list]> outcome, int offset, string message) -> void {
+    let check_error = func(outcome: result.Result<uint8[list]>, offset: int, message: string) -> void {
         match (test.assert_err<uint8[list]>(outcome)) {
             error.Error.Encoding { offset: at, message: text } => {
                 test.assert_equal_string(message, text);

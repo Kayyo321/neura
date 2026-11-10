@@ -7,7 +7,7 @@ let program = import:Std.Program;
 let zone_offset = import:Std.Time.ZoneOffset;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let far = instant.of_epoch_seconds(31556889864403200, 0);
         console.print_line("before");
         console.print_line(far.to_local(zone_offset.Utc).to_string());

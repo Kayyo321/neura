@@ -8,18 +8,18 @@ let GenericEnums = module:program.Entry (
     let Tree = enum<T> (Empty, Leaf(T), Branch { children: Tree<T>[list] });
     let Direction = enum<T> (Left, Right);
 
-    let present = func<T>(T value) -> Optional<T> {
+    let present = func<T>(value: T) -> Optional<T> {
         return Optional<T>.Some(value);
     };
 
-    let unwrap_or = func<T>(Optional<T> value, T fallback) -> T {
+    let unwrap_or = func<T>(value: Optional<T>, fallback: T) -> T {
         return match (value) {
             Optional.None => fallback,
             Optional.Some(item) => item,
         };
     };
 
-    let size = func<T>(Tree<T> tree) -> int {
+    let size = func<T>(tree: Tree<T>) -> int {
         match (tree) {
             Tree.Empty => { return 0; },
             Tree.Leaf(_) => { return 1; },
@@ -37,7 +37,7 @@ let GenericEnums = module:program.Entry (
         export let item: Optional<T> = Optional<T>.None;
     );
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let a = present<int>(10);
         let b = Optional<Optional<int>>.Some(a);
         let c = IntOptional.Some(11);

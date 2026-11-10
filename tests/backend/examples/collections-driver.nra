@@ -5,7 +5,7 @@ let program = import:Std.Program;
 let collections = import:Collections;
 
 let CollectionsDriver = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         collections.example();
         console.print_line("collections example finished");
         return program.ExitCode.Ok;

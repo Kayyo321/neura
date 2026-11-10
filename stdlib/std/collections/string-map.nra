@@ -24,7 +24,7 @@ export let StringMap = module (
         let stored_values: V[list] = [];
         let printing_depth: int = 0;
 
-        export let init = func(Seal seal, hash_core.HashCore table) -> void {
+        export let init = func(seal: Seal, table: hash_core.HashCore) -> void {
             core = table;
         };
 
@@ -43,11 +43,11 @@ export let StringMap = module (
             stored_values = [];
         };
 
-        export let contains_key = func(string key) -> bool {
+        export let contains_key = func(key: string) -> bool {
             return find(key, spread(key.hash_code())) >= 0;
         };
 
-        export let get = func(string key) -> optional.Optional<V> {
+        export let get = func(key: string) -> optional.Optional<V> {
             let slot = find(key, spread(key.hash_code()));
             if (slot < 0) {
                 return optional.Optional<V>.None;
@@ -55,7 +55,7 @@ export let StringMap = module (
             return optional.Optional<V>.Some(stored_values[core.index[slot]]);
         };
 
-        export let get_or = func(string key, V fallback) -> V {
+        export let get_or = func(key: string, fallback: V) -> V {
             let slot = find(key, spread(key.hash_code()));
             if (slot < 0) {
                 return fallback;
@@ -64,7 +64,7 @@ export let StringMap = module (
         };
 
         // Traps with "no such element" when the key is absent.
-        export let require = func(string key) -> V {
+        export let require = func(key: string) -> V {
             let slot = find(key, spread(key.hash_code()));
             if (slot < 0) {
                 trap_with_message("no such element");
@@ -72,7 +72,7 @@ export let StringMap = module (
             return stored_values[core.index[slot]];
         };
 
-        export let set = func(string key, V value) -> void {
+        export let set = func(key: string, value: V) -> void {
             let hash = spread(key.hash_code());
             let slot = find(key, hash);
             if (slot >= 0) {
@@ -83,7 +83,7 @@ export let StringMap = module (
         };
 
         // The previous value.
-        export let put = func(string key, V value) -> optional.Optional<V> {
+        export let put = func(key: string, value: V) -> optional.Optional<V> {
             let hash = spread(key.hash_code());
             let slot = find(key, hash);
             if (slot >= 0) {
@@ -97,7 +97,7 @@ export let StringMap = module (
         };
 
         // Removes the key; returns whether it was present.
-        export let delete = func(string key) -> bool {
+        export let delete = func(key: string) -> bool {
             let slot = find(key, spread(key.hash_code()));
             if (slot < 0) {
                 return false;
@@ -107,7 +107,7 @@ export let StringMap = module (
         };
 
         // The removed value.
-        export let remove = func(string key) -> optional.Optional<V> {
+        export let remove = func(key: string) -> optional.Optional<V> {
             let slot = find(key, spread(key.hash_code()));
             if (slot < 0) {
                 return optional.Optional<V>.None;
@@ -166,7 +166,7 @@ export let StringMap = module (
         };
 
         // Sets each entry of `other` in its iteration order.
-        export let put_all = func(StringMap<V> other) -> void {
+        export let put_all = func(other: StringMap<V>) -> void {
             let items = other.entries();
             let count = items.length;
             let i = 0;
@@ -179,7 +179,7 @@ export let StringMap = module (
 
         // In insertion order. The action must not change the map
         // structurally.
-        export let for_each = func(func(string, V) -> void action) -> void {
+        export let for_each = func(action: func(string, V) -> void) -> void {
             let expected = core.modifications;
             let entry = 0;
             while (entry < core.live.length) {
@@ -195,7 +195,7 @@ export let StringMap = module (
 
         // Calls `drop` once per entry in order, then removes the entries it
         // chose. Returns how many were removed.
-        export let remove_if = func(func(string, V) -> bool drop) -> int {
+        export let remove_if = func(drop: func(string, V) -> bool) -> int {
             let expected = core.modifications;
             let chosen: int[list] = [];
             let length = core.live.length;
@@ -227,7 +227,7 @@ export let StringMap = module (
 
         // The existing value, or the result of `make`, stored. `make` must
         // not change the map structurally.
-        export let get_or_put = func(string key, func() -> V make) -> V {
+        export let get_or_put = func(key: string, make: func() -> V) -> V {
             let hash = spread(key.hash_code());
             let slot = find(key, hash);
             if (slot >= 0) {
@@ -244,7 +244,7 @@ export let StringMap = module (
 
         // Stores `value` when the key is absent, otherwise combine(old,
         // value). Returns the stored value.
-        export let merge = func(string key, V value, func(V, V) -> V combine) -> V {
+        export let merge = func(key: string, value: V, combine: func(V, V) -> V) -> V {
             let hash = spread(key.hash_code());
             let slot = find(key, hash);
             if (slot < 0) {
@@ -263,7 +263,7 @@ export let StringMap = module (
 
         // Stores a Some result of `f`, or removes the key for None. Returns
         // the result.
-        export let compute = func(string key, func(string, optional.Optional<V>) -> optional.Optional<V> f) -> optional.Optional<V> {
+        export let compute = func(key: string, f: func(string, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V> {
             let hash = spread(key.hash_code());
             let slot = find(key, hash);
             let current = optional.Optional<V>.None;
@@ -293,7 +293,7 @@ export let StringMap = module (
         };
 
         // By the values' equals, with `value` as the receiver.
-        export let contains_value = func(V value) -> bool {
+        export let contains_value = func(value: V) -> bool {
             let live = core.live;
             let length = live.length;
             let entry = 0;
@@ -330,7 +330,7 @@ export let StringMap = module (
 
         // Another StringMap with the same size in which, for each of its
         // entries, this map holds an equal value for the key.
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is StringMap<V>)) {
                 return false;
             }
@@ -394,7 +394,7 @@ export let StringMap = module (
         // The slot holding the key when present; otherwise -1 minus the slot
         // a new entry takes (the first Tombstone passed, else the Empty slot
         // that ended the search).
-        let find = func(string key, uint32 hash) -> int {
+        let find = func(key: string, hash: uint32) -> int {
             let slots = core.index;
             let cached = core.hashes;
             let mask = core.mask;
@@ -420,7 +420,7 @@ export let StringMap = module (
             return -1;
         };
 
-        let insert = func(string key, V value, uint32 hash, int slot) -> void {
+        let insert = func(key: string, value: V, hash: uint32, slot: int) -> void {
             let target = slot;
             if (core.is_full()) {
                 compact(core.grown_size());
@@ -431,7 +431,7 @@ export let StringMap = module (
             stored_values.append(value);
         };
 
-        let release = func(int slot) -> void {
+        let release = func(slot: int) -> void {
             shorten(core.release(slot));
             if (core.needs_compaction()) {
                 compact(core.table_size());
@@ -440,7 +440,7 @@ export let StringMap = module (
 
         // Drops owner entries above `length` after the core removed trailing
         // dead entries.
-        let shorten = func(int length) -> void {
+        let shorten = func(length: int) -> void {
             while (stored_keys.length > length) {
                 let last = stored_keys.length - 1;
                 stored_keys.remove_at(last);
@@ -448,7 +448,7 @@ export let StringMap = module (
             }
         };
 
-        let compact = func(int table_size) -> void {
+        let compact = func(table_size: int) -> void {
             let order = core.live_entries();
             stored_keys = reordered<string>(stored_keys, order);
             stored_values = reordered<V>(stored_values, order);
@@ -464,7 +464,7 @@ export let StringMap = module (
         let expected: uint64;
         let position: int = 0;
 
-        export let init = func(hash_core.HashCore table, string[list] keys, V[list] values) -> void {
+        export let init = func(table: hash_core.HashCore, keys: string[list], values: V[list]) -> void {
             core = table;
             source_keys = keys;
             source_values = values;
@@ -498,15 +498,15 @@ export let StringMap = module (
 
     // A table sized for `capacity` entries. Traps with "invalid argument:
     // capacity" for a negative capacity or one above 2^29.
-    export let with_capacity = func<V>(int capacity) -> StringMap<V> {
+    export let with_capacity = func<V>(capacity: int) -> StringMap<V> {
         return new StringMap<V>(Seal.Token, hash_core.with_capacity(capacity));
     };
 
-    let spread = func(uint32 hash) -> uint32 {
+    let spread = func(hash: uint32) -> uint32 {
         return hash ^ (hash >> 16);
     };
 
-    let reordered = func<T>(T[list] old, int[list] order) -> T[list] {
+    let reordered = func<T>(old: T[list], order: int[list]) -> T[list] {
         let result: T[list] = [];
         let count = order.length;
         let i = 0;
@@ -518,7 +518,7 @@ export let StringMap = module (
     };
 
     // `[a, b]` text of the parts with braces in place of the brackets.
-    let braced = func(string[list] parts) -> string {
+    let braced = func(parts: string[list]) -> string {
         let text = parts.to_string();
         return "{" + text.slice(1, text.byte_length - 1) + "}";
     };

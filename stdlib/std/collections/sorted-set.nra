@@ -9,13 +9,13 @@ export let SortedSet = module (
         let first = func() -> T;
         let last = func() -> T;
         // Elements from `from` inclusive to `to` exclusive, ascending.
-        let range = func(T from, T to) -> T[list];
+        let range = func(from: T, to: T) -> T[list];
         let descending = func() -> T[list];
         // The greatest element at most, the least at least, the greatest
         // below, and the least above the value.
-        let floor = func(T value) -> optional.Optional<T>;
-        let ceiling = func(T value) -> optional.Optional<T>;
-        let lower = func(T value) -> optional.Optional<T>;
-        let higher = func(T value) -> optional.Optional<T>;
+        let floor = func(value: T) -> optional.Optional<T>;
+        let ceiling = func(value: T) -> optional.Optional<T>;
+        let lower = func(value: T) -> optional.Optional<T>;
+        let higher = func(value: T) -> optional.Optional<T>;
     );
 );

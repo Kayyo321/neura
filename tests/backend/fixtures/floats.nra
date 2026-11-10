@@ -3,43 +3,43 @@
 let program = import:Std.Program;
 
 let Floats = module (
-    export let add16 = func(float16 a, float16 b) -> float16 {
+    export let add16 = func(a: float16, b: float16) -> float16 {
         return a + b;
     };
 
-    export let multiply_bf16 = func(bfloat16 a, bfloat16 b) -> bfloat16 {
+    export let multiply_bf16 = func(a: bfloat16, b: bfloat16) -> bfloat16 {
         return a * b;
     };
 
-    export let divide32 = func(float32 a, float32 b) -> float32 {
+    export let divide32 = func(a: float32, b: float32) -> float32 {
         return a / b;
     };
 
-    export let subtract64 = func(float64 a, float64 b) -> float64 {
+    export let subtract64 = func(a: float64, b: float64) -> float64 {
         return a - b;
     };
 
-    export let ordered32 = func(float32 a, float32 b) -> bool {
+    export let ordered32 = func(a: float32, b: float32) -> bool {
         return a < b || a >= b;
     };
 
-    export let scaled32 = func(float32 a) -> float32 {
+    export let scaled32 = func(a: float32) -> float32 {
         return a * 2.5 - 1.0;
     };
 
-    export let truncate32 = func(float32 a) -> int32 {
+    export let truncate32 = func(a: float32) -> int32 {
         return a as int32;
     };
 
-    export let from_int16 = func(int16 a) -> float16 {
+    export let from_int16 = func(a: int16) -> float16 {
         return a as float16;
     };
 
-    export let narrow64 = func(float64 a) -> float32 {
+    export let narrow64 = func(a: float64) -> float32 {
         return a as float32;
     };
 
-    export let polynomial64 = func(float64 x) -> float64 {
+    export let polynomial64 = func(x: float64) -> float64 {
         let total: float64 = 0.0;
         for (let i: int32 = 0; i < 3; i = i + 1) {
             total = total * x + 1.5;
@@ -49,7 +49,7 @@ let Floats = module (
 );
 
 let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
     }
 );

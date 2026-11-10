@@ -8,7 +8,7 @@ let UuidTests = module (
     // Expected text and hash from Python: the generator's fill_bytes(16)
     // with the version and variant bits set (uuid.UUID confirms version 4,
     // RFC 4122 variant), and the hash 17 combined with each byte.
-    let check_random = func(uint64 seed, string first, uint32 first_hash, string second, uint32 second_hash) -> void {
+    let check_random = func(seed: uint64, first: string, first_hash: uint32, second: string, second_hash: uint32) -> void {
         let r = randoms.seeded(seed);
         let a = uuids.random(r);
         let b = uuids.random(r);
@@ -23,7 +23,7 @@ let UuidTests = module (
         test.assert_equal_int32(128, (bytes[8] & 192) as int);
     };
 
-    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+    let check_error = func(text: string, kind: error.ParseErrorKind, offset: int) -> void {
         let failure = test.assert_err<uuids.Uuid>(uuids.parse(text));
         match (failure) {
             error.Error.Parse { kind: actual, offset: at, message: _ } => {
@@ -36,7 +36,7 @@ let UuidTests = module (
         }
     };
 
-    let parsed = func(string text) -> uuids.Uuid {
+    let parsed = func(text: string) -> uuids.Uuid {
         return test.assert_ok<uuids.Uuid>(uuids.parse(text));
     };
 

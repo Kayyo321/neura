@@ -12,7 +12,7 @@ export let ImmutableList = module (
         let storage: T[list];
 
         // Copies `values`.
-        export let init = func(T[list] values) -> void {
+        export let init = func(values: T[list]) -> void {
             let copy: T[list] = [];
             let count = values.length;
             let i = 0;
@@ -32,7 +32,7 @@ export let ImmutableList = module (
         };
 
         // A bounds trap for an index outside 0 through size() - 1.
-        export let get = func(int index) -> T {
+        export let get = func(index: int) -> T {
             return storage[index];
         };
 
@@ -65,11 +65,11 @@ export let ImmutableList = module (
         };
 
         // By equals, with `value` as the receiver.
-        export let contains = func(T value) -> bool {
+        export let contains = func(value: T) -> bool {
             return index_of(value) >= 0;
         };
 
-        export let index_of = func(T value) -> int {
+        export let index_of = func(value: T) -> int {
             let count = storage.length;
             let i = 0;
             while (i < count) {
@@ -81,7 +81,7 @@ export let ImmutableList = module (
             return -1;
         };
 
-        export let last_index_of = func(T value) -> int {
+        export let last_index_of = func(value: T) -> int {
             let i = storage.length - 1;
             while (i >= 0) {
                 if (value.equals(storage[i])) {
@@ -93,7 +93,7 @@ export let ImmutableList = module (
         };
 
         // The first index whose element passes, or -1.
-        export let index_where = func(func(T) -> bool test) -> int {
+        export let index_where = func(test: func(T) -> bool) -> int {
             let count = storage.length;
             let i = 0;
             while (i < count) {
@@ -105,7 +105,7 @@ export let ImmutableList = module (
             return -1;
         };
 
-        export let for_each = func(func(T) -> void action) -> void {
+        export let for_each = func(action: func(T) -> void) -> void {
             let count = storage.length;
             let i = 0;
             while (i < count) {
@@ -117,7 +117,7 @@ export let ImmutableList = module (
         // A new ImmutableList with the elements from `start` inclusive to
         // `end` exclusive. Traps with "invalid argument: range" unless
         // 0 <= start <= end <= size().
-        export let slice = func(int start, int end) -> ImmutableList<T> {
+        export let slice = func(start: int, end: int) -> ImmutableList<T> {
             if (start < 0 || start > end || end > storage.length) {
                 trap_with_message("invalid argument: range");
             }
@@ -131,7 +131,7 @@ export let ImmutableList = module (
         };
 
         // Sorting.binary_search over the elements, which must be sorted by c.
-        export let binary_search = func(T value, func(T, T) -> ordering.Ordering c) -> int {
+        export let binary_search = func(value: T, c: func(T, T) -> ordering.Ordering) -> int {
             return sorting.binary_search<T>(storage, value, c);
         };
 
@@ -153,7 +153,7 @@ export let ImmutableList = module (
 
         // Another ImmutableList with the same element type, size, and equal
         // elements at each index.
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is ImmutableList<T>)) {
                 return false;
             }
@@ -188,7 +188,7 @@ export let ImmutableList = module (
         let source: T[list];
         let position: int = 0;
 
-        export let init = func(T[list] values) -> void {
+        export let init = func(values: T[list]) -> void {
             source = values;
         };
 
@@ -207,7 +207,7 @@ export let ImmutableList = module (
     );
 
     // Copies `items`.
-    export let of = func<T>(T[list] items) -> ImmutableList<T> {
+    export let of = func<T>(items: T[list]) -> ImmutableList<T> {
         return new ImmutableList<T>(items);
     };
 );

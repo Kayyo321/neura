@@ -28,7 +28,7 @@ export let Sequence = module (
 
         // A sequence over a has_next and next pair with the iterator
         // protocol's contract.
-        export let init = func(func() -> bool more, func() -> T pull) -> void {
+        export let init = func(more: func() -> bool, pull: func() -> T) -> void {
             has_next = more;
             next = pull;
         };
@@ -40,7 +40,7 @@ export let Sequence = module (
             return new SequenceIterator<T>(has_next, next);
         };
 
-        export let map = func<U>(func(T) -> U f) -> Sequence<U> {
+        export let map = func<U>(f: func(T) -> U) -> Sequence<U> {
             begin();
             let pull = next;
             return new Sequence<U>(has_next, func() -> U {
@@ -49,7 +49,7 @@ export let Sequence = module (
         };
 
         // The elements that pass `keep`.
-        export let filter = func(func(T) -> bool keep) -> Sequence<T> {
+        export let filter = func(keep: func(T) -> bool) -> Sequence<T> {
             begin();
             let more = has_next;
             let pull = next;
@@ -67,7 +67,7 @@ export let Sequence = module (
         };
 
         // The elements of each list `f` returns, in order.
-        export let flat_map = func<U>(func(T) -> U[list] f) -> Sequence<U> {
+        export let flat_map = func<U>(f: func(T) -> U[list]) -> Sequence<U> {
             begin();
             let more = has_next;
             let pull = next;
@@ -91,7 +91,7 @@ export let Sequence = module (
 
         // At most the first `n` elements; stops pulling after the n-th.
         // Traps with "invalid argument: negative count" for a negative `n`.
-        export let take = func(int n) -> Sequence<T> {
+        export let take = func(n: int) -> Sequence<T> {
             begin();
             if (n < 0) {
                 trap_with_message("invalid argument: negative count");
@@ -112,7 +112,7 @@ export let Sequence = module (
 
         // All but the first `n` elements. Traps with "invalid argument:
         // negative count" for a negative `n`.
-        export let skip = func(int n) -> Sequence<T> {
+        export let skip = func(n: int) -> Sequence<T> {
             begin();
             if (n < 0) {
                 trap_with_message("invalid argument: negative count");
@@ -141,7 +141,7 @@ export let Sequence = module (
 
         // The leading elements that pass `test`; ends at the first that
         // fails.
-        export let take_while = func(func(T) -> bool test) -> Sequence<T> {
+        export let take_while = func(test: func(T) -> bool) -> Sequence<T> {
             begin();
             let more = has_next;
             let pull = next;
@@ -164,7 +164,7 @@ export let Sequence = module (
         };
 
         // The elements from the first that fails `test` on.
-        export let skip_while = func(func(T) -> bool test) -> Sequence<T> {
+        export let skip_while = func(test: func(T) -> bool) -> Sequence<T> {
             begin();
             let more = has_next;
             let pull = next;
@@ -205,7 +205,7 @@ export let Sequence = module (
 
         // Pairs of elements of this and `other`; ends with the shorter.
         // Uses `other` up as well.
-        export let zip = func<U>(Sequence<U> other) -> Sequence<[T, U]> {
+        export let zip = func<U>(other: Sequence<U>) -> Sequence<[T, U]> {
             begin();
             let more = has_next;
             let pull = next;
@@ -222,7 +222,7 @@ export let Sequence = module (
 
         // This sequence's elements, then those of `other`. Uses `other` up
         // as well.
-        export let chain = func(Sequence<T> other) -> Sequence<T> {
+        export let chain = func(other: Sequence<T>) -> Sequence<T> {
             begin();
             let more = has_next;
             let pull = next;
@@ -239,7 +239,7 @@ export let Sequence = module (
         };
 
         // Calls `action` with each element as it passes.
-        export let peek = func(func(T) -> void action) -> Sequence<T> {
+        export let peek = func(action: func(T) -> void) -> Sequence<T> {
             begin();
             let pull = next;
             return new Sequence<T>(has_next, func() -> T {
@@ -251,7 +251,7 @@ export let Sequence = module (
 
         // Consecutive new lists of `n` elements; the last may be shorter.
         // Traps with "invalid argument: chunk size" when `n` is below 1.
-        export let chunked = func(int n) -> Sequence<T[list]> {
+        export let chunked = func(n: int) -> Sequence<T[list]> {
             begin();
             if (n < 1) {
                 trap_with_message("invalid argument: chunk size");
@@ -275,7 +275,7 @@ export let Sequence = module (
         // Every run of `n` consecutive elements, each a new list, advancing
         // by one; none when there are fewer than `n`. Traps with "invalid
         // argument: window size" when `n` is below 1.
-        export let windowed = func(int n) -> Sequence<T[list]> {
+        export let windowed = func(n: int) -> Sequence<T[list]> {
             begin();
             if (n < 1) {
                 trap_with_message("invalid argument: window size");
@@ -311,7 +311,7 @@ export let Sequence = module (
         };
 
         // The whole input, stably sorted by `c` when first pulled.
-        export let sorted = func(func(T, T) -> ordering.Ordering c) -> Sequence<T> {
+        export let sorted = func(c: func(T, T) -> ordering.Ordering) -> Sequence<T> {
             begin();
             let more = has_next;
             let pull = next;
@@ -392,7 +392,7 @@ export let Sequence = module (
         };
 
         // The elements that pass `test`, then those that fail it.
-        export let partition = func(func(T) -> bool test) -> [array_list.ArrayList<T>, array_list.ArrayList<T>] {
+        export let partition = func(test: func(T) -> bool) -> [array_list.ArrayList<T>, array_list.ArrayList<T>] {
             begin();
             let passed: T[list] = [];
             let failed: T[list] = [];
@@ -409,7 +409,7 @@ export let Sequence = module (
         };
 
         // Left to right.
-        export let fold = func<A>(A initial, func(A, T) -> A f) -> A {
+        export let fold = func<A>(initial: A, f: func(A, T) -> A) -> A {
             begin();
             let accumulator = initial;
             while (has_next()) {
@@ -429,7 +429,7 @@ export let Sequence = module (
             return total;
         };
 
-        export let for_each = func(func(T) -> void action) -> void {
+        export let for_each = func(action: func(T) -> void) -> void {
             begin();
             while (has_next()) {
                 action(next());
@@ -437,7 +437,7 @@ export let Sequence = module (
         };
 
         // Stops at the first element that passes.
-        export let any = func(func(T) -> bool test) -> bool {
+        export let any = func(test: func(T) -> bool) -> bool {
             begin();
             while (has_next()) {
                 if (test(next())) {
@@ -448,7 +448,7 @@ export let Sequence = module (
         };
 
         // Stops at the first element that fails.
-        export let all = func(func(T) -> bool test) -> bool {
+        export let all = func(test: func(T) -> bool) -> bool {
             begin();
             while (has_next()) {
                 if (!test(next())) {
@@ -459,7 +459,7 @@ export let Sequence = module (
         };
 
         // Stops at the first element that passes.
-        export let none = func(func(T) -> bool test) -> bool {
+        export let none = func(test: func(T) -> bool) -> bool {
             begin();
             while (has_next()) {
                 if (test(next())) {
@@ -470,7 +470,7 @@ export let Sequence = module (
         };
 
         // f(f(first, second), third) and so on; None when empty.
-        export let reduce = func(func(T, T) -> T f) -> optional.Optional<T> {
+        export let reduce = func(f: func(T, T) -> T) -> optional.Optional<T> {
             begin();
             if (!has_next()) {
                 return optional.Optional<T>.None;
@@ -504,7 +504,7 @@ export let Sequence = module (
         };
 
         // The first element that passes `test`.
-        export let find = func(func(T) -> bool test) -> optional.Optional<T> {
+        export let find = func(test: func(T) -> bool) -> optional.Optional<T> {
             begin();
             while (has_next()) {
                 let value = next();
@@ -516,12 +516,12 @@ export let Sequence = module (
         };
 
         // The first of several least elements.
-        export let min = func(func(T, T) -> ordering.Ordering c) -> optional.Optional<T> {
+        export let min = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T> {
             return extreme(c, ordering.Ordering.Less);
         };
 
         // The first of several greatest elements.
-        export let max = func(func(T, T) -> ordering.Ordering c) -> optional.Optional<T> {
+        export let max = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T> {
             return extreme(c, ordering.Ordering.Greater);
         };
 
@@ -539,7 +539,7 @@ export let Sequence = module (
         // A HashMap from key(element) to value(element), by the keys' equals
         // and hash_code. Traps with "invalid argument: duplicate key" when two
         // elements give equal keys.
-        export let to_map = func<K, V>(func(T) -> K key, func(T) -> V value) -> hash_map.HashMap<K, V> {
+        export let to_map = func<K, V>(key: func(T) -> K, value: func(T) -> V) -> hash_map.HashMap<K, V> {
             begin();
             let result = hash_map.create<K, V>();
             while (has_next()) {
@@ -555,7 +555,7 @@ export let Sequence = module (
 
         // The elements grouped by key(element), groups in first-seen key
         // order and each group in sequence order.
-        export let group_by = func<K>(func(T) -> K key) -> hash_map.HashMap<K, array_list.ArrayList<T>> {
+        export let group_by = func<K>(key: func(T) -> K) -> hash_map.HashMap<K, array_list.ArrayList<T>> {
             begin();
             let groups = hash_map.create<K, array_list.ArrayList<T>>();
             let make = func() -> array_list.ArrayList<T> {
@@ -591,7 +591,7 @@ export let Sequence = module (
             consumed = true;
         };
 
-        let extreme = func(func(T, T) -> ordering.Ordering c, ordering.Ordering wanted) -> optional.Optional<T> {
+        let extreme = func(c: func(T, T) -> ordering.Ordering, wanted: ordering.Ordering) -> optional.Optional<T> {
             begin();
             if (!has_next()) {
                 return optional.Optional<T>.None;
@@ -611,7 +611,7 @@ export let Sequence = module (
         let more: func() -> bool;
         let pull: func() -> T;
 
-        export let init = func(func() -> bool has_more, func() -> T take) -> void {
+        export let init = func(has_more: func() -> bool, take: func() -> T) -> void {
             more = has_more;
             pull = take;
         };
@@ -631,7 +631,7 @@ export let Sequence = module (
     // A sequence whose elements come from `buffer`, which `refill` appends
     // to when it is used up. `refill` returns false at the end and true only
     // after appending at least one element.
-    let buffered = func<U>(U[list] buffer, func() -> bool refill) -> Sequence<U> {
+    let buffered = func<U>(buffer: U[list], refill: func() -> bool) -> Sequence<U> {
         let position = cell.of<int>(0);
         let more = func() -> bool {
             if (position.value < buffer.length) {
@@ -656,7 +656,7 @@ export let Sequence = module (
     // The list's elements in order. It fails fast with "collection modified
     // during iteration" when the list changes structurally, as the built-in
     // for-each does.
-    export let from_list = func<T>(T[list] items) -> Sequence<T> {
+    export let from_list = func<T>(items: T[list]) -> Sequence<T> {
         let position = cell.of<int>(0);
         let version = items.version;
         let more = func() -> bool {
@@ -677,7 +677,7 @@ export let Sequence = module (
 
     // The remaining elements of an iterator, which keeps its own
     // modification checks.
-    export let from_iterator = func<T>(iterators.Iterator<T> items) -> Sequence<T> {
+    export let from_iterator = func<T>(items: iterators.Iterator<T>) -> Sequence<T> {
         return new Sequence<T>(func() -> bool {
             return items.has_next();
         }, func() -> T {
@@ -694,7 +694,7 @@ export let Sequence = module (
     };
 
     // An infinite sequence of make(), make(), ...
-    export let generate = func<T>(func() -> T make) -> Sequence<T> {
+    export let generate = func<T>(make: func() -> T) -> Sequence<T> {
         return new Sequence<T>(func() -> bool {
             return true;
         }, make);
@@ -702,7 +702,7 @@ export let Sequence = module (
 
     // The infinite sequence seed, step(seed), step(step(seed)), ...; `step`
     // runs only when the next element is pulled.
-    export let iterate = func<T>(T seed, func(T) -> T step) -> Sequence<T> {
+    export let iterate = func<T>(seed: T, step: func(T) -> T) -> Sequence<T> {
         let state = cell.of<T>(seed);
         let started = cell.of<bool>(false);
         return new Sequence<T>(func() -> bool {
@@ -719,7 +719,7 @@ export let Sequence = module (
 
     // The ints from `start` inclusive to `end` exclusive, ascending; empty
     // when `end` is not above `start`.
-    export let range = func(int start, int end) -> Sequence<int> {
+    export let range = func(start: int, end: int) -> Sequence<int> {
         let position = cell.of<int>(start);
         let more = func() -> bool {
             return position.value < end;
@@ -735,7 +735,7 @@ export let Sequence = module (
     };
 
     // The strings with `separator` between consecutive ones.
-    export let join = func(Sequence<string> s, string separator) -> string {
+    export let join = func(s: Sequence<string>, separator: string) -> string {
         let items = s.iterator();
         let text = "";
         let first = true;
@@ -751,7 +751,7 @@ export let Sequence = module (
     };
 
     // Checked: an overflow traps (reason 1).
-    export let sum_int32 = func(Sequence<int> s) -> int {
+    export let sum_int32 = func(s: Sequence<int>) -> int {
         let items = s.iterator();
         let total = 0;
         while (items.has_next()) {
@@ -761,7 +761,7 @@ export let Sequence = module (
     };
 
     // Checked: an overflow traps (reason 1).
-    export let sum_int64 = func(Sequence<int64> s) -> int64 {
+    export let sum_int64 = func(s: Sequence<int64>) -> int64 {
         let items = s.iterator();
         let total: int64 = 0;
         while (items.has_next()) {
@@ -772,7 +772,7 @@ export let Sequence = module (
 
     // Left-to-right addition starting from the first element; 0.0 when
     // empty.
-    export let sum_float64 = func(Sequence<float64> s) -> float64 {
+    export let sum_float64 = func(s: Sequence<float64>) -> float64 {
         let items = s.iterator();
         if (!items.has_next()) {
             return 0.0;

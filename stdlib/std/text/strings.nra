@@ -15,12 +15,12 @@ let result = import:Std.Core.Result;
 // where they can, and build new text in one uint8 list converted once.
 export let Strings = module (
     // Constant time.
-    export let byte_length = func(string s) -> int {
+    export let byte_length = func(s: string) -> int {
         return s.byte_length;
     };
 
     // The number of bytes that are not continuation bytes. Linear.
-    export let scalar_count = func(string s) -> int {
+    export let scalar_count = func(s: string) -> int {
         let count = 0;
         let length = s.byte_length;
         let i = 0;
@@ -33,19 +33,19 @@ export let Strings = module (
         return count;
     };
 
-    export let is_empty = func(string s) -> bool {
+    export let is_empty = func(s: string) -> bool {
         return s.byte_length == 0;
     };
 
     // The byte at the offset; the built-in read traps outside the string.
-    export let byte_at = func(string s, int offset) -> uint8 {
+    export let byte_at = func(s: string, offset: int) -> uint8 {
         return s.byte_at(offset);
     };
 
     // The scalar value of the character starting at the offset. An offset
     // outside the string is a built-in bounds trap; a continuation byte traps
     // with "invalid argument: offset is not a character boundary".
-    export let scalar_at = func(string s, int offset) -> uint32 {
+    export let scalar_at = func(s: string, offset: int) -> uint32 {
         if ((s.byte_at(offset) & 192) == 128) {
             trap_with_message("invalid argument: offset is not a character boundary");
         }
@@ -54,7 +54,7 @@ export let Strings = module (
 
     // True for 0, for the byte length, and for every offset whose byte is
     // not a continuation byte; false outside 0 through the byte length.
-    export let is_boundary = func(string s, int offset) -> bool {
+    export let is_boundary = func(s: string, offset: int) -> bool {
         if (offset < 0 || offset > s.byte_length) {
             return false;
         }
@@ -62,7 +62,7 @@ export let Strings = module (
     };
 
     // The scalar values in order.
-    export let scalars = func(string s) -> uint32[list] {
+    export let scalars = func(s: string) -> uint32[list] {
         let values: uint32[list] = [];
         let length = s.byte_length;
         let i = 0;
@@ -75,7 +75,7 @@ export let Strings = module (
     };
 
     // Each character's starting offset with its scalar value.
-    export let scalar_offsets = func(string s) -> [int, uint32][list] {
+    export let scalar_offsets = func(s: string) -> [int, uint32][list] {
         let values: [int, uint32][list] = [];
         let length = s.byte_length;
         let i = 0;
@@ -88,27 +88,27 @@ export let Strings = module (
     };
 
     // The built-in slice: both ends on boundaries and start not above end.
-    export let slice = func(string s, int start, int end) -> string {
+    export let slice = func(s: string, start: int, end: int) -> string {
         return s.slice(start, end);
     };
 
-    export let slice_from = func(string s, int start) -> string {
+    export let slice_from = func(s: string, start: int) -> string {
         return s.slice(start, s.byte_length);
     };
 
     // Same bytes (Stdlib.md section 5.2).
-    export let equals = func(string a, string b) -> bool {
+    export let equals = func(a: string, b: string) -> bool {
         return a == b;
     };
 
     // Start with 0; for each byte, 31 times the hash plus the byte, wrapping.
-    export let hash = func(string s) -> uint32 {
+    export let hash = func(s: string) -> uint32 {
         return s.hash_code();
     };
 
     // Byte-wise lexicographic order; a proper prefix sorts first. This is
     // also the order of the scalar values.
-    export let compare = func(string a, string b) -> ordering.Ordering {
+    export let compare = func(a: string, b: string) -> ordering.Ordering {
         if (a == b) {
             return ordering.Ordering.Equal;
         }
@@ -136,11 +136,11 @@ export let Strings = module (
         return ordering.Ordering.Greater;
     };
 
-    export let starts_with = func(string s, string prefix) -> bool {
+    export let starts_with = func(s: string, prefix: string) -> bool {
         return matches_at(s, prefix, 0);
     };
 
-    export let ends_with = func(string s, string suffix) -> bool {
+    export let ends_with = func(s: string, suffix: string) -> bool {
         let start = s.byte_length - suffix.byte_length;
         if (start < 0) {
             return false;
@@ -148,27 +148,27 @@ export let Strings = module (
         return matches_at(s, suffix, start);
     };
 
-    export let contains = func(string s, string needle) -> bool {
+    export let contains = func(s: string, needle: string) -> bool {
         return find(s, needle, 0) >= 0;
     };
 
     // The offset of the first occurrence, or -1. An empty needle matches
     // at 0.
-    export let index_of = func(string s, string needle) -> int {
+    export let index_of = func(s: string, needle: string) -> int {
         return find(s, needle, 0);
     };
 
     // The offset of the first occurrence at or after `from`, or -1. An
     // empty needle matches at `from`. `from` must be a boundary from 0
     // through the byte length.
-    export let index_of_from = func(string s, string needle, int from) -> int {
+    export let index_of_from = func(s: string, needle: string, from: int) -> int {
         check_offset(s, from);
         return find(s, needle, from);
     };
 
     // The offset of the last occurrence, or -1. An empty needle matches at
     // the byte length.
-    export let last_index_of = func(string s, string needle) -> int {
+    export let last_index_of = func(s: string, needle: string) -> int {
         let n = needle.byte_length;
         let i = s.byte_length - n;
         if (n == 0) {
@@ -188,13 +188,13 @@ export let Strings = module (
     // left to right. Empty pieces are kept; the empty string gives one
     // piece. An empty separator traps with "invalid argument: empty
     // separator".
-    export let split = func(string s, string separator) -> string[list] {
+    export let split = func(s: string, separator: string) -> string[list] {
         return split_pieces(s, separator, 2147483647);
     };
 
     // As split, with at most `limit` pieces; the last piece holds the rest.
     // A limit below 1 traps with "invalid argument: limit below 1".
-    export let split_limit = func(string s, string separator, int limit) -> string[list] {
+    export let split_limit = func(s: string, separator: string, limit: int) -> string[list] {
         if (limit < 1) {
             trap_with_message("invalid argument: limit below 1");
         }
@@ -204,7 +204,7 @@ export let Strings = module (
     // Splits at LF. A CR immediately before an LF is removed, and the empty
     // piece after a final LF is dropped. The empty string gives one empty
     // line, as split does.
-    export let lines = func(string s) -> string[list] {
+    export let lines = func(s: string) -> string[list] {
         let pieces: string[list] = [];
         let length = s.byte_length;
         let start = 0;
@@ -227,7 +227,7 @@ export let Strings = module (
     };
 
     // The parts with the separator between each pair.
-    export let join = func(string[list] parts, string separator) -> string {
+    export let join = func(parts: string[list], separator: string) -> string {
         let count = parts.length;
         if (count == 0) {
             return "";
@@ -251,7 +251,7 @@ export let Strings = module (
 
     // `count` copies of the string. A negative count traps with "invalid
     // argument: negative count".
-    export let repeat = func(string s, int count) -> string {
+    export let repeat = func(s: string, count: int) -> string {
         if (count < 0) {
             trap_with_message("invalid argument: negative count");
         }
@@ -272,7 +272,7 @@ export let Strings = module (
 
     // Removes space, tab, LF, vertical tab, form feed, and CR from both
     // ends.
-    export let trim = func(string s) -> string {
+    export let trim = func(s: string) -> string {
         let end = trimmed_end(s);
         let start = 0;
         while (start < end && is_space(s.byte_at(start))) {
@@ -281,7 +281,7 @@ export let Strings = module (
         return s.slice(start, end);
     };
 
-    export let trim_start = func(string s) -> string {
+    export let trim_start = func(s: string) -> string {
         let length = s.byte_length;
         let start = 0;
         while (start < length && is_space(s.byte_at(start))) {
@@ -290,12 +290,12 @@ export let Strings = module (
         return s.slice(start, length);
     };
 
-    export let trim_end = func(string s) -> string {
+    export let trim_end = func(s: string) -> string {
         return s.slice(0, trimmed_end(s));
     };
 
     // The rest of the string when it starts with the prefix.
-    export let strip_prefix = func(string s, string prefix) -> optional.Optional<string> {
+    export let strip_prefix = func(s: string, prefix: string) -> optional.Optional<string> {
         if (matches_at(s, prefix, 0)) {
             return optional.Optional<string>.Some(s.slice(prefix.byte_length, s.byte_length));
         }
@@ -303,7 +303,7 @@ export let Strings = module (
     };
 
     // The start of the string when it ends with the suffix.
-    export let strip_suffix = func(string s, string suffix) -> optional.Optional<string> {
+    export let strip_suffix = func(s: string, suffix: string) -> optional.Optional<string> {
         let start = s.byte_length - suffix.byte_length;
         if (start >= 0 && matches_at(s, suffix, start)) {
             return optional.Optional<string>.Some(s.slice(0, start));
@@ -313,27 +313,27 @@ export let Strings = module (
 
     // Replaces every non-overlapping occurrence, left to right. An empty
     // target traps with "invalid argument: empty target".
-    export let replace = func(string s, string target, string replacement) -> string {
+    export let replace = func(s: string, target: string, replacement: string) -> string {
         return replace_up_to(s, target, replacement, 2147483647);
     };
 
     // Replaces the first occurrence. An empty target traps as in replace.
-    export let replace_first = func(string s, string target, string replacement) -> string {
+    export let replace_first = func(s: string, target: string, replacement: string) -> string {
         return replace_up_to(s, target, replacement, 1);
     };
 
     // a through z become A through Z; every other byte is unchanged.
-    export let to_ascii_upper = func(string s) -> string {
+    export let to_ascii_upper = func(s: string) -> string {
         return map_ascii_letters(s, 97, 122, -32);
     };
 
     // A through Z become a through z; every other byte is unchanged.
-    export let to_ascii_lower = func(string s) -> string {
+    export let to_ascii_lower = func(s: string) -> string {
         return map_ascii_letters(s, 65, 90, 32);
     };
 
     // Equal after mapping A through Z to a through z in both strings.
-    export let equals_ignore_ascii_case = func(string a, string b) -> bool {
+    export let equals_ignore_ascii_case = func(a: string, b: string) -> bool {
         if (a == b) {
             return true;
         }
@@ -356,7 +356,7 @@ export let Strings = module (
     // Copies of `pad` before the string until it has `width` scalar values.
     // `pad` must be exactly one scalar value; otherwise the call traps with
     // "invalid argument: pad is not one scalar value".
-    export let pad_start = func(string s, int width, string pad) -> string {
+    export let pad_start = func(s: string, width: int, pad: string) -> string {
         let missing = padding(s, width, pad);
         if (missing == 0) {
             return s;
@@ -368,7 +368,7 @@ export let Strings = module (
     };
 
     // Copies of `pad` after the string, with the rules of pad_start.
-    export let pad_end = func(string s, int width, string pad) -> string {
+    export let pad_end = func(s: string, width: int, pad: string) -> string {
         let missing = padding(s, width, pad);
         if (missing == 0) {
             return s;
@@ -380,7 +380,7 @@ export let Strings = module (
     };
 
     // The scalar values in reverse order.
-    export let reverse = func(string s) -> string {
+    export let reverse = func(s: string) -> string {
         let length = s.byte_length;
         let bytes: uint8[list] = [];
         let end = length;
@@ -396,7 +396,7 @@ export let Strings = module (
     };
 
     // A copy of the UTF-8 bytes.
-    export let to_bytes = func(string s) -> uint8[list] {
+    export let to_bytes = func(s: string) -> uint8[list] {
         let bytes: uint8[list] = [];
         append_bytes(bytes, s, 0, s.byte_length);
         return bytes;
@@ -406,7 +406,7 @@ export let Strings = module (
     // start of the first ill-formed sequence (the length of the longest
     // valid prefix). Its message is "invalid start byte", "invalid
     // continuation byte", or "unexpected end of data".
-    export let from_bytes = func(uint8[list] bytes) -> result.Result<string> {
+    export let from_bytes = func(bytes: uint8[list]) -> result.Result<string> {
         let [valid, text] = string.from_utf8(bytes);
         if (valid) {
             return result.Result<string>.Ok(text);
@@ -428,7 +428,7 @@ export let Strings = module (
 
     // The text the bytes encode, with each maximal ill-formed subsequence
     // (Unicode's "maximal subpart" practice) replaced by one U+FFFD.
-    export let from_bytes_lossy = func(uint8[list] bytes) -> string {
+    export let from_bytes_lossy = func(bytes: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(bytes);
         if (valid) {
             return text;
@@ -456,7 +456,7 @@ export let Strings = module (
 
     // The text of the scalar values. A surrogate or a value above 0x10FFFF
     // traps with "invalid argument: not a Unicode scalar value".
-    export let from_scalars = func(uint32[list] values) -> string {
+    export let from_scalars = func(values: uint32[list]) -> string {
         let bytes: uint8[list] = [];
         for (let value in values) {
             append_scalar(bytes, value);
@@ -467,7 +467,7 @@ export let Strings = module (
     // Internal helpers.
 
     // The scalar value of the well-formed sequence starting at the offset.
-    let decode = func(string s, int offset) -> uint32 {
+    let decode = func(s: string, offset: int) -> uint32 {
         let lead = s.byte_at(offset) as uint32;
         if (lead < 128) {
             return lead;
@@ -484,7 +484,7 @@ export let Strings = module (
     };
 
     // The length of the sequence a lead byte of valid text starts.
-    let sequence_length = func(uint8 lead) -> int {
+    let sequence_length = func(lead: uint8) -> int {
         if (lead < 128) {
             return 1;
         }
@@ -499,7 +499,7 @@ export let Strings = module (
 
     // Whether the needle's bytes occur at the offset. A candidate whose end
     // is not a boundary cannot match, so the slice compared is always valid.
-    let matches_at = func(string s, string needle, int offset) -> bool {
+    let matches_at = func(s: string, needle: string, offset: int) -> bool {
         let end = offset + needle.byte_length;
         if (end > s.byte_length) {
             return false;
@@ -515,7 +515,7 @@ export let Strings = module (
 
     // The first occurrence at or after `from`: scan for the needle's first
     // byte, then compare the candidate.
-    let find = func(string s, string needle, int from) -> int {
+    let find = func(s: string, needle: string, from: int) -> int {
         let n = needle.byte_length;
         if (n == 0) {
             return from;
@@ -534,7 +534,7 @@ export let Strings = module (
         return -1;
     };
 
-    let check_offset = func(string s, int offset) -> void {
+    let check_offset = func(s: string, offset: int) -> void {
         if (offset < 0 || offset > s.byte_length) {
             trap_with_message("invalid argument: offset out of range");
         }
@@ -543,7 +543,7 @@ export let Strings = module (
         }
     };
 
-    let split_pieces = func(string s, string separator, int limit) -> string[list] {
+    let split_pieces = func(s: string, separator: string, limit: int) -> string[list] {
         let n = separator.byte_length;
         if (n == 0) {
             trap_with_message("invalid argument: empty separator");
@@ -564,7 +564,7 @@ export let Strings = module (
         return pieces;
     };
 
-    let replace_up_to = func(string s, string target, string replacement, int limit) -> string {
+    let replace_up_to = func(s: string, target: string, replacement: string, limit: int) -> string {
         let n = target.byte_length;
         if (n == 0) {
             trap_with_message("invalid argument: empty target");
@@ -591,7 +591,7 @@ export let Strings = module (
 
     // Copies s with every byte from `low` through `high` shifted by
     // `delta`. Returns s itself when no byte changes.
-    let map_ascii_letters = func(string s, uint8 low, uint8 high, int delta) -> string {
+    let map_ascii_letters = func(s: string, low: uint8, high: uint8, delta: int) -> string {
         let length = s.byte_length;
         let i = 0;
         while (i < length) {
@@ -617,7 +617,7 @@ export let Strings = module (
         return text_of(bytes);
     };
 
-    let fold = func(uint8 b) -> uint8 {
+    let fold = func(b: uint8) -> uint8 {
         if (b >= 65 && b <= 90) {
             return b + 32;
         }
@@ -625,7 +625,7 @@ export let Strings = module (
     };
 
     // The number of pad copies needed; traps unless pad is one scalar.
-    let padding = func(string s, int width, string pad) -> int {
+    let padding = func(s: string, width: int, pad: string) -> int {
         let pad_length = pad.byte_length;
         if (pad_length == 0 || sequence_length(pad.byte_at(0)) != pad_length) {
             trap_with_message("invalid argument: pad is not one scalar value");
@@ -637,7 +637,7 @@ export let Strings = module (
         return missing;
     };
 
-    let append_copies = func(uint8[list] bytes, string pad, int count) -> void {
+    let append_copies = func(bytes: uint8[list], pad: string, count: int) -> void {
         let k = 0;
         while (k < count) {
             append_bytes(bytes, pad, 0, pad.byte_length);
@@ -645,11 +645,11 @@ export let Strings = module (
         }
     };
 
-    let is_space = func(uint8 b) -> bool {
+    let is_space = func(b: uint8) -> bool {
         return b == 32 || (b >= 9 && b <= 13);
     };
 
-    let trimmed_end = func(string s) -> int {
+    let trimmed_end = func(s: string) -> int {
         let end = s.byte_length;
         while (end > 0 && is_space(s.byte_at(end - 1))) {
             end = end - 1;
@@ -659,7 +659,7 @@ export let Strings = module (
 
     // Appends the bytes of s from `start` up to `end`, four at a time where
     // possible.
-    let append_bytes = func(uint8[list] bytes, string s, int start, int end) -> void {
+    let append_bytes = func(bytes: uint8[list], s: string, start: int, end: int) -> void {
         let i = start;
         while (i + 4 <= end) {
             bytes.append(s.byte_at(i));
@@ -675,7 +675,7 @@ export let Strings = module (
     };
 
     // Text from bytes this module built from whole characters.
-    let text_of = func(uint8[list] bytes) -> string {
+    let text_of = func(bytes: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(bytes);
         if (!valid) {
             trap_with_message("invalid state: built text is not UTF-8");
@@ -683,7 +683,7 @@ export let Strings = module (
         return text;
     };
 
-    let append_scalar = func(uint8[list] bytes, uint32 value) -> void {
+    let append_scalar = func(bytes: uint8[list], value: uint32) -> void {
         if (value < 128) {
             bytes.append(value as uint8);
         } else if (value < 2048) {
@@ -709,7 +709,7 @@ export let Strings = module (
 
     // The length of the well-formed sequence at `i`, or the negated length
     // of the maximal subpart of an ill-formed one (Unicode Table 3-7).
-    let valid_length = func(uint8[list] bytes, int i) -> int {
+    let valid_length = func(bytes: uint8[list], i: int) -> int {
         let lead = bytes[i];
         if (lead < 128) {
             return 1;
@@ -754,7 +754,7 @@ export let Strings = module (
     };
 
     // Why the ill-formed subpart of `size` bytes at `i` is invalid.
-    let invalid_message = func(uint8[list] bytes, int i, int size) -> string {
+    let invalid_message = func(bytes: uint8[list], i: int, size: int) -> string {
         let lead = bytes[i];
         if (lead < 194 || lead > 244) {
             return "invalid start byte";

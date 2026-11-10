@@ -44,7 +44,7 @@ An exact integer target can encode a fixed-width value as a vector of bits and i
 ### Example from source to circuit
 
 ```neura
-let both = func(bool left, bool right) -> bool {
+let both = func(left: bool, right: bool) -> bool {
     return left && right;
 };
 ```

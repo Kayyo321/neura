@@ -15,12 +15,12 @@ export let StringBuilder = module (
         let bytes: uint8[list] = [];
         let link: cell.Cell<StringBuilder>;
 
-        export let init = func(Seal seal, cell.Cell<StringBuilder> owner) -> void {
+        export let init = func(seal: Seal, owner: cell.Cell<StringBuilder>) -> void {
             link = owner;
         };
 
         // Appends the bytes of `s` and returns this builder.
-        export let append = func(string s) -> StringBuilder {
+        export let append = func(s: string) -> StringBuilder {
             let count = s.byte_length;
             for (let i = 0; i < count; i = i + 1) {
                 bytes.append(s.byte_at(i));
@@ -30,7 +30,7 @@ export let StringBuilder = module (
 
         // Appends the UTF-8 encoding of a Unicode scalar value. Traps for a
         // surrogate or a value above 0x10FFFF.
-        export let append_scalar = func(uint32 scalar) -> StringBuilder {
+        export let append_scalar = func(scalar: uint32) -> StringBuilder {
             if (scalar < 128) {
                 bytes.append(scalar as uint8);
             } else if (scalar < 2048) {
@@ -56,14 +56,14 @@ export let StringBuilder = module (
         };
 
         // Appends `s` and one LF.
-        export let append_line = func(string s) -> StringBuilder {
+        export let append_line = func(s: string) -> StringBuilder {
             append(s);
             bytes.append(10);
             return link.value;
         };
 
         // Appends `count` copies of `s`. A negative count traps.
-        export let append_repeated = func(string s, int count) -> StringBuilder {
+        export let append_repeated = func(s: string, count: int) -> StringBuilder {
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
             }
@@ -75,19 +75,19 @@ export let StringBuilder = module (
 
         // The scalar appends use the built-in decimal and float text
         // (Stdlib.md sections 5.2 and 7.5).
-        export let append_int = func(int64 v) -> StringBuilder {
+        export let append_int = func(v: int64) -> StringBuilder {
             return append(v.to_string());
         };
 
-        export let append_uint = func(uint64 v) -> StringBuilder {
+        export let append_uint = func(v: uint64) -> StringBuilder {
             return append(v.to_string());
         };
 
-        export let append_float = func(float64 v) -> StringBuilder {
+        export let append_float = func(v: float64) -> StringBuilder {
             return append(v.to_string());
         };
 
-        export let append_bool = func(bool v) -> StringBuilder {
+        export let append_bool = func(v: bool) -> StringBuilder {
             if (v) {
                 return append("true");
             }
@@ -95,7 +95,7 @@ export let StringBuilder = module (
         };
 
         // Appends `value.to_string()`.
-        export let append_value = func<T>(T value) -> StringBuilder {
+        export let append_value = func<T>(value: T) -> StringBuilder {
             return append(value.to_string());
         };
 
@@ -109,7 +109,7 @@ export let StringBuilder = module (
 
         // Keeps the first `new_length` bytes. The length must be between 0
         // and the current byte length and fall on a character boundary.
-        export let truncate = func(int new_length) -> void {
+        export let truncate = func(new_length: int) -> void {
             let length = bytes.length;
             if (new_length < 0 || new_length > length) {
                 trap_with_message("invalid argument: byte length out of range");
@@ -142,7 +142,7 @@ export let StringBuilder = module (
             return text;
         };
 
-        let copy_prefix = func(int count) -> uint8[list] {
+        let copy_prefix = func(count: int) -> uint8[list] {
             let kept: uint8[list] = [];
             for (let i = 0; i < count; i = i + 1) {
                 kept.append(bytes[i]);

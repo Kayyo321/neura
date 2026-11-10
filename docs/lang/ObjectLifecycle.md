@@ -10,7 +10,7 @@ A class may declare an `init` function. `new` allocates an instance and passes i
 let Message = class (
     export let text: string;
 
-    export let init = func(string initial_text) -> void {
+    export let init = func(initial_text: string) -> void {
         text = initial_text;
     }
 );

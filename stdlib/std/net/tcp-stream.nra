@@ -15,10 +15,10 @@ export let TcpStream = module (
     let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
     let CountOutcome = enum (Ok(int), Error(uint32));
     let DoneOutcome = enum (Ok, Error(uint32));
-    let connect_socket = func(string host, int port, int64 timeout_nanos) -> IdOutcome host("neura.net.connect", 1);
-    let read_socket = func(int64 socket, int max, int64 timeout_nanos) -> BytesOutcome host("neura.net.read", 1);
-    let write_socket = func(int64 socket, uint8[list] data) -> CountOutcome host("neura.net.write", 1);
-    let close_socket = func(int64 socket) -> DoneOutcome host("neura.net.close", 1);
+    let connect_socket = func(host: string, port: int, timeout_nanos: int64) -> IdOutcome host("neura.net.connect", 1);
+    let read_socket = func(socket: int64, max: int, timeout_nanos: int64) -> BytesOutcome host("neura.net.read", 1);
+    let write_socket = func(socket: int64, data: uint8[list]) -> CountOutcome host("neura.net.write", 1);
+    let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
     export let TcpStream = class implements closeable.Closeable (
         let handle: socket.Handle = nil;
@@ -27,14 +27,14 @@ export let TcpStream = module (
 
         // Use connect or TcpListener.accept; the handle comes from the
         // library.
-        export let init = func(socket.Handle opened) -> void {
+        export let init = func(opened: socket.Handle) -> void {
             handle = opened;
         };
 
         // Up to `max` bytes; an empty list once the peer has closed its side.
         // Waits at most the read timeout, then fails with TimedOut. A maximum
         // below 1 traps.
-        export let read = func(int max) -> result.Result<uint8[list]> {
+        export let read = func(max: int) -> result.Result<uint8[list]> {
             bytes.check_maximum(max);
             if (!open_now) {
                 return result.Result<uint8[list]>.Err(bytes.closed("stream", handle.address));
@@ -46,7 +46,7 @@ export let TcpStream = module (
         };
 
         // Writes every byte, repeating partial host writes.
-        export let write = func(uint8[list] data) -> result.Result<unit.Unit> {
+        export let write = func(data: uint8[list]) -> result.Result<unit.Unit> {
             if (!open_now) {
                 return result.Result<unit.Unit>.Err(bytes.closed("stream", handle.address));
             }
@@ -72,7 +72,7 @@ export let TcpStream = module (
 
         // The longest a read waits; zero waits without limit. A negative
         // timeout traps with "invalid argument: negative timeout".
-        export let set_read_timeout = func(duration.Duration timeout) -> void {
+        export let set_read_timeout = func(timeout: duration.Duration) -> void {
             read_timeout = timeout_nanos(timeout);
         };
 
@@ -94,7 +94,7 @@ export let TcpStream = module (
     // `timeout` (zero waits without limit). A port outside 0 through 65,535
     // traps with "invalid argument: port"; a negative timeout traps with
     // "invalid argument: negative timeout".
-    export let connect = func(string host, int port, duration.Duration timeout) -> result.Result<TcpStream> {
+    export let connect = func(host: string, port: int, timeout: duration.Duration) -> result.Result<TcpStream> {
         socket.check_port(port);
         let nanos = timeout_nanos(timeout);
         let address = socket.address_of(host, port);
@@ -104,7 +104,7 @@ export let TcpStream = module (
         };
     };
 
-    let timeout_nanos = func(duration.Duration timeout) -> int64 {
+    let timeout_nanos = func(timeout: duration.Duration) -> int64 {
         let nanos = timeout.to_nanos();
         if (nanos < 0) {
             trap_with_message("invalid argument: negative timeout");

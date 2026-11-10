@@ -5,7 +5,7 @@ let program = import:Std.Program;
 let ranges = import:Std.Core.IntRange;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(ranges.of(-2147483648, 2147483647).is_empty().to_string());
         console.print_line(ranges.of(-2147483648, 2147483647).size().to_string());
         console.print_line("unreachable");

@@ -8,7 +8,7 @@ let tree_map = import:Std.Collections.TreeMap;
 // validate() (AVL balance, heights, order, parent links) after every
 // operation.
 let TreeMapModelTests = module (
-    let identity = func(int id) -> int {
+    let identity = func(id: int) -> int {
         return id;
     };
 
@@ -21,7 +21,7 @@ let TreeMapModelTests = module (
 
     // Keys mapped to strings whose comparator orders them like the ids.
     export let test_model_string_keys = func() -> void {
-        let map = tree_map.create<string, int>(func(string a, string b) -> ordering.Ordering {
+        let map = tree_map.create<string, int>(func(a: string, b: string) -> ordering.Ordering {
             return int32.compare(a.byte_length, b.byte_length);
         });
         let keys: string[list] = [];
@@ -30,7 +30,7 @@ let TreeMapModelTests = module (
             keys.append(text);
             text = text + "x";
         }
-        map_model.run<string>(map, func(int id) -> string {
+        map_model.run<string>(map, func(id: int) -> string {
             return keys[id];
         }, map.validate, nothing, true, 42, 3000, 16, 60);
     };

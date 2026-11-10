@@ -4,7 +4,7 @@ let program = import:Std.Program;
 let string_map = import:Std.Collections.StringMap;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let map = string_map.with_capacity<int>(-1);
         return program.ExitCode.Ok;
     };

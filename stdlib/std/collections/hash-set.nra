@@ -23,7 +23,7 @@ export let HashSet = module (
         let same: func(T, T) -> bool;
         let printing_depth: int = 0;
 
-        export let init = func(Seal seal, hash_core.HashCore table, func(T) -> uint32 hash, func(T, T) -> bool equal) -> void {
+        export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(T) -> uint32, equal: func(T, T) -> bool) -> void {
             core = table;
             hash_of = hash;
             same = equal;
@@ -43,13 +43,13 @@ export let HashSet = module (
             elements = [];
         };
 
-        export let contains = func(T value) -> bool {
+        export let contains = func(value: T) -> bool {
             return find(value, spread(hash_of(value))) >= 0;
         };
 
         // False when the set already holds an equal element; the set keeps
         // the element it holds.
-        export let add = func(T value) -> bool {
+        export let add = func(value: T) -> bool {
             let hash = spread(hash_of(value));
             let slot = find(value, hash);
             if (slot >= 0) {
@@ -60,7 +60,7 @@ export let HashSet = module (
         };
 
         // Adds each element in order.
-        export let add_all = func(T[list] items) -> void {
+        export let add_all = func(items: T[list]) -> void {
             let count = items.length;
             let i = 0;
             while (i < count) {
@@ -69,7 +69,7 @@ export let HashSet = module (
             }
         };
 
-        export let remove = func(T value) -> bool {
+        export let remove = func(value: T) -> bool {
             let slot = find(value, spread(hash_of(value)));
             if (slot < 0) {
                 return false;
@@ -99,7 +99,7 @@ export let HashSet = module (
 
         // In insertion order. The action must not change the set
         // structurally.
-        export let for_each = func(func(T) -> void action) -> void {
+        export let for_each = func(action: func(T) -> void) -> void {
             let expected = core.modifications;
             let entry = 0;
             while (entry < core.live.length) {
@@ -115,16 +115,16 @@ export let HashSet = module (
 
         // The callback runs once per element in order; the chosen elements
         // are removed afterwards. Returns how many were removed.
-        export let remove_if = func(func(T) -> bool drop) -> int {
+        export let remove_if = func(drop: func(T) -> bool) -> int {
             return remove_matching(drop, true);
         };
 
-        export let retain_if = func(func(T) -> bool keep) -> int {
+        export let retain_if = func(keep: func(T) -> bool) -> int {
             return remove_matching(keep, false);
         };
 
         // Whether every element of this set is in `other`.
-        export let is_subset_of = func(HashSet<T> other) -> bool {
+        export let is_subset_of = func(other: HashSet<T>) -> bool {
             if (core.count > other.size()) {
                 return false;
             }
@@ -141,7 +141,7 @@ export let HashSet = module (
         };
 
         // Whether no element of this set is in `other`.
-        export let is_disjoint_from = func(HashSet<T> other) -> bool {
+        export let is_disjoint_from = func(other: HashSet<T>) -> bool {
             let live = core.live;
             let length = live.length;
             let entry = 0;
@@ -156,7 +156,7 @@ export let HashSet = module (
 
         // A new set with this set's element operations: this set's elements
         // in order, then the other's new elements in its order.
-        export let union = func(HashSet<T> other) -> HashSet<T> {
+        export let union = func(other: HashSet<T>) -> HashSet<T> {
             let result = empty_like();
             result.add_all(to_list());
             result.add_all(other.to_list());
@@ -164,12 +164,12 @@ export let HashSet = module (
         };
 
         // This set's elements that are in `other`, in this set's order.
-        export let intersection = func(HashSet<T> other) -> HashSet<T> {
+        export let intersection = func(other: HashSet<T>) -> HashSet<T> {
             return selected(other, true);
         };
 
         // This set's elements that are not in `other`, in this set's order.
-        export let difference = func(HashSet<T> other) -> HashSet<T> {
+        export let difference = func(other: HashSet<T>) -> HashSet<T> {
             return selected(other, false);
         };
 
@@ -197,7 +197,7 @@ export let HashSet = module (
 
         // Another HashSet of the same size whose elements this set all
         // contains.
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is HashSet<T>)) {
                 return false;
             }
@@ -250,7 +250,7 @@ export let HashSet = module (
             return new HashSet<T>(Seal.Token, hash_core.create(), hash_of, same);
         };
 
-        let selected = func(HashSet<T> other, bool present) -> HashSet<T> {
+        let selected = func(other: HashSet<T>, present: bool) -> HashSet<T> {
             let result = empty_like();
             let live = core.live;
             let length = live.length;
@@ -264,7 +264,7 @@ export let HashSet = module (
             return result;
         };
 
-        let remove_matching = func(func(T) -> bool test, bool remove_when) -> int {
+        let remove_matching = func(test: func(T) -> bool, remove_when: bool) -> int {
             let expected = core.modifications;
             let chosen: int[list] = [];
             let length = core.live.length;
@@ -296,7 +296,7 @@ export let HashSet = module (
 
         // The slot holding the element when present; otherwise -1 minus the
         // slot a new entry takes.
-        let find = func(T value, uint32 hash) -> int {
+        let find = func(value: T, hash: uint32) -> int {
             let slots = core.index;
             let cached = core.hashes;
             let mask = core.mask;
@@ -322,7 +322,7 @@ export let HashSet = module (
             return -1;
         };
 
-        let insert = func(T value, uint32 hash, int slot) -> void {
+        let insert = func(value: T, hash: uint32, slot: int) -> void {
             let target = slot;
             if (core.is_full()) {
                 compact(core.grown_size());
@@ -332,20 +332,20 @@ export let HashSet = module (
             elements.append(value);
         };
 
-        let release = func(int slot) -> void {
+        let release = func(slot: int) -> void {
             shorten(core.release(slot));
             if (core.needs_compaction()) {
                 compact(core.table_size());
             }
         };
 
-        let shorten = func(int length) -> void {
+        let shorten = func(length: int) -> void {
             while (elements.length > length) {
                 elements.remove_at(elements.length - 1);
             }
         };
 
-        let compact = func(int table_size) -> void {
+        let compact = func(table_size: int) -> void {
             let order = core.live_entries();
             elements = reordered<T>(elements, order);
             core.rebuild(order, table_size);
@@ -359,7 +359,7 @@ export let HashSet = module (
         let expected: uint64;
         let position: int = 0;
 
-        export let init = func(hash_core.HashCore table, T[list] values) -> void {
+        export let init = func(table: hash_core.HashCore, values: T[list]) -> void {
             core = table;
             source = values;
             expected = table.modifications;
@@ -393,37 +393,37 @@ export let HashSet = module (
 
     // A table sized for `capacity` elements. Traps with "invalid argument:
     // capacity" for a negative capacity or one above 2^29.
-    export let with_capacity = func<T>(int capacity) -> HashSet<T> {
+    export let with_capacity = func<T>(capacity: int) -> HashSet<T> {
         return with_keys_and_capacity<T>(universal_hash<T>(), universal_same<T>(), capacity);
     };
 
     // Elements hashed and compared with the given functions. Equal elements
     // must have equal hashes.
-    export let with_keys = func<T>(func(T) -> uint32 hash, func(T, T) -> bool same) -> HashSet<T> {
+    export let with_keys = func<T>(hash: func(T) -> uint32, same: func(T, T) -> bool) -> HashSet<T> {
         return with_keys_and_capacity<T>(hash, same, 0);
     };
 
-    export let with_keys_and_capacity = func<T>(func(T) -> uint32 hash, func(T, T) -> bool same, int capacity) -> HashSet<T> {
+    export let with_keys_and_capacity = func<T>(hash: func(T) -> uint32, same: func(T, T) -> bool, capacity: int) -> HashSet<T> {
         return new HashSet<T>(Seal.Token, hash_core.with_capacity(capacity), hash, same);
     };
 
     let universal_hash = func<T>() -> func(T) -> uint32 {
-        return func(T value) -> uint32 {
+        return func(value: T) -> uint32 {
             return value.hash_code();
         };
     };
 
     let universal_same = func<T>() -> func(T, T) -> bool {
-        return func(T a, T b) -> bool {
+        return func(a: T, b: T) -> bool {
             return a.equals(b);
         };
     };
 
-    let spread = func(uint32 hash) -> uint32 {
+    let spread = func(hash: uint32) -> uint32 {
         return hash ^ (hash >> 16);
     };
 
-    let reordered = func<T>(T[list] old, int[list] order) -> T[list] {
+    let reordered = func<T>(old: T[list], order: int[list]) -> T[list] {
         let result: T[list] = [];
         let count = order.length;
         let i = 0;

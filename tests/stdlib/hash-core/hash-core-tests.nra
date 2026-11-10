@@ -8,7 +8,7 @@ let test = import:Std.Test;
 // entries agree, at least half of the index is Empty, the last entry is
 // live, and no more than max(size, 7) removed entries remain.
 let HashCoreTests = module (
-    let ints = func(int start, int end) -> int[list] {
+    let ints = func(start: int, end: int) -> int[list] {
         let result: int[list] = [];
         let i = start;
         while (i < end) {
@@ -108,12 +108,12 @@ let HashCoreTests = module (
     export let test_bulk_release = func() -> void {
         let set = hash_set.create<int>();
         set.add_all(ints(0, 200));
-        test.assert_equal_int32(195, set.remove_if(func(int v) -> bool {
+        test.assert_equal_int32(195, set.remove_if(func(v: int) -> bool {
             return v % 40 != 7;
         }));
         set.validate();
         test.assert_equal_string("{7, 47, 87, 127, 167}", set.to_string());
-        test.assert_equal_int32(5, set.retain_if(func(int v) -> bool {
+        test.assert_equal_int32(5, set.retain_if(func(v: int) -> bool {
             return false;
         }));
         set.validate();
@@ -129,7 +129,7 @@ let HashCoreTests = module (
         set.add_all(ints(0, 100));
         set.trim();
         set.validate();
-        set.remove_if(func(int v) -> bool {
+        set.remove_if(func(v: int) -> bool {
             return v < 97;
         });
         set.trim();

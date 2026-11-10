@@ -26,17 +26,17 @@ let Polymorphism = module (
     );
 
     // Subtype polymorphism: the same function accepts different subclasses.
-    export let display = func(Renderable item) -> string {
+    export let display = func(item: Renderable) -> string {
         return item.framed();
     };
 
     // Parametric polymorphism: T is preserved in the result.
-    export let identity = func<T>(T value) -> T {
+    export let identity = func<T>(value: T) -> T {
         return value;
     };
 
     // A bound permits render() while preserving the caller's concrete type.
-    export let render_twice = func<T:Renderable>(T item) -> string {
+    export let render_twice = func<T:Renderable>(item: T) -> string {
         return item.render() + " / " + item.render();
     };
 
@@ -53,7 +53,7 @@ let Polymorphism = module (
     export let NamedText = class:Text (
         export let label: string;
 
-        export let init = func(string name, string content) -> void {
+        export let init = func(name: string, content: string) -> void {
             super.init();
             label = name;
             value = content;

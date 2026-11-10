@@ -5,8 +5,8 @@ let test = import:Std.Test;
 let Classes = module:program.Entry (
     let Integer = class (
         export let value: int;
-        export let init = func(int number) -> void { value = number; };
-        export let.override equals = func(class other) -> bool {
+        export let init = func(number: int) -> void { value = number; };
+        export let.override equals = func(other: class) -> bool {
             return other is Integer && value == (other as Integer).value;
         };
         export let.override hash_code = func() -> uint32 {
@@ -19,12 +19,12 @@ let Classes = module:program.Entry (
     );
     let empty: class = nil;
 
-    let same = func<T>(T left, T right) -> bool { return left.equals(right); };
-    let hash = func<T>(T value) -> uint32 { return value.hash_code(); };
-    let text = func<T>(T value) -> string { return value.to_string(); };
+    let same = func<T>(left: T, right: T) -> bool { return left.equals(right); };
+    let hash = func<T>(value: T) -> uint32 { return value.hash_code(); };
+    let text = func<T>(value: T) -> string { return value.to_string(); };
     let bound_nil = func<T: class>() -> T { return nil; };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let xyz: class = new Integer(10);
         let equal: class = new Integer(10);
         let marker: class = new Marker();

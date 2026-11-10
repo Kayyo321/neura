@@ -42,7 +42,7 @@ export let Regex = module (
         let slots: int[list] = [];
         let names: string[list] = [];
 
-        export let init = func(string text, int[list] captured, string[list] group_names) -> void {
+        export let init = func(text: string, captured: int[list], group_names: string[list]) -> void {
             input = text;
             slots = captured;
             names = group_names;
@@ -63,7 +63,7 @@ export let Regex = module (
         // The group's text, or None when the group did not participate. An
         // index outside 0 through group_count() traps with "invalid
         // argument: no such group".
-        export let group = func(int index) -> optional.Optional<string> {
+        export let group = func(index: int) -> optional.Optional<string> {
             check_group(index);
             let start_offset = slots[2 * index];
             if (start_offset < 0) {
@@ -73,7 +73,7 @@ export let Regex = module (
         };
 
         // The group's start offset, or -1 when it did not participate.
-        export let group_start = func(int index) -> int {
+        export let group_start = func(index: int) -> int {
             check_group(index);
             return slots[2 * index];
         };
@@ -81,11 +81,11 @@ export let Regex = module (
         // The named group's text, or None when it did not participate. A
         // name the pattern does not define traps with "invalid argument: no
         // such group".
-        export let named_group = func(string name) -> optional.Optional<string> {
+        export let named_group = func(name: string) -> optional.Optional<string> {
             return group(group_index(names, name));
         };
 
-        let check_group = func(int index) -> void {
+        let check_group = func(index: int) -> void {
             if (index < 0 || index > names.length) {
                 trap_with_message("invalid argument: no such group");
             }
@@ -98,22 +98,22 @@ export let Regex = module (
         let names: string[list] = [];
 
         // Called by compile_with; the program type is internal to the library.
-        export let init = func(string text, machine.Program compiled, string[list] group_names) -> void {
+        export let init = func(text: string, compiled: machine.Program, group_names: string[list]) -> void {
             source = text;
             program = compiled;
             names = group_names;
         };
 
-        export let is_match = func(string input) -> bool {
+        export let is_match = func(input: string) -> bool {
             return machine.search(program, input, 0, machine.Earliest).length > 0;
         };
 
         // Whether the pattern matches the whole input.
-        export let matches_fully = func(string input) -> bool {
+        export let matches_fully = func(input: string) -> bool {
             return machine.search(program, input, 0, machine.Whole).length > 0;
         };
 
-        export let find = func(string input) -> RegexMatch {
+        export let find = func(input: string) -> RegexMatch {
             return match_at(input, 0);
         };
 
@@ -122,14 +122,14 @@ export let Regex = module (
         // otherwise the call traps with "invalid argument: offset out of
         // range" or "invalid argument: offset is not a character boundary".
         // ^ and \b still see the text before the offset.
-        export let find_from = func(string input, int offset) -> RegexMatch {
+        export let find_from = func(input: string, offset: int) -> RegexMatch {
             check_offset(input, offset);
             return match_at(input, offset);
         };
 
         // Successive non-overlapping matches. After an empty match the search
         // resumes one scalar value later.
-        export let find_all = func(string input) -> RegexMatch[list] {
+        export let find_all = func(input: string) -> RegexMatch[list] {
             let matches: RegexMatch[list] = [];
             let length = input.byte_length;
             let pos = 0;
@@ -157,12 +157,12 @@ export let Regex = module (
         // does not have traps with "invalid argument: no such group"; any
         // other $ traps with "invalid argument: malformed replacement". The
         // replacement is checked before matching.
-        export let replace_all = func(string input, string replacement) -> string {
+        export let replace_all = func(input: string, replacement: string) -> string {
             return replace_matches(input, replacement, find_all(input));
         };
 
         // Replaces the first match, with the rules of replace_all.
-        export let replace_first = func(string input, string replacement) -> string {
+        export let replace_first = func(input: string, replacement: string) -> string {
             let matches: RegexMatch[list] = [];
             let first = find(input);
             if (first != nil) {
@@ -174,7 +174,7 @@ export let Regex = module (
         // The pieces between the matches of find_all, with the rules of
         // Strings.split: empty pieces are kept, and an input without a match
         // gives one piece.
-        export let split = func(string input) -> string[list] {
+        export let split = func(input: string) -> string[list] {
             let pieces: string[list] = [];
             let start = 0;
             for (let found in find_all(input)) {
@@ -194,7 +194,7 @@ export let Regex = module (
             return source;
         };
 
-        let match_at = func(string input, int offset) -> RegexMatch {
+        let match_at = func(input: string, offset: int) -> RegexMatch {
             let slots = machine.search(program, input, offset, machine.Leftmost);
             if (slots.length == 0) {
                 return nil;
@@ -202,7 +202,7 @@ export let Regex = module (
             return new RegexMatch(input, slots, names);
         };
 
-        let replace_matches = func(string input, string replacement, RegexMatch[list] matches) -> string {
+        let replace_matches = func(input: string, replacement: string, matches: RegexMatch[list]) -> string {
             let segments = parse_replacement(replacement, names);
             if (matches.length == 0) {
                 return input;
@@ -232,13 +232,13 @@ export let Regex = module (
     );
 
     // Compiles the pattern with every flag off.
-    export let compile = func(string pattern) -> result.Result<Regex> {
+    export let compile = func(pattern: string) -> result.Result<Regex> {
         return compile_with(pattern, new RegexFlags());
     };
 
     // Compiles the pattern; a syntax error or an exceeded limit is a Parse
     // error at the offending pattern offset. The flags are read once.
-    export let compile_with = func(string pattern, RegexFlags flags) -> result.Result<Regex> {
+    export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex> {
         let syntax = new parser.Parser(pattern);
         syntax.parse();
         if (syntax.failed) {
@@ -257,7 +257,7 @@ export let Regex = module (
     };
 
     // The index of the named group; traps when there is none.
-    let group_index = func(string[list] names, string name) -> int {
+    let group_index = func(names: string[list], name: string) -> int {
         let k = 0;
         while (k < names.length) {
             if (names[k] == name) {
@@ -269,7 +269,7 @@ export let Regex = module (
     };
 
     // The replacement as segments: literal text, then a group index or -1.
-    let parse_replacement = func(string replacement, string[list] names) -> [string, int][list] {
+    let parse_replacement = func(replacement: string, names: string[list]) -> [string, int][list] {
         let segments: [string, int][list] = [];
         let length = replacement.byte_length;
         let literal: uint8[list] = [];
@@ -326,7 +326,7 @@ export let Regex = module (
     };
 
     // The value of a reference made only of decimal digits, or -1.
-    let number_of = func(string reference) -> int {
+    let number_of = func(reference: string) -> int {
         let value = 0;
         let k = 0;
         while (k < reference.byte_length) {
@@ -342,7 +342,7 @@ export let Regex = module (
         return value;
     };
 
-    let check_offset = func(string s, int offset) -> void {
+    let check_offset = func(s: string, offset: int) -> void {
         if (offset < 0 || offset > s.byte_length) {
             trap_with_message("invalid argument: offset out of range");
         }
@@ -351,7 +351,7 @@ export let Regex = module (
         }
     };
 
-    let scalar_width = func(uint8 lead) -> int {
+    let scalar_width = func(lead: uint8) -> int {
         if (lead < 128) {
             return 1;
         }
@@ -364,7 +364,7 @@ export let Regex = module (
         return 4;
     };
 
-    let append_bytes = func(uint8[list] bytes, string s, int start, int end) -> void {
+    let append_bytes = func(bytes: uint8[list], s: string, start: int, end: int) -> void {
         let i = start;
         while (i + 4 <= end) {
             bytes.append(s.byte_at(i));
@@ -379,7 +379,7 @@ export let Regex = module (
         }
     };
 
-    let text_of = func(uint8[list] bytes) -> string {
+    let text_of = func(bytes: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(bytes);
         return text;
     };

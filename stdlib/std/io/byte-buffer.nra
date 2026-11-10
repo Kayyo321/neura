@@ -10,7 +10,7 @@ export let ByteBuffer = module (
         let data: uint8[list] = [];
 
         // Appends every byte; never fails.
-        export let write = func(uint8[list] input) -> result.Result<unit.Unit> {
+        export let write = func(input: uint8[list]) -> result.Result<unit.Unit> {
             bytes.append_range(data, input, 0, input.length);
             return bytes.ok();
         };
@@ -34,7 +34,7 @@ export let ByteBuffer = module (
         export let reader = func() -> func(int) -> result.Result<uint8[list]> {
             let snapshot = to_list();
             let position = cell.of<int>(0);
-            return func(int max) -> result.Result<uint8[list]> {
+            return func(max: int) -> result.Result<uint8[list]> {
                 bytes.check_maximum(max);
                 let start = position.value;
                 let end = snapshot.length;

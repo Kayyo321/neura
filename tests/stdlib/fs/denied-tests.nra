@@ -7,7 +7,7 @@ let unit = import:Std.Core.Unit;
 
 // Without --allow-fs every operation fails with CapabilityDenied.
 let FsDeniedTests = module (
-    let denied = func<T>(result.Result<T> r) -> void {
+    let denied = func<T>(r: result.Result<T>) -> void {
         let failure = test.assert_err<T>(r);
         match (failure) {
             error.Error.Io { kind, message, path } => {

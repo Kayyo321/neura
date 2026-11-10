@@ -11,25 +11,25 @@ export let Duration = module (
     export let Duration = class implements comparable.Comparable<Duration> (
         let total: int64;
 
-        export let init = func(int64 nanos) -> void {
+        export let init = func(nanos: int64) -> void {
             total = nanos;
         };
 
-        export let plus = func(Duration other) -> Duration {
+        export let plus = func(other: Duration) -> Duration {
             return new Duration(total + other.total);
         };
 
-        export let minus = func(Duration other) -> Duration {
+        export let minus = func(other: Duration) -> Duration {
             return new Duration(total - other.total);
         };
 
-        export let multiplied_by = func(int64 factor) -> Duration {
+        export let multiplied_by = func(factor: int64) -> Duration {
             return new Duration(total * factor);
         };
 
         // Truncates toward zero. A zero divisor traps (reason 1), as does
         // the most negative duration divided by -1.
-        export let divided_by = func(int64 divisor) -> Duration {
+        export let divided_by = func(divisor: int64) -> Duration {
             return new Duration(total / divisor);
         };
 
@@ -75,7 +75,7 @@ export let Duration = module (
             return (total as float64) / 1000000000.0;
         };
 
-        export let compare_to = func(Duration other) -> ordering.Ordering {
+        export let compare_to = func(other: Duration) -> ordering.Ordering {
             if (total < other.total) {
                 return ordering.Ordering.Less;
             }
@@ -85,7 +85,7 @@ export let Duration = module (
             return ordering.Ordering.Equal;
         };
 
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             return other is Duration && total == (other as Duration).total;
         };
 
@@ -127,32 +127,32 @@ export let Duration = module (
 
     export const Zero: Duration = new Duration(0);
 
-    export let of_nanos = func(int64 nanos) -> Duration {
+    export let of_nanos = func(nanos: int64) -> Duration {
         return new Duration(nanos);
     };
 
-    export let of_micros = func(int64 micros) -> Duration {
+    export let of_micros = func(micros: int64) -> Duration {
         return new Duration(micros * 1000);
     };
 
-    export let of_millis = func(int64 millis) -> Duration {
+    export let of_millis = func(millis: int64) -> Duration {
         return new Duration(millis * 1000000);
     };
 
-    export let of_seconds = func(int64 seconds) -> Duration {
+    export let of_seconds = func(seconds: int64) -> Duration {
         return new Duration(seconds * calendar.NanosPerSecond);
     };
 
-    export let of_minutes = func(int64 minutes) -> Duration {
+    export let of_minutes = func(minutes: int64) -> Duration {
         return new Duration(minutes * calendar.NanosPerMinute);
     };
 
-    export let of_hours = func(int64 hours) -> Duration {
+    export let of_hours = func(hours: int64) -> Duration {
         return new Duration(hours * calendar.NanosPerHour);
     };
 
     // A day is 24 hours.
-    export let of_days = func(int64 days) -> Duration {
+    export let of_days = func(days: int64) -> Duration {
         return new Duration(days * calendar.NanosPerDay);
     };
 
@@ -163,7 +163,7 @@ export let Duration = module (
     // to_string form always parses. Errors: Empty; InvalidCharacter or
     // UnexpectedEnd at the first byte that does not fit; OutOfRange at the
     // first digit of the component that leaves int64.
-    export let parse = func(string text) -> result.Result<Duration> {
+    export let parse = func(text: string) -> result.Result<Duration> {
         let scan = new calendar.Scanner(text);
         let negative = false;
         if (scan.accept(45)) {
@@ -232,12 +232,12 @@ export let Duration = module (
         export let magnitude: uint64 = 0;
         let limit: uint64;
 
-        export let init = func(uint64 bound) -> void {
+        export let init = func(bound: uint64) -> void {
             limit = bound;
         };
 
         // Adds value * unit + extra, or reports OutOfRange at `start`.
-        export let add = func(calendar.Scanner scan, int start, uint64 value, uint64 unit, uint64 extra) -> void {
+        export let add = func(scan: calendar.Scanner, start: int, value: uint64, unit: uint64, extra: uint64) -> void {
             if (!scan.ok()) {
                 return;
             }
@@ -254,7 +254,7 @@ export let Duration = module (
         };
     );
 
-    let unit_names = func(int stage) -> string {
+    let unit_names = func(stage: int) -> string {
         if (stage == 0) {
             return "'H', 'M', 'S', or '.'";
         }
@@ -265,7 +265,7 @@ export let Duration = module (
     };
 
     // |value| as uint64; the most negative value needs no negation.
-    let magnitude_of = func(int64 value) -> uint64 {
+    let magnitude_of = func(value: int64) -> uint64 {
         if (value >= 0) {
             return value as uint64;
         }
@@ -273,7 +273,7 @@ export let Duration = module (
     };
 
     // The inverse of magnitude_of; the magnitude is within the sign's limit.
-    let signed_of = func(uint64 magnitude, bool negative) -> int64 {
+    let signed_of = func(magnitude: uint64, negative: bool) -> int64 {
         if (!negative) {
             return magnitude as int64;
         }
@@ -284,7 +284,7 @@ export let Duration = module (
     };
 
     // Nine digits without trailing zeros, after a point; empty for zero.
-    let trimmed_fraction = func(uint64 nanos) -> string {
+    let trimmed_fraction = func(nanos: uint64) -> string {
         if (nanos == 0) {
             return "";
         }

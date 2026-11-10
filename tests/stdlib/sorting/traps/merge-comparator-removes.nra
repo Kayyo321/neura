@@ -5,7 +5,7 @@ let program = import:Std.Program;
 let sorting = import:Std.Collections.Sorting;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let items: int[list] = [];
         let i = 0;
         while (i < 40) {
@@ -13,7 +13,7 @@ export let Main = module:program.Entry (
             i = i + 1;
         }
         let calls: int[list] = [];
-        sorting.sort<int>(items, func(int a, int b) -> ordering.Ordering {
+        sorting.sort<int>(items, func(a: int, b: int) -> ordering.Ordering {
             calls.append(a);
             if (calls.length == 120) {
                 items.remove_at(0);

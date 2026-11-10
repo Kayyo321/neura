@@ -18,7 +18,7 @@ export let Csv = module (
     // - Syntax, "text after closing quote": at the first byte after the
     //   closing quote that is not a comma or a line break.
     // - UnexpectedEnd, "unterminated quoted field": at the text's length.
-    export let parse = func(string text) -> result.Result<string[list][list]> {
+    export let parse = func(text: string) -> result.Result<string[list][list]> {
         let records: string[list][list] = [];
         let count = text.byte_length;
         let record: string[list] = [];
@@ -83,7 +83,7 @@ export let Csv = module (
     // LF. A field is quoted, with each quote doubled, only when it contains a
     // comma, a quote, a CR, or an LF. A row with no fields is written as an
     // empty line, which parses as one empty field.
-    export let write = func(string[list][list] rows) -> string {
+    export let write = func(rows: string[list][list]) -> string {
         let out = builders.create();
         for (let row in rows) {
             let first = true;
@@ -106,7 +106,7 @@ export let Csv = module (
     };
 
     // Whether the byte at the offset is a comma, an LF, or the CR of a CRLF.
-    let is_separator = func(string text, int offset) -> bool {
+    let is_separator = func(text: string, offset: int) -> bool {
         let b = text.byte_at(offset);
         if (b == 44 or 10) {
             return true;
@@ -116,7 +116,7 @@ export let Csv = module (
 
     // The offset of the quote that closes a quoted field whose content
     // starts at `start`, or -1 when the text ends first.
-    let quoted_end = func(string text, int start) -> int {
+    let quoted_end = func(text: string, start: int) -> int {
         let count = text.byte_length;
         let j = start;
         while (j < count) {
@@ -134,7 +134,7 @@ export let Csv = module (
 
     // The content between `start` and `end` with each doubled quote made
     // single.
-    let unquote = func(string text, int start, int end) -> string {
+    let unquote = func(text: string, start: int, end: int) -> string {
         let content = text.slice(start, end);
         if (strings.index_of(content, "\"") < 0) {
             return content;
@@ -142,7 +142,7 @@ export let Csv = module (
         return strings.replace(content, "\"\"", "\"");
     };
 
-    let needs_quotes = func(string field) -> bool {
+    let needs_quotes = func(field: string) -> bool {
         let count = field.byte_length;
         for (let i = 0; i < count; i = i + 1) {
             if (field.byte_at(i) == 44 or 34 or 13 or 10) {
@@ -152,7 +152,7 @@ export let Csv = module (
         return false;
     };
 
-    let failure = func(error.ParseErrorKind kind, int offset, string message) -> result.Result<string[list][list]> {
+    let failure = func(kind: error.ParseErrorKind, offset: int, message: string) -> result.Result<string[list][list]> {
         return result.Result<string[list][list]>.Err(error.Error.Parse { kind: kind, offset: offset, message: message });
     };
 );

@@ -13,9 +13,9 @@ let Logger = module (
         }
     );
 
-    export let log = func(string message) -> void;
+    export let log = func(message: string) -> void;
 
-    export let log_entry = func(LogEntry entry) -> void {
+    export let log_entry = func(entry: LogEntry) -> void {
         log(entry.format());
     }
 );
@@ -27,13 +27,13 @@ let ConsoleLogger = module:Logger ( // ConsoleLogger module inherits from Logger
         export let show_timestamp: bool = false;
     );
 
-    export let.override log = func(string message) -> void {
+    export let.override log = func(message: string) -> void {
         console.print_line(prefix + " -> " + message);
     }
 );
 
 let App = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         ConsoleLogger.log("Application started");
 
         let entry = new Logger.LogEntry();

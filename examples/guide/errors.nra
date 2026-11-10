@@ -11,7 +11,7 @@ let result = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 
 export let Errors = module (
-    export let read_count = func(string location) -> result.Result<int32> {
+    export let read_count = func(location: string) -> result.Result<int32> {
         match (fs.read_text(path.of(location))) {
             result.Result.Ok(text) => {
                 return result.with_context<int32>(int32s.parse(strings.trim(text)), "reading the count");
@@ -23,7 +23,7 @@ export let Errors = module (
     };
 
     // The message a program shows for any failure: every Error has one.
-    export let describe = func(result.Result<int32> outcome) -> string {
+    export let describe = func(outcome: result.Result<int32>) -> string {
         return match (outcome) {
             result.Result.Ok(count) => "count " + count.to_string(),
             result.Result.Err(failure) => error.message(failure),

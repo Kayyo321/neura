@@ -6,17 +6,17 @@ let optional = import:Std.Core.Optional;
 export let Map = module (
     export let Map = interface<K, V>:iterable.Iterable<[K, V]> (
         let size = func() -> int;
-        let contains_key = func(K key) -> bool;
-        let get = func(K key) -> optional.Optional<V>;
-        let get_or = func(K key, V fallback) -> V;
+        let contains_key = func(key: K) -> bool;
+        let get = func(key: K) -> optional.Optional<V>;
+        let get_or = func(key: K, fallback: V) -> V;
         // Traps with "no such element" when the key is absent.
-        let require = func(K key) -> V;
+        let require = func(key: K) -> V;
         // New built-in lists in iteration order.
         let keys = func() -> K[list];
         let values = func() -> V[list];
         let entries = func() -> [K, V][list];
-        let contains_value = func(V value) -> bool;
-        let for_each = func(func(K, V) -> void action) -> void;
+        let contains_value = func(value: V) -> bool;
+        let for_each = func(action: func(K, V) -> void) -> void;
 
         let is_empty = func() -> bool {
             return size() == 0;

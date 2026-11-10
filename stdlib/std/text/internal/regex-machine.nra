@@ -47,7 +47,7 @@ export let RegexMachine = module (
     );
 
     // Compiles a syntax tree with `groups` capturing groups.
-    export let compile = func(parser.Node root, int groups, bool ignore_case, bool multi_line, bool dot_all) -> Program {
+    export let compile = func(root: parser.Node, groups: int, ignore_case: bool, multi_line: bool, dot_all: bool) -> Program {
         let compiler = new Compiler(ignore_case, multi_line, dot_all, 2 * groups + 2);
         compiler.emit(Inst.Save(0));
         compiler.compile(root);
@@ -72,19 +72,19 @@ export let RegexMachine = module (
         let any_newline: bool = false;
         export let next_slot: int = 2;
 
-        export let init = func(bool ignore_case, bool multi_line, bool dot_all, int first_free_slot) -> void {
+        export let init = func(ignore_case: bool, multi_line: bool, dot_all: bool, first_free_slot: int) -> void {
             fold_case = ignore_case;
             line_anchors = multi_line;
             any_newline = dot_all;
             next_slot = first_free_slot;
         };
 
-        export let emit = func(Inst inst) -> int {
+        export let emit = func(inst: Inst) -> int {
             insts.append(inst);
             return insts.length - 1;
         };
 
-        export let compile = func(parser.Node node) -> void {
+        export let compile = func(node: parser.Node) -> void {
             match (node) {
                 parser.Node.Empty => {},
                 parser.Node.Literal(value) => {
@@ -156,7 +156,7 @@ export let RegexMachine = module (
         // does this (the thread returning to the loop's split at the same
         // position dies); an optional copy of an item that can match empty
         // saves its entry position and ends with Progress.
-        let compile_repeat = func(parser.Node item, int min, int max, bool greedy) -> void {
+        let compile_repeat = func(item: parser.Node, min: int, max: int, greedy: bool) -> void {
             let nullable = parser.nullable(item);
             let copies = min;
             if (max < 0 && min > 0 && !nullable) {
@@ -205,7 +205,7 @@ export let RegexMachine = module (
             }
         };
 
-        let choice = func(int body, int exit, bool greedy) -> Inst {
+        let choice = func(body: int, exit: int, greedy: bool) -> Inst {
             if (greedy) {
                 return Inst.Split { first: body, second: exit };
             }
@@ -215,7 +215,7 @@ export let RegexMachine = module (
 
     // A class instruction with its ASCII members as a 128-bit set, so that
     // matching an ASCII scalar is one read.
-    let class_of = func(uint32[list] ranges, bool negated) -> Inst {
+    let class_of = func(ranges: uint32[list], negated: bool) -> Inst {
         let ascii: uint32[list] = [0, 0, 0, 0];
         let c: uint32 = 0;
         while (c < 128) {
@@ -230,7 +230,7 @@ export let RegexMachine = module (
 
     // Sorted, merged ranges; with case folding, each ASCII letter range also
     // adds the other case.
-    let normalize = func(uint32[list] ranges, bool fold_case) -> uint32[list] {
+    let normalize = func(ranges: uint32[list], fold_case: bool) -> uint32[list] {
         let pairs: uint32[list] = [];
         let k = 0;
         while (k < ranges.length) {
@@ -280,7 +280,7 @@ export let RegexMachine = module (
     };
 
     // Adds the part of [low, high] inside [from, to] moved to the other case.
-    let add_shifted = func(uint32[list] pairs, uint32 low, uint32 high, uint32 from, uint32 to, bool up) -> void {
+    let add_shifted = func(pairs: uint32[list], low: uint32, high: uint32, from: uint32, to: uint32, up: bool) -> void {
         let a = low;
         if (a < from) {
             a = from;
@@ -304,7 +304,7 @@ export let RegexMachine = module (
     // Finds the bytes that can begin a match, and whether every match must
     // start at offset 0, by following the epsilon instructions from the
     // start.
-    let analyze_start = func(Program program) -> void {
+    let analyze_start = func(program: Program) -> void {
         let first: bool[list] = [];
         let k = 0;
         while (k < 256) {
@@ -324,7 +324,7 @@ export let RegexMachine = module (
     // instructions reached and returns true when a match instruction or an
     // instruction consuming any scalar is reached (no byte can be ruled
     // out), or, without `through_start`, when any consuming instruction is.
-    let reaches_input = func(Inst[list] insts, bool[list] first, bool through_start) -> bool {
+    let reaches_input = func(insts: Inst[list], first: bool[list], through_start: bool) -> bool {
         let seen: bool[list] = [];
         let k = 0;
         while (k < insts.length) {
@@ -392,7 +392,7 @@ export let RegexMachine = module (
 
     // Marks the first bytes of the UTF-8 encodings of [low, high]. The lead
     // byte grows with the value, so the leads of the ends bound the rest.
-    let mark_range = func(bool[list] first, uint32 low, uint32 high) -> void {
+    let mark_range = func(first: bool[list], low: uint32, high: uint32) -> void {
         let a = lead_byte(low);
         let b = lead_byte(high);
         while (a <= b) {
@@ -401,7 +401,7 @@ export let RegexMachine = module (
         }
     };
 
-    let mark_complement = func(bool[list] first, uint32[list] ranges) -> void {
+    let mark_complement = func(first: bool[list], ranges: uint32[list]) -> void {
         let next: uint32 = 0;
         let r = 0;
         while (r < ranges.length) {
@@ -418,7 +418,7 @@ export let RegexMachine = module (
         }
     };
 
-    let lead_byte = func(uint32 value) -> int {
+    let lead_byte = func(value: uint32) -> int {
         if (value < 128) {
             return value as int;
         }
@@ -433,7 +433,7 @@ export let RegexMachine = module (
 
     // Runs the program over `input` from the byte offset `start`. Returns
     // the capture slots of the match, or an empty list when there is none.
-    export let search = func(Program program, string input, int start, int mode) -> int[list] {
+    export let search = func(program: Program, input: string, start: int, mode: int) -> int[list] {
         let none: int[list] = [];
         if (program.anchored && start > 0) {
             return none;
@@ -569,9 +569,9 @@ export let RegexMachine = module (
     // target first), saves, and assertions that hold at `pos`. A pc already
     // marked with this generation is skipped. The stacks are empty on entry
     // and on return.
-    let add_thread = func(Inst[list] insts, int[list] marks, int generation, int[list] stack_pcs,
-                          (int[list])[list] stack_caps, int[list] pcs, (int[list])[list] caps_list, int start_pc,
-                          int[list] start_caps, string input, int pos) -> void {
+    let add_thread = func(insts: Inst[list], marks: int[list], generation: int, stack_pcs: int[list],
+                          stack_caps: (int[list])[list], pcs: int[list], caps_list: (int[list])[list], start_pc: int,
+                          start_caps: int[list], input: string, pos: int) -> void {
         let pc = start_pc;
         let caps = start_caps;
         while (true) {
@@ -627,7 +627,7 @@ export let RegexMachine = module (
 
     // A copy of the slots with one changed. Threads share slot lists, so a
     // save never writes in place. Small counts use one list construction.
-    let copy_with = func(int[list] caps, int slot, int value) -> int[list] {
+    let copy_with = func(caps: int[list], slot: int, value: int) -> int[list] {
         let count = caps.length;
         if (count == 2) {
             if (slot == 0) {
@@ -656,7 +656,7 @@ export let RegexMachine = module (
         return copy;
     };
 
-    let holds = func(parser.Anchor kind, string input, int pos) -> bool {
+    let holds = func(kind: parser.Anchor, input: string, pos: int) -> bool {
         let length = input.byte_length;
         if (kind == parser.Anchor.StartText) {
             return pos == 0;
@@ -680,12 +680,12 @@ export let RegexMachine = module (
 
     // Word characters are ASCII letters, digits, and the underscore; a byte
     // of a multi-byte character is never one.
-    let is_word_byte = func(uint8 b) -> bool {
+    let is_word_byte = func(b: uint8) -> bool {
         return (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
     };
 
     // Sorted ranges: stop at the first range above the value.
-    let in_ranges = func(uint32[list] ranges, uint32 value) -> bool {
+    let in_ranges = func(ranges: uint32[list], value: uint32) -> bool {
         let count = ranges.length;
         let r = 0;
         while (r < count) {
@@ -700,7 +700,7 @@ export let RegexMachine = module (
         return false;
     };
 
-    let scalar_width = func(uint8 lead) -> int {
+    let scalar_width = func(lead: uint8) -> int {
         if (lead < 128) {
             return 1;
         }
@@ -713,7 +713,7 @@ export let RegexMachine = module (
         return 4;
     };
 
-    let reset_marks = func(Program program) -> void {
+    let reset_marks = func(program: Program) -> void {
         let k = 0;
         while (k < program.marks.length) {
             program.marks[k] = -1;

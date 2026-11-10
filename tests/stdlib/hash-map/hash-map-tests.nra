@@ -9,10 +9,10 @@ let HashMapTests = module (
     // A key class with value equality: equal when the codes are equal.
     let Code = class (
         export let code: int;
-        export let init = func(int value) -> void {
+        export let init = func(value: int) -> void {
             code = value;
         };
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             return other is Code && (other as Code).code == code;
         };
         export let.override hash_code = func() -> uint32 {
@@ -31,7 +31,7 @@ let HashMapTests = module (
         return map;
     };
 
-    let text = func(hash_map.HashMap<string, int> map) -> string {
+    let text = func(map: hash_map.HashMap<string, int>) -> string {
         return map.to_string();
     };
 
@@ -101,7 +101,7 @@ let HashMapTests = module (
         test.assert_equal_string("[three, 3]", items.next().to_string());
         test.assert(!items.has_next());
         let seen = cell.of<string>("");
-        map.for_each(func(string key, int value) -> void {
+        map.for_each(func(key: string, value: int) -> void {
             seen.value = seen.value + key + "=" + value.to_string() + ";";
         });
         test.assert_equal_string("one=1;three=3;", seen.value);
@@ -120,7 +120,7 @@ let HashMapTests = module (
         map.set("two", 20);
         items.next();
         test.assert_equal_string("[two, 20]", items.next().to_string());
-        map.for_each(func(string key, int value) -> void {
+        map.for_each(func(key: string, value: int) -> void {
             map.set(key, value + 1);
         });
         test.assert_equal_string("{one: 2, two: 21, three: 4}", text(map));
@@ -145,7 +145,7 @@ let HashMapTests = module (
             i = i + 1;
         }
         let calls = cell.of<int>(0);
-        let removed = map.remove_if(func(int key, int value) -> bool {
+        let removed = map.remove_if(func(key: int, value: int) -> bool {
             calls.value = calls.value + 1;
             return key % 4 != 1;
         });
@@ -153,10 +153,10 @@ let HashMapTests = module (
         test.assert_equal_int32(30, removed);
         test.assert_equal_string("[1, 5, 9, 13, 17, 21, 25, 29, 33, 37]", map.keys().to_string());
         map.validate();
-        test.assert_equal_int32(0, map.remove_if(func(int key, int value) -> bool {
+        test.assert_equal_int32(0, map.remove_if(func(key: int, value: int) -> bool {
             return false;
         }));
-        test.assert_equal_int32(10, map.remove_if(func(int key, int value) -> bool {
+        test.assert_equal_int32(10, map.remove_if(func(key: int, value: int) -> bool {
             return true;
         }));
         test.assert(map.is_empty());
@@ -179,7 +179,7 @@ let HashMapTests = module (
 
     export let test_merge = func() -> void {
         let map = sample();
-        let plus = func(int a, int b) -> int {
+        let plus = func(a: int, b: int) -> int {
             return a * 10 + b;
         };
         test.assert_equal_int32(15, map.merge("one", 5, plus));
@@ -189,13 +189,13 @@ let HashMapTests = module (
 
     export let test_compute = func() -> void {
         let map = sample();
-        let double = func(string key, optional.Optional<int> current) -> optional.Optional<int> {
+        let double = func(key: string, current: optional.Optional<int>) -> optional.Optional<int> {
             return match (current) {
                 optional.Optional.None => optional.Optional<int>.Some(key.byte_length),
                 optional.Optional.Some(value) => optional.Optional<int>.Some(value * 2),
             };
         };
-        let erase = func(string key, optional.Optional<int> current) -> optional.Optional<int> {
+        let erase = func(key: string, current: optional.Optional<int>) -> optional.Optional<int> {
             return optional.Optional<int>.None;
         };
         test.assert_equal_int32(4, test.assert_some<int>(map.compute("two", double)));
@@ -291,7 +291,7 @@ let HashMapTests = module (
 
     // with_keys stores the caller's functions: keys equal ignoring case.
     export let test_with_keys = func() -> void {
-        let lower = func(string s) -> string {
+        let lower = func(s: string) -> string {
             let bytes: uint8[list] = [];
             let i = 0;
             while (i < s.byte_length) {
@@ -305,9 +305,9 @@ let HashMapTests = module (
             let [valid, text] = string.from_utf8(bytes);
             return text;
         };
-        let map = hash_map.with_keys<string, int>(func(string key) -> uint32 {
+        let map = hash_map.with_keys<string, int>(func(key: string) -> uint32 {
             return lower(key).hash_code();
-        }, func(string a, string b) -> bool {
+        }, func(a: string, b: string) -> bool {
             return lower(a) == lower(b);
         });
         map.set("Alpha", 1);
@@ -315,9 +315,9 @@ let HashMapTests = module (
         map.set("beta", 3);
         test.assert_equal_string("{Alpha: 2, beta: 3}", map.to_string());
         test.assert(map.contains_key("BETA"));
-        let copy = hash_map.with_keys_and_capacity<string, int>(func(string key) -> uint32 {
+        let copy = hash_map.with_keys_and_capacity<string, int>(func(key: string) -> uint32 {
             return lower(key).hash_code();
-        }, func(string a, string b) -> bool {
+        }, func(a: string, b: string) -> bool {
             return lower(a) == lower(b);
         }, 2);
         copy.put_all(map);

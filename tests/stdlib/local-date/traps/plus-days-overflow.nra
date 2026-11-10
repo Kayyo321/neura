@@ -5,7 +5,7 @@ let local_date = import:Std.Time.LocalDate;
 let program = import:Std.Program;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let first = local_date.of(-999999, 1, 1);
         console.print_line("before");
         console.print_line(first.plus_days(-9223372036854775807).to_string());

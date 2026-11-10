@@ -11,7 +11,7 @@ let tree_map = import:Std.Collections.TreeMap;
 // temporaries); if removed values stayed reachable, 300 rounds would need
 // about 600,000.
 export let Main = module:program.Entry (
-    let block = func(int seed) -> int[list] {
+    let block = func(seed: int) -> int[list] {
         let values: int[list] = [];
         let i = 0;
         while (i < 2000) {
@@ -21,7 +21,7 @@ export let Main = module:program.Entry (
         return values;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let map = tree_map.create<int, int[list]>(int32.compare);
         let i = 0;
         while (i < 7) {
@@ -43,7 +43,7 @@ export let Main = module:program.Entry (
                 } else if (round % 4 == 2) {
                     map.remove_first();
                 } else {
-                    map.remove_if(func(int key, int[list] value) -> bool {
+                    map.remove_if(func(key: int, value: int[list]) -> bool {
                         return key == previous;
                     });
                 }

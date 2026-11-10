@@ -11,7 +11,7 @@ let TreeSetModelTests = module (
 
     export let test_model = func() -> void {
         let set = tree_set.create<int>(int32.compare);
-        set_model.run<int>(set, func(int id) -> int {
+        set_model.run<int>(set, func(id: int) -> int {
             return id;
         }, set.validate, nothing, true, 51, 10000, 24, 160);
     };
@@ -19,10 +19,10 @@ let TreeSetModelTests = module (
     // Descending element values under a reversed comparator still ascend
     // in comparator order.
     export let test_model_reversed_comparator = func() -> void {
-        let set = tree_set.create<int>(func(int a, int b) -> ordering.Ordering {
+        let set = tree_set.create<int>(func(a: int, b: int) -> ordering.Ordering {
             return int32.compare(b, a);
         });
-        set_model.run<int>(set, func(int id) -> int {
+        set_model.run<int>(set, func(id: int) -> int {
             return -id;
         }, set.validate, nothing, true, 52, 3000, 16, 80);
     };

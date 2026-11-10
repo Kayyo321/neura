@@ -5,7 +5,7 @@ let program = import:Std.Program;
 // Process.exit ends the run from inside nested calls with its status;
 // output written before it is kept and nothing after it runs.
 export let ExitFromDepth = module:program.Entry (
-    let descend = func(int depth) -> int {
+    let descend = func(depth: int) -> int {
         if (depth == 0) {
             console.print_line("leaving");
             program.Process.exit(7);
@@ -15,7 +15,7 @@ export let ExitFromDepth = module:program.Entry (
         return below;
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("start");
         descend(5);
         console.print_line("not reached");

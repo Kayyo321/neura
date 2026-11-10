@@ -18,7 +18,7 @@ export let Instant = module (
         let seconds: int64;
         let nanos_value: int;
 
-        export let init = func(int64 epoch_seconds, int nanos) -> void {
+        export let init = func(epoch_seconds: int64, nanos: int) -> void {
             seconds = epoch_seconds;
             nanos_value = nanos;
         };
@@ -42,7 +42,7 @@ export let Instant = module (
             return seconds * 1000 + millis;
         };
 
-        export let plus = func(duration.Duration span) -> Instant {
+        export let plus = func(span: duration.Duration) -> Instant {
             let total = span.to_nanos();
             let whole = seconds + calendar.floor_div(total, calendar.NanosPerSecond);
             let part = (nanos_value as int64) + calendar.floor_mod(total, calendar.NanosPerSecond);
@@ -52,7 +52,7 @@ export let Instant = module (
             return new Instant(whole, part as int);
         };
 
-        export let minus = func(duration.Duration span) -> Instant {
+        export let minus = func(span: duration.Duration) -> Instant {
             let total = span.to_nanos();
             let whole = seconds - calendar.floor_div(total, calendar.NanosPerSecond);
             let part = (nanos_value as int64) - calendar.floor_mod(total, calendar.NanosPerSecond);
@@ -64,7 +64,7 @@ export let Instant = module (
 
         // This instant minus `other`. Traps (reason 1) when the difference
         // does not fit a Duration.
-        export let duration_since = func(Instant other) -> duration.Duration {
+        export let duration_since = func(other: Instant) -> duration.Duration {
             let whole = seconds - other.seconds;
             let part = ((nanos_value - other.nanos_value) as int64);
             // Moves a second between the parts when their signs differ, so
@@ -81,7 +81,7 @@ export let Instant = module (
 
         // Traps with "invalid argument: date out of range" when the local
         // date is outside years -999,999 through 999,999.
-        export let to_local = func(zone_offset.ZoneOffset offset) -> local_date_time.LocalDateTime {
+        export let to_local = func(offset: zone_offset.ZoneOffset) -> local_date_time.LocalDateTime {
             let local_seconds = seconds + (offset.total_seconds() as int64);
             let day = local_date.of_epoch_day(calendar.floor_div(local_seconds, calendar.SecondsPerDay));
             let second_of_day = calendar.floor_mod(local_seconds, calendar.SecondsPerDay);
@@ -89,7 +89,7 @@ export let Instant = module (
             return local_date_time.of(day, time);
         };
 
-        export let compare_to = func(Instant other) -> ordering.Ordering {
+        export let compare_to = func(other: Instant) -> ordering.Ordering {
             if (seconds != other.seconds) {
                 if (seconds < other.seconds) {
                     return ordering.Ordering.Less;
@@ -105,7 +105,7 @@ export let Instant = module (
             return ordering.Ordering.Equal;
         };
 
-        export let.override equals = func(class other) -> bool {
+        export let.override equals = func(other: class) -> bool {
             if (!(other is Instant)) {
                 return false;
             }
@@ -133,13 +133,13 @@ export let Instant = module (
 
     // `nanos` may be any int: whole seconds in it move into the seconds,
     // and a negative remainder borrows one.
-    export let of_epoch_seconds = func(int64 seconds, int nanos) -> Instant {
+    export let of_epoch_seconds = func(seconds: int64, nanos: int) -> Instant {
         let adjustment = nanos as int64;
         let whole = seconds + calendar.floor_div(adjustment, calendar.NanosPerSecond);
         return new Instant(whole, calendar.floor_mod(adjustment, calendar.NanosPerSecond) as int);
     };
 
-    export let of_epoch_millis = func(int64 millis) -> Instant {
+    export let of_epoch_millis = func(millis: int64) -> Instant {
         let part = calendar.floor_mod(millis, 1000) * 1000000;
         return new Instant(calendar.floor_div(millis, 1000), part as int);
     };
@@ -149,7 +149,7 @@ export let Instant = module (
     // time. Years are -999,999 through 999,999. Errors are those of
     // LocalDate.parse and LocalTime.parse for the date and time, then those
     // of ZoneOffset.parse for the offset.
-    export let parse = func(string text) -> result.Result<Instant> {
+    export let parse = func(text: string) -> result.Result<Instant> {
         let scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);
         scan.expect(84, "'T'");

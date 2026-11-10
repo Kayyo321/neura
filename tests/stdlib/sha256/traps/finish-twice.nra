@@ -5,7 +5,7 @@ let program = import:Std.Program;
 let sha256s = import:Std.Digest.Sha256;
 
 export let Main = module:program.Entry (
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let first = sha256s.of([]);
         console.print_line(first.length.to_string());
         let digest = sha256s.create();

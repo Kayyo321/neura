@@ -45,7 +45,7 @@ export let Math = module (
     // significand, shifted to an even exponent and extended by 54 zero bits,
     // one result bit per step with a running remainder; then round to
     // nearest, ties to even. sqrt(-0.0) is -0.0; other negatives give NaN.
-    export let sqrt = func(float64 x) -> float64 {
+    export let sqrt = func(x: float64) -> float64 {
         if (x != x) {
             return x + x;
         }
@@ -107,7 +107,7 @@ export let Math = module (
     };
 
     // s_cbrt.c
-    export let cbrt = func(float64 x) -> float64 {
+    export let cbrt = func(x: float64) -> float64 {
         let B1 = 715094163; // B1 = (682-0.03306235651)*2**20
         let B2 = 696219795; // B2 = (664-0.03306235651)*2**20
         let c0 = float64.from_bits(4603064841997850097); // 0x3FE15F15F15F15F1 19/35 5.42857142857142815906e-01
@@ -154,7 +154,7 @@ export let Math = module (
     };
 
     // e_hypot.c: sqrt(x*x + y*y) without undue overflow or underflow.
-    export let hypot = func(float64 x, float64 y) -> float64 {
+    export let hypot = func(x: float64, y: float64) -> float64 {
         let ha = words.high(x) & 2147483647; // 0x7fffffff high word of x
         let hb = words.high(y) & 2147483647; // 0x7fffffff high word of y
         let a = x;
@@ -229,7 +229,7 @@ export let Math = module (
     };
 
     // e_exp.c
-    export let exp = func(float64 x) -> float64 {
+    export let exp = func(x: float64) -> float64 {
         let one = 1.0;
         let huge = 1.0e300;
         let twom1000 = float64.from_bits(103582791429521408); // 0x0170000000000000 2**-1000 9.33263618503218878990e-302
@@ -308,7 +308,7 @@ export let Math = module (
     };
 
     // s_expm1.c: exp(x) - 1, accurate near zero.
-    export let expm1 = func(float64 x) -> float64 {
+    export let expm1 = func(x: float64) -> float64 {
         let one = 1.0;
         let huge = 1.0e300;
         let tiny = 1.0e-300;
@@ -416,7 +416,7 @@ export let Math = module (
     };
 
     // e_log.c
-    export let log = func(float64 x) -> float64 {
+    export let log = func(x: float64) -> float64 {
         let ln2_hi = float64.from_bits(4604418534311723008); // 0x3FE62E42FEE00000 6.93147180369123816490e-01
         let ln2_lo = float64.from_bits(4461442080421002358); // 0x3DEA39EF35793C76 1.90821492927058770002e-10
         let two54 = float64.from_bits(4850376798678024192); // 0x4350000000000000 1.80143985094819840000e+16
@@ -490,7 +490,7 @@ export let Math = module (
     };
 
     // s_log1p.c: log(1 + x), accurate near zero.
-    export let log1p = func(float64 x) -> float64 {
+    export let log1p = func(x: float64) -> float64 {
         let ln2_hi = float64.from_bits(4604418534311723008); // 0x3FE62E42FEE00000 6.93147180369123816490e-01
         let ln2_lo = float64.from_bits(4461442080421002358); // 0x3DEA39EF35793C76 1.90821492927058770002e-10
         let two54 = float64.from_bits(4850376798678024192); // 0x4350000000000000 1.80143985094819840000e+16
@@ -585,7 +585,7 @@ export let Math = module (
     };
 
     // e_log10.c
-    export let log10 = func(float64 x) -> float64 {
+    export let log10 = func(x: float64) -> float64 {
         let two54 = float64.from_bits(4850376798678024192); // 0x4350000000000000 1.80143985094819840000e+16
         let ivln10 = float64.from_bits(4601495173785380110); // 0x3FDBCB7B1526E50E 4.34294481903251816668e-01
         let log10_2hi = float64.from_bits(4599094494223097856); // 0x3FD34413509F6000 3.01029995663611771306e-01
@@ -620,7 +620,7 @@ export let Math = module (
     };
 
     // Base-2 logarithm, shaped like e_log10.c (see the file comment).
-    export let log2 = func(float64 x) -> float64 {
+    export let log2 = func(x: float64) -> float64 {
         let two54 = float64.from_bits(4850376798678024192); // 0x4350000000000000 1.80143985094819840000e+16
         let ivln2 = float64.from_bits(4609176140021203710); // 0x3FF71547652B82FE 1.44269504088896338700e+00
         let zero = 0.0;
@@ -656,7 +656,7 @@ export let Math = module (
     };
 
     // e_pow.c: x raised to y.
-    export let pow = func(float64 x, float64 y) -> float64 {
+    export let pow = func(x: float64, y: float64) -> float64 {
         let zero = 0.0;
         let one = 1.0;
         let two = 2.0;
@@ -937,7 +937,7 @@ export let Math = module (
     };
 
     // s_sin.c
-    export let sin = func(float64 x) -> float64 {
+    export let sin = func(x: float64) -> float64 {
         let ix = words.high(x) & 2147483647; // 0x7fffffff
         if (ix <= 1072243195) { // 0x3fe921fb |x| ~< pi/4
             return trig.sin_kernel(x, 0.0, 0);
@@ -961,7 +961,7 @@ export let Math = module (
     };
 
     // s_cos.c
-    export let cos = func(float64 x) -> float64 {
+    export let cos = func(x: float64) -> float64 {
         let ix = words.high(x) & 2147483647; // 0x7fffffff
         if (ix <= 1072243195) { // 0x3fe921fb |x| ~< pi/4
             return trig.cos_kernel(x, 0.0);
@@ -985,7 +985,7 @@ export let Math = module (
     };
 
     // s_tan.c
-    export let tan = func(float64 x) -> float64 {
+    export let tan = func(x: float64) -> float64 {
         let ix = words.high(x) & 2147483647; // 0x7fffffff
         if (ix <= 1072243195) { // 0x3fe921fb |x| ~< pi/4
             return trig.tan_kernel(x, 0.0, 1);
@@ -999,7 +999,7 @@ export let Math = module (
     };
 
     // R(x^2) of e_asin.c and e_acos.c: p/q.
-    let asin_ratio = func(float64 t) -> float64 {
+    let asin_ratio = func(t: float64) -> float64 {
         let pS0 = float64.from_bits(4595172819793696085); // 0x3FC5555555555555 1.66666666666666657415e-01
         let pS1 = float64.from_bits(13822908529170411389); // 0xBFD4D61203EB6F7D -3.25565818622400915405e-01
         let pS2 = float64.from_bits(4596417465768494165); // 0x3FC9C1550E884455 2.01212532134862925881e-01
@@ -1016,7 +1016,7 @@ export let Math = module (
     };
 
     // e_asin.c
-    export let asin = func(float64 x) -> float64 {
+    export let asin = func(x: float64) -> float64 {
         let pio2_hi = float64.from_bits(4609753056924675352); // 0x3FF921FB54442D18 1.57079632679489655800e+00
         let pio2_lo = float64.from_bits(4364452196894661639); // 0x3C91A62633145C07 6.12323399573676603587e-17
         let pio4_hi = float64.from_bits(4605249457297304856); // 0x3FE921FB54442D18 7.85398163397448278999e-01
@@ -1057,7 +1057,7 @@ export let Math = module (
     };
 
     // e_acos.c
-    export let acos = func(float64 x) -> float64 {
+    export let acos = func(x: float64) -> float64 {
         let pi = float64.from_bits(4614256656552045848); // 0x400921FB54442D18 3.14159265358979311600e+00
         let pio2_hi = float64.from_bits(4609753056924675352); // 0x3FF921FB54442D18 1.57079632679489655800e+00
         let pio2_lo = float64.from_bits(4364452196894661639); // 0x3C91A62633145C07 6.12323399573676603587e-17
@@ -1098,7 +1098,7 @@ export let Math = module (
     };
 
     // s_atan.c
-    export let atan = func(float64 x) -> float64 {
+    export let atan = func(x: float64) -> float64 {
         let aT0 = float64.from_bits(4599676419421066509); // 0x3FD555555555550D 3.33333333333329318027e-01
         let aT1 = float64.from_bits(13819745816549059524); // 0xBFC999999998EBC4 -1.99999999998764832476e-01
         let aT2 = float64.from_bits(4594314991288484863); // 0x3FC24924920083FF 1.42857142725034663711e-01
@@ -1181,7 +1181,7 @@ export let Math = module (
     };
 
     // e_atan2.c: the angle of the point (x, y).
-    export let atan2 = func(float64 y, float64 x) -> float64 {
+    export let atan2 = func(y: float64, x: float64) -> float64 {
         let tiny = 1.0e-300;
         let pi_o_4 = float64.from_bits(4605249457297304856); // 0x3FE921FB54442D18 7.8539816339744827900E-01
         let pi_o_2 = float64.from_bits(4609753056924675352); // 0x3FF921FB54442D18 1.5707963267948965580E+00
@@ -1272,7 +1272,7 @@ export let Math = module (
     };
 
     // e_sinh.c
-    export let sinh = func(float64 x) -> float64 {
+    export let sinh = func(x: float64) -> float64 {
         let one = 1.0;
         let shuge = 1.0e307;
         let jx = words.high(x);
@@ -1312,7 +1312,7 @@ export let Math = module (
     };
 
     // e_cosh.c
-    export let cosh = func(float64 x) -> float64 {
+    export let cosh = func(x: float64) -> float64 {
         let one = 1.0;
         let half = 0.5;
         let huge = 1.0e300;
@@ -1351,7 +1351,7 @@ export let Math = module (
     };
 
     // s_tanh.c
-    export let tanh = func(float64 x) -> float64 {
+    export let tanh = func(x: float64) -> float64 {
         let one = 1.0;
         let two = 2.0;
         let tiny = 1.0e-300;
@@ -1386,12 +1386,12 @@ export let Math = module (
     };
 
     // Degrees to radians: x times the nearest float64 to pi/180.
-    export let to_radians = func(float64 degrees) -> float64 {
+    export let to_radians = func(degrees: float64) -> float64 {
         return degrees * float64.from_bits(4580687790476533049); // 0x3F91DF46A2529D39 0.017453292519943295
     };
 
     // Radians to degrees: x times the nearest float64 to 180/pi.
-    export let to_degrees = func(float64 radians) -> float64 {
+    export let to_degrees = func(radians: float64) -> float64 {
         return radians * float64.from_bits(4633260481411531256); // 0x404CA5DC1A63C1F8 57.29577951308232
     };
 );

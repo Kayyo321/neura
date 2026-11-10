@@ -55,7 +55,7 @@ let StringMapTests = module (
         test.assert_equal_string("[日本, 8]", items.next().to_string());
         test.assert(!items.has_next());
         let seen = cell.of<string>("");
-        map.for_each(func(string key, int value) -> void {
+        map.for_each(func(key: string, value: int) -> void {
             seen.value = seen.value + "<" + key + value.to_string() + ">";
         });
         test.assert_equal_string("<b2><0><日本8>", seen.value);
@@ -64,7 +64,7 @@ let StringMapTests = module (
             total = total + entry[1];
         }
         test.assert_equal_int32(10, total);
-        test.assert_equal_int32(1, map.remove_if(func(string key, int value) -> bool {
+        test.assert_equal_int32(1, map.remove_if(func(key: string, value: int) -> bool {
             return key.byte_length == 0;
         }));
         test.assert_equal_int32(2, map.get_or_put("b", func() -> int {
@@ -73,12 +73,12 @@ let StringMapTests = module (
         test.assert_equal_int32(5, map.get_or_put("e", func() -> int {
             return 5;
         }));
-        let plus = func(int a, int b) -> int {
+        let plus = func(a: int, b: int) -> int {
             return a + b;
         };
         test.assert_equal_int32(12, map.merge("b", 10, plus));
         test.assert_equal_int32(1, map.merge("f", 1, plus));
-        let erase_odd = func(string key, optional.Optional<int> current) -> optional.Optional<int> {
+        let erase_odd = func(key: string, current: optional.Optional<int>) -> optional.Optional<int> {
             return match (current) {
                 optional.Optional.None => optional.Optional<int>.Some(0),
                 optional.Optional.Some(v) => erase_if_odd(v),
@@ -89,7 +89,7 @@ let StringMapTests = module (
         test.assert_equal_string("{b: 12, 日本: 8, f: 1, g: 0}", map.to_string());
     };
 
-    let erase_if_odd = func(int v) -> optional.Optional<int> {
+    let erase_if_odd = func(v: int) -> optional.Optional<int> {
         if (v % 2 == 1) {
             return optional.Optional<int>.None;
         }
@@ -114,7 +114,7 @@ let StringMapTests = module (
             many.set("key" + i.to_string(), i);
             i = i + 1;
         }
-        many.remove_if(func(string key, int value) -> bool {
+        many.remove_if(func(key: string, value: int) -> bool {
             return value % 100 != 0;
         });
         many.trim();

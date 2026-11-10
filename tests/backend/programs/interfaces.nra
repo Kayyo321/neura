@@ -3,7 +3,7 @@ let program = import:Std.Program;
 
 let Interfaces = module:program.Entry (
     let Comparable = interface<T> (
-        let compare_to = func(T other) -> int;
+        let compare_to = func(other: T) -> int;
     );
 
     let Named = interface (
@@ -38,7 +38,7 @@ let Interfaces = module:program.Entry (
     let Counter = class implements Iterator<int> (
         let position: int = 0;
         let limit: int;
-        export let init = func(int size) -> void {
+        export let init = func(size: int) -> void {
             limit = size;
         };
         export let has_next = func() -> bool {
@@ -52,13 +52,13 @@ let Interfaces = module:program.Entry (
 
     let Series = class implements Comparable<Series>, Listing<int> (
         export let length: int;
-        export let init = func(int size) -> void {
+        export let init = func(size: int) -> void {
             length = size;
         };
         export let iterator = func() -> Iterator<int> {
             return new Counter(length);
         };
-        export let compare_to = func(Series other) -> int {
+        export let compare_to = func(other: Series) -> int {
             return length - other.length;
         };
         export let name = func() -> string {
@@ -66,21 +66,21 @@ let Interfaces = module:program.Entry (
         };
     );
 
-    let first = func<T: Iterable<int>>(T items) -> int {
+    let first = func<T: Iterable<int>>(items: T) -> int {
         for (let value in items) {
             return value;
         }
         return 0;
     };
 
-    let describe = func<T: [Comparable<T>, Named], K: Iterable<int>>(T value, T other, K items) -> string {
+    let describe = func<T: [Comparable<T>, Named], K: Iterable<int>>(value: T, other: T, items: K) -> string {
         if (value.compare_to(other) > 0 && first<K>(items) == 1) {
             return value.title();
         }
         return "wrong bound dispatch";
     };
 
-    export let.override main = func(string[] args) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let values: Listing<int> = new Series(5);
         let read = values.iterator().reader();
         let total: int = 0;

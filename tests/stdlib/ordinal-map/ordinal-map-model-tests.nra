@@ -45,7 +45,7 @@ let OrdinalMapModelTests = module (
         };
     );
 
-    let check = func(ordinal_map.OrdinalMap<int> actual, Model model) -> void {
+    let check = func(actual: ordinal_map.OrdinalMap<int>, model: Model) -> void {
         let walk = actual.iterator();
         let count = 0;
         let key = 0;
@@ -64,11 +64,11 @@ let OrdinalMapModelTests = module (
         test.assert_equal_bool(count == 0, actual.is_empty());
     };
 
-    let some_or = func(optional.Optional<int> o, int fallback) -> int {
+    let some_or = func(o: optional.Optional<int>, fallback: int) -> int {
         return optional.value_or<int>(o, fallback);
     };
 
-    let run = func(uint64 seed, int operations) -> void {
+    let run = func(seed: uint64, operations: int) -> void {
         let random = model_random.seeded(seed);
         let actual = ordinal_map.create<int>(Limit);
         let model = new Model();
@@ -128,7 +128,7 @@ let OrdinalMapModelTests = module (
                 }
                 test.assert_equal_int32(model.values[key], made);
             } else if (choice < 68) {
-                let merged = actual.merge(key, value, func(int a, int b) -> int {
+                let merged = actual.merge(key, value, func(a: int, b: int) -> int {
                     return a + b;
                 });
                 if (had) {
@@ -140,7 +140,7 @@ let OrdinalMapModelTests = module (
                 test.assert_equal_int32(model.values[key], merged);
             } else if (choice < 74) {
                 let drop = value % 3 == 0;
-                let result = actual.compute(key, func(int k, optional.Optional<int> current) -> optional.Optional<int> {
+                let result = actual.compute(key, func(k: int, current: optional.Optional<int>) -> optional.Optional<int> {
                     if (drop) {
                         return optional.Optional<int>.None;
                     }
@@ -160,7 +160,7 @@ let OrdinalMapModelTests = module (
                 }
             } else if (choice < 77) {
                 let divisor = value % 4 + 2;
-                let removed = actual.remove_if(func(int k, int v) -> bool {
+                let removed = actual.remove_if(func(k: int, v: int) -> bool {
                     return (k + v) % divisor == 0;
                 });
                 let expected = 0;
@@ -221,7 +221,7 @@ let OrdinalMapModelTests = module (
                 test.assert_equal_string(text + "}", actual.to_string());
             } else {
                 let seen: [int, int][list] = [];
-                actual.for_each(func(int k, int v) -> void {
+                actual.for_each(func(k: int, v: int) -> void {
                     seen.append([k, v]);
                 });
                 test.assert(seen.equals(model.entries()));

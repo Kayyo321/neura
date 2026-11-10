@@ -4,12 +4,12 @@ let test = import:Std.Test;
 let State = module (
     export let counter: int32 = 2 + 3;
 
-    export let bump = func(int32 amount) -> int32 {
+    export let bump = func(amount: int32) -> int32 {
         counter = counter + amount;
         return counter;
     };
 
-    export let discards = func(int8 value) -> int8 {
+    export let discards = func(value: int8) -> int8 {
         value < 3;
         true;
         !(value == 1);
@@ -19,12 +19,12 @@ let State = module (
         return value;
     };
 
-    export let failing_discard = func(int8 value) -> int8 {
+    export let failing_discard = func(value: int8) -> int8 {
         value / 0;
         return value;
     };
 
-    export let reset_then_read = func(bool flag) -> int32 {
+    export let reset_then_read = func(flag: bool) -> int32 {
         if (flag || false) {
             counter = 0;
         }

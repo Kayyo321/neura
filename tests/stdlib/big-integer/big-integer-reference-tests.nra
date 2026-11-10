@@ -15,7 +15,7 @@ let BigIntegerReferenceTests = module (
         let data: uint32[list] = [];
         let position: int = 0;
 
-        export let init = func(uint32[list] cases) -> void {
+        export let init = func(cases: uint32[list]) -> void {
             data = cases;
         };
 
@@ -58,13 +58,13 @@ let BigIntegerReferenceTests = module (
         };
     );
 
-    let same = func(string what, big.BigInteger expected, big.BigInteger actual) -> void {
+    let same = func(what: string, expected: big.BigInteger, actual: big.BigInteger) -> void {
         if (!expected.equals(actual)) {
             test.fail(what + ": expected <" + expected.to_string() + ">, got <" + actual.to_string() + ">");
         }
     };
 
-    let ordinal = func(ordering.Ordering o) -> int {
+    let ordinal = func(o: ordering.Ordering) -> int {
         if (o == ordering.Ordering.Less) {
             return 0;
         }
