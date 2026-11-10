@@ -651,6 +651,11 @@ private:
         }
         const auto matches = [&](char letter, const IrType& type) {
             switch (letter) {
+            // A function value of no arguments, or after specialization the
+            // object of its signature layout.
+            case 'f': return type.kind == TypeKind::Object || (is_function_value(type) && type.arguments.size() == 1);
+            case 'l': return type.kind == TypeKind::List && type.arguments.size() == 1 && type.arguments.front() == uint64;
+            case 'a': return type.kind == TypeKind::Array && type.arguments.size() == 1;
             case 'u': return type == uint64;
             case 'i': return type == IrType{TypeKind::Integer, "int64", no_symbol, {}};
             case 'c': return type == uint32;
@@ -670,6 +675,12 @@ private:
         }
         if (!matches(operation->result, node.type)) {
             report(node.span, "scheduler operation '" + node.text + "' has result type " + describe(node.type));
+        }
+        // The function an isolated item runs is fixed where it is written.
+        if (operation->arguments.starts_with('f') && node.operands.front().op != IrOp::MakeClosure &&
+            node.operands.front().op != IrOp::Allocate) {
+            report(node.operands.front().span, "scheduler operation '" + node.text +
+                                               "' takes a function value written at the call");
         }
     }
 

@@ -281,6 +281,13 @@ if(BUILD_TESTING)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/programs.cmake"
     )
 
+    add_test(NAME concurrency-parallel COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-parallel-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/parallel.cmake"
+    )
+
     add_test(NAME source-docs COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/source-docs-tests"

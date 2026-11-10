@@ -1,0 +1,71 @@
+// A parallel map means the sequential map: values in input order, whatever
+// the number of workers. The items carry scalars, text, tuples, payload
+// enums, and a function value with a transferable capture.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let parallel = import:Std.Concurrent.Parallel;
+
+let Shape = enum (Dot, Circle(int), Box { width: int, height: int });
+
+const scale: int = 3;
+
+let collatz = func(start: int) -> int {
+    let n = start as int64;
+    let steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    return steps;
+};
+
+let describe = func(shape: Shape) -> [string, int] => match (shape) {
+    Shape.Dot => ["dot", 0],
+    Shape.Circle(radius) => ["circle", scale * radius * radius],
+    Shape.Box { width, height } => ["box", width * height],
+};
+
+let grow = func(shape: Shape) -> Shape => match (shape) {
+    Shape.Dot => Shape.Circle(1),
+    Shape.Circle(radius) => Shape.Box { width: radius, height: radius },
+    Shape.Box { width, height } => Shape.Box { width: width + 1, height: height + 1 },
+};
+
+let repeat = func(text: string) -> string => text + text;
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let starts: int[] = [27, 97, 871, 6171, 77031, 837799, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let lengths = parallel.map<int, int>(starts, collatz, parallel.limits(10000000, 100000));
+        let line = "";
+        for (let length: int in lengths) {
+            line = line + length.to_string() + " ";
+        }
+        console.print_line(line);
+
+        let shapes: Shape[] = [Shape.Dot, Shape.Circle(2), Shape.Box { width: 3, height: 4 }];
+        for (let pair: [string, int] in parallel.map<Shape, [string, int]>(shapes, describe, parallel.limits(100000, 100000))) {
+            console.print_line(pair[0] + " " + pair[1].to_string());
+        }
+        for (let shape: Shape in parallel.map<Shape, Shape>(shapes, grow, parallel.limits(100000, 100000))) {
+            console.print_line(describe(shape)[0]);
+        }
+
+        let offset = 100;
+        let shifted = parallel.map<int, int>([1, 2, 3], func(x: int) -> int => x + offset, parallel.limits(100000, 100000));
+        console.print_line((shifted[0] + shifted[1] + shifted[2]).to_string());
+
+        let words: string[] = ["ab", "", "xyz"];
+        for (let word: string in parallel.map<string, string>(words, repeat, parallel.limits(100000, 100000))) {
+            console.print_line("[" + word + "]");
+        }
+
+        let none: int[] = [];
+        console.print_line(parallel.map<int, int>(none, collatz, parallel.limits(1000, 1000)).length.to_string());
+        return program.ExitCode.Ok;
+    };
+);

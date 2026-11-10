@@ -51,6 +51,11 @@ struct RunLimits {
     // and can be cancelled. Null or short: every import is synchronous. It
     // must outlive the run.
     const std::vector<std::uint8_t>* host_modes = nullptr;
+    // Worker threads that evaluate the isolated items of a parallel map
+    // (docs/lang/Concurrency.md section 12). One evaluates them in order on
+    // the scheduler's thread. More may change only wall time and peak
+    // process memory.
+    std::uint32_t parallel_workers = 1;
     // Which runnable task goes next, or null for the first: the FIFO order
     // of the reference scheduler. Schedule exploration and the replay of a
     // saved schedule supply one. It must outlive the run.

@@ -1,0 +1,46 @@
+/// @brief Multicore computation over isolated work (Concurrency.md section 12). A map means what calling the
+/// worker on each item in index order would return; more workers may change only wall time and peak process
+/// memory.
+/// @see [Std.Concurrent.Parallel](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Parallel)
+export let Parallel = module (
+    /// @brief The limits each item of a map runs under, the same under any number of workers. An item that
+    /// exceeds one traps as that item.
+    export let ItemLimits = class (
+        /// @brief The most steps one item may execute.
+        export let max_steps: int64;
+        /// @brief The most heap cells one item may hold at once, the copies of the program's constants it
+        /// can read included.
+        export let max_heap_cells: int64;
+
+        /// @brief Limits of the given steps and heap cells, both positive.
+        export let init = func(steps: int64, heap_cells: int64) {
+            if (steps <= 0) {
+                trap_with_message("invalid argument: steps");
+            }
+            if (heap_cells <= 0) {
+                trap_with_message("invalid argument: heap_cells");
+            }
+            max_steps = steps;
+            max_heap_cells = heap_cells;
+        };
+    );
+
+    /// @brief Limits of the given steps and heap cells for each item.
+    export let limits = func(steps: int64, heap_cells: int64) -> ItemLimits => new ItemLimits(steps, heap_cells);
+
+    /// @brief Returns what `worker` returns for each item, in input order. T and U are transferable. The worker
+    /// is task-safe, issues no host request, uses no task, channel, or other scheduler operation, and uses no
+    /// object identity; the compiler checks this. Each item runs alone under `limits`. If items trap, the run
+    /// reports the trap of the lowest index.
+    export let map = func<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[] {
+        let started: uint64[list] = [];
+        for (let item: T in items) {
+            started.append(start<U>(func -> U => worker(item), limits.max_steps, limits.max_heap_cells));
+        }
+        return finish<U>(started);
+    };
+
+    let start = func<U>(body: func() -> U, max_steps: int64, max_heap_cells: int64) -> uint64 scheduler("parallel.start");
+
+    let finish = func<U>(started: uint64[list]) -> U[] scheduler("parallel.finish");
+);

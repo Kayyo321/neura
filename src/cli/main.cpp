@@ -102,6 +102,7 @@ void usage(std::ostream& out) {
            "  --task-quantum N         polls per turn for a concurrent image\n"
            "  --max-queued-messages N  bound the values buffered in all channels\n"
            "  --max-pending-requests N bound the overlapping host requests in flight\n"
+           "  --parallel-workers N     threads that evaluate the items of a parallel map (default 1)\n"
            "  --task-dump[=text|json]  print every task when one traps; SIGQUIT prints a dump at any time\n"
            "  --trace-events FILE      write one JSON line per scheduler event (run only)\n"
            "  --trace-wall-time        add wall-clock times to --trace-events\n"
@@ -376,13 +377,15 @@ Options read_options(int argc, char** argv) {
         } else if (options.command == Command::Run && arg == "--profile") {
             options.limits.profile = true;
         } else if (arg == "--max-tasks" || arg == "--task-quantum" || arg == "--max-queued-messages" ||
-                   arg == "--max-pending-requests") {
+                   arg == "--max-pending-requests" || arg == "--parallel-workers") {
             if (!runs) throw std::runtime_error(std::string(arg) + " applies only to run and test");
             const auto value = parse_limit(arg, next());
             if (arg == "--max-tasks") options.limits.max_tasks = value;
             else if (arg == "--task-quantum") options.limits.task_quantum = value;
             else if (arg == "--max-queued-messages") options.limits.max_queued_messages = value;
-            else options.limits.max_pending_requests = value;
+            else if (arg == "--max-pending-requests") options.limits.max_pending_requests = value;
+            else if (value > 1024) throw std::runtime_error("--parallel-workers is at most 1024");
+            else options.limits.parallel_workers = static_cast<std::uint32_t>(value);
         } else if (arg == "--task-dump" || arg.starts_with("--task-dump=")) {
             if (!runs) throw std::runtime_error("--task-dump applies only to run and test");
             const auto form = arg == "--task-dump" ? std::string_view("text") : arg.substr(12);

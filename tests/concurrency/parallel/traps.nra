@@ -1,0 +1,44 @@
+// The trapping item: with several, the lowest index is reported, as the
+// sequential map would reach it first. An item that exceeds its own limits
+// traps as that item. The first argument selects the case.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let parallel = import:Std.Concurrent.Parallel;
+
+let divide = func(by: int) -> int => 100 / (by - 3);
+
+let count_to = func(limit: int) -> int {
+    let total = 0;
+    for (let i: int = 0; i < limit * 1000; i++) {
+        total = total + 1;
+    }
+    return total;
+};
+
+let build = func(length: int) -> string {
+    let text = "";
+    for (let i: int = 0; i < length; i++) {
+        text = text + "0123456789";
+    }
+    return text;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        console.print_line("start");
+        if (arguments[0] == "divide") {
+            let out = parallel.map<int, int>([1, 2, 3, 4, 3], divide, parallel.limits(1000, 1000));
+        }
+        if (arguments[0] == "steps") {
+            let out = parallel.map<int, int>([1, 2, 50, 3], count_to, parallel.limits(20000, 1000));
+        }
+        if (arguments[0] == "heap") {
+            let out = parallel.map<int, string>([1, 2, 5000, 3], build, parallel.limits(10000000, 2000));
+        }
+        if (arguments[0] == "total") {
+            let out = parallel.map<int, int>([4, 4, 4, 4], count_to, parallel.limits(200000, 1000));
+        }
+        console.print_line("finished");
+        return program.ExitCode.Ok;
+    };
+);

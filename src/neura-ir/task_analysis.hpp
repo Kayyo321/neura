@@ -56,6 +56,12 @@ private:
     std::map<SymbolId, std::vector<SymbolId>> variants_;
     std::map<SymbolId, std::vector<SymbolId>> destructors_;
     std::map<SymbolId, Reason> unsafe_;
+    // Why a function cannot run as an isolated item of a parallel map
+    // (section 12): it issues a host request, uses the scheduler, or performs
+    // an identity operation, itself or through a call.
+    std::map<SymbolId, Reason> impure_;
+    std::optional<Reason> isolated_reason(const IrNode& node) const;
+    std::optional<Unsafe> chain(const std::map<SymbolId, Reason>& reasons, SymbolId function) const;
     // For each body owner, the owners whose bodies can run it and where.
     std::map<SymbolId, std::vector<std::pair<SymbolId, Span>>> callers_;
     bool library_code(SymbolId owner) const;

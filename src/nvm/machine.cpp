@@ -10,6 +10,8 @@
 #include <array>
 #include <thread>
 #include <chrono>
+#include <mutex>
+#include <condition_variable>
 #include <deque>
 #include <limits>
 #include <map>
@@ -253,6 +255,8 @@ std::optional<std::size_t> evaluate_outputs(const nvr::Graph& graph, std::span<c
 }
 
 class Execution::State {
+    struct ParallelItem;
+
 public:
     State(const nvr::Image& image, std::span<const std::string> arguments, RunLimits limits,
           std::optional<std::uint32_t> entry = {})
@@ -272,7 +276,16 @@ public:
         start_arguments_.assign(arguments.begin(), arguments.end());
     }
 
-    ~State() { stop_tracking_heap(); }
+    // An isolated parallel item: one call of `item.function` on the item's
+    // argument, with the starting run's transferable constants as globals,
+    // its own heap, and no scheduler. See run_item.
+    State(const nvr::Image& image, RunLimits limits, const ParallelItem& item)
+        : image_(image), types_(image), limits_(limits), start_function_(item.function), item_(&item) {}
+
+    ~State() {
+        stop_parallel_workers();
+        stop_tracking_heap();
+    }
 
     // A concurrent image needs a positive quantum; reject it before any run state exists.
     void check_task_settings() const {
@@ -437,7 +450,10 @@ public:
         std::vector<TaskSiteProfile> sites{{nvr::absent, nvr::absent, 0, 0, 0, 0, 0}};
         std::map<std::pair<std::uint32_t, std::uint32_t>, std::size_t> index{{{nvr::absent, nvr::absent}, 0}};
         for (const auto& released : scheduler_->sites) {
-            auto& site = site_of(sites, index, Task{.spawn_function = released.function, .spawn_block = released.block});
+            Task at;
+            at.spawn_function = released.function;
+            at.spawn_block = released.block;
+            auto& site = site_of(sites, index, at);
             site.tasks += released.tasks;
             site.steps += released.steps;
             site.runnable_ticks += released.runnable_ticks;
@@ -487,6 +503,8 @@ private:
         // Parked on a channel, a timer, several operations at once, or an
         // overlapping host request.
         Sending, Receiving, TimerWait, Selecting, HostWait,
+        // Parked until another task leaves a guard.
+        GuardWait,
     };
 
     struct TaskScope {
@@ -531,6 +549,8 @@ private:
     static constexpr std::uint64_t task_record_cells = 20;
     static constexpr std::uint64_t channel_record_cells = 16;
     static constexpr std::uint64_t timer_record_cells = 8;
+    static constexpr std::uint64_t guard_record_cells = 8;
+    static constexpr std::uint64_t parallel_item_cells = 8;
 
     struct Task {
         std::uint64_t parent = 0;
@@ -607,6 +627,80 @@ private:
         std::deque<Waiter> waiters;
     };
 
+    // A guard owns one value, which never leaves it except to the one task
+    // that has entered. Keyed by the guard object's handle.
+    struct Guard {
+        std::uint64_t number = 0;
+        std::uint64_t value = 0;
+        std::uint32_t type = 0;
+        bool held = false;
+        std::uint64_t holder = 0;
+        std::deque<Waiter> waiters;
+    };
+
+    // A transferable value detached from any heap: scalars as their bits,
+    // and the objects and texts a reference reaches as numbered nodes. A
+    // parallel item receives its argument and returns its result in this
+    // form, so it shares no heap with the run that started it.
+    struct PortableGraph {
+        struct Node {
+            EntryKind kind = EntryKind::Object;
+            std::uint32_t type = 0;
+            std::string bytes;
+            // A scalar field's bits, or for a reference field the number of
+            // the node it names plus one; zero is nil.
+            std::vector<std::uint64_t> cells;
+            std::vector<std::uint8_t> initialized;
+            std::vector<std::uint8_t> reference;
+        };
+        std::vector<Node> nodes;
+        std::uint64_t root = 0;
+        bool reference = false;
+
+        std::uint64_t cells() const {
+            std::uint64_t total = 1;
+            for (const auto& node : nodes) total += 1 + node.cells.size() + node.bytes.size();
+            return total;
+        }
+    };
+
+    using GlobalsSnapshot = std::vector<std::pair<std::uint32_t, PortableGraph>>;
+
+    // One isolated item of a parallel map (Concurrency.md section 12).
+    struct ParallelItem {
+        std::uint64_t id = 0;
+        // The item's position in its map, for diagnostics.
+        std::uint64_t index = 0;
+        std::uint32_t function = 0;
+        PortableGraph argument;
+        std::shared_ptr<const GlobalsSnapshot> globals;
+        std::uint64_t max_steps = 0;
+        std::uint64_t max_cells = 0;
+        std::uint64_t charged_cells = 0;
+        bool started = false;
+        bool done = false;
+        bool trapped = false;
+        Trap trap;
+        PortableGraph result;
+        std::uint64_t steps = 0;
+    };
+
+    struct Parallel {
+        // In order of their identities. An item leaves when it is finished.
+        std::deque<std::unique_ptr<ParallelItem>> items;
+        std::uint64_t next_id = 1;
+        // Items started since the last time none was outstanding: one map.
+        std::uint64_t batch = 0;
+        std::shared_ptr<const GlobalsSnapshot> globals;
+        // Worker threads take the lowest unstarted item. Everything below
+        // is guarded by the mutex.
+        std::mutex mutex;
+        std::condition_variable changed;
+        std::deque<ParallelItem*> unstarted;
+        std::vector<std::thread> workers;
+        bool stopping = false;
+    };
+
     // An armed deadline: a scope's, or a timer some task waits for.
     struct Deadline {
         bool scope = false;
@@ -632,8 +726,10 @@ private:
         // Looked up by handle only, so their order never affects a run.
         std::unordered_map<std::uint64_t, Channel> channels;
         std::unordered_map<std::uint64_t, Timer> timers;
+        std::unordered_map<std::uint64_t, Guard> guards;
         std::uint64_t next_channel = 1;
         std::uint64_t next_timer = 1;
+        std::uint64_t next_guard = 1;
         std::uint64_t queued = 0;
         std::uint64_t peak_queued = 0;
         // Overlapping host requests by sequence number, with their tasks.
@@ -813,14 +909,19 @@ private:
             if (!entry.cells.empty()) {
                 mark_work_.push_back(&entry);
             }
-            // A reachable channel keeps the values buffered in it.
-            if (scheduler_ && !scheduler_->channels.empty() && scheduler_->channels.contains(handle)) {
+            // A reachable channel keeps the values buffered in it, and a
+            // reachable guard the value it owns.
+            if (scheduler_ && (scheduler_->channels.contains(handle) || scheduler_->guards.contains(handle))) {
                 channel_work_.push_back(handle);
             }
         }
     }
 
     void mark_channel(std::uint64_t handle) {
+        if (const auto found = scheduler_->guards.find(handle); found != scheduler_->guards.end()) {
+            if (nvr::is_reference(type(found->second.type).kind)) mark(found->second.value);
+            return;
+        }
         const auto& marked = scheduler_->channels.at(handle);
         if (!nvr::is_reference(type(marked.type).kind)) return;
         for (const auto value : marked.buffer) mark(value);
@@ -995,7 +1096,7 @@ private:
 
     void start() {
         started_ = true;
-        if (image_.transferable_layouts) {
+        if (image_.transferable_layouts && !item_) {
             if (limits_.max_tasks == 0) fault(TrapKind::TaskLimit, "starting the root task");
             scheduler_ = std::make_unique<Scheduler>();
             scheduler_->tasks.try_emplace(0);
@@ -1020,6 +1121,16 @@ private:
             }
         }
 
+        if (item_) {
+            initialize_globals();
+            for (const auto& [global, graph] : *item_->globals) {
+                globals_[global] = import_value(graph);
+                global_initialized_[global] = 1;
+            }
+            const std::vector<std::uint64_t> argument{import_value(item_->argument)};
+            push_frame(item_->function, argument, nvr::absent, 0);
+            return;
+        }
         if (start_function_) {
             push_frame(*start_function_, start_arguments_, nvr::absent, 0);
             initialize_globals();
@@ -1256,6 +1367,8 @@ private:
             text += (id == 0 ? " task " : " -> task ") + std::to_string(id) + " (" + wait_text(id, task) + ")";
             if (task.state == TaskState::Joining) {
                 id = task.waiting_for;
+            } else if (task.state == TaskState::GuardWait && scheduler_->guards.contains(task.waiting_for)) {
+                id = scheduler_->guards.at(task.waiting_for).holder;
             } else if (task.state == TaskState::LeavingScope && !task.scopes.empty()) {
                 // The lowest-numbered task the scope still waits for.
                 std::uint64_t next = 0;
@@ -1657,6 +1770,294 @@ private:
         return arms;
     }
 
+    Guard& guard(std::uint64_t object) {
+        const auto found = scheduler_->guards.find(object);
+        if (found == scheduler_->guards.end()) {
+            fault(TrapKind::InvalidTaskOperation, "the object is not an open guard");
+        }
+        return found->second;
+    }
+
+    bool scheduler_object(std::uint64_t handle) const {
+        return scheduler_ && (scheduler_->channels.contains(handle) || scheduler_->timers.contains(handle) ||
+                              scheduler_->guards.contains(handle));
+    }
+
+    // Detaches a transferable value from this heap. Every object it reaches
+    // must have a marked layout, as for a spawn, and none may be a channel,
+    // timer, or guard: those are identities of this run's scheduler.
+    PortableGraph export_value(std::uint64_t value, std::uint32_t value_type) {
+        PortableGraph graph;
+        if (!nvr::is_reference(type(value_type).kind)) {
+            graph.root = value;
+            return graph;
+        }
+        graph.reference = true;
+        std::unordered_map<std::uint64_t, std::uint64_t> numbers;
+        std::vector<std::uint64_t> handles;
+        const auto visit = [&](std::uint64_t handle, std::uint32_t static_type) -> std::uint64_t {
+            if (handle == 0 && type(static_type).kind == nvr::TypeKind::Object) return 0;
+            if (const auto found = numbers.find(handle); found != numbers.end()) return found->second;
+            typed_entry(handle, static_type);
+            handles.push_back(handle);
+            numbers.emplace(handle, handles.size());
+            return handles.size();
+        };
+        graph.root = visit(value, value_type);
+        for (std::size_t i = 0; i < handles.size(); ++i) {
+            const auto& item = entry(handles[i]);
+            PortableGraph::Node node;
+            node.kind = item.kind;
+            node.type = item.type;
+            switch (item.kind) {
+            case EntryKind::Text:
+            case EntryKind::Bytes:
+                node.bytes = item.bytes;
+                break;
+            case EntryKind::Object: {
+                if (!std::ranges::binary_search(*image_.transferable_layouts, item.type) ||
+                    scheduler_object(handles[i])) {
+                    fault(TrapKind::InvalidTaskOperation, "a value that enters or leaves a parallel item is not transferable");
+                }
+                const auto& fields = image_.layouts[item.type].fields;
+                node.cells.assign(fields.size(), 0);
+                node.initialized.assign(fields.size(), 0);
+                node.reference.assign(fields.size(), 0);
+                for (std::size_t field = 0; field < fields.size(); ++field) {
+                    if (!item.initialized[field]) continue;
+                    node.initialized[field] = 1;
+                    if (nvr::is_reference(type(fields[field]).kind)) {
+                        node.reference[field] = 1;
+                        node.cells[field] = visit(item.cells[field], fields[field]);
+                    } else {
+                        node.cells[field] = item.cells[field];
+                    }
+                }
+                break;
+            }
+            default:
+                fault(TrapKind::InvalidTaskOperation, "a value that enters or leaves a parallel item is not transferable");
+            }
+            graph.nodes.push_back(std::move(node));
+        }
+        return graph;
+    }
+
+    // Builds a detached value in this heap. Nodes are allocated in their
+    // order, so the handles they receive are the same on every run.
+    std::uint64_t import_value(const PortableGraph& graph, std::span<const std::uint64_t> roots = {}) {
+        if (!graph.reference) return graph.root;
+        // Values the caller holds outside any frame survive a collection
+        // that these allocations start.
+        std::vector<std::uint64_t> handles(roots.begin(), roots.end());
+        const auto first = handles.size();
+        handles.reserve(first + graph.nodes.size());
+        for (const auto& node : graph.nodes) {
+            HeapEntry item;
+            item.kind = node.kind;
+            item.type = node.type;
+            item.bytes = node.bytes;
+            item.cells = node.cells;
+            item.initialized = node.initialized;
+            // References are filled in once every node has its handle.
+            for (std::size_t field = 0; field < item.cells.size(); ++field) {
+                if (node.reference[field]) item.cells[field] = 0;
+            }
+            handles.push_back(allocate(std::move(item), handles));
+        }
+        for (std::size_t i = 0; i < graph.nodes.size(); ++i) {
+            const auto& node = graph.nodes[i];
+            for (std::size_t field = 0; field < node.cells.size(); ++field) {
+                if (node.reference[field] && node.cells[field] != 0) {
+                    entry(handles[first + i]).cells[field] = handles[first + node.cells[field] - 1];
+                }
+            }
+        }
+        return graph.root == 0 ? 0 : handles[first + graph.root - 1];
+    }
+
+    // The constants a parallel item may read: every initialized global whose
+    // type is transferable and whose value is. An item cannot reach any
+    // other binding (Concurrency.md section 5.2).
+    std::shared_ptr<const GlobalsSnapshot> snapshot_globals() {
+        auto snapshot = std::make_shared<GlobalsSnapshot>();
+        for (std::uint32_t i = 0; i < globals_.size(); ++i) {
+            if (!global_initialized_[i] || !nvr::is_transferable(image_, image_.globals[i].type)) continue;
+            try {
+                snapshot->emplace_back(i, export_value(globals_[i], image_.globals[i].type));
+            } catch (const Fault&) {
+                // The binding holds an object of another class; an item that
+                // read it would have been rejected when it was compiled.
+            }
+        }
+        return snapshot;
+    }
+
+    // Evaluates one item to its end in a state of its own. It touches
+    // nothing of the run that started it, so any number can run at once.
+    static void run_item(const nvr::Image& image, const RunLimits& parent, ParallelItem& item) {
+        RunLimits limits;
+        limits.max_steps = item.max_steps;
+        limits.max_heap_cells = item.max_cells;
+        limits.max_frames = parent.max_frames;
+        limits.max_handles = parent.max_handles;
+        const auto refuse = [&](std::string detail) {
+            item.trapped = true;
+            item.trap = {};
+            item.trap.kind = TrapKind::InvalidTaskOperation;
+            item.trap.detail = std::move(detail);
+        };
+        try {
+            State child(image, limits, item);
+            const auto event = child.advance();
+            if (event.kind == Event::Kind::Completed) {
+                item.result = child.export_value(event.result, image.functions[item.function].result_type);
+            } else if (event.kind == Event::Kind::Trapped) {
+                item.trapped = true;
+                item.trap = event.trap;
+            } else {
+                refuse("a parallel item issued a host request");
+            }
+            item.steps = child.steps();
+        } catch (const Fault& failure) {
+            item.trapped = true;
+            item.trap = failure.trap;
+        } catch (const std::exception& error) {
+            refuse(std::string("a parallel item could not run: ") + error.what());
+        }
+    }
+
+    void start_parallel_workers() {
+        if (limits_.parallel_workers <= 1 || !parallel_->workers.empty()) return;
+        for (std::uint32_t i = 0; i < limits_.parallel_workers; ++i) {
+            parallel_->workers.emplace_back([this] {
+                auto& pool = *parallel_;
+                std::unique_lock lock(pool.mutex);
+                for (;;) {
+                    pool.changed.wait(lock, [&] { return pool.stopping || !pool.unstarted.empty(); });
+                    if (pool.stopping) return;
+                    auto* item = pool.unstarted.front();
+                    pool.unstarted.pop_front();
+                    item->started = true;
+                    lock.unlock();
+                    run_item(image_, limits_, *item);
+                    lock.lock();
+                    item->done = true;
+                    pool.changed.notify_all();
+                }
+            });
+        }
+    }
+
+    void stop_parallel_workers() {
+        if (!parallel_ || parallel_->workers.empty()) return;
+        {
+            const std::lock_guard lock(parallel_->mutex);
+            parallel_->stopping = true;
+        }
+        parallel_->changed.notify_all();
+        for (auto& worker : parallel_->workers) worker.join();
+        parallel_->workers.clear();
+    }
+
+    std::uint64_t start_parallel_item(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments) {
+        const auto max_steps = static_cast<std::int64_t>(arguments[1]);
+        const auto max_cells = static_cast<std::int64_t>(arguments[2]);
+        if (max_steps <= 0 || max_cells <= 0) {
+            fault(TrapKind::InvalidTaskOperation, "a parallel item's limits are positive");
+        }
+        if (!parallel_) parallel_ = std::make_unique<Parallel>();
+        auto item = std::make_unique<ParallelItem>();
+        item->function = exit.target;
+        item->argument = export_value(arguments[0], exit.arguments[0].type);
+        item->max_steps = static_cast<std::uint64_t>(max_steps);
+        item->max_cells = static_cast<std::uint64_t>(max_cells);
+        item->charged_cells = parallel_item_cells + item->argument.cells();
+        const std::vector<std::uint64_t> roots{arguments[0]};
+        ensure_heap_cells(item->charged_cells, "parallel item of ", roots);
+        {
+            const std::lock_guard lock(parallel_->mutex);
+            // The items of one map see the globals as they were when its
+            // first item started.
+            if (parallel_->items.empty() || !parallel_->globals) {
+                parallel_->globals = snapshot_globals();
+                parallel_->batch = 0;
+            }
+            item->globals = parallel_->globals;
+            item->id = parallel_->next_id++;
+            item->index = parallel_->batch++;
+            parallel_->unstarted.push_back(item.get());
+            parallel_->items.push_back(std::move(item));
+        }
+        add_live_cells(parallel_->items.back()->charged_cells);
+        start_parallel_workers();
+        parallel_->changed.notify_one();
+        return parallel_->items.back()->id;
+    }
+
+    // Finishes item `id`: its result enters this heap, its steps join the
+    // run's, and a trap in it becomes the run's trap. The library finishes
+    // items in index order, so the lowest trapping index is the one reported
+    // and totals grow in the same order under any number of workers.
+    std::uint64_t finish_parallel_item(std::uint64_t id, std::uint32_t slot_type,
+                                       std::span<const std::uint64_t> roots) {
+        if (!parallel_) fault(TrapKind::InvalidTaskOperation, "no such parallel item");
+        std::unique_lock lock(parallel_->mutex);
+        const auto found = std::ranges::find(parallel_->items, id, [](const auto& item) { return item->id; });
+        if (found == parallel_->items.end()) fault(TrapKind::InvalidTaskOperation, "no such parallel item");
+        auto& item = **found;
+        if (parallel_->workers.empty()) {
+            // The reference executor: items run one after another, in order,
+            // on this thread.
+            for (auto& earlier : parallel_->items) {
+                if (!earlier->done) {
+                    earlier->started = true;
+                    std::erase(parallel_->unstarted, earlier.get());
+                    run_item(image_, limits_, *earlier);
+                    earlier->done = true;
+                }
+                if (earlier->id == id) break;
+            }
+        } else {
+            parallel_->changed.wait(lock, [&] { return item.done; });
+        }
+        const auto finished = std::move(*found);
+        parallel_->items.erase(found);
+        lock.unlock();
+        remove_live_cells(finished->charged_cells);
+        if (finished->trapped) {
+            auto trap = finished->trap;
+            trap.detail += (trap.detail.empty() ? "" : " ") + std::string("(item ") +
+                           std::to_string(finished->index) + " of a parallel map)";
+            throw Fault{std::move(trap)};
+        }
+        if (finished->steps > limits_.max_steps - std::min(steps_, limits_.max_steps)) {
+            fault(TrapKind::StepLimit, std::to_string(limits_.max_steps) + " steps");
+        }
+        steps_ += finished->steps;
+        if (!types_.assignable(image_.functions[finished->function].result_type, slot_type)) {
+            fault(TrapKind::InvalidTaskOperation, "a parallel item's result does not match its slot");
+        }
+        return import_value(finished->result, roots);
+    }
+
+    // Finishes every item `list` names, in order, into a new array.
+    std::uint64_t finish_parallel_items(std::uint64_t list, std::uint32_t list_type, std::uint32_t array_type) {
+        const auto ids = typed_entry(list, list_type).cells;
+        const auto element = type(array_type).reference;
+        const bool references = nvr::is_reference(type(element).kind);
+        HeapEntry results;
+        results.kind = EntryKind::Array;
+        results.type = array_type;
+        results.cells.reserve(ids.size());
+        std::vector<std::uint64_t> roots{list};
+        for (const auto id : ids) {
+            results.cells.push_back(finish_parallel_item(id, element, roots));
+            if (references) roots.push_back(results.cells.back());
+        }
+        return allocate(std::move(results), roots);
+    }
+
     void check_scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments,
                               const std::vector<std::pair<std::uint32_t, std::uint64_t>>& assignments) {
         using Op = nvr::SchedulerOp;
@@ -1695,8 +2096,7 @@ private:
             cells = task_record_cells + frame_cells(exit.target);
             break;
         case Op::ChannelOpen:
-            if (entry(arguments[0]).kind != EntryKind::Object || scheduler_->channels.contains(arguments[0]) ||
-                scheduler_->timers.contains(arguments[0])) {
+            if (entry(arguments[0]).kind != EntryKind::Object || scheduler_object(arguments[0])) {
                 fault(TrapKind::InvalidTaskOperation, "the object cannot be opened as a channel");
             }
             if (static_cast<std::int64_t>(arguments[1]) < 0) {
@@ -1706,12 +2106,19 @@ private:
             cells = channel_record_cells;
             break;
         case Op::TimerOpen:
-            if (entry(arguments[0]).kind != EntryKind::Object || scheduler_->channels.contains(arguments[0]) ||
-                scheduler_->timers.contains(arguments[0])) {
+            if (entry(arguments[0]).kind != EntryKind::Object || scheduler_object(arguments[0])) {
                 fault(TrapKind::InvalidTaskOperation, "the object cannot be opened as a timer");
             }
             roots.push_back(arguments[0]);
             cells = timer_record_cells;
+            break;
+        case Op::GuardOpen:
+            if (entry(arguments[0]).kind != EntryKind::Object || scheduler_object(arguments[0])) {
+                fault(TrapKind::InvalidTaskOperation, "the object cannot be opened as a guard");
+            }
+            roots.push_back(arguments[0]);
+            if (nvr::is_reference(type(exit.arguments[1].type).kind)) roots.push_back(arguments[1]);
+            cells = guard_record_cells;
             break;
         default:
             break;
@@ -1902,6 +2309,63 @@ private:
             }
             break;
         }
+        case Op::GuardOpen: {
+            auto& opened = scheduler_->guards[arguments[0]];
+            opened.number = scheduler_->next_guard++;
+            opened.value = arguments[1];
+            opened.type = exit.arguments[1].type;
+            add_live_cells(guard_record_cells);
+            break;
+        }
+        case Op::GuardEnter: {
+            auto& target = guard(arguments[0]);
+            const auto& types = image_.functions[frame.function].frame_types;
+            if (!types_.assignable(target.type, types[exit.result_slot])) {
+                fault(TrapKind::InvalidTaskOperation, "the guarded value does not match its slot");
+            }
+            if (!target.held) {
+                target.held = true;
+                target.holder = self;
+                write_result(frame, exit.result_slot, target.value);
+            } else if (target.holder == self) {
+                fault(TrapKind::Program, "invalid state: guard already held",
+                      static_cast<std::uint32_t>(nvr::TrapReason::ProgramFailure));
+            } else {
+                // Not cancellable: `with` has no outcome for it. The task
+                // waits its turn, first come, first served.
+                task.waiting_for = arguments[0];
+                task.join_slot = exit.result_slot;
+                target.waiters.push_back({self, nvr::absent});
+                park(TaskState::GuardWait);
+            }
+            break;
+        }
+        case Op::GuardExit: {
+            auto& target = guard(arguments[0]);
+            if (!target.held || target.holder != self) {
+                fault(TrapKind::InvalidTaskOperation, "the task does not hold the guard");
+            }
+            if (target.waiters.empty()) {
+                target.held = false;
+            } else {
+                const auto next = target.waiters.front();
+                target.waiters.pop_front();
+                target.holder = next.task;
+                auto& waiting = scheduler_->tasks.at(next.task);
+                write_result(waiting.frames.back(), waiting.join_slot, target.value);
+                make_runnable(next.task, waiting);
+            }
+            break;
+        }
+        case Op::ParallelStart:
+            write_result(frame, exit.result_slot, start_parallel_item(exit, arguments));
+            break;
+        case Op::ParallelFinish: {
+            const auto slot_type = image_.functions[frame.function].frame_types[exit.result_slot];
+            const auto value = finish_parallel_items(arguments[0], exit.arguments[0].type, slot_type);
+            write_result(frames_.back(), exit.result_slot, value);
+            break;
+        }
         case Op::Select: {
             auto arms = select_arms(exit, arguments);
             const auto count = arms.size();
@@ -2079,6 +2543,9 @@ private:
             if (timed->second.armed) disarm(timed->second.deadline, false, handle);
             remove_live_cells(timer_record_cells);
             scheduler_->timers.erase(timed);
+        } else if (const auto guarded = scheduler_->guards.find(handle); guarded != scheduler_->guards.end()) {
+            remove_live_cells(guard_record_cells);
+            scheduler_->guards.erase(guarded);
         }
     }
 
@@ -2272,7 +2739,10 @@ private:
         for (const auto& argument : exit.arguments) {
             arguments.push_back(read(argument, frame));
         }
-        if (exit.kind == nvr::ExitKind::Scheduler) check_scheduler_exit(exit, arguments, assignments);
+        if (exit.kind == nvr::ExitKind::Scheduler) {
+            if (!scheduler_) fault(TrapKind::InvalidTaskOperation, "a parallel item cannot use tasks");
+            check_scheduler_exit(exit, arguments, assignments);
+        }
         for (const auto& [slot, value] : assignments) {
             frame.slots[slot] = value;
             frame.initialized[slot] = 1;
@@ -2281,11 +2751,11 @@ private:
         switch (exit.kind) {
         case nvr::ExitKind::Continue:
             frame.block = exit.resume;
-            if (exit.poll) poll();
+            if (exit.poll && scheduler_) poll();
             return std::nullopt;
         case nvr::ExitKind::Call:
             push_frame(exit.target, arguments, exit.result_slot, exit.resume);
-            if (exit.poll) poll();
+            if (exit.poll && scheduler_) poll();
             return std::nullopt;
         case nvr::ExitKind::Return: {
             const auto result = arguments.empty() ? 0 : arguments.front();
@@ -2745,6 +3215,9 @@ private:
     std::vector<std::uint8_t> global_initialized_;
     std::vector<Frame> frames_;
     std::unique_ptr<Scheduler> scheduler_;
+    std::unique_ptr<Parallel> parallel_;
+    // Set in the state that evaluates one parallel item.
+    const ParallelItem* item_ = nullptr;
     // Function names for task dumps, when the image carries them.
     std::optional<nvr::Names> names_;
     std::string frame_text(const Frame& frame) const;
@@ -2815,6 +3288,12 @@ std::string Execution::State::wait_text(std::uint64_t id, const Task& task) cons
             }
         }
         return text;
+    }
+    case TaskState::GuardWait: {
+        const auto found = scheduler_->guards.find(task.waiting_for);
+        if (found == scheduler_->guards.end()) return "parked: a guard";
+        return "parked: guard " + std::to_string(found->second.number) + " (held by task " +
+               std::to_string(found->second.holder) + ")";
     }
     case TaskState::HostWait: {
         const auto& import = image_.imports[task.pending.import];

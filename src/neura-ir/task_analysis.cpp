@@ -214,6 +214,25 @@ std::optional<TaskAnalysis::Reason> TaskAnalysis::direct(const IrNode& node) con
     return std::nullopt;
 }
 
+// What only a task of the run may do, and an isolated item may not.
+std::optional<TaskAnalysis::Reason> TaskAnalysis::isolated_reason(const IrNode& node) const {
+    switch (node.op) {
+    case IrOp::ExternalCall:
+        return Reason{"issues a host request", node.span, no_symbol};
+    case IrOp::Spawn:
+    case IrOp::TaskScope:
+        return Reason{"starts or scopes tasks", node.span, no_symbol};
+    case IrOp::SchedulerCall:
+        if (node.text == "transfer.check") return std::nullopt;
+        return Reason{"uses the scheduler operation '" + node.text + "'", node.span, no_symbol};
+    case IrOp::ClassHash:
+    case IrOp::ClassText:
+        return Reason{"uses an object's identity", node.span, no_symbol};
+    default:
+        return std::nullopt;
+    }
+}
+
 void TaskAnalysis::callees(const IrNode& node, std::vector<std::pair<SymbolId, Span>>& out) const {
     const auto add = [&](SymbolId id) {
         if (valid(id)) out.emplace_back(id, node.span);
@@ -282,6 +301,9 @@ void TaskAnalysis::summarize() {
             if (!unsafe_.contains(body.owner)) {
                 if (auto reason = direct(node)) unsafe_.emplace(body.owner, std::move(*reason));
             }
+            if (!impure_.contains(body.owner)) {
+                if (auto reason = isolated_reason(node)) impure_.emplace(body.owner, std::move(*reason));
+            }
             callees(node, out);
         });
         for (const auto& [callee, span] : out) {
@@ -289,21 +311,26 @@ void TaskAnalysis::summarize() {
             callers_[callee].emplace_back(body.owner, span);
         }
     }
-    std::vector<SymbolId> pending;
-    for (const auto& [owner, reason] : unsafe_) pending.push_back(owner);
-    while (!pending.empty()) {
-        const auto callee = pending.back();
-        pending.pop_back();
-        const auto found = callers.find(callee);
-        if (found == callers.end()) continue;
-        for (const auto caller : found->second) {
-            if (unsafe_.contains(caller)) continue;
-            const auto& out = edges[caller];
-            const auto edge = std::ranges::find(out, callee, &std::pair<SymbolId, Span>::first);
-            unsafe_.emplace(caller, Reason{{}, edge->second, callee});
-            pending.push_back(caller);
+    // A function that calls one with a reason has that reason too.
+    const auto propagate = [&](std::map<SymbolId, Reason>& reasons) {
+        std::vector<SymbolId> pending;
+        for (const auto& [owner, reason] : reasons) pending.push_back(owner);
+        while (!pending.empty()) {
+            const auto callee = pending.back();
+            pending.pop_back();
+            const auto found = callers.find(callee);
+            if (found == callers.end()) continue;
+            for (const auto caller : found->second) {
+                if (reasons.contains(caller)) continue;
+                const auto& out = edges[caller];
+                const auto edge = std::ranges::find(out, callee, &std::pair<SymbolId, Span>::first);
+                reasons.emplace(caller, Reason{{}, edge->second, callee});
+                pending.push_back(caller);
+            }
         }
-    }
+    };
+    propagate(unsafe_);
+    propagate(impure_);
 }
 
 bool TaskAnalysis::library_code(SymbolId owner) const {
@@ -330,6 +357,12 @@ Span TaskAnalysis::user_site(SymbolId owner, const Span& fallback) const {
 }
 
 std::optional<TaskAnalysis::Unsafe> TaskAnalysis::unsafe(SymbolId function) const {
+    return chain(unsafe_, function);
+}
+
+std::optional<TaskAnalysis::Unsafe> TaskAnalysis::chain(const std::map<SymbolId, Reason>& reasons,
+                                                        SymbolId function) const {
+    const auto& unsafe_ = reasons;
     auto found = unsafe_.find(function);
     if (found == unsafe_.end()) return std::nullopt;
     Unsafe result;
@@ -356,7 +389,37 @@ void TaskAnalysis::check() const {
                     throw Diagnostic(user_site(body.owner, node.span),
                                      "a value of type " + display(type) + " is not transferable, so it cannot be " + role);
                 };
-                if (node.text == "channel.open" && !node.type_arguments.empty()) {
+                if (node.text == "transfer.check" && node.operands.size() == 1) {
+                    require(node.operands.front().type, "used where a transferable value is required");
+                } else if (node.text == "parallel.start" && !node.operands.empty() &&
+                           node.operands.front().op == IrOp::Allocate && valid(node.operands.front().symbol)) {
+                    // An isolated item: its captures enter another heap, its
+                    // result returns from one, and it may touch nothing else.
+                    const auto layout = symbol(node.operands.front().symbol).owner;
+                    for (const auto field : all_fields(layout)) require(symbol(field).type, "given to a parallel item");
+                    SymbolId invoke = no_symbol;
+                    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+                        const auto& item = symbol(id);
+                        if (item.kind == SymbolKind::Function && item.owner == layout && item.name == "$invoke") invoke = id;
+                    }
+                    if (invoke == no_symbol) throw Diagnostic(node.span, "an isolated function value has no body");
+                    require(symbol(invoke).type, "the result of a parallel item");
+                    const auto describe_chain = [&](const Unsafe& reason, const char* rule) {
+                        std::string text = std::string("the worker of a parallel map ") + rule + ": ";
+                        for (const auto& [callee, span] : reason.calls) {
+                            if (symbol(callee).name == "$invoke" || symbol(callee).kind != SymbolKind::Function) continue;
+                            text += "it reaches '" + symbol(callee).name + "' (called at " + location(span) + "), and ";
+                        }
+                        return text + "that code " + reason.operation + " at " + location(reason.span);
+                    };
+                    if (const auto reason = chain(unsafe_, invoke)) {
+                        throw Diagnostic(user_site(body.owner, node.span), describe_chain(*reason, "is not task-safe"));
+                    }
+                    if (const auto reason = chain(impure_, invoke)) {
+                        throw Diagnostic(user_site(body.owner, node.span),
+                                         describe_chain(*reason, "must compute in isolation"));
+                    }
+                } else if (node.text == "channel.open" && !node.type_arguments.empty()) {
                     require(node.type_arguments.front(), "a channel's element type");
                 } else if ((node.text == "channel.send" || node.text == "channel.try_send") && node.operands.size() == 2) {
                     require(node.operands[1].type, "sent on a channel");

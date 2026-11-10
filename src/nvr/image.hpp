@@ -123,10 +123,15 @@ enum class SchedulerOp : std::uint8_t {
     ChannelOpen = 12, ChannelSend = 13, ChannelReceive = 14, ChannelTrySend = 15, ChannelTryReceive = 16,
     ChannelClose = 17,
     TimerOpen = 18, TimerWait = 19,
-    Select = 20
+    Select = 20,
+    // A guard owns one value; a task enters to get exclusive use of it.
+    GuardOpen = 21, GuardEnter = 22, GuardExit = 23,
+    // An isolated item of a parallel map: start it, then finish it for its
+    // result. The target of a start is the function the item runs.
+    ParallelStart = 24, ParallelFinish = 25
 };
 
-inline constexpr std::uint8_t scheduler_op_count = 21;
+inline constexpr std::uint8_t scheduler_op_count = 26;
 
 inline constexpr std::array<std::string_view, scheduler_op_count> scheduler_op_names{
     "scope-enter", "scope-exit", "spawn", "join", "is-finished",
@@ -134,6 +139,8 @@ inline constexpr std::array<std::string_view, scheduler_op_count> scheduler_op_n
     "task-cancelled", "task-deadline", "take",
     "channel-open", "channel-send", "channel-receive", "channel-try-send", "channel-try-receive", "channel-close",
     "timer-open", "timer-wait", "select",
+    "guard-open", "guard-enter", "guard-exit",
+    "parallel-start", "parallel-finish",
 };
 
 // The uint32 result of an operation that can park or find nothing to do.

@@ -791,7 +791,7 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
         }
     };
     if (exit.scheduler != SchedulerOp::Spawn && exit.scheduler != SchedulerOp::ChannelOpen &&
-        exit.scheduler != SchedulerOp::Select && exit.target != 0) {
+        exit.scheduler != SchedulerOp::Select && exit.scheduler != SchedulerOp::ParallelStart && exit.target != 0) {
         invalid(where + ": scheduler target must be zero for this operation");
     }
     const auto is_signed64 = [&](std::uint32_t type) {
@@ -898,6 +898,54 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
         object_operand(0);
         typed_operand(1, is_signed64, "int64");
         no_result();
+        break;
+    case SchedulerOp::GuardOpen:
+        // The guarded value may have any type: it never leaves the guard
+        // except to the one task that has entered.
+        arity(2);
+        object_operand(0);
+        no_result();
+        break;
+    case SchedulerOp::GuardEnter:
+        // The slot's type is checked against the guarded value on entry.
+        arity(1);
+        object_operand(0);
+        if (exit.result_slot >= function.frame_types.size()) invalid(where + ": guard-enter needs a result slot");
+        break;
+    case SchedulerOp::GuardExit:
+        arity(1);
+        object_operand(0);
+        no_result();
+        break;
+    case SchedulerOp::ParallelStart: {
+        // The item runs the target with one transferable argument, under
+        // its own step and heap-cell limits, and yields its identity.
+        if (exit.target >= image_.functions.size()) {
+            invalid(where + ": function " + std::to_string(exit.target) + " is out of range");
+        }
+        const auto& callee = image_.functions[exit.target];
+        arity(3);
+        if (callee.parameter_count != 1) invalid(where + ": a parallel item's function takes one argument");
+        assign(exit.arguments[0].type, callee.frame_types[0], where + " argument 0");
+        if (!is_transferable(image_, exit.arguments[0].type) || !is_transferable(image_, callee.frame_types[0])) {
+            invalid(where + ": a parallel item's argument is not transferable");
+        }
+        if (image_.types[callee.result_type].kind == TypeKind::Void || !is_transferable(image_, callee.result_type)) {
+            invalid(where + ": a parallel item's result is not a transferable value");
+        }
+        typed_operand(1, is_signed64, "int64");
+        typed_operand(2, is_signed64, "int64");
+        require_slot_type(unsigned64, "uint64");
+        break;
+    }
+    case SchedulerOp::ParallelFinish:
+        // A list of item identities in, the array of their results out. Each
+        // result is checked against the array's element type as it arrives.
+        arity(1);
+        typed_operand(0, [&](std::uint32_t type) {
+            return image_.types[type].kind == TypeKind::List && is_unsigned(image_.types[type].reference, 64);
+        }, "a list of uint64");
+        require_slot_type([&](std::uint32_t type) { return image_.types[type].kind == TypeKind::Array; }, "an array");
         break;
     case SchedulerOp::Select: {
         // Flags in the target: bit 0 says a default arm follows the listed

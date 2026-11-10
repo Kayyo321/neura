@@ -2607,6 +2607,10 @@ Operand FunctionCompiler::scheduler_call(const IrNode& node) {
     if (!is_select && !operation) {
         throw Diagnostic(node.span, "unknown scheduler operation '" + node.text + "'");
     }
+    if (!is_select && operation->code == compile_time_operation) {
+        // Checked when the program was analyzed; the value passes through.
+        return expression(node.operands.front());
+    }
     // A select's arm kinds are uint32 literals and stay constants in the
     // image; every other operand is evaluated left to right.
     auto arguments = sequence(node.operands);
@@ -2629,6 +2633,18 @@ Operand FunctionCompiler::scheduler_call(const IrNode& node) {
     } else if (operation->typed) {
         // A channel's element type crosses to the scheduler as a type index.
         target = c_.type_of(node.type_arguments.front(), node.span);
+    } else if (operation->arguments.starts_with('f')) {
+        // The item runs the invoke method of the function value's own
+        // capture layout, as a spawn does, with that object as its argument.
+        const auto& body = node.operands.front();
+        if (body.op != IrOp::Allocate || body.symbol == no_symbol) {
+            throw Diagnostic(node.span, "function values must be specialized before conversion");
+        }
+        const auto method = c_.member(c_.symbol(body.symbol).owner, "$invoke");
+        if (method == no_symbol || !c_.symbol(method).has_body) {
+            throw Diagnostic(node.span, "an isolated function value has no body");
+        }
+        target = c_.function({Role::Function, method, no_symbol});
     }
     const auto code = is_select ? select_code : operation->code;
     return scheduler(static_cast<nvr::SchedulerOp>(code), target, std::move(arguments),
