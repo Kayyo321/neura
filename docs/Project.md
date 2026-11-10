@@ -103,7 +103,7 @@ IRtoNeuronConversion, the NVR writer and loader, and a reference NVM are impleme
 
 ## Artifact and inspection
 
-The [NVR format](runtime/NVR.md) defines the versioned executable image emitted by the output stage. It carries the graphs, weights, constants, layouts, execution metadata, and host imports required to run independently of the source. A versioned `.nir` file carries typed NeuraIR across the earlier compiler boundary.
+The [NVR format](runtime/NVR.md) defines the versioned executable image emitted by the output stage. It carries the graphs, weights, constants, layouts, execution metadata, and host imports required to run independently of the source. A versioned `.nir` file carries typed NeuraIR across the earlier compiler boundary. A native executable can carry an NVR image unchanged, and inspection reads the image from its container.
 
 Source maps are optional. Inspection tools expose graph topology and parameters, declared memory and effect operations, and source locations when available. Optimization can combine or remove source operations, and inspection can show the relationship where provenance survives. Editing weights creates a changed image whose behavior can be evaluated and checked again.
 

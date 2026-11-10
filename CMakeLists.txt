@@ -22,7 +22,7 @@ neura_target_defaults(neura_nvr)
 
 # The Neura Virtual Machine. It depends only on the image format, so a
 # runtime-only distribution needs no compiler code.
-add_library(neura_nvm STATIC
+set(neura_nvm_sources
     src/nvm/ffi_provider.cpp
     src/nvm/fleet.cpp
     src/nvm/fs_provider.cpp
@@ -37,6 +37,7 @@ add_library(neura_nvm STATIC
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
 )
+add_library(neura_nvm STATIC ${neura_nvm_sources})
 target_link_libraries(neura_nvm PUBLIC neura_nvr)
 # Std.DynamicForeign calls native functions through libffi and loads
 # libraries with the platform loader.
@@ -47,10 +48,17 @@ if(NOT WIN32)
 endif()
 neura_target_defaults(neura_nvm)
 
-add_library(neura_runner STATIC src/runner/runner.cpp src/launcher/container.cpp)
+set(neura_runner_sources src/runner/runner.cpp src/launcher/container.cpp)
+add_library(neura_runner STATIC ${neura_runner_sources})
 target_link_libraries(neura_runner PUBLIC neura_nvm)
 neura_target_defaults(neura_runner)
 
+set(NEURA_STATIC_LAUNCHER "AUTO" CACHE STRING "Fully static Neura launcher: AUTO, ON, or OFF")
+set_property(CACHE NEURA_STATIC_LAUNCHER PROPERTY STRINGS AUTO ON OFF)
+if(NOT NEURA_STATIC_LAUNCHER MATCHES "^(AUTO|ON|OFF)$")
+    message(FATAL_ERROR "NEURA_STATIC_LAUNCHER must be AUTO, ON, or OFF")
+endif()
+set(NEURA_HAS_STATIC_LAUNCHER OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" neura_launcher_arch)
     if(neura_launcher_arch MATCHES "^(x86_64|amd64)$")
@@ -67,13 +75,42 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(neura_launcher_triple "${neura_launcher_arch}-linux-gnu")
     set(neura_launcher_directory "lib/neura/launchers/${neura_launcher_triple}")
     find_library(NEURA_STATIC_LIBFFI NAMES libffi.a HINTS ${LIBFFI_LIBRARY_DIRS} REQUIRED)
-    add_executable(neura_launcher src/launcher/main.cpp)
-    target_compile_definitions(neura_launcher PRIVATE NEURA_LAUNCHER_TRIPLE="${neura_launcher_triple}")
+    function(neura_add_launcher target name flavor)
+        add_executable(${target} src/launcher/main.cpp)
+        target_compile_definitions(${target} PRIVATE
+            NEURA_LAUNCHER_TRIPLE="${neura_launcher_triple}" NEURA_LAUNCHER_FLAVOR=${flavor})
+        target_link_options(${target} PRIVATE -s)
+        set_target_properties(${target} PROPERTIES OUTPUT_NAME "${name}"
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${neura_launcher_directory}")
+        neura_target_defaults(${target})
+        install(TARGETS ${target} RUNTIME DESTINATION "${neura_launcher_directory}")
+    endfunction()
+    neura_add_launcher(neura_launcher neura-launcher 0)
     target_link_libraries(neura_launcher PRIVATE neura_runner neura_nvm "${NEURA_STATIC_LIBFFI}")
-    target_link_options(neura_launcher PRIVATE -static-libstdc++ -static-libgcc -s)
-    set_target_properties(neura_launcher PROPERTIES OUTPUT_NAME neura-launcher
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${neura_launcher_directory}")
-    neura_target_defaults(neura_launcher)
+    target_link_options(neura_launcher PRIVATE -static-libstdc++ -static-libgcc)
+
+    if(NOT NEURA_STATIC_LAUNCHER STREQUAL "OFF")
+        find_library(NEURA_STATIC_LIBC NAMES libc.a)
+        if(NEURA_STATIC_LIBC)
+            set(NEURA_HAS_STATIC_LAUNCHER ON)
+            add_library(neura_nvm_static STATIC ${neura_nvm_sources})
+            target_link_libraries(neura_nvm_static PUBLIC neura_nvr)
+            target_compile_definitions(neura_nvm_static PRIVATE NEURA_NO_NATIVE_INTEROP)
+            neura_target_defaults(neura_nvm_static)
+
+            add_library(neura_runner_static STATIC ${neura_runner_sources})
+            target_link_libraries(neura_runner_static PUBLIC neura_nvm_static)
+            neura_target_defaults(neura_runner_static)
+
+            neura_add_launcher(neura_launcher_static neura-launcher-static 1)
+            target_link_libraries(neura_launcher_static PRIVATE neura_runner_static)
+            target_link_options(neura_launcher_static PRIVATE -static)
+        elseif(NEURA_STATIC_LAUNCHER STREQUAL "ON")
+            message(FATAL_ERROR "NEURA_STATIC_LAUNCHER needs a static C library")
+        endif()
+    endif()
+elseif(NEURA_STATIC_LAUNCHER STREQUAL "ON")
+    message(FATAL_ERROR "NEURA_STATIC_LAUNCHER requires Linux")
 endif()
 
 set(NEURA_GPU "AUTO" CACHE STRING "GPU graph execution: AUTO, ON, or OFF")
@@ -171,6 +208,9 @@ add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run
 target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler)
 if(TARGET neura_launcher)
     add_dependencies(neura neura_launcher)
+endif()
+if(TARGET neura_launcher_static)
+    add_dependencies(neura neura_launcher_static)
 endif()
 if(NEURA_HAS_GPU)
     target_link_libraries(neura PRIVATE neura_gpu)
@@ -379,6 +419,20 @@ if(BUILD_TESTING)
             "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-executable-policy"
             "-DMATHOPS=$<TARGET_FILE:neura_test_mathops_shared>"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/policy.cmake")
+        add_test(NAME native-install COMMAND ${CMAKE_COMMAND}
+            "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-executable-install"
+            "-DCONFIG=$<CONFIG>" "-DTRIPLE=${neura_launcher_triple}"
+            "-DHAS_STATIC=${NEURA_HAS_STATIC_LAUNCHER}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/install-executable.cmake")
+        add_test(NAME native-c-import COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=$<TARGET_FILE:neura>"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-executable-c-import"
+            "-DMATHOPS=$<TARGET_FILE:neura_test_mathops_static>" "-DTRIPLE=${neura_launcher_triple}"
+            "-DHAS_STATIC=${NEURA_HAS_STATIC_LAUNCHER}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/c-import-executable.cmake")
     endif()
 
     # The standard library: one fixture installs the tool and the library

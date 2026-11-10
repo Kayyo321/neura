@@ -16,7 +16,7 @@ This release carries the language below from source through NeuraIR, optimizatio
 | Errors | Expected failures as returned values, plus runtime traps and explicit message traps | [Errors](Errors.md) |
 | Testing | `neura test` with the `Std.Test` assertions | [Testing](Testing.md) |
 | Foreign interop | `Std.DynamicForeign`: native libraries, symbol lookup, arena-owned native memory, layouts, downcalls through the platform C ABI, and upcalls, under `--allow-native`. `import:c(...)` C header imports that link static libraries into the image | [Foreign interop](ForeignInterop.md) |
-| Tooling | `check`, `docs` for `///` comments, `emit-ir`, `build`, `run` (with capabilities, `--record`, `--replay`, `--stats`, `--profile`, `--each`), `test` (both with `--gpu=auto\|always\|off`, `--no-gpu`, `--require-gpu`, `--gpu-software`, `--gpu-verify`, and `NEURA_GPU`), `disassemble`, `assemble`, `decompile` | [Tooling](Tooling.md), [Decompiler](../Decompiler.md) |
+| Tooling | `check`, `docs` for `///` comments, `emit-ir`, `build`, `build --native` and `inspect` on Linux x86-64, `run` (with capabilities, `--record`, `--replay`, `--stats`, `--profile`, `--each`), `test` (both with `--gpu=auto\|always\|off`, `--no-gpu`, `--require-gpu`, `--gpu-software`, `--gpu-verify`, and `NEURA_GPU`), `disassemble`, `assemble`, `decompile` | [Tooling](Tooling.md), [Decompiler](../Decompiler.md) |
 | Standard library | The `Std` source modules of the [implementation plan](Stdlib.md), installed with the tool, and the host providers they bind; see [Standard library](StandardLibrary.md) for the module list and [section 18 of the plan](Stdlib.md#18-implementation-decisions) for decisions made while implementing it | [Standard library](StandardLibrary.md) |
 
 ## Outside this release
@@ -25,7 +25,6 @@ This release carries the language below from source through NeuraIR, optimizatio
 | --- | --- |
 | Standard library extensions | `Std.Concurrent`, time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](Stdlib.md#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
 | Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](ResourcesConcurrency.md)). [Concurrency](Concurrency.md) plans scoped tasks, channels, cancellation, and their tooling; none of it is implemented. |
-| Native executables | `neura build` writes `.nvr` images only. [Native executables](Standalone.md) plans `neura build --native`, which bundles an image and its runtime into one executable; none of it is implemented. |
 | Foreign interop | Interop with Java and other managed runtimes. Native code runs only on Linux x86-64 in this release's tests; other platforms build the same provider but are unverified. |
 | Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](ProjectStructure.md)). |
 

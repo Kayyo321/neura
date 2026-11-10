@@ -77,6 +77,22 @@ Console input and output and `Std.Program.Process.exit` are always available. Ot
 
 [Neuron conversion and execution](https://github.com/Kayyo321/neura/wiki/Backend) lists the supported operations and the build diagnostics for unsupported ones. The status of each example is in [Feature status](https://github.com/Kayyo321/neura/wiki/Status).
 
+### Package a native executable
+
+```sh
+neura build --native --allow-fs=data --max-steps 1000000 hello.nra -o hello
+./hello --help
+neura inspect hello -o hello.nvr
+```
+
+`build --native` packages sources, a `.nir`, or a validated `.nvr` with a CPU launcher. The image and launcher bytes are preserved. Every argument to the executable reaches the program, including `--help` and `--`. The build records the capability options and the three run limits above. Relative file-system prefixes are resolved from the executable's working directory.
+
+Set `NEURA_RUN_OPTIONS` to space- or tab-separated options to lower a recorded limit or to select `--stats`, `--profile`, `--record <file>`, or `--replay <file>`. The variable has no quoting and cannot widen the build policy. A build with `--sealed` ignores it.
+
+`--static` selects the fully static flavor, which excludes native interop. Set the CMake option `NEURA_STATIC_LAUNCHER` to `ON` to require that flavor or `OFF` to disable it. `AUTO` builds it when a static C library is available. Linux launchers install below `lib/neura/launchers/<triple>/`. Use `--target <triple>` to choose an installed ELF target or `--launcher <file>` to supply the launcher. Linux x86-64 is the verified target.
+
+`inspect` reports the launcher, the recorded policy, and the image. Its `-o` option extracts the original image bytes. `run`, `disassemble`, and `decompile` also accept a packaged executable. `neura run` uses the supplied command-line policy. Run the file directly to apply the recorded policy. [Native executable format and contract](https://github.com/Kayyo321/neura/blob/main/docs/lang/Standalone.md)
+
 ### Choose graph execution
 
 `run` and `test` choose graph placement automatically by default. With `--gpu=auto`, Neura opens Vulkan only when the observed workload can repay setup and calibration. It sends a batch only when the calibrated device is predicted to beat the CPU by the configured margin. `--gpu=always` sends eligible graphs to Vulkan, with CPU fallback when no device is usable or a request is declined. `--gpu=off` and `--no-gpu` select the CPU. `--require-gpu` selects `always` and turns an unavailable or failed device into an error. `--gpu-software` also accepts software Vulkan devices. `--gpu-verify` checks every device result against the CPU. When a device is in use, `test` and `run --each` advance their members as a fleet, preserving serial output and host effect order.

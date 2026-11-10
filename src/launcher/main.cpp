@@ -28,7 +28,7 @@ constexpr std::string_view toolchain_version = "development";
     raw(magic);
     number(triple.size(), 4);
     raw(triple);
-    number(0, 1);
+    number(NEURA_LAUNCHER_FLAVOR, 1);
     number(neura::nvr::major_version, 2);
     number(neura::nvr::minor_version, 2);
     number(neura::launcher::container_version, 4);

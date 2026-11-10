@@ -1,11 +1,11 @@
-# Native executables: implementation plan for `neura build --native`
+# Native executables
 
-Phases 1 and 2 implement `neura build --native` with the default launcher on Linux x86-64, recorded policies and limits, and executable inspection. Phase 3 adds the static launcher, target selection, and installation. A native executable contains the program's image and the runtime that executes it, so the file can run on a machine without an installed Neura toolchain.
+`neura build --native` packages an NVR image with a launcher. The executable carries the program and the CPU runtime that executes it, so the file can run on a machine without an installed Neura toolchain. Both launcher flavors are verified on Linux x86-64.
 
-## 1. How to read this plan
+## 1. Terminology
 
 - "Must" states a requirement on the implementation. A row of section 3 is a decision; an option name, message, or record layout given here is fixed. Section 13 lists what is still open.
-- Two words already have meanings in these pages, and this plan keeps them:
+- Two terms distinguish the image from the executable and from foreign code:
   - **Standalone image.** [Overview](Overview.md) and [Status](Status.md) call a `.nvr` image standalone because it runs without its source. It still needs a runner.
   - **Native code.** `--allow-native`, `Std.DynamicForeign`, and the `NATV` section concern C code that a program calls ([Foreign interop](ForeignInterop.md)). `--native` grants no native access and compiles nothing to machine code.
 
@@ -229,9 +229,9 @@ Dynamic loading needs a dynamic C library, which is why native interop and a ful
 
 `cmake --install` places launchers at `<prefix>/lib/neura/launchers/<triple>/neura-launcher` and `neura-launcher-static`, where `<triple>` is the form `nvm::native_target_triple()` returns, such as `x86_64-linux-gnu`. A `neura` in a build directory directly inside the checkout finds them below that build directory, as it finds the standard library there.
 
-`neura build --native` uses `--launcher <file>` when given. Otherwise it looks in the launcher directory of the `neura` that is running, under the triple from `--target` or its own. A launcher for another target comes from building Neura for that target and copying its launcher directory; the image needs no rebuilding, because an image moves between hosts unchanged ([NVM](../runtime/NVM.md#toolchain-and-distribution)).
+`neura build --native` uses `--launcher <file>` when given. Otherwise it looks in the launcher directory of the `neura` that is running, under the triple from `--target` or its own. A launcher for another target comes from building Neura for that target and copying its launcher directory; the image needs no rebuilding, because an image moves between hosts unchanged ([NVM](../runtime/NVM.md#toolchain-and-distribution)). With an explicit launcher and no `--target`, its descriptor determines the target and flavor. An explicit target must match the descriptor, and `--static` requires a static descriptor. Target strings must be single directory names made of letters, digits, periods, underscores, and hyphens.
 
-The phase 1 Release build on Linux x86-64 with GCC 14.2.0 produced a stripped default launcher of 1,999,344 bytes and a packaged Hello World of 2,012,899 bytes. On the Ryzen 7 9800X3D pinned to CPU 7, the median of 21 paired launches after warming both modes was 0.418 ms for the executable and 0.644 ms for `neura run --no-gpu`. The descriptor uses `development` as the toolchain version for this unversioned build.
+The phase 1 Release build on Linux x86-64 with GCC 14.2.0 produced a stripped default launcher of 1,999,344 bytes and a packaged Hello World of 2,012,899 bytes. On the Ryzen 7 9800X3D pinned to CPU 7, the median of 21 paired launches after warming both modes was 0.418 ms for the executable and 0.644 ms for `neura run --no-gpu`. The descriptor uses `development` as the toolchain version for this unversioned build. With policy and environment handling, the stripped default and static launchers measured 2,007,536 and 2,880,840 bytes. The static Hello World ran in a root containing only its executable and procfs, which provides `/proc/self/exe`.
 
 ## 8. Reading an executable back
 

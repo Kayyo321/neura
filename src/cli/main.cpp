@@ -64,7 +64,8 @@ void usage(std::ostream& out) {
            "       neura emit-ir [--no-optimize] <file.nir>\n"
            "       neura build [-I source-root] [--no-optimize] [--no-source-map] <file.nra>... -o <file.nvr>\n"
            "       neura build [--no-optimize] [--no-source-map] <file.nir> -o <file.nvr>\n"
-           "       neura build --native <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
+           "       neura build --native [policy] [--static] [--target <triple>] [--launcher <file>]\n"
+           "                  <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
            "       neura inspect <file> [-o <file.nvr>]\n"
            "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [capabilities] "
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
@@ -119,6 +120,9 @@ struct Options {
     bool doxygen = false;
     bool native_executable = false;
     bool sealed = false;
+    bool static_launcher = false;
+    std::optional<std::string> native_target;
+    std::optional<fs::path> launcher;
     // Report execution costs: steps, peak heap cells, and image size.
     bool stats = false;
     std::vector<fs::path> files;
@@ -326,6 +330,26 @@ Options read_options(int argc, char** argv) {
             if (!builds) throw std::runtime_error("--sealed applies only with --native");
             options.sealed = true;
             if (!first_policy_flag) first_policy_flag = arg;
+        } else if (arg == "--static" || arg == "--target" || arg == "--launcher") {
+            if (!builds) throw std::runtime_error(std::string(arg) + " applies only with --native");
+            if (!first_policy_flag) first_policy_flag = arg;
+            if (arg == "--static") {
+                options.static_launcher = true;
+            } else if (arg == "--target") {
+                const std::string triple = next();
+                if (options.native_target && *options.native_target != triple) {
+                    throw std::runtime_error("conflicting --target values");
+                }
+                if (triple.empty() || triple == "." || triple == ".." ||
+                    triple.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != std::string::npos) {
+                    throw std::runtime_error("--target expects an ELF target triple");
+                }
+                options.native_target = triple;
+            } else {
+                const fs::path file = next();
+                if (options.launcher && *options.launcher != file) throw std::runtime_error("conflicting --launcher values");
+                options.launcher = file;
+            }
         } else if (arg == "--no-source-map") {
             if (options.command != Command::Build) {
                 throw std::runtime_error("--no-source-map applies only to build");
@@ -597,20 +621,30 @@ void note_denied_imports(const neura::nvr::Image& image, const neura::nvm::Capab
 }
 
 void package_native(const Options& options, std::span<const std::uint8_t> bytes) {
-    const auto triple = neura::nvm::native_target_triple();
+    constexpr const char* static_interop_error =
+        "--static: the image uses native interop, which the static launcher does not provide";
+    if (options.static_launcher && options.capabilities.native) throw std::runtime_error(static_interop_error);
+    const auto triple = options.native_target.value_or(neura::nvm::native_target_triple());
     auto prefix = options.executable.parent_path();
     if (prefix.filename() == "bin") prefix = prefix.parent_path();
     const auto directory = prefix / "lib/neura/launchers" / triple;
-    const auto file = directory / "neura-launcher";
+    const auto file = options.launcher.value_or(directory / (options.static_launcher ? "neura-launcher-static" : "neura-launcher"));
     if (!fs::is_regular_file(file)) {
+        if (options.launcher) throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
         throw std::runtime_error("--native: no launcher for " + triple + " in " + directory.string() +
                                  "; pass --launcher or install one");
     }
     const auto launcher = read_file(file);
     const auto descriptor = neura::launcher::read_descriptor(launcher);
-    if (!descriptor || descriptor->triple != triple || descriptor->flavor != 0 ||
-        descriptor->nvr_major != neura::nvr::major_version) {
+    if (!descriptor || descriptor->nvr_major != neura::nvr::major_version ||
+        (!options.launcher && (descriptor->triple != triple || descriptor->flavor != unsigned{options.static_launcher}))) {
         throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
+    }
+    if (options.native_target && descriptor->triple != triple) {
+        throw std::runtime_error("--target: launcher is for " + descriptor->triple + ", expected " + triple);
+    }
+    if (options.static_launcher && descriptor->flavor == 0) {
+        throw std::runtime_error("--static: " + file.string() + " is a default launcher");
     }
     if (bytes.size() >= 8 && has_image_magic(bytes)) {
         const unsigned major = bytes[4] | (unsigned{bytes[5]} << 8);
@@ -624,6 +658,10 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
     if (image.native_library && image.native_library->triple != descriptor->triple) {
         throw std::runtime_error("--native: the image's native library is for " + image.native_library->triple +
                                  "; the launcher is for " + descriptor->triple);
+    }
+    if (descriptor->flavor == 1 && (options.capabilities.native || image.native_library ||
+        std::ranges::any_of(image.imports, [](const auto& import) { return import.name.starts_with("neura.ffi."); }))) {
+        throw std::runtime_error(static_interop_error);
     }
     const neura::launcher::Policy policy{options.capabilities, options.limits, options.sealed};
     neura::launcher::write_executable(*options.output, launcher, bytes, policy);

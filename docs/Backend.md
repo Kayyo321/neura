@@ -26,6 +26,8 @@ hello.nvr --> load --> bind imports --> Execution
 | `src/nvr/` | `neura_nvr` | The image model, the writer, and the validating loader. |
 | `src/nvm/` | `neura_nvm` | Execution, graph devices and layered tables, fleets, host services, the console sink, and host traces. |
 | `src/gpu/` | `neura_gpu` | Optional Vulkan graph evaluator with a dynamically loaded Vulkan loader. |
+| `src/runner/` | `neura_runner` | Shared host setup, trace handling, and run diagnostics. |
+| `src/launcher/` | `neura_launcher`, `neura_launcher_static` | CPU launchers and the executable container. |
 | `src/decompiler/` | `neura_decompiler` | Assembly, lifting, and the reconstruction form ([Decompiler](Decompiler.md)). |
 
 `neura_nvm` links only `neura_nvr`, so a runtime-only distribution needs no compiler code. The `neura` executable links both and provides `neura run`.
@@ -197,6 +199,8 @@ The embedding API is `nvm::Execution`. `advance()` runs until the run completes,
 
 The NVM library defaults to the reference evaluator. `nvm::Execution`, `nvm::run`, `nvm::record`, `nvm::replay`, and `nvm::Fleet` use a graph device only when the caller supplies one. Declined jobs use the reference evaluator. With no usable device, CLI auto and always modes fall back to the reference evaluator without a diagnostic unless `--require-gpu` is set. In that case startup fails before entry. `nvm::Fleet` advances independent executions of one validated image and offers each round as a batch to an optional device. `nvm::run_fleet` drives host requests and callbacks in member order. `neura run --each` takes argument lists from a file. The CLI supports automatic placement, an explicit Vulkan mode, and CPU-only evaluation. Its `--stats` report includes placement and fallback information. [NVM fleets](runtime/NVM.md#fleets) [Tooling](lang/Tooling.md#run-an-image-over-argument-lists)
 
+A packaged executable starts the CPU runner with its recorded limits and capabilities. The default launcher provides native interop under its recorded capability. The static launcher supplies Unsupported for those imports, and the packager rejects images that use them. [Native executables](lang/Standalone.md)
+
 ## Tests and the limits of the evidence
 
 The [release checklist](Release.md) maps each feature to its tests and states which checks are exhaustive, sampled, or structural. In summary:
@@ -218,6 +222,9 @@ The [release checklist](Release.md) maps each feature to its tests and states wh
 | `backend-generics` | Instance caching, determinism, the specialization limits, and specialized functions against the evaluator exhaustively over 8-bit inputs. |
 | `backend-cli` | End-to-end builds and runs, reproducibility, isolated execution, every runnable example and driver, trap programs, unsupported builds, the test runner, and option errors. |
 | `backend-install` | The installed toolchain builds and runs Hello World from a directory without sources. |
+| `native-build`, `native-run`, `native-container` | Byte-preserving packaging, differential execution, and malformed container rejection. |
+| `native-policy`, `native-replay` | Recorded grants and limits, environment overrides, sealing, and cross-runner traces. |
+| `native-install`, `native-c-import` | Relocated launchers, static execution in a root with only the executable and procfs, and C-import target checks. |
 | `decompiler-*` | See [Decompiler](Decompiler.md#evidence). |
 
 These are observed agreements over the stated domains; the exhaustive checks are exhaustive only over the stated domains, and nothing here is a proof beyond them. The IR evaluator models objects, collections, floats, and initialization independently of the converter, but it shares the language rules as written in these pages, so a misreading common to both would not be caught. MSVC builds have not been verified.

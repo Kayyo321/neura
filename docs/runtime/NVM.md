@@ -20,7 +20,7 @@ neura build hello.nra -o hello.nvr
 neura run hello.nvr -- arg1 arg2
 ```
 
-`neura run` loads the image, binds the selected host services, and passes arguments after `--` to the entry function. The loader and executor form a reusable NVM library. A runtime-only distribution uses the same loader and execution contract. A compiled image can move between supported hosts with compatible format and service versions.
+`neura run` loads the image, binds the selected host services, and passes arguments after `--` to the entry function. The loader and executor form a reusable NVM library. A runtime-only distribution uses the same loader and execution contract. A compiled image can move between supported hosts with compatible format and service versions. A [native executable](../lang/Standalone.md) is a runtime-only distribution with a CPU launcher. Its container carries the unchanged NVR bytes and the runner policy. The same loader and execution contract apply after extraction.
 
 ## Graphs and continuations
 
