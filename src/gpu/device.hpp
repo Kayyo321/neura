@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace neura::gpu {
 
@@ -27,16 +28,20 @@ private:
     std::unique_ptr<State> state_;
 };
 
-// Borrows the context and the image. The context serves one device at a time.
+// Borrows the image. A context serves one device at a time and may be
+// borrowed or transferred to the device.
 class VulkanGraphDevice final : public nvm::GraphDevice {
 public:
     VulkanGraphDevice(Context& context, const nvr::Image& image);
+    VulkanGraphDevice(std::unique_ptr<Context> context, const nvr::Image& image);
     ~VulkanGraphDevice() override;
 
     const nvr::Image& image() const override;
     void evaluate(std::span<nvm::GraphJob> jobs) override;
     std::size_t batch_hint() const override;
     nvm::GraphDeviceStatistics statistics() const override;
+    std::string_view failure_reason() const override;
+    std::span<const nvm::GraphShape> graph_shapes() const override;
 
     bool failed() const;
     const std::string& reason() const;
@@ -46,6 +51,7 @@ private:
     friend class Context;
     static bool self_test(Context& context);
     struct State;
+    std::unique_ptr<Context> owned_context_;
     std::unique_ptr<State> state_;
 };
 

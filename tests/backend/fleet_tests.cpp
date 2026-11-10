@@ -1,4 +1,5 @@
 #include "graph_test_support.hpp"
+#include "fleet_tests.hpp"
 
 #include "backend/converter.hpp"
 #include "ir-optimization/optimizer.hpp"
@@ -116,52 +117,72 @@ NEURA_TEST(fleet, step_split_requires_an_active_step) {
     check(execution.advance().kind == nvm::Event::Kind::Completed, "advance resumes after a host completion");
 }
 
-NEURA_TEST(fleet, corpus_matches_serial_runs) {
-    const std::vector<std::vector<std::string>> arguments{
+const std::vector<std::vector<std::string>>& fleet_corpus_arguments() {
+    static const std::vector<std::vector<std::string>> arguments{
         {}, {"one"}, {"héllo", "two"}, {""}, {"four", ""}, {"--flag", "five"}, {"two words"}, {"seven", "8", "9"},
     };
+    return arguments;
+}
+
+nvm::RunLimits fleet_corpus_limits(const CorpusImage& item) {
+    auto limits = graph_test_limits(item);
+    if (item.label.starts_with("traps/endless-loop.nra") || item.label.starts_with("traps/empty-endless-loop.nra")) {
+        limits.max_steps = 1'000; // Use the bounds declared by these CLI fixtures.
+    }
+    return limits;
+}
+
+std::vector<Captured> capture_serial_members(const nvr::Image& image, nvm::RunLimits limits) {
+    std::vector<Captured> reference;
+    for (const auto& member_arguments : fleet_corpus_arguments()) {
+        reference.push_back(run_captured(image, limits, std::nullopt, member_arguments));
+    }
+    return reference;
+}
+
+void check_corpus_fleet(const nvr::Image& image, nvm::RunLimits limits, nvm::GraphDevice* device, std::uint32_t window,
+                        const std::vector<Captured>& reference, const std::string& label) {
+    const auto& arguments = fleet_corpus_arguments();
+    nvm::Fleet fleet(image, {limits, device, window});
+    for (std::size_t member = 0; member < arguments.size(); ++member) {
+        check_equal(fleet.add(image.entry, arguments[member]), member, "member index");
+    }
+    CapturingConsole console;
+    nvm::HostRegistry registry;
+    registry.add(console);
+    const auto bindings = nvm::bind(image, registry);
+    std::size_t members = 0;
+    std::size_t request = 0;
+    std::string expected_output;
+    nvm::run_fleet(fleet, bindings, [&](std::size_t member, const nvm::RunResult& actual) {
+        check_equal(member, members, label + " completion order");
+        const auto& expected = reference[member];
+        check_same_run(actual, expected.result, label + " member " + std::to_string(member));
+        check_equal(console.requests.size(), request + expected.requests.size(), label + " request count");
+        for (const auto& expected_request : expected.requests) {
+            check_same_request(console.requests[request++], expected_request, label);
+        }
+        expected_output += expected.output;
+        check_equal(console.output(), expected_output, label + " console output");
+        ++members;
+    });
+    check_equal(members, arguments.size(), label + " members reported");
+    check(fleet.done(), label + " completed fleet");
+}
+
+NEURA_TEST(fleet, corpus_matches_serial_runs) {
     for (const auto& item : image_corpus(environment)) {
         const auto image = nvr::load(item.bytes);
         if (image.entry == nvr::absent) continue;
-        auto limits = graph_test_limits(item);
-        if (item.label.starts_with("traps/endless-loop.nra") || item.label.starts_with("traps/empty-endless-loop.nra")) {
-            limits.max_steps = 1'000; // Use the bounds declared by these CLI fixtures.
-        }
-        std::vector<Captured> reference;
-        for (const auto& member_arguments : arguments) {
-            reference.push_back(run_captured(image, limits, std::nullopt, member_arguments));
-        }
+        const auto limits = fleet_corpus_limits(item);
+        const auto reference = capture_serial_members(image, limits);
         for (const auto window : {1U, 3U, 4'096U}) {
             for (const bool use_device : {false, true}) {
                 const auto label = item.label + " with window " + std::to_string(window) +
                                    (use_device ? " and ModelDevice" : " and the reference evaluator");
                 nvm::ModelDevice model(image);
                 nvm::VerifyingDevice verifying(model);
-                nvm::Fleet fleet(image, {limits, use_device ? &verifying : nullptr, window});
-                for (std::size_t member = 0; member < arguments.size(); ++member) {
-                    check_equal(fleet.add(image.entry, arguments[member]), member, "member index");
-                }
-                CapturingConsole console;
-                nvm::HostRegistry registry;
-                registry.add(console);
-                const auto bindings = nvm::bind(image, registry);
-                std::size_t members = 0;
-                std::size_t request = 0;
-                std::string expected_output;
-                nvm::run_fleet(fleet, bindings, [&](std::size_t member, const nvm::RunResult& actual) {
-                    check_equal(member, members, label + " completion order");
-                    const auto& expected = reference[member];
-                    check_same_run(actual, expected.result, label + " member " + std::to_string(member));
-                    check_equal(console.requests.size(), request + expected.requests.size(), label + " request count");
-                    for (const auto& expected_request : expected.requests) {
-                        check_same_request(console.requests[request++], expected_request, label);
-                    }
-                    expected_output += expected.output;
-                    check_equal(console.output(), expected_output, label + " console output");
-                    ++members;
-                });
-                check_equal(members, arguments.size(), label + " members reported");
-                check(fleet.done(), label + " completed fleet");
+                check_corpus_fleet(image, limits, use_device ? &verifying : nullptr, window, reference, label);
             }
         }
     }

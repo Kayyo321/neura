@@ -46,6 +46,8 @@ A typed value descriptor can read a frame slot, a constant, or an output lane sl
 
 A graph device belongs to one validated image. Each job sends a graph index and its binary input lanes. The device either returns the exact output lanes in the graph's output order or declines the job. A device failure also declines the job. The executor evaluates declined jobs by reference, including the reference evaluator's first-overflow diagnostic. The executor checks selectors and consumed output lanes and owns every continuation, slot, heap object, resource limit, and host interaction. Device evaluation has no host import or trace entry.
 
+A device can expose its graph shapes in image order and a failure reason to a placement wrapper. The wrapper can then omit graphs excluded by the device's table limit or demoted after an escape. An empty shape view leaves the wrapper with the image's static shapes. A failure reason retires the device from automatic placement for the remainder of the run.
+
 Embedders can split a block transition using `Execution::begin_step`, then `finish_step` with exact output lanes or `fail_step` with the reference overflow's node index. Begin charges the block's step and resolves its inputs before evaluation. The input view remains valid until the step is settled. Beginning another step or calling `advance` before settling it is an API error. Finishing with the wrong number of lanes rejects the call and leaves the step open. With no device in `RunLimits`, `advance` evaluates by reference.
 
 ## Execution state

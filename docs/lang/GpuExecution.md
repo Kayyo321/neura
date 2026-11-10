@@ -1,6 +1,6 @@
 # GPU execution of neuron graphs: implementation plan
 
-This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The graph-device interface, step split, and CPU model are implemented in `neura_nvm`. The NVM fleet API and serial `neura run --each` are implemented. The Vulkan evaluator and the explicit `always` and `off` modes are implemented. Auto placement remains planned. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
+This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The graph-device interface, step split, and CPU model are implemented in `neura_nvm`. The NVM fleet API and serial `neura run --each` are implemented. The Vulkan evaluator and the explicit `always` and `off` modes are implemented. Auto placement is available through `--gpu=auto`. The CLI defaults to `off` in this phase. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
 
 ## 1. How to read this plan
 
@@ -749,6 +749,8 @@ public:
 
 A job that `AutoDevice` declines by its own choice is counted in `declined_placement`. The other counters are the inner device's.
 
+An inner device can publish `graph_shapes()` and `failure_reason()`. The verdict and active placement use those shapes when supplied, including the device's table limit and later demotions. Otherwise they use the image's static shapes. Jobs omitted by this wrapper count as placement declines. Auto retains the last shapes and counters after rejection, including when an execution continues to offer jobs.
+
 The CLI passes `max_jobs = 1` for `neura run` and the smaller of the test count and the fleet window for `neura test`. Its opener creates the `gpu::Context`, runs the calibration of section 11.6, and returns a `VulkanGraphDevice` for the image; the returned device keeps the context alive.
 
 ### 11.5 Before a device is opened
@@ -766,7 +768,7 @@ If no graph passes, the state is Rejected at once with the reason `no graph can 
 - if `saved ≥ open_budget`, call the opener. On failure the state is Rejected with `unavailable: <reason>`. On success apply the verdict of section 11.7.
 - otherwise, if `work ≥ give_up_work`, the state is Rejected with `the workload cannot gain`.
 
-The jobs of the call that opens the device are declined like the others; placement starts with the next call. `saved` and `work` are sums of products of constants and integer counts, so the moment a device is opened, or the workload is given up on, is the same on every machine and every run.
+The jobs of the call that opens the device are declined like the others. Placement starts with the next call. The gate groups jobs by graph and sums CPU work in first-occurrence order. It sums gain in the critical-time and graph-index order of section 11.8. The calculation uses binary64 with the default rounding mode and explicit fused multiply-add operations so compiler contraction does not change the result.
 
 Opening is synchronous. Its cost, 40 to 130 ms in section 4.7 plus the calibration of section 11.6, is therefore paid at most once, and only after the workload has shown that a good device could have saved about that much already.
 
@@ -844,6 +846,8 @@ s      = clamp(s + (sample − s) / 8, 1/16, 64)
 ```
 
 A device that is slower than its calibration raises `s`, which shrinks the set of candidates and raises the batch a dispatch needs; a faster one lowers it. One slow dispatch moves `s` by at most 12.5 percent. If `s` rises until nothing is placed, nothing further is measured and the device stays unused; that is the intended outcome when it keeps losing.
+
+When both the predicted and elapsed times are zero, the sample supplies no timing evidence and leaves `s` unchanged.
 
 ### 11.10 What auto mode will choose for today's programs
 

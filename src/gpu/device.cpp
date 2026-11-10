@@ -508,11 +508,20 @@ VulkanGraphDevice::VulkanGraphDevice(Context& context, const nvr::Image& image)
     state_->initialize();
 }
 
+VulkanGraphDevice::VulkanGraphDevice(std::unique_ptr<Context> context, const nvr::Image& image)
+    : owned_context_(std::move(context)) {
+    if (!owned_context_) throw std::invalid_argument("Vulkan graph device needs a context");
+    state_ = std::make_unique<State>(*owned_context_->state_, image);
+    state_->initialize();
+}
+
 VulkanGraphDevice::~VulkanGraphDevice() = default;
 const nvr::Image& VulkanGraphDevice::image() const { return state_->image; }
 void VulkanGraphDevice::evaluate(std::span<nvm::GraphJob> jobs) { state_->evaluate(jobs); }
 std::size_t VulkanGraphDevice::batch_hint() const { return std::numeric_limits<std::size_t>::max(); }
 nvm::GraphDeviceStatistics VulkanGraphDevice::statistics() const { return state_->statistics; }
+std::string_view VulkanGraphDevice::failure_reason() const { return state_->failure; }
+std::span<const nvm::GraphShape> VulkanGraphDevice::graph_shapes() const { return state_->tables.shapes; }
 bool VulkanGraphDevice::failed() const { return state_->failed(); }
 const std::string& VulkanGraphDevice::reason() const { return state_->failure; }
 const nvm::LayeredTables& VulkanGraphDevice::tables() const { return state_->tables; }

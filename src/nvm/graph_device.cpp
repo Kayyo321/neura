@@ -60,4 +60,8 @@ GraphDeviceStatistics VerifyingDevice::statistics() const {
     return inner_.statistics();
 }
 
+std::span<const GraphShape> VerifyingDevice::graph_shapes() const { return inner_.graph_shapes(); }
+
+std::string_view VerifyingDevice::failure_reason() const { return inner_.failure_reason(); }
+
 } // namespace neura::nvm

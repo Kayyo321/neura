@@ -60,10 +60,10 @@ void usage(std::ostream& out) {
            "       neura build [-I source-root] [--no-optimize] [--no-source-map] <file.nra>... -o <file.nvr>\n"
            "       neura build [--no-optimize] [--no-source-map] <file.nir> -o <file.nvr>\n"
            "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [capabilities] "
-           "[--record <file> | --replay <file>] [--each <lists>] [--gpu=always|off] [--no-gpu] "
+           "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
-           "                  [--max-heap-cells N] [--stats] [capabilities] [--gpu=always|off] [--no-gpu]\n"
+           "                  [--max-heap-cells N] [--stats] [capabilities] [--gpu=auto|always|off] [--no-gpu]\n"
            "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
            "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
            "       neura assemble <file.nvra> -o <file.nvr>\n"
@@ -84,6 +84,7 @@ void usage(std::ostream& out) {
            "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
            "\n"
            "graph execution: run and test use the CPU by default.\n"
+           "  --gpu=auto               decide automatically by predicted speed\n"
            "  --gpu=always             evaluate every eligible graph on a GPU when one is usable\n"
            "  --gpu=off, --no-gpu      evaluate graphs on the CPU\n"
            "  --require-gpu            --gpu=always, and fail unless a GPU device is available\n"
@@ -779,7 +780,8 @@ int run(const Options& options) {
     std::size_t image_bytes = 0;
     const auto image = load_image(path, &image_bytes);
     auto lists = options.each ? neura::cli::read_argument_lists(*options.each) : std::vector<neura::cli::ArgumentList>{};
-    neura::cli::GpuRun gpu(options.gpu, image);
+    const auto max_jobs = options.each ? std::min<std::size_t>(lists.size(), neura::nvm::FleetOptions{}.window) : 1;
+    neura::cli::GpuRun gpu(options.gpu, image, max_jobs);
 #ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
@@ -909,7 +911,8 @@ int run_tests(const Options& options) {
     conversion_options.entries = tests;
     auto conversion = neura::backend::convert(program, conversion_options);
     auto image = neura::nvr::load(neura::nvr::encode(conversion.image));
-    neura::cli::GpuRun gpu(options.gpu, image);
+    const auto max_jobs = std::min<std::size_t>(tests.size(), neura::nvm::FleetOptions{}.window);
+    neura::cli::GpuRun gpu(options.gpu, image, max_jobs);
 
 #ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);

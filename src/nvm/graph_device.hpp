@@ -6,9 +6,22 @@
 #include <cstdint>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace neura::nvm {
+
+enum class IneligibleReason { none, no_nodes, weight_budget, table_limit, escaped };
+
+struct GraphShape {
+    bool eligible = false;
+    IneligibleReason reason = IneligibleReason::none;
+    std::uint64_t layers = 0;
+    std::uint64_t edges = 0;
+    std::uint64_t nodes = 0;
+    std::uint64_t critical = 0;
+    std::uint64_t io_words = 0;
+};
 
 struct GraphJob {
     std::uint32_t graph = 0;
@@ -40,6 +53,10 @@ public:
     // The largest useful batch. A hint of one gives no benefit from batching.
     virtual std::size_t batch_hint() const = 0;
     virtual GraphDeviceStatistics statistics() const = 0;
+    // Optional observations for a placement wrapper. An empty shape span
+    // leaves eligibility to the wrapper's static analysis of the image.
+    virtual std::span<const GraphShape> graph_shapes() const { return {}; }
+    virtual std::string_view failure_reason() const { return {}; }
 };
 
 // Checks the caller's graph indices, lane counts, and input bits before a
@@ -59,6 +76,8 @@ public:
     void evaluate(std::span<GraphJob> jobs) override;
     std::size_t batch_hint() const override;
     GraphDeviceStatistics statistics() const override;
+    std::span<const GraphShape> graph_shapes() const override;
+    std::string_view failure_reason() const override;
 
 private:
     GraphDevice& inner_;

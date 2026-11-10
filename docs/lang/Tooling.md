@@ -68,7 +68,7 @@ Console input and output and `Std.Program.Process.exit` are always available. Ot
 
 ### Choose graph execution
 
-`run` and `test` use the reference CPU evaluator by default. `--gpu=always` sends eligible graphs to Vulkan, with CPU fallback when no device is usable or a request is declined. `--gpu=off` and `--no-gpu` select the CPU. `--require-gpu` selects `always` and turns an unavailable or failed device into an error. `--gpu-software` also accepts software Vulkan devices. `--gpu-verify` checks every device result against the CPU. When a device is in use, `test` and `run --each` advance their members as a fleet, preserving serial output and host effect order.
+`run` and `test` use the reference CPU evaluator by default. With `--gpu=auto`, Neura opens Vulkan only when the observed workload can repay setup and calibration. It sends a batch only when the calibrated device is predicted to beat the CPU by the configured margin. `--gpu=always` sends eligible graphs to Vulkan, with CPU fallback when no device is usable or a request is declined. `--gpu=off` and `--no-gpu` select the CPU. `--require-gpu` selects `always` and turns an unavailable or failed device into an error. `--gpu-software` also accepts software Vulkan devices. `--gpu-verify` checks every device result against the CPU. When a device is in use, `test` and `run --each` advance their members as a fleet, preserving serial output and host effect order.
 
 The CMake setting `NEURA_GPU=AUTO` builds the GPU backend when the Vulkan headers and `glslangValidator` are available on a supported platform. `ON` requires those tools and `OFF` builds the CPU runner. The GPU backend opens the Vulkan loader only when a run requests a device.
 

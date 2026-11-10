@@ -7,12 +7,13 @@
 
 #ifdef NEURA_HAS_GPU
 #include "gpu/device.hpp"
+#include "nvm/placement.hpp"
 #include <memory>
 #endif
 
 namespace neura::cli {
 
-enum class GpuMode { Off, Always };
+enum class GpuMode { Off, Always, Auto };
 
 struct GpuOptions {
     std::optional<GpuMode> mode;
@@ -26,7 +27,7 @@ struct GpuOptions {
 
 class GpuRun {
 public:
-    GpuRun(const GpuOptions& options, const nvr::Image& image);
+    GpuRun(const GpuOptions& options, const nvr::Image& image, std::size_t max_jobs);
     nvm::GraphDevice* device();
     int finish(int status) const;
 
@@ -35,6 +36,7 @@ private:
     // The context outlives its graph device and the verifying wrapper.
     std::unique_ptr<gpu::Context> context_;
     std::unique_ptr<gpu::VulkanGraphDevice> device_;
+    std::unique_ptr<nvm::AutoDevice> auto_;
     std::optional<nvm::VerifyingDevice> verifier_;
     bool required_ = false;
 #endif

@@ -54,6 +54,7 @@ Each feature of this release with the tests that establish it. A feature counts 
 | Graph devices and the layered model | [NVM](NVM#graph-devices) | `backend-layered` | Structural, exhaustive (8-bit pairs), sampled (wider), end to end |
 | Fleets and argument lists | [NVM](NVM#fleets), [Tooling](Tooling#run-an-image-over-argument-lists) | `backend-fleet`, `backend-each` | Structural, exhaustive (8-bit pairs), end to end |
 | Vulkan graph evaluation | [GPU execution](https://github.com/Kayyo321/neura/blob/main/docs/lang/GpuExecution.md) | `gpu-device`, `gpu-cli` | Exhaustive (8-bit pairs), sampled (wider), end to end |
+| Automatic graph placement | [GPU execution](https://github.com/Kayyo321/neura/blob/main/docs/lang/GpuExecution.md#11-auto-mode) | `backend-placement`, `gpu-device`, `gpu-cli` | Structural, end to end |
 
 ## Standard library
 

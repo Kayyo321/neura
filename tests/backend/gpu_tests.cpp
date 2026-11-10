@@ -1,10 +1,14 @@
 #include "circuit_tests.hpp"
 #include "fixtures.hpp"
+#include "gpu/calibrate.hpp"
 #include "gpu/device.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
+#include <cmath>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 
 namespace neura::testing {
@@ -25,6 +29,20 @@ std::unique_ptr<gpu::Context> open_gpu() {
 
 NEURA_TEST(gpu_device, integer_circuits_and_mixed_dispatch) {
     auto context = open_gpu();
+    // Calibration checks every measured and warm-up job against the CPU.
+    const auto calibration = gpu::calibrate(*context);
+    check(calibration.has_value(), "all calibration probes evaluated with the reference output lanes");
+    const auto& model = calibration->device_model;
+    const auto& cpu = calibration->cpu_model;
+    const std::array coefficients{model.a, model.b0, model.b1, model.K, model.d, cpu.c0, cpu.c1, cpu.c2};
+    check(std::ranges::all_of(coefficients, [](double value) { return std::isfinite(value) && value >= 0; }),
+          "calibration coefficients are finite and non-negative");
+    check(model.K >= 1 && model.K <= 65'536, "calibration parallelism estimate is within its bounds");
+    std::cout << std::setprecision(10)
+              << "calibration: a=" << model.a << " b0=" << model.b0 << " b1=" << model.b1
+              << " K=" << model.K << " d=" << model.d
+              << " c0=" << cpu.c0 << " c1=" << cpu.c1 << " c2=" << cpu.c2 << '\n';
+
     check_integer_graph_device([&](const nvr::Image& image) {
         auto device = std::make_unique<gpu::VulkanGraphDevice>(*context, image);
         check(!device->failed(), device->reason());

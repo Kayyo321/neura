@@ -124,18 +124,15 @@ void append_graph(const nvr::Graph& graph, const GraphOrder& order, const GraphS
     words.insert(words.end(), graph.outputs.begin(), graph.outputs.end());
 }
 
-} // namespace
-
-LayeredTables pack_layered(const nvr::Image& image, std::uint64_t max_table_bytes) {
+template <class KeepOrder>
+std::uint64_t analyze_graphs(const nvr::Image& image, std::uint64_t max_table_bytes,
+                             std::vector<GraphShape>& shapes, KeepOrder keep_order) {
     const auto word_limit = std::min(max_table_bytes, layered_table_limit) / sizeof(std::uint32_t);
-    LayeredTables tables;
-    tables.shapes.resize(image.graphs.size());
-    tables.slots.resize(image.graphs.size(), nvr::absent);
-    std::vector<GraphOrder> orders;
+    shapes.resize(image.graphs.size());
     std::uint64_t word_count = 0;
     for (std::size_t index = 0; index < image.graphs.size(); ++index) {
         const auto& graph = image.graphs[index];
-        auto& shape = tables.shapes[index];
+        auto& shape = shapes[index];
         auto order = order_graph(graph, shape);
         if (!shape.eligible) continue;
         const auto non_edge_words = directory_words + node_words * shape.nodes +
@@ -146,11 +143,23 @@ LayeredTables pack_layered(const nvr::Image& image, std::uint64_t max_table_byte
             shape.reason = IneligibleReason::table_limit;
             continue;
         }
-        tables.slots[index] = static_cast<std::uint32_t>(orders.size());
-        orders.push_back(std::move(order));
+        keep_order(index, std::move(order));
         word_count += non_edge_words + edge_words * shape.edges;
     }
+    return word_count;
+}
 
+} // namespace
+
+LayeredTables pack_layered(const nvr::Image& image, std::uint64_t max_table_bytes) {
+    LayeredTables tables;
+    tables.slots.resize(image.graphs.size(), nvr::absent);
+    std::vector<GraphOrder> orders;
+    const auto word_count = analyze_graphs(image, max_table_bytes, tables.shapes,
+        [&](std::size_t index, GraphOrder&& order) {
+            tables.slots[index] = static_cast<std::uint32_t>(orders.size());
+            orders.push_back(std::move(order));
+        });
     tables.words.reserve(static_cast<std::size_t>(word_count));
     tables.words.resize(directory_words * orders.size());
     for (std::size_t index = 0; index < image.graphs.size(); ++index) {
@@ -162,12 +171,19 @@ LayeredTables pack_layered(const nvr::Image& image, std::uint64_t max_table_byte
     return tables;
 }
 
+std::vector<GraphShape> layered_shapes(const nvr::Image& image, std::uint64_t max_table_bytes) {
+    std::vector<GraphShape> shapes;
+    analyze_graphs(image, max_table_bytes, shapes, [](std::size_t, GraphOrder&&) {});
+    return shapes;
+}
+
 ModelDevice::ModelDevice(const nvr::Image& image, std::uint64_t max_table_bytes)
     : image_(image), tables_(pack_layered(image, max_table_bytes)) {}
 
 const nvr::Image& ModelDevice::image() const { return image_; }
 std::size_t ModelDevice::batch_hint() const { return std::numeric_limits<std::size_t>::max(); }
 GraphDeviceStatistics ModelDevice::statistics() const { return statistics_; }
+std::span<const GraphShape> ModelDevice::graph_shapes() const { return tables_.shapes; }
 const LayeredTables& ModelDevice::tables() const { return tables_; }
 
 std::uint32_t ModelDevice::evaluate_job(GraphJob& job) {

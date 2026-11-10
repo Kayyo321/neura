@@ -210,7 +210,8 @@ The [release checklist](Release.md) maps each feature to its tests and states wh
 | `backend-layered` | Packed graph tables, exact CPU model evaluation over the integer circuit domains, and traps and results across the image corpus. |
 | `backend-fleet` | Step transitions and member-order equivalence across the image corpus, fleet state and limits, and all 65,536 pairs for one 8-bit function. |
 | `backend-each` | Argument-list parsing, CLI diagnostics, and serial output, statistics, and status. |
-| `gpu-device` | Vulkan graph outputs over the integer circuit domains, mixed and split batches, and buffer growth. |
+| `backend-placement` | Cost model fits, deterministic gate accounting, placement, timing correction, and fleet equivalence with fixed models. |
+| `gpu-device` | Vulkan graph outputs over the integer circuit domains, mixed and split batches, buffer growth, and calibration. |
 | `gpu-cli` | CPU and Vulkan runs, tests, fleets, and trace replay compared through the CLI. |
 | `backend-nir` | `.nir` round trips, deterministic encoding, both build routes give identical images, corrupt files are rejected. |
 | `backend-conversion` | Compiled functions against the IR reference evaluator: integer, structure, and float fixtures, exhaustively over 8-bit domains where the parameters allow and on sampled float operands; whole-program stdout and initialization order against the evaluator. |

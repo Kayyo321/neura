@@ -31,6 +31,7 @@ add_library(neura_nvm STATIC
     src/nvm/layered.cpp
     src/nvm/machine.cpp
     src/nvm/net_provider.cpp
+    src/nvm/placement.cpp
     src/nvm/providers.cpp
     src/nvm/scalar_text.cpp
     src/nvm/trace.cpp
@@ -84,6 +85,7 @@ if(NEURA_HAS_GPU)
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/graph_eval.comp"
         VERBATIM)
     add_library(neura_gpu STATIC
+        src/gpu/calibrate.cpp
         src/gpu/context.cpp
         src/gpu/device.cpp
         src/gpu/vulkan_api.cpp
@@ -220,6 +222,7 @@ if(BUILD_TESTING)
         tests/backend/host_tests.cpp
         tests/backend/layered_tests.cpp
         tests/backend/nir_tests.cpp
+        tests/backend/placement_tests.cpp
         tests/backend/reference_tests.cpp
         tests/backend/vm_tests.cpp
         tests/ir-optimization/evaluator.cpp
@@ -262,7 +265,7 @@ if(BUILD_TESTING)
         set_tests_properties(gpu-device gpu-cli PROPERTIES SKIP_RETURN_CODE 77 LABELS gpu TIMEOUT 1800)
     endif()
 
-    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet)
+    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
