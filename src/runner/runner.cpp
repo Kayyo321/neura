@@ -57,6 +57,71 @@ TaskDumps::TaskDumps(std::optional<nvm::TaskDumpFormat> on_trap) {
 #endif
 }
 
+struct TraceEvents::Output {
+    std::ofstream file;
+};
+
+TraceEvents::TraceEvents(const fs::path& path, bool wall_time)
+    : output_(std::make_unique<Output>()), wall_time_(wall_time) {
+    output_->file.open(path, std::ios::binary | std::ios::trunc);
+    if (!output_->file) throw std::runtime_error("cannot write " + path.string());
+}
+
+TraceEvents::~TraceEvents() = default;
+
+void TraceEvents::event(const nvm::TaskEvent& event) {
+    using Kind = nvm::TaskEvent::Kind;
+    const auto quoted = [](const std::string& text) {
+        std::string out = "\"";
+        for (const char c : text) {
+            if (c == '"' || c == '\\') {
+                out += '\\';
+                out += c;
+            } else if (static_cast<unsigned char>(c) < 0x20) {
+                constexpr std::string_view hex = "0123456789abcdef";
+                out += "\\u00";
+                out += hex[(c >> 4) & 15];
+                out += hex[c & 15];
+            } else {
+                out += c;
+            }
+        }
+        return out + '"';
+    };
+    // The name of the event and of the field that holds `other`.
+    std::string_view name;
+    std::string_view other;
+    switch (event.kind) {
+    case Kind::Spawn: name = "spawn"; other = "child"; break;
+    case Kind::Start: name = "start"; break;
+    case Kind::Park: name = "park"; break;
+    case Kind::Wake: name = "wake"; break;
+    case Kind::Finish: name = "finish"; break;
+    case Kind::Send: name = "send"; other = "channel"; break;
+    case Kind::Receive: name = "receive"; other = "channel"; break;
+    case Kind::Close: name = "close"; other = "channel"; break;
+    case Kind::Cancel: name = "cancel"; other = "scope"; break;
+    case Kind::DeadlineExpired: name = "deadline"; other = event.detail == "timer" ? "timer" : "scope"; break;
+    case Kind::HostRequest: name = "host-request"; other = "request"; break;
+    case Kind::HostCompletion: name = "host-completion"; other = "request"; break;
+    }
+    auto& out = output_->file;
+    out << "{\"event\":\"" << name << "\",\"tick\":" << event.tick << ",\"task\":" << event.task;
+    if (!other.empty()) out << ",\"" << other << "\":" << event.other;
+    if (event.kind == Kind::Park) out << ",\"reason\":" << quoted(event.detail);
+    if (event.kind == Kind::Cancel) out << ",\"cause\":" << quoted(event.detail);
+    if (event.kind == Kind::HostRequest || event.kind == Kind::HostCompletion) {
+        out << ",\"service\":" << quoted(event.detail);
+    }
+    if (!event.where.empty()) out << ",\"at\":" << quoted(event.where);
+    if (wall_time_) {
+        out << ",\"wall_ns\":"
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+    out << "}\n";
+}
+
 TaskDumps::~TaskDumps() {
 #ifdef SIGQUIT
     std::signal(SIGQUIT, SIG_DFL);
@@ -250,6 +315,17 @@ void print_profile(const nvr::Image& image, const nvm::RunResult& result) {
         if (names && f < names->functions.size()) std::cerr << "  " << names->functions[f];
         std::cerr << '\n';
     }
+    // Per spawn site: whether its tasks were computing, waiting for a turn,
+    // waiting on a channel or timer, or waiting on host I/O.
+    if (!result.task_profile.empty()) {
+        std::cerr << "profile: tasks by spawn site (steps executed; ticks runnable, on channels, on host I/O)\n";
+        for (std::size_t i = 0; i < result.task_profile.size(); ++i) {
+            const auto& site = result.task_profile[i];
+            std::cerr << "  " << result.task_profile_sites[i] << "  tasks " << site.tasks << "  steps " << site.steps
+                      << "  runnable " << site.runnable_ticks << "  channel " << site.channel_ticks << "  host "
+                      << site.host_ticks << '\n';
+        }
+    }
 }
 
 } // namespace
@@ -259,6 +335,11 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
     TaskDumps dumps(options.task_dump);
     auto limits = options.limits;
     limits.task_dump = dumps.request();
+    std::optional<TraceEvents> events;
+    if (options.trace_events) {
+        events.emplace(*options.trace_events, options.trace_wall_time);
+        limits.observer = &*events;
+    }
     nvm::RunResult result;
     if (options.replay) {
         // No service runs: every response comes from the trace. Console
@@ -291,7 +372,10 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
                   << ", host requests " << result.host_requests << ", " << image_costs(image)
                   << ", image bytes " << image_bytes;
         // Only an image with tasks reports them, so other output is unchanged.
-        if (result.peak_tasks != 0) std::cerr << ", peak tasks " << result.peak_tasks;
+        if (result.peak_tasks != 0) {
+            std::cerr << ", peak tasks " << result.peak_tasks << ", peak queued messages "
+                      << result.peak_queued_messages << ", peak pending requests " << result.peak_pending_requests;
+        }
         std::cerr << '\n';
     }
     if (options.limits.profile) {

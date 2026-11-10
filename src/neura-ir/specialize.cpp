@@ -631,7 +631,11 @@ private:
     void check_nodes(const std::vector<IrNode>& nodes, const std::string& where) const {
         for (const auto& node : nodes) {
             check_type(node.type, where);
-            if (!node.type_arguments.empty() && node.op != IrOp::ClassIs) {
+            // A type test names its target, and a typed scheduler operation its
+            // element type, as a concrete type argument.
+            if (node.op == IrOp::SchedulerCall) {
+                for (const auto& argument : node.type_arguments) check_type(argument, where);
+            } else if (!node.type_arguments.empty() && node.op != IrOp::ClassIs) {
                 throw std::logic_error("specialization left type arguments in " + where);
             }
             check_nodes(node.operands, where);
@@ -686,7 +690,7 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // Concurrency.md section 5 need the concrete types that exist only now:
     // a generic function is checked at each specialization.
     insert_polls(program);
-    if (has_spawn(program)) TaskAnalysis(program).check();
+    if (uses_tasks(program)) TaskAnalysis(program).check();
 }
 
 } // namespace neura

@@ -100,7 +100,11 @@ void usage(std::ostream& out) {
            "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
            "  --max-tasks N            bound the number of live tasks in a concurrent image\n"
            "  --task-quantum N         polls per turn for a concurrent image\n"
+           "  --max-queued-messages N  bound the values buffered in all channels\n"
+           "  --max-pending-requests N bound the overlapping host requests in flight\n"
            "  --task-dump[=text|json]  print every task when one traps; SIGQUIT prints a dump at any time\n"
+           "  --trace-events FILE      write one JSON line per scheduler event (run only)\n"
+           "  --trace-wall-time        add wall-clock times to --trace-events\n"
            "\n"
            "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
            "  --c-include <dir>        search a directory for C headers\n"
@@ -129,6 +133,8 @@ struct Options {
     // Report execution costs: steps, peak heap cells, and image size.
     bool stats = false;
     std::optional<neura::nvm::TaskDumpFormat> task_dump;
+    std::optional<fs::path> trace_events;
+    bool trace_wall_time = false;
     std::vector<fs::path> files;
     std::vector<fs::path> roots;
     fs::path library;
@@ -369,17 +375,26 @@ Options read_options(int argc, char** argv) {
             options.output = fs::path(next());
         } else if (options.command == Command::Run && arg == "--profile") {
             options.limits.profile = true;
-        } else if (arg == "--max-tasks" || arg == "--task-quantum") {
+        } else if (arg == "--max-tasks" || arg == "--task-quantum" || arg == "--max-queued-messages" ||
+                   arg == "--max-pending-requests") {
             if (!runs) throw std::runtime_error(std::string(arg) + " applies only to run and test");
             const auto value = parse_limit(arg, next());
             if (arg == "--max-tasks") options.limits.max_tasks = value;
-            else options.limits.task_quantum = value;
+            else if (arg == "--task-quantum") options.limits.task_quantum = value;
+            else if (arg == "--max-queued-messages") options.limits.max_queued_messages = value;
+            else options.limits.max_pending_requests = value;
         } else if (arg == "--task-dump" || arg.starts_with("--task-dump=")) {
             if (!runs) throw std::runtime_error("--task-dump applies only to run and test");
             const auto form = arg == "--task-dump" ? std::string_view("text") : arg.substr(12);
             if (form == "text") options.task_dump = neura::nvm::TaskDumpFormat::Text;
             else if (form == "json") options.task_dump = neura::nvm::TaskDumpFormat::Json;
             else throw std::runtime_error("--task-dump expects text or json");
+        } else if (arg == "--trace-events") {
+            if (options.command != Command::Run) throw std::runtime_error("--trace-events applies only to run");
+            options.trace_events = fs::path(next());
+        } else if (arg == "--trace-wall-time") {
+            if (options.command != Command::Run) throw std::runtime_error("--trace-wall-time applies only to run");
+            options.trace_wall_time = true;
         } else if (runs && arg == "--stats") {
             options.stats = true;
         } else if (compiles && arg == "--c-include") {
@@ -897,7 +912,7 @@ int run(const Options& options) {
     provide_native_library(image, host.services);
     if (options.each) return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device()), options.stats);
     neura::runner::RunOptions run_options{options.limits, options.stats, options.record, options.replay,
-                                          options.task_dump};
+                                          options.task_dump, options.trace_events, options.trace_wall_time};
     run_options.limits.graph_device = gpu.device();
     const auto status = neura::runner::run(image, host, options.arguments, run_options, path.string(), image_bytes);
     return gpu.finish(status, options.stats);
@@ -1057,7 +1072,7 @@ int main(int argc, char** argv) {
         switch (options.command) {
         case Command::Check: {
             auto program = load_source_program(options);
-            if (neura::has_spawn(program)) {
+            if (neura::uses_tasks(program)) {
                 // The isolation rules of a spawn need concrete types, which
                 // exist after specialization (Concurrency.md section 5).
                 neura::require_valid_ir(program, "before specialization");

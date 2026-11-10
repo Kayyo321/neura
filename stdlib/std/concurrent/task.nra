@@ -16,9 +16,17 @@ export let Task = module (
 
         /// @brief Whether the task has finished. Never waits.
         export let is_finished = func -> bool => task_finished(id);
+
+        /// @brief What a select waits on for this task. Used by the select statement.
+        export let select_handle = func -> uint64 => id;
+
+        /// @brief The result of a join that a select committed. Used by the select statement.
+        export let join_selected = func(code: uint32) -> T => take<T>();
     );
 
     let join_task = func<T>(task: uint64) -> T scheduler("join");
+
+    let take = func<T> -> T scheduler("take");
 
     let task_finished = func(task: uint64) -> bool scheduler("is_finished");
 );

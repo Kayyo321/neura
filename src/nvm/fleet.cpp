@@ -139,8 +139,21 @@ private:
         }
     }
 
+    TaskClock& clock() { return options_.clock ? *options_.clock : steady_clock_; }
+
     bool settle(Active& live, std::optional<Event>&& event) {
         if (!event) return false;
+        // A member's timers follow the fleet's clock. The member stays
+        // runnable: its next step makes the scheduling decision again.
+        if (event->kind == Event::Kind::Poll || event->kind == Event::Kind::Waiting) {
+            if (event->kind == Event::Kind::Waiting) {
+                if (!event->timer) throw std::logic_error("a fleet member waits for a request a fleet never starts");
+                clock().wait_until(event->deadline);
+            }
+            if (event->timer) live.execution->advance_clock(clock().now());
+            return false;
+        }
+        if (event->kind == Event::Kind::Cancel) return false;
         if (event->kind == Event::Kind::HostRequest) {
             live.request = std::make_unique<Event>(std::move(*event));
             --runnable_count_;
@@ -294,6 +307,7 @@ private:
 
     const nvr::Image& image_;
     FleetOptions options_;
+    SteadyTaskClock steady_clock_;
     std::vector<Member> members_;
     // Must outlive every admitted execution that reports heap mutations.
     Execution::FleetHeapCells heap_cells_;

@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <array>
+#include <thread>
+#include <chrono>
 #include <deque>
 #include <limits>
 #include <map>
@@ -41,6 +43,8 @@ std::string_view describe(TrapKind kind) {
     case TrapKind::HeapLimit: return "heap limit exceeded";
     case TrapKind::HandleLimit: return "handle space exhausted";
     case TrapKind::TaskLimit: return "task limit exceeded";
+    case TrapKind::MessageLimit: return "queued message limit exceeded";
+    case TrapKind::RequestLimit: return "pending request limit exceeded";
     case TrapKind::InvalidTaskOperation: return "invalid task operation";
     case TrapKind::Deadlock: return "deadlock";
     }
@@ -82,7 +86,9 @@ int exit_status(const Trap& trap) {
     case TrapKind::InvalidTaskOperation: return illegal_instruction;
     case TrapKind::HeapLimit:
     case TrapKind::HandleLimit:
-    case TrapKind::TaskLimit: return out_of_memory;
+    case TrapKind::TaskLimit:
+    case TrapKind::MessageLimit:
+    case TrapKind::RequestLimit: return out_of_memory;
     case TrapKind::StepLimit: return cpu_time_exceeded;
     }
     return illegal_instruction;
@@ -336,35 +342,10 @@ public:
         }
         const auto pending = *pending_;
         pending_.reset();
+        emit(TaskEvent::Kind::HostCompletion, scheduler_ ? scheduler_->current : 0, sequence_ - 1,
+             [&] { return image_.imports[pending.import].name; });
         try {
-            const auto& import = image_.imports[pending.import];
-            if (completion.exit_status) {
-                const auto status = *completion.exit_status;
-                using Kind = nvr::TypeKind;
-                if (!completion.success || import.name != "neura.process.exit" || import.interface_version != 1 ||
-                    import.parameter_types.size() != 1 || type(import.parameter_types.front()) != nvr::Type{Kind::Signed, 32} ||
-                    type(import.success_type).kind != Kind::Void || type(import.error_type) != nvr::Type{Kind::Unsigned, 32} ||
-                    status < 0 || status > 255) {
-                    fault(TrapKind::InvalidCompletion, "invalid process exit completion");
-                }
-                Event event;
-                event.kind = Event::Kind::Completed;
-                event.status = status;
-                event.result = static_cast<std::uint64_t>(status);
-                set_finished(std::move(event));
-                return;
-            }
-            const auto type = completion.success ? import.success_type : import.error_type;
-            const auto slot = completion.success ? pending.success_slot : pending.error_slot;
-            if (image_.types[type].kind != nvr::TypeKind::Void) {
-                std::vector<std::uint64_t> temporary_roots;
-                auto remaining = limits_.max_heap_cells;
-                const auto value = host_to_value(completion.value, type, temporary_roots, remaining, 0);
-                auto& frame = frames_.back();
-                frame.slots[slot] = value;
-                frame.initialized[slot] = 1;
-            }
-            frames_.back().block = completion.success ? pending.success_block : pending.error_block;
+            apply_completion(frames_, pending, completion);
         } catch (const Fault& fault) {
             Event event;
             event.kind = Event::Kind::Trapped;
@@ -446,6 +427,29 @@ public:
     const std::vector<std::uint64_t>& function_steps() const { return function_steps_; }
     std::string dump_tasks(TaskDumpFormat format) const;
     std::uint64_t peak_tasks() const { return scheduler_ ? scheduler_->peak_live : 0; }
+    std::uint64_t tick() const { return scheduler_ ? scheduler_->ticks : 0; }
+    std::uint64_t peak_queued_messages() const { return scheduler_ ? scheduler_->peak_queued : 0; }
+    std::uint64_t peak_pending_requests() const { return scheduler_ ? scheduler_->peak_requests : 0; }
+    std::vector<TaskSiteProfile> task_profile() const {
+        if (!scheduler_ || !limits_.profile) return {};
+        // The root comes first. Released tasks were summed as they went;
+        // add the ones still held.
+        std::vector<TaskSiteProfile> sites{{nvr::absent, nvr::absent, 0, 0, 0, 0, 0}};
+        std::map<std::pair<std::uint32_t, std::uint32_t>, std::size_t> index{{{nvr::absent, nvr::absent}, 0}};
+        for (const auto& released : scheduler_->sites) {
+            auto& site = site_of(sites, index, Task{.spawn_function = released.function, .spawn_block = released.block});
+            site.tasks += released.tasks;
+            site.steps += released.steps;
+            site.runnable_ticks += released.runnable_ticks;
+            site.channel_ticks += released.channel_ticks;
+            site.host_ticks += released.host_ticks;
+        }
+        for (const auto& [id, task] : scheduler_->tasks) add_to_site(site_of(sites, index, task), task);
+        return sites;
+    }
+    std::string location(std::uint32_t function, std::uint32_t block) const {
+        return function == nvr::absent ? std::string("root") : task_location(function, block);
+    }
 
 private:
     friend class Execution;
@@ -478,21 +482,61 @@ private:
         bool boundary = false;
     };
 
-    enum class TaskState { Running, Runnable, Joining, LeavingScope, Finished };
+    enum class TaskState {
+        Running, Runnable, Joining, LeavingScope, Finished,
+        // Parked on a channel, a timer, several operations at once, or an
+        // overlapping host request.
+        Sending, Receiving, TimerWait, Selecting, HostWait,
+    };
 
     struct TaskScope {
-        std::size_t frame_depth;
+        std::uint64_t id = 0;
+        std::size_t frame_depth = 0;
         std::size_t live_children = 0;
         std::vector<std::uint64_t> children;
     };
 
-    // The heap cells one task record is charged: a record with its place in
-    // the task table measured about 160 bytes (Concurrency.md section 10.3).
+    // The cancellation state of an open scope, by scope identity. Scopes
+    // are numbered in creation order.
+    struct ScopeRecord {
+        std::uint64_t owner = 0;
+        // The context the owner inherited: the scope that spawned it.
+        std::uint64_t parent = 0;
+        bool cancelled = false;
+        bool deadline_passed = false;
+        std::uint64_t cancelled_tick = 0;
+        std::int64_t deadline = nvr::no_deadline;
+    };
+
+    struct SelectEntry {
+        nvr::SelectArm kind = nvr::SelectArm::Receive;
+        // The channel or timer object, or the task of a join.
+        std::uint64_t handle = 0;
+        std::uint64_t value = 0;
+        std::uint32_t value_type = nvr::absent;
+    };
+
+    struct Pending {
+        std::uint32_t import = 0;
+        std::uint32_t success_slot = nvr::absent;
+        std::uint32_t success_block = 0;
+        std::uint32_t error_slot = nvr::absent;
+        std::uint32_t error_block = 0;
+    };
+
+    // The heap cells charged for scheduler records. A task record with its
+    // place in the task table measured about 160 bytes (Concurrency.md
+    // section 10.3); a channel and a timer are charged in proportion, and
+    // each buffered message one cell more.
     static constexpr std::uint64_t task_record_cells = 20;
+    static constexpr std::uint64_t channel_record_cells = 16;
+    static constexpr std::uint64_t timer_record_cells = 8;
 
     struct Task {
         std::uint64_t parent = 0;
         std::size_t parent_scope = 0;
+        // The scope that spawned the task: its cancellation context.
+        std::uint64_t context = 0;
         // Spawned without a result slot: nothing can join it, so its record
         // is released when it finishes instead of when its scope closes.
         bool unjoinable = false;
@@ -503,9 +547,70 @@ private:
         TaskState state = TaskState::Running;
         std::vector<Frame> frames;
         std::vector<TaskScope> scopes;
+        // What the task waits for: the task of a join, the channel or timer
+        // object, or the sequence number of a host request.
         std::uint64_t waiting_for = 0;
+        // The result slot of the parked operation.
         std::uint32_t join_slot = nvr::absent;
         bool close_on_wake = false;
+        // Sending: the value in flight.
+        std::uint64_t wait_value = 0;
+        std::uint32_t wait_value_type = nvr::absent;
+        // Selecting: the arms in source order.
+        std::vector<SelectEntry> select;
+        // Selects this task has committed. A scan starts at this count
+        // modulo the number of arms, so no ready arm starves another.
+        std::uint64_t selects = 0;
+        // A received value or a selected join's result, until Take.
+        bool stashed = false;
+        std::uint64_t stash = 0;
+        std::uint32_t stash_type = nvr::absent;
+        // HostWait: where the response goes.
+        Pending pending;
+        bool cancellable = false;
+        bool cancel_sent = false;
+        // For --profile: the steps the task executed, and the scheduling
+        // decisions that passed while it was in its current state.
+        bool started = false;
+        std::uint64_t steps = 0;
+        std::uint64_t since_tick = 0;
+        std::uint64_t runnable_ticks = 0;
+        std::uint64_t channel_ticks = 0;
+        std::uint64_t host_ticks = 0;
+    };
+
+    // A parked operation in an object's queue: the task, and the arm when
+    // the task is parked in a select.
+    struct Waiter {
+        std::uint64_t task = 0;
+        std::uint32_t arm = nvr::absent;
+    };
+
+    // Scheduler state of an object the image opened as a channel, keyed by
+    // the object's handle and released when the object is collected.
+    struct Channel {
+        // Creation order, for dumps: the handle is not stable across builds.
+        std::uint64_t number = 0;
+        std::uint32_t type = 0;
+        std::uint64_t capacity = 0;
+        bool closed = false;
+        std::deque<std::uint64_t> buffer;
+        std::deque<Waiter> senders;
+        std::deque<Waiter> receivers;
+    };
+
+    struct Timer {
+        std::uint64_t number = 0;
+        std::int64_t deadline = 0;
+        bool fired = false;
+        bool armed = false;
+        std::deque<Waiter> waiters;
+    };
+
+    // An armed deadline: a scope's, or a timer some task waits for.
+    struct Deadline {
+        bool scope = false;
+        std::uint64_t id = 0;
     };
 
     struct Scheduler {
@@ -518,15 +623,91 @@ private:
         std::uint64_t polls = 0;
         // Scheduling decisions made so far.
         std::uint64_t ticks = 0;
+        // No task is running: the next step begins by choosing one.
+        bool deciding = false;
+        // The driver has been offered this decision's Poll event.
+        bool polled = false;
+        std::uint64_t next_scope = 1;
+        std::map<std::uint64_t, ScopeRecord> scopes;
+        // Looked up by handle only, so their order never affects a run.
+        std::unordered_map<std::uint64_t, Channel> channels;
+        std::unordered_map<std::uint64_t, Timer> timers;
+        std::uint64_t next_channel = 1;
+        std::uint64_t next_timer = 1;
+        std::uint64_t queued = 0;
+        std::uint64_t peak_queued = 0;
+        // Overlapping host requests by sequence number, with their tasks.
+        std::map<std::uint64_t, std::uint64_t> requests;
+        std::uint64_t peak_requests = 0;
+        // Equal deadlines expire in the order they were armed.
+        std::multimap<std::int64_t, Deadline> deadlines;
+        // Requests whose cancellation the driver has yet to be told.
+        std::deque<std::uint64_t> cancellations;
+        // What released tasks did, by spawn site in order of first spawn.
+        std::vector<TaskSiteProfile> sites;
+        std::map<std::pair<std::uint32_t, std::uint32_t>, std::size_t> site_index;
     };
 
-    struct Pending {
-        std::uint32_t import = 0;
-        std::uint32_t success_slot = nvr::absent;
-        std::uint32_t success_block = 0;
-        std::uint32_t error_slot = nvr::absent;
-        std::uint32_t error_block = 0;
-    };
+    // Writes a host response into the frame that waits for it and moves that
+    // frame to the continuation the response selects.
+    void apply_completion(std::vector<Frame>& frames, const Pending& pending, const HostCompletion& completion) {
+        const auto& import = image_.imports[pending.import];
+        if (completion.exit_status) {
+            const auto status = *completion.exit_status;
+            using Kind = nvr::TypeKind;
+            if (!completion.success || import.name != "neura.process.exit" || import.interface_version != 1 ||
+                import.parameter_types.size() != 1 || type(import.parameter_types.front()) != nvr::Type{Kind::Signed, 32} ||
+                type(import.success_type).kind != Kind::Void || type(import.error_type) != nvr::Type{Kind::Unsigned, 32} ||
+                status < 0 || status > 255) {
+                fault(TrapKind::InvalidCompletion, "invalid process exit completion");
+            }
+            Event event;
+            event.kind = Event::Kind::Completed;
+            event.status = status;
+            event.result = static_cast<std::uint64_t>(status);
+            set_finished(std::move(event));
+            return;
+        }
+        const auto type = completion.success ? import.success_type : import.error_type;
+        const auto slot = completion.success ? pending.success_slot : pending.error_slot;
+        if (image_.types[type].kind != nvr::TypeKind::Void) {
+            std::vector<std::uint64_t> temporary_roots;
+            auto remaining = limits_.max_heap_cells;
+            const auto value = host_to_value(completion.value, type, temporary_roots, remaining, 0);
+            auto& frame = frames.back();
+            frame.slots[slot] = value;
+            frame.initialized[slot] = 1;
+        }
+        frames.back().block = completion.success ? pending.success_block : pending.error_block;
+    }
+
+    void deliver(std::uint64_t sequence, const HostCompletion& completion) {
+        const auto found = scheduler_ ? scheduler_->requests.find(sequence) : decltype(scheduler_->requests.end()){};
+        if (!scheduler_ || found == scheduler_->requests.end()) {
+            throw std::logic_error("deliver() called for a host request that is not pending");
+        }
+        const auto id = found->second;
+        scheduler_->requests.erase(found);
+        if (finished_) return;
+        auto& task = scheduler_->tasks.at(id);
+        // A fault while the response is copied in belongs to the waiting task.
+        scheduler_->current = id;
+        emit(TaskEvent::Kind::HostCompletion, id, sequence,
+             [&] { return image_.imports[task.pending.import].name; });
+        try {
+            apply_completion(task.frames, task.pending, completion);
+            if (!finished_) make_runnable(id, task);
+        } catch (const Fault& fault) {
+            Event event;
+            event.kind = Event::Kind::Trapped;
+            event.trap = fault.trap;
+            set_finished(std::move(event));
+        }
+    }
+
+    std::uint8_t host_mode(std::uint32_t import) const {
+        return limits_.host_modes && import < limits_.host_modes->size() ? (*limits_.host_modes)[import] : 0;
+    }
 
     void check_device() const {
         if (limits_.graph_device && &limits_.graph_device->image() != &image_) {
@@ -632,7 +813,17 @@ private:
             if (!entry.cells.empty()) {
                 mark_work_.push_back(&entry);
             }
+            // A reachable channel keeps the values buffered in it.
+            if (scheduler_ && !scheduler_->channels.empty() && scheduler_->channels.contains(handle)) {
+                channel_work_.push_back(handle);
+            }
         }
+    }
+
+    void mark_channel(std::uint64_t handle) {
+        const auto& marked = scheduler_->channels.at(handle);
+        if (!nvr::is_reference(type(marked.type).kind)) return;
+        for (const auto value : marked.buffer) mark(value);
     }
 
     void mark_children(const HeapEntry& item) {
@@ -671,11 +862,20 @@ private:
         }
         mark_frames(frames_);
         if (scheduler_) {
+            const auto mark_typed = [&](std::uint64_t value, std::uint32_t value_type) {
+                if (value_type != nvr::absent && nvr::is_reference(type(value_type).kind)) mark(value);
+            };
             for (const auto& [id, task] : scheduler_->tasks) {
                 mark_frames(task.frames);
-                if (task.state == TaskState::Finished && nvr::is_reference(type(task.result_type).kind)) {
-                    mark(task.result);
+                if (task.state == TaskState::Finished) mark_typed(task.result, task.result_type);
+                // Values in flight: a parked send's, a select's, and one
+                // received but not yet taken.
+                if (task.state == TaskState::Sending) mark_typed(task.wait_value, task.wait_value_type);
+                for (const auto& arm : task.select) {
+                    if (arm.kind == nvr::SelectArm::Send) mark_typed(arm.value, arm.value_type);
+                    else if (arm.kind != nvr::SelectArm::Join) mark(arm.handle);
                 }
+                if (task.stashed) mark_typed(task.stash, task.stash_type);
             }
         }
         for (const auto handle : temporary_roots) {
@@ -684,7 +884,13 @@ private:
         if (allocation != nullptr) {
             mark_children(*allocation);
         }
-        while (!mark_work_.empty()) {
+        while (!mark_work_.empty() || !channel_work_.empty()) {
+            if (!channel_work_.empty()) {
+                const auto handle = channel_work_.back();
+                channel_work_.pop_back();
+                mark_channel(handle);
+                continue;
+            }
             const auto& item = *mark_work_.back();
             mark_work_.pop_back();
             mark_children(item);
@@ -694,6 +900,7 @@ private:
                 it->second.marked = false;
                 ++it;
             } else {
+                if (scheduler_) release_scheduler_object(it->first);
                 remove_live_cells(entry_cells(it->second));
                 it = heap_.erase(it);
             }
@@ -901,37 +1108,123 @@ private:
         return "function " + std::to_string(function) + " block " + std::to_string(block);
     }
 
+    static void write_result(Frame& frame, std::uint32_t slot, std::uint64_t value) {
+        if (slot != nvr::absent) {
+            frame.slots[slot] = value;
+            frame.initialized[slot] = 1;
+        }
+    }
+
+    // Scheduler events for an observer (Concurrency.md section 14.2). The
+    // detail is built only when someone listens.
+    template <typename Detail>
+    void emit(TaskEvent::Kind kind, std::uint64_t task, std::uint64_t other, const Detail& detail,
+              std::string where = {}) const {
+        if (!limits_.observer) return;
+        TaskEvent event;
+        event.kind = kind;
+        event.tick = scheduler_ ? scheduler_->ticks : 0;
+        event.task = task;
+        event.other = other;
+        event.detail = detail();
+        event.where = std::move(where);
+        limits_.observer->event(event);
+    }
+
+    void emit(TaskEvent::Kind kind, std::uint64_t task, std::uint64_t other = 0) const {
+        emit(kind, task, other, [] { return std::string(); });
+    }
+
+    // Every change of a task's state goes through here, so the decisions
+    // that passed in the state it leaves are counted once.
+    void set_state(Task& task, TaskState state) {
+        const auto elapsed = scheduler_->ticks - task.since_tick;
+        switch (task.state) {
+        case TaskState::Runnable: task.runnable_ticks += elapsed; break;
+        case TaskState::Sending:
+        case TaskState::Receiving:
+        case TaskState::Selecting:
+        case TaskState::TimerWait: task.channel_ticks += elapsed; break;
+        case TaskState::HostWait: task.host_ticks += elapsed; break;
+        default: break;
+        }
+        task.since_tick = scheduler_->ticks;
+        task.state = state;
+    }
+
+    static void add_to_site(TaskSiteProfile& site, const Task& task) {
+        ++site.tasks;
+        site.steps += task.steps;
+        site.runnable_ticks += task.runnable_ticks;
+        site.channel_ticks += task.channel_ticks;
+        site.host_ticks += task.host_ticks;
+    }
+
+    TaskSiteProfile& site_of(std::vector<TaskSiteProfile>& sites,
+                             std::map<std::pair<std::uint32_t, std::uint32_t>, std::size_t>& index,
+                             const Task& task) const {
+        const auto [found, inserted] = index.try_emplace({task.spawn_function, task.spawn_block}, sites.size());
+        if (inserted) sites.push_back({task.spawn_function, task.spawn_block, 0, 0, 0, 0, 0});
+        return sites[found->second];
+    }
+
+    // A task record is about to be released: keep what it did.
+    void retire_task(const Task& task) {
+        if (limits_.profile) add_to_site(site_of(scheduler_->sites, scheduler_->site_index, task), task);
+    }
+
+    // The frames of a task: the machine's own while the task runs.
+    std::vector<Frame>& frames_of(std::uint64_t id, Task& task) {
+        return task.state == TaskState::Running && id == scheduler_->current ? frames_ : task.frames;
+    }
+
+    void make_runnable(std::uint64_t id, Task& task) {
+        set_state(task, TaskState::Runnable);
+        scheduler_->runnable.push_back(id);
+        emit(TaskEvent::Kind::Wake, id);
+    }
+
+    void disarm(std::int64_t deadline, bool scope, std::uint64_t id) {
+        const auto [first, last] = scheduler_->deadlines.equal_range(deadline);
+        for (auto entry = first; entry != last; ++entry) {
+            if (entry->second.scope == scope && entry->second.id == id) {
+                scheduler_->deadlines.erase(entry);
+                return;
+            }
+        }
+    }
+
     void close_scope(Task& task) {
         const auto& scope = task.scopes.back();
-        for (const auto child : scope.children) scheduler_->tasks.erase(child);
+        for (const auto child : scope.children) {
+            const auto found = scheduler_->tasks.find(child);
+            if (found == scheduler_->tasks.end()) continue;
+            retire_task(found->second);
+            scheduler_->tasks.erase(found);
+        }
         remove_live_cells(1 + task_record_cells * scope.children.size());
+        if (const auto record = scheduler_->scopes.find(scope.id); record != scheduler_->scopes.end()) {
+            if (record->second.deadline != nvr::no_deadline && !record->second.deadline_passed) {
+                disarm(record->second.deadline, true, scope.id);
+            }
+            scheduler_->scopes.erase(record);
+        }
         task.scopes.pop_back();
     }
 
-    void schedule_next() {
-        if (scheduler_->runnable.empty()) {
-            fault(TrapKind::Deadlock, "all tasks are parked\n" + dump_tasks(TaskDumpFormat::Text));
-        }
-        scheduler_->current = scheduler_->runnable.front();
-        scheduler_->runnable.pop_front();
-        scheduler_->polls = 0;
-        ++scheduler_->ticks;
-        if (limits_.schedule) limits_.schedule->push_back(scheduler_->current);
-        auto& task = current_task();
-        task.state = TaskState::Running;
-        frames_ = std::move(task.frames);
-        if (task.close_on_wake) {
-            task.close_on_wake = false;
-            close_scope(task);
-        }
-    }
-
+    // The running task stops here. The next step begins with a scheduling
+    // decision, which the driver can precede with deliveries and time.
     void park(TaskState state) {
         auto& task = current_task();
-        task.state = state;
+        set_state(task, state);
         task.frames = std::move(frames_);
+        frames_.clear();
         if (state == TaskState::Runnable) scheduler_->runnable.push_back(scheduler_->current);
-        schedule_next();
+        scheduler_->deciding = true;
+        emit(TaskEvent::Kind::Park, scheduler_->current, 0, [&] {
+            return state == TaskState::Runnable ? std::string("quantum spent")
+                                                : wait_text(scheduler_->current, task).substr(8);
+        });
     }
 
     // A requested task dump is written at a scheduling point and leaves the
@@ -951,13 +1244,101 @@ private:
         }
     }
 
-    void check_transfer(std::uint32_t function, std::span<const std::uint64_t> arguments) {
-        const auto& types = image_.functions[function].frame_types;
-        std::vector<std::pair<std::uint64_t, std::uint32_t>> references;
-        std::unordered_set<std::uint64_t> visited;
-        for (std::size_t i = 0; i < arguments.size(); ++i) {
-            if (nvr::is_reference(type(types[i]).kind)) references.emplace_back(arguments[i], types[i]);
+    // What the root waits for, followed through joins and scope exits to
+    // the first task that waits for something other than a task.
+    std::string wait_chain() const {
+        std::string text = "wait chain:";
+        std::unordered_set<std::uint64_t> seen;
+        for (std::uint64_t id = 0; seen.insert(id).second;) {
+            const auto found = scheduler_->tasks.find(id);
+            if (found == scheduler_->tasks.end()) break;
+            const auto& task = found->second;
+            text += (id == 0 ? " task " : " -> task ") + std::to_string(id) + " (" + wait_text(id, task) + ")";
+            if (task.state == TaskState::Joining) {
+                id = task.waiting_for;
+            } else if (task.state == TaskState::LeavingScope && !task.scopes.empty()) {
+                // The lowest-numbered task the scope still waits for.
+                std::uint64_t next = 0;
+                for (const auto& [child_id, child] : scheduler_->tasks) {
+                    if (child_id != 0 && child.parent == id && child.parent_scope + 1 == task.scopes.size() &&
+                        child.state != TaskState::Finished) {
+                        next = child_id;
+                        break;
+                    }
+                }
+                if (next == 0) break;
+                id = next;
+            } else {
+                break;
+            }
         }
+        return text + '\n';
+    }
+
+    // Chooses the task that runs next, or reports why none can yet.
+    std::optional<Event> decide() {
+        auto& scheduler = *scheduler_;
+        serve_dump_request();
+        if (!scheduler.cancellations.empty()) {
+            Event event;
+            event.kind = Event::Kind::Cancel;
+            event.sequence = scheduler.cancellations.front();
+            event.tick = scheduler.ticks;
+            scheduler.cancellations.pop_front();
+            return event;
+        }
+        const bool timers = !scheduler.deadlines.empty();
+        const bool external = timers || !scheduler.requests.empty();
+        const auto external_event = [&](Event::Kind kind) {
+            Event event;
+            event.kind = kind;
+            event.timer = timers;
+            event.deadline = timers ? scheduler.deadlines.begin()->first : nvr::no_deadline;
+            event.tick = scheduler.ticks;
+            return event;
+        };
+        if (scheduler.runnable.empty()) {
+            // A pending request or an armed timer can still wake a task: the
+            // run is waiting, not deadlocked.
+            if (external) return external_event(Event::Kind::Waiting);
+            fault(TrapKind::Deadlock, "all tasks are parked\n" + wait_chain() + dump_tasks(TaskDumpFormat::Text));
+        }
+        if (external && !scheduler.polled) {
+            scheduler.polled = true;
+            return external_event(Event::Kind::Poll);
+        }
+        scheduler.polled = false;
+        // The reference scheduler takes the first runnable task. A chooser
+        // may take any: every choice is a legal schedule.
+        std::size_t position = 0;
+        if (limits_.chooser) {
+            position = limits_.chooser->choose(scheduler.ticks, scheduler.runnable.size());
+            if (position >= scheduler.runnable.size()) position = 0;
+        }
+        scheduler.current = scheduler.runnable[position];
+        scheduler.runnable.erase(scheduler.runnable.begin() + static_cast<std::ptrdiff_t>(position));
+        scheduler.polls = 0;
+        auto& task = current_task();
+        set_state(task, TaskState::Running);
+        ++scheduler.ticks;
+        if (limits_.schedule) limits_.schedule->push_back(scheduler.current);
+        if (!task.started) {
+            task.started = true;
+            emit(TaskEvent::Kind::Start, scheduler.current);
+        }
+        frames_ = std::move(task.frames);
+        if (task.close_on_wake) {
+            task.close_on_wake = false;
+            close_scope(task);
+        }
+        scheduler.deciding = false;
+        return std::nullopt;
+    }
+
+    // Every object reachable from a value given to another task must have a
+    // marked layout (docs/runtime/NVR.md, "Scheduler operations").
+    void check_transferred(std::vector<std::pair<std::uint64_t, std::uint32_t>> references) {
+        std::unordered_set<std::uint64_t> visited;
         while (!references.empty()) {
             const auto [handle, expected] = references.back();
             references.pop_back();
@@ -971,9 +1352,24 @@ private:
             const auto& fields = image_.layouts[value.type].fields;
             for (std::size_t field = 0; field < fields.size(); ++field) {
                 // An unset field is not transferred data; reading it later traps as usual.
-                if (value.initialized[field] && nvr::is_reference(type(fields[field]).kind)) references.emplace_back(value.cells[field], fields[field]);
+                if (value.initialized[field] && nvr::is_reference(type(fields[field]).kind)) {
+                    references.emplace_back(value.cells[field], fields[field]);
+                }
             }
         }
+    }
+
+    void check_transfer(std::uint32_t function, std::span<const std::uint64_t> arguments) {
+        const auto& types = image_.functions[function].frame_types;
+        std::vector<std::pair<std::uint64_t, std::uint32_t>> references;
+        for (std::size_t i = 0; i < arguments.size(); ++i) {
+            if (nvr::is_reference(type(types[i]).kind)) references.emplace_back(arguments[i], types[i]);
+        }
+        check_transferred(std::move(references));
+    }
+
+    void check_sent(std::uint64_t value, std::uint32_t value_type) {
+        if (nvr::is_reference(type(value_type).kind)) check_transferred({{value, value_type}});
     }
 
     Task& child_task(std::uint64_t id) {
@@ -982,6 +1378,283 @@ private:
             fault(TrapKind::InvalidTaskOperation, "task handle is outside its owning scope");
         }
         return found->second;
+    }
+
+    Channel& channel(std::uint64_t object) {
+        const auto found = scheduler_->channels.find(object);
+        if (found == scheduler_->channels.end()) {
+            fault(TrapKind::InvalidTaskOperation, "the object is not an open channel");
+        }
+        return found->second;
+    }
+
+    Timer& timer(std::uint64_t object) {
+        const auto found = scheduler_->timers.find(object);
+        if (found == scheduler_->timers.end()) {
+            fault(TrapKind::InvalidTaskOperation, "the object is not an open timer");
+        }
+        return found->second;
+    }
+
+    // A scope handle is used by the task that executes the scope.
+    ScopeRecord& owned_scope(std::uint64_t id) {
+        const auto found = scheduler_->scopes.find(id);
+        if (found == scheduler_->scopes.end() || found->second.owner != scheduler_->current) {
+            fault(TrapKind::InvalidTaskOperation, "scope handle is outside its scope");
+        }
+        return found->second;
+    }
+
+    // A context is the scope that spawned a task, joined with everything
+    // that scope's own task inherited.
+    bool cancelled(std::uint64_t context) const {
+        for (auto id = context; id != 0;) {
+            const auto& scope = scheduler_->scopes.at(id);
+            if (scope.cancelled) return true;
+            id = scope.parent;
+        }
+        return false;
+    }
+
+    std::int64_t deadline_of(std::uint64_t context) const {
+        auto earliest = nvr::no_deadline;
+        for (auto id = context; id != 0;) {
+            const auto& scope = scheduler_->scopes.at(id);
+            earliest = std::min(earliest, scope.deadline);
+            id = scope.parent;
+        }
+        return earliest;
+    }
+
+    bool within(std::uint64_t context, std::uint64_t scope) const {
+        for (auto id = context; id != 0; id = scheduler_->scopes.at(id).parent) {
+            if (id == scope) return true;
+        }
+        return false;
+    }
+
+    static void unregister(std::deque<Waiter>& queue, std::uint64_t task) {
+        std::erase_if(queue, [task](const Waiter& waiter) { return waiter.task == task; });
+    }
+
+    void stash(Task& task, std::uint64_t value, std::uint32_t value_type) {
+        task.stashed = true;
+        task.stash = value;
+        task.stash_type = value_type;
+    }
+
+    // Commits one arm of the select `task` is evaluating or parked in.
+    // Exactly one arm commits; the task's place in every other arm's queue
+    // is given up first.
+    void commit_select(std::uint64_t id, Task& task, std::uint32_t arm, nvr::SchedulerOutcome outcome) {
+        const bool parked = task.state == TaskState::Selecting;
+        if (parked) {
+            for (const auto& entry : task.select) {
+                if (entry.kind == nvr::SelectArm::Receive) {
+                    if (const auto found = scheduler_->channels.find(entry.handle); found != scheduler_->channels.end()) {
+                        unregister(found->second.receivers, id);
+                    }
+                } else if (entry.kind == nvr::SelectArm::Send) {
+                    if (const auto found = scheduler_->channels.find(entry.handle); found != scheduler_->channels.end()) {
+                        unregister(found->second.senders, id);
+                    }
+                } else if (entry.kind == nvr::SelectArm::Timer) {
+                    if (const auto found = scheduler_->timers.find(entry.handle); found != scheduler_->timers.end()) {
+                        unregister(found->second.waiters, id);
+                    }
+                }
+            }
+        }
+        write_result(frames_of(id, task).back(), task.join_slot,
+                     std::uint64_t{arm} | (static_cast<std::uint64_t>(outcome) << 32));
+        ++task.selects;
+        task.select.clear();
+        if (parked) make_runnable(id, task);
+    }
+
+    // Ends a parked operation with its uint32 outcome.
+    void complete_parked(std::uint64_t id, Task& task, nvr::SchedulerOutcome outcome) {
+        write_result(task.frames.back(), task.join_slot, static_cast<std::uint64_t>(outcome));
+        task.wait_value_type = nvr::absent;
+        make_runnable(id, task);
+    }
+
+    void complete_waiter(const Waiter& waiter, nvr::SchedulerOutcome outcome) {
+        auto& task = scheduler_->tasks.at(waiter.task);
+        if (waiter.arm == nvr::absent) complete_parked(waiter.task, task, outcome);
+        else commit_select(waiter.task, task, waiter.arm, outcome);
+    }
+
+    std::uint64_t offered_value(const Waiter& waiter) const {
+        const auto& task = scheduler_->tasks.at(waiter.task);
+        return waiter.arm == nvr::absent ? task.wait_value : task.select[waiter.arm].value;
+    }
+
+    enum class Attempt { Done, Closed, Blocked };
+
+    // Sends without parking. A parked receiver takes the value directly;
+    // otherwise it is buffered if there is room.
+    Attempt try_send(Channel& target, std::uint64_t value) {
+        if (target.closed) return Attempt::Closed;
+        if (!target.receivers.empty()) {
+            const auto waiter = target.receivers.front();
+            target.receivers.pop_front();
+            stash(scheduler_->tasks.at(waiter.task), value, target.type);
+            emit(TaskEvent::Kind::Send, scheduler_->current, target.number);
+            emit(TaskEvent::Kind::Receive, waiter.task, target.number);
+            complete_waiter(waiter, nvr::SchedulerOutcome::Done);
+            return Attempt::Done;
+        }
+        if (target.buffer.size() < target.capacity) {
+            if (scheduler_->queued >= limits_.max_queued_messages) {
+                fault(TrapKind::MessageLimit, "buffering another message");
+            }
+            std::vector<std::uint64_t> roots;
+            if (nvr::is_reference(type(target.type).kind)) roots.push_back(value);
+            ensure_heap_cells(1, "channel message of ", roots);
+            target.buffer.push_back(value);
+            add_live_cells(1);
+            scheduler_->peak_queued = std::max(scheduler_->peak_queued, ++scheduler_->queued);
+            emit(TaskEvent::Kind::Send, scheduler_->current, target.number);
+            return Attempt::Done;
+        }
+        return Attempt::Blocked;
+    }
+
+    // Receives without parking; on Done the value is stashed for `receiver`.
+    // Buffered values come first, in order, and the longest-parked sender's
+    // value takes the place a receive frees.
+    Attempt try_receive(Channel& source, Task& receiver) {
+        if (!source.buffer.empty()) {
+            const auto value = source.buffer.front();
+            source.buffer.pop_front();
+            if (!source.senders.empty()) {
+                const auto waiter = source.senders.front();
+                source.senders.pop_front();
+                source.buffer.push_back(offered_value(waiter));
+                emit(TaskEvent::Kind::Send, waiter.task, source.number);
+                complete_waiter(waiter, nvr::SchedulerOutcome::Done);
+            } else {
+                --scheduler_->queued;
+                remove_live_cells(1);
+            }
+            stash(receiver, value, source.type);
+            emit(TaskEvent::Kind::Receive, scheduler_->current, source.number);
+            return Attempt::Done;
+        }
+        if (!source.senders.empty()) {
+            // A rendezvous: the sender has been waiting for this receive.
+            const auto waiter = source.senders.front();
+            source.senders.pop_front();
+            const auto value = offered_value(waiter);
+            emit(TaskEvent::Kind::Send, waiter.task, source.number);
+            complete_waiter(waiter, nvr::SchedulerOutcome::Done);
+            stash(receiver, value, source.type);
+            emit(TaskEvent::Kind::Receive, scheduler_->current, source.number);
+            return Attempt::Done;
+        }
+        return source.closed ? Attempt::Closed : Attempt::Blocked;
+    }
+
+    void close_channel(Channel& target) {
+        if (target.closed) return;
+        target.closed = true;
+        emit(TaskEvent::Kind::Close, scheduler_->current, target.number);
+        // Parked senders learn the channel closed; their values are not
+        // delivered. Receivers are parked only when nothing is buffered.
+        while (!target.senders.empty()) {
+            const auto waiter = target.senders.front();
+            target.senders.pop_front();
+            complete_waiter(waiter, nvr::SchedulerOutcome::Closed);
+        }
+        while (!target.receivers.empty()) {
+            const auto waiter = target.receivers.front();
+            target.receivers.pop_front();
+            complete_waiter(waiter, nvr::SchedulerOutcome::Closed);
+        }
+    }
+
+    void arm_timer(std::uint64_t object, Timer& target) {
+        if (target.armed || target.fired) return;
+        target.armed = true;
+        scheduler_->deadlines.emplace(target.deadline, Deadline{false, object});
+    }
+
+    // Ends the wait of a parked task whose context was cancelled, where the
+    // operation can be cancelled. A join and a scope exit never are.
+    void cancel_wait(std::uint64_t id, Task& task) {
+        switch (task.state) {
+        case TaskState::Sending:
+            unregister(channel(task.waiting_for).senders, id);
+            complete_parked(id, task, nvr::SchedulerOutcome::Cancelled);
+            break;
+        case TaskState::Receiving:
+            unregister(channel(task.waiting_for).receivers, id);
+            complete_parked(id, task, nvr::SchedulerOutcome::Cancelled);
+            break;
+        case TaskState::TimerWait:
+            unregister(timer(task.waiting_for).waiters, id);
+            complete_parked(id, task, nvr::SchedulerOutcome::Cancelled);
+            break;
+        case TaskState::Selecting: {
+            // No arm was ready, or the task would not be parked. Each
+            // channel or timer arm can report the cancellation; the
+            // rotation chooses which.
+            const auto count = task.select.size();
+            for (std::size_t offset = 0; offset < count; ++offset) {
+                const auto arm = (task.selects + offset) % count;
+                if (task.select[arm].kind != nvr::SelectArm::Join) {
+                    commit_select(id, task, static_cast<std::uint32_t>(arm), nvr::SchedulerOutcome::Cancelled);
+                    break;
+                }
+            }
+            break;
+        }
+        case TaskState::HostWait:
+            if (task.cancellable && !task.cancel_sent) {
+                task.cancel_sent = true;
+                scheduler_->cancellations.push_back(task.waiting_for);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+
+    // Requests cancellation of a scope's tasks and all their descendants.
+    // Idempotent. A running task is not interrupted; it asks.
+    void cancel_scope(std::uint64_t id) {
+        auto& scope = scheduler_->scopes.at(id);
+        if (scope.cancelled) return;
+        scope.cancelled = true;
+        scope.cancelled_tick = scheduler_->ticks;
+        emit(TaskEvent::Kind::Cancel, scope.owner, id, [&] {
+            return std::string(scope.deadline_passed ? "deadline passed" : "requested");
+        });
+        for (auto& [task_id, task] : scheduler_->tasks) {
+            if (task_id != 0 && task.state != TaskState::Finished && within(task.context, id)) {
+                cancel_wait(task_id, task);
+            }
+        }
+    }
+
+    // Reads the arms of a select from its exit: a kind, then its operands.
+    std::vector<SelectEntry> select_arms(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments) {
+        std::vector<SelectEntry> arms;
+        for (std::size_t i = 0; i < arguments.size();) {
+            SelectEntry arm;
+            arm.kind = static_cast<nvr::SelectArm>(arguments[i]);
+            arm.handle = arguments[i + 1];
+            if (arm.kind == nvr::SelectArm::Send) {
+                arm.value = arguments[i + 2];
+                arm.value_type = exit.arguments[i + 2].type;
+                i += 3;
+            } else {
+                i += 2;
+            }
+            arms.push_back(arm);
+        }
+        return arms;
     }
 
     void check_scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments,
@@ -1003,18 +1676,47 @@ private:
                 }
             }
         }
-        if (exit.scheduler == Op::Spawn || exit.scheduler == Op::ScopeEnter) {
-            std::vector<std::uint64_t> roots;
-            std::uint64_t cells = 1;
-            if (exit.scheduler == Op::Spawn) {
-                if (scheduler_->live >= limits_.max_tasks || scheduler_->next_id == std::numeric_limits<std::uint64_t>::max()) {
-                    fault(TrapKind::TaskLimit, "spawning another task");
-                }
-                if (limits_.max_frames == 0) fault(TrapKind::FrameLimit, "starting a task frame");
-                check_transfer(exit.target, arguments);
-                roots = argument_roots(exit.target, arguments);
-                cells = task_record_cells + frame_cells(exit.target);
+        // Operations that take heap cells check the limit, and so may
+        // collect, before anything changes. Values this exit assigns are
+        // roots during that collection.
+        std::uint64_t cells = 0;
+        std::vector<std::uint64_t> roots;
+        switch (exit.scheduler) {
+        case Op::ScopeEnter:
+            cells = 1;
+            break;
+        case Op::Spawn:
+            if (scheduler_->live >= limits_.max_tasks || scheduler_->next_id == std::numeric_limits<std::uint64_t>::max()) {
+                fault(TrapKind::TaskLimit, "spawning another task");
             }
+            if (limits_.max_frames == 0) fault(TrapKind::FrameLimit, "starting a task frame");
+            check_transfer(exit.target, arguments);
+            roots = argument_roots(exit.target, arguments);
+            cells = task_record_cells + frame_cells(exit.target);
+            break;
+        case Op::ChannelOpen:
+            if (entry(arguments[0]).kind != EntryKind::Object || scheduler_->channels.contains(arguments[0]) ||
+                scheduler_->timers.contains(arguments[0])) {
+                fault(TrapKind::InvalidTaskOperation, "the object cannot be opened as a channel");
+            }
+            if (static_cast<std::int64_t>(arguments[1]) < 0) {
+                fault(TrapKind::InvalidTaskOperation, "a channel capacity is not negative");
+            }
+            roots.push_back(arguments[0]);
+            cells = channel_record_cells;
+            break;
+        case Op::TimerOpen:
+            if (entry(arguments[0]).kind != EntryKind::Object || scheduler_->channels.contains(arguments[0]) ||
+                scheduler_->timers.contains(arguments[0])) {
+                fault(TrapKind::InvalidTaskOperation, "the object cannot be opened as a timer");
+            }
+            roots.push_back(arguments[0]);
+            cells = timer_record_cells;
+            break;
+        default:
+            break;
+        }
+        if (cells != 0) {
             const auto& types = image_.functions[frames_.back().function].frame_types;
             for (const auto& [slot, value] : assignments) {
                 if (nvr::is_reference(type(types[slot]).kind)) roots.push_back(value);
@@ -1023,37 +1725,54 @@ private:
         }
     }
 
-    static void write_result(Frame& frame, std::uint32_t slot, std::uint64_t value) {
-        if (slot != nvr::absent) {
-            frame.slots[slot] = value;
-            frame.initialized[slot] = 1;
-        }
-    }
-
     void scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments) {
+        using Op = nvr::SchedulerOp;
+        using Outcome = nvr::SchedulerOutcome;
+        const auto self = scheduler_->current;
         auto& task = current_task();
         auto& frame = frames_.back();
         const auto block = frame.block;
         frame.block = exit.resume;
+        const auto outcome = [&](Outcome value) {
+            write_result(frame, exit.result_slot, static_cast<std::uint64_t>(value));
+        };
+        // Parks the task on an object's queue, unless its context is
+        // already cancelled: then the operation reports that instead.
+        const auto wait_on = [&](TaskState state, std::deque<Waiter>& queue) {
+            if (cancelled(task.context)) {
+                outcome(Outcome::Cancelled);
+                return;
+            }
+            task.waiting_for = arguments.front();
+            task.join_slot = exit.result_slot;
+            queue.push_back({self, nvr::absent});
+            park(state);
+        };
         switch (exit.scheduler) {
-        case nvr::SchedulerOp::ScopeEnter:
-            task.scopes.push_back({frames_.size(), 0, {}});
+        case Op::ScopeEnter: {
+            const auto id = scheduler_->next_scope++;
+            scheduler_->scopes.emplace(id, ScopeRecord{self, task.context});
+            task.scopes.push_back({id, frames_.size(), 0, {}});
             add_live_cells(1);
+            write_result(frame, exit.result_slot, id);
             break;
-        case nvr::SchedulerOp::ScopeExit:
+        }
+        case Op::ScopeExit:
             if (task.scopes.back().live_children == 0) close_scope(task);
             else park(TaskState::LeavingScope);
             break;
-        case nvr::SchedulerOp::Spawn: {
+        case Op::Spawn: {
             const auto id = scheduler_->next_id++;
             auto& child = scheduler_->tasks.try_emplace(id).first->second;
-            child.parent = scheduler_->current;
+            child.parent = self;
             child.parent_scope = task.scopes.size() - 1;
+            child.context = task.scopes.back().id;
             child.spawn_function = frame.function;
             child.spawn_block = block;
             child.result_type = image_.functions[exit.target].result_type;
             child.frames.push_back(make_frame(exit.target, arguments, nvr::absent, 0));
             child.state = TaskState::Runnable;
+            child.since_tick = scheduler_->ticks;
             child.unjoinable = exit.result_slot == nvr::absent;
             ++task.scopes.back().live_children;
             if (!child.unjoinable) task.scopes.back().children.push_back(id);
@@ -1061,9 +1780,11 @@ private:
             scheduler_->runnable.push_back(id);
             add_live_cells(task_record_cells + frame_cells(exit.target));
             write_result(frame, exit.result_slot, id);
+            emit(TaskEvent::Kind::Spawn, self, id, [] { return std::string(); },
+                 limits_.observer ? task_location(frame.function, block) : std::string());
             break;
         }
-        case nvr::SchedulerOp::Join: {
+        case Op::Join: {
             const auto& child = child_task(arguments.front());
             if (child.state == TaskState::Finished) {
                 write_result(frame, exit.result_slot, child.result);
@@ -1074,9 +1795,202 @@ private:
             }
             break;
         }
-        case nvr::SchedulerOp::IsFinished:
+        case Op::IsFinished:
             write_result(frame, exit.result_slot, child_task(arguments.front()).state == TaskState::Finished);
             break;
+        case Op::ScopeCancel:
+            owned_scope(arguments[0]);
+            cancel_scope(arguments[0]);
+            break;
+        case Op::ScopeIsCancelled:
+            write_result(frame, exit.result_slot, owned_scope(arguments[0]).cancelled);
+            break;
+        case Op::ScopeSetDeadline: {
+            auto& scope = owned_scope(arguments[0]);
+            const auto deadline = static_cast<std::int64_t>(arguments[1]);
+            // A later call replaces the scope's own deadline. What its tasks
+            // observe is still the earlier of it and the inherited one.
+            if (scope.deadline != nvr::no_deadline && !scope.deadline_passed) disarm(scope.deadline, true, arguments[0]);
+            scope.deadline = deadline;
+            if (deadline != nvr::no_deadline && !scope.cancelled) {
+                scope.deadline_passed = false;
+                scheduler_->deadlines.emplace(deadline, Deadline{true, arguments[0]});
+            }
+            break;
+        }
+        case Op::ScopeDeadline: {
+            const auto& scope = owned_scope(arguments[0]);
+            const auto earliest = std::min(scope.deadline, deadline_of(scope.parent));
+            write_result(frame, exit.result_slot, static_cast<std::uint64_t>(earliest));
+            break;
+        }
+        case Op::TaskCancelled:
+            write_result(frame, exit.result_slot, cancelled(task.context));
+            break;
+        case Op::TaskDeadline:
+            write_result(frame, exit.result_slot, static_cast<std::uint64_t>(deadline_of(task.context)));
+            break;
+        case Op::Take: {
+            const auto& types = image_.functions[frame.function].frame_types;
+            if (!task.stashed || !types_.assignable(task.stash_type, types[exit.result_slot])) {
+                fault(TrapKind::InvalidTaskOperation, "no received value of the slot's type to take");
+            }
+            write_result(frame, exit.result_slot, task.stash);
+            task.stashed = false;
+            break;
+        }
+        case Op::ChannelOpen: {
+            auto& opened = scheduler_->channels[arguments[0]];
+            opened.number = scheduler_->next_channel++;
+            opened.type = exit.target;
+            opened.capacity = arguments[1];
+            add_live_cells(channel_record_cells);
+            break;
+        }
+        case Op::ChannelSend:
+        case Op::ChannelTrySend: {
+            auto& target = channel(arguments[0]);
+            if (!types_.assignable(exit.arguments[1].type, target.type)) {
+                fault(TrapKind::InvalidTaskOperation, "the value does not have the channel's element type");
+            }
+            check_sent(arguments[1], exit.arguments[1].type);
+            switch (try_send(target, arguments[1])) {
+            case Attempt::Done: outcome(Outcome::Done); break;
+            case Attempt::Closed: outcome(Outcome::Closed); break;
+            case Attempt::Blocked:
+                if (exit.scheduler == Op::ChannelTrySend) {
+                    outcome(Outcome::Full);
+                } else {
+                    task.wait_value = arguments[1];
+                    task.wait_value_type = exit.arguments[1].type;
+                    wait_on(TaskState::Sending, target.senders);
+                }
+                break;
+            }
+            break;
+        }
+        case Op::ChannelReceive:
+        case Op::ChannelTryReceive: {
+            auto& source = channel(arguments[0]);
+            switch (try_receive(source, task)) {
+            case Attempt::Done: outcome(Outcome::Done); break;
+            case Attempt::Closed: outcome(Outcome::Closed); break;
+            case Attempt::Blocked:
+                if (exit.scheduler == Op::ChannelTryReceive) outcome(Outcome::Empty);
+                else wait_on(TaskState::Receiving, source.receivers);
+                break;
+            }
+            break;
+        }
+        case Op::ChannelClose:
+            close_channel(channel(arguments[0]));
+            break;
+        case Op::TimerOpen: {
+            auto& opened = scheduler_->timers[arguments[0]];
+            opened.number = scheduler_->next_timer++;
+            opened.deadline = static_cast<std::int64_t>(arguments[1]);
+            add_live_cells(timer_record_cells);
+            break;
+        }
+        case Op::TimerWait: {
+            auto& target = timer(arguments[0]);
+            if (target.fired) {
+                outcome(Outcome::Done);
+            } else {
+                wait_on(TaskState::TimerWait, target.waiters);
+                if (task.state == TaskState::TimerWait) arm_timer(arguments[0], target);
+            }
+            break;
+        }
+        case Op::Select: {
+            auto arms = select_arms(exit, arguments);
+            const auto count = arms.size();
+            task.join_slot = exit.result_slot;
+            // Validate every arm before any of them can commit.
+            for (const auto& arm : arms) {
+                switch (arm.kind) {
+                case nvr::SelectArm::Receive:
+                    channel(arm.handle);
+                    break;
+                case nvr::SelectArm::Send:
+                    if (!types_.assignable(arm.value_type, channel(arm.handle).type)) {
+                        fault(TrapKind::InvalidTaskOperation, "the value does not have the channel's element type");
+                    }
+                    check_sent(arm.value, arm.value_type);
+                    break;
+                case nvr::SelectArm::Join:
+                    child_task(arm.handle);
+                    break;
+                case nvr::SelectArm::Timer:
+                    timer(arm.handle);
+                    break;
+                }
+            }
+            // The first ready arm in rotation order commits.
+            std::optional<std::pair<std::size_t, Outcome>> committed;
+            for (std::size_t offset = 0; offset < count && !committed; ++offset) {
+                const auto index = (task.selects + offset) % count;
+                const auto& arm = arms[index];
+                Attempt attempt = Attempt::Blocked;
+                switch (arm.kind) {
+                case nvr::SelectArm::Receive:
+                    attempt = try_receive(channel(arm.handle), task);
+                    break;
+                case nvr::SelectArm::Send:
+                    attempt = try_send(channel(arm.handle), arm.value);
+                    break;
+                case nvr::SelectArm::Join: {
+                    const auto& child = child_task(arm.handle);
+                    if (child.state == TaskState::Finished) {
+                        if (type(child.result_type).kind != nvr::TypeKind::Void) stash(task, child.result, child.result_type);
+                        attempt = Attempt::Done;
+                    }
+                    break;
+                }
+                case nvr::SelectArm::Timer:
+                    if (timer(arm.handle).fired) attempt = Attempt::Done;
+                    break;
+                }
+                if (attempt != Attempt::Blocked) {
+                    committed = {index, attempt == Attempt::Done ? Outcome::Done : Outcome::Closed};
+                }
+            }
+            if (!committed && (exit.target & 1U) != 0) {
+                // Nothing was ready and the select has a default arm, whose
+                // index follows the listed ones.
+                committed = {count, Outcome::Done};
+            }
+            if (!committed && cancelled(task.context)) {
+                for (std::size_t offset = 0; offset < count && !committed; ++offset) {
+                    const auto index = (task.selects + offset) % count;
+                    if (arms[index].kind != nvr::SelectArm::Join) committed = {index, Outcome::Cancelled};
+                }
+            }
+            if (committed) {
+                commit_select(self, task, static_cast<std::uint32_t>(committed->first), committed->second);
+                break;
+            }
+            // Park on every arm. The first operation another task or the
+            // runtime completes for this task is the one that commits.
+            for (std::size_t index = 0; index < count; ++index) {
+                const auto& arm = arms[index];
+                const Waiter waiter{self, static_cast<std::uint32_t>(index)};
+                switch (arm.kind) {
+                case nvr::SelectArm::Receive: channel(arm.handle).receivers.push_back(waiter); break;
+                case nvr::SelectArm::Send: channel(arm.handle).senders.push_back(waiter); break;
+                case nvr::SelectArm::Timer: {
+                    auto& target = timer(arm.handle);
+                    target.waiters.push_back(waiter);
+                    arm_timer(arm.handle, target);
+                    break;
+                }
+                case nvr::SelectArm::Join: break;
+                }
+            }
+            task.select = std::move(arms);
+            park(TaskState::Selecting);
+            break;
+        }
         }
     }
 
@@ -1084,30 +1998,88 @@ private:
         const auto id = scheduler_->current;
         auto& child = current_task();
         child.result = result;
-        child.state = TaskState::Finished;
+        set_state(child, TaskState::Finished);
+        emit(TaskEvent::Kind::Finish, id);
         // A finished task keeps only what a join needs.
         std::vector<Frame>().swap(child.frames);
         std::vector<TaskScope>().swap(child.scopes);
+        child.stashed = false;
         --scheduler_->live;
+        const auto result_type = child.result_type;
         const auto parent_id = child.parent;
         auto& parent = scheduler_->tasks.at(parent_id);
         auto& scope = parent.scopes[child.parent_scope];
         --scope.live_children;
         const bool last_of_scope = child.parent_scope + 1 == parent.scopes.size() && scope.live_children == 0;
         if (child.unjoinable) {
+            retire_task(child);
             scheduler_->tasks.erase(id);
             remove_live_cells(task_record_cells);
         }
         if (parent.state == TaskState::Joining && parent.waiting_for == id) {
             write_result(parent.frames.back(), parent.join_slot, result);
-            parent.state = TaskState::Runnable;
-            scheduler_->runnable.push_back(parent_id);
+            make_runnable(parent_id, parent);
+        } else if (parent.state == TaskState::Selecting) {
+            for (std::size_t arm = 0; arm < parent.select.size(); ++arm) {
+                if (parent.select[arm].kind == nvr::SelectArm::Join && parent.select[arm].handle == id) {
+                    if (type(result_type).kind != nvr::TypeKind::Void) stash(parent, result, result_type);
+                    commit_select(parent_id, parent, static_cast<std::uint32_t>(arm), nvr::SchedulerOutcome::Done);
+                    break;
+                }
+            }
         } else if (parent.state == TaskState::LeavingScope && last_of_scope) {
             parent.close_on_wake = true;
-            parent.state = TaskState::Runnable;
-            scheduler_->runnable.push_back(parent_id);
+            make_runnable(parent_id, parent);
         }
-        schedule_next();
+        scheduler_->deciding = true;
+    }
+
+    // Expires every timer and scope deadline at or before `now`.
+    std::size_t advance_clock(std::int64_t now) {
+        if (!scheduler_ || finished_) return 0;
+        std::size_t expired = 0;
+        try {
+            auto& deadlines = scheduler_->deadlines;
+            while (!deadlines.empty() && deadlines.begin()->first <= now) {
+                const auto entry = deadlines.begin()->second;
+                deadlines.erase(deadlines.begin());
+                ++expired;
+                if (entry.scope) {
+                    if (const auto found = scheduler_->scopes.find(entry.id); found != scheduler_->scopes.end()) {
+                        found->second.deadline_passed = true;
+                        emit(TaskEvent::Kind::DeadlineExpired, found->second.owner, entry.id,
+                             [] { return std::string("scope"); });
+                        cancel_scope(entry.id);
+                    }
+                } else if (const auto found = scheduler_->timers.find(entry.id); found != scheduler_->timers.end()) {
+                    auto& fired = found->second;
+                    fired.fired = true;
+                    fired.armed = false;
+                    emit(TaskEvent::Kind::DeadlineExpired, 0, fired.number, [] { return std::string("timer"); });
+                    while (!fired.waiters.empty()) {
+                        const auto waiter = fired.waiters.front();
+                        fired.waiters.pop_front();
+                        complete_waiter(waiter, nvr::SchedulerOutcome::Done);
+                    }
+                }
+            }
+        } catch (const Fault& failure) {
+            trap(failure);
+        }
+        return expired;
+    }
+
+    // Scheduler records of a collected or freed object go with it.
+    void release_scheduler_object(std::uint64_t handle) {
+        if (const auto found = scheduler_->channels.find(handle); found != scheduler_->channels.end()) {
+            scheduler_->queued -= found->second.buffer.size();
+            remove_live_cells(channel_record_cells + found->second.buffer.size());
+            scheduler_->channels.erase(found);
+        } else if (const auto timed = scheduler_->timers.find(handle); timed != scheduler_->timers.end()) {
+            if (timed->second.armed) disarm(timed->second.deadline, false, handle);
+            remove_live_cells(timer_record_cells);
+            scheduler_->timers.erase(timed);
+        }
     }
 
     void require_initialized(const Frame& frame, std::uint32_t slot) const {
@@ -1181,6 +2153,9 @@ private:
             if constexpr (!Prepared) {
                 if (!started_) start();
             }
+            if (scheduler_ && scheduler_->deciding) {
+                if (auto event = decide()) return event;
+            }
             prepare_step(Prepared);
             return std::nullopt;
         } catch (const Fault& failure) {
@@ -1213,6 +2188,7 @@ private:
         }
         ++steps_;
         const auto& frame = frames_.back();
+        if (scheduler_ && limits_.profile) ++current_task().steps;
         if (limits_.profile) {
             if (function_steps_.size() != image_.functions.size()) function_steps_.resize(image_.functions.size());
             ++function_steps_[frame.function];
@@ -1361,6 +2337,10 @@ private:
         }
         case nvr::ExitKind::Host: {
             const auto& import = image_.imports[exit.target];
+            if (scheduler_ && host_mode(exit.target) != 0 &&
+                scheduler_->requests.size() >= limits_.max_pending_requests) {
+                fault(TrapKind::RequestLimit, "issuing another overlapping host request");
+            }
             Event event;
             event.kind = Event::Kind::HostRequest;
             event.request.sequence = sequence_++;
@@ -1369,7 +2349,30 @@ private:
             for (std::size_t i = 0; i < arguments.size(); ++i) {
                 event.request.arguments.push_back(value_to_host(arguments[i], import.parameter_types[i], remaining, 0));
             }
-            pending_ = Pending{exit.target, exit.result_slot, exit.resume, exit.error_slot, exit.error_resume};
+            const Pending pending{exit.target, exit.result_slot, exit.resume, exit.error_slot, exit.error_resume};
+            const auto mode = host_mode(exit.target);
+            if (scheduler_) {
+                event.task = scheduler_->current;
+                event.tick = scheduler_->ticks;
+            }
+            emit(TaskEvent::Kind::HostRequest, event.task, event.request.sequence, [&] { return import.name; });
+            if (scheduler_ && mode != 0) {
+                // The service overlaps: this task parks and others run. The
+                // driver supplies the response through deliver().
+                auto& task = current_task();
+                task.pending = pending;
+                task.waiting_for = event.request.sequence;
+                task.cancellable = mode == 2;
+                task.cancel_sent = task.cancellable && cancelled(task.context);
+                task.waiting_for = event.request.sequence;
+                scheduler_->requests.emplace(event.request.sequence, scheduler_->current);
+                scheduler_->peak_requests = std::max<std::uint64_t>(scheduler_->peak_requests, scheduler_->requests.size());
+                if (task.cancel_sent) scheduler_->cancellations.push_back(event.request.sequence);
+                park(TaskState::HostWait);
+                event.overlapping = true;
+                return event;
+            }
+            pending_ = pending;
             return event;
         }
         case nvr::ExitKind::Trap:
@@ -1566,6 +2569,7 @@ private:
         }
         case nvr::StateOp::FreeObject: {
             const auto& item = typed_entry(args[0], types[0].type);
+            if (scheduler_) release_scheduler_object(args[0]);
             remove_live_cells(entry_cells(item));
             heap_.erase(args[0]);
             return 0;
@@ -1727,6 +2731,7 @@ private:
     TracePlans layout_traces_;
     TracePlans frame_traces_;
     std::vector<HeapEntry*> mark_work_;
+    std::vector<std::uint64_t> channel_work_;
     std::uint64_t last_handle_ = 0;
     std::uint64_t last_identity_ = 0;
     std::uint64_t live_cells_ = 0;
@@ -1744,6 +2749,7 @@ private:
     std::optional<nvr::Names> names_;
     std::string frame_text(const Frame& frame) const;
     std::string wait_text(std::uint64_t id, const Task& task) const;
+    std::string cancellation_text(const Task& task) const;
     const nvr::Block* active_block_ = nullptr;
     std::vector<std::int64_t> inputs_;
     std::vector<std::int64_t> outputs_;
@@ -1763,6 +2769,20 @@ std::string Execution::State::frame_text(const Frame& frame) const {
 }
 
 std::string Execution::State::wait_text(std::uint64_t id, const Task& task) const {
+    const auto channel_text = [&](std::uint64_t object, bool sending) {
+        const auto found = scheduler_->channels.find(object);
+        if (found == scheduler_->channels.end()) return std::string("a closed channel");
+        const auto& state = found->second;
+        return "channel " + std::to_string(state.number) + " (" + std::to_string(state.buffer.size()) + " of " +
+               std::to_string(state.capacity) + " queued, " +
+               (sending ? std::to_string(state.receivers.size()) + " receivers waiting"
+                        : std::to_string(state.senders.size()) + " senders waiting") +
+               (state.closed ? ", closed)" : ")");
+    };
+    const auto timer_text = [&](std::uint64_t object) {
+        const auto found = scheduler_->timers.find(object);
+        return found == scheduler_->timers.end() ? std::string("a timer") : "timer " + std::to_string(found->second.number);
+    };
     switch (task.state) {
     case TaskState::Running:
         return pending_ ? "parked: host request " + std::to_string(sequence_ - 1) : std::string("running");
@@ -1776,8 +2796,47 @@ std::string Execution::State::wait_text(std::uint64_t id, const Task& task) cons
     }
     case TaskState::Finished:
         return id == 0 ? "finished" : "finished, result not yet released";
+    case TaskState::Sending:
+        return "parked: send on " + channel_text(task.waiting_for, true);
+    case TaskState::Receiving:
+        return "parked: receive on " + channel_text(task.waiting_for, false);
+    case TaskState::TimerWait:
+        return "parked: " + timer_text(task.waiting_for);
+    case TaskState::Selecting: {
+        std::string text = "parked: select of";
+        for (std::size_t arm = 0; arm < task.select.size(); ++arm) {
+            const auto& entry = task.select[arm];
+            text += arm == 0 ? " " : ", ";
+            switch (entry.kind) {
+            case nvr::SelectArm::Receive: text += "receive on " + channel_text(entry.handle, false); break;
+            case nvr::SelectArm::Send: text += "send on " + channel_text(entry.handle, true); break;
+            case nvr::SelectArm::Join: text += "join of task " + std::to_string(entry.handle); break;
+            case nvr::SelectArm::Timer: text += timer_text(entry.handle); break;
+            }
+        }
+        return text;
+    }
+    case TaskState::HostWait: {
+        const auto& import = image_.imports[task.pending.import];
+        return "parked: host request " + std::to_string(task.waiting_for) + " " + import.name +
+               (task.cancel_sent ? ", cancel requested" : "");
+    }
     }
     return "unknown";
+}
+
+// The cancellation a task's context carries, or nothing.
+std::string Execution::State::cancellation_text(const Task& task) const {
+    for (auto id = task.context; id != 0;) {
+        const auto found = scheduler_->scopes.find(id);
+        if (found == scheduler_->scopes.end()) break;
+        if (found->second.cancelled) {
+            return "cancellation: requested at tick " + std::to_string(found->second.cancelled_tick) +
+                   (found->second.deadline_passed ? ", deadline passed" : "");
+        }
+        id = found->second.parent;
+    }
+    return {};
 }
 
 std::string Execution::State::dump_tasks(TaskDumpFormat format) const {
@@ -1817,6 +2876,9 @@ std::string Execution::State::dump_tasks(TaskDumpFormat format) const {
             out += ",\"spawned_at\":" +
                    (id == 0 ? std::string("null") : quoted(task_location(task.spawn_function, task.spawn_block)));
             out += ",\"state\":" + quoted(wait_text(id, task));
+            if (const auto cancellation = cancellation_text(task); !cancellation.empty()) {
+                out += ",\"cancellation\":" + quoted(cancellation);
+            }
             out += ",\"stack\":[";
             const auto& stack = stack_of(id, task);
             for (auto frame = stack.rbegin(); frame != stack.rend(); ++frame) {
@@ -1843,6 +2905,9 @@ std::string Execution::State::dump_tasks(TaskDumpFormat format) const {
         const auto& stack = stack_of(id, task);
         for (auto frame = stack.rbegin(); frame != stack.rend(); ++frame) {
             out += indent + "    " + frame_text(*frame) + '\n';
+        }
+        if (const auto cancellation = cancellation_text(task); !cancellation.empty()) {
+            out += indent + "    " + cancellation + '\n';
         }
         if (const auto found = children.find(id); found != children.end()) {
             for (auto child = found->second.rbegin(); child != found->second.rend(); ++child) {
@@ -1937,6 +3002,17 @@ Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::
 Event Execution::advance() { return state_->advance(); }
 std::string Execution::dump_tasks(TaskDumpFormat format) const { return state_->dump_tasks(format); }
 std::uint64_t Execution::peak_tasks() const { return state_->peak_tasks(); }
+std::uint64_t Execution::tick() const { return state_->tick(); }
+std::uint64_t Execution::peak_queued_messages() const { return state_->peak_queued_messages(); }
+std::uint64_t Execution::peak_pending_requests() const { return state_->peak_pending_requests(); }
+void Execution::deliver(std::uint64_t sequence, const HostCompletion& completion) {
+    state_->deliver(sequence, completion);
+}
+std::size_t Execution::advance_clock(std::int64_t now) { return state_->advance_clock(now); }
+std::vector<TaskSiteProfile> Execution::task_profile() const { return state_->task_profile(); }
+std::string Execution::location(std::uint32_t function, std::uint32_t block) const {
+    return state_->location(function, block);
+}
 
 std::optional<Event> Execution::begin_step(GraphStep& step) { return state_->begin_step(step); }
 
@@ -1959,8 +3035,20 @@ std::uint64_t Execution::live_heap_cells() const { return state_->live_heap_cell
 std::uint64_t Execution::peak_heap_cells() const { return state_->peak_heap_cells(); }
 const std::vector<std::uint64_t>& Execution::function_steps() const { return state_->function_steps(); }
 
+std::int64_t SteadyTaskClock::now() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+void SteadyTaskClock::wait_until(std::int64_t deadline) {
+    const auto remaining = deadline - now();
+    if (remaining > 0) std::this_thread::sleep_for(std::chrono::nanoseconds(remaining));
+}
+
 RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const std::string> arguments,
-              RunLimits limits) {
+              RunLimits limits, TaskClock* clock) {
+    SteadyTaskClock steady;
+    if (!clock) clock = &steady;
     Execution execution(image, arguments, limits);
     std::uint64_t requests = 0;
     detail::ServiceCallbacks callbacks(execution, bindings, requests);
@@ -1968,7 +3056,23 @@ RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const
         const auto event = execution.advance();
         switch (event.kind) {
         case Event::Kind::HostRequest:
-            execution.complete(callbacks.serve(event.request));
+            if (event.overlapping) {
+                // This driver starts nothing in the background: it serves
+                // the request now and hands the response back at once.
+                execution.deliver(event.request.sequence, callbacks.serve(event.request));
+            } else {
+                execution.complete(callbacks.serve(event.request));
+            }
+            break;
+        case Event::Kind::Poll:
+            if (event.timer) execution.advance_clock(clock->now());
+            break;
+        case Event::Kind::Waiting:
+            if (!event.timer) throw std::logic_error("the run waits for a request this driver never started");
+            clock->wait_until(event.deadline);
+            execution.advance_clock(clock->now());
+            break;
+        case Event::Kind::Cancel:
             break;
         case Event::Kind::Completed:
         case Event::Kind::Trapped:

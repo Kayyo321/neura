@@ -1740,7 +1740,18 @@ void FunctionCompiler::statement(const IrNode& node) {
         return;
     case IrOp::TaskScope: {
         const auto nothing = c_.scalar(nvr::TypeKind::Void);
-        scheduler(nvr::SchedulerOp::ScopeEnter, 0, {}, nothing, node.span);
+        if (node.symbol != no_symbol) {
+            // The scope's identity, for its handle.
+            const auto identity = scheduler(nvr::SchedulerOp::ScopeEnter, 0, {},
+                                            c_.scalar(nvr::TypeKind::Unsigned, 64), node.span);
+            auto it = slots_.find(node.symbol);
+            if (it == slots_.end()) {
+                it = slots_.emplace(node.symbol, new_slot(c_.scalar(nvr::TypeKind::Unsigned, 64))).first;
+            }
+            assign(it->second, identity);
+        } else {
+            scheduler(nvr::SchedulerOp::ScopeEnter, 0, {}, nothing, node.span);
+        }
         ++task_scopes_;
         region(node.body);
         // Falling off the end waits for the scope's tasks. A return, break,
@@ -2591,16 +2602,36 @@ Operand FunctionCompiler::spawn(const IrNode& node, bool handle) {
 }
 
 Operand FunctionCompiler::scheduler_call(const IrNode& node) {
+    const bool is_select = node.text == select_operation || node.text == select_with_default;
     const auto operation = scheduler_operation(node.text);
-    if (!operation) {
+    if (!is_select && !operation) {
         throw Diagnostic(node.span, "unknown scheduler operation '" + node.text + "'");
     }
+    // A select's arm kinds are uint32 literals and stay constants in the
+    // image; every other operand is evaluated left to right.
     auto arguments = sequence(node.operands);
-    for (auto& argument : arguments) {
-        spill(argument);
-        argument = resolve(argument);
+    for (std::size_t i = 0; i < arguments.size(); ++i) {
+        if (is_select && node.operands[i].op == IrOp::Integer && arguments[i].kind == Operand::Kind::Immediate) {
+            const auto type = arguments[i].type;
+            Operand constant;
+            constant.kind = Operand::Kind::Constant;
+            constant.type = type;
+            constant.index = c_.constant(type, immediate_payload(c_.type_at(type), arguments[i].bits));
+            arguments[i] = constant;
+            continue;
+        }
+        spill(arguments[i]);
+        arguments[i] = resolve(arguments[i]);
     }
-    return scheduler(static_cast<nvr::SchedulerOp>(operation->code), 0, std::move(arguments),
+    std::uint32_t target = 0;
+    if (is_select) {
+        target = node.text == select_with_default ? 1 : 0;
+    } else if (operation->typed) {
+        // A channel's element type crosses to the scheduler as a type index.
+        target = c_.type_of(node.type_arguments.front(), node.span);
+    }
+    const auto code = is_select ? select_code : operation->code;
+    return scheduler(static_cast<nvr::SchedulerOp>(code), target, std::move(arguments),
                      c_.type_of(node.type, node.span), node.span);
 }
 

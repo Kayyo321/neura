@@ -201,6 +201,9 @@ public:
 
 // True when any body of `program` contains a Spawn.
 bool has_spawn(const IrProgram& program);
+// True when any body of `program` contains a Spawn, a TaskScope, or a
+// SchedulerCall: the program needs the checks of Concurrency.md section 5.
+bool uses_tasks(const IrProgram& program);
 // Marks a poll on every loop and call of a program that contains a Spawn
 // (Concurrency.md section 10.2). Does nothing otherwise, and running it again
 // changes nothing. Lowering runs it on the linked program, and the build runs

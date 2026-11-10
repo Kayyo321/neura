@@ -5,6 +5,7 @@
 #include "nvm/providers.hpp"
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 
 namespace neura::runner {
@@ -27,6 +28,25 @@ struct RunOptions {
     std::optional<std::filesystem::path> replay;
     // --task-dump: the full task dump of a trap, in this form.
     std::optional<nvm::TaskDumpFormat> task_dump;
+    // --trace-events: one JSON object per scheduler event, one per line.
+    std::optional<std::filesystem::path> trace_events;
+    // --trace-wall-time: add wall-clock times, which differ between runs.
+    bool trace_wall_time = false;
+};
+
+// Writes scheduler events as JSON lines (docs/lang/Concurrency.md section
+// 14.2). Every line carries the event, its tick, and its task; other fields
+// depend on the event. Wall-clock times are added only on request.
+class TraceEvents final : public nvm::TaskObserver {
+public:
+    TraceEvents(const std::filesystem::path& path, bool wall_time);
+    ~TraceEvents() override;
+    void event(const nvm::TaskEvent& event) override;
+
+private:
+    struct Output;
+    std::unique_ptr<Output> output_;
+    bool wall_time_;
 };
 
 // Task dumps for the runs made while it lives (docs/lang/Concurrency.md

@@ -353,6 +353,7 @@ private:
     SymbolId library_module(std::string_view path, std::string_view module, const Span& span,
                             const Context& context, const std::string& message);
     IrNode task_scope(const Statement& stmt, Context& context);
+    IrNode select_statement(const Statement& stmt, Context& context);
     // With `handle`, the Task<T> for the new task; without, the bare spawn
     // of a statement that discards it.
     IrNode spawn(const Expr& expr, Context& context, bool handle = true);
@@ -1370,7 +1371,8 @@ void Lowering::resolve(SymbolId id) {
                 throw Diagnostic(decl.span, "unknown scheduler operation '" + *decl.scheduler_binding + "'");
             if (decl.exported || decl.override_member || decl.static_member ||
                 std::ranges::any_of(decl.parameters, &Parameter::variadic) ||
-                decl.parameters.size() != operation->arguments.size())
+                decl.parameters.size() != operation->arguments.size() ||
+                (operation->typed && decl.generics.size() != 1))
                 throw Diagnostic(decl.span, "a scheduler binding needs a private function with the operation's arguments");
             scheduler_bindings_.emplace(id, *decl.scheduler_binding);
         }
@@ -2017,6 +2019,10 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         result.symbol = no_symbol;
         result.text = bound->second;
         result.type = substitute(symbol(target).type, replacements);
+        // A typed operation carries its type argument to the scheduler.
+        if (scheduler_operation(bound->second)->typed) {
+            result.type_arguments.push_back(replacements.at(symbol(target).generics.front()));
+        }
         return result;
     }
     auto qualifier = static_qualifier(callee);
@@ -2896,17 +2902,209 @@ IrNode Lowering::task_scope(const Statement& stmt, Context& context) {
     // decided no. Globals are still being initialized there.
     if (context.function == no_symbol)
         throw Diagnostic(stmt.keyword, "a scope block is only allowed inside a function body");
-    if (!stmt.bindings.empty())
-        throw Diagnostic(stmt.bindings.front().span,
-                         "a scope handle needs Std.Concurrent.Scope, which this toolchain does not provide yet");
     auto result = node(IrOp::TaskScope, stmt.span);
     const auto base = context.task_scope_base;
     ++context.task_scopes;
-    // body() opens the scope's own lexical block at this index.
     context.task_scope_base = context.scopes.size();
-    result.body = body(stmt.body, context);
+    context.scopes.emplace_back();
+    if (!stmt.bindings.empty()) {
+        // `scope (name)`: a constant bound to the scope's handle. The scope's
+        // identity arrives in a hidden local, and the handle wraps it.
+        const auto& name = stmt.bindings.front();
+        const auto scope_module = library_module("std/concurrent/scope.nra", "Scope", name.span, context,
+                                                 "a scope handle requires Std.Concurrent.Scope");
+        const auto scope_class = own_member(scope_module, "Scope");
+        if (scope_class == no_symbol || !scope_bound_class(scope_class))
+            throw Diagnostic(name.span, "Std.Concurrent.Scope must declare the class Scope");
+        resolve(scope_class);
+        const auto scope_init = own_member(scope_class, "init");
+        if (scope_init == no_symbol) throw Diagnostic(name.span, "Std.Concurrent.Scope.Scope needs a constructor");
+        resolve(scope_init);
+        const auto identity = add(SymbolKind::Local, "$scope", name.span, context.owner);
+        symbol(identity).type = uint64_type;
+        symbol(identity).constant = true;
+        result.symbol = identity;
+        auto load = node(IrOp::Load, name.span, uint64_type);
+        load.symbol = identity;
+        auto handle = node(IrOp::Allocate, name.span, symbol(scope_class).type);
+        handle.symbol = scope_init;
+        handle.operands.push_back(std::move(load));
+        const auto binding = add(SymbolKind::Local, name.text, name.span, context.owner);
+        symbol(binding).type = symbol(scope_class).type;
+        symbol(binding).constant = true;
+        context.scopes.back().emplace(name.text, binding);
+        auto initialize = node(IrOp::Initialize, name.span);
+        initialize.symbol = binding;
+        initialize.operands.push_back(std::move(handle));
+        result.body.push_back(std::move(initialize));
+    }
+    for (const auto& inner : stmt.body) append_statement(result.body, inner, context);
+    context.scopes.pop_back();
     context.task_scope_base = base;
     --context.task_scopes;
+    return result;
+}
+
+// select { arms }. Every arm's receiver and arguments are evaluated once, in
+// source order, before anything is attempted; then one scheduler operation
+// commits exactly one arm, and only that arm's block runs. The operation of
+// an arm is a call of a selectable member of a Std.Concurrent handle:
+// receive, send, join, or wait. Each such class provides select_handle(),
+// what the scheduler waits on, and <member>_selected(code), which turns the
+// committed outcome into what the member would have returned on its own.
+IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
+    if (context.function == no_symbol)
+        throw Diagnostic(stmt.keyword, "select is only allowed inside a function body");
+    struct Arm {
+        const SelectArm* syntax = nullptr;
+        std::string member;
+        std::string receiver_name;
+        IrType receiver_type;
+    };
+    std::vector<Arm> arms;
+    const SelectArm* fallback = nullptr;
+    auto result = node(IrOp::Block, stmt.span);
+    auto call = node(IrOp::SchedulerCall, stmt.span, uint64_type);
+    context.scopes.emplace_back();
+    const auto synthetic = [](Expr::Kind kind, const Span& span, std::string text) {
+        return Expr{kind, span, std::move(text), {}, {}, std::nullopt};
+    };
+    const auto integer = [&](const IrType& type, std::string digits, const Span& span) {
+        auto literal = node(IrOp::Integer, span, type);
+        literal.text = std::move(digits);
+        return literal;
+    };
+    for (const auto& arm : stmt.select_arms) {
+        if (!arm.operation) {
+            if (fallback) throw Diagnostic(arm.span, "a select has at most one '_' arm");
+            fallback = &arm;
+            continue;
+        }
+        const auto& operation = *arm.operation;
+        if (operation.kind != ExprKind::Call || operation.operands.front().kind != ExprKind::Member)
+            throw Diagnostic(operation.span, "a select arm is a call of send, receive, join, or wait");
+        const auto& callee = operation.operands.front();
+        const auto kind = callee.text == "receive" ? select_receive : callee.text == "send" ? select_send
+                        : callee.text == "join" ? select_join : callee.text == "wait" ? select_timer : 4U;
+        const std::size_t expected = kind == select_send ? 1 : 0;
+        if (kind == 4U || operation.operands.size() != 1 + expected || !operation.type_arguments.empty())
+            throw Diagnostic(operation.span, "a select arm is a call of send, receive, join, or wait");
+        // The receiver is evaluated once and kept for the committed arm.
+        auto receiver = value(callee.operands.front(), context);
+        const auto index = std::to_string(arms.size());
+        const auto receiver_span = callee.operands.front().span;
+        if (receiver.type.kind != TypeKind::Object || value_member(receiver.type, "select_handle", true) == no_symbol ||
+            value_member(receiver.type, callee.text + "_selected", true) == no_symbol)
+            throw Diagnostic(receiver_span, "type " + describe(receiver.type) + " has no selectable member '" +
+                                            callee.text + "'");
+        Arm lowered{&arm, callee.text, "$select" + index, receiver.type};
+        const auto saved = save_temporary(std::move(receiver), result.body, context, lowered.receiver_name);
+        context.scopes.back().emplace(lowered.receiver_name, saved.symbol);
+        // kind, then select_handle() of the receiver, then a send's value.
+        call.operands.push_back(integer(uint32_type, std::to_string(kind), operation.span));
+        auto handle_callee = synthetic(ExprKind::Member, receiver_span, "select_handle");
+        handle_callee.operands.push_back(synthetic(ExprKind::Name, receiver_span, lowered.receiver_name));
+        auto handle_call = synthetic(ExprKind::Call, receiver_span, {});
+        handle_call.operands.push_back(std::move(handle_callee));
+        auto handle = save_temporary(value(handle_call, context), result.body, context, "$handle" + index);
+        if (kind == select_send) {
+            // Type the value as the member's parameter, as the call would.
+            const auto member = value_member(lowered.receiver_type, "send", true);
+            if (member == no_symbol || symbol(member).parameters.size() != 1)
+                throw Diagnostic(operation.span, "send takes the value to send");
+            resolve(member);
+            const auto parameter = substitute(symbol(symbol(member).parameters.front()).type,
+                                              receiver_arguments(lowered.receiver_type, symbol(member).owner));
+            auto sent = save_temporary(value(operation.operands[1], context, &parameter, true), result.body, context,
+                                       "$sent" + index);
+            call.operands.push_back(std::move(handle));
+            call.operands.push_back(std::move(sent));
+        } else {
+            call.operands.push_back(std::move(handle));
+        }
+        arms.push_back(std::move(lowered));
+    }
+    if (arms.empty()) throw Diagnostic(stmt.span, "a select needs at least one arm that waits");
+    call.text = std::string(fallback ? select_with_default : select_operation);
+    const auto committed = save_temporary(std::move(call), result.body, context, "$selected");
+    // The low half of the result is the committed arm, the high half its outcome.
+    const auto arm_of = [&](const Span& span) {
+        auto mask = node(IrOp::Binary, span, uint64_type);
+        mask.text = "&";
+        auto selected = committed;
+        mask.operands.push_back(std::move(selected));
+        mask.operands.push_back(integer(uint64_type, "4294967295", span));
+        return mask;
+    };
+    const auto outcome_of = [&](const Span& span) {
+        auto shift = node(IrOp::Binary, span, uint64_type);
+        shift.text = ">>";
+        auto selected = committed;
+        shift.operands.push_back(std::move(selected));
+        shift.operands.push_back(integer(uint32_type, "32", span));
+        auto narrowed = node(IrOp::Convert, span, uint32_type);
+        narrowed.operands.push_back(std::move(shift));
+        return narrowed;
+    };
+    const auto arm_block = [&](const SelectArm& arm, const Arm* waits) {
+        auto block = node(IrOp::Block, arm.span);
+        context.scopes.emplace_back();
+        if (waits) {
+            auto outcome_name = synthetic(ExprKind::Name, arm.span, "$outcome");
+            auto finisher = synthetic(ExprKind::Member, arm.operation->span, waits->member + "_selected");
+            finisher.operands.push_back(synthetic(ExprKind::Name, arm.operation->span, waits->receiver_name));
+            auto finish = synthetic(ExprKind::Call, arm.operation->span, {});
+            finish.operands.push_back(std::move(finisher));
+            finish.operands.push_back(std::move(outcome_name));
+            const auto outcome = save_temporary(outcome_of(arm.span), block.body, context, "$outcome");
+            context.scopes.back().emplace("$outcome", outcome.symbol);
+            auto produced = expression(finish, context);
+            if (arm.binding) {
+                if (produced.type.kind == TypeKind::Void)
+                    throw Diagnostic(arm.binding->span, "this operation has no result to bind");
+                if (arm.binding->text != "_" && context.scopes.back().contains(arm.binding->text))
+                    throw Diagnostic(arm.binding->span, "duplicate local binding '" + arm.binding->text + "'");
+                const auto binding = add(SymbolKind::Local, arm.binding->text, arm.binding->span, context.owner);
+                symbol(binding).type = produced.type;
+                symbol(binding).constant = arm.constant_binding;
+                if (arm.binding->text != "_") context.scopes.back().emplace(arm.binding->text, binding);
+                auto initialize = node(IrOp::Initialize, arm.binding->span);
+                initialize.symbol = binding;
+                initialize.operands.push_back(std::move(produced));
+                block.body.push_back(std::move(initialize));
+            } else {
+                auto discard = node(IrOp::Discard, arm.operation->span);
+                discard.operands.push_back(std::move(produced));
+                block.body.push_back(std::move(discard));
+            }
+        }
+        for (const auto& inner : arm.body) append_statement(block.body, inner, context);
+        context.scopes.pop_back();
+        return block;
+    };
+    // The last listed arm, or the default arm, needs no test: it is what
+    // remains when no earlier index matched.
+    std::optional<IrNode> chain;
+    if (fallback) chain = arm_block(*fallback, nullptr);
+    for (std::size_t position = arms.size(); position-- > 0;) {
+        auto block = arm_block(*arms[position].syntax, &arms[position]);
+        if (!chain) {
+            chain = std::move(block);
+            continue;
+        }
+        const auto& span = arms[position].syntax->span;
+        auto test = node(IrOp::Binary, span, bool_type);
+        test.text = "==";
+        test.operands.push_back(arm_of(span));
+        test.operands.push_back(integer(uint64_type, std::to_string(position), span));
+        auto branch = node(IrOp::Branch, span);
+        branch.operands.push_back(std::move(test));
+        branch.body.push_back(std::move(block));
+        branch.alternative.push_back(std::move(*chain));
+        chain = std::move(branch);
+    }
+    result.body.push_back(std::move(*chain));
+    context.scopes.pop_back();
     return result;
 }
 
@@ -3162,7 +3360,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     case StmtKind::Scope:
         return task_scope(stmt, context);
     case StmtKind::Select:
-        throw Diagnostic(stmt.keyword, "select needs Std.Concurrent channels, which this toolchain does not provide yet");
+        return select_statement(stmt, context);
     case StmtKind::Break:
     case StmtKind::Continue:
         if (context.loops == 0) {

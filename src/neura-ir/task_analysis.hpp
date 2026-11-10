@@ -56,6 +56,10 @@ private:
     std::map<SymbolId, std::vector<SymbolId>> variants_;
     std::map<SymbolId, std::vector<SymbolId>> destructors_;
     std::map<SymbolId, Reason> unsafe_;
+    // For each body owner, the owners whose bodies can run it and where.
+    std::map<SymbolId, std::vector<std::pair<SymbolId, Span>>> callers_;
+    bool library_code(SymbolId owner) const;
+    Span user_site(SymbolId owner, const Span& fallback) const;
     mutable std::map<SymbolId, bool> class_cache_;
     mutable std::map<SymbolId, bool> enum_cache_;
 

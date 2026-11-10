@@ -28,8 +28,12 @@ foreach(name IN ITEMS scalars upcalls)
     if(NOT replayed_stdout STREQUAL expected)
         message(FATAL_ERROR "${name}: replayed run output differs:\n${replayed_stdout}")
     endif()
-    file(STRINGS "${TEST_DIR}/${name}.trace" calls REGEX "^request neura[.]ffi[.]call")
-    file(STRINGS "${TEST_DIR}/${name}.trace" callbacks REGEX "^callback neura[.]ffi[.]upcall")
+    # Count the matched prefixes, not the lines: a trace line holds argument
+    # bytes, pointers among them, and a `[` or `;` in one would change how
+    # CMake splits a list of whole lines from run to run.
+    file(READ "${TEST_DIR}/${name}.trace" trace_text)
+    string(REGEX MATCHALL "(^|\n)request neura[.]ffi[.]call" calls "${trace_text}")
+    string(REGEX MATCHALL "(^|\n)callback neura[.]ffi[.]upcall" callbacks "${trace_text}")
     list(LENGTH calls call_count)
     list(LENGTH callbacks callback_count)
     if(call_count LESS 2 OR (name STREQUAL "upcalls" AND callback_count LESS 2))

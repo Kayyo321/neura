@@ -790,15 +790,154 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
             invalid(where + ": result slot must have type " + name);
         }
     };
-    if (exit.scheduler != SchedulerOp::Spawn && exit.target != 0) {
-        invalid(where + ": scheduler target must be zero except for spawn");
+    if (exit.scheduler != SchedulerOp::Spawn && exit.scheduler != SchedulerOp::ChannelOpen &&
+        exit.scheduler != SchedulerOp::Select && exit.target != 0) {
+        invalid(where + ": scheduler target must be zero for this operation");
     }
+    const auto is_signed64 = [&](std::uint32_t type) {
+        return image_.types[type].kind == TypeKind::Signed && image_.types[type].width == 64;
+    };
+    const auto is_bool = [&](std::uint32_t type) { return image_.types[type].kind == TypeKind::Bool; };
+    const auto no_result = [&] {
+        if (exit.result_slot != absent) invalid(where + ": a void result requires an absent slot");
+    };
+    // A scheduler object is any object reference; the scheduler knows
+    // which objects it has opened as channels or timers.
+    const auto object_operand = [&](std::size_t index) {
+        if (index >= exit.arguments.size() || image_.types[exit.arguments[index].type].kind != TypeKind::Object) {
+            invalid(where + ": argument " + std::to_string(index) + " must be an object reference");
+        }
+    };
+    const auto typed_operand = [&](std::size_t index, auto predicate, const char* name) {
+        if (index >= exit.arguments.size() || !predicate(exit.arguments[index].type)) {
+            invalid(where + ": argument " + std::to_string(index) + " must have type " + name);
+        }
+    };
+    const auto unsigned64 = [&](std::uint32_t type) { return is_unsigned(type, 64); };
+    const auto unsigned32 = [&](std::uint32_t type) { return is_unsigned(type, 32); };
+    const auto sent_value = [&](std::size_t index) {
+        if (index >= exit.arguments.size() || !is_transferable(image_, exit.arguments[index].type)) {
+            invalid(where + ": argument " + std::to_string(index) + " is not transferable");
+        }
+    };
     switch (exit.scheduler) {
     case SchedulerOp::ScopeEnter:
+        arity(0);
+        // With a slot, the identity of the new scope for its handle.
+        if (exit.result_slot != absent) require_slot_type(unsigned64, "uint64");
+        break;
     case SchedulerOp::ScopeExit:
         arity(0);
-        if (exit.result_slot != absent) invalid(where + ": a void result requires an absent slot");
+        no_result();
         break;
+    case SchedulerOp::ScopeCancel:
+        arity(1);
+        typed_operand(0, unsigned64, "uint64");
+        no_result();
+        break;
+    case SchedulerOp::ScopeIsCancelled:
+        arity(1);
+        typed_operand(0, unsigned64, "uint64");
+        require_slot_type(is_bool, "bool");
+        break;
+    case SchedulerOp::ScopeSetDeadline:
+        arity(2);
+        typed_operand(0, unsigned64, "uint64");
+        typed_operand(1, is_signed64, "int64");
+        no_result();
+        break;
+    case SchedulerOp::ScopeDeadline:
+        arity(1);
+        typed_operand(0, unsigned64, "uint64");
+        require_slot_type(is_signed64, "int64");
+        break;
+    case SchedulerOp::TaskCancelled:
+        arity(0);
+        require_slot_type(is_bool, "bool");
+        break;
+    case SchedulerOp::TaskDeadline:
+        arity(0);
+        require_slot_type(is_signed64, "int64");
+        break;
+    case SchedulerOp::Take:
+        // The slot's type is checked against the value when it is taken.
+        arity(0);
+        if (exit.result_slot >= function.frame_types.size()) invalid(where + ": take needs a result slot");
+        break;
+    case SchedulerOp::ChannelOpen:
+        arity(2);
+        object_operand(0);
+        typed_operand(1, is_signed64, "int64");
+        if (exit.target >= image_.types.size() || image_.types[exit.target].kind == TypeKind::Void ||
+            !is_transferable(image_, exit.target)) {
+            invalid(where + ": the channel's element type must be a transferable type");
+        }
+        no_result();
+        break;
+    case SchedulerOp::ChannelSend:
+    case SchedulerOp::ChannelTrySend:
+        arity(2);
+        object_operand(0);
+        sent_value(1);
+        require_slot_type(unsigned32, "uint32");
+        break;
+    case SchedulerOp::ChannelReceive:
+    case SchedulerOp::ChannelTryReceive:
+    case SchedulerOp::TimerWait:
+        arity(1);
+        object_operand(0);
+        require_slot_type(unsigned32, "uint32");
+        break;
+    case SchedulerOp::ChannelClose:
+        arity(1);
+        object_operand(0);
+        no_result();
+        break;
+    case SchedulerOp::TimerOpen:
+        arity(2);
+        object_operand(0);
+        typed_operand(1, is_signed64, "int64");
+        no_result();
+        break;
+    case SchedulerOp::Select: {
+        // Flags in the target: bit 0 says a default arm follows the listed
+        // ones. Each arm is a uint32 constant kind and its operands.
+        if (exit.target > 1) invalid(where + ": select flags must be 0 or 1");
+        std::size_t index = 0;
+        std::size_t arms = 0;
+        while (index < exit.arguments.size()) {
+            const auto& kind = exit.arguments[index];
+            if (kind.kind != ValueKind::Constant || !is_unsigned(kind.type, 32)) {
+                invalid(where + ": a select arm begins with a uint32 constant");
+            }
+            std::uint32_t code = 0;
+            const auto& payload = image_.constants[kind.index].payload;
+            for (std::size_t byte = 0; byte < payload.size() && byte < 4; ++byte) {
+                code |= static_cast<std::uint32_t>(payload[byte]) << (8 * byte);
+            }
+            if (code >= select_arm_count) invalid(where + ": invalid select arm kind " + std::to_string(code));
+            switch (static_cast<SelectArm>(code)) {
+            case SelectArm::Receive:
+            case SelectArm::Timer:
+                object_operand(index + 1);
+                index += 2;
+                break;
+            case SelectArm::Send:
+                object_operand(index + 1);
+                sent_value(index + 2);
+                index += 3;
+                break;
+            case SelectArm::Join:
+                typed_operand(index + 1, unsigned64, "uint64");
+                index += 2;
+                break;
+            }
+            ++arms;
+        }
+        if (arms == 0) invalid(where + ": select needs at least one arm");
+        require_slot_type(unsigned64, "uint64");
+        break;
+    }
     case SchedulerOp::Spawn: {
         if (exit.target >= image_.functions.size()) {
             invalid(where + ": function " + std::to_string(exit.target) + " is out of range");

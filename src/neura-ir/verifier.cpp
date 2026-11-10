@@ -522,11 +522,22 @@ private:
             if (context.function == no_symbol) {
                 report(node.span, "a task scope appears outside a function body");
             }
-            if (node.symbol != no_symbol) {
-                report(node.span, "a task scope names a handle, which this format revision does not define");
+            // With a symbol, the constant uint64 local that receives the
+            // scope's identity for its handle.
+            if (node.symbol != no_symbol &&
+                (!valid(node.symbol) || symbol(node.symbol).kind != SymbolKind::Local ||
+                 symbol(node.symbol).type != IrType{TypeKind::Integer, "uint64", no_symbol, {}})) {
+                report(node.span, "a task scope's identity is a uint64 local");
+            } else if (node.symbol != no_symbol) {
+                if (initialized_[node.symbol]) report(node.span, "a task scope's identity is initialized twice");
+                initialized_[node.symbol] = true;
             }
             ++context.task_scopes;
+            // The identity is set on entry and visible in the body only.
+            scopes_.emplace_back();
+            if (valid(node.symbol)) scopes_.back().push_back(node.symbol);
             check_region(node.body, context);
+            scopes_.pop_back();
             --context.task_scopes;
             break;
         case IrOp::Return: check_return(node, context); break;
@@ -591,20 +602,61 @@ private:
     }
 
     void check_scheduler_call(const IrNode& node) {
-        if (node.symbol != no_symbol || !node.type_arguments.empty()) {
+        if (node.symbol != no_symbol) {
             report(node.span, "a scheduler call names its operation in text only");
+        }
+        const IrType uint64{TypeKind::Integer, "uint64", no_symbol, {}};
+        const IrType uint32{TypeKind::Integer, "uint32", no_symbol, {}};
+        const auto value = [](const IrType& type) {
+            return type.kind != TypeKind::Void && type.kind != TypeKind::Module;
+        };
+        if (node.text == select_operation || node.text == select_with_default) {
+            // Arms in source order: a uint32 kind literal and its operands.
+            if (!node.type_arguments.empty()) report(node.span, "a select takes no type arguments");
+            if (node.type != uint64) report(node.span, "a select result must be uint64");
+            std::size_t index = 0;
+            std::size_t arms = 0;
+            while (index < node.operands.size()) {
+                const auto& kind = node.operands[index];
+                if (kind.op != IrOp::Integer || kind.type != uint32 ||
+                    (kind.text != "0" && kind.text != "1" && kind.text != "2" && kind.text != "3")) {
+                    report(kind.span, "a select arm begins with its kind, a uint32 literal from 0 to 3");
+                    return;
+                }
+                const std::size_t operands = kind.text == "1" ? 2 : 1;
+                if (index + operands >= node.operands.size()) {
+                    report(kind.span, "a select arm lacks its operands");
+                    return;
+                }
+                const auto& target = node.operands[index + 1];
+                if (kind.text == "2" ? target.type != uint64 : target.type.kind != TypeKind::Object) {
+                    report(target.span, "a select arm waits on an object, or on a uint64 task for a join");
+                }
+                if (operands == 2 && !value(node.operands[index + 2].type)) {
+                    report(node.operands[index + 2].span, "a select send arm needs a value");
+                }
+                index += 1 + operands;
+                ++arms;
+            }
+            if (arms == 0) report(node.span, "a select needs at least one arm");
+            return;
         }
         const auto operation = scheduler_operation(node.text);
         if (!operation) {
             report(node.span, "scheduler call names unknown operation '" + node.text + "'");
             return;
         }
-        const auto matches = [](char letter, const IrType& type) {
+        if (node.type_arguments.size() != (operation->typed ? 1U : 0U)) {
+            report(node.span, "scheduler operation '" + node.text + "' has the wrong number of type arguments");
+        }
+        const auto matches = [&](char letter, const IrType& type) {
             switch (letter) {
-            case 'u': return type == IrType{TypeKind::Integer, "uint64", no_symbol, {}};
+            case 'u': return type == uint64;
             case 'i': return type == IrType{TypeKind::Integer, "int64", no_symbol, {}};
+            case 'c': return type == uint32;
             case 'b': return type.kind == TypeKind::Bool;
-            case 'v': return type.kind != TypeKind::Void && type.kind != TypeKind::Module;
+            case 'o': return type.kind == TypeKind::Object;
+            case 'v': return value(type);
             case '0': return type.kind == TypeKind::Void;
             default: return false;
             }

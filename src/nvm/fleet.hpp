@@ -8,6 +8,9 @@ struct FleetOptions {
     RunLimits limits;
     GraphDevice* device = nullptr;
     std::uint32_t window = 4096;
+    // The clock of the members' timers and deadlines; the steady clock when
+    // null. A member that waits for a deadline holds the fleet until then.
+    TaskClock* clock = nullptr;
 };
 
 struct FleetEvent {

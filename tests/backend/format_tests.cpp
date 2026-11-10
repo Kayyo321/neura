@@ -248,8 +248,11 @@ NEURA_TEST(format, scheduler_exits_and_transferable_layouts) {
         }
         expect_rejected(assemble(polled, concurrent), Kind::Malformed, "poll flag is valid only");
     }
-    changed([](auto& i) { i.functions[0].blocks[0].exits[0].scheduler = static_cast<nvr::SchedulerOp>(5); },
-            Kind::Malformed, "invalid scheduler operation 5");
+    // The first code after the defined operations.
+    changed([](auto& i) {
+                i.functions[0].blocks[0].exits[0].scheduler = static_cast<nvr::SchedulerOp>(nvr::scheduler_op_count);
+            },
+            Kind::Malformed, "invalid scheduler operation 21");
     changed([](auto& i) { i.native_library = nvr::NativeLibrary{"target", {1}, {}}; }, Kind::Malformed,
             "concurrent images cannot contain CALB, NATV, or neura.ffi.* imports");
     changed([](auto& i) { i.imports[0].name = "neura.ffi.fake"; }, Kind::Malformed, "concurrent images cannot");

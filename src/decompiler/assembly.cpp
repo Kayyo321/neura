@@ -20,9 +20,7 @@ constexpr std::array<std::string_view, 11> type_kinds{"void", "bool", "unsigned"
 constexpr std::array<std::string_view, 8> exit_kinds{
     "continue", "call", "return", "state", "host", "trap", "message-trap", "scheduler",
 };
-constexpr std::array<std::string_view, nvr::scheduler_op_count> scheduler_ops{
-    "scope-enter", "scope-exit", "spawn", "join", "is-finished",
-};
+constexpr auto& scheduler_ops = nvr::scheduler_op_names;
 constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "allocate-object", "read-tag",         "read-field",    "write-field",    "free-object",
     "read-global",     "write-global",     "allocate-collection", "read-length", "read-element",

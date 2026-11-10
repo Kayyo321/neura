@@ -176,8 +176,9 @@ public:
                 operation = "spawn " + function_name(exit.target) + "(" + values(function, args, lifted, inputs) + ")";
                 break;
             case nvr::SchedulerOp::Join: operation = "join(" + values(function, args, lifted, inputs) + ")"; break;
-            case nvr::SchedulerOp::IsFinished:
-                operation = "is-finished(" + values(function, args, lifted, inputs) + ")";
+            default:
+                operation = std::string(nvr::scheduler_op_names[static_cast<std::size_t>(exit.scheduler)]) + "(" +
+                            values(function, args, lifted, inputs) + ")";
                 break;
             }
             operation += " [decoded]";

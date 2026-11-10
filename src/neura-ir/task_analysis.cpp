@@ -65,6 +65,17 @@ bool has_spawn(const IrProgram& program) {
     return false;
 }
 
+bool uses_tasks(const IrProgram& program) {
+    bool found = false;
+    for (const auto& body : program.bodies) {
+        each_node(body.instructions, [&](const IrNode& node) {
+            found = found || node.op == IrOp::Spawn || node.op == IrOp::TaskScope || node.op == IrOp::SchedulerCall;
+        });
+        if (found) return true;
+    }
+    return false;
+}
+
 void insert_polls(IrProgram& program) {
     // The flag is a function of the whole program: a module compiled alone
     // carries none, and gains them when it is linked into a program that
@@ -273,7 +284,10 @@ void TaskAnalysis::summarize() {
             }
             callees(node, out);
         });
-        for (const auto& [callee, span] : out) callers[callee].push_back(body.owner);
+        for (const auto& [callee, span] : out) {
+            callers[callee].push_back(body.owner);
+            callers_[callee].emplace_back(body.owner, span);
+        }
     }
     std::vector<SymbolId> pending;
     for (const auto& [owner, reason] : unsafe_) pending.push_back(owner);
@@ -290,6 +304,29 @@ void TaskAnalysis::summarize() {
             pending.push_back(caller);
         }
     }
+}
+
+bool TaskAnalysis::library_code(SymbolId owner) const {
+    const auto file = source_file(program_, owner);
+    return file != no_symbol && !symbol(file).library_path.empty();
+}
+
+// Where a program's own code reaches `owner`: the nearest call outside the
+// standard library, so that a rule a library operation enforces is reported
+// where the program used it. `fallback` when no such call exists.
+Span TaskAnalysis::user_site(SymbolId owner, const Span& fallback) const {
+    if (!library_code(owner)) return fallback;
+    std::vector<SymbolId> pending{owner};
+    std::set<SymbolId> seen{owner};
+    for (std::size_t i = 0; i < pending.size(); ++i) {
+        const auto found = callers_.find(pending[i]);
+        if (found == callers_.end()) continue;
+        for (const auto& [caller, span] : found->second) {
+            if (!library_code(caller)) return span;
+            if (seen.insert(caller).second) pending.push_back(caller);
+        }
+    }
+    return fallback;
 }
 
 std::optional<TaskAnalysis::Unsafe> TaskAnalysis::unsafe(SymbolId function) const {
@@ -312,6 +349,26 @@ void TaskAnalysis::check() const {
     const IrNode* first_spawn = nullptr;
     for (const auto& body : program_.bodies) {
         each_node(body.instructions, [&](const IrNode& node) {
+            if (node.op == IrOp::SchedulerCall) {
+                // What a channel carries is given to another task (5.1).
+                const auto require = [&](const IrType& type, const char* role) {
+                    if (transferable(type)) return;
+                    throw Diagnostic(user_site(body.owner, node.span),
+                                     "a value of type " + display(type) + " is not transferable, so it cannot be " + role);
+                };
+                if (node.text == "channel.open" && !node.type_arguments.empty()) {
+                    require(node.type_arguments.front(), "a channel's element type");
+                } else if ((node.text == "channel.send" || node.text == "channel.try_send") && node.operands.size() == 2) {
+                    require(node.operands[1].type, "sent on a channel");
+                } else if (node.text.starts_with("select")) {
+                    for (std::size_t i = 0; i + 1 < node.operands.size();) {
+                        const bool send = node.operands[i].text == "1";
+                        if (send && i + 2 < node.operands.size()) require(node.operands[i + 2].type, "sent on a channel");
+                        i += send ? 3 : 2;
+                    }
+                }
+                return;
+            }
             if (node.op != IrOp::Spawn) return;
             if (!first_spawn) first_spawn = &node;
             if (node.operands.size() != 1 || node.operands.front().op != IrOp::Allocate ||
