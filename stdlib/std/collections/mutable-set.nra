@@ -1,6 +1,6 @@
-let mutable_collection = import:Std.Collections.MutableCollection;
-let set = import:Std.Collections.Set;
+let.promote _ = import:Std.Collections.MutableCollection;
+let.promote _ = import:Std.Collections.Set;
 
 export let MutableSet = module (
-    export let MutableSet = interface<T>:set.Set<T>, mutable_collection.MutableCollection<T> ();
+    export let MutableSet = interface<T>:Set<T>, MutableCollection<T> ();
 );

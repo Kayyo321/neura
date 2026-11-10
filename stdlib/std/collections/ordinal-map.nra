@@ -1,6 +1,6 @@
 let cell = import:Std.Core.Cell;
 let iterators = import:Std.Collections.Iterator;
-let mutable_map = import:Std.Collections.MutableMap;
+let.promote _ = import:Std.Collections.MutableMap;
 let optional = import:Std.Core.Optional;
 let text_depth = import:Std.Collections.Internal.TextDepth;
 
@@ -12,7 +12,7 @@ let text_depth = import:Std.Collections.Internal.TextDepth;
 // order. A key outside 0 through n - 1 is a bounds trap from the position
 // list.
 export let OrdinalMap = module (
-    export let OrdinalMap = class<V> implements mutable_map.MutableMap<int, V> (
+    export let OrdinalMap = class<V> implements MutableMap<int, V> (
         let position: int[list];
         let dense_keys: int[list] = [];
         let dense_values: V[list] = [];
@@ -22,7 +22,7 @@ export let OrdinalMap = module (
 
         // An empty map for the keys 0 through `limit` - 1. Traps with
         // "invalid argument: negative size".
-        export let init = func(limit: int) -> void {
+        export let init = func(limit: int) {
             if (limit < 0) {
                 trap_with_message("invalid argument: negative size");
             }
@@ -30,23 +30,23 @@ export let OrdinalMap = module (
             let i = 0;
             while (i < limit) {
                 slots.append(-1);
-                i = i + 1;
+                i += 1;
             }
             position = slots;
         };
 
-        let changed = func() -> void {
+        let changed = func {
             modifications.value = modifications.value + 1;
         };
 
-        let check = func(expected: uint64) -> void {
+        let check = func(expected: uint64) {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
             }
         };
 
         // Appends a new entry for an absent key.
-        let insert = func(key: int, value: V) -> void {
+        let insert = func(key: int, value: V) {
             position[key] = dense_keys.length;
             dense_keys.append(key);
             dense_values.append(value);
@@ -55,7 +55,7 @@ export let OrdinalMap = module (
 
         // Removes the entry at dense place `slot`, moving the last entry into
         // it.
-        let release = func(slot: int) -> void {
+        let release = func(slot: int) {
             let last = dense_keys.length - 1;
             position[dense_keys[slot]] = -1;
             if (slot != last) {
@@ -69,15 +69,11 @@ export let OrdinalMap = module (
             changed();
         };
 
-        export let size = func() -> int {
-            return dense_keys.length;
-        };
+        export let size = func -> int => dense_keys.length;
 
-        export let is_empty = func() -> bool {
-            return dense_keys.length == 0;
-        };
+        export let is_empty = func -> bool => dense_keys.length == 0;
 
-        export let clear = func() -> void {
+        export let clear = func {
             for (let key in dense_keys) {
                 position[key] = -1;
             }
@@ -88,9 +84,7 @@ export let OrdinalMap = module (
             changed();
         };
 
-        export let contains_key = func(key: int) -> bool {
-            return position[key] >= 0;
-        };
+        export let contains_key = func(key: int) -> bool => position[key] >= 0;
 
         export let get = func(key: int) -> optional.Optional<V> {
             let slot = position[key];
@@ -119,7 +113,7 @@ export let OrdinalMap = module (
 
         // Associates the value, replacing any previous one. Replacing is not
         // structural.
-        export let set = func(key: int, value: V) -> void {
+        export let set = func(key: int, value: V) {
             let slot = position[key];
             if (slot >= 0) {
                 dense_values[slot] = value;
@@ -161,7 +155,7 @@ export let OrdinalMap = module (
         };
 
         // The keys in ascending order.
-        export let keys = func() -> int[list] {
+        export let keys = func -> int[list] {
             let result: int[list] = [];
             let limit = position.length;
             let key = 0;
@@ -169,13 +163,13 @@ export let OrdinalMap = module (
                 if (position[key] >= 0) {
                     result.append(key);
                 }
-                key = key + 1;
+                key += 1;
             }
             return result;
         };
 
         // The values in key order.
-        export let values = func() -> V[list] {
+        export let values = func -> V[list] {
             let result: V[list] = [];
             let limit = position.length;
             let key = 0;
@@ -184,12 +178,12 @@ export let OrdinalMap = module (
                 if (slot >= 0) {
                     result.append(dense_values[slot]);
                 }
-                key = key + 1;
+                key += 1;
             }
             return result;
         };
 
-        export let entries = func() -> [int, V][list] {
+        export let entries = func -> [int, V][list] {
             let result: [int, V][list] = [];
             let limit = position.length;
             let key = 0;
@@ -198,19 +192,18 @@ export let OrdinalMap = module (
                 if (slot >= 0) {
                     result.append([key, dense_values[slot]]);
                 }
-                key = key + 1;
+                key += 1;
             }
             return result;
         };
 
         // [key, value] entries in key order; fail-fast.
-        export let iterator = func() -> iterators.Iterator<[int, V]> {
-            return new OrdinalMapIterator<V>(position, dense_values, modifications);
-        };
+        export let iterator = func -> iterators.Iterator<[int, V]> =>
+            new OrdinalMapIterator<V>(position, dense_values, modifications);
 
         // Sets every entry of the other map, in its key order. A key at or
         // beyond this map's size is a bounds trap.
-        export let put_all = func(other: OrdinalMap<V>) -> void {
+        export let put_all = func(other: OrdinalMap<V>) {
             for (let entry in other.entries()) {
                 set(entry[0], entry[1]);
             }
@@ -219,7 +212,7 @@ export let OrdinalMap = module (
         // By equals, with `value` as the receiver.
         export let contains_value = func(value: V) -> bool {
             for (let element in dense_values) {
-                if (value.equals(element)) {
+                if (value === element) {
                     return true;
                 }
             }
@@ -227,7 +220,7 @@ export let OrdinalMap = module (
         };
 
         // In key order. The action must not change the map structurally.
-        export let for_each = func(action: func(int, V) -> void) -> void {
+        export let for_each = func(action: func(int, V) -> void) {
             let expected = modifications.value;
             let limit = position.length;
             let key = 0;
@@ -237,7 +230,7 @@ export let OrdinalMap = module (
                     action(key, dense_values[slot]);
                     check(expected);
                 }
-                key = key + 1;
+                key += 1;
             }
         };
 
@@ -255,11 +248,11 @@ export let OrdinalMap = module (
                     check(expected);
                     if (matched) {
                         release(slot);
-                        removed = removed + 1;
+                        removed += 1;
                         expected = modifications.value;
                     }
                 }
-                key = key + 1;
+                key += 1;
             }
             return removed;
         };
@@ -335,21 +328,21 @@ export let OrdinalMap = module (
 
         // The wrapping sum over entries of the key's hash exclusive-or the
         // value's hash.
-        export let.override hash_code = func() -> uint32 {
+        export let.override hash_code = func -> uint32 {
             let sum: uint64 = 0;
             let count = dense_keys.length;
             let i = 0;
             while (i < count) {
                 let entry_hash = dense_keys[i].hash_code() ^ dense_values[i].hash_code();
                 sum = (sum + (entry_hash as uint64)) & 4294967295;
-                i = i + 1;
+                i += 1;
             }
             return sum as uint32;
         };
 
         // `{k: v, k2: v2}` in key order; the map itself as a direct value
         // prints "(this collection)".
-        export let.override to_string = func() -> string {
+        export let.override to_string = func -> string {
             if (printing_depth != 0 && printing_depth == text_depth.current()) {
                 return "(this collection)";
             }
@@ -368,7 +361,7 @@ export let OrdinalMap = module (
                     text = text + key.to_string() + ": " + dense_values[slot].to_string();
                     first = false;
                 }
-                key = key + 1;
+                key += 1;
             }
             text_depth.leave();
             printing_depth = saved;
@@ -385,7 +378,7 @@ export let OrdinalMap = module (
         let expected: uint64;
         let key: int = 0;
 
-        export let init = func(slots: int[list], values: V[list], counter: cell.Cell<uint64>) -> void {
+        export let init = func(slots: int[list], values: V[list], counter: cell.Cell<uint64>) {
             position = slots;
             dense_values = values;
             modifications = counter;
@@ -393,20 +386,20 @@ export let OrdinalMap = module (
             skip_absent();
         };
 
-        let skip_absent = func() -> void {
+        let skip_absent = func {
             while (key < position.length && position[key] < 0) {
-                key = key + 1;
+                key += 1;
             }
         };
 
-        export let has_next = func() -> bool {
+        export let has_next = func -> bool {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
             }
             return key < position.length;
         };
 
-        export let next = func() -> [int, V] {
+        export let next = func -> [int, V] {
             if (modifications.value != expected) {
                 trap_with_message("collection modified during iteration");
             }
@@ -414,7 +407,7 @@ export let OrdinalMap = module (
                 trap_with_message("no such element");
             }
             let entry: [int, V] = [key, dense_values[position[key]]];
-            key = key + 1;
+            key += 1;
             skip_absent();
             return entry;
         };
@@ -422,7 +415,5 @@ export let OrdinalMap = module (
 
     // An empty map for the keys 0 through `size` - 1. Traps with "invalid
     // argument: negative size".
-    export let create = func<V>(size: int) -> OrdinalMap<V> {
-        return new OrdinalMap<V>(size);
-    };
+    export let create = func<V>(size: int) -> OrdinalMap<V> => new OrdinalMap<V>(size);
 );

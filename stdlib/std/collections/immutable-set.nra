@@ -1,6 +1,6 @@
 let hash_set = import:Std.Collections.HashSet;
-let iterators = import:Std.Collections.Iterator;
-let set = import:Std.Collections.Set;
+let.promote _ = import:Std.Collections.Iterator;
+let.promote _ = import:Std.Collections.Set;
 
 // A set that copies its contents at construction and implements only the
 // read-only Set interface (Stdlib.md section 9.10). Elements are compared
@@ -9,36 +9,26 @@ let set = import:Std.Collections.Set;
 export let ImmutableSet = module (
     let Seal = enum (Token);
 
-    export let ImmutableSet = class<T> implements set.Set<T> (
+    export let ImmutableSet = class<T> implements Set<T> (
         let elements: hash_set.HashSet<T>;
 
-        export let init = func(seal: Seal, values: T[list]) -> void {
+        export let init = func(seal: Seal, values: T[list]) {
             elements = hash_set.create<T>();
             elements.add_all(values);
         };
 
-        export let size = func() -> int {
-            return elements.size();
-        };
+        export let size = func -> int => elements.size();
 
-        export let is_empty = func() -> bool {
-            return elements.size() == 0;
-        };
+        export let is_empty = func -> bool => elements.size() == 0;
 
-        export let contains = func(value: T) -> bool {
-            return elements.contains(value);
-        };
+        export let contains = func(value: T) -> bool => elements.contains(value);
 
         // A new built-in list in iteration order.
-        export let to_list = func() -> T[list] {
-            return elements.to_list();
-        };
+        export let to_list = func -> T[list] => elements.to_list();
 
-        export let iterator = func() -> iterators.Iterator<T> {
-            return elements.iterator();
-        };
+        export let iterator = func -> Iterator<T> => elements.iterator();
 
-        export let for_each = func(action: func(T) -> void) -> void {
+        export let for_each = func(action: func(T) -> void) {
             elements.for_each(action);
         };
 
@@ -59,25 +49,19 @@ export let ImmutableSet = module (
                 if (!elements.contains(items[i])) {
                     return false;
                 }
-                i = i + 1;
+                i += 1;
             }
             return true;
         };
 
         // The wrapping sum of the element hashes.
-        export let.override hash_code = func() -> uint32 {
-            return elements.hash_code();
-        };
+        export let.override hash_code = func -> uint32 => elements.hash_code();
 
         // `{a, b, c}` in iteration order. The elements exist before the set,
         // so it can never contain itself.
-        export let.override to_string = func() -> string {
-            return elements.to_string();
-        };
+        export let.override to_string = func -> string => elements.to_string();
     );
 
     // Copies `items`; a later duplicate of an earlier element is dropped.
-    export let of = func<T>(items: T[list]) -> ImmutableSet<T> {
-        return new ImmutableSet<T>(Seal.Token, items);
-    };
+    export let of = func<T>(items: T[list]) -> ImmutableSet<T> => new ImmutableSet<T>(Seal.Token, items);
 );

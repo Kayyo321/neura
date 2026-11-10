@@ -1,4 +1,4 @@
-let map = import:Std.Collections.Map;
+let.promote _ = import:Std.Collections.Map;
 let optional = import:Std.Core.Optional;
 
 // Comparisons of maps of different classes through the read-only interface
@@ -7,7 +7,7 @@ export let Maps = module (
     // Whether the maps have the same size and, for each entry of `b`, `a`
     // holds a value for the key (by `a`'s own key lookup) that equals the
     // entry's value, with `a`'s value as the receiver.
-    export let same_entries = func<K, V>(a: map.Map<K, V>, b: map.Map<K, V>) -> bool {
+    export let same_entries = func<K, V>(a: Map<K, V>, b: Map<K, V>) -> bool {
         if (a.size() != b.size()) {
             return false;
         }
@@ -16,7 +16,7 @@ export let Maps = module (
             let [key, value] = items.next();
             match (a.get(key)) {
                 optional.Optional.Some(held) => {
-                    if (!held.equals(value)) {
+                    if (!(held === value)) {
                         return false;
                     }
                 },

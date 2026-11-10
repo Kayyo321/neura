@@ -1,25 +1,23 @@
-let iterable = import:Std.Collections.Iterable;
+let.promote _ = import:Std.Collections.Iterable;
 let optional = import:Std.Core.Optional;
 
 // A read-only association of keys to values (HashMap, TreeMap, IntMap,
 // StringMap, OrdinalMap, ImmutableMap). Iteration yields [K, V] entries.
 export let Map = module (
-    export let Map = interface<K, V>:iterable.Iterable<[K, V]> (
-        let size = func() -> int;
+    export let Map = interface<K, V>:Iterable<[K, V]> (
+        let size = func -> int;
         let contains_key = func(key: K) -> bool;
         let get = func(key: K) -> optional.Optional<V>;
         let get_or = func(key: K, fallback: V) -> V;
         // Traps with "no such element" when the key is absent.
         let require = func(key: K) -> V;
         // New built-in lists in iteration order.
-        let keys = func() -> K[list];
-        let values = func() -> V[list];
-        let entries = func() -> [K, V][list];
+        let keys = func -> K[list];
+        let values = func -> V[list];
+        let entries = func -> [K, V][list];
         let contains_value = func(value: V) -> bool;
-        let for_each = func(action: func(K, V) -> void) -> void;
+        let for_each = func(action: func(K, V) -> void);
 
-        let is_empty = func() -> bool {
-            return size() == 0;
-        };
+        let is_empty = func -> bool => size() == 0;
     );
 );

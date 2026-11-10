@@ -1,16 +1,16 @@
 let optional = import:Std.Core.Optional;
-let set = import:Std.Collections.Set;
+let.promote _ = import:Std.Collections.Set;
 
 // A set ordered by its comparator (TreeSet). Positions are by the
 // comparator, never by equals.
 export let SortedSet = module (
-    export let SortedSet = interface<T>:set.Set<T> (
+    export let SortedSet = interface<T>:Set<T> (
         // Trap with "no such element" when empty.
-        let first = func() -> T;
-        let last = func() -> T;
+        let first = func -> T;
+        let last = func -> T;
         // Elements from `from` inclusive to `to` exclusive, ascending.
         let range = func(from: T, to: T) -> T[list];
-        let descending = func() -> T[list];
+        let descending = func -> T[list];
         // The greatest element at most, the least at least, the greatest
         // below, and the least above the value.
         let floor = func(value: T) -> optional.Optional<T>;

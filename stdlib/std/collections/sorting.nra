@@ -12,7 +12,7 @@ export let Sorting = module (
     // goes after the last element of the sorted prefix that is not Greater
     // than it, which keeps equal elements in their original order.
     let insertion_sort = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering,
-                                 version: uint64) -> void {
+                                 version: uint64) {
         let i = start + 1;
         while (i < end) {
             let value = items[i];
@@ -33,10 +33,10 @@ export let Sorting = module (
             let k = i;
             while (k > low) {
                 items[k] = items[k - 1];
-                k = k - 1;
+                k -= 1;
             }
             items[low] = value;
-            i = i + 1;
+            i += 1;
         }
     };
 
@@ -45,7 +45,7 @@ export let Sorting = module (
     // destination, which starts at destination_start.
     let merge_pass = func<T>(source: T[list], source_start: int, destination: T[list], destination_start: int,
                              count: int, width: int, c: func(T, T) -> ordering.Ordering, items: T[list],
-                             version: uint64) -> void {
+                             version: uint64) {
         let left = 0;
         while (left < count) {
             let middle = left + width;
@@ -69,7 +69,7 @@ export let Sorting = module (
                 let k = left;
                 while (k < right_end) {
                     destination[destination_start + k] = source[source_start + k];
-                    k = k + 1;
+                    k += 1;
                 }
             } else {
                 let i = left;
@@ -85,22 +85,22 @@ export let Sorting = module (
                     // Take from the right run only when it is strictly less.
                     if (order == ordering.Ordering.Less) {
                         destination[destination_start + k] = right_value;
-                        j = j + 1;
+                        j += 1;
                     } else {
                         destination[destination_start + k] = left_value;
-                        i = i + 1;
+                        i += 1;
                     }
-                    k = k + 1;
+                    k += 1;
                 }
                 while (i < middle) {
                     destination[destination_start + k] = source[source_start + i];
-                    i = i + 1;
-                    k = k + 1;
+                    i += 1;
+                    k += 1;
                 }
                 while (j < right_end) {
                     destination[destination_start + k] = source[source_start + j];
-                    j = j + 1;
-                    k = k + 1;
+                    j += 1;
+                    k += 1;
                 }
             }
             left = right_end;
@@ -111,7 +111,7 @@ export let Sorting = module (
     // lives only in this helper's frame, so it is unreachable once the
     // helper returns (section 5.5).
     let merge_blocks = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering,
-                               version: uint64) -> void {
+                               version: uint64) {
         let count = end - start;
         // The buffer holds references the list already holds, so it keeps
         // nothing extra alive and needs no "empty" element.
@@ -119,7 +119,7 @@ export let Sorting = module (
         let i = start;
         while (i < end) {
             buffer.append(items[i]);
-            i = i + 1;
+            i += 1;
         }
         let in_buffer = false;
         let width = BlockSize;
@@ -133,7 +133,7 @@ export let Sorting = module (
             if (width > count / 2) {
                 width = count;
             } else {
-                width = width * 2;
+                width *= 2;
             }
         }
         if (in_buffer) {
@@ -141,14 +141,14 @@ export let Sorting = module (
             let k = 0;
             while (k < count) {
                 items[start + k] = buffer[k];
-                k = k + 1;
+                k += 1;
             }
         }
     };
 
     // Sorts items[start, end) stably. Traps with "invalid argument: range"
     // unless 0 <= start <= end <= items.length.
-    export let sort_range = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering) -> void {
+    export let sort_range = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering) {
         if (start < 0 || start > end || end > items.length) {
             trap_with_message("invalid argument: range");
         }
@@ -169,7 +169,7 @@ export let Sorting = module (
 
     // Sorts the whole list stably with at most about n log2 n comparator
     // calls.
-    export let sort = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) -> void {
+    export let sort = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) {
         sort_range<T>(items, 0, items.length, c);
     };
 

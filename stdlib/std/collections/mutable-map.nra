@@ -6,10 +6,10 @@ let optional = import:Std.Core.Optional;
 export let MutableMap = module (
     export let MutableMap = interface<K, V>:map.Map<K, V> (
         // Associates the value, replacing any previous one.
-        let set = func(key: K, value: V) -> void;
+        let set = func(key: K, value: V);
         // Removes the key; returns whether it was present.
         let delete = func(key: K) -> bool;
-        let clear = func() -> void;
+        let clear = func;
         // The previous value.
         let put = func(key: K, value: V) -> optional.Optional<V>;
         let remove = func(key: K) -> optional.Optional<V>;

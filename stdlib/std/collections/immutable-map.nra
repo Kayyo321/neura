@@ -1,6 +1,6 @@
 let hash_map = import:Std.Collections.HashMap;
-let iterators = import:Std.Collections.Iterator;
-let map = import:Std.Collections.Map;
+let.promote _ = import:Std.Collections.Iterator;
+let.promote _ = import:Std.Collections.Map;
 let optional = import:Std.Core.Optional;
 
 // A map that copies its contents at construction and implements only the
@@ -10,62 +10,40 @@ let optional = import:Std.Core.Optional;
 export let ImmutableMap = module (
     let Seal = enum (Token);
 
-    export let ImmutableMap = class<K, V> implements map.Map<K, V> (
+    export let ImmutableMap = class<K, V> implements Map<K, V> (
         let associations: hash_map.HashMap<K, V>;
 
-        export let init = func(seal: Seal, contents: hash_map.HashMap<K, V>) -> void {
+        export let init = func(seal: Seal, contents: hash_map.HashMap<K, V>) {
             associations = contents;
         };
 
-        export let size = func() -> int {
-            return associations.size();
-        };
+        export let size = func -> int => associations.size();
 
-        export let is_empty = func() -> bool {
-            return associations.size() == 0;
-        };
+        export let is_empty = func -> bool => associations.size() == 0;
 
-        export let contains_key = func(key: K) -> bool {
-            return associations.contains_key(key);
-        };
+        export let contains_key = func(key: K) -> bool => associations.contains_key(key);
 
-        export let get = func(key: K) -> optional.Optional<V> {
-            return associations.get(key);
-        };
+        export let get = func(key: K) -> optional.Optional<V> => associations.get(key);
 
-        export let get_or = func(key: K, fallback: V) -> V {
-            return associations.get_or(key, fallback);
-        };
+        export let get_or = func(key: K, fallback: V) -> V => associations.get_or(key, fallback);
 
         // Traps with "no such element" when the key is absent.
-        export let require = func(key: K) -> V {
-            return associations.require(key);
-        };
+        export let require = func(key: K) -> V => associations.require(key);
 
-        export let keys = func() -> K[list] {
-            return associations.keys();
-        };
+        export let keys = func -> K[list] => associations.keys();
 
-        export let values = func() -> V[list] {
-            return associations.values();
-        };
+        export let values = func -> V[list] => associations.values();
 
-        export let entries = func() -> [K, V][list] {
-            return associations.entries();
-        };
+        export let entries = func -> [K, V][list] => associations.entries();
 
-        export let contains_value = func(value: V) -> bool {
-            return associations.contains_value(value);
-        };
+        export let contains_value = func(value: V) -> bool => associations.contains_value(value);
 
-        export let for_each = func(action: func(K, V) -> void) -> void {
+        export let for_each = func(action: func(K, V) -> void) {
             associations.for_each(action);
         };
 
         // Yields [K, V] in the order of `of`.
-        export let iterator = func() -> iterators.Iterator<[K, V]> {
-            return associations.iterator();
-        };
+        export let iterator = func -> Iterator<[K, V]> => associations.iterator();
 
         // Another ImmutableMap of the same size in which, for each of its
         // entries, this map holds an equal value for the key.
@@ -84,7 +62,7 @@ export let ImmutableMap = module (
                 let [key, value] = items[i];
                 match (associations.get(key)) {
                     optional.Optional.Some(held) => {
-                        if (!held.equals(value)) {
+                        if (!(held === value)) {
                             return false;
                         }
                     },
@@ -92,22 +70,18 @@ export let ImmutableMap = module (
                         return false;
                     },
                 }
-                i = i + 1;
+                i += 1;
             }
             return true;
         };
 
         // The wrapping sum over entries of the key hash exclusive-or the
         // value hash.
-        export let.override hash_code = func() -> uint32 {
-            return associations.hash_code();
-        };
+        export let.override hash_code = func -> uint32 => associations.hash_code();
 
         // `{k: v, k2: v2}` in iteration order. The entries exist before the
         // map, so it can never contain itself.
-        export let.override to_string = func() -> string {
-            return associations.to_string();
-        };
+        export let.override to_string = func -> string => associations.to_string();
     );
 
     // Copies `entries`. Traps with "invalid argument: duplicate key" when two
@@ -122,7 +96,7 @@ export let ImmutableMap = module (
                 trap_with_message("invalid argument: duplicate key");
             }
             contents.set(key, value);
-            i = i + 1;
+            i += 1;
         }
         return new ImmutableMap<K, V>(Seal.Token, contents);
     };

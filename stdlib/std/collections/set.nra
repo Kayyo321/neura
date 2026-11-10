@@ -1,7 +1,7 @@
-let collection = import:Std.Collections.Collection;
+let.promote _ = import:Std.Collections.Collection;
 
 // A read-only collection without duplicates (HashSet, TreeSet, BitSet,
 // ImmutableSet).
 export let Set = module (
-    export let Set = interface<T>:collection.Collection<T> ();
+    export let Set = interface<T>:Collection<T> ();
 );

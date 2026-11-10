@@ -9,17 +9,15 @@
 export let TextDepth = module (
     let depth: int = 0;
 
-    export let current = func() -> int {
-        return depth;
-    };
+    export let current = func -> int => depth;
 
     // Starts a collection's text and returns the depth it runs at.
-    export let enter = func() -> int {
-        depth = depth + 1;
+    export let enter = func -> int {
+        depth += 1;
         return depth;
     };
 
-    export let leave = func() -> void {
-        depth = depth - 1;
+    export let leave = func {
+        depth -= 1;
     };
 );
