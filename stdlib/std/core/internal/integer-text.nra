@@ -1,11 +1,11 @@
-let error = import:Std.Core.Error;
-let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
 
 // Text helpers shared by the integer companion modules (Stdlib.md section
 // 7.1): radix checks, digit bytes, padding, and the parsing grammar's
 // syntax errors. The value accumulation stays in each type's module.
 export let IntegerText = module (
-    export let check_radix = func(radix: int) -> void {
+    export let check_radix = func(radix: int) {
         if (radix < 2 || radix > 36) {
             trap_with_message("invalid argument: radix outside 2 through 36");
         }
@@ -41,7 +41,7 @@ export let IntegerText = module (
         if (negative) {
             bytes.append(45);
         }
-        for (let i = reversed.length - 1; i >= 0; i = i - 1) {
+        for (let i = reversed.length - 1; i >= 0; i--) {
             bytes.append(reversed[i]);
         }
         let [valid, text] = string.from_utf8(bytes);
@@ -60,8 +60,8 @@ export let IntegerText = module (
             return text;
         }
         let padding = "";
-        for (let i = 0; i < missing; i = i + 1) {
-            padding = padding + pad;
+        for (let i = 0; i < missing; i++) {
+            padding += pad;
         }
         if (pad == "0" && text.byte_at(0) == 45) {
             return "-" + padding + text.slice(1, text.byte_length);
@@ -71,23 +71,23 @@ export let IntegerText = module (
 
     // The first error of the grammar: an optional `+` or `-`, then one or
     // more digits of the radix. None when the text matches.
-    export let syntax_error = func(text: string, radix: int) -> optional.Optional<error.Error> {
+    export let syntax_error = func(text: string, radix: int) -> Optional<Error> {
         let length = text.byte_length;
         if (length == 0) {
-            return optional.Optional<error.Error>.Some(parse_error(error.ParseErrorKind.Empty, 0, "empty input"));
+            return Optional<Error>.Some(parse_error(ParseErrorKind.Empty, 0, "empty input"));
         }
         let start = sign_length(text);
         if (start == length) {
-            return optional.Optional<error.Error>.Some(
-                parse_error(error.ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
+            return Optional<Error>.Some(
+                parse_error(ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
         }
-        for (let i = start; i < length; i = i + 1) {
+        for (let i = start; i < length; i++) {
             if (digit_value(text.byte_at(i)) >= radix) {
-                return optional.Optional<error.Error>.Some(
-                    parse_error(error.ParseErrorKind.InvalidCharacter, i, "invalid character"));
+                return Optional<Error>.Some(
+                    parse_error(ParseErrorKind.InvalidCharacter, i, "invalid character"));
             }
         }
-        return optional.Optional<error.Error>.None;
+        return Optional<Error>.None;
     };
 
     // 1 when the text starts with `+` or `-`, otherwise 0.
@@ -99,13 +99,11 @@ export let IntegerText = module (
         return 0;
     };
 
-    export let out_of_range = func(type_name: string) -> error.Error {
-        return parse_error(error.ParseErrorKind.OutOfRange, 0, "value out of range for " + type_name);
-    };
+    export let out_of_range = func(type_name: string) -> Error =>
+        parse_error(ParseErrorKind.OutOfRange, 0, "value out of range for " + type_name);
 
-    let parse_error = func(kind: error.ParseErrorKind, offset: int, message: string) -> error.Error {
-        return error.Error.Parse { kind: kind, offset: offset, message: message };
-    };
+    let parse_error = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
+        Error.Parse { kind: kind, offset: offset, message: message };
 
     // The length of the UTF-8 sequence that a lead byte starts.
     let sequence_length = func(lead: uint8) -> int {

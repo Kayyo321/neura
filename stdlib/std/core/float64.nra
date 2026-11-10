@@ -1,6 +1,6 @@
 let float_text = import:Std.Core.Internal.FloatText;
-let ordering = import:Std.Core.Ordering;
-let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
 
 // Companion functions for float64 (Stdlib.md section 7.3).
 // Format: IEEE 754 binary64, 52 fraction bits and 11 exponent bits.
@@ -23,33 +23,23 @@ export let Float64 = module (
     const SignBit: uint64 = 9223372036854775808;
     const Magnitude: uint64 = 9223372036854775807;
 
-    export let is_nan = func(v: float64) -> bool {
-        return v != v;
-    };
+    export let is_nan = func(v: float64) -> bool => v != v;
 
-    export let is_infinite = func(v: float64) -> bool {
-        return (v.to_bits() & Magnitude) == 9218868437227405312;
-    };
+    export let is_infinite = func(v: float64) -> bool => (v.to_bits() & Magnitude) == 9218868437227405312;
 
-    export let is_finite = func(v: float64) -> bool {
-        return (v.to_bits() & 9218868437227405312) != 9218868437227405312;
-    };
+    export let is_finite = func(v: float64) -> bool =>
+        (v.to_bits() & 9218868437227405312) != 9218868437227405312;
 
     // Reads the sign bit, so it is true for -0.0 and for a NaN with the sign
     // bit set.
-    export let is_negative = func(v: float64) -> bool {
-        return (v.to_bits() & SignBit) != 0;
-    };
+    export let is_negative = func(v: float64) -> bool => (v.to_bits() & SignBit) != 0;
 
     // Clears the sign bit; never rounds.
-    export let abs = func(v: float64) -> float64 {
-        return float64.from_bits(v.to_bits() & Magnitude);
-    };
+    export let abs = func(v: float64) -> float64 => float64.from_bits(v.to_bits() & Magnitude);
 
     // The magnitude of `magnitude` with the sign bit of `sign`.
-    export let copy_sign = func(magnitude: float64, sign: float64) -> float64 {
-        return float64.from_bits((magnitude.to_bits() & Magnitude) | (sign.to_bits() & SignBit));
-    };
+    export let copy_sign = func(magnitude: float64, sign: float64) -> float64 =>
+        float64.from_bits((magnitude.to_bits() & Magnitude) | (sign.to_bits() & SignBit));
 
     // NaN (canonical) if either operand is NaN; -0.0 is less than 0.0.
     export let min = func(a: float64, b: float64) -> float64 {
@@ -90,7 +80,7 @@ export let Float64 = module (
         if (low != low || high != high) {
             trap_with_message("invalid argument: NaN bound");
         }
-        if (total_compare(low, high) == ordering.Ordering.Greater) {
+        if (total_compare(low, high) == Ordering.Greater) {
             trap_with_message("invalid argument: low exceeds high");
         }
         return min(max(v, low), high);
@@ -98,104 +88,79 @@ export let Float64 = module (
 
     // Rounding to an integral value. All keep the sign of zero (ceil(-0.5)
     // is -0.0); infinities are unchanged and a NaN becomes the canonical NaN.
-    export let floor = func(v: float64) -> float64 {
-        return round_with(v, 0);
-    };
+    export let floor = func(v: float64) -> float64 => round_with(v, 0);
 
-    export let ceil = func(v: float64) -> float64 {
-        return round_with(v, 1);
-    };
+    export let ceil = func(v: float64) -> float64 => round_with(v, 1);
 
-    export let trunc = func(v: float64) -> float64 {
-        return round_with(v, 2);
-    };
+    export let trunc = func(v: float64) -> float64 => round_with(v, 2);
 
     // Halves round away from zero.
-    export let round = func(v: float64) -> float64 {
-        return round_with(v, 3);
-    };
+    export let round = func(v: float64) -> float64 => round_with(v, 3);
 
     // Halves round to the even neighbour.
-    export let round_even = func(v: float64) -> float64 {
-        return round_with(v, 4);
-    };
+    export let round_even = func(v: float64) -> float64 => round_with(v, 4);
 
-    export let to_bits = func(v: float64) -> uint64 {
-        return v.to_bits();
-    };
+    export let to_bits = func(v: float64) -> uint64 => v.to_bits();
 
-    export let from_bits = func(bits: uint64) -> float64 {
-        return float64.from_bits(bits);
-    };
+    export let from_bits = func(bits: uint64) -> float64 => float64.from_bits(bits);
 
     // The total order of section 5.3: -Infinity, negative values, -0.0,
     // 0.0, positive values, Infinity, then every NaN (all NaNs equal).
-    export let total_compare = func(a: float64, b: float64) -> ordering.Ordering {
+    export let total_compare = func(a: float64, b: float64) -> Ordering {
         let a_nan = a != a;
         let b_nan = b != b;
         if (a_nan || b_nan) {
             if (a_nan && b_nan) {
-                return ordering.Ordering.Equal;
+                return Ordering.Equal;
             }
             if (a_nan) {
-                return ordering.Ordering.Greater;
+                return Ordering.Greater;
             }
-            return ordering.Ordering.Less;
+            return Ordering.Less;
         }
         if (a < b) {
-            return ordering.Ordering.Less;
+            return Ordering.Less;
         }
         if (a > b) {
-            return ordering.Ordering.Greater;
+            return Ordering.Greater;
         }
         let a_negative = is_negative(a);
         if (a_negative == is_negative(b)) {
-            return ordering.Ordering.Equal;
+            return Ordering.Equal;
         }
         if (a_negative) {
-            return ordering.Ordering.Less;
+            return Ordering.Less;
         }
-        return ordering.Ordering.Greater;
+        return Ordering.Greater;
     };
 
     // Same bit pattern, except that every NaN equals every NaN; 0.0 and
     // -0.0 differ (section 5.2).
-    export let equals = func(a: float64, b: float64) -> bool {
-        return a.equals(b);
-    };
+    export let equals = func(a: float64, b: float64) -> bool => a === b;
 
-    export let hash = func(v: float64) -> uint32 {
-        return v.hash_code();
-    };
+    export let hash = func(v: float64) -> uint32 => v.hash_code();
 
     // The shortest text that parses back to the same value (section 7.5).
-    export let to_string = func(v: float64) -> string {
-        return v.to_string();
-    };
+    export let to_string = func(v: float64) -> string => v.to_string();
 
     // Exactly `digits` fraction digits (0 through 100; no point for 0),
     // correctly rounded, ties to even. Other digit counts trap.
-    export let to_fixed = func(v: float64, digits: int) -> string {
-        return float_text.to_fixed(v.to_bits() as uint64, 52, 11, digits);
-    };
+    export let to_fixed = func(v: float64, digits: int) -> string =>
+        float_text.to_fixed(v.to_bits() as uint64, 52, 11, digits);
 
     // `d.ddd` with `digits` fraction digits (0 through 100), `e`, and the
     // decimal exponent; correctly rounded, ties to even.
-    export let to_exponential = func(v: float64, digits: int) -> string {
-        return float_text.to_exponential(v.to_bits() as uint64, 52, 11, digits);
-    };
+    export let to_exponential = func(v: float64, digits: int) -> string =>
+        float_text.to_exponential(v.to_bits() as uint64, 52, 11, digits);
 
     // The grammar of section 7.5, converted exactly and rounded once, ties
     // to even. Too large becomes an infinity and too small a signed zero.
-    export let parse = func(text: string) -> result.Result<float64> {
-        return match (float_text.parse(text, 52, 11)) {
-            float_text.Parsed.Failure(failure) => result.Result<float64>.Err(failure),
-            float_text.Parsed.Bits(bits) => result.Result<float64>.Ok(float64.from_bits(bits as uint64)),
-            float_text.Parsed.Near(near) => result.Result<float64>.Ok(near),
-        };
+    export let parse = func(text: string) -> Result<float64> => match (float_text.parse(text, 52, 11)) {
+        float_text.Parsed.Failure(failure) => Result<float64>.Err(failure),
+        float_text.Parsed.Bits(bits) => Result<float64>.Ok(float64.from_bits(bits as uint64)),
+        float_text.Parsed.Near(near) => Result<float64>.Ok(near),
     };
 
-    let round_with = func(v: float64, mode: int) -> float64 {
-        return float64.from_bits(float_text.round_bits(v.to_bits() as uint64, 52, 11, mode) as uint64);
-    };
+    let round_with = func(v: float64, mode: int) -> float64 =>
+        float64.from_bits(float_text.round_bits(v.to_bits() as uint64, 52, 11, mode) as uint64);
 );

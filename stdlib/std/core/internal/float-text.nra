@@ -1,5 +1,5 @@
-let error = import:Std.Core.Error;
-let wide = import:Std.Core.Internal.WideUint;
+let.promote _ = import:Std.Core.Error;
+let.promote wide = import:Std.Core.Internal.WideUint;
 
 // Float text conversion and bit-level helpers shared by the float companion
 // modules (Stdlib.md sections 7.3 and 7.5). A format is given by its fraction
@@ -17,7 +17,7 @@ export let FloatText = module (
     // is a float64 that rounds to the correct result with one conversion:
     // either the exact value, or a value no midpoint of the format separates
     // from the exact value.
-    export let Parsed = enum (Failure(error.Error), Bits(uint64), Near(float64));
+    export let Parsed = enum (Failure(Error), Bits(uint64), Near(float64));
 
     // Powers of ten that float64 holds exactly.
     let exact_powers: float64[] = [
@@ -177,18 +177,18 @@ export let FloatText = module (
         lower.multiply_pow10(digits);
         let upper = lower.copy();
         upper.multiply_small(10);
-        while (true) {
+        do {
             // Twice the value times 10^(digits - k), rounded down, and
             // whether that division was exact.
             let [doubled, exact] = scale_doubled(significand, exponent, digits - k);
             let floor_value = doubled.copy();
             floor_value.shift_right(1);
             if (floor_value.compare(lower) < 0) {
-                k = k - 1;
+                k--;
                 continue;
             }
             if (floor_value.compare(upper) >= 0) {
-                k = k + 1;
+                k++;
                 continue;
             }
             if (doubled.is_odd() && (!exact || floor_value.is_odd())) {
@@ -196,7 +196,7 @@ export let FloatText = module (
             }
             if (floor_value.compare(upper) == 0) {
                 floor_value = lower.copy();
-                k = k + 1;
+                k++;
             }
             return sign + with_point(floor_value.to_decimal()) + "e" + k.to_string();
         }
@@ -212,7 +212,7 @@ export let FloatText = module (
     export let parse = func(text: string, f: int, w: int) -> Parsed {
         let length = text.byte_length;
         if (length == 0) {
-            return Parsed.Failure(parse_error(error.ParseErrorKind.Empty, 0, "empty input"));
+            return Parsed.Failure(parse_error(ParseErrorKind.Empty, 0, "empty input"));
         }
         if (text == "NaN") {
             return Parsed.Bits(nan_bits(f, w));
@@ -243,19 +243,19 @@ export let FloatText = module (
                 seen_digit = true;
                 if (digits.length == 0 && digit == 0) {
                     if (seen_point) {
-                        scale = scale - 1;
+                        scale--;
                     }
                 } else if (digits.length < MaxDigits) {
                     digits.append(digit);
                     if (seen_point) {
-                        scale = scale - 1;
+                        scale--;
                     }
                 } else {
                     if (digit != 0) {
                         sticky = true;
                     }
                     if (!seen_point) {
-                        scale = scale + 1;
+                        scale++;
                     }
                 }
             } else if (b == 46 && !seen_point) {
@@ -264,41 +264,41 @@ export let FloatText = module (
                 break;
             } else {
                 return Parsed.Failure(
-                    parse_error(error.ParseErrorKind.InvalidCharacter, position, "invalid character"));
+                    parse_error(ParseErrorKind.InvalidCharacter, position, "invalid character"));
             }
-            position = position + 1;
+            position++;
         }
         if (!seen_digit) {
-            return Parsed.Failure(parse_error(error.ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
+            return Parsed.Failure(parse_error(ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
         }
         if (position < length) {
             // The exponent. Its magnitude saturates far beyond every format's
             // range, so it cannot overflow.
-            position = position + 1;
+            position++;
             let exponent_negative = false;
             if (position < length && (text.byte_at(position) == 43 || text.byte_at(position) == 45)) {
                 exponent_negative = text.byte_at(position) == 45;
-                position = position + 1;
+                position++;
             }
             if (position == length) {
-                return Parsed.Failure(parse_error(error.ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
+                return Parsed.Failure(parse_error(ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
             }
             let exponent_value: int64 = 0;
             while (position < length) {
                 let b = text.byte_at(position);
                 if (b < 48 || b > 57) {
                     return Parsed.Failure(
-                        parse_error(error.ParseErrorKind.InvalidCharacter, position, "invalid character"));
+                        parse_error(ParseErrorKind.InvalidCharacter, position, "invalid character"));
                 }
                 if (exponent_value < 1000000000000) {
                     exponent_value = exponent_value * 10 + ((b - 48) as int64);
                 }
-                position = position + 1;
+                position++;
             }
             if (exponent_negative) {
-                scale = scale - exponent_value;
+                scale -= exponent_value;
             } else {
-                scale = scale + exponent_value;
+                scale += exponent_value;
             }
         }
         let sign: uint64 = 0;
@@ -311,7 +311,7 @@ export let FloatText = module (
         // Trailing zeros move into the exponent.
         while (digits[digits.length - 1] == 0) {
             digits.remove_at(digits.length - 1);
-            scale = scale + 1;
+            scale++;
         }
         let near = fast_path(digits, scale, sticky, f, w);
         if (near > 0.0) {
@@ -357,10 +357,10 @@ export let FloatText = module (
         let power = 1.0;
         let remaining = magnitude as int;
         while (remaining > 22) {
-            power = power * exact_powers[22];
-            remaining = remaining - 22;
+            power *= exact_powers[22];
+            remaining -= 22;
         }
-        power = power * exact_powers[remaining];
+        power *= exact_powers[remaining];
         let near = mantissa * power;
         if (scale < 0) {
             near = mantissa / power;
@@ -421,8 +421,8 @@ export let FloatText = module (
         let group_scale: uint32 = 1;
         for (let digit in digits) {
             group = group * 10 + (digit as uint32);
-            group_scale = group_scale * 10;
-            group_size = group_size + 1;
+            group_scale *= 10;
+            group_size++;
             if (group_size == 9) {
                 value.multiply_small(group_scale);
                 value.add_small(group);
@@ -457,7 +457,7 @@ export let FloatText = module (
     // Rounds (value + tail) * 2^scale to the format, where the tail is in
     // [0, 1) and positive when `sticky`. The value has enough bits that the
     // tail lies below the rounding position.
-    let round_to_bits = func(value: wide.WideUint, sticky: bool, scale: int, f: int, w: int) -> uint64 {
+    let round_to_bits = func(value: WideUint, sticky: bool, scale: int, f: int, w: int) -> uint64 {
         let bias = (1 << (w - 1)) - 1;
         let one: uint64 = 1;
         let leading = value.bit_length() - 1 + scale;
@@ -478,12 +478,12 @@ export let FloatText = module (
             value.shift_right(dropped);
             mantissa = value.to_uint64();
             if (versus > 0 || (versus == 0 && (sticky || (mantissa & 1) == 1))) {
-                mantissa = mantissa + 1;
+                mantissa++;
             }
         }
         if (mantissa == one << (f + 1)) {
-            mantissa = mantissa >> 1;
-            lowest = lowest + 1;
+            mantissa >>= 1;
+            lowest++;
         }
         if (mantissa == 0) {
             return 0;
@@ -500,7 +500,7 @@ export let FloatText = module (
 
     // Helpers. --------------------------------------------------------------
 
-    let check_digits = func(digits: int) -> void {
+    let check_digits = func(digits: int) {
         if (digits < 0 || digits > 100) {
             trap_with_message("invalid argument: digits outside 0 through 100");
         }
@@ -546,7 +546,7 @@ export let FloatText = module (
     };
 
     // floor(2 * significand * 2^exponent * 10^power) and whether it is exact.
-    let scale_doubled = func(significand: uint64, exponent: int, power: int) -> [wide.WideUint, bool] {
+    let scale_doubled = func(significand: uint64, exponent: int, power: int) -> [WideUint, bool] {
         let value = wide.of(significand);
         value.shift_left(1);
         if (exponent > 0) {
@@ -576,7 +576,7 @@ export let FloatText = module (
     };
 
     // Shifts right by `count` bits, rounding half to even.
-    let round_shift_right = func(value: wide.WideUint, count: int) -> void {
+    let round_shift_right = func(value: WideUint, count: int) {
         let versus = value.low_bits_versus_half(count);
         value.shift_right(count);
         if (versus > 0 || (versus == 0 && value.is_odd())) {
@@ -594,8 +594,8 @@ export let FloatText = module (
 
     let zeros = func(count: int) -> string {
         let text = "";
-        for (let i = 0; i < count; i = i + 1) {
-            text = text + "0";
+        for (let i = 0; i < count; i++) {
+            text += "0";
         }
         return text;
     };
@@ -608,7 +608,6 @@ export let FloatText = module (
         return quotient;
     };
 
-    let parse_error = func(kind: error.ParseErrorKind, offset: int, message: string) -> error.Error {
-        return error.Error.Parse { kind: kind, offset: offset, message: message };
-    };
+    let parse_error = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
+        Error.Parse { kind: kind, offset: offset, message: message };
 );

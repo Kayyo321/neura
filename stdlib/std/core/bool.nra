@@ -1,36 +1,27 @@
-let error = import:Std.Core.Error;
-let ordering = import:Std.Core.Ordering;
-let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
 
 // Companion functions for bool (Stdlib.md section 7.4).
 export let Bool = module (
     // 1 for true, 0 for false.
-    export let to_int = func(v: bool) -> int {
-        if (v) {
-            return 1;
-        }
-        return 0;
-    };
+    export let to_int = func(v: bool) -> int => v ? 1 : 0;
 
-    export let xor = func(a: bool, b: bool) -> bool {
-        return a != b;
-    };
+    export let xor = func(a: bool, b: bool) -> bool => a != b;
 
     // The natural order: false before true. Usable as a comparator.
-    export let compare = func(a: bool, b: bool) -> ordering.Ordering {
+    export let compare = func(a: bool, b: bool) -> Ordering {
         if (a == b) {
-            return ordering.Ordering.Equal;
+            return Ordering.Equal;
         }
         if (b) {
-            return ordering.Ordering.Less;
+            return Ordering.Less;
         }
-        return ordering.Ordering.Greater;
+        return Ordering.Greater;
     };
 
     // 1231 for true and 1237 for false (section 5.2).
-    export let hash = func(v: bool) -> uint32 {
-        return v.hash_code();
-    };
+    export let hash = func(v: bool) -> uint32 => v.hash_code();
 
     export let to_string = func(v: bool) -> string {
         if (v) {
@@ -43,17 +34,17 @@ export let Bool = module (
     // proper prefix of either word with UnexpectedEnd at its length; any
     // other text with InvalidCharacter at the first byte that matches
     // neither word.
-    export let parse = func(text: string) -> result.Result<bool> {
+    export let parse = func(text: string) -> Result<bool> {
         if (text == "true") {
-            return result.Result<bool>.Ok(true);
+            return Result<bool>.Ok(true);
         }
         if (text == "false") {
-            return result.Result<bool>.Ok(false);
+            return Result<bool>.Ok(false);
         }
         let length = text.byte_length;
         if (length == 0) {
-            return result.Result<bool>.Err(
-                error.Error.Parse { kind: error.ParseErrorKind.Empty, offset: 0, message: "empty input" });
+            return Result<bool>.Err(
+                Error.Parse { kind: ParseErrorKind.Empty, offset: 0, message: "empty input" });
         }
         let matched = common_prefix(text, "true");
         let other = common_prefix(text, "false");
@@ -61,12 +52,12 @@ export let Bool = module (
             matched = other;
         }
         if (matched == length) {
-            return result.Result<bool>.Err(error.Error.Parse {
-                kind: error.ParseErrorKind.UnexpectedEnd, offset: length, message: "expected true or false"
+            return Result<bool>.Err(Error.Parse {
+                kind: ParseErrorKind.UnexpectedEnd, offset: length, message: "expected true or false"
             });
         }
-        return result.Result<bool>.Err(error.Error.Parse {
-            kind: error.ParseErrorKind.InvalidCharacter, offset: matched, message: "invalid character"
+        return Result<bool>.Err(Error.Parse {
+            kind: ParseErrorKind.InvalidCharacter, offset: matched, message: "invalid character"
         });
     };
 
@@ -74,7 +65,7 @@ export let Bool = module (
     let common_prefix = func(text: string, word: string) -> int {
         let count = 0;
         while (count < text.byte_length && count < word.byte_length && text.byte_at(count) == word.byte_at(count)) {
-            count = count + 1;
+            count++;
         }
         return count;
     };
