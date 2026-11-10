@@ -173,7 +173,7 @@ ELF loaders map only the segments the program headers name and ignore bytes afte
 
 In order:
 
-1. The launcher opens its own file and reads the container (section 5.3). It reads the footer and the payload, not the launcher's own bytes. On Linux it uses the first of these that can be opened: `/proc/self/exe`; the path the kernel recorded for the executable (`AT_EXECFN`); the program name, when it contains a `/`. A root file system without procfs therefore works. The container checks (magic, bounds, checksum) reject a fallback that names some other file. When none can be opened, the start-up error is `could not open the executable file (tried <list>)`, naming each candidate.
+1. The launcher opens its own file and reads the container (section 5.3). It reads the footer and the payload, not the launcher's own bytes. On Linux it uses the first of these that can be opened: `/proc/self/exe`, then the path the kernel recorded when it started the executable (`AT_EXECFN`). A root file system without procfs therefore works. The program name is never used to find the file: whoever starts the process chooses it, and it could name a different executable with a different policy. When none can be opened, the start-up error is `could not open the executable file (tried <list>)`, naming each candidate.
 2. Unless the policy is sealed, it reads `NEURA_RUN_OPTIONS` (section 6.4).
 3. It loads and validates the image, binds the image's imports to the standard providers under the policy's capabilities, and provides the image's embedded native library, if any, to the native provider.
 4. It runs the entry function with the program's arguments.

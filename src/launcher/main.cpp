@@ -104,17 +104,16 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy) {
 
 // The file the launcher is running from. /proc/self/exe is exact but needs
 // procfs; a root file system without it falls back to the path the kernel
-// recorded for the executable, then to a program name that contains a
-// slash. The container checks (footer magic, bounds, checksum) reject a
-// fallback that names some other file.
-std::filesystem::path own_file(std::string_view program, std::string& tried) {
+// recorded when it started the executable. The program name is not used:
+// whoever starts the process chooses it, and it could name another
+// executable with a different policy.
+std::filesystem::path own_file(std::string& tried) {
     std::vector<std::string> candidates{"/proc/self/exe"};
 #ifdef __linux__
     if (const auto* execfn = reinterpret_cast<const char*>(getauxval(AT_EXECFN)); execfn && *execfn) {
         candidates.emplace_back(execfn);
     }
 #endif
-    if (program.find('/') != std::string_view::npos) candidates.emplace_back(program);
     for (const auto& candidate : candidates) {
         if (!tried.empty()) tried += ", ";
         tried += candidate;
@@ -129,7 +128,7 @@ int main(int argc, char** argv) {
     const std::string_view name = argc > 0 && *argv[0] ? argv[0] : "neura-launcher";
     try {
         std::string tried;
-        const auto file = own_file(argc > 0 ? argv[0] : "", tried);
+        const auto file = own_file(tried);
         if (file.empty()) {
             throw std::runtime_error("could not open the executable file (tried " + tried + ")");
         }
