@@ -1,0 +1,4 @@
+[submodule "third_party/neura-libclang"]
+	path = third_party/neura-libclang
+	url = https://github.com/Kayyo321/neura-libclang.git
+	shallow = true
