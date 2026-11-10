@@ -66,7 +66,7 @@ function(check_capabilities executable)
             message(FATAL_ERROR "${executable} should allow native access\n${result_stdout}${result_stderr}")
         endif()
     elseif(NOT result_status STREQUAL "134" OR
-           NOT result_stderr MATCHES "native access denied: run with --allow-native")
+           NOT result_stderr MATCHES "native access denied: the native capability is not granted")
         message(FATAL_ERROR "${executable} should trap on denied native access\n${result_stdout}${result_stderr}")
     endif()
     if(NOT result_stdout STREQUAL expected)

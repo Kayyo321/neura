@@ -81,7 +81,7 @@ expect_ok(check check c-import.nra)
 # With native code denied the first native call traps; on another target the
 # embedded library cannot load.
 neura(denied run --deny-native c-import.nvr)
-if(NOT denied_status STREQUAL "134" OR NOT denied_stderr MATCHES "native access denied: run with --allow-native")
+if(NOT denied_status STREQUAL "134" OR NOT denied_stderr MATCHES "native access denied: the native capability is not granted")
     message(FATAL_ERROR "a run with --deny-native should trap with 134\n${denied_stderr}")
 endif()
 file(READ "${TEST_DIR}/c-import.nvra" assembly)

@@ -1,5 +1,5 @@
 // status: 134
-// stderr: explicit program failure \(trap reason 3\): invalid state: native access denied: run with --allow-native
+// stderr: explicit program failure \(trap reason 3\): invalid state: native access denied: the native capability is not granted
 // run-options: --deny-native
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

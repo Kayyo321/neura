@@ -104,7 +104,7 @@ if(NOT result_status STREQUAL "0" OR NOT result_stdout STREQUAL expected OR NOT 
 endif()
 invoke("${TEST_DIR}/denied")
 if(NOT result_status STREQUAL "134" OR NOT result_stdout STREQUAL "" OR
-   NOT result_stderr MATCHES "native access denied: run with --allow-native")
+   NOT result_stderr MATCHES "native access denied: the native capability is not granted")
     message(FATAL_ERROR "the embedded native library should trap before its first output\n${result_stdout}${result_stderr}")
 endif()
 message(STATUS "checked the bundled C-import library, recorded grant, and target mismatch")

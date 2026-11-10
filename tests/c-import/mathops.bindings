@@ -14,7 +14,7 @@ let c_value = import:Std.DynamicForeign.ForeignValue;
 let c_value_layout = import:Std.DynamicForeign.ValueLayout;
 let c_variadic = import:Std.Core.Variadic;
 
-/// @brief The declarations of the C header mathops.h (ForeignInterop.md, C imports). Calls need --allow-native.
+/// @brief The declarations of the C header mathops.h (ForeignInterop.md, C imports). Calls need the native capability.
 export let Mathops = module (
     let neura_lookup: c_lookup.SymbolLookup = nil;
     let neura_library = func -> c_lookup.SymbolLookup {

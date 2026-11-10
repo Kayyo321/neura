@@ -1,6 +1,6 @@
 // The native interface provider behind Std.DynamicForeign (ForeignInterop.md):
 // native libraries, symbol lookup, arena-owned native memory, and downcalls
-// through libffi. Every service needs the native capability (--allow-native).
+// through libffi. Every service needs the native capability, which --deny-native removes.
 //
 // Wire formats, shared with stdlib/std/dynamic-foreign/internal/native.nra:
 //
