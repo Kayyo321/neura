@@ -254,6 +254,36 @@ NEURA_TEST(placement, prospect_budget_giveup_and_verdict) {
           no_gain.statistics().declined_placement == 6'687 * 8 && opens == 3, "the give-up call rejects without opening");
 }
 
+NEURA_TEST(placement, mixed_graph_gate_opens_on_fixed_call) {
+    nvr::Image image;
+    image.graphs = {wide_graph(), chain_graph(1)};
+    Jobs wide(0, batch_size / 2);
+    Jobs narrow(1, batch_size / 2);
+    std::vector<GraphJob> mixed;
+    for (std::size_t i = 0; i < wide.jobs.size(); ++i) {
+        mixed.push_back(wide.jobs[i]);
+        mixed.push_back(narrow.jobs[i]);
+    }
+    // 256 copies of each shape give 574.9 microseconds per call when both
+    // groups are selected. Call 260 is below 150,000 and call 261 above.
+    constexpr std::size_t expected_open = 261;
+    for (int run = 0; run < 2; ++run) {
+        std::size_t call = 0;
+        std::size_t opened = 0;
+        AutoDevice device(image, [&](std::string&) {
+            opened = call;
+            return nvm::Opened{std::make_unique<nvm::ModelDevice>(image), quick_model, slow_cpu, "model"};
+        }, {batch_size, {}});
+        for (call = 1; call <= expected_open; ++call) {
+            check(device.state() == AutoDevice::State::Gated, "mixed sequence stayed gated before the opening call");
+            device.evaluate(mixed);
+            check(std::ranges::none_of(mixed, &GraphJob::evaluated), "mixed gate declines every job up to opening");
+        }
+        check_equal(opened, expected_open, "mixed sequence opened at the fixed call");
+        check(device.state() == AutoDevice::State::Active, "mixed sequence activated the model");
+    }
+}
+
 NEURA_TEST(placement, active_state_statistics_and_correction) {
     nvr::Image image;
     image.graphs = {wide_graph(), {1, {}, {0}}, {1, {{nvr::Activation::Identity, 0, {{0, 40000}}}}, {1}}};
