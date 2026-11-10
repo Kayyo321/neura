@@ -90,6 +90,24 @@ let StreamsTests = module (
         test.assert_equal_int32(0, test.assert_ok<uint8[list]>(source(4)).length);
     };
 
+    export let test_byte_buffer_content_members = func {
+        let a = byte_buffer.create();
+        let b = byte_buffer.create();
+        test.assert_ok<unit.Unit>(a.write([0, 255]));
+        test.assert_ok<unit.Unit>(b.write([0]));
+        test.assert_ok<unit.Unit>(b.write([255]));
+        let read = b.reader();
+        test.assert_ok<uint8[list]>(read(1));
+        test.assert(a != b);
+        test.assert(a === b);
+        test.assert(b === a);
+        test.assert(!a.equals(nil));
+        test.assert_equal<uint32>(a.hash_code(), b.hash_code());
+        test.assert_equal_string("[0, 255]", a.to_string());
+        b.clear();
+        test.assert(!(a === b));
+    };
+
     export let test_buffered_reader_reads_through_its_buffer = func() -> void {
         let calls = cell.of<int>(0);
         let data = numbers(100);

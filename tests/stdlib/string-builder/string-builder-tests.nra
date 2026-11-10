@@ -182,13 +182,18 @@ let StringBuilderTests = module (
         test.assert_equal_string("ab", bytes_of(b));
     };
 
-    export let test_identity_equality = func() -> void {
+    export let test_content_equality_and_hash = func {
         let a = builders.create();
         let b = builders.create();
-        a.append("same");
-        b.append("same");
-        test.assert(a.equals(a));
-        test.assert(!a.equals(b));
-        test.assert_equal_string("same", a.to_string());
+        a.append("samé");
+        b.append("sam").append_scalar(233);
+        test.assert(a != b);
+        test.assert(a === b);
+        test.assert(b === a);
+        test.assert_equal<uint32>(a.hash_code(), b.hash_code());
+        test.assert_equal_string("samé", a.to_string());
+        test.assert(!a.equals(nil));
+        b.clear();
+        test.assert(!(a === b));
     };
 );

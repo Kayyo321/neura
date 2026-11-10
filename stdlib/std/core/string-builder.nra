@@ -133,6 +133,17 @@ export let StringBuilder = module (
             bytes = [];
         };
 
+        // The current UTF-8 bytes determine equality and hashing.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is StringBuilder)) {
+                return false;
+            }
+            let builder = other as StringBuilder;
+            return bytes === builder.bytes;
+        };
+
+        export let.override hash_code = func -> uint32 => bytes.hash_code();
+
         // The accumulated text. The builder stays usable.
         export let.override to_string = func() -> string {
             let [valid, text] = string.from_utf8(bytes);

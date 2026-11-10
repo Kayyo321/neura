@@ -29,6 +29,20 @@ export let ByteBuffer = module (
             data = empty;
         };
 
+        // Only the current byte sequence participates. Readers hold their
+        // own copies and do not affect the buffer's equality or hash.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is ByteBuffer)) {
+                return false;
+            }
+            let buffer = other as ByteBuffer;
+            return data === buffer.data;
+        };
+
+        export let.override hash_code = func -> uint32 => data.hash_code();
+
+        export let.override to_string = func -> string => data.to_string();
+
         // A byte source over a copy of the current contents. A maximum count
         // below 1 traps.
         export let reader = func() -> func(int) -> result.Result<uint8[list]> {
