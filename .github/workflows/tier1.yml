@@ -1,0 +1,128 @@
+# Tier 1: the checks every pull request must pass before it is merged.
+# docs/ContinuousIntegration.md describes each job and how to run it locally.
+#
+# This workflow runs code from pull requests, including pull requests from
+# forks. It holds no secrets and its token can only read the repository.
+name: Tier 1
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    # `shell: bash` runs each script with `-e -o pipefail`.
+    shell: bash
+
+jobs:
+  repository:
+    name: Documentation and workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test the check scripts
+        run: python3 scripts/test-checks.py
+
+      - name: Check the workflow rules
+        run: python3 scripts/check-workflows.py
+
+      - name: Check documentation links
+        run: python3 scripts/check-docs.py
+
+      - name: Check the standard library reference pages
+        run: python3 scripts/update-stdlib-wiki-api.py --check
+
+  build-and-test:
+    name: Build and test (Linux x86-64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CC: gcc-14
+      CXX: g++-14
+      # A test that needs libclang fails instead of being skipped.
+      NEURA_LIBCLANG_REQUIRED: "1"
+    steps:
+      - name: Check out the repository and its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install the build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends gcc-14 g++-14 libffi-dev libclang1-19
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
+
+      - name: Require a build of Neura's sources without compiler warnings
+        run: |
+          if grep -F "warning:" build/build.log | grep -v -F "/third_party/"; then
+            echo "::error::The build reported the compiler warnings above in Neura's sources."
+            exit 1
+          fi
+
+      - name: Test
+        run: >
+          ctest --test-dir build --parallel "$(nproc)" --no-tests=error
+          --output-on-failure --output-junit ctest-junit.xml
+
+      - name: Require every test to have run
+        if: ${{ !cancelled() }}
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 95
+
+      - name: Upload the test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tier1-test-report
+          path: |
+            build/build.log
+            build/ctest-junit.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The one status check that branch rules require. It fails unless every
+  # job above succeeded, so a skipped or cancelled job cannot pass for it.
+  tier1:
+    name: Tier 1
+    if: ${{ always() }}
+    needs:
+      - repository
+      - build-and-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to have succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS"
+          python3 - <<'EOF'
+          import json, os, sys
+          results = {job: outcome["result"] for job, outcome in json.loads(os.environ["RESULTS"]).items()}
+          failed = {job: result for job, result in results.items() if result != "success"}
+          for job, result in sorted(failed.items()):
+              print(f"::error::Job `{job}` ended as `{result}`; Tier 1 requires `success`.")
+          sys.exit(1 if failed or not results else 0)
+          EOF

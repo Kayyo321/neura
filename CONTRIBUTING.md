@@ -67,6 +67,8 @@ Use the repository's applicable checks and report the exact commands and results
 
 Exercise failure paths that the change can affect. Examples include malformed artifacts, arithmetic boundaries, invalid memory access, exhausted execution limits, and unsupported circuit structures. Use the documented behavior of the affected type or feature to decide the expected result. Keep language-level tests independent of test order and follow the conventions in [Language testing](docs/lang/Testing.md).
 
+Every pull request runs the [Tier 1 checks](docs/ContinuousIntegration.md): the documentation and workflow checks, a Release build on Linux x86-64, and the whole CTest suite. A test that is skipped or not run fails the pull request. Run the same commands locally before opening one; that page lists them.
+
 ## Review performance changes
 
 Specify the workload, artifact configuration, execution environment, and baseline. For the standard library, `tests/benchmarks` records NVM steps, peak heap cells, neuron count, and image bytes for representative workloads in `tests/benchmarks/baseline.txt`; the `benchmarks` test fails when a figure rises more than 10%, and a change that raises one updates the baseline with the reason. `neura run --profile` shows the steps each function takes. Compare the same inputs and confirm equivalent results before measuring. Record the cost the change targets, such as compile time, circuit size or depth, serialized size, execution steps, runtime, or memory. Include the cost of any work moved to another stage or to the runtime. Explain which workloads benefit and which regress in the measurements.
