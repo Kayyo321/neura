@@ -1,0 +1,46 @@
+let channels = import:Std.Concurrent.Channel;
+let test = import:Std.Test;
+
+// Tests for schedule exploration (Concurrency.md section 14.4). The second
+// one holds a bug that the reference scheduler never shows.
+let OrderTests = module (
+    let report = func(name: int, out: channels.Sender<int>) {
+        out.send(name);
+    };
+
+    let next = func(incoming: channels.Receiver<int>) -> int => match (incoming.receive()) {
+        channels.Received.Value(value) => value,
+        _ => 0,
+    };
+
+    // Holds under every schedule: a sum does not depend on the order.
+    export let test_sum_is_order_free = func() -> void {
+        let [out, incoming, closer] = channels.open<int>(2);
+        let total = 0;
+        scope {
+            spawn report(1, out);
+            spawn report(2, out);
+            total = next(incoming) + next(incoming);
+        }
+        test.assert_equal_int32(3, total);
+    };
+
+    // Wrong: it assumes the task spawned first sends first. The reference
+    // scheduler runs tasks in the order they became runnable, so only
+    // another legal schedule shows the failure.
+    export let test_assumes_spawn_order = func() -> void {
+        let [out, incoming, closer] = channels.open<int>(2);
+        let first = 0;
+        scope {
+            spawn report(1, out);
+            spawn report(2, out);
+            first = next(incoming);
+        }
+        test.assert_equal_int32(1, first);
+    };
+
+    // One task: there is a single schedule to run.
+    export let test_without_tasks = func() -> void {
+        test.assert(true);
+    };
+);

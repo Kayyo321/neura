@@ -1,5 +1,7 @@
 #include "runner.hpp"
 
+#include "nvm/schedule.hpp"
+
 #include "nvm/trace.hpp"
 #include "nvm/trace_file.hpp"
 #include "nvr/names.hpp"
@@ -340,6 +342,10 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         events.emplace(*options.trace_events, options.trace_wall_time);
         limits.observer = &*events;
     }
+    // A replay takes its clock readings from the trace.
+    nvm::VirtualTaskClock virtual_clock;
+    nvm::TaskClock* clock = options.virtual_time && !options.replay ? &virtual_clock : nullptr;
+    host.services.set_clock(clock);
     nvm::RunResult result;
     if (options.replay) {
         // No service runs: every response comes from the trace. Console
@@ -357,14 +363,14 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         result = result_of(replayed.trace);
     } else if (options.record) {
         const auto bindings = nvm::bind(image, host.registry);
-        const auto trace = nvm::record(image, bindings, arguments, limits);
+        const auto trace = nvm::record(image, bindings, arguments, limits, clock);
         host.services.end_run();
         const auto text = nvm::write_trace(trace);
         write_file(*options.record, std::vector<std::uint8_t>(text.begin(), text.end()));
         result = result_of(trace);
     } else {
         const auto bindings = nvm::bind(image, host.registry);
-        result = nvm::run(image, bindings, arguments, limits);
+        result = nvm::run(image, bindings, arguments, limits, clock);
         host.services.end_run();
     }
     if (options.stats) {

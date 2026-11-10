@@ -15,6 +15,7 @@
 #include "nvm/host.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
+#include "nvm/schedule.hpp"
 #include "nvr/format.hpp"
 #include "runner/runner.hpp"
 #include "source_docs.hpp"
@@ -113,6 +114,12 @@ void usage(std::ostream& out) {
            "  --max-pending-requests N bound the overlapping host requests in flight\n"
            "  --parallel-workers N     threads that evaluate the items of a parallel map (default 1)\n"
            "  --task-dump[=text|json]  print every task when one traps; SIGQUIT prints a dump at any time\n"
+           "  --virtual-time           timers, deadlines, and the clock follow a clock that moves only when\n"
+           "                           every task is parked, so a timeout takes no real time\n"
+           "  --schedules N            (test) run each test under up to N legal task schedules\n"
+           "  --schedule-seed S        (test) the seed of the explored schedules (default 0)\n"
+           "  --save-schedule FILE     (test) write the first failing schedule to FILE\n"
+           "  --schedule FILE          (test) run the test of a saved schedule under exactly that schedule\n"
            "  --trace-events FILE      write one JSON line per scheduler event (run only)\n"
            "  --trace-wall-time        add wall-clock times to --trace-events\n"
            "\n"
@@ -154,6 +161,13 @@ struct Options {
     bool task_safety = false;
     std::optional<fs::path> trace_events;
     bool trace_wall_time = false;
+    // Testing concurrent code (Concurrency.md section 14.4).
+    bool virtual_time = false;
+    std::uint64_t schedules = 1;
+    std::uint64_t schedule_seed = 0;
+    bool exploration_options = false;
+    std::optional<fs::path> save_schedule;
+    std::optional<fs::path> schedule;
     std::vector<fs::path> files;
     std::vector<fs::path> roots;
     fs::path library;
@@ -447,6 +461,29 @@ Options read_options(int argc, char** argv) {
         } else if (arg == "--trace-wall-time") {
             if (options.command != Command::Run) throw std::runtime_error("--trace-wall-time applies only to run");
             options.trace_wall_time = true;
+        } else if (arg == "--virtual-time") {
+            if (!runs) throw std::runtime_error("--virtual-time applies only to run and test");
+            options.virtual_time = true;
+        } else if (arg == "--schedules" || arg == "--schedule-seed" || arg == "--save-schedule" || arg == "--schedule") {
+            if (options.command != Command::Test) throw std::runtime_error(std::string(arg) + " applies only to test");
+            if (arg == "--schedules") {
+                options.schedules = parse_limit(arg, next());
+                options.exploration_options = true;
+            } else if (arg == "--schedule-seed") {
+                const std::string_view digits(next());
+                const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(),
+                                                          options.schedule_seed);
+                if (digits.empty() || error != std::errc{} || end != digits.data() + digits.size()) {
+                    throw std::runtime_error("expected an unsigned integer after --schedule-seed");
+                }
+                options.exploration_options = true;
+            } else if (arg == "--save-schedule") {
+                options.save_schedule = fs::path(next());
+                options.exploration_options = true;
+            } else {
+                if (options.schedule) throw std::runtime_error("--schedule given more than once");
+                options.schedule = fs::path(next());
+            }
         } else if (runs && arg == "--stats") {
             options.stats = true;
         } else if (compiles && arg == "--c-include") {
@@ -499,6 +536,13 @@ Options read_options(int argc, char** argv) {
         if (options.record) throw std::runtime_error("--each cannot be combined with --record");
         if (options.replay) throw std::runtime_error("--each cannot be combined with --replay");
         if (options.limits.profile) throw std::runtime_error("--each cannot be combined with --profile");
+        if (options.virtual_time) throw std::runtime_error("--each cannot be combined with --virtual-time");
+    }
+    if (options.virtual_time && options.replay) {
+        throw std::runtime_error("--virtual-time cannot be combined with --replay: a replay takes its clock from the trace");
+    }
+    if (options.schedule && options.exploration_options) {
+        throw std::runtime_error("--schedule cannot be combined with --schedules, --schedule-seed, or --save-schedule");
     }
     if (options.record && options.replay) {
         throw std::runtime_error("--record and --replay cannot be combined");
@@ -966,6 +1010,7 @@ int run(const Options& options) {
     neura::runner::RunOptions run_options{options.limits, options.stats, options.record, options.replay,
                                           options.task_dump, options.trace_events, options.trace_wall_time};
     run_options.limits.graph_device = gpu.device();
+    run_options.virtual_time = options.virtual_time;
     const auto status = neura::runner::run(image, host, options.arguments, run_options, path.string(), image_bytes);
     return gpu.finish(status, options.stats);
 }
@@ -1063,18 +1108,19 @@ int run_tests(const Options& options) {
     provide_native_library(image, host.services);
     const auto bindings = neura::nvm::bind(image, host.registry);
     std::size_t failed = 0;
-    const auto finished = [&](std::size_t i, const neura::nvm::RunResult& result) {
+    // `note` follows the test's name: which schedule failed, or how many ran.
+    const auto finished = [&](std::size_t i, const neura::nvm::RunResult& result, const std::string& note = {}) {
         // Each test is its own run: files and sockets it left open close now.
         host.services.end_run();
         // A test that ends the process with a nonzero status through
         // Std.Program.Process.exit fails.
         if (result.completed && result.status != 0) {
             ++failed;
-            std::cout << "FAIL " << names[i] << ": the test exited with status " << result.status << '\n';
+            std::cout << "FAIL " << names[i] << note << ": the test exited with status " << result.status << '\n';
             return;
         }
         if (result.completed) {
-            std::cout << "PASS " << names[i];
+            std::cout << "PASS " << names[i] << note;
             if (options.stats) {
                 std::cout << " (steps " << result.steps << ", peak heap cells " << result.peak_heap_cells << ")";
             }
@@ -1082,7 +1128,7 @@ int run_tests(const Options& options) {
             return;
         }
         ++failed;
-        std::cout << "FAIL " << names[i] << ": ";
+        std::cout << "FAIL " << names[i] << note << ": ";
         if (const auto message = test_failure_message(result.trap, image, test_labels)) {
             std::cout << *message << '\n';
         } else {
@@ -1094,19 +1140,94 @@ int run_tests(const Options& options) {
     neura::runner::TaskDumps dumps(options.task_dump);
     auto limits = options.limits;
     limits.task_dump = dumps.request();
-    if (auto* device = gpu.device()) {
+    // One test, alone, under a chooser (null: the reference scheduler) and
+    // its own virtual clock when virtual time is on.
+    const auto run_test = [&](std::size_t i, neura::nvm::ScheduleChooser* chooser, std::uint64_t quantum,
+                              bool virtual_time) {
+        neura::nvm::VirtualTaskClock virtual_clock;
+        neura::nvm::TaskClock* clock = virtual_time ? &virtual_clock : nullptr;
+        host.services.set_clock(clock);
+        auto test_limits = limits;
+        test_limits.chooser = chooser;
+        test_limits.task_quantum = quantum;
+        // The start functions share the entry signature, so any of them can
+        // be the entry of a validated image.
+        image.entry = static_cast<std::uint32_t>(i);
+        auto result = neura::nvm::run(image, bindings, {}, test_limits, clock);
+        host.services.set_clock(nullptr);
+        return result;
+    };
+    const auto passed = [](const neura::nvm::RunResult& result) { return result.completed && result.status == 0; };
+    std::size_t ran = tests.size();
+    if (options.schedule) {
+        // Reproduction: the one test of the saved schedule, under exactly
+        // its choices, quantum, and clock.
+        const auto saved = neura::nvm::read_schedule(*options.schedule);
+        const auto found = std::ranges::find(names, saved.test);
+        if (found == names.end()) {
+            throw std::runtime_error(options.schedule->string() + ": the schedule is for test " + saved.test +
+                                     ", which these files do not define");
+        }
+        const auto i = static_cast<std::size_t>(found - names.begin());
+        neura::nvm::RecordedChooser chooser(saved.choices);
+        const auto result = run_test(i, &chooser, saved.quantum, saved.virtual_time || options.virtual_time);
+        if (chooser.diverged()) {
+            host.services.end_run();
+            ++failed;
+            std::cout << "FAIL " << names[i] << " [saved schedule]: the schedule does not fit this program: at decision "
+                      << chooser.diverged_tick() << " fewer tasks could run than its choice needs\n";
+        } else {
+            finished(i, result, " [saved schedule]");
+        }
+        ran = 1;
+    } else if (auto* device = options.schedules > 1 || options.virtual_time ? nullptr : gpu.device()) {
         neura::nvm::Fleet fleet(image, {limits, device});
         for (std::size_t i = 0; i < tests.size(); ++i) fleet.add(static_cast<std::uint32_t>(i), {});
-        neura::nvm::run_fleet(fleet, bindings, finished);
+        neura::nvm::run_fleet(fleet, bindings,
+                              [&](std::size_t i, const neura::nvm::RunResult& result) { finished(i, result); });
     } else {
+        // Schedule 1 is the reference scheduler's. Each later one varies
+        // which runnable task goes next, from the seed. Exploration is
+        // bounded: it says nothing about schedules it did not run.
+        std::uint64_t explored = 0;
+        bool saved = false;
         for (std::size_t i = 0; i < tests.size(); ++i) {
-            // The start functions share the entry signature, so any of them can
-            // be the entry of a validated image.
-            image.entry = static_cast<std::uint32_t>(i);
-            finished(i, neura::nvm::run(image, bindings, {}, limits));
+            auto result = run_test(i, nullptr, limits.task_quantum, options.virtual_time);
+            std::uint64_t count = 1;
+            std::string note;
+            neura::nvm::SavedSchedule failing{names[i], options.schedule_seed, limits.task_quantum,
+                                              options.virtual_time, {}};
+            for (std::uint64_t k = 1; passed(result) && k < options.schedules; ++k) {
+                host.services.end_run();
+                neura::nvm::ExploringChooser chooser(options.schedule_seed + k);
+                result = run_test(i, &chooser, limits.task_quantum, options.virtual_time);
+                // No decision offered a choice: the test has one schedule.
+                if (chooser.offered() == 0) break;
+                ++count;
+                failing.seed = options.schedule_seed + k;
+                failing.choices = chooser.choices();
+            }
+            explored += count;
+            if (options.schedules > 1) {
+                note = passed(result) ? " [" + std::to_string(count) + (count == 1 ? " schedule]" : " schedules]")
+                                      : " [schedule " + std::to_string(count) + " of " +
+                                            std::to_string(options.schedules) + ", seed " +
+                                            std::to_string(failing.seed) + "]";
+            }
+            if (!passed(result) && options.save_schedule && !saved) {
+                neura::nvm::write_schedule(*options.save_schedule, failing);
+                saved = true;
+                std::cerr << "neura: note: the failing schedule of " << names[i] << " was written to "
+                          << options.save_schedule->string() << '\n';
+            }
+            finished(i, result, note);
+        }
+        if (options.schedules > 1) {
+            std::cout << "explored " << explored << " schedule(s) of " << tests.size() << " test(s), seed "
+                      << options.schedule_seed << '\n';
         }
     }
-    std::cout << tests.size() << " test(s), " << tests.size() - failed << " passed, " << failed << " failed\n";
+    std::cout << ran << " test(s), " << ran - failed << " passed, " << failed << " failed\n";
     std::cout.flush();
     return gpu.finish(failed == 0 ? 0 : 1, options.stats);
 }

@@ -35,6 +35,7 @@ set(neura_nvm_sources
     src/nvm/placement.cpp
     src/nvm/providers.cpp
     src/nvm/scalar_text.cpp
+    src/nvm/schedule.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
 )
@@ -288,6 +289,14 @@ if(BUILD_TESTING)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-io-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/io.cmake"
+    )
+
+    # Virtual time, schedule exploration, and saved schedules (Concurrency.md section 14.4).
+    add_test(NAME concurrency-schedules COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-schedules-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/schedules.cmake"
     )
 
     add_test(NAME concurrency-parallel COMMAND ${CMAKE_COMMAND}

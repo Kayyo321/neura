@@ -1,6 +1,7 @@
 #pragma once
 
 #include "host.hpp"
+#include "machine.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -232,6 +233,12 @@ public:
     std::size_t open_files() const;
     std::size_t open_sockets() const;
     const Capabilities& capabilities() const { return capabilities_; }
+    // Virtual time (docs/lang/Concurrency.md section 14.4): when set, the
+    // clock services read this clock instead of the host's. The monotonic
+    // clock is its reading, the wall clock is its reading after
+    // 2000-01-01T00:00:00Z, and a sleep that does not overlap moves it
+    // instead of waiting. Null restores the host's clocks.
+    void set_clock(TaskClock* clock) { clock_ = clock; }
     // The shared object from the image's NATV section, which
     // neura.ffi.library.embedded loads on first use. The services keep a
     // copy.
@@ -249,6 +256,7 @@ private:
     ConsoleSink& error_;
     ConsoleSource& input_;
     Capabilities capabilities_;
+    TaskClock* clock_ = nullptr;
     std::vector<ResolvedPath> prefixes_;
     std::unique_ptr<Tables> tables_;
     std::string embedded_object_;

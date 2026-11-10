@@ -32,6 +32,9 @@ struct RunOptions {
     std::optional<std::filesystem::path> trace_events;
     // --trace-wall-time: add wall-clock times, which differ between runs.
     bool trace_wall_time = false;
+    // --virtual-time: timers, deadlines, and the clock services follow a
+    // clock that moves only when every task is parked.
+    bool virtual_time = false;
 };
 
 // Writes scheduler events as JSON lines (docs/lang/Concurrency.md section

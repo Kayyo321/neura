@@ -323,9 +323,12 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
 
     add(signature("neura.clock.wall", {}, tuple({int64(), int32()})), [this](const HostRequest&) {
         if (!capabilities_.clock) return denied();
-        const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                             std::chrono::system_clock::now().time_since_epoch())
-                             .count();
+        // Under virtual time the wall clock starts at 2000-01-01T00:00:00Z.
+        constexpr std::int64_t virtual_epoch = 946'684'800LL * 1'000'000'000LL;
+        const auto now = clock_ ? virtual_epoch + clock_->now()
+                                : std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                      std::chrono::system_clock::now().time_since_epoch())
+                                      .count();
         auto seconds = now / 1'000'000'000;
         auto nanos = now % 1'000'000'000;
         if (nanos < 0) {
@@ -337,16 +340,21 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
     });
     add(signature("neura.clock.monotonic", {}, int64()), [this](const HostRequest&) {
         if (!capabilities_.clock) return denied();
-        const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                             std::chrono::steady_clock::now().time_since_epoch())
-                             .count();
+        const auto now = clock_ ? clock_->now()
+                                : std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                      std::chrono::steady_clock::now().time_since_epoch())
+                                      .count();
         return HostCompletion::ok(int64_value(now));
     });
     const FunctionService::Handler sleep = [this](const HostRequest& request) {
         if (!capabilities_.clock) return denied();
         const auto nanos = as_int64(request.arguments.at(0));
         if (nanos < 0) return fail(host_error::invalid_input);
-        std::this_thread::sleep_for(std::chrono::nanoseconds(nanos));
+        if (clock_) {
+            clock_->wait_until(deadline_after(clock_->now(), nanos));
+        } else {
+            std::this_thread::sleep_for(std::chrono::nanoseconds(nanos));
+        }
         return HostCompletion::ok();
     };
     // Overlapping: a deadline on the task clock; no thread sleeps.
