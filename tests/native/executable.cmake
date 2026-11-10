@@ -66,10 +66,11 @@ if(SUITE STREQUAL "build")
     success("${NEURA}" build --native "${TEST_DIR}/copies/deeper/still/hello-world.nra" -o from-copy)
     equal_files("${TEST_DIR}/source" "${TEST_DIR}/from-copy")
     # The default policy holds no prefixes. Its encoded size, including the
-    # image length word, is 36 bytes. Compare both unmodified regions.
+    # five task settings of container version 2 (36 bytes) and the image
+    # length word, is 72 bytes. Compare both unmodified regions.
     file(SIZE "${LAUNCHER}" launcher_size)
     file(SIZE "${TEST_DIR}/hello.nvr" image_size)
-    math(EXPR image_offset "${launcher_size} + 36")
+    math(EXPR image_offset "${launcher_size} + 72")
     file(READ "${LAUNCHER}" launcher_hex HEX)
     file(READ "${TEST_DIR}/source" prefix LIMIT "${launcher_size}" HEX)
     file(READ "${TEST_DIR}/source" payload OFFSET "${image_offset}" LIMIT "${image_size}" HEX)

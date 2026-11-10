@@ -103,10 +103,21 @@ void put(Bytes& bytes, std::uint64_t value, unsigned width) {
     for (unsigned i = 0; i < width; ++i) bytes.push_back(static_cast<std::uint8_t>(value >> (i * 8)));
 }
 
+// The task settings a version 2 policy records after the three run limits.
+struct TaskSettings {
+    std::uint64_t max_tasks = 64;
+    std::uint64_t quantum = 1024;
+    std::uint64_t queued_messages = 4096;
+    std::uint64_t pending_requests = 16;
+    std::uint32_t workers = 1;
+};
+
 // A policy and image as the container stores them, with every length word
-// under the caller's control so that a case can make one of them lie.
+// under the caller's control so that a case can make one of them lie. A
+// version 1 policy has no task settings.
 Bytes policy_payload(std::uint32_t capabilities, std::uint32_t prefix_count, const std::vector<Bytes>& prefixes,
-                     const Bytes& image, std::uint32_t image_length) {
+                     const Bytes& image, std::uint32_t image_length, std::uint32_t version = 2,
+                     const TaskSettings& tasks = {}) {
     Bytes payload;
     put(payload, 0, 4);
     put(payload, capabilities, 4);
@@ -118,6 +129,13 @@ Bytes policy_payload(std::uint32_t capabilities, std::uint32_t prefix_count, con
     put(payload, 1000, 8);
     put(payload, 100, 4);
     put(payload, 100000, 8);
+    if (version >= 2) {
+        put(payload, tasks.max_tasks, 8);
+        put(payload, tasks.quantum, 8);
+        put(payload, tasks.queued_messages, 8);
+        put(payload, tasks.pending_requests, 8);
+        put(payload, tasks.workers, 4);
+    }
     put(payload, image_length, 4);
     payload.insert(payload.end(), image.begin(), image.end());
     return payload;
@@ -127,7 +145,7 @@ Bytes policy_payload(std::uint32_t capabilities, std::uint32_t prefix_count, con
 // footer's offset or size word away from the truth; the checksum covers the
 // bytes the footer states.
 Bytes assemble(const Bytes& launcher, const Bytes& payload, std::int64_t offset_shift = 0,
-               std::int64_t size_shift = 0) {
+               std::int64_t size_shift = 0, std::uint32_t version = 2) {
     Bytes file = launcher;
     file.insert(file.end(), payload.begin(), payload.end());
     const auto offset = static_cast<std::uint64_t>(static_cast<std::int64_t>(launcher.size()) + offset_shift);
@@ -138,7 +156,7 @@ Bytes assemble(const Bytes& launcher, const Bytes& payload, std::int64_t offset_
     put(file, offset, 8);
     put(file, stated_size, 8);
     put(file, crc(std::span(file).subspan(begin, end - begin)), 4);
-    put(file, 1, 4);
+    put(file, version, 4);
     for (const char letter : std::string_view("NEURAEXE")) file.push_back(static_cast<std::uint8_t>(letter));
     return file;
 }
@@ -170,9 +188,14 @@ int main(int argc, char** argv) try {
     write(altered, changed);
     rejects(altered, directory, "wrong checksum", "checksum");
     changed = bytes;
-    changed[footer + 20] = 2;
-    write(altered, changed);
-    rejects(altered, directory, "newer container", "version");
+    check(number(bytes, footer + 20, 4) == 2, "the toolchain writes container version 2");
+    for (const std::uint8_t version : {0, 3}) {
+        changed = bytes;
+        changed[footer + 20] = version;
+        write(altered, changed);
+        rejects(altered, directory, "container version " + std::to_string(version),
+                "unsupported container version " + std::to_string(version));
+    }
     changed = bytes;
     changed[offset + 3] = 0x80;
     fix_checksum(changed, offset);
@@ -198,7 +221,8 @@ int main(int argc, char** argv) try {
     // Crafted containers. The image is the good executable's own. The two
     // controls must run, and each lie about the policy must be refused.
     const auto launcher_bytes = read(launcher);
-    constexpr std::size_t default_policy_size = 36;
+    constexpr std::size_t task_settings_size = 36;
+    constexpr std::size_t default_policy_size = 36 + task_settings_size;
     const Bytes image(bytes.begin() + static_cast<std::ptrdiff_t>(offset + default_policy_size),
                       bytes.begin() + static_cast<std::ptrdiff_t>(footer));
     const auto image_size = static_cast<std::uint32_t>(image.size());
@@ -215,6 +239,29 @@ int main(int argc, char** argv) try {
     check(granted.exited && granted.status == 0 && granted.stdout_size != 0,
           "a container with one valid prefix must run: " + granted.stderr_text);
 
+    // A version 1 container, which has no task settings, still runs: the
+    // launcher uses the defaults for them. Its bytes under a version 2
+    // footer, or the reverse, are refused, because the fields do not line up.
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 1), 0, 0, 1));
+    const auto older = execute(altered, directory);
+    check(older.exited && older.status == 0 && older.stdout_size != 0,
+          "a version 1 container must run: " + older.stderr_text);
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 1), 0, 0, 2));
+    rejects(altered, directory, "version 1 policy under a version 2 footer");
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 2), 0, 0, 1));
+    rejects(altered, directory, "version 2 policy under a version 1 footer");
+
+    for (const auto& settings : {TaskSettings{.max_tasks = 0}, TaskSettings{.quantum = 0},
+                                 TaskSettings{.queued_messages = 0}, TaskSettings{.pending_requests = 0},
+                                 TaskSettings{.workers = 0}, TaskSettings{.workers = 1025}}) {
+        craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 2, settings)));
+        rejects(altered, directory, "invalid task settings", "invalid task settings");
+    }
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 2, TaskSettings{.workers = 1024})));
+    const auto widest = execute(altered, directory);
+    check(widest.exited && widest.status == 0 && widest.stdout_size != 0,
+          "a container with 1024 parallel workers must run: " + widest.stderr_text);
+
     craft(assemble(launcher_bytes, policy_payload(files_capability, 1, {Bytes{}}, image, image_size)));
     rejects(altered, directory, "empty file-system prefix", "file-system prefix is empty");
     craft(assemble(launcher_bytes, policy_payload(files_capability, 2, {slash, Bytes{}}, image, image_size)));
@@ -227,7 +274,7 @@ int main(int argc, char** argv) try {
     rejects(altered, directory, "prefix without the files capability", "require the files capability");
 
     const auto remaining_after_count = policy_payload(files_capability, 0, {}, image, image_size).size() - 12;
-    const auto room = static_cast<std::uint32_t>((remaining_after_count - 24) / 4);
+    const auto room = static_cast<std::uint32_t>((remaining_after_count - 24 - task_settings_size) / 4);
     for (const std::uint32_t count : {room + 1, 0x40000000U, 0xffffffffU}) {
         craft(assemble(launcher_bytes, policy_payload(files_capability, count, {}, image, image_size)));
         rejects(altered, directory, "prefix count " + std::to_string(count), "invalid file-system prefix count");
@@ -250,8 +297,10 @@ int main(int argc, char** argv) try {
 
     craft(assemble(launcher_bytes, {}));
     rejects(altered, directory, "zero-length payload", "invalid payload bounds");
-    craft(assemble(launcher_bytes, Bytes(35, 0)));
+    craft(assemble(launcher_bytes, Bytes(71, 0)));
     rejects(altered, directory, "payload shorter than the fixed policy fields", "invalid payload bounds");
+    craft(assemble(launcher_bytes, Bytes(35, 0), 0, 0, 1));
+    rejects(altered, directory, "version 1 payload shorter than its fixed policy fields", "invalid payload bounds");
     {
         // The footer places the payload inside the launcher, so the policy
         // would be read from launcher code.

@@ -29,8 +29,13 @@ namespace {
 
 constexpr std::string_view magic = "NEURAEXE";
 constexpr std::size_t footer_size = 32;
-constexpr std::uint64_t policy_tail_size = 24; // Three limits and the image byte count.
-constexpr std::uint64_t minimum_payload_size = 12 + policy_tail_size;
+// The fixed fields that follow the file-system prefixes: three limits and the
+// image byte count, with the five task settings between them since version 2.
+constexpr std::uint64_t task_settings_size = 4 * sizeof(std::uint64_t) + sizeof(std::uint32_t);
+constexpr std::uint64_t policy_tail_size(std::uint32_t version) {
+    return 24 + (version >= 2 ? task_settings_size : 0);
+}
+constexpr std::uint64_t minimum_payload_size(std::uint32_t version) { return 12 + policy_tail_size(version); }
 constexpr std::size_t io_chunk = 64U << 10;
 
 constexpr std::uint32_t sealed = 1U;
@@ -89,6 +94,7 @@ struct Footer {
     std::uint64_t payload_offset;
     std::uint64_t payload_size;
     std::uint32_t checksum;
+    std::uint32_t version;
 };
 
 Footer read_footer(std::span<const std::uint8_t> tail, std::uint64_t file_size) {
@@ -96,16 +102,19 @@ Footer read_footer(std::span<const std::uint8_t> tail, std::uint64_t file_size) 
     if (tail.size() < footer_size) malformed("truncated footer");
     tail = tail.last(footer_size);
     const auto version = little_endian<std::uint32_t>(tail.subspan(20));
-    if (version != container_version) malformed("unsupported container version " + std::to_string(version));
+    if (version == 0 || version > container_version) {
+        malformed("unsupported container version " + std::to_string(version));
+    }
     const Footer footer{
         little_endian<std::uint64_t>(tail),
         little_endian<std::uint64_t>(tail.subspan(8)),
         little_endian<std::uint32_t>(tail.subspan(16)),
+        version,
     };
     const auto footer_offset = file_size - footer_size;
     if (footer.payload_offset == 0 || footer.payload_offset > footer_offset ||
         footer.payload_size != footer_offset - footer.payload_offset ||
-        footer.payload_size < minimum_payload_size) {
+        footer.payload_size < minimum_payload_size(version)) {
         malformed("invalid payload bounds");
     }
     return footer;
@@ -157,8 +166,9 @@ private:
 };
 
 Container read_payload(PayloadReader& input, const Footer& footer) {
-    Container result{.policy = {}, .image = {}, .launcher_size = footer.payload_offset};
+    Container result{.version = footer.version, .policy = {}, .image = {}, .launcher_size = footer.payload_offset};
     auto& policy = result.policy;
+    const auto tail_size = policy_tail_size(footer.version);
     const auto flags = input.integer<std::uint32_t>();
     if ((flags & ~sealed) != 0) malformed("reserved policy flags");
     policy.sealed = (flags & sealed) != 0;
@@ -175,12 +185,12 @@ Container read_payload(PayloadReader& input, const Footer& footer) {
     if (!policy.capabilities.fs && prefixes != 0) malformed("file-system prefixes require the files capability");
     // The minimum payload size guarantees space for the fixed fields here.
     // Each prefix leaves those fields and the remaining length words intact.
-    if (prefixes > (input.remaining() - policy_tail_size) / sizeof(std::uint32_t)) {
+    if (prefixes > (input.remaining() - tail_size) / sizeof(std::uint32_t)) {
         malformed("invalid file-system prefix count");
     }
     for (std::uint32_t i = 0; i < prefixes; ++i) {
         const auto size = input.integer<std::uint32_t>();
-        const auto trailing = policy_tail_size + std::uint64_t{prefixes - i - 1} * sizeof(std::uint32_t);
+        const auto trailing = tail_size + std::uint64_t{prefixes - i - 1} * sizeof(std::uint32_t);
         std::string prefix;
         if (size > input.remaining() - trailing || size > prefix.max_size()) {
             malformed("invalid file-system prefix length");
@@ -195,6 +205,20 @@ Container read_payload(PayloadReader& input, const Footer& footer) {
     policy.limits.max_steps = input.integer<std::uint64_t>();
     policy.limits.max_frames = input.integer<std::uint32_t>();
     policy.limits.max_heap_cells = input.integer<std::uint64_t>();
+    if (footer.version >= 2) {
+        policy.limits.max_tasks = input.integer<std::uint64_t>();
+        policy.limits.task_quantum = input.integer<std::uint64_t>();
+        policy.limits.max_queued_messages = input.integer<std::uint64_t>();
+        policy.limits.max_pending_requests = input.integer<std::uint64_t>();
+        policy.limits.parallel_workers = input.integer<std::uint32_t>();
+        // A zero here would stop the first task, turn, send, or request, or
+        // leave a parallel map with nothing to run on.
+        if (policy.limits.max_tasks == 0 || policy.limits.task_quantum == 0 ||
+            policy.limits.max_queued_messages == 0 || policy.limits.max_pending_requests == 0 ||
+            policy.limits.parallel_workers == 0 || policy.limits.parallel_workers > max_parallel_workers) {
+            malformed("invalid task settings");
+        }
+    }
     const auto image_size = input.integer<std::uint32_t>();
     if (image_size > input.remaining() || image_size > result.image.max_size()) {
         malformed("invalid image length");
@@ -228,6 +252,17 @@ std::vector<std::uint8_t> encode_policy(const Policy& policy, std::uint32_t imag
     append_integer(bytes, policy.limits.max_steps);
     append_integer(bytes, policy.limits.max_frames);
     append_integer(bytes, policy.limits.max_heap_cells);
+    const auto& limits = policy.limits;
+    if (limits.max_tasks == 0 || limits.task_quantum == 0 || limits.max_queued_messages == 0 ||
+        limits.max_pending_requests == 0 || limits.parallel_workers == 0 ||
+        limits.parallel_workers > max_parallel_workers) {
+        malformed("invalid task settings");
+    }
+    append_integer(bytes, limits.max_tasks);
+    append_integer(bytes, limits.task_quantum);
+    append_integer(bytes, limits.max_queued_messages);
+    append_integer(bytes, limits.max_pending_requests);
+    append_integer(bytes, limits.parallel_workers);
     append_integer(bytes, image_size);
     return bytes;
 }
