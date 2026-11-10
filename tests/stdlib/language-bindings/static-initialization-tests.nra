@@ -1,0 +1,234 @@
+let test = import:Std.Test;
+
+let events = "";
+
+let record = func(tag: string) -> int {
+    events += tag;
+    return events.byte_length;
+};
+
+let Base = class (
+    export static let first = record("B");
+    export static let second = record("b");
+    export static const Constant = 2 + 3;
+    export static const Folded = Constant * 2;
+    export static const Greeting = "hel" + "lo";
+    export static const Enabled = Folded == 10 && Greeting == "hello";
+);
+
+let Middle = class:Base ();
+
+let Derived = class:Middle (
+    export static let own = record("D");
+    let instance = record("i");
+);
+
+let Called = class (
+    static let recorded = record("C");
+    export static let invoke = func -> int => recorded;
+    export static let echo = func(argument: int) -> int => argument;
+);
+
+let Written = class (
+    export static let value = record("W");
+);
+
+let Updated = class (
+    export static let value = record("U");
+);
+
+let Constructed = class (
+    static let recorded = record("N");
+    export let argument: int;
+
+    export let init = func(value: int) {
+        argument = value;
+    }
+);
+
+let Generic = class<T> (
+    static let recorded = record("G");
+    let item: T;
+);
+
+let call_qualifier = func -> Called {
+    let _ = record("q");
+    return nil;
+};
+
+let base_qualifier = func -> Base {
+    let _ = record("q");
+    return nil;
+};
+
+let write_qualifier = func -> Written {
+    let _ = record("q");
+    return nil;
+};
+
+let update_qualifier = func -> Updated {
+    let _ = record("q");
+    return nil;
+};
+
+let ParentDefault = interface (
+    static const ParentToken = record("P");
+    let read_parent = func -> int => ParentToken;
+);
+
+let Required = interface:ParentDefault (
+    static const Token = record("I");
+    let read = func -> int => Token;
+);
+
+let UsesDefault = class:Base implements Required (
+    static let own = record("X");
+);
+
+let MarkerOnly = interface (
+    static const Token = record("M");
+);
+
+let Marked = class implements MarkerOnly ();
+
+let startup_events = "";
+
+let record_startup = func(tag: string) -> int {
+    startup_events += tag;
+    return startup_events.byte_length;
+};
+
+let StartupDependency = class (
+    export static let first = record_startup("d");
+);
+
+let Before = singleton (
+    export static let marker = record_startup("o");
+    export let first = StartupDependency.first;
+    export let counter = record_startup("s");
+
+    let init = func {
+        counter = record_startup("i");
+    }
+);
+
+let Container = class (
+    export static let delayed = record_startup("L");
+
+    export static let nested = singleton (
+        export let counter = record_startup("n");
+    );
+);
+
+let StaticInitializationTests = module (
+    export let test_passive_references_leave_statics_dormant = func {
+        test.assert_equal_string("", events);
+        let missing: Derived = nil;
+        test.assert(!(missing is Derived));
+        test.assert((missing as Derived) == nil);
+        test.assert_equal_int32(5, Derived.Constant);
+        test.assert_equal_int32(10, Derived.Folded);
+        test.assert_equal_string("hello", Derived.Greeting);
+        test.assert(Derived.Enabled);
+        test.assert_equal_string("", events);
+        test.assert_equal_int32(5, base_qualifier().Constant);
+        test.assert_equal_string("q", events);
+    }
+
+    export let test_inherited_access_initializes_only_the_declaring_class = func {
+        test.assert_equal_int32(2, Derived.second);
+        test.assert_equal_string("Bb", events);
+        test.assert_equal_int32(1, Base.first);
+        test.assert_equal_int32(3, Derived.own);
+        test.assert_equal_int32(3, Derived.own);
+        test.assert_equal_string("BbD", events);
+    }
+
+    export let test_construction_initializes_bases_and_class_once = func {
+        let _ = new Derived();
+        test.assert_equal_string("BbDi", events);
+        let _ = new Derived();
+        test.assert_equal_string("BbDii", events);
+    }
+
+    export let test_construction_initializes_an_inherited_static_scope = func {
+        let _ = new Middle();
+        test.assert_equal_string("Bb", events);
+    }
+
+    export let test_static_calls_and_writes_initialize_on_first_use = func {
+        test.assert_equal_int32(1, Called.invoke());
+        test.assert_equal_string("C", events);
+        Written.value = 42;
+        test.assert_equal_string("CW", events);
+        test.assert_equal_int32(42, Written.value);
+        test.assert_equal_int32(1, Called.invoke());
+        test.assert_equal_string("CW", events);
+    }
+
+    export let test_static_method_reference_initializes_on_invocation = func {
+        let callback = call_qualifier().invoke;
+        test.assert_equal_string("q", events);
+        test.assert_equal_int32(2, callback());
+        test.assert_equal_string("qC", events);
+    }
+
+    export let test_static_call_runs_after_arguments = func {
+        test.assert_equal_int32(2, call_qualifier().echo(record("a")));
+        test.assert_equal_string("qaC", events);
+    }
+
+    export let test_static_assignment_runs_after_qualifier_and_value = func {
+        write_qualifier().value = record("a");
+        test.assert_equal_string("qaW", events);
+        test.assert_equal_int32(2, Written.value);
+    }
+
+    export let test_compound_assignment_runs_before_right_operand = func {
+        update_qualifier().value += record("a");
+        test.assert_equal_string("qUa", events);
+        test.assert_equal_int32(5, Updated.value);
+    }
+
+    export let test_construction_initializes_before_arguments = func {
+        let instance = new Constructed(record("a"));
+        test.assert_equal_string("Na", events);
+        test.assert_equal_int32(2, instance.argument);
+    }
+
+    export let test_generic_applications_share_initialization = func {
+        let _ = new Generic<int>();
+        let _ = new Generic<string>();
+        test.assert_equal_string("G", events);
+    }
+
+    export let test_initialization_of_interfaces = func {
+        let _ = new Marked();
+        test.assert_equal_string("", events);
+        let with_default = new UsesDefault();
+        test.assert_equal_string("BbPIX", events);
+        test.assert_equal_int32(4, with_default.read());
+        test.assert_equal_int32(6, MarkerOnly.Token);
+        test.assert_equal_string("BbPIXM", events);
+    }
+
+    export let test_interface_use_does_not_initialize_superinterfaces = func {
+        test.assert_equal_int32(1, Required.Token);
+        test.assert_equal_string("I", events);
+        test.assert_equal_int32(2, Required.ParentToken);
+        test.assert_equal_string("IP", events);
+    }
+
+    export let test_singletons_initialize_at_startup = func {
+        test.assert_equal_string("odsin", startup_events);
+        let alias = Before;
+        test.assert(alias == Before);
+        test.assert_equal_int32(2, alias.first);
+        test.assert_equal_int32(4, alias.counter);
+        test.assert_equal_int32(5, Container.nested.counter);
+        test.assert_equal_string("odsin", startup_events);
+        test.assert_equal_int32(6, Container.delayed);
+        test.assert_equal_int32(6, Container.delayed);
+        test.assert_equal_string("odsinL", startup_events);
+    }
+);

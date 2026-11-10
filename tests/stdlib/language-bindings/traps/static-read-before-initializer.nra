@@ -1,0 +1,15 @@
+// stderr: read of an uninitialized global
+let program = import:Std.Program;
+
+let Text = class (
+    export static let value: string = read_pending();
+
+    static let read_pending = func -> string => value;
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = Text.value;
+        return program.ExitCode.Ok;
+    }
+);

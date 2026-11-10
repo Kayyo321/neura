@@ -2,7 +2,10 @@ let Classes = module (
     // A class groups fields and methods into a type.
     export let Animal = class (
         export static const DefaultName = "Animal";
-        export let name: string = DefaultName;
+        static let fallback_name = load_default_name();
+        export let name: string = fallback_name;
+
+        static let load_default_name = func -> string => DefaultName;
 
         export let speak = func() -> string {
             return name + " makes a sound";
@@ -29,7 +32,8 @@ let Classes = module (
     };
 
     export let example = func() -> void {
-        let dog = new Dog();
+        let default_name = Animal.DefaultName; // A constant read leaves Animal's statics dormant.
+        let dog = new Dog(); // Animal's static initializer runs before Dog's instance is created.
         dog.name = "Rover";
         let cat = new Cat();
         cat.name = "Mittens";

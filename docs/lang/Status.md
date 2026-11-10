@@ -8,7 +8,7 @@ This release carries the language below from source through NeuraIR, optimizatio
 | --- | --- | --- |
 | Core | Bindings and destructuring, functions and closures, variadic parameters, expression bodies, `if`/`else`, conditional expressions, comparison chains, `do`, `do`/`while`, `while`, three-part `for`, for-each, `break`, `continue`, `return` | [Core language](CoreLanguage.md) |
 | Numbers | Sized integers and floats, aliases, checked arithmetic and conversions, update and compound assignment operators, bitwise operations and shifts, exact float bit reinterpretation | [Numbers](Numbers.md) |
-| Types | Classes, singletons, static members and interfaces, umbrella `class`, explicit `nil`, reference identity and checked casts, value members and `===`, UTF-8 text, tuples, and payload enums with exhaustive matching | [Types](Types.md) |
+| Types | Classes and interfaces with first-use static initialization, startup singletons, umbrella `class`, explicit `nil`, reference identity and checked casts, value members and `===`, UTF-8 text, tuples, and payload enums with exhaustive matching | [Types](Types.md) |
 | Generics | Generic functions, classes, enums, interfaces, methods and closures, with explicit type arguments, intersection bounds, and specialization | [Polymorphism](Polymorphism.md) |
 | Modules | Imports, promoted and wildcard imports, discard bindings, exports, module inheritance, initialization, trusted `Std` sources and host bindings, and the library-defined or legacy entry point | [Modules](Modules.md) |
 | Lifecycle | Constructors, field initializers, `destroy`, destructors, deterministic tracing garbage collection | [Object lifecycle](ObjectLifecycle.md) |
@@ -54,7 +54,7 @@ These remain open. The compiler rejects or does not offer the affected construct
 - Integer overflow, a zero divisor, `MIN / -1`, and an out-of-range conversion trap with reason 1. Division truncates toward zero.
 - A negative index traps with reason 2; a list modified during for-each traps with reason 5.
 - The entry point is the unique override of `Std.Program.Entry.main`. `Ok` is status 0, `Failure` 1, and `Status(n)` is `n` for 0 through 255; any other `n` traps. The built-in `SysIo` and `Test` modules are retired, and importing either is an error that names its replacement.
-- A field without an initializer starts uninitialized, and reading it before a store faults. Construction and `destroy` follow the order in [Object lifecycle](ObjectLifecycle.md).
+- An instance field without an initializer starts uninitialized, and reading it before a store faults. Static fields follow the preparation and first-use rules in [Static initialization](Types.md#static-initialization). Construction and `destroy` follow the order in [Object lifecycle](ObjectLifecycle.md).
 - `Console.print_line` traps with reason 3 when the write fails, and a failed `Std.Test` assertion is a message trap with reason 3.
 
 ## Examples

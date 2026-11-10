@@ -129,11 +129,14 @@ A program's files, modules, and top-level statements initialize before the entry
 
 1. Every module or file global whose initializer is written as a literal (a number, a string, `true`, `false`, `nil`, or a fieldless enum variant) holds its value when the image loads. A number may have a leading `-`.
 2. Each file runs after every file it imports. Files that do not depend on each other run in the order the compiler received them. Files that import each other, directly or through other files, form a cycle: the cycle starts once every file it imports from outside the cycle has run, and its files then run in the order the compiler received them.
-3. Within a file, top-level statements and the remaining initializers of the
-   file's globals, module members, class static fields, and singleton
-   instances run in source order, by their position in the file.
+3. Within a file, top-level statements, the remaining initializers of file
+   globals and module members, and construction of singleton instances run
+   in source order. This includes singletons declared inside classes. An
+   active use during startup can also initialize a class before `main`.
 
 Then `main` runs. The same initialization runs before each test under `neura test`.
+Ordinary static field initializers follow [the declaring type's initialization
+rules](Types.md#static-initialization).
 
 ```neura
 let console = import:Std.Io.Console;
@@ -147,5 +150,8 @@ let shared = new Counter();                   // runs fourth
 
 Whether an initializer is a literal is decided by how it is written, not by its value: `let size: int32 = 2 * 3;` is computed at program start in source order, while `let size: int32 = 6;` is set when the image loads. Reading a global before its initializer has run, for example from a file-level statement that precedes the declaration of a module whose member it reads, is a fault that ends the run with status 70. Within one module or file, a global cannot be read before its declaration; the frontend rejects that.
 
-Initialization has no separate failure handling: a trap during initialization ends the run before `main`. Cyclic imports between files are allowed only as far as the order above permits; reads of globals that are not yet initialized fault.
+A startup trap ends the run before `main`. If a static initializer traps
+during an active use, execution ends before that use completes. Cyclic imports
+between files can run in the order above when every read finds an initialized
+global.
 

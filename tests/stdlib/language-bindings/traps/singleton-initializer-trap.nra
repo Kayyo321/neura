@@ -1,0 +1,19 @@
+// stderr: failure during singleton startup
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let fail = func -> int {
+    trap_with_message("failure during singleton startup");
+    return 0;
+};
+
+let unused = singleton (
+    let value = fail();
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("entered main");
+        return program.ExitCode.Ok;
+    }
+);

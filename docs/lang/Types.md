@@ -146,12 +146,46 @@ fields are constants, and its static functions belong only to that interface.
 A static function needs a body. It may use the surrounding class's static
 members, and needs an explicit instance to access instance members. A
 generic class shares its static members across all type arguments, so they
-cannot use the enclosing class's type parameters. Uninitialized mutable
-numeric and Boolean static fields start at zero and false respectively.
-Uninitialized mutable class and interface references start at `nil`.
+cannot use the enclosing class's type parameters. Mutable numeric and Boolean
+fields may omit an initializer and default to zero and false. Mutable class
+and interface references may omit an initializer and default to `nil`.
 Other static fields and all static constants require an initializer.
-[Program initialization](Modules.md#initialization) determines when
-initializers run.
+
+#### Static initialization
+
+A class or interface initializes once per execution on its first active use.
+Constructing a class, invoking a static function, assigning a static field,
+or reading a static field with a runtime initializer or a mutable binding
+are active uses. Access to an inherited static member initializes the type
+that declares it. A read of a compile-time constant, a type annotation, a
+type test, and a checked cast are passive. Taking a static function as a
+value delays the active use until that function is invoked.
+
+A static `const` of numeric, Boolean, or string type is a compile-time
+constant when its initializer can be resolved from literals, other
+compile-time static constants, and scalar expressions whose evaluation is
+known to complete without a trap. Const bindings initialized by calls
+follow the same first-use rule as other runtime initializers.
+
+Initialization runs before evaluating constructor arguments. For a static
+call or simple assignment, any qualifier and the arguments or right operand
+are evaluated first. A compound assignment or increment initializes the
+declaring type when it reads the old field value.
+
+A class first initializes its base class. It then initializes each interface
+in its inheritance tree that declares an instance method with a default
+body, visiting interface parents before their children in declaration order.
+An interface's own initialization leaves its parents untouched. The
+declaring type then evaluates its static field initializers in source order.
+Generic type applications share the initialization state of their
+declaration.
+
+On reentry, the active initializer continues without running a second time.
+Reads can observe an earlier store or a field's default while its initializer
+is pending. Numeric fields default to zero, Boolean fields to false, and
+class and interface references to `nil`. A pending field of another type
+faults on a read until it receives a value. A trap during initialization
+ends the execution.
 
 ### Singletons
 
@@ -169,8 +203,10 @@ export let counter = singleton (
 ```
 
 Singletons can be declared at file scope, in modules, or as static class
-members. A singleton may implement interfaces. It cannot be subclassed,
-constructed with `new`, or destroyed. See
+members. Construction of a nested singleton at startup follows its
+declaration position. Reading that singleton alone is a passive use of the
+enclosing class. A singleton may implement interfaces. It cannot be
+subclassed, constructed with `new`, or destroyed. See
 [Object lifecycle](ObjectLifecycle.md#singleton-lifecycle) for its
 initialization rules.
 
@@ -188,7 +224,7 @@ if (entry is LogEntry) {
 }
 ```
 
-- `nil` is an explicit absent reference for class and interface types, including type parameters bounded by them. With no contextual type, it has type `class`. A field without an initializer is still uninitialized. Use `= nil` to initialize it to absence.
+- `nil` is an explicit absent reference for class and interface types, including type parameters bounded by them. With no contextual type, it has type `class`. An instance field without an initializer starts uninitialized. Use `= nil` to initialize it to absence.
 - `==` and `!=` compare references by identity. Two nil references compare equal. Use `is` to test a live reference against a class or interface. A nil reference gives false. A checked reference cast with `as` preserves nil and traps for an incompatible instance.
 - Reading or writing a field, invoking an instance method, or explicitly destroying a nil reference traps. It has no heap allocation and tracing skips it.
 - `class` supplies `equals(other: class) -> bool`, `hash_code() -> uint32`, and `to_string() -> string`. A class can override those signatures. The defaults use identity and a qualified class name with an identity number, such as `Acme.Shapes.Circle#3`. The runtime assigns that number at first use by default hashing or formatting. An equality override must agree with its hash and return false for nil.

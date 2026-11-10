@@ -1,0 +1,50 @@
+let test = import:Std.Test;
+
+let reads = 0;
+
+let Reentrant = class (
+    export static let value: int = read_pending();
+
+    static let read_pending = func -> int {
+        reads++;
+        return value + 7;
+    }
+);
+
+let BaseOfCycle = class (
+    export static let observed = read_derived();
+);
+
+let DerivedOfCycle = class:BaseOfCycle (
+    export static let actual = next_value();
+);
+
+let read_derived = func -> int => DerivedOfCycle.actual;
+let next_value = func -> int => ++reads;
+
+let Marker = class ();
+
+let Defaults = class (
+    export static let seen: bool = inspect_pending();
+    static let reference: Marker = new Marker();
+
+    static let inspect_pending = func -> bool => !seen && reference == nil;
+);
+
+let ReentrantStaticInitializationTests = module (
+    export let test_initializer_can_read_its_own_pending_field = func {
+        test.assert_equal_int32(7, Reentrant.value);
+        test.assert_equal_int32(7, Reentrant.value);
+        test.assert_equal_int32(1, reads);
+    }
+
+    export let test_base_can_reenter_derived_class_before_its_fields_run = func {
+        test.assert_equal_int32(1, DerivedOfCycle.actual);
+        test.assert_equal_int32(0, BaseOfCycle.observed);
+        test.assert_equal_int32(1, reads);
+    }
+
+    export let test_pending_booleans_and_references_have_defaults = func {
+        test.assert(Defaults.seen);
+    }
+);

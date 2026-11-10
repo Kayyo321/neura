@@ -1,0 +1,20 @@
+// stderr: failure during class initialization
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let fail = func -> int {
+    trap_with_message("failure during class initialization");
+    return 0;
+};
+
+let Deferred = class (
+    export static let value = fail();
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("entered main");
+        let _ = Deferred.value;
+        return program.ExitCode.Ok;
+    }
+);

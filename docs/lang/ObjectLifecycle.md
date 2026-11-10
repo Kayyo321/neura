@@ -4,7 +4,11 @@ This page proposes constructors and explicit destruction for the class model ill
 
 ## Construction
 
-A class may declare an `init` function. `new` allocates an instance and passes its arguments to that function; `init` returns `void` and is not an ordinary callable method. The resulting expression has the constructed class type.
+A class may declare an `init` function. `new` first ensures the class's
+[static initialization](Types.md#static-initialization). It then allocates
+an instance and passes its arguments to `init`. The function returns
+`void` and is called through construction. The resulting expression has
+the constructed class type.
 
 ```neura
 let Message = class (
@@ -34,6 +38,9 @@ The VM automatically reclaims unreachable heap storage, including cyclic object 
 
 A [singleton](Types.md#singletons) runs its field initializers and optional
 zero-argument `init` at its declaration's place in program initialization.
+Its construction also initializes the singleton type's own statics and any
+base dependencies. Ordinary static fields of an enclosing class still wait
+for an active use of that class.
 The instance remains reachable for the life of the program. Singletons
 cannot declare `deinit`. Attempting to destroy a reference known to be a
 singleton is a compile-time error. When its type has been erased to
