@@ -26,6 +26,20 @@ let rows: string[][] = [["a", "b"], ["c"]];
 
 An array's length is fixed when it is created, including when that length is determined at runtime. The length is a property of the value, not part of the type: arrays of different lengths can both have type `string[]`. Elements can be replaced, but an array cannot be extended, shortened, or resized. Assigning a different array to a variable replaces its value; it does not resize the original array.
 
+### Ranges
+
+`start .. stop` constructs a collection starting at `start` and ending before `stop`. Supply a step with `start .. stop : step`. Braces may group a range as `{start .. stop : step}`. The step defaults to one. A negative step counts down. A range whose start has already reached or passed its stop in the selected direction is empty. A zero step traps, including for an empty range.
+
+```neura
+let numbers = {0 .. 5};                 // int[] containing 0, 1, 2, 3, 4
+let evens: int[list] = 0 .. 8 : 2;      // [0, 2, 4, 6]
+let descending = 5 .. 0 : -2;          // [5, 3, 1]
+```
+
+An expected array or list type determines the result and the integer type of the bounds and step. Without that context the result is an array and the start determines its element type. Bounds and step are evaluated once, from left to right. Construction checks the result length against the `int32` and heap limits and does not advance past the last element. A constructed list starts with version zero.
+
+Binary operators bind more tightly than `..` and the conditional operator binds more loosely. Group a stepped range with parentheses or braces in a conditional's middle arm so its step colon stays separate from the conditional's colon. Ranges can be passed, returned, indexed after grouping, or used directly as a for-each source.
+
 A list can grow or shrink through its built-in operations. Both collections expose their current element count as `length`, of type `int` (`int32`). `append(value)` adds an element to a list, and `remove_at(index)` removes the element at an index and shifts subsequent elements left. These operations are not available on arrays.
 
 A list's read-only `version` is a `uint64`. It starts at zero and advances modulo 2^64 on every successful append or removal. Element assignment leaves it alone. Wrappers can save it when they create an iterator and compare it before advancing, including after a structural change made through another reference to the same list.

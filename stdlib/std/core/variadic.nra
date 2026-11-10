@@ -1,0 +1,13 @@
+export let Variadic = module (
+    export let Argument = enum (
+        Text(string),
+        Signed(int64),
+        Unsigned(uint64),
+        Floating16(float16),
+        BFloating16(bfloat16),
+        Floating32(float32),
+        Floating(float64),
+        Boolean(bool),
+        Object(class)
+    );
+);

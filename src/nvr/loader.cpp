@@ -790,6 +790,7 @@ void Validator::state(const Function& function, const Exit& exit,
         assign(args[0].type, image_.globals[exit.immediate].type, where + " global value");
         no_result();
         break;
+    case StateOp::RepeatCollection:
     case StateOp::AllocateCollection: {
         if (exit.immediate >= image_.types.size()) {
             invalid(where + ": type " + std::to_string(exit.immediate) + " is out of range");
@@ -798,7 +799,13 @@ void Validator::state(const Function& function, const Exit& exit,
         if (collection.kind != TypeKind::Array && collection.kind != TypeKind::List) {
             invalid(where + ": immediate must name an array or list type");
         }
-        for (std::size_t i = 0; i < args.size(); ++i) {
+        std::size_t first = 0;
+        if (exit.operation == StateOp::RepeatCollection) {
+            arity(2);
+            require_index(0);
+            first = 1;
+        }
+        for (std::size_t i = first; i < args.size(); ++i) {
             assign(args[i].type, collection.reference, where + " element " + std::to_string(i));
         }
         result_of(exit.immediate);

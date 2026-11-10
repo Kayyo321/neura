@@ -38,6 +38,17 @@ let reset = func {
 
 `=> expression` gives a function an expression body. The expression supplies the result of a non-`void` function. A `void` function evaluates the expression for its effects. A named declaration with an expression body ends with `;`.
 
+### Variadic parameters
+
+A named function can mark its final parameter `items: ...T` to accept zero or more arguments assignable to `T`. Each call evaluates its fixed arguments and then its variadic arguments in source order. The function receives a new `T[]`. Reading a named variadic function as a function value exposes its packed signature, so an indirect call supplies the final array explicitly.
+
+```neura
+let count = func(items: ...int) -> int => items.length;
+let three = count(10, 20, 30);
+```
+
+A bare `items: ...` packs mixed types into an array of `Std.Core.Variadic.Argument`. The variants retain strings, booleans, each floating-point width, and object references. Integers are widened to signed or unsigned 64-bit values. Other values with a built-in `to_string()` use that text representation. Pass an explicit representation for types without a value member. An existing `Argument` is passed through as-is. The standard library module also exposes the type for callers that want to match the variants or construct a pack directly.
+
 `if (condition) { ... } else { ... }` selects a branch; `while (condition) { ... }` repeats while its Boolean condition is true. `break` exits the innermost loop and `continue` starts its next iteration. Conditions must be `bool`; there is no implicit truthiness. See [core.nra](../../examples/guide/core.nra).
 
 ### Function values and closures
@@ -112,7 +123,8 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 12. `==`, `!=`, `===`
 13. `&&`
 14. `||`
-15. `? :`
+15. `..` and its optional step in [range expressions](Collections.md#ranges)
+16. `? :`
 
 Assignments are statements. `=` stores a value and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `^=`, `|=`, `<<=`, and `>>=` apply the corresponding binary operator before storing its result. Each compound assignment evaluates the destination's receiver and index once, reads the old value, then evaluates the right operand and stores the result. An operation that traps leaves the final store unexecuted.
 

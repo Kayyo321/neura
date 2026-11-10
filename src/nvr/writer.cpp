@@ -268,31 +268,32 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
 } // namespace
 
 std::uint16_t required_minor_version(const Image& image) {
+    std::uint16_t version = 0;
     if (std::ranges::any_of(image.layouts, [](const Layout& layout) { return !layout.interfaces.empty(); }))
-        return 2;
+        version = 2;
     if (std::ranges::any_of(image.constants, [&](const Constant& value) {
             return value.type < image.types.size() && image.types[value.type].kind == TypeKind::Object;
         })) {
-        return 2;
+        version = 2;
     }
-    std::uint16_t version = 0;
     for (const auto& type : image.types) {
         if (type.kind == TypeKind::Float || type.kind == TypeKind::BFloat) {
-            version = 1;
+            version = std::max<std::uint16_t>(version, 1);
             break;
         }
     }
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::State && exit.operation == StateOp::RepeatCollection) return 3;
                 if (exit.kind == ExitKind::MessageTrap ||
                     (exit.kind == ExitKind::State && exit.operation >= StateOp::TextSlice)) {
-                    return 2;
+                    version = 2;
                 }
                 if ((exit.kind == ExitKind::State && exit.operation == StateOp::ReadVersion) ||
                     (exit.kind == ExitKind::Trap && exit.reason == static_cast<std::uint32_t>(
                                                                       TrapReason::ModifiedDuringIteration))) {
-                    version = 1;
+                    version = std::max<std::uint16_t>(version, 1);
                 }
             }
         }

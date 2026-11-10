@@ -183,6 +183,9 @@ public:
             case nvr::StateOp::AllocateCollection:
                 operation = type_name(image_, exit.immediate) + " [" + values(function, args, lifted, inputs) + "]";
                 break;
+            case nvr::StateOp::RepeatCollection:
+                operation = type_name(image_, exit.immediate) + " repeat(" + a(0) + ", " + a(1) + ")";
+                break;
             case nvr::StateOp::ReadLength: operation = "length(" + a(0) + ")"; break;
             case nvr::StateOp::ReadElement: operation = a(0) + "[" + a(1) + "]"; break;
             case nvr::StateOp::WriteElement: operation = a(0) + "[" + a(1) + "] = " + a(2); break;

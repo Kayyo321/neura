@@ -600,6 +600,18 @@ private:
                 require_assignable(element.type, node.type.arguments.front(), element.span, "element");
             }
             break;
+        case IrOp::RepeatCollection:
+            if (!is_collection(node.type)) {
+                report(node.span, "repeated collection requires an array or list result");
+                break;
+            }
+            if (expect_operands(node, 2, "repeated collection")) {
+                const IrType length{TypeKind::Integer, "uint64", no_symbol, {}};
+                require_assignable(node.operands[0].type, length, node.operands[0].span, "length");
+                require_assignable(node.operands[1].type, node.type.arguments.front(),
+                                   node.operands[1].span, "element");
+            }
+            break;
         case IrOp::Tuple:
             if (node.type.kind != TypeKind::Tuple ||
                 !expect_operands(node, node.type.arguments.size(), "tuple construction")) {

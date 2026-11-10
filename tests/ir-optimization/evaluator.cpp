@@ -644,8 +644,16 @@ private:
             construct(cls, result, values, node.span);
             return result;
         }
+        case IrOp::RepeatCollection:
         case IrOp::Collection: {
             auto values = arguments(node, 0, frame);
+            if (node.op == IrOp::RepeatCollection) {
+                const auto count = values[0].magnitude;
+                if (count > limits_.budget || count > values.max_size())
+                    throw Stop{Status::LimitReached, "collection allocation exceeds evaluation budget", node.span};
+                const auto fill = std::move(values[1]);
+                values.assign(static_cast<std::size_t>(count), fill);
+            }
             const auto kind = node.type.kind == TypeKind::List ? HeapEntry::Kind::List : HeapEntry::Kind::Array;
             heap_.entries.push_back({kind, no_symbol, {}, std::move(values), 0, false, 0});
             Value result;

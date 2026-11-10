@@ -6,13 +6,13 @@ This release carries the language below from source through NeuraIR, optimizatio
 
 | Area | Supported | Specification |
 | --- | --- | --- |
-| Core | Bindings and destructuring, functions and closures, `if`/`else`, comparison chains, `while`, three-part `for`, for-each, `break`, `continue`, `return` | [Core language](CoreLanguage.md) |
-| Numbers | Sized integers and floats, aliases, checked arithmetic and conversions, bitwise operations and shifts, exact float bit reinterpretation | [Numbers](Numbers.md) |
-| Types | Classes and interfaces, umbrella `class`, explicit `nil`, reference identity and checked casts, value members, UTF-8 text, tuples, and payload enums with exhaustive matching | [Types](Types.md) |
+| Core | Bindings and destructuring, functions and closures, variadic parameters, expression bodies, `if`/`else`, conditional expressions, comparison chains, `do`, `do`/`while`, `while`, three-part `for`, for-each, `break`, `continue`, `return` | [Core language](CoreLanguage.md) |
+| Numbers | Sized integers and floats, aliases, checked arithmetic and conversions, update and compound assignment operators, bitwise operations and shifts, exact float bit reinterpretation | [Numbers](Numbers.md) |
+| Types | Classes, singletons, static members and interfaces, umbrella `class`, explicit `nil`, reference identity and checked casts, value members and `===`, UTF-8 text, tuples, and payload enums with exhaustive matching | [Types](Types.md) |
 | Generics | Generic functions, classes, enums, interfaces, methods and closures, with explicit type arguments, intersection bounds, and specialization | [Polymorphism](Polymorphism.md) |
-| Modules | Imports, exports, module inheritance, initialization, trusted `Std` sources and host bindings, and the library-defined or legacy entry point | [Modules](Modules.md) |
+| Modules | Imports, promoted and wildcard imports, discard bindings, exports, module inheritance, initialization, trusted `Std` sources and host bindings, and the library-defined or legacy entry point | [Modules](Modules.md) |
 | Lifecycle | Constructors, field initializers, `destroy`, destructors, deterministic tracing garbage collection | [Object lifecycle](ObjectLifecycle.md) |
-| Collections | Arrays, lists, `length`, indexing, `append`, `remove_at`, structural versions, and for-each over built-ins or `Iterable<T>` | [Collections](Collections.md) |
+| Collections | Arrays, lists, stepped ranges, `length`, indexing, `append`, `remove_at`, structural versions, and for-each over built-ins or `Iterable<T>` | [Collections](Collections.md) |
 | Errors | Expected failures as returned values, plus runtime traps and explicit message traps | [Errors](Errors.md) |
 | Testing | `neura test` with the `Std.Test` assertions | [Testing](Testing.md) |
 | Tooling | `check`, `emit-ir`, `build`, `run` (with capabilities, `--record`, `--replay`, `--stats`, `--profile`), `test`, `disassemble`, `assemble`, `decompile` | [Tooling](Tooling.md), [Decompiler](../Decompiler.md) |
@@ -33,7 +33,7 @@ These remain open. The compiler rejects or does not offer the affected construct
 
 | Area | Open decisions |
 | --- | --- |
-| Core | Shadowing, Unicode identifiers and escapes, compound assignment |
+| Core | Shadowing, Unicode identifiers and escapes |
 | Types | Type inference beyond local bindings, static non-nil types, nested enum patterns, match guards |
 | Generics | Inference of type arguments, generic class inheritance, variance |
 | Modules | Package-level resolution |

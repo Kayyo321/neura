@@ -17,6 +17,7 @@ std::string_view op_name(IrOp op) {
     case IrOp::Field: return "field";
     case IrOp::Index: return "index";
     case IrOp::Collection: return "collection";
+    case IrOp::RepeatCollection: return "repeat_collection";
     case IrOp::Integer: return "integer";
     case IrOp::Float: return "float";
     case IrOp::String: return "string";

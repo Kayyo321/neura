@@ -254,7 +254,7 @@ endforeach()
 
 # The new source constructs produce the same image after a NIR round trip.
 foreach(name IN ITEMS operators closures aggregates class-nil generic-closures generic-enums interfaces
-                      stdlib-primitives control-and-updates)
+                      stdlib-primitives control-and-updates ranges-and-variadics)
     neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
     if(NOT emit_status STREQUAL "0")
         message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")
@@ -262,6 +262,19 @@ foreach(name IN ITEMS operators closures aggregates class-nil generic-closures g
     build_image("${TEST_DIR}/${name}-from-nir.nvr" "${TEST_DIR}/${name}.nir")
     same_bytes("${name} from NIR" "${TEST_DIR}/${name}.nvr" "${TEST_DIR}/${name}-from-nir.nvr")
 endforeach()
+
+neura(ranges_text "${TEST_DIR}" disassemble "${TEST_DIR}/ranges-and-variadics.nvr"
+      -o "${TEST_DIR}/ranges-and-variadics.nvra")
+if(NOT ranges_text_status STREQUAL "0")
+    message(FATAL_ERROR "range image disassembly failed: ${ranges_text_stderr}")
+endif()
+neura(ranges_assembled "${TEST_DIR}" assemble "${TEST_DIR}/ranges-and-variadics.nvra"
+      -o "${TEST_DIR}/ranges-and-variadics-reassembled.nvr")
+if(NOT ranges_assembled_status STREQUAL "0")
+    message(FATAL_ERROR "range image assembly failed: ${ranges_assembled_stderr}")
+endif()
+same_bytes("range image reassembly" "${TEST_DIR}/ranges-and-variadics.nvr"
+           "${TEST_DIR}/ranges-and-variadics-reassembled.nvr")
 
 # Runtime traps: stdout up to the trap, a diagnostic, and status 70.
 file(GLOB traps "${tests}/traps/*.nra")

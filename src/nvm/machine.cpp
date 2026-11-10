@@ -443,6 +443,10 @@ private:
         }
         const auto cells = entry_cells(entry);
         ensure_heap_cells(cells, "allocation of ", temporary_roots, &entry);
+        return insert_allocation(std::move(entry), cells);
+    }
+
+    std::uint64_t insert_allocation(HeapEntry entry, std::uint64_t cells) {
         const auto handle = last_handle_ + 1;
         heap_.emplace(handle, std::move(entry));
         last_handle_ = handle;
@@ -920,10 +924,23 @@ private:
             globals_[exit.immediate] = args[0];
             global_initialized_[exit.immediate] = 1;
             return 0;
+        case nvr::StateOp::RepeatCollection:
         case nvr::StateOp::AllocateCollection: {
             HeapEntry item;
             item.kind = type(exit.immediate).kind == nvr::TypeKind::Array ? EntryKind::Array : EntryKind::List;
             item.type = exit.immediate;
+            if (exit.operation == nvr::StateOp::RepeatCollection) {
+                if (last_handle_ >= limits_.max_handles) fault(TrapKind::HandleLimit);
+                const auto count = args[0];
+                if (count > item.cells.max_size() || count == std::numeric_limits<std::uint64_t>::max())
+                    fault(TrapKind::HeapLimit, "collection length exceeds storage limits");
+                const auto cells = count + 1;
+                const bool reference = nvr::is_reference(type(type(item.type).reference).kind);
+                const std::array roots{reference && count != 0 ? args[1] : std::uint64_t{0}};
+                ensure_heap_cells(cells, "allocation of ", roots);
+                item.cells.assign(static_cast<std::size_t>(count), args[1]);
+                return insert_allocation(std::move(item), cells);
+            }
             item.cells = args;
             return allocate(std::move(item));
         }

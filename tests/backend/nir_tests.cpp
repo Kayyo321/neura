@@ -248,7 +248,10 @@ NEURA_TEST(nir, minor_version_follows_the_features_used) {
         expect_nir_error(current, std::string_view(fixture) == "operators"
                           ? "bitwise operations require NeuraIR format 1.2" : "invalid");
     }
-
+    auto range = write_nir(lower_files({versions / "range.nra"}));
+    check_equal(static_cast<int>(range[6]), 4, "range.nir is NeuraIR 1.4");
+    range[6] = 3;
+    expect_nir_error(range, "invalid operation tag 59");
 }
 
 } // namespace neura::testing

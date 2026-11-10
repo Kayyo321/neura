@@ -96,7 +96,9 @@ enum class IrOp {
     MakeClosure, CallClosure,
     TextLength, TextByteAt, TextSlice, TextFromUtf8, TextEqual, ReinterpretFloat, TrapMessage,
     Nil, ClassHash, ClassText, ClassIs, ClassCast,
-    ValueEquals, ValueHash, ValueText
+    ValueEquals, ValueHash, ValueText,
+    // NeuraIR 1.4. Allocate an array or list filled with one value.
+    RepeatCollection
 };
 
 struct IrNode {

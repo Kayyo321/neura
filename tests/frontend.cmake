@@ -78,6 +78,8 @@ endif()
 check_rejection(lexical "let count = @;" "2:13" "[@]")
 check_rejection(syntax "let count: int32 = ;" "2:20" "expected")
 check_rejection(old-parameter-syntax "let f = func(int value) {};" "2:18" "expected ':'")
+check_rejection(rest-position "let f = func(args: ..., last: int) {};" "2:23" "variadic parameter must be last")
+check_rejection(range-float "let values = 1.5 .. 4.5;" "2:14" "range requires integer bounds")
 check_rejection(type "let count: int32 = true;" "2:[1-9][0-9]*" "int32|bool|type")
 check_rejection(import "let missing = import:Missing.Module;" "2:[1-9][0-9]*" "Missing|import")
 check_rejection(return [=[

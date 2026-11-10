@@ -18,6 +18,7 @@ public:
         while (!at_end()) {
             result.statements.push_back(statement());
         }
+        result.untyped_variadic = std::move(untyped_variadic_);
         return result;
     }
 
@@ -25,6 +26,7 @@ private:
     const std::vector<Token>& tokens_;
     std::size_t cursor_{};
     unsigned block_depth_ = 0;
+    std::optional<Span> untyped_variadic_;
 
     const Token& current() const { return tokens_[cursor_]; }
     bool at_end() const { return current().kind == TokenKind::End; }
@@ -162,8 +164,17 @@ private:
             do {
                 const auto& name = identifier();
                 expect(":");
-                auto parameter_type = type();
-                result.push_back({name.span, name.text, std::move(parameter_type)});
+                const bool variadic = match("...");
+                TypeSyntax parameter_type;
+                if (variadic && (at(")") || at(","))) {
+                    parameter_type = {tokens_[cursor_ - 1].span, "[variadic argument]", {}, {}};
+                    if (!untyped_variadic_) untyped_variadic_ = parameter_type.span;
+                } else {
+                    parameter_type = type();
+                }
+                if (variadic && at(","))
+                    throw Diagnostic(current().span, "a variadic parameter must be last");
+                result.push_back({name.span, name.text, std::move(parameter_type), variadic});
             } while (match(","));
         }
         expect(")");
@@ -577,12 +588,12 @@ private:
         return 0;
     }
 
-    Expr expression(int minimum_precedence = 1) {
+    Expr expression(int minimum_precedence = 1, bool range_step = true) {
         const auto start = cursor_;
-        return expression_tail(start, cast(), minimum_precedence);
+        return expression_tail(start, cast(), minimum_precedence, range_step);
     }
 
-    Expr expression_tail(std::size_t start, Expr left, int minimum_precedence) {
+    Expr expression_tail(std::size_t start, Expr left, int minimum_precedence, bool range_step = true) {
         while (precedence() >= minimum_precedence) {
             const auto priority = precedence();
             const bool shift = at_shift();
@@ -601,10 +612,18 @@ private:
             binary.operands.push_back(std::move(right));
             left = std::move(binary);
         }
+        if (minimum_precedence == 1 && match("..")) {
+            auto range = make_expression(Expr::Kind::Range, left.span);
+            range.operands.push_back(std::move(left));
+            range.operands.push_back(expression(2));
+            if (range_step && match(":")) range.operands.push_back(expression(2));
+            range.span = span_from(start);
+            left = std::move(range);
+        }
         if (minimum_precedence == 1 && match("?")) {
-            auto when_true = expression();
+            auto when_true = expression(1, false);
             expect(":");
-            auto when_false = expression();
+            auto when_false = expression(1, range_step);
             auto conditional = make_expression(Expr::Kind::Conditional, span_from(start));
             conditional.operands.push_back(std::move(left));
             conditional.operands.push_back(std::move(when_true));
@@ -799,6 +818,14 @@ private:
             auto elements = expression_list("]");
             auto result = make_expression(Expr::Kind::Collection, span_from(start));
             result.operands = std::move(elements);
+            return result;
+        }
+        if (match("{")) {
+            auto result = expression();
+            if (result.kind != Expr::Kind::Range)
+                throw Diagnostic(result.span, "braces in an expression must enclose a range");
+            expect("}");
+            result.span = span_from(start);
             return result;
         }
         if (match("new")) {

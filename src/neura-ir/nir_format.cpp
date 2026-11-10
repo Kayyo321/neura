@@ -19,7 +19,7 @@ constexpr std::uint8_t max_op_1_0 = static_cast<std::uint8_t>(IrOp::Discard);
 constexpr std::uint8_t max_op_1_1 = static_cast<std::uint8_t>(IrOp::Fail);
 constexpr std::uint8_t max_op_1_2 = static_cast<std::uint8_t>(IrOp::SelectValue);
 constexpr std::uint8_t max_op_1_3 = static_cast<std::uint8_t>(IrOp::ValueText);
-constexpr std::uint8_t max_op_1_4 = max_op_1_3;
+constexpr std::uint8_t max_op_1_4 = static_cast<std::uint8_t>(IrOp::RepeatCollection);
 
 std::uint16_t type_minor(const IrType& type) {
     if (is_function_value(type) || (type.kind == TypeKind::Enum && !type.arguments.empty())) return 3;

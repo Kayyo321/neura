@@ -17,7 +17,7 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 2;
+inline constexpr std::uint16_t minor_version = 3;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -115,10 +115,12 @@ enum class StateOp : std::uint8_t {
     ReadVersion = 14,
     // NVR 1.2.
     TextSlice = 15, TextFromUtf8 = 16, TextEqual = 17,
-    ClassHash = 18, ClassText = 19, ClassIs = 20, ClassCast = 21, ScalarText = 22
+    ClassHash = 18, ClassText = 19, ClassIs = 20, ClassCast = 21, ScalarText = 22,
+    // NVR 1.3.
+    RepeatCollection = 23
 };
 
-inline constexpr std::uint8_t state_op_count = 23;
+inline constexpr std::uint8_t state_op_count = 24;
 
 enum class TrapReason : std::uint32_t {
     Arithmetic = 1, Bounds = 2, ProgramFailure = 3, InvalidDispatch = 4,

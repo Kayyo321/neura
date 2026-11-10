@@ -1,0 +1,11 @@
+// status: 70
+// stderr: source arithmetic failure .* at range-zero-step[.]nra:8:22
+let program = import:Std.Program;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let step = 0;
+        let values = 0 .. 0 : step;
+        return program.ExitCode.Ok;
+    }
+);

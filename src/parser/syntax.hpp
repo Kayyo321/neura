@@ -30,6 +30,7 @@ struct Parameter {
     Span span;
     std::string name;
     TypeSyntax type;
+    bool variadic{};
 };
 
 struct Declaration;
@@ -39,7 +40,7 @@ struct Statement;
 struct Expr {
     enum class Kind {
         Name, Integer, Float, String, Boolean, Unary, Binary, Member, Call,
-        Index, Collection, New, Import,
+        Index, Collection, Range, New, Import,
         // `operand as type`: the target type is in `type`.
         Cast, NamedVariant, Match,
         ComparisonChain, Conditional, PrefixUpdate, PostfixUpdate,
@@ -135,6 +136,7 @@ struct ParsedFile {
     std::string file;
     std::vector<ResolvedImport> imports;
     std::string library_path{};
+    std::optional<Span> untyped_variadic{};
 };
 
 ParsedFile parse(const std::vector<Token>& tokens);

@@ -20,12 +20,12 @@ constexpr std::array<std::string_view, 11> type_kinds{"void", "bool", "unsigned"
 constexpr std::array<std::string_view, 7> exit_kinds{
     "continue", "call", "return", "state", "host", "trap", "message-trap",
 };
-constexpr std::array<std::string_view, 23> state_ops{
+constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "allocate-object", "read-tag",         "read-field",    "write-field",    "free-object",
     "read-global",     "write-global",     "allocate-collection", "read-length", "read-element",
     "write-element",   "append-element",   "remove-element", "construct-text", "read-version",
     "text-slice",      "text-from-utf8",   "text-equal",    "class-hash",     "class-text",
-    "class-is",        "class-cast",       "scalar-text",
+    "class-is",        "class-cast",       "scalar-text", "repeat-collection",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -481,8 +481,10 @@ nvr::Image assemble(std::string_view text) {
             }
             header = true;
             const auto version = in.next("format version");
-            if (version != "1.0" && version != "1.1" && version != "1.2") {
-                in.error("NVR " + version + " is not supported; this assembler writes 1.0 through 1.2");
+            if (version.size() != 3 || !version.starts_with("1.") ||
+                version[2] < '0' || version[2] - '0' > nvr::minor_version) {
+                in.error("NVR " + version + " is not supported; this assembler writes 1.0 through 1." +
+                         std::to_string(nvr::minor_version));
             }
             image.minor_version = static_cast<std::uint16_t>(version.back() - '0');
             in.keyword("profile");

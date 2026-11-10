@@ -21,6 +21,8 @@ Lexer -> Parser -> NeuraIR -> IR optimization -> IRtoNeuronConversion -> output
 
 Semantic analysis belongs at the boundary between the syntax tree and valid NeuraIR. By the time optimization starts, operations should have explicit types and effects. For example, the parser can represent `left && right` as a Boolean expression. NeuraIR must express that the right-hand side is evaluated only when the left-hand side is true if evaluating it could change state or fail.
 
+Range bounds, stride, checked length arithmetic, and element generation lower to explicit NeuraIR before conversion. The executable uses circuits for the arithmetic and control flow and a deterministic NVM state operation to allocate a collection of a computed length. Allocation checks the heap budget before reserving the backing storage.
+
 Class static fields lower to global slots in a class-owned scope, and
 static functions lower to calls without an object receiver. A singleton
 lowers to one object allocation during startup and a global reference

@@ -65,7 +65,7 @@ NEURA_TEST(format, version_1_1_features) {
     check(nvr::load(nvr::encode(recorded)).minor_version == 1, "the loader records the minor version");
 
     expect_rejected(version_bytes(0), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
-    expect_rejected(version_bytes(3), Kind::Unsupported, "format version 1.3 is not supported");
+    expect_rejected(version_bytes(4), Kind::Unsupported, "format version 1.4 is not supported");
     auto reason_only = version_model();
     reason_only.functions[0].blocks[1] = reason_only.functions[0].blocks[2];
     reason_only.minor_version = 0;
@@ -258,9 +258,9 @@ NEURA_TEST(format, header_errors) {
     bad_magic.magic = "NEUX";
     expect_rejected(assemble(sections, bad_magic), Kind::Malformed, "not an NVR image");
     Header newer_minor;
-    newer_minor.minor = 3;
+    newer_minor.minor = 4;
     expect_rejected(assemble(sections, newer_minor), Kind::Unsupported,
-                    "format version 1.3 is not supported; this loader accepts 1.0 through 1.2");
+                    "format version 1.4 is not supported; this loader accepts 1.0 through 1.3");
     Header newer_major;
     newer_major.major = 2;
     expect_rejected(assemble(sections, newer_major), Kind::Unsupported, "format version 2.0");

@@ -1884,6 +1884,11 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         const auto type = c_.type_of(node.type, node.span);
         return state(nvr::StateOp::AllocateCollection, type, std::move(elements), type, node.span);
     }
+    case IrOp::RepeatCollection: {
+        auto arguments = sequence(node.operands);
+        const auto type = c_.type_of(node.type, node.span);
+        return state(nvr::StateOp::RepeatCollection, type, std::move(arguments), type, node.span);
+    }
     case IrOp::Index: {
         auto operands = sequence(node.operands);
         auto index = to_index(operands[1], node.operands[1].type, node.span);

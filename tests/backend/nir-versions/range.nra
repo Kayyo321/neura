@@ -1,0 +1,1 @@
+let range = func(stop: int) -> int[] => 0 .. stop;

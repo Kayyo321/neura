@@ -187,6 +187,14 @@ std::vector<ParsedFile> read_sources(const std::vector<fs::path>& files,
             collect_imports(statement, imports);
         }
         std::set<std::string> seen_imports;
+        if (syntax.untyped_variadic) {
+            const Expr dependency{Expr::Kind::Import, *syntax.untyped_variadic,
+                                  "Std.Core.Variadic", {}, {}, std::nullopt};
+            auto path = find_module(dependency, roots, trusted, !syntax.library_path.empty());
+            syntax.imports.push_back({dependency.text, path.generic_string()});
+            seen_imports.insert(dependency.text);
+            pending.push_back(std::move(path));
+        }
         for (const auto* import : imports) {
             if (!seen_imports.insert(import->text).second) {
                 continue;

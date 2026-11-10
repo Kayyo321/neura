@@ -1,6 +1,6 @@
 // Collection syntax and behavior. tests/backend/examples/collections-driver.nra runs it.
 let Collections = module (
-    export let example = func() -> void {
+    export let example = func {
         let names: string[] = ["Ada", "Lin"];
         names[0] = "Grace"; // Replacing an element does not change the length.
         let count: int = names.length; // 2
@@ -19,6 +19,9 @@ let Collections = module (
         list_of_arrays.append(["d"]);
         let array_of_lists: string[list][] = [["a"], []];
         array_of_lists[1].append("b");
+
+        let indices = {0 .. names.length};
+        let even_indices: int[list] = 0 .. names.length : 2;
 
         // names[2] and names[-1] raise a bounds error; neither accesses memory.
         // names.append("new"); is invalid: arrays cannot change length.

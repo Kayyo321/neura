@@ -1,0 +1,45 @@
+let program = import:Std.Program;
+let test = import:Std.Test;
+let variadic = import:Std.Core.Variadic;
+
+let sum = func(first: int, rest: ...int) -> int {
+    let total = first;
+    for (let value in rest) {
+        total += value;
+    }
+    return total;
+};
+
+let inspect = func(items: ...) -> variadic.Argument[] => items;
+let touch = func(history: int[], digit: int) -> int => history[0]++ + digit;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        test.assert_equal_int32(9, sum(2, 3, 4));
+        test.assert_equal_int32(2, sum(2));
+        let packed = inspect("two", 2, true);
+        test.assert(match (packed[0]) { variadic.Argument.Text(text) => text == "two", _ => false });
+        test.assert(match (packed[1]) { variadic.Argument.Signed(number) => number == 2, _ => false });
+        test.assert(match (packed[2]) { variadic.Argument.Boolean(flag) => flag, _ => false });
+        test.assert_equal_int32(0, inspect().length);
+        let packed_inspect: func(variadic.Argument[]) -> variadic.Argument[] = inspect;
+        test.assert_equal_int32(1, packed_inspect([variadic.Argument.Unsigned(1)]).length);
+
+        let history = [0];
+        let dynamic: int[list] = {touch(history, 0) .. touch(history, 7) : touch(history, 0)};
+        test.assert(dynamic === [0, 2, 4, 6]);
+        test.assert_equal_int32(3, history[0]);
+        test.assert(dynamic.version == 0);
+        test.assert((5 .. -2 : -3) === [5, 2, -1]);
+        test.assert_equal_int32(0, (0 .. 5 : -1).length);
+        test.assert_equal_int32(0, (true ? 3 .. 3 : 0 .. 8 : 2).length);
+
+        let extremes: int64[] = {-9223372036854775808 .. 9223372036854775807 : 9223372036854775807};
+        test.assert(extremes === [-9223372036854775808, -1, 9223372036854775806]);
+        let reverse: int64[] = {9223372036854775807 .. -9223372036854775808 : -9223372036854775808};
+        test.assert(reverse === [9223372036854775807, -1]);
+        let near_max: uint64[] = {18446744073709551614 .. 18446744073709551615 : 2};
+        test.assert(near_max === [18446744073709551614]);
+        return program.ExitCode.Ok;
+    }
+);

@@ -31,6 +31,7 @@ const IrType void_type{TypeKind::Void, "void", no_symbol, {}};
 const IrType bool_type{TypeKind::Bool, "bool", no_symbol, {}};
 const IrType string_type{TypeKind::String, "string", no_symbol, {}};
 const IrType int32_type{TypeKind::Integer, "int32", no_symbol, {}};
+const IrType int64_type{TypeKind::Integer, "int64", no_symbol, {}};
 const IrType uint8_type{TypeKind::Integer, "uint8", no_symbol, {}};
 const IrType uint64_type{TypeKind::Integer, "uint64", no_symbol, {}};
 const IrType uint32_type{TypeKind::Integer, "uint32", no_symbol, {}};
@@ -224,6 +225,9 @@ private:
     IrNode enum_construct(const IrNode& variant, const Expr& expr, Context& context);
     Substitution enum_arguments(const IrType& type) const;
     IrNode tuple(const Expr& expr, Context& context, const IrType* expected);
+    IrNode range(const Expr& expr, Context& context, const IrType* expected);
+    IrType parameter_type(const Parameter& parameter, const Context& context);
+    IrNode pack_argument(const Expr& expr, const IrType& argument, Context& context);
     IrNode allocate(const Expr& expr, Context& context);
     IrNode binary(const Expr& expr, Context& context, const IrType* expected);
     IrNode comparison_chain(const Expr& expr, Context& context);
@@ -772,12 +776,32 @@ IrNode Lowering::closure_value(const IrType& type, ClosureEnvironment& environme
     return result;
 }
 
+IrType Lowering::parameter_type(const Parameter& parameter, const Context& context) {
+    if (!parameter.variadic) return type(parameter.type, context);
+    if (parameter.type.name == "[variadic argument]") {
+        const Expr dependency{ExprKind::Import, parameter.type.span,
+                              "Std.Core.Variadic", {}, {}, std::nullopt};
+        const auto module = resolve_import(dependency);
+        const auto argument = own_member(module, "Argument");
+        if (argument == no_symbol || symbol(argument).kind != SymbolKind::Enum)
+            throw Diagnostic(parameter.span, "Std.Core.Variadic must export its Argument enum");
+        resolve(argument);
+        return collection_type(TypeKind::Array, symbol(argument).type);
+    }
+    auto element = type(parameter.type, context);
+    if (element.kind == TypeKind::Void)
+        throw Diagnostic(parameter.span, "a variadic parameter cannot have elements of type void");
+    return collection_type(TypeKind::Array, element);
+}
+
 IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
     const auto& span = declaration.span;
     std::vector<IrType> signature;
     std::vector<std::string> names;
     for (const auto& parameter : declaration.parameters) {
-        signature.push_back(type(parameter.type, context));
+        if (parameter.variadic)
+            throw Diagnostic(parameter.span, "a variadic parameter requires a named function");
+        signature.push_back(parameter_type(parameter, context));
         names.push_back(parameter.name);
     }
     signature.push_back(type(*declaration.type, context));
@@ -1037,13 +1061,13 @@ void Lowering::resolve(SymbolId id) {
         resolve_generics(id, decl, ctx);
         symbol(id).type = type(*decl.type, ctx);
         for (const auto& parameter : decl.parameters) {
-            auto parameter_type = type(parameter.type, ctx);
-            if (parameter_type.kind == TypeKind::Void)
+            auto argument_type = parameter_type(parameter, ctx);
+            if (argument_type.kind == TypeKind::Void)
                 throw Diagnostic(parameter.span, "a parameter cannot have type void");
             auto arg = add(SymbolKind::Parameter, parameter.name, parameter.span, id);
             if (!entries_[id].names.emplace(parameter.name, arg).second)
                 throw Diagnostic(parameter.span, "duplicate parameter '" + parameter.name + "'");
-            symbol(arg).type = std::move(parameter_type);
+            symbol(arg).type = std::move(argument_type);
             symbol(id).parameters.push_back(arg);
         }
         if (!decl.has_body && symbol(symbol(id).owner).kind != SymbolKind::Module &&
@@ -1057,6 +1081,7 @@ void Lowering::resolve(SymbolId id) {
                 symbol(symbol(id).owner).kind != SymbolKind::Module)
                 throw Diagnostic(decl.span, "host bindings are only allowed in standard library modules");
             if (!decl.generics.empty() || decl.override_member ||
+                std::ranges::any_of(decl.parameters, &Parameter::variadic) ||
                 !host_service_name(decl.host_binding->first))
                 throw Diagnostic(decl.span, "a host binding needs a non-generic function and a qualified service name");
             for (auto parameter : symbol(id).parameters) {
@@ -1354,12 +1379,63 @@ IrNode Lowering::select(const Expr& expr, Context& context) {
 void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
                          const Substitution& replacements, Context& context) {
     auto params = target == no_symbol ? std::vector<SymbolId>{} : symbol(target).parameters;
-    if (expr.operands.size() - first != params.size())
-        throw Diagnostic(expr.span, "expected " + std::to_string(params.size()) + " argument(s)");
-    for (std::size_t i = 0; i < params.size(); ++i) {
+    const auto* declaration = target == no_symbol ? nullptr : entries_[target].declaration;
+    const auto* rest = declaration && !declaration->parameters.empty() &&
+        declaration->parameters.back().variadic ? &declaration->parameters.back() : nullptr;
+    const auto fixed = params.size() - (rest ? 1 : 0);
+    const auto count = expr.operands.size() - first;
+    if (count < fixed || (!rest && count != fixed))
+        throw Diagnostic(expr.span, "expected " + std::string(rest ? "at least " : "") +
+                                    std::to_string(fixed) + " argument(s)");
+    for (std::size_t i = 0; i < fixed; ++i) {
         auto expected = substitute(symbol(params[i]).type, replacements);
         call.operands.push_back(value(expr.operands[i + first], context, &expected));
     }
+    if (!rest) return;
+    auto pack = node(IrOp::Collection, expr.span, substitute(symbol(params.back()).type, replacements));
+    const auto& element = pack.type.arguments.front();
+    for (std::size_t i = fixed; i < count; ++i) {
+        const auto& input = expr.operands[i + first];
+        pack.operands.push_back(rest->type.name == "[variadic argument]"
+            ? pack_argument(input, element, context) : value(input, context, &element));
+    }
+    call.operands.push_back(std::move(pack));
+}
+
+IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context& context) {
+    auto input = value(expr, context);
+    if (input.type == argument) return input;
+    auto variant_name = "Text";
+    const IrType* numeric_type = nullptr;
+    if (auto integer = specified_integer_format(input.type)) {
+        variant_name = integer->is_signed ? "Signed" : "Unsigned";
+        numeric_type = integer->is_signed ? &int64_type : &uint64_type;
+    } else if (input.type.kind == TypeKind::Float) {
+        if (input.type.name == "float16") variant_name = "Floating16";
+        else if (input.type.name == "bfloat16") variant_name = "BFloating16";
+        else if (input.type.name == "float32") variant_name = "Floating32";
+        else variant_name = "Floating";
+    } else if (input.type.kind == TypeKind::Bool) {
+        variant_name = "Boolean";
+    } else if (class_reference(input.type)) {
+        variant_name = "Object";
+    } else if (input.type != string_type) {
+        if (!supports_value_members(program_, input.type))
+            throw Diagnostic(expr.span, "cannot pack " + describe(input.type) +
+                                        " as a variadic argument; pass its text representation explicitly");
+        auto text = node(IrOp::ValueText, expr.span, string_type);
+        text.operands.push_back(std::move(input));
+        input = std::move(text);
+    }
+    if (numeric_type && *numeric_type != input.type) {
+        auto widened = node(IrOp::Convert, expr.span, *numeric_type);
+        widened.operands.push_back(std::move(input));
+        input = std::move(widened);
+    }
+    auto packed = node(IrOp::EnumConstruct, expr.span, argument);
+    packed.symbol = own_member(argument.symbol, variant_name);
+    packed.operands.push_back(std::move(input));
+    return packed;
 }
 
 Substitution Lowering::enum_arguments(const IrType& type) const {
@@ -1777,6 +1853,115 @@ IrNode Lowering::comparison_chain(const Expr& expr, Context& context) {
     return result;
 }
 
+IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expected) {
+    const auto& span = expr.span;
+    const auto* expected_element = expected && collection(*expected) ? &expected->arguments.front() : nullptr;
+    auto start = value(expr.operands[0], context, expected_element);
+    const auto element = start.type;
+    const auto format = specified_integer_format(element);
+    if (!format) throw Diagnostic(start.span, "a range requires integer bounds and step");
+    auto result = node(IrOp::ScopedValue, span,
+                       expected_element ? *expected : collection_type(TypeKind::Array, element));
+    const auto integer = [&](const IrType& type, std::string digits) {
+        auto literal = node(IrOp::Integer, span, type);
+        literal.text = std::move(digits);
+        return literal;
+    };
+    const auto binary = [&](std::string op, const IrType& type, IrNode left, IrNode right) {
+        auto operation = node(IrOp::Binary, span, type);
+        operation.text = std::move(op);
+        operation.operands = {std::move(left), std::move(right)};
+        return operation;
+    };
+    const auto convert = [&](const IrType& type, IrNode operand) {
+        if (operand.type == type) return operand;
+        auto operation = node(IrOp::Convert, span, type);
+        operation.operands.push_back(std::move(operand));
+        return operation;
+    };
+    const auto select = [&](IrNode condition, IrNode yes, IrNode no) {
+        auto selection = node(IrOp::SelectValue, span, yes.type);
+        selection.operands.push_back(std::move(condition));
+        selection.body.push_back(std::move(yes));
+        selection.alternative.push_back(std::move(no));
+        return selection;
+    };
+    const auto save = [&](IrNode initializer, std::string name, bool constant = true) {
+        return save_temporary(std::move(initializer), result.body, context, std::move(name), constant);
+    };
+    const auto store = [&](IrNode place, IrNode value) {
+        auto operation = node(IrOp::Store, span);
+        operation.operands = {std::move(place), std::move(value)};
+        return operation;
+    };
+
+    const auto current = save(std::move(start), "$range_current", false);
+    const auto stop = save(value(expr.operands[1], context, &element), "$range_stop");
+    const auto step = save(expr.operands.size() == 3 ? value(expr.operands[2], context, &element)
+                                                   : integer(element, "1"), "$range_step");
+    const auto& distance_type = format->bits <= 32 ? uint32_type : uint64_type;
+    const auto zero = integer(distance_type, "0");
+    const auto one = integer(distance_type, "1");
+
+    // Signed ranks preserve order and let even the full int64 distance fit in
+    // uint64. Negate the stride one short of its magnitude to handle INT64_MIN.
+    const auto rank = [&](IrNode bound) {
+        if (!format->is_signed) return convert(distance_type, std::move(bound));
+        const auto signed_bound = convert(int64_type, std::move(bound));
+        if (format->bits <= 32) {
+            const auto bias = std::to_string(std::uint64_t{1} << (format->bits - 1));
+            return convert(distance_type, binary("+", int64_type, signed_bound, integer(int64_type, bias)));
+        }
+        return select(binary("<", bool_type, signed_bound, integer(int64_type, "0")),
+                      convert(uint64_type, binary("-", int64_type, signed_bound,
+                                                 integer(int64_type, "-9223372036854775808"))),
+                      binary("+", uint64_type, convert(uint64_type, signed_bound),
+                             integer(uint64_type, "9223372036854775808")));
+    };
+    const auto from_rank = save(rank(current), "$range_from_rank");
+    const auto to_rank = save(rank(stop), "$range_to_rank");
+    auto low = from_rank;
+    auto high = to_rank;
+    auto stride = convert(distance_type, step);
+    if (format->is_signed) {
+        const auto descending = save(binary("<", bool_type, step, integer(element, "0")), "$range_descending");
+        low = save(select(descending, to_rank, from_rank), "$range_low");
+        high = save(select(descending, from_rank, to_rank), "$range_high");
+        const auto signed_step = convert(int64_type, step);
+        auto magnitude = convert(distance_type, binary("-", int64_type,
+            integer(int64_type, format->bits <= 32 ? "0" : "-1"), signed_step));
+        if (format->bits == 64) magnitude = binary("+", distance_type, std::move(magnitude), one);
+        stride = select(descending, std::move(magnitude), std::move(stride));
+    }
+    const auto has_items = save(binary("<", bool_type, low, high), "$range_nonempty");
+    auto last_offset = select(has_items, binary("-", distance_type,
+                             binary("-", distance_type, high, low), one), zero);
+    // The division also checks a zero step for an empty range.
+    auto count = binary("+", distance_type,
+                        binary("/", distance_type, std::move(last_offset), std::move(stride)),
+                        select(has_items, one, zero));
+    const auto length = save(convert(int32_type, std::move(count)), "$range_length");
+    auto allocation = node(IrOp::RepeatCollection, span, result.type);
+    allocation.operands = {convert(uint64_type, length), current};
+    const auto items = save(std::move(allocation), "$range_items");
+    const auto index = save(integer(int32_type, "0"), "$range_index", false);
+
+    auto loop = node(IrOp::Loop, span);
+    const auto in_range = binary("<", bool_type, index, length);
+    loop.operands.push_back(in_range);
+    auto target = node(IrOp::Index, span, element);
+    target.operands = {items, index};
+    loop.body.push_back(store(std::move(target), current));
+    loop.body.push_back(store(index, binary("+", int32_type, index, integer(int32_type, "1"))));
+    auto advance = node(IrOp::Branch, span);
+    advance.operands.push_back(in_range);
+    advance.body.push_back(store(current, binary("+", element, current, step)));
+    loop.body.push_back(std::move(advance));
+    result.body.push_back(std::move(loop));
+    result.body.push_back(items);
+    return result;
+}
+
 IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected) {
     switch (expr.kind) {
     case ExprKind::TypeApplication: {
@@ -1908,6 +2093,8 @@ IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* ex
             result.operands.push_back(value(expr.operands[i], context, &element));
         return result;
     }
+    case ExprKind::Range:
+        return range(expr, context, expected);
     case ExprKind::New:
         return allocate(expr, context);
     case ExprKind::NamedVariant: {

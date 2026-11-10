@@ -21,12 +21,12 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 
 The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four printable ASCII characters and compare bytewise. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
 
-### Versions 1.0 through 1.2
+### Versions 1.0 through 1.3
 
-Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. The graph profile remains 1.
+Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). The graph profile remains 1.
 
 - A writer emits the lowest minor version whose features the image uses. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
-- The loader accepts major version 1 with minor version 0, 1, or 2. A feature newer than the version declared by the image makes the image malformed.
+- The loader accepts major version 1 with minor versions 0 through 3. A feature newer than the version declared by the image makes the image malformed.
 - An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
@@ -123,8 +123,9 @@ The state-operation exit provides checked storage primitives. Its immediate is z
 | 20 (1.2) | Class test | Target layout ID | Object reference | Boolean, false for nil |
 | 21 (1.2) | Class cast | Target layout ID | Object reference | Same handle at the target type, preserving nil |
 | 22 (1.2) | Scalar text | Zero | Boolean, integer or float, optionally an unsigned 32-bit ordinal followed by text variants | Deterministically formatted text or the variant name |
+| 23 (1.3) | Allocate repeated collection | Array or list type ID | Unsigned 64-bit length and one assignable element | New collection with that length and value in every slot |
 
-Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a list because operation 7 takes its elements as exit arguments, so a list is the only way to collect bytes whose number is known only at run time. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Every list carries a structural version that starts at zero when the list is allocated and grows by one, modulo 2^64, with each successful append or removal; writing an element does not change it. A for-each loop compares versions to detect modification. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Freeing an object invalidates its handle after language cleanup has completed.
+Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a byte list, which can grow as text is assembled. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Every list carries a structural version that starts at zero when the list is allocated and grows by one, modulo 2^64, with each successful append or removal; writing an element does not change it. A for-each loop compares versions to detect modification. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Operation 23 checks the requested length against storage and heap limits before allocating. Freeing an object invalidates its handle after language cleanup has completed.
 
 ## Imports and optional source maps
 

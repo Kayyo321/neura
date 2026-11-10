@@ -123,6 +123,12 @@ private:
         if (peek() == '"') {
             return string(start);
         }
+        if (peek() == '.' && peek(1) == '.') {
+            advance();
+            advance();
+            if (peek() == '.') advance();
+            return TokenKind::Symbol;
+        }
         const auto remaining = source_.substr(offset_);
         for (const auto op : compound_symbols) {
             if (remaining.starts_with(op)) {
