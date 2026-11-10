@@ -1,0 +1,4 @@
+PASS ExitSuite.test_exit_zero
+before exit
+FAIL ExitSuite.test_exit_three: the test exited with status 3
+2 test(s), 1 passed, 1 failed

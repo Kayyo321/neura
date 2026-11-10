@@ -1,7 +1,7 @@
 PASS Suite.test_counter_starts_fresh
 PASS Suite.test_counter_starts_fresh_again
 before the failing assertion
-FAIL Suite.test_unequal: expected 3, got 4 at suite.nra:25:9
+FAIL Suite.test_unequal: expected <3>, got <4> at suite.nra:25:9
 FAIL Suite.test_false: assertion failed at suite.nra:30:9
 FAIL Suite.test_trap: index out of bounds: index 3 for length 1 at suite.nra:35:21
 5 test(s), 2 passed, 3 failed

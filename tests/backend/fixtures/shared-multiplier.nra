@@ -1,7 +1,8 @@
 // Two int32 products of variables share one multiplier graph.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let Shared = module:io.Entry (
+let Shared = module:program.Entry (
     let area = func(int32 width, int32 height) -> int32 {
         return width * height;
     };
@@ -10,10 +11,10 @@ let Shared = module:io.Entry (
         return base * depth;
     };
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         if (volume(area(2, 3), 4) == 24) {
-            io.println("24");
+            console.print_line("24");
         }
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );

@@ -1,0 +1,107 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Interfaces = module:program.Entry (
+    let Comparable = interface<T> (
+        let compare_to = func(T other) -> int;
+    );
+
+    let Named = interface (
+        let name = func() -> string;
+        let title = func() -> string {
+            return name();
+        };
+    );
+
+    let Titled = interface:Named (
+        let.override title = func() -> string {
+            return "[" + name() + "]";
+        };
+    );
+
+    let Iterator = interface<T> (
+        let has_next = func() -> bool;
+        let next = func() -> T;
+        let reader = func() -> func() -> T {
+            return func() -> T {
+                return next();
+            };
+        };
+    );
+
+    let Iterable = interface<T> (
+        let iterator = func() -> Iterator<T>;
+    );
+
+    let Listing = interface<T>:Iterable<T>, Titled ();
+
+    let Counter = class implements Iterator<int> (
+        let position: int = 0;
+        let limit: int;
+        export let init = func(int size) -> void {
+            limit = size;
+        };
+        export let has_next = func() -> bool {
+            return position < limit;
+        };
+        export let next = func() -> int {
+            position = position + 1;
+            return position;
+        };
+    );
+
+    let Series = class implements Comparable<Series>, Listing<int> (
+        export let length: int;
+        export let init = func(int size) -> void {
+            length = size;
+        };
+        export let iterator = func() -> Iterator<int> {
+            return new Counter(length);
+        };
+        export let compare_to = func(Series other) -> int {
+            return length - other.length;
+        };
+        export let name = func() -> string {
+            return "series";
+        };
+    );
+
+    let first = func<T: Iterable<int>>(T items) -> int {
+        for (let value in items) {
+            return value;
+        }
+        return 0;
+    };
+
+    let describe = func<T: [Comparable<T>, Named], K: Iterable<int>>(T value, T other, K items) -> string {
+        if (value.compare_to(other) > 0 && first<K>(items) == 1) {
+            return value.title();
+        }
+        return "wrong bound dispatch";
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let values: Listing<int> = new Series(5);
+        let read = values.iterator().reader();
+        let total: int = 0;
+        for (let value in values) {
+            if (value == 2) {
+                continue;
+            }
+            if (value == 4) {
+                break;
+            }
+            total = total + value;
+        }
+        if (total == 4 && read() == 1) {
+            let named: Named = values as Named;
+            let umbrella: class = named;
+            let absent: Named = nil;
+            if (umbrella is Titled && !(absent is Titled)) {
+                console.print_line(named.title());
+            }
+        }
+        console.print_line(describe<Series, Series>(new Series(3), new Series(2), new Series(1)));
+        return program.ExitCode.Ok;
+    }
+);

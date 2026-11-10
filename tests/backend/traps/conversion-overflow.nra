@@ -1,19 +1,20 @@
 // status: 70
-// stderr: source arithmetic failure \(trap reason 1\) .* at conversion-overflow\.nra:7:16
-let io = import:SysIo;
+// stderr: source arithmetic failure \(trap reason 1\) .* at conversion-overflow\.nra:8:16
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let Narrow = module:io.Entry (
+let Narrow = module:program.Entry (
     let to_byte = func(int32 value) -> byte {
         return value as byte;
     };
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         if (to_byte(255) == 255) {
-            io.println("255 fits in a byte");
+            console.print_line("255 fits in a byte");
         }
         if (to_byte(-1) == 255) {
-            io.println("unreachable");
+            console.print_line("unreachable");
         }
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );

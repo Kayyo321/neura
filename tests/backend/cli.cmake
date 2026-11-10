@@ -110,11 +110,31 @@ same_bytes("repeated source builds" "${TEST_DIR}/hello.nvr" "${TEST_DIR}/hello-a
 build_image("${TEST_DIR}/hello-from-nir-again.nvr" "${TEST_DIR}/hello.nir")
 same_bytes("repeated .nir builds" "${TEST_DIR}/hello.nvr" "${TEST_DIR}/hello-from-nir-again.nvr")
 
-# Programs that use no NVR 1.1 feature are still NVR 1.0 images.
+# Std.Program's ExitCode is a payload enum, so every program now needs NVR
+# 1.2. Images built before the standard library existed are NVR 1.0 and still
+# run: the legacy fixtures are lossless disassemblies of a SysIo Hello World
+# and of a program that used the retired Test assertion services.
 file(READ "${TEST_DIR}/hello.nvr" hello_version OFFSET 4 LIMIT 4 HEX)
-if(NOT hello_version STREQUAL "01000000")
-    message(FATAL_ERROR "Hello World should be an NVR 1.0 image, found version bytes ${hello_version}")
+if(NOT hello_version STREQUAL "01000200")
+    message(FATAL_ERROR "Hello World should be an NVR 1.2 image, found version bytes ${hello_version}")
 endif()
+neura(legacy "${TEST_DIR}" assemble "${tests}/legacy/legacy-hello.nvra" -o "${TEST_DIR}/legacy-hello.nvr")
+if(NOT legacy_status STREQUAL "0")
+    message(FATAL_ERROR "the legacy Hello World image does not assemble\n${legacy_stderr}")
+endif()
+file(READ "${TEST_DIR}/legacy-hello.nvr" legacy_version OFFSET 4 LIMIT 4 HEX)
+if(NOT legacy_version STREQUAL "01000000")
+    message(FATAL_ERROR "the legacy Hello World should be an NVR 1.0 image, found ${legacy_version}")
+endif()
+expect_run("legacy Hello World image" "${TEST_DIR}/legacy-hello.nvr" "Hello, World!\n" 0 "")
+neura(legacy "${TEST_DIR}" assemble "${tests}/legacy/legacy-assert.nvra" -o "${TEST_DIR}/legacy-assert.nvr")
+if(NOT legacy_status STREQUAL "0")
+    message(FATAL_ERROR "the legacy assertion image does not assemble\n${legacy_stderr}")
+endif()
+# The runner no longer provides the retired assertion services, so an image
+# that imports them is rejected when it binds, before it runs.
+expect_run("legacy assertion image" "${TEST_DIR}/legacy-assert.nvr" "" 1
+    "import 1 [(]neura[.]test[.]assert version 1[)] is not available")
 
 file(MAKE_DIRECTORY "${TEST_DIR}/isolated")
 file(COPY "${TEST_DIR}/hello.nvr" DESTINATION "${TEST_DIR}/isolated")
@@ -148,7 +168,7 @@ endforeach()
 build_image("${TEST_DIR}/first-argument.nvr" "${tests}/arguments/first-argument.nra")
 expect_run("first argument" "${TEST_DIR}/first-argument.nvr" "first: héllo\n" 0 "" -- "héllo" second)
 expect_run("no arguments" "${TEST_DIR}/first-argument.nvr" "" 70
-    "trap: index out of bounds: index 0 for length 0 in function 0 block [0-9]+ at first-argument[.]nra:7:32")
+    "trap: index out of bounds: index 0 for length 0 in function [0-9]+ block [0-9]+ at first-argument[.]nra:8:40")
 
 # Runnable examples.
 build_image("${TEST_DIR}/module-interface.nvr" "${SOURCE_DIR}/examples/modules/module-interface.nra")
@@ -159,7 +179,7 @@ build_image("${TEST_DIR}/multi-file.nvr" -I "${SOURCE_DIR}/examples/modules/mult
 expect_run("multi-file" "${TEST_DIR}/multi-file.nvr" "Hello, Neura!\n" 0 "")
 
 # Library examples run through drivers that import them.
-foreach(driver IN ITEMS core overlay classes collections polymorphism)
+foreach(driver IN ITEMS core overlay classes collections polymorphism errors)
     build_image("${TEST_DIR}/${driver}-driver.nvr" ${roots} "${tests}/examples/${driver}-driver.nra")
     file(READ "${tests}/examples/${driver}-driver.out" expected)
     expect_run("${driver} driver" "${TEST_DIR}/${driver}-driver.nvr" "${expected}" 0 "")
@@ -184,6 +204,8 @@ file(READ "${tests}/testing/suite.out" expected)
 expect_tests("test suite" "${expected}" 1 "${tests}/testing/suite.nra")
 expect_tests("test suite unoptimized" "${expected}" 1 --no-optimize "${tests}/testing/suite.nra")
 expect_failure("no tests" "no tests found" test "${hello}")
+file(READ "${tests}/testing/exit-suite.out" expected)
+expect_tests("exit suite" "${expected}" 1 "${tests}/testing/exit-suite.nra")
 build_image("${TEST_DIR}/resources-driver.nvr" "${SOURCE_DIR}/examples/guide/resources.nra"
     "${tests}/examples/resources-driver.nra")
 file(READ "${tests}/examples/resources-driver.out" expected)
@@ -198,6 +220,13 @@ expect_run("initialization unoptimized" "${TEST_DIR}/initialization-unoptimized.
 neura(emit "${TEST_DIR}" emit-ir "${tests}/initialization/main.nra" -o "${TEST_DIR}/initialization.nir")
 build_image("${TEST_DIR}/initialization-from-nir.nvr" "${TEST_DIR}/initialization.nir")
 same_bytes("initialization from .nir" "${TEST_DIR}/initialization.nvr" "${TEST_DIR}/initialization-from-nir.nvr")
+# Files that import each other start together, after the files the cycle
+# imports, in both build modes.
+foreach(mode IN ITEMS "" --no-optimize)
+    build_image("${TEST_DIR}/initialization-cycle${mode}.nvr" ${mode} "${tests}/initialization-cycle/main.nra")
+    file(READ "${tests}/initialization-cycle/main.out" expected)
+    expect_run("initialization cycle ${mode}" "${TEST_DIR}/initialization-cycle${mode}.nvr" "${expected}" 0 "")
+endforeach()
 foreach(library IN ITEMS guide/core guide/errors testing/math-tests types/classes types/collections
                          types/overlay types/polymorphism modules/multi-file/acme/greetings
                          modules/multi-file/acme/greetings/punctuation)
@@ -224,7 +253,7 @@ foreach(program IN LISTS programs)
 endforeach()
 
 # The new source constructs produce the same image after a NIR round trip.
-foreach(name IN ITEMS operators closures aggregates)
+foreach(name IN ITEMS operators closures aggregates class-nil generic-closures generic-enums interfaces stdlib-primitives)
     neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
     if(NOT emit_status STREQUAL "0")
         message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")

@@ -1,12 +1,13 @@
 // The right operand of && and || runs only when the left operand does not
 // decide the result. Skipped operands here would print or trap.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let ShortCircuit = module:io.Entry (
+let ShortCircuit = module:program.Entry (
     let evaluated: int32 = 0;
 
     let noisy = func(bool value, string label) -> bool {
-        io.println("evaluated " + label);
+        console.print_line("evaluated " + label);
         evaluated = evaluated + 1;
         return value;
     };
@@ -15,36 +16,36 @@ let ShortCircuit = module:io.Entry (
         return value + 1 > value;
     };
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         if (noisy(false, "left of &&") && noisy(true, "right of &&")) {
-            io.println("unexpected");
+            console.print_line("unexpected");
         }
         if (noisy(true, "left of ||") || noisy(false, "right of ||")) {
-            io.println("|| decided by its left operand");
+            console.print_line("|| decided by its left operand");
         }
         if (noisy(true, "left of &&") && noisy(false, "right of &&")) {
-            io.println("unexpected");
+            console.print_line("unexpected");
         } else {
-            io.println("&& evaluated both operands");
+            console.print_line("&& evaluated both operands");
         }
 
         let largest: int8 = 127;
         let check: bool = false;
         if (check && largest + 1 > largest) {
-            io.println("unexpected");
+            console.print_line("unexpected");
         }
         if (!check || increments(largest)) {
-            io.println("skipped operands did not trap");
+            console.print_line("skipped operands did not trap");
         }
 
         let small: int8 = 5;
         let limit: int8 = 10;
         if (small < limit && limit > small) {
-            io.println("comparisons combine in one graph");
+            console.print_line("comparisons combine in one graph");
         }
         if (evaluated == 4) {
-            io.println("four operands evaluated");
+            console.print_line("four operands evaluated");
         }
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );

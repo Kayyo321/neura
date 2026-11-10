@@ -1,0 +1,8 @@
+// expect: 8:1 multiple interface defaults
+let Left = interface (
+    let value = func() -> int { return 1; };
+);
+let Right = interface (
+    let value = func() -> int { return 2; };
+);
+let Both = class implements Left, Right ();

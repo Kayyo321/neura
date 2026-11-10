@@ -1,0 +1,70 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let test = import:Std.Test;
+
+let Classes = module:program.Entry (
+    let Integer = class (
+        export let value: int;
+        export let init = func(int number) -> void { value = number; };
+        export let.override equals = func(class other) -> bool {
+            return other is Integer && value == (other as Integer).value;
+        };
+        export let.override hash_code = func() -> uint32 {
+            return value as uint32;
+        };
+    );
+    let Marker = class ();
+    let Node = class (
+        export let next: Node = nil;
+    );
+    let empty: class = nil;
+
+    let same = func<T>(T left, T right) -> bool { return left.equals(right); };
+    let hash = func<T>(T value) -> uint32 { return value.hash_code(); };
+    let text = func<T>(T value) -> string { return value.to_string(); };
+    let bound_nil = func<T: class>() -> T { return nil; };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let xyz: class = new Integer(10);
+        let equal: class = new Integer(10);
+        let marker: class = new Marker();
+        test.assert(xyz != equal && xyz.equals(equal));
+        test.assert(xyz.hash_code() == 10 && same<class>(xyz, equal));
+        test.assert(!xyz.equals(marker) && xyz != marker);
+        test.assert(xyz is Integer && !(xyz is Marker));
+        test.assert((xyz as Integer).value == 10);
+        test.assert(empty == nil && !(nil is Integer) && (empty as Integer) == nil);
+        test.assert(bound_nil<Integer>() == nil && same<class>(nil, nil));
+        test.assert(hash<class>(nil) == 0 && text<class>(nil) == "nil");
+
+        let node = new Node();
+        test.assert(node.next == nil);
+        node.next = node;
+        test.assert(node == node.next);
+        node.next = nil;
+        test.assert(nil == node.next);
+        let items: class[list] = [xyz, nil, marker];
+        test.assert(items[1] == nil);
+        let version = items.version;
+        items[1] = xyz;
+        test.assert(items[0] == items[1] && items.version == version);
+        items.append(nil);
+        test.assert(items.version == version + 1);
+
+        let pair: [int, bool] = [23, true];
+        let another: [int, bool] = [23, true];
+        test.assert(pair.equals(another) && pair.hash_code() == 2905);
+        test.assert(pair.to_string() == "[23, true]");
+        let names: string[list] = ["a", "b"];
+        let shorter: string[list] = ["a"];
+        test.assert(!names.equals(shorter) && names.to_string() == "[a, b]");
+        test.assert(names.hash_code() == 4066);
+        let optional_nodes: Node[list] = [nil];
+        test.assert(optional_nodes.to_string() == "[nil]");
+        test.assert(marker.to_string() == "Classes.Marker#1");
+        test.assert(marker.hash_code() == 2654435761);
+        test.assert(xyz.to_string() == "Classes.Integer#2");
+        console.print_line("class references and value members passed");
+        return program.ExitCode.Ok;
+    }
+);

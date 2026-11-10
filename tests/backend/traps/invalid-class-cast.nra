@@ -1,0 +1,15 @@
+// status: 70
+// stderr: invalid class cast
+
+let program = import:Std.Program;
+
+let InvalidClassCast = module:program.Entry (
+    let First = class ();
+    let Second = class ();
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let reference: class = new First();
+        let wrong = reference as Second;
+        return program.ExitCode.Ok;
+    }
+);

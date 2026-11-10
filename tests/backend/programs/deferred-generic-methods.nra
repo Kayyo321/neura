@@ -1,0 +1,53 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// A method of a generic class whose signature names a larger instance of its
+// own class (Box<T>.pair() -> Box<[int, T]>) is specialized only when the
+// program refers to it, so instantiating Box<int> terminates. Methods that
+// dispatch reaches by name (interface implementations, overrides) are still
+// specialized with the class.
+let DeferredGenericMethods = module:program.Entry (
+    let Named = interface (
+        let name = func() -> string;
+    );
+
+    let Box = class<T> implements Named (
+        export let value: T;
+        export let init = func(T item) -> void {
+            value = item;
+        };
+        export let pair = func() -> Box<[int, T]> {
+            let item: [int, T] = [1, value];
+            return new Box<[int, T]>(item);
+        };
+        export let nest = func() -> Box<T[list]> {
+            let items: T[list] = [value, value];
+            return new Box<T[list]>(items);
+        };
+        export let name = func() -> string {
+            return "box " + value.to_string();
+        };
+        export let.override to_string = func() -> string {
+            return "Box(" + value.to_string() + ")";
+        };
+    );
+
+    let describe = func(Named item) -> string {
+        return item.name();
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let box = new Box<int>(7);
+        let paired = box.pair();
+        console.print_line(paired.value.to_string());
+        console.print_line(paired.pair().value.to_string());
+        let nested = new Box<string>("n").nest();
+        console.print_line(nested.value.to_string());
+        console.print_line(describe(box));
+        let generic: class = paired;
+        console.print_line(generic.to_string());
+        let read = box.nest;
+        console.print_line(read().value.to_string());
+        return program.ExitCode.Ok;
+    }
+);

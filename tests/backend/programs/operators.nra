@@ -1,6 +1,7 @@
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let Operators = module:io.Entry (
+let Operators = module:program.Entry (
     let reads: int = 0;
     let current: int = 3;
 
@@ -28,20 +29,20 @@ let Operators = module:io.Entry (
         return value << count;
     };
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         if (subject() == change_subject() or 2 or 3 or fail() && reads == 1 && current == 2) {
-            io.println("or captures the subject and short-circuits");
+            console.print_line("or captures the subject and short-circuits");
         }
         if (subject() == 1 and fail() || reads == 2) {
-            io.println("and stops at the first false comparison");
+            console.print_line("and stops at the first false comparison");
         }
         if (subject() >= 0 and 1 and 2 && reads == 3) {
-            io.println("and requires each comparison");
+            console.print_line("and requires each comparison");
         }
         if (bit_ops(12, 5, -3) && (wide_shift(1, 63) == 9223372036854775808) &&
             ((~0 as int64) == -1) && (128 as byte << 1) == 0) {
-            io.println("fixed-width bitwise operations");
+            console.print_line("fixed-width bitwise operations");
         }
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     };
 );

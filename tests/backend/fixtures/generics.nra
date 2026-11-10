@@ -1,6 +1,6 @@
 // Generic functions and classes behind scalar wrappers, compared against the
 // NeuraIR reference evaluator after specialization.
-let io = import:SysIo;
+let program = import:Std.Program;
 
 let Generic = module (
     let Box = class<T> (
@@ -46,8 +46,8 @@ let Generic = module (
     };
 );
 
-let Main = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
-        return Entry.ExitCode.Ok;
+let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        return program.ExitCode.Ok;
     }
 );

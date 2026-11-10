@@ -1,0 +1,8 @@
+// expect: 7:10 type argument OnlyFirst does not satisfy the bound Second
+let First = interface ();
+let Second = interface ();
+let OnlyFirst = class implements First ();
+let both = func<T: [First, Second]>() -> void {};
+let use = func() -> void {
+    both<OnlyFirst>();
+};

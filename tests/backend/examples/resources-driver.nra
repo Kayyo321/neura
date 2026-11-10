@@ -1,10 +1,11 @@
 // Built together with examples/guide/resources.nra, whose top-level
 // statements create, update, and destroy a counter before main runs.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let ResourcesDriver = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
-        io.println("resources example finished");
-        return Entry.ExitCode.Ok;
+let ResourcesDriver = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("resources example finished");
+        return program.ExitCode.Ok;
     }
 );

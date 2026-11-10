@@ -1,0 +1,11 @@
+// Tuples, a payload enum, and a match, which need NeuraIR 1.2.
+export let Aggregates = module (
+    export let Shape = enum (Point, Circle(int32));
+
+    export let area = func(Shape shape) -> [int32, bool] {
+        return match (shape) {
+            Shape.Point => [0, false],
+            Shape.Circle(radius) => [3 * radius * radius, true],
+        };
+    };
+);

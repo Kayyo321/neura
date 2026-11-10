@@ -9,6 +9,7 @@
 #include "fixtures.hpp"
 #include "ir-optimization/float_reference.hpp"
 #include "neura-ir/float.hpp"
+#include "nvm/scalar_text.hpp"
 
 #include <bit>
 #include <cmath>
@@ -408,6 +409,38 @@ NEURA_TEST(floats, literals_round_exactly) {
     check_equal(parse_float_literal("3.0e-8", binary16).bits, std::uint64_t{1}, "3e-8 rounds up to the least subnormal");
     check_equal(parse_float_literal("1", bfloat16).bits, std::uint64_t{0x3f80}, "1 as bfloat16");
     check(parse_float_literal("1x", binary64).error == FloatLiteralError::Malformed, "1x is malformed");
+}
+
+NEURA_TEST(floats, shortest_scalar_text_round_trips) {
+    const auto check_pattern = [](FloatFormat format, nvr::TypeKind kind, std::uint64_t bits) {
+        const nvr::Type type{kind, static_cast<std::uint8_t>(format.width())};
+        const auto text = nvm::scalar_text(type, bits);
+        const auto exponent_mask = mask(format.exponent_bits);
+        const auto exponent = (bits >> format.fraction_bits) & exponent_mask;
+        if (exponent == exponent_mask) {
+            const bool nan = (bits & mask(format.fraction_bits)) != 0;
+            const bool negative = (bits >> (format.width() - 1)) != 0;
+            check_equal(text, std::string(nan ? "NaN" : negative ? "-Infinity" : "Infinity"), "special value text");
+            return;
+        }
+        const auto parsed = parse_float_literal(text, format);
+        check(!parsed.error && parsed.bits == bits, "round trip of " + hex(bits) + " through " + text);
+    };
+    for (std::uint64_t bits = 0; bits < 65536; ++bits) {
+        check_pattern(binary16, nvr::TypeKind::Float, bits);
+        check_pattern(bfloat16, nvr::TypeKind::BFloat, bits);
+    }
+    for (const auto format : {binary32, binary64}) {
+        for (const auto bits : samples(format, 256)) {
+            check_pattern(format, nvr::TypeKind::Float, bits);
+        }
+    }
+    const nvr::Type f64{nvr::TypeKind::Float, 64};
+    check_equal(nvm::scalar_text(f64, 1), std::string("5.0e-324"), "least subnormal shortest digits");
+    check_equal(nvm::scalar_text(f64, parse_float_literal("1e-4", binary64).bits), std::string("0.0001"),
+                "fixed lower threshold");
+    check_equal(nvm::scalar_text(f64, parse_float_literal("1e16", binary64).bits), std::string("1.0e16"),
+                "scientific upper threshold");
 }
 
 } // namespace neura::testing

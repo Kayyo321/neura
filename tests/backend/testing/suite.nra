@@ -1,7 +1,7 @@
 // Test runner behavior: passing and failing assertions, a failure that ends
 // its test, a runtime trap, and isolation of module state between tests.
-let io = import:SysIo;
-let test = import:Test;
+let console = import:Std.Io.Console;
+let test = import:Std.Test;
 
 let Suite = module (
     let counter: int32 = 0;
@@ -21,9 +21,9 @@ let Suite = module (
     };
 
     export let test_unequal = func() -> void {
-        io.println("before the failing assertion");
+        console.print_line("before the failing assertion");
         test.assert_equal_int32(3, 4);
-        io.println("unreachable: a failed assertion ends the test");
+        console.print_line("unreachable: a failed assertion ends the test");
     };
 
     export let test_false = func() -> void {

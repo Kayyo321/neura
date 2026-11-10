@@ -1,0 +1,64 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Primitives = module:program.Entry (
+    let Light = enum (Red, Green, Blue);
+
+    let check = func(bool condition) -> void {
+        if (!condition) {
+            trap_with_message("primitive check failed");
+        }
+    };
+
+    let round_trip = func(uint64 bits) -> uint64 {
+        return float64.from_bits(bits).to_bits();
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let text = "Aé🙂";
+        check(text.byte_length == 7);
+        check(text.byte_at(1) == 195);
+        check(text.byte_at(6) == 130);
+        check(text.slice(1, 3) == "é");
+        check(text.slice(3, 7) == "🙂");
+        check(text.slice(7, 7) == "");
+        check(text != "A");
+        check(text == "A" or "Aé🙂");
+        check("é" != "é");
+
+        let [valid, decoded] = string.from_utf8([65, 195, 169]);
+        check(valid && decoded == "Aé");
+        let bytes: byte[list] = [240, 159, 153, 130];
+        let [valid_list, emoji] = string.from_utf8(bytes);
+        bytes[0] = 255;
+        check(valid_list && emoji == "🙂");
+        let [invalid, fallback] = string.from_utf8(bytes);
+        check(!invalid && fallback == "");
+        let [valid_empty, empty] = string.from_utf8([]);
+        check(valid_empty && empty == "");
+        let [overlong, _] = string.from_utf8([192, 128]);
+        let [surrogate, _] = string.from_utf8([237, 160, 128]);
+        let [truncated, _] = string.from_utf8([240, 159, 153]);
+        check(!overlong && !surrogate && !truncated);
+        let [nul_valid, nul] = string.from_utf8([0]);
+        check(nul_valid && nul.byte_length == 1 && nul.byte_at(0) == 0);
+
+        check(float16.from_bits(32768).to_bits() == 32768);
+        check(bfloat16.from_bits(32641).to_bits() == 32641);
+        check(float.from_bits(2147483648).to_bits() == 2147483648);
+        check(round_trip(9221120237041090561) == 9221120237041090561);
+        let v = float64.from_bits(9221120237041090561);
+        check(v != v);
+        check(round_trip(9223372036854775808) == 9223372036854775808);
+        check(v.equals(float64.from_bits(9218868437227405313)));
+        check(v.hash_code() == 2146959360 && v.to_string() == "NaN");
+        check(!float64.from_bits(9223372036854775808).equals(0.0));
+        check(float64.from_bits(1).to_string() == "5.0e-324");
+        check(true.hash_code() == 1231 && false.to_string() == "false");
+        check((-1 as int8).hash_code() == 4294967295 && (-128 as int8).to_string() == "-128");
+        check("AB".hash_code() == 2081 && "AB".equals("A" + "B"));
+        check(Light.Green.to_string() == "Green" && Light.Blue.hash_code() == 2);
+        console.print_line("stdlib primitives passed");
+        return program.ExitCode.Ok;
+    };
+);

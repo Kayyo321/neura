@@ -1,0 +1,4 @@
+alpha: initialized
+beta: initialized after alpha!
+main: alpha!
+main: alpha! and beta

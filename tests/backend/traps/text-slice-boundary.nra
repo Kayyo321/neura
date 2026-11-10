@@ -1,0 +1,12 @@
+// status: 70
+// stderr: text slice endpoints must be on UTF-8 boundaries.*text-slice-boundary[.]nra:
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let invalid = "é".slice(1, 2);
+        console.print_line(invalid);
+        return program.ExitCode.Ok;
+    };
+);

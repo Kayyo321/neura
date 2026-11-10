@@ -1,8 +1,9 @@
 // Enums declared in source: qualified variants, equality, ordinals through
 // `as`, enums as fields and parameters, and an enum in a generic box.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let Enums = module:io.Entry (
+let Enums = module:program.Entry (
     export let Light = enum (Red, Yellow, Green);
 
     let next = func(Light current) -> Light {
@@ -26,24 +27,24 @@ let Enums = module:io.Entry (
         export let item: T;
     );
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         let signal = new Signal();
         signal.advance();
         if (signal.state == Light.Green) {
-            io.println("red advances to green");
+            console.print_line("red advances to green");
         }
         signal.advance();
         if (signal.state != Light.Green && signal.state == Light.Yellow) {
-            io.println("green advances to yellow");
+            console.print_line("green advances to yellow");
         }
         if (Light.Red as int32 == 0 && Light.Yellow as uint8 == 1 && Light.Green as int64 == 2) {
-            io.println("ordinals follow declaration order");
+            console.print_line("ordinals follow declaration order");
         }
         let holder = new Holder<Light>();
         holder.item = next(Light.Yellow);
         if (holder.item == Light.Red) {
-            io.println("an enum in a generic box");
+            console.print_line("an enum in a generic box");
         }
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );

@@ -1,9 +1,10 @@
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let Closures = module:io.Entry (
+let Closures = module:program.Entry (
     let assert_equal = func(int expected, int actual) -> void {
         if (expected != actual) {
-            io.println("closure result differed");
+            console.print_line("closure result differed");
         }
     };
 
@@ -48,7 +49,7 @@ let Closures = module:io.Entry (
         };
     );
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         let seed: int = 10;
         let add_seed = func(int value) -> int {
             return value + seed;
@@ -83,7 +84,7 @@ let Closures = module:io.Entry (
             return [make_adder(offset), 3];
         }(9);
         assert_equal(12, callback(argument));
-        io.println("closures passed");
-        return Entry.ExitCode.Ok;
+        console.print_line("closures passed");
+        return program.ExitCode.Ok;
     }
 );

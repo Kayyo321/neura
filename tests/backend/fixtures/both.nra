@@ -1,5 +1,6 @@
 // The conjunction from docs/Project.md, "Example from source to circuit".
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
 let Logic = module (
     export let both = func(bool left, bool right) -> bool {
@@ -7,11 +8,11 @@ let Logic = module (
     };
 );
 
-let Main = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
         if (Logic.both(true, true)) {
-            io.println("both");
+            console.print_line("both");
         }
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );

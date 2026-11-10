@@ -1,18 +1,19 @@
 // Exercises examples/guide/core.nra, a library without an entry point.
 // Build with -I examples/guide.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 let core = import:Core;
 
-let CoreDriver = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+let CoreDriver = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
         if (core.sum_to(3) == 6) {
-            io.println("Core.sum_to(3) = 6");
+            console.print_line("Core.sum_to(3) = 6");
         }
         if (core.sum_to(0) == 0) {
-            io.println("Core.sum_to(0) = 0");
+            console.print_line("Core.sum_to(0) = 0");
         }
-        io.println(core.describe(5));
-        io.println(core.describe(0));
-        return Entry.ExitCode.Ok;
+        console.print_line(core.describe(5));
+        console.print_line(core.describe(0));
+        return program.ExitCode.Ok;
     }
 );

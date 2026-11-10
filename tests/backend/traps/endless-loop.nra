@@ -1,11 +1,12 @@
 // status: 70
 // run-options: --max-steps 1000
 // stderr: step limit exceeded: 1000 steps
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let Loop = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
-        io.println("looping");
+let Loop = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("looping");
         let count: uint64 = 0;
         while (true) {
             count = count + 1;

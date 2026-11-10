@@ -1,0 +1,58 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// Checking Wide resolves each requirement of the interface declared after it,
+// which adds symbols while the requirement names are being read.
+let RequirementResolution = module:program.Entry (
+    let Wide = class implements Requirements (
+        export let m0 = func(int a, int b, int c) -> int { return a + b + c + 0; };
+        export let m1 = func(int a, int b, int c) -> int { return a + b + c + 1; };
+        export let m2 = func(int a, int b, int c) -> int { return a + b + c + 2; };
+        export let m3 = func(int a, int b, int c) -> int { return a + b + c + 3; };
+        export let m4 = func(int a, int b, int c) -> int { return a + b + c + 4; };
+        export let m5 = func(int a, int b, int c) -> int { return a + b + c + 5; };
+        export let m6 = func(int a, int b, int c) -> int { return a + b + c + 6; };
+        export let m7 = func(int a, int b, int c) -> int { return a + b + c + 7; };
+        export let m8 = func(int a, int b, int c) -> int { return a + b + c + 8; };
+        export let m9 = func(int a, int b, int c) -> int { return a + b + c + 9; };
+        export let m10 = func(int a, int b, int c) -> int { return a + b + c + 10; };
+        export let m11 = func(int a, int b, int c) -> int { return a + b + c + 11; };
+        export let m12 = func(int a, int b, int c) -> int { return a + b + c + 12; };
+        export let m13 = func(int a, int b, int c) -> int { return a + b + c + 13; };
+        export let m14 = func(int a, int b, int c) -> int { return a + b + c + 14; };
+        export let m15 = func(int a, int b, int c) -> int { return a + b + c + 15; };
+        export let m16 = func(int a, int b, int c) -> int { return a + b + c + 16; };
+        export let m17 = func(int a, int b, int c) -> int { return a + b + c + 17; };
+        export let m18 = func(int a, int b, int c) -> int { return a + b + c + 18; };
+        export let m19 = func(int a, int b, int c) -> int { return a + b + c + 19; };
+    );
+
+    let Requirements = interface (
+        let m0 = func(int a, int b, int c) -> int;
+        let m1 = func(int a, int b, int c) -> int;
+        let m2 = func(int a, int b, int c) -> int;
+        let m3 = func(int a, int b, int c) -> int;
+        let m4 = func(int a, int b, int c) -> int;
+        let m5 = func(int a, int b, int c) -> int;
+        let m6 = func(int a, int b, int c) -> int;
+        let m7 = func(int a, int b, int c) -> int;
+        let m8 = func(int a, int b, int c) -> int;
+        let m9 = func(int a, int b, int c) -> int;
+        let m10 = func(int a, int b, int c) -> int;
+        let m11 = func(int a, int b, int c) -> int;
+        let m12 = func(int a, int b, int c) -> int;
+        let m13 = func(int a, int b, int c) -> int;
+        let m14 = func(int a, int b, int c) -> int;
+        let m15 = func(int a, int b, int c) -> int;
+        let m16 = func(int a, int b, int c) -> int;
+        let m17 = func(int a, int b, int c) -> int;
+        let m18 = func(int a, int b, int c) -> int;
+        let m19 = func(int a, int b, int c) -> int;
+    );
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let value: Requirements = new Wide();
+        console.print_line((value.m0(1, 2, 3) + value.m19(1, 1, 1)).to_string());
+        return program.ExitCode.Ok;
+    };
+);

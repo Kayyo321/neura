@@ -1,0 +1,16 @@
+// A test that ends the process through Std.Program.Process.exit fails unless
+// the status is 0.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let ExitSuite = module (
+    export let test_exit_zero = func() -> void {
+        program.Process.exit(0);
+    };
+
+    export let test_exit_three = func() -> void {
+        console.print_line("before exit");
+        program.Process.exit(3);
+        console.print_line("unreachable");
+    };
+);

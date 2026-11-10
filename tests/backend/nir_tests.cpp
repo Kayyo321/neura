@@ -182,10 +182,10 @@ NEURA_TEST(nir, corrupt_files_are_rejected) {
     expect_nir_error(changed, "not a NeuraIR file");
     changed = bytes;
     changed[4] = 2;
-    expect_nir_error(changed, "NeuraIR format 2.0 is not supported");
+    expect_nir_error(changed, "NeuraIR format 2." + std::to_string(bytes[6]) + " is not supported");
     changed = bytes;
-    changed[6] = 3;
-    expect_nir_error(changed, "NeuraIR format 1.3 is not supported");
+    changed[6] = 4;
+    expect_nir_error(changed, "NeuraIR format 1.4 is not supported");
     changed = bytes;
     changed.push_back(0);
     expect_nir_error(changed, "1 unread bytes");
@@ -218,9 +218,15 @@ NEURA_TEST(nir, corrupt_files_are_rejected) {
 NEURA_TEST(nir, minor_version_follows_the_features_used) {
     // Programs without 1.1 operations or loop latches are written as 1.0,
     // so their files are unchanged; for loops and conversions need 1.1.
-    const auto hello = write_nir(lower_files({environment.examples() / "hello-world" / "hello-world.nra"}));
-    check_equal(static_cast<int>(hello[6]), 0, "hello-world.nir is NeuraIR 1.0");
-    const auto loops = write_nir(lower_files({program_path(environment, "loops")}));
+    // Hello World imports the standard library, whose matches need 1.2, so
+    // the 1.0 check uses a library module of the multi-file example.
+    const auto plain = write_nir(lower_files(
+        {environment.examples() / "modules" / "multi-file" / "acme" / "greetings" / "punctuation.nra"}));
+    check_equal(static_cast<int>(plain[6]), 0, "punctuation.nir is NeuraIR 1.0");
+    // Programs that import the standard library use its 1.3 operations, so
+    // these checks use import-free modules.
+    const auto versions = backend_dir(environment) / "nir-versions";
+    const auto loops = write_nir(lower_files({versions / "loops.nra"}));
     check_equal(static_cast<int>(loops[6]), 1, "loops.nir is NeuraIR 1.1");
     auto downgraded = loops;
     downgraded[6] = 0;
@@ -234,7 +240,7 @@ NEURA_TEST(nir, minor_version_follows_the_features_used) {
               message);
     }
     for (const auto* fixture : {"aggregates", "operators"}) {
-        auto current = write_nir(lower_files({program_path(environment, fixture)}));
+        auto current = write_nir(lower_files({versions / (std::string(fixture) + ".nra")}));
         check_equal(static_cast<int>(current[6]), 2, std::string(fixture) + " uses NeuraIR 1.2");
         current[6] = 1;
         expect_nir_error(current, std::string_view(fixture) == "operators"

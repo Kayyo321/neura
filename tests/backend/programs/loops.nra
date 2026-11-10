@@ -1,14 +1,15 @@
 // for and for-each loops: scope, continue running the step, nested loops,
 // early exits, empty collections, a collection expression evaluated once,
 // and element writes that the loop observes.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let Loops = module:io.Entry (
+let Loops = module:program.Entry (
     let report = func(bool holds, string label) -> void {
         if (holds) {
-            io.println(label);
+            console.print_line(label);
         } else {
-            io.println("FAILED: " + label);
+            console.print_line("FAILED: " + label);
         }
     };
 
@@ -106,7 +107,7 @@ let Loops = module:io.Entry (
         return total;
     };
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         report(sum_below(5) == 10, "for: sum below 5 is 10");
         report(sum_below(0) == 0, "for: no iterations below 0");
         report(sum_odd_below(10) == 25, "for: continue runs the step");
@@ -125,8 +126,8 @@ let Loops = module:io.Entry (
         report(visit_changed() == 33, "an element write is visible to the loop");
         let words: string[] = ["a", "b"];
         for (let word in words) {
-            io.println("word " + word);
+            console.print_line("word " + word);
         }
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );

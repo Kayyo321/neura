@@ -1,12 +1,13 @@
 // Calls examples/types/collections.nra, which exercises arrays, lists, and
 // nested collections without printing.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 let collections = import:Collections;
 
-let CollectionsDriver = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+let CollectionsDriver = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
         collections.example();
-        io.println("collections example finished");
-        return Entry.ExitCode.Ok;
+        console.print_line("collections example finished");
+        return program.ExitCode.Ok;
     }
 );

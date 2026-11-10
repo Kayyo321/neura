@@ -2,6 +2,7 @@
 // imports and their continuations, resource limits, and determinism.
 
 #include "fixtures.hpp"
+#include "nvm/trace.hpp"
 
 #include <fstream>
 #include <limits>
@@ -183,6 +184,49 @@ NEURA_TEST(vm, freed_objects_cannot_be_used) {
     expect_trap(image, TrapKind::InvalidHandle, "handle");
 }
 
+NEURA_TEST(vm, nil_is_a_value_and_faults_only_when_dereferenced) {
+    using Kind = nvr::TypeKind;
+    using Op = nvr::StateOp;
+    auto image = garbage_collection_image();
+    image.constants.push_back({4, {}});
+    image.types.push_back({Kind::Bool});
+    const nvr::Value nil{ValueKind::Constant, 4, 2};
+
+    nvr::Function test;
+    test.frame_types = {8};
+    test.result_type = 8;
+    nvr::Exit answer;
+    answer.kind = nvr::ExitKind::Return;
+    answer.arguments = {{ValueKind::Slot, 8, 0}};
+    test.blocks = {state_block(Op::ClassIs, 1, 0, {nil}), one_exit(answer)};
+    image.functions.push_back(std::move(test));
+
+    nvr::Function cast;
+    cast.frame_types = {4};
+    cast.result_type = 4;
+    answer.arguments = {{ValueKind::Slot, 4, 0}};
+    cast.blocks = {state_block(Op::ClassCast, 1, 0, {nil}), one_exit(answer)};
+    image.functions.push_back(std::move(cast));
+
+    nvr::Function dereference;
+    dereference.frame_types = {4};
+    dereference.result_type = 4;
+    dereference.blocks = {state_block(Op::ReadField, 1, 0, {nil}), one_exit(answer)};
+    image.functions.push_back(std::move(dereference));
+    image = nvr::load(nvr::encode(image));
+    const std::vector<std::uint64_t> arguments;
+    nvm::Execution testing(image, 2, arguments);
+    const auto tested = testing.advance();
+    check(tested.kind == nvm::Event::Kind::Completed && tested.result == 0, "nil is not an instance of a class");
+    nvm::Execution casting(image, 3, arguments);
+    const auto casted = casting.advance();
+    check(casted.kind == nvm::Event::Kind::Completed && casted.result == 0, "casting preserves nil");
+    nvm::Execution reading(image, 4, arguments);
+    const auto invalid = reading.advance();
+    check(invalid.kind == nvm::Event::Kind::Trapped && invalid.trap.kind == TrapKind::NilReference,
+          "dereferencing nil traps");
+}
+
 NEURA_TEST(vm, imports_bind_by_name_version_and_signature) {
     auto image = hello_model();
     nvm::HostRegistry empty;
@@ -254,6 +298,116 @@ NEURA_TEST(vm, host_request_order_follows_the_program) {
         check_equal(recorder.requests[i].sequence, std::uint64_t{i}, "sequence numbers count up from zero");
     }
     check_equal(recorder.requests.front().arguments[0].bytes, std::string("evaluated left of &&"), "first request");
+}
+
+NEURA_TEST(vm, host_compound_values_are_copied_in_both_directions) {
+    using Kind = nvr::TypeKind;
+    auto image = garbage_collection_image();
+    image.types.push_back({Kind::Unsigned, 8});
+    image.types.push_back({Kind::List, 0, 8});
+    image.types.push_back({Kind::Object, 0, 1});
+    image.layouts.push_back({nvr::absent, {2, 9}});
+    image.imports = {{"neura.test.get_tuple", 1, {}, 10, 7},
+                     {"neura.test.take_tuple", 1, {10}, 0, 7}};
+    auto& function = image.functions.front();
+    function.frame_types = {3, 10, 7};
+    nvr::Exit get;
+    get.kind = nvr::ExitKind::Host;
+    get.result_slot = 1;
+    get.resume = 1;
+    get.error_slot = 2;
+    get.error_resume = 2;
+    nvr::Exit take;
+    take.kind = nvr::ExitKind::Host;
+    take.target = 1;
+    take.arguments = {{ValueKind::Slot, 10, 1}};
+    take.resume = 2;
+    take.error_slot = 2;
+    take.error_resume = 2;
+    const auto done = function.blocks.back();
+    function.blocks = {one_exit(get), one_exit(take), done};
+    image = nvr::load(nvr::encode(image));
+
+    class Stub final : public nvm::HostService {
+    public:
+        explicit Stub(nvm::HostSignature signature) : signature_(std::move(signature)) {}
+        const nvm::HostSignature& signature() const override { return signature_; }
+        nvm::HostCompletion invoke(const nvm::HostRequest&) override { return nvm::HostCompletion::ok(); }
+    private:
+        nvm::HostSignature signature_;
+    };
+    const nvm::HostType bytes(Kind::List, std::vector<nvm::HostType>{{Kind::Unsigned, 8}});
+    const nvm::HostType tuple(Kind::Object, std::vector<nvm::HostType>{{Kind::Text}, bytes});
+    Stub producer({"neura.test.get_tuple", 1, {}, tuple, {Kind::Unsigned, 32}});
+    Stub consumer({"neura.test.take_tuple", 1, {tuple}, {Kind::Void}, {Kind::Unsigned, 32}});
+    nvm::HostRegistry registry;
+    registry.add(producer);
+    registry.add(consumer);
+    check_equal(nvm::bind(image, registry).services.size(), std::size_t{2}, "structural host bindings");
+
+    const nvm::HostValue expected{0, {}, {{0, std::string(240, 'a')}, {0, std::string(32, '\xff')}}};
+    nvm::Execution execution(image, std::vector<std::string>{});
+    auto event = execution.advance();
+    check(event.kind == nvm::Event::Kind::HostRequest && event.request.import == 0, "producer requested");
+    execution.complete(nvm::HostCompletion::ok(expected));
+    event = execution.advance();
+    check(event.kind == nvm::Event::Kind::HostRequest && event.request.import == 1, "consumer requested");
+    check(event.request.arguments == std::vector{expected}, "compound transfer survives allocation pressure");
+    execution.complete(nvm::HostCompletion::ok());
+    check(execution.advance().kind == nvm::Event::Kind::Completed, "completed");
+
+    nvm::Execution bad(image, std::vector<std::string>{});
+    bad.advance();
+    bad.complete(nvm::HostCompletion::ok());
+    const auto invalid = bad.advance();
+    check(invalid.kind == nvm::Event::Kind::Trapped && invalid.trap.kind == TrapKind::InvalidCompletion,
+          "a tuple completion must have all fields");
+}
+
+NEURA_TEST(vm, terminal_host_completions_record_and_replay) {
+    using Kind = nvr::TypeKind;
+    auto image = garbage_collection_image();
+    image.constants.push_back({1, {37, 0, 0, 0}});
+    image.imports = {{"neura.process.exit", 1, {1}, 0, 7}};
+    auto& function = image.functions.front();
+    function.frame_types = {3, 7};
+    nvr::Exit stop;
+    stop.kind = nvr::ExitKind::Host;
+    stop.arguments = {{ValueKind::Constant, 1, 2}};
+    stop.resume = 1;
+    stop.error_slot = 1;
+    stop.error_resume = 1;
+    function.blocks.front() = one_exit(stop);
+    image = nvr::load(nvr::encode(image));
+
+    class ExitService final : public nvm::HostService {
+    public:
+        const nvm::HostSignature& signature() const override { return signature_; }
+        nvm::HostCompletion invoke(const nvm::HostRequest& request) override {
+            return nvm::HostCompletion::terminate(static_cast<std::int32_t>(request.arguments.at(0).bits));
+        }
+    private:
+        const nvm::HostSignature signature_{"neura.process.exit", 1, {{Kind::Signed, 32}}, {Kind::Void},
+                                            {Kind::Unsigned, 32}};
+    };
+    ExitService service;
+    nvm::HostRegistry registry;
+    registry.add(service);
+    const auto bindings = nvm::bind(image, registry);
+    const auto trace = nvm::record(image, bindings, {});
+    check(trace.outcome.completed && trace.outcome.status == 37 && trace.entries.size() == 1,
+          "terminal completion skips the normal success continuation");
+    check(nvm::replay(image, trace, {}).matches, "terminal completion replays without a registry");
+    auto changed = trace;
+    changed.entries[0].completion = nvm::HostCompletion::terminate(38);
+    check(!nvm::replay(image, changed, {}).matches, "replay detects a different terminal result");
+    image.imports[0].name = "neura.other.service";
+    nvm::Execution unauthorized(image, std::vector<std::string>{});
+    unauthorized.advance();
+    unauthorized.complete(nvm::HostCompletion::terminate(37));
+    const auto invalid = unauthorized.advance();
+    check(invalid.kind == nvm::Event::Kind::Trapped && invalid.trap.kind == TrapKind::InvalidCompletion,
+          "only the process exit service can return a terminal completion");
 }
 
 NEURA_TEST(vm, resource_limits_trap) {
@@ -438,9 +592,10 @@ NEURA_TEST(vm, list_versions_count_structural_changes) {
           "the version fixture traps with reason 5");
     const auto path = fs::temp_directory_path() / "neura-vm-tests" / "versions.nra";
     fs::create_directories(path.parent_path());
-    std::ofstream(path) << R"(let io = import:SysIo;
-let App = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    std::ofstream(path) << R"(let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
         let values: int32[list] = [1, 2];
         let seen: int32 = 0;
         for (let value in values) {
@@ -448,14 +603,14 @@ let App = module:io.Entry (
             seen = seen + value;
         }
         if (seen == 6) {
-            io.println("element writes keep the version");
+            console.print_line("element writes keep the version");
         }
         values.append(3);
         values.remove_at(0);
         for (let value in values) {
             values.append(value);
         }
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );
 )";

@@ -158,7 +158,7 @@ let f = func(int32 value) -> void {
     for (let item in value) {
     }
 };
-]=] "3:22" "for-each requires an array or list, got int32")
+]=] "3:22" "for-each requires an array or list or Iterable<T>, got int32")
 check_rejection(for-each-element-type [=[
 let f = func(int32[] values) -> void {
     for (let item: string in values) {
@@ -291,6 +291,18 @@ let wrong = func(int x) -> int {
 };
 ]=] "3:17" "a shift count must be an integer")
 
+check_rejection(implicit-base-constructor [=[
+let Base = class (
+    export let init = func(int value) -> void {}
+);
+let Middle = class:Base ();
+let Derived = class:Middle (
+    export let init = func() -> void {
+        super.init();
+    }
+);
+]=] "8:9" "class 'Middle' needs a constructor to initialize its base")
+
 # Float literals convert directly to their format; values that do not fit are
 # compile-time errors.
 check_rejection(float16-overflow "let big: float16 = 65520.0;" "2:20" "float literal is outside the range of float16")
@@ -302,3 +314,6 @@ let f = func(float32 x, int32 n) -> float32 {
     return x * n;
 };
 ]=] "3:16" "expected float32, got int32")
+
+check_rejection(nil-scalar "let number: int = nil;" "2:19" "nil requires a class reference type")
+check_rejection(construct-umbrella "let value = new class();" "2:13" "class is an umbrella type and cannot be constructed")

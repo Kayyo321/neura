@@ -1,0 +1,117 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let GenericClosures = module:program.Entry (
+    let apply = func<T, U>(func(T) -> U transform, T value) -> U {
+        return transform(value);
+    };
+
+    let remember = func<T>(T value) -> func() -> T {
+        return func() -> T {
+            return value;
+        };
+    };
+
+    let remember_nested = func<T>(T value) -> func() -> func() -> T {
+        return func() -> func() -> T {
+            return func() -> T {
+                return value;
+            };
+        };
+    };
+
+    let unchanged = func<T>(T value) -> T {
+        return value;
+    };
+
+    let read_later = func<T>(T value) -> func() -> int {
+        return func() -> int {
+            let copied: T = unchanged<T>(value);
+            return 5;
+        };
+    };
+
+    let Action = enum (Callback(func() -> int));
+    let Deferred = enum<T> (Callback(func() -> T));
+
+    let remember_action = func<T>(T value) -> Action {
+        return Action.Callback(read_later<T>(value));
+    };
+
+    let defer = func<T>(T value) -> Deferred<T> {
+        return Deferred<T>.Callback(remember<T>(value));
+    };
+
+    let ignore = func<T>(T value) -> func() -> int {
+        return func() -> int {
+            return 9;
+        };
+    };
+
+    let Callback = class<T> (
+        let transform: func(T) -> T;
+        export let init = func(func(T) -> T implementation) -> void {
+            transform = implementation;
+        };
+        export let read = func(T value) -> T {
+            return transform(value);
+        };
+        export let bind = func<U>(U suffix) -> func(T) -> [T, U] {
+            return func(T value) -> [T, U] {
+                return [transform(value), suffix];
+            };
+        };
+    );
+
+    let wrap = func<T>(func(T) -> T transform) -> Callback<T> {
+        return new Callback<T>(transform);
+    };
+
+    let bound_read = func<T>(Callback<T> callback) -> func(T) -> T {
+        return callback.read;
+    };
+
+    let Holder = class<T> (
+        export let value: T;
+    );
+
+    let hold_callback = func<T>(func(T) -> T callback) -> Holder<func(T) -> T> {
+        let result = new Holder<func(T) -> T>();
+        result.value = callback;
+        return result;
+    };
+
+    let report = func(bool holds) -> void {
+        if (!holds) {
+            console.print_line("generic closure result differed");
+        }
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let number = remember<int>(4);
+        let message = remember<string>("typed capture");
+        report(number() == 4);
+        console.print_line(message());
+        report(remember_nested<int>(8)()() == 8);
+        let identity = func(int value) -> int {
+            return value;
+        };
+        let offsets: (func() -> int)[] = [read_later<bool>(true), ignore<string>("unused")];
+        report(offsets[0]() == 5 && offsets[1]() == 9);
+        match (remember_action<bool>(true)) {
+            Action.Callback(run) => { report(run() == 5); }
+        }
+        match (defer<int>(7)) {
+            Deferred.Callback(run) => { report(run() == 7); }
+        }
+        let callback = wrap<int>(identity);
+        report(bound_read<int>(callback)(17) == 17);
+        let [value, suffix] = callback.bind<string>("method capture")(12);
+        report(value == 12);
+        console.print_line(suffix);
+        let holder = hold_callback<int>(identity);
+        report(holder.value(21) == 21);
+        report(apply<int, bool>(func(int value) -> bool { return value > 3; }, 8));
+        return program.ExitCode.Ok;
+    }
+);

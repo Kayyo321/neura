@@ -1,10 +1,11 @@
 // Prints the first launch argument. Without arguments the index is out of
 // bounds and the run traps.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let FirstArgument = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
-        io.println("first: " + args[0]);
-        return Entry.ExitCode.Ok;
+let FirstArgument = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("first: " + args[0]);
+        return program.ExitCode.Ok;
     }
 );

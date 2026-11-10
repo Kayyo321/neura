@@ -1,18 +1,19 @@
 // status: 70
 // stderr: read of an uninitialized field
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let Fields = module:io.Entry (
+let Fields = module:program.Entry (
     let LogEntry = class (
         export let level: string;
         export let message: string;
     );
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         let entry = new LogEntry();
         entry.level = "INFO";
-        io.println(entry.level);
-        io.println(entry.message);
-        return Entry.ExitCode.Ok;
+        console.print_line(entry.level);
+        console.print_line(entry.message);
+        return program.ExitCode.Ok;
     }
 );

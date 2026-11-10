@@ -1,7 +1,7 @@
 // Imported by main.nra, so its initialization runs first.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
 
-io.println("settings: first statement");
+console.print_line("settings: first statement");
 
 let Settings = module (
     // A literal holds its value when the image is loaded.
@@ -15,4 +15,4 @@ let Settings = module (
     };
 );
 
-io.println("settings: " + Settings.label);
+console.print_line("settings: " + Settings.label);

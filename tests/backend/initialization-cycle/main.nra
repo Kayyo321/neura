@@ -1,0 +1,15 @@
+// Initialization with an import cycle: Alpha and Beta import each other, so
+// they run together, in the order given, after the files they import from
+// outside the cycle and before main.nra, which imports Alpha.
+let alpha = import:Alpha;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+console.print_line("main: " + alpha.label);
+
+export let App = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("main: " + alpha.describe());
+        return program.ExitCode.Ok;
+    };
+);

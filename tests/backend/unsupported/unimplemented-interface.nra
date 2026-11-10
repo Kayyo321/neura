@@ -1,13 +1,13 @@
 // expect: 10:9 module 'Logger' does not implement 'log'
-let io = import:SysIo;
+let program = import:Std.Program;
 
 let Logger = module (
     export let log = func(string message) -> void;
 );
 
-let App = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+let App = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
         Logger.log("hello");
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );

@@ -334,13 +334,8 @@ Captured run_captured(const nvr::Image& image, nvm::RunLimits limits, std::optio
                       const std::vector<std::string>& arguments) {
     nvm::StringSink sink = capacity ? nvm::StringSink(*capacity) : nvm::StringSink();
     nvm::ConsoleWriteLine console(sink);
-    nvm::TestLog test_log;
-    nvm::TestAssert assertion(test_log);
-    nvm::TestAssertEqualInt32 equal(test_log);
     nvm::HostRegistry registry;
     registry.add(console);
-    registry.add(assertion);
-    registry.add(equal);
     const auto bindings = nvm::bind(image, registry);
     Captured captured;
     captured.result = nvm::run(image, bindings, arguments, limits);

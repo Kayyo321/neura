@@ -65,7 +65,7 @@ NEURA_TEST(format, version_1_1_features) {
     check(nvr::load(nvr::encode(recorded)).minor_version == 1, "the loader records the minor version");
 
     expect_rejected(version_bytes(0), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
-    expect_rejected(version_bytes(2), Kind::Unsupported, "format version 1.2 is not supported");
+    expect_rejected(version_bytes(3), Kind::Unsupported, "format version 1.3 is not supported");
     auto reason_only = version_model();
     reason_only.functions[0].blocks[1] = reason_only.functions[0].blocks[2];
     reason_only.minor_version = 0;
@@ -80,6 +80,26 @@ NEURA_TEST(format, version_1_1_features) {
     auto wrong_slot = version_model();
     wrong_slot.functions[0].frame_types[2] = 2;
     expect_invalid(wrong_slot, "result slot must have type uint64");
+}
+
+NEURA_TEST(format, message_trap_requires_version_1_2_and_text) {
+    auto image = hello_model();
+    // Presence of an older feature must not keep a newer image at 1.1.
+    image.types.push_back({nvr::TypeKind::Float, 32, 0});
+    nvr::Exit trap;
+    trap.kind = nvr::ExitKind::MessageTrap;
+    trap.arguments = {{nvr::ValueKind::Constant, 3, 1}};
+    image.functions.front().blocks.front().exits = {trap};
+    auto bytes = nvr::encode(image);
+    check_equal(bytes[6], std::uint8_t{2}, "message trap requires NVR 1.2");
+    check(nvr::load(bytes).functions.front().blocks.front().exits.front() == trap,
+          "a message trap keeps its text operand");
+    bytes[6] = 1;
+    expect_rejected(bytes, Kind::Malformed, "uses NVR 1.2 features but declares 1.1");
+
+    auto& exit = image.functions.front().blocks.front().exits.front();
+    exit.arguments = {{nvr::ValueKind::Constant, 2, 0}};
+    expect_invalid(image, "a message trap requires one text argument");
 }
 
 NEURA_TEST(format, float_types_and_constants) {
@@ -126,6 +146,36 @@ NEURA_TEST(format, assembled_fixtures_decode_to_their_models) {
     check(nvr::load(hello) == hello_model(), "the hello fixture decodes to its model");
     const auto logic = logic_bytes();
     check(nvr::load(logic) == logic_model(), "the logic fixture decodes to its model");
+}
+
+NEURA_TEST(format, nil_and_interface_layouts_require_version_1_2) {
+    auto image = logic_model();
+    image.constants.push_back({5, {}});
+    const auto nil_bytes = nvr::encode(image);
+    check_equal(nil_bytes[6], std::uint8_t{2}, "nil constants require NVR 1.2");
+    check(nvr::load(nil_bytes).constants.back() == image.constants.back(), "nil constant round trips");
+    image.constants.back().payload = {0};
+    expect_invalid(image, "a nil object constant has no payload");
+
+    image = logic_model();
+    image.layouts.push_back({nvr::absent, {}});
+    image.layouts.push_back({nvr::absent, {}, {1}});
+    image.layouts[0].interfaces = {2};
+    const auto interfaces_bytes = nvr::encode(image);
+    check_equal(interfaces_bytes[6], std::uint8_t{2}, "interface links require NVR 1.2");
+    const auto decoded = nvr::load(interfaces_bytes);
+    check(decoded.layouts == image.layouts, "interface lists round trip");
+    const nvr::TypeSystem types(decoded);
+    check(types.derives(0, 1) && types.derives(0, 2) && !types.derives(1, 0), "interfaces are transitive");
+
+    image.layouts[0].interfaces.push_back(2);
+    expect_invalid(image, "invalid or repeated interface layout");
+    image.layouts[0].interfaces.pop_back();
+    image.layouts[1].fields.push_back(2);
+    expect_invalid(image, "invalid or repeated interface layout");
+    image.layouts[1].fields.clear();
+    image.layouts[1].interfaces = {2};
+    expect_invalid(image, "links form a cycle");
 }
 
 NEURA_TEST(format, writer_reproduces_assembled_fixtures) {
@@ -208,9 +258,9 @@ NEURA_TEST(format, header_errors) {
     bad_magic.magic = "NEUX";
     expect_rejected(assemble(sections, bad_magic), Kind::Malformed, "not an NVR image");
     Header newer_minor;
-    newer_minor.minor = 2;
+    newer_minor.minor = 3;
     expect_rejected(assemble(sections, newer_minor), Kind::Unsupported,
-                    "format version 1.2 is not supported; this loader accepts 1.0 through 1.1");
+                    "format version 1.3 is not supported; this loader accepts 1.0 through 1.2");
     Header newer_major;
     newer_major.major = 2;
     expect_rejected(assemble(sections, newer_major), Kind::Unsupported, "format version 2.0");
@@ -350,18 +400,18 @@ NEURA_TEST(format, record_encoding_errors) {
         expect_rejected(assemble(sections), Kind::Malformed, "reserved index");
     }
     {
-        // Exit kind 6 in the first exit of the first block.
+        // An invalid kind in the first exit of the first block.
         auto sections = hello_sections();
         auto& data = sections[1].data;
         // Function count, parameter count, result type, frame (count and two
         // slots), block count, graph, input count, selector start, exit count.
         const std::size_t exit_kind = 4 * 11;
         check_equal(static_cast<int>(data[exit_kind]), 4, "fixture layout: host exit kind");
-        data[exit_kind] = 6;
-        expect_rejected(assemble(sections), Kind::Malformed, "invalid exit kind 6");
+        data[exit_kind] = 255;
+        expect_rejected(assemble(sections), Kind::Malformed, "invalid exit kind 255");
         data[exit_kind] = 3;  // a state operation needs more bytes than remain valid
-        data[exit_kind + 5] = 15;
-        expect_rejected(assemble(sections), Kind::Malformed, "invalid state operation 15");
+        data[exit_kind + 5] = 255;
+        expect_rejected(assemble(sections), Kind::Malformed, "invalid state operation 255");
     }
 }
 
@@ -395,7 +445,7 @@ NEURA_TEST(format, constant_and_global_validation) {
     mutate_logic([](nvr::Image& i) { i.constants[0].payload = {2}; }, "Boolean payload");
     mutate_logic([](nvr::Image& i) { i.constants[1].payload = {7, 0}; }, "integer payload has 4 bytes");
     mutate_logic([](nvr::Image& i) { i.constants.push_back({3, {0xc3, 0x28}}); }, "not valid UTF-8");
-    mutate_logic([](nvr::Image& i) { i.constants.push_back({5, {}}); }, "constants cannot have this type");
+    mutate_logic([](nvr::Image& i) { i.constants.push_back({4, {}}); }, "constants cannot have this type");
     mutate_logic([](nvr::Image& i) { i.globals[0].initializer = 0; }, "initializer type does not match");
     mutate_logic([](nvr::Image& i) { i.globals[0].initializer = 5; }, "initializer 5 is out of range");
     mutate_logic([](nvr::Image& i) { i.globals[0].type = 0; }, "void is not a value type");

@@ -1,0 +1,22 @@
+// expect: 13:20 type V has no member 'to_string' in this specialization
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Main = module:program.Entry (
+    let V = enum (Null, Number(string));
+    let Box = class<T> (
+        export let item: T;
+        export let init = func(T value) -> void {
+            item = value;
+        };
+        export let text = func() -> string {
+            return item.to_string();
+        };
+    );
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let b = new Box<V>(V.Number("1"));
+        console.print_line(b.text());
+        return program.ExitCode.Ok;
+    };
+);

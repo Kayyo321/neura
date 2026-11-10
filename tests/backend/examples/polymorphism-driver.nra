@@ -1,13 +1,14 @@
 // Calls examples/types/polymorphism.nra, which exercises subtype dispatch,
 // generic functions and classes, a bound, and construction and destruction
 // without printing.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 let polymorphism = import:Polymorphism;
 
-let PolymorphismDriver = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+let PolymorphismDriver = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
         polymorphism.example();
-        io.println("polymorphism example finished");
-        return Entry.ExitCode.Ok;
+        console.print_line("polymorphism example finished");
+        return program.ExitCode.Ok;
     }
 );

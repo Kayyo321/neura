@@ -1,9 +1,10 @@
-let io = import:SysIo;
-let test = import:Test;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let test = import:Std.Test;
 
 let [default_code, default_weight] = [4, 1.5 as float];
 
-let Aggregates = module:io.Entry (
+let Aggregates = module:program.Entry (
     let Tree = enum (
         Empty,
         Leaf(int),
@@ -34,7 +35,7 @@ let Aggregates = module:io.Entry (
 
     let identity = func<T>(T value) -> T { return value; };
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         let [code, weight, _] = identity<[int, float, string]>(sample());
         test.assert_equal_int32(1, calls);
         test.assert_equal_int32(4, code);
@@ -64,7 +65,7 @@ let Aggregates = module:io.Entry (
             _ => { selected = true; },
         }
         test.assert(selected);
-        io.println("tuples and enum payloads passed");
-        return Entry.ExitCode.Ok;
+        console.print_line("tuples and enum payloads passed");
+        return program.ExitCode.Ok;
     }
 );

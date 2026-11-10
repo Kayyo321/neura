@@ -1,6 +1,6 @@
 // Floating-point functions compared against the NeuraIR reference evaluator
 // on special and pseudo-random operands.
-let io = import:SysIo;
+let program = import:Std.Program;
 
 let Floats = module (
     export let add16 = func(float16 a, float16 b) -> float16 {
@@ -48,8 +48,8 @@ let Floats = module (
     };
 );
 
-let Main = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
-        return Entry.ExitCode.Ok;
+let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        return program.ExitCode.Ok;
     }
 );

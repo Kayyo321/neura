@@ -97,10 +97,10 @@ let Structures = module (
     };
 );
 
-let io = import:SysIo;
+let program = import:Std.Program;
 
-let Main = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
-        return Entry.ExitCode.Ok;
+let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        return program.ExitCode.Ok;
     }
 );

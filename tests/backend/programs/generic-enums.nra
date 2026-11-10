@@ -1,0 +1,62 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let test = import:Std.Test;
+
+let GenericEnums = module:program.Entry (
+    let Optional = enum<T> (None, Some(T));
+    let IntOptional = Optional<int>;
+    let Tree = enum<T> (Empty, Leaf(T), Branch { children: Tree<T>[list] });
+    let Direction = enum<T> (Left, Right);
+
+    let present = func<T>(T value) -> Optional<T> {
+        return Optional<T>.Some(value);
+    };
+
+    let unwrap_or = func<T>(Optional<T> value, T fallback) -> T {
+        return match (value) {
+            Optional.None => fallback,
+            Optional.Some(item) => item,
+        };
+    };
+
+    let size = func<T>(Tree<T> tree) -> int {
+        match (tree) {
+            Tree.Empty => { return 0; },
+            Tree.Leaf(_) => { return 1; },
+            Tree.Branch { children } => {
+                let count = 0;
+                for (let child in children) {
+                    count = count + size<T>(child);
+                }
+                return count;
+            },
+        }
+    };
+
+    let holder = class<T> (
+        export let item: Optional<T> = Optional<T>.None;
+    );
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let a = present<int>(10);
+        let b = Optional<Optional<int>>.Some(a);
+        let c = IntOptional.Some(11);
+        let result = match (c) {
+            IntOptional.None => 0,
+            IntOptional.Some(value) => value,
+        };
+        test.assert(result == 11);
+        test.assert(unwrap_or<int>(unwrap_or<Optional<int>>(b, IntOptional.None), 0) == 10);
+        test.assert(unwrap_or<string>(Optional<string>.None, "empty") == "empty");
+        let container = new holder<int>();
+        test.assert(unwrap_or<int>(container.item, 3) == 3);
+        container.item = a;
+        test.assert(unwrap_or<int>(container.item, 0) == 10);
+        let tree = Tree<string>.Branch { children: [Tree<string>.Empty, Tree<string>.Leaf("leaf")] };
+        test.assert(size<string>(tree) == 1);
+        let d = Direction<int>.Right;
+        test.assert(d as int == 1 && d.to_string() == "Right");
+        console.print_line("generic enum specialization passed");
+        return program.ExitCode.Ok;
+    }
+);

@@ -1,17 +1,18 @@
 // status: 70
-// stderr: collection modified during iteration \(trap reason 5\) .* at for-each-last\.nra:10:9
-let io = import:SysIo;
+// stderr: collection modified during iteration \(trap reason 5\) .* at for-each-last\.nra:11:9
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
 // The check also runs before the advance that would end the loop, so a
 // change made while visiting the last element still fails.
-let Last = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+let Last = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
         let values: int32[list] = [7];
         for (let value in values) {
-            io.println("visit last");
+            console.print_line("visit last");
             values.remove_at(0);
         }
-        io.println("unreachable");
-        return Entry.ExitCode.Ok;
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
     }
 );

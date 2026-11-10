@@ -1,0 +1,10 @@
+let alpha = import:Alpha;
+let console = import:Std.Io.Console;
+
+console.print_line("beta: initialized after " + alpha.label);
+
+export let Beta = module (
+    export let name = func() -> string {
+        return "beta";
+    };
+);

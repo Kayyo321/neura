@@ -1,8 +1,9 @@
 // Independent object instances, inherited fields and methods, dynamic
 // dispatch, constructors with base initialization, and explicit cleanup.
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
-let Objects = module:io.Entry (
+let Objects = module:program.Entry (
     let Counter = class (
         export let value: int32 = 0;
         export let step: int32 = 1;
@@ -69,17 +70,17 @@ let Objects = module:io.Entry (
         export let name: string = "resource";
 
         let deinit = func() -> void {
-            io.println("release " + name);
+            console.print_line("release " + name);
         }
     );
 
     let Connection = class:Resource (
         let deinit = func() -> void {
-            io.println("close connection");
+            console.print_line("close connection");
         }
     );
 
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         let first = new Counter();
         let second = new Counter();
         first.increment();
@@ -87,24 +88,24 @@ let Objects = module:io.Entry (
         second.step = 10;
         second.increment();
         if (first.value == 2 && second.value == 10) {
-            io.println("independent counters: 2 and 10");
+            console.print_line("independent counters: 2 and 10");
         }
 
         let triangle = new Triangle();
         triangle.name = "triangle";
         let square = new Square();
-        io.println(triangle.describe());
-        io.println(square.describe());
+        console.print_line(triangle.describe());
+        console.print_line(square.describe());
         if (total_sides(triangle, square) == 7) {
-            io.println("dispatch: 3 + 4 = 7");
+            console.print_line("dispatch: 3 + 4 = 7");
         }
 
         let loud = new Loud("hello");
-        io.println(loud.label);
+        console.print_line(loud.label);
 
         let resource: Resource = new Connection();
         resource.name = "socket";
         destroy resource;
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );

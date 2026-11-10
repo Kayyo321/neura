@@ -1,0 +1,13 @@
+// status: 70
+// stderr: nil class reference
+
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let NilReceiver = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let reference: class = nil;
+        console.print_line(reference.to_string());
+        return program.ExitCode.Ok;
+    }
+);

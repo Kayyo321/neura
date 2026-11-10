@@ -439,6 +439,46 @@ NEURA_TEST(conversion, identical_operations_share_one_graph) {
     check_equal(run_captured(image).output, std::string("24\n"), "output");
 }
 
+// Jump threading: no exit resumes at a block that evaluates nothing and only
+// continues elsewhere, except inside a cycle of such blocks (an empty endless
+// loop, kept so that it still runs) or the entry block.
+NEURA_TEST(conversion, exits_skip_jump_only_blocks) {
+    std::size_t checked = 0;
+    for (const auto& entry : fs::directory_iterator(backend_dir(environment) / "programs")) {
+        if (entry.path().extension() != ".nra") continue;
+        const auto image = build_program({entry.path()});
+        for (const auto& function : image.functions) {
+            const auto jump_only = [&](std::uint32_t index) {
+                const auto& block = function.blocks.at(index);
+                return block.inputs.empty() && image.graphs[block.graph].nodes.empty() && block.exits.size() == 1 &&
+                       block.exits.front().kind == nvr::ExitKind::Continue && block.exits.front().assignments.empty();
+            };
+            for (const auto& block : function.blocks) {
+                for (const auto& exit : block.exits) {
+                    if (exit.kind != nvr::ExitKind::Continue && exit.kind != nvr::ExitKind::Call &&
+                        exit.kind != nvr::ExitKind::State) {
+                        continue;
+                    }
+                    ++checked;
+                    if (!jump_only(exit.resume)) continue;
+                    // Allowed only when the jump-only chain returns to itself.
+                    auto target = exit.resume;
+                    bool cycle = false;
+                    for (std::size_t hops = 0; hops <= function.blocks.size() && jump_only(target); ++hops) {
+                        target = function.blocks[target].exits.front().resume;
+                        if (target == exit.resume) {
+                            cycle = true;
+                            break;
+                        }
+                    }
+                    check(cycle, entry.path().filename().string() + ": an exit resumes at a jump-only block");
+                }
+            }
+        }
+    }
+    check(checked > 1000, "too few exits were checked");
+}
+
 NEURA_TEST(conversion, conversion_is_deterministic) {
     for (const auto& entry : fs::directory_iterator(backend_dir(environment) / "programs")) {
         if (entry.path().extension() == ".nra") {
@@ -463,9 +503,18 @@ NEURA_TEST(conversion, source_map_is_optional) {
     with_map.other_sections.clear();
     check(with_map == without_map, "the source map and names are the only differences");
     const auto rebuilt = backend::build(lower_files({program_path(environment, "computation")}));
+    // Program files are labeled relative to their common directory and
+    // standard library files by their path below the library root.
+    bool program_label = false;
     for (const auto& location : *rebuilt.image.source_map) {
-        check_equal(location.path, std::string("computation.nra"), "source map paths are relative");
+        if (location.path == "computation.nra") {
+            program_label = true;
+            continue;
+        }
+        check(location.path.starts_with("std/") && location.path.ends_with(".nra"),
+              "source map label " + location.path + " is relative");
     }
+    check(program_label, "the program's own blocks are labeled computation.nra");
 }
 
 } // namespace neura::testing

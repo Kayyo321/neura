@@ -1,14 +1,14 @@
 // expect: 11:5 the program has more than one entry point
-let io = import:SysIo;
+let program = import:Std.Program;
 
-let First = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
-        return Entry.ExitCode.Ok;
+let First = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        return program.ExitCode.Ok;
     }
 );
 
-let Second = module:io.Entry (
-    export let.override main = func(string[] args) -> Entry.ExitCode {
-        return Entry.ExitCode.Ok;
+let Second = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        return program.ExitCode.Ok;
     }
 );

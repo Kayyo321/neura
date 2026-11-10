@@ -1,0 +1,16 @@
+// status: 70
+// run-options: --max-steps 1000
+// stderr: step limit exceeded: 1000 steps
+// An empty endless loop compiles to a block that only jumps to itself; jump
+// threading keeps such a cycle, so the run still reaches the step limit.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let EmptyLoop = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line("looping");
+        while (true) {
+        }
+        return program.ExitCode.Ok;
+    }
+);
