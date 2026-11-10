@@ -4,14 +4,16 @@
 #include "nvr/image.hpp"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace neura::backend {
 
 struct ConversionOptions {
     // Emit the optional SMAP section. Paths are relative to the deepest
-    // directory that contains every source file of the program, so the image
-    // carries no build-machine directories.
+    // directory that contains every program source file, and standard
+    // library files are labeled by their path below the library root (see
+    // source_label), so the image carries no build-machine directories.
     bool source_map = true;
     // Functions to convert in addition to those reachable from the entry
     // point, for embedders and tests that call them directly. A module
@@ -38,6 +40,9 @@ struct FunctionOrigin {
         Destructor,
         // Text concatenation for string `+`.
         Concatenate,
+        // Bytewise polynomial hash of a text value.
+        HashText,
+        ValueEquals, ValueHash, ValueText,
         // Program start: runs top-level statements and module initializers
         // that are not literals, then calls the entry function `symbol`.
         Start,
@@ -55,6 +60,11 @@ struct Conversion {
     // One entry per image function, in function table order.
     std::vector<FunctionOrigin> functions;
 };
+
+// The source map label of `file`: its path below the standard library root
+// for a trusted library file, and otherwise its path relative to the deepest
+// directory that contains every program (non-library) file.
+std::string source_label(const IrProgram& program, const std::string& file);
 
 // IRtoNeuronConversion. Converts verified, optimized NeuraIR into an NVR
 // image whose neuron graphs compute the program's arithmetic, comparisons,

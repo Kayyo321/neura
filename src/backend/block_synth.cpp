@@ -134,7 +134,8 @@ nvr::Block BlockSynthesizer::close(std::vector<ExitSpec> exits) {
     for (const auto& spec : selected) {
         nvr::Exit exit;
         exit.kind = spec.kind;
-        if (spec.kind != nvr::ExitKind::Trap && spec.kind != nvr::ExitKind::Return) {
+        if (spec.kind != nvr::ExitKind::Trap && spec.kind != nvr::ExitKind::MessageTrap &&
+            spec.kind != nvr::ExitKind::Return) {
             for (const auto& [slot, operand] : pending_) {
                 if (operand.kind == Operand::Kind::Slot && operand.index == slot) {
                     continue;
