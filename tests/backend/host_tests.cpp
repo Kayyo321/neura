@@ -253,8 +253,14 @@ NEURA_TEST(host, native_services_allocate_read_write_and_call) {
     expect_error(host.call("neura.ffi.call", {abs.value, bytes(variadic), bytes(std::string(12, '\0'))}),
                  host_error::invalid_input, "unpromoted variadic float");
 
+    const auto math = host.call("neura.ffi.library.open", {arena.value, text("libm.so.6")});
+    expect_ok(math, "libm through the arena");
+    expect_ok(host.call("neura.ffi.symbol", {math.value, text("cos")}), "cos in libm");
+
     expect_ok(host.call("neura.ffi.arena.close", {arena.value}), "arena close");
     expect_error(host.call("neura.ffi.arena.close", {arena.value}), host_error::invalid_input, "second close");
+    expect_error(host.call("neura.ffi.symbol", {math.value, text("cos")}), host_error::invalid_input,
+                 "a library unloaded with its arena");
     host.services.end_run();
 }
 

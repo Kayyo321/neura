@@ -63,6 +63,9 @@ struct Expr {
     std::shared_ptr<Statement> match{};
     // Artifact imports carry a quoted path and an optional module name in text.
     std::optional<std::string> import_path{};
+    // `import:c("header.h", "lib.a", ...)`: the header and then the libraries,
+    // as written. The loader generates the module (ForeignInterop.md).
+    std::vector<std::string> c_import{};
 };
 
 struct Statement {

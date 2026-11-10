@@ -404,7 +404,12 @@ void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const 
         if (found == native.arenas.end()) return fail(host_error::invalid_input);
         for (auto* upcall : found->second.upcalls) upcall->alive = false;
         for (auto* block : found->second.blocks) std::free(block);
-        for (auto* library : found->second.libraries) ::dlclose(library);
+        for (auto* library : found->second.libraries) {
+            // Forget the library's IDs before unloading it, so a later
+            // lookup through them fails instead of using a closed handle.
+            std::erase_if(native.libraries, [library](const auto& entry) { return entry.second == library; });
+            ::dlclose(library);
+        }
         native.arenas.erase(found);
         return HostCompletion::ok();
     });

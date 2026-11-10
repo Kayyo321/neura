@@ -44,6 +44,7 @@ endif()
 neura_target_defaults(neura_nvm)
 
 add_library(neura_compiler STATIC
+    src/c-import/c_import.cpp
     src/cli/source_loader.cpp
     src/cli/source_docs.cpp
     src/lexer/lexer.cpp
@@ -70,7 +71,7 @@ add_library(neura_compiler STATIC
     src/backend/converter.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
-target_link_libraries(neura_compiler PUBLIC neura_nvr)
+target_link_libraries(neura_compiler PUBLIC neura_nvr PRIVATE neura_libclang)
 neura_target_defaults(neura_compiler)
 
 # The decompiler reads images through the shared loader and lifts their
@@ -249,6 +250,17 @@ if(BUILD_TESTING)
         )
         set_tests_properties(stdlib-${area} PROPERTIES FIXTURES_REQUIRED stdlib)
     endforeach()
+
+    add_test(NAME c-import COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/c-import-tests"
+        "-DNATIVE_DIR=${neura_native_test_dir}"
+        "-DC_COMPILER=${CMAKE_C_COMPILER}"
+        "-DCMAKE_AR=${CMAKE_AR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/c-import/c-import.cmake"
+    )
+    set_tests_properties(c-import PROPERTIES FIXTURES_REQUIRED stdlib)
 
     add_test(NAME native-replay COMMAND ${CMAKE_COMMAND}
         "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"

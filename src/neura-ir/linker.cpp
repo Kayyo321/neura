@@ -322,6 +322,15 @@ SymbolId legacy_overload_group(std::string_view name) {
 
 std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const Span& import_site,
                               bool legacy_signatures) {
+    // One image holds one native library: an imported artifact may bring
+    // one only when the program has none or the same one.
+    if (incoming.native_library) {
+        if (destination.native_library && !(*destination.native_library == *incoming.native_library))
+            throw Diagnostic(import_site, "the imported NeuraIR artifact links a different native library; "
+                                          "an image holds one native library");
+        destination.native_library = incoming.native_library;
+    }
+    for (auto& unit : incoming.native_units) destination.native_units.push_back(std::move(unit));
     const auto imported = index(incoming, import_site);
     if (const auto issues = verify_ir(incoming); !issues.empty())
         throw Diagnostic(import_site, "invalid imported NeuraIR: " + issues.front().message);

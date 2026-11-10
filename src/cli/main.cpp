@@ -34,6 +34,10 @@
 #include <system_error>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
@@ -58,6 +62,7 @@ void usage(std::ostream& out) {
            "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
            "       neura assemble <file.nvra> -o <file.nvr>\n"
            "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
+           "       neura c-bindings [--linked] [c-options] <header.h>\n"
            "\n"
            "capabilities: run and test allow only console input and output (and process exit) by\n"
            "default; a denied host service fails with error 14 (CapabilityDenied).\n"
@@ -69,12 +74,20 @@ void usage(std::ostream& out) {
            "  --allow-native           native libraries, memory, and calls (unsafe)\n"
            "  --record <file>          (run) write every host request and response to a trace\n"
            "  --profile                (run) print the steps each function took\n"
-           "  --replay <file>          (run) answer host requests from a trace instead of services\n";
+           "  --replay <file>          (run) answer host requests from a trace instead of services\n"
+           "\n"
+           "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
+           "  --c-include <dir>        search a directory for C headers\n"
+           "  --c-define <name[=value]> define a macro while reading C headers\n"
+           "  --libclang <file>        the libclang library to load (default: NEURA_LIBCLANG, then a search)\n"
+           "  --cc <compiler>          the C compiler that links the native library (default: $CC, then cc)\n"
+           "  --c-link-arg <arg>       pass an argument to that link\n";
 }
 
-enum class Command { Check, Docs, EmitIr, Build, Run, Test, Disassemble, Assemble, Decompile };
+enum class Command { Check, Docs, EmitIr, Build, Run, Test, Disassemble, Assemble, Decompile, CBindings };
 
-constexpr const char* commands = "expected check, docs, emit-ir, build, run, test, disassemble, assemble, or decompile";
+constexpr const char* commands =
+    "expected check, docs, emit-ir, build, run, test, disassemble, assemble, decompile, or c-bindings";
 
 struct Options {
     Command command = Command::Check;
@@ -95,6 +108,13 @@ struct Options {
     bool all_paths = false;
     std::optional<fs::path> record;
     std::optional<fs::path> replay;
+    // C imports: header search and definitions, the libclang library, and
+    // the C compiler and extra arguments that link the native library.
+    neura::CImportOptions c_import;
+    std::string cc;
+    std::vector<std::string> link_arguments;
+    // c-bindings: generate as if the import named libraries.
+    bool linked = false;
 };
 
 fs::path executable_path(const fs::path& launch) {
@@ -169,14 +189,18 @@ Options read_options(int argc, char** argv) {
         options.command = Command::Assemble;
     } else if (command == "decompile") {
         options.command = Command::Decompile;
+    } else if (command == "c-bindings") {
+        options.command = Command::CBindings;
     } else {
         throw std::runtime_error(commands);
     }
     const bool runs = options.command == Command::Run || options.command == Command::Test;
     const bool compiles = options.command == Command::Check || options.command == Command::EmitIr ||
-                          options.command == Command::Build || options.command == Command::Test;
+                          options.command == Command::Build || options.command == Command::Test ||
+                          options.command == Command::CBindings;
     const bool single_input = options.command == Command::Run || options.command == Command::Disassemble ||
-                              options.command == Command::Assemble || options.command == Command::Decompile;
+                              options.command == Command::Assemble || options.command == Command::Decompile ||
+                              options.command == Command::CBindings;
     bool positional_only = false;
     for (int i = 2; i < argc; ++i) {
         const std::string_view arg = argv[i];
@@ -268,6 +292,18 @@ Options read_options(int argc, char** argv) {
             options.capabilities.entropy = true;
         } else if (runs && arg == "--allow-native") {
             options.capabilities.native = true;
+        } else if (compiles && arg == "--c-include") {
+            options.c_import.include_dirs.push_back(fs::canonical(next()).string());
+        } else if (compiles && arg == "--c-define") {
+            options.c_import.defines.emplace_back(next());
+        } else if (compiles && arg == "--libclang") {
+            options.c_import.libclang = next();
+        } else if (compiles && arg == "--cc") {
+            options.cc = next();
+        } else if (compiles && arg == "--c-link-arg") {
+            options.link_arguments.emplace_back(next());
+        } else if (options.command == Command::CBindings && arg == "--linked") {
+            options.linked = true;
         } else if (options.command == Command::Run && arg == "--record") {
             options.record = fs::path(next());
         } else if (options.command == Command::Run && arg == "--replay") {
@@ -340,12 +376,114 @@ bool is_nir_input(const fs::path& path) {
     return path.extension() == ".nir";
 }
 
+// Runs `arguments` and returns its exit status, with standard output and
+// standard error in `output`.
+int run_command(const std::vector<std::string>& arguments, std::string& output, const fs::path& log) {
+    std::string command;
+    for (const auto& argument : arguments) {
+        command += command.empty() ? "" : " ";
+        command += "'";
+        for (const char c : argument) {
+            if (c == '\'') command += "'\\''";
+            else command += c;
+        }
+        command += "'";
+    }
+    command += " > '" + log.string() + "' 2>&1";
+    const int status = std::system(command.c_str());
+    std::ifstream input(log);
+    output.assign(std::istreambuf_iterator<char>{input}, {});
+    return status;
+}
+
+// Links the static libraries of the program's C imports, and wrappers for
+// their inline functions, into one shared object for the image's NATV
+// section (ForeignInterop.md, C imports).
+void link_native(neura::IrProgram& program, const Options& options) {
+    if (program.native_units.empty()) return;
+#ifdef _WIN32
+    throw std::runtime_error("linking C imports is not supported on Windows in this release");
+#else
+    std::error_code ignored;
+    const auto directory = fs::temp_directory_path() / ("neura-link-" + std::to_string(::getpid()));
+    fs::remove_all(directory, ignored);
+    fs::create_directories(directory);
+    std::string shim = "/* Wrappers generated by neura for C imports. */\ntypedef int neura_native_unit;\n";
+    std::vector<std::string> libraries;
+    std::set<std::string> include_dirs;
+    std::set<std::string> symbols;
+    for (const auto& unit : program.native_units) {
+        shim += unit.shim;
+        include_dirs.insert(fs::path(unit.header).parent_path().string());
+        for (const auto& library : unit.libraries)
+            if (std::find(libraries.begin(), libraries.end(), library) == libraries.end()) libraries.push_back(library);
+        symbols.insert(unit.symbols.begin(), unit.symbols.end());
+    }
+    {
+        std::ofstream file(directory / "neura-native.c");
+        file << shim;
+    }
+    std::string compiler = options.cc;
+    if (compiler.empty()) {
+        const char* environment = std::getenv("CC");
+        compiler = environment != nullptr && *environment != '\0' ? environment : "cc";
+    }
+    std::vector<std::string> command{compiler, "-shared", "-fPIC", "-O2", "-o", (directory / "neura-native.so").string(),
+                                     (directory / "neura-native.c").string(),
+                                     "-ffile-prefix-map=" + directory.string() + "=.", "-Wl,--build-id=none"};
+    for (const auto& dir : include_dirs) command.push_back("-I" + dir);
+    for (const auto& dir : options.c_import.include_dirs) command.push_back("-I" + dir);
+    for (const auto& define : options.c_import.defines) command.push_back("-D" + define);
+    if (!libraries.empty()) {
+        command.push_back("-Wl,--whole-archive");
+        command.insert(command.end(), libraries.begin(), libraries.end());
+        command.push_back("-Wl,--no-whole-archive");
+    }
+    command.insert(command.end(), options.link_arguments.begin(), options.link_arguments.end());
+    std::string output;
+    const auto status = run_command(command, output, directory / "link.log");
+    if (status != 0) {
+        fs::remove_all(directory, ignored);
+        std::string message = "linking the native library of the C imports failed:\n" + output;
+        if (output.find("-fPIC") != std::string::npos || output.find("relocation") != std::string::npos)
+            message += "hint: a static library linked into an image must be compiled with -fPIC\n";
+        throw std::runtime_error(message);
+    }
+    const auto object = read_file(directory / "neura-native.so");
+    fs::remove_all(directory, ignored);
+    neura::IrNativeLibrary library;
+    library.triple = neura::nvm::native_target_triple();
+    library.object = object;
+    library.symbols.assign(symbols.begin(), symbols.end());
+    program.native_library = std::move(library);
+    program.native_units.clear();
+#endif
+}
+
 neura::IrProgram load_source_program(const Options& options) {
     auto roots = options.roots;
     for (const auto& file : options.files) {
         roots.push_back(file.parent_path());
     }
-    return neura::lower_sources(options.files, roots, options.library);
+    neura::set_c_import_options(options.c_import);
+    auto program = neura::lower_sources(options.files, roots, options.library);
+    if (options.command != Command::Check) link_native(program, options);
+    return program;
+}
+
+int c_bindings(const Options& options) {
+    neura::set_c_import_options(options.c_import);
+    std::cout << neura::c_import_source(options.files.front(), options.roots, options.linked);
+    return 0;
+}
+
+// Gives the runner the image's embedded native library when it was linked
+// for this target; otherwise neura.ffi.library.embedded fails when used.
+void provide_native_library(const neura::nvr::Image& image, neura::nvm::StandardServices& services) {
+    if (image.native_library && image.native_library->triple == neura::nvm::native_target_triple()) {
+        const auto& object = image.native_library->object;
+        services.set_embedded_object(std::string(object.begin(), object.end()));
+    }
 }
 
 // Loads the program from source files or from one .nir file.
@@ -536,6 +674,7 @@ int run(const Options& options) {
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
     Host host(options.capabilities);
+    provide_native_library(image, host.services);
     neura::nvm::RunResult result;
     if (options.replay) {
         // No service runs: every response comes from the trace. Console
@@ -666,6 +805,7 @@ int run_tests(const Options& options) {
         test_labels.insert(neura::backend::source_label(program, file.generic_string()));
     }
     Host host(options.capabilities);
+    provide_native_library(image, host.services);
     const auto bindings = neura::nvm::bind(image, host.registry);
     std::size_t failed = 0;
     for (std::size_t i = 0; i < tests.size(); ++i) {
@@ -735,6 +875,8 @@ int main(int argc, char** argv) {
             return assemble(options);
         case Command::Decompile:
             return decompile(options);
+        case Command::CBindings:
+            return c_bindings(options);
         }
     } catch (const neura::Diagnostic& error) {
         const auto& span = error.span;

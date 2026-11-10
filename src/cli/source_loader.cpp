@@ -1,5 +1,6 @@
 #include "source_loader.hpp"
 
+#include "c-import/c_import.hpp"
 #include "lexer/lexer.hpp"
 #include "module_path.hpp"
 #include "neura-ir/ir.hpp"
@@ -11,6 +12,7 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,6 +21,37 @@ namespace neura {
 namespace {
 
 namespace fs = std::filesystem;
+
+CImportOptions c_import_options;
+
+// The modules generated for C imports during one source load.
+struct CImports {
+    // Generated source by its virtual path: the header's path with the
+    // module name and .nra appended.
+    std::map<fs::path, std::string> sources;
+    std::vector<IrNativeUnit> units;
+    // Declarations each generated module could not import, by module name.
+    std::map<std::string, std::map<std::string, std::string>> unsupported;
+};
+
+// Finds a C header: beside the importing file, below a source root, in an
+// include directory, or in the system include directories.
+fs::path find_c_header(const std::string& header, const fs::path& base, const std::vector<fs::path>& roots,
+                       const Span& span) {
+    const fs::path name(header);
+    std::vector<fs::path> directories{base};
+    directories.insert(directories.end(), roots.begin(), roots.end());
+    for (const auto& dir : c_import_options.include_dirs) directories.emplace_back(dir);
+    for (const auto* dir : {"/usr/local/include", "/usr/include/x86_64-linux-gnu", "/usr/include/aarch64-linux-gnu",
+                            "/usr/include"})
+        directories.emplace_back(dir);
+    if (name.is_absolute() && fs::is_regular_file(name)) return fs::canonical(name);
+    for (const auto& dir : directories) {
+        std::error_code ignored;
+        if (fs::is_regular_file(dir / name, ignored)) return fs::canonical(dir / name);
+    }
+    throw Diagnostic(span, "cannot find C header '" + header + "'");
+}
 
 void collect_imports(const Declaration& declaration, std::vector<const Expr*>& imports);
 void collect_imports(const Statement& statement, std::vector<const Expr*>& imports);
@@ -205,7 +238,8 @@ ArtifactInput read_artifact(const fs::path& path, const Span& span) {
 }
 
 std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, const std::vector<fs::path>& roots,
-                                          const fs::path& library, std::vector<ArtifactInput>* artifacts) {
+                                          const fs::path& library, std::vector<ArtifactInput>* artifacts,
+                                          CImports* c_imports = nullptr) {
     const auto trusted = library.empty() ? fs::path{} : fs::canonical(library);
     std::vector<fs::path> pending;
     for (const auto& file : files) pending.push_back(fs::canonical(file));
@@ -216,16 +250,21 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
         if (!visited.insert(file).second) {
             continue;
         }
-        if (!fs::is_regular_file(file)) {
-            throw std::runtime_error("not a regular input file: " + file.string());
-        }
-        std::ifstream input(file, std::ios::binary);
-        if (!input) {
-            throw std::runtime_error("cannot read " + file.string());
-        }
-        const std::string source(std::istreambuf_iterator<char>{input}, {});
-        if (input.bad()) {
-            throw std::runtime_error("error reading " + file.string());
+        std::string source;
+        if (c_imports && c_imports->sources.contains(file)) {
+            source = c_imports->sources.at(file);
+        } else {
+            if (!fs::is_regular_file(file)) {
+                throw std::runtime_error("not a regular input file: " + file.string());
+            }
+            std::ifstream input(file, std::ios::binary);
+            if (!input) {
+                throw std::runtime_error("cannot read " + file.string());
+            }
+            source.assign(std::istreambuf_iterator<char>{input}, {});
+            if (input.bad()) {
+                throw std::runtime_error("error reading " + file.string());
+            }
         }
         auto syntax = parse(lex(source, file.generic_string()));
         syntax.library_path = library_path(file, trusted);
@@ -255,6 +294,40 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
                 continue;
             }
             const bool from_library = !syntax.library_path.empty();
+            if (!import->c_import.empty()) {
+                if (from_library || !c_imports)
+                    throw Diagnostic(import->span, "a C import is not available here");
+                const auto header = find_c_header(import->c_import.front(), file.parent_path(), roots, import->span);
+                std::vector<std::string> libraries;
+                for (std::size_t l = 1; l < import->c_import.size(); ++l) {
+                    const auto path = file.parent_path() / import->c_import[l];
+                    if (!fs::is_regular_file(path))
+                        throw Diagnostic(import->span, "cannot find C library '" + import->c_import[l] + "'");
+                    const auto extension = path.extension().string();
+                    if (extension != ".a" && extension != ".o" && extension != ".lib" && extension != ".obj")
+                        throw Diagnostic(import->span, "a C import links static libraries (.a, .lib) and object "
+                                                       "files (.o, .obj); load shared libraries with "
+                                                       "Std.DynamicForeign.SymbolLookup");
+                    libraries.push_back(fs::canonical(path).string());
+                }
+                const auto module = import->text.substr(2);
+                const fs::path generated(header.string() + "." + module + ".nra");
+                if (!c_imports->sources.contains(generated)) {
+                    auto imported = import_c_header(header, !libraries.empty(), module, c_import_options, import->span);
+                    c_imports->sources.emplace(generated, std::move(imported.source));
+                    c_imports->units.push_back({header.string(), std::move(libraries), std::move(imported.shim),
+                                                std::move(imported.symbols)});
+                    c_imports->unsupported[module] = std::move(imported.unsupported);
+                } else if (!libraries.empty()) {
+                    auto& unit = *std::ranges::find(c_imports->units, header.string(), &IrNativeUnit::header);
+                    for (auto& added : libraries)
+                        if (std::ranges::find(unit.libraries, added) == unit.libraries.end())
+                            unit.libraries.push_back(std::move(added));
+                }
+                syntax.imports.push_back({import->text, generated.generic_string()});
+                pending.push_back(generated);
+                continue;
+            }
             bool artifact = import->import_path.has_value();
             auto dependency = artifact ? find_artifact(*import, roots)
                                        : find_module(*import, roots, trusted, from_library);
@@ -406,6 +479,86 @@ std::vector<ParsedFile> read_sources(const std::vector<fs::path>& files,
     return read_sources_impl(files, roots, library, nullptr);
 }
 
+void set_c_import_options(CImportOptions options) { c_import_options = std::move(options); }
+
+std::string c_import_source(const fs::path& header, const std::vector<fs::path>& roots, bool linked) {
+    const auto found = find_c_header(header.string(), fs::current_path(), roots, Span{header.string()});
+    std::string stem = found.stem().string();
+    std::string name;
+    bool upper = true;
+    for (const char c : stem) {
+        const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        const bool digit = c >= '0' && c <= '9';
+        if (!letter && !digit) {
+            upper = true;
+            continue;
+        }
+        if (name.empty() && digit) name += 'H';
+        name += upper && c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+        upper = false;
+    }
+    if (name.empty()) name = "Header";
+    auto imported = import_c_header(found, linked, name, c_import_options, Span{found.string()});
+    if (!imported.shim.empty()) {
+        imported.source += "\n// Native wrappers compiled into the image's library:\n";
+        std::istringstream lines(imported.shim);
+        for (std::string line; std::getline(lines, line);) imported.source += "// " + line + "\n";
+    }
+    return imported.source;
+}
+
+namespace {
+
+// One load and lowering of `inputs`. A use of a C declaration that the
+// importer could not map names the reason instead of an unknown member.
+IrProgram lower_once(const std::vector<fs::path>& inputs, const std::vector<fs::path>& roots,
+                     const fs::path& trusted) {
+    CImports c_imports;
+    try {
+        std::vector<ArtifactInput> artifacts;
+        auto parsed = read_sources_impl(inputs, roots, trusted, &artifacts, &c_imports);
+        auto program = artifacts.empty() ? lower(parsed)
+                                         : lower_with_artifacts(std::move(parsed), std::move(artifacts), trusted);
+        for (auto& unit : c_imports.units) program.native_units.push_back(std::move(unit));
+        return program;
+    } catch (const MissingPrimitiveWrapper&) {
+        throw;
+    } catch (const Diagnostic& error) {
+        const std::string message = error.what();
+        // A qualified type name such as m.flags names the member last.
+        const std::string name_marker = "unknown or inaccessible name '";
+        if (const auto at = message.find(name_marker); at != std::string::npos) {
+            const auto end = message.find('\'', at + name_marker.size());
+            const auto qualified = message.substr(at + name_marker.size(), end - at - name_marker.size());
+            const auto dot = qualified.find_last_of('.');
+            if (dot != std::string::npos) {
+                const auto name = qualified.substr(dot + 1);
+                for (const auto& [module, reasons] : c_imports.unsupported) {
+                    if (const auto reason = reasons.find(name); reason != reasons.end())
+                        throw Diagnostic(error.span, "the C declaration '" + name + "' was not imported: it is " +
+                                                         reason->second);
+                }
+            }
+        }
+        const std::string marker = "unknown or inaccessible member '";
+        const auto at = message.find(marker);
+        if (at != std::string::npos) {
+            const auto name_end = message.find('\'', at + marker.size());
+            const auto name = message.substr(at + marker.size(), name_end - at - marker.size());
+            const auto of = message.find(" of ", name_end);
+            const auto module = of == std::string::npos ? std::string{} : message.substr(of + 4);
+            if (const auto found = c_imports.unsupported.find(module); found != c_imports.unsupported.end()) {
+                if (const auto reason = found->second.find(name); reason != found->second.end())
+                    throw Diagnostic(error.span, "the C declaration '" + name + "' was not imported: it is " +
+                                                     reason->second);
+            }
+        }
+        throw;
+    }
+}
+
+} // namespace
+
 IrProgram lower_sources(const std::vector<fs::path>& files, const std::vector<fs::path>& roots,
                         const fs::path& library) {
     auto inputs = files;
@@ -413,10 +566,7 @@ IrProgram lower_sources(const std::vector<fs::path>& files, const std::vector<fs
     std::set<std::string> wrappers;
     for (;;) {
         try {
-            std::vector<ArtifactInput> artifacts;
-            auto parsed = read_sources_impl(inputs, roots, trusted, &artifacts);
-            if (artifacts.empty()) return lower(parsed);
-            return lower_with_artifacts(std::move(parsed), std::move(artifacts), trusted);
+            return lower_once(inputs, roots, trusted);
         } catch (const MissingPrimitiveWrapper& missing) {
             if (library.empty() || !wrappers.insert(missing.path).second) throw;
             const auto path = trusted / missing.path;

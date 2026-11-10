@@ -1008,6 +1008,10 @@ Conversion Converter::run() {
         return std::tie(a.name, a.interface_version) < std::tie(b.name, b.interface_version);
     });
     image_.callbacks = callbacks_;
+    if (program_.native_library) {
+        const auto& library = *program_.native_library;
+        image_.native_library = nvr::NativeLibrary{library.triple, library.object, library.symbols};
+    }
     for (const auto& dispatch : dispatches_) {
         build_dispatch(dispatch);
     }

@@ -1,6 +1,8 @@
 # Foreign interop
 
-Neura programs can call native C code through `Std.DynamicForeign`, a standard library modeled on Java's Foreign Function and Memory API. Native code runs in the [Neura Virtual Machine](https://github.com/Kayyo321/neura/wiki/NVM)'s process as a host service. It never becomes part of the circuit. Every native operation crosses the runtime boundary as a host request that the runner grants with `--allow-native`.
+Neura programs can call native C code in two ways. `Std.DynamicForeign`, a standard library modeled on Java's Foreign Function and Memory API, loads shared libraries at run time. A [C import](#c-imports) reads a C header at compile time and links static libraries into the image. Native code runs in the [Neura Virtual Machine](https://github.com/Kayyo321/neura/wiki/NVM)'s process as a host service. It never becomes part of the circuit. Every native operation crosses the runtime boundary as a host request that the runner grants with `--allow-native`.
+
+[`examples/foreign/native.nra`](https://github.com/Kayyo321/neura/blob/main/examples/foreign/native.nra) uses both.
 
 ## Safety and determinism
 
@@ -67,6 +69,45 @@ A value layout has a carrier: the Neura type that holds the value. `ValueLayout`
 
 The result is a `ForeignValue`. A pointer result is an `Address` segment of size 0. A struct result is copied into the global arena, or into the arena given to `invoke_with`. For a variadic C function such as `printf`, `downcall_handle(symbol, descriptor, first_variadic)` names the first variadic argument. The descriptor lists the layouts of the call's actual arguments, and those from `first_variadic` on must already be promoted: `int` or a wider integer, `double`, or an address.
 
+## C imports
+
+`import:c("header.h", "library.a", ...)` imports the declarations of a C header as a module. Any further strings name static libraries (`.a`, `.lib`) or object files (`.o`, `.obj`) to link into the image. A header-only import such as `import:c("stdlib.h")` calls functions that the C library already provides.
+
+```neura
+let mathops = import:c("mathops.h", "libmathops.a");
+let clib = import:c("stdlib.h");
+
+let sum = mathops.add(5, 3);                        // int add(int, int)
+let point = mathops.make_point(3, 4);               // a struct returned by value
+console.print_line(point.x.to_string());
+console.print_line(mathops.MATHOPS_NAME);           // #define MATHOPS_NAME "mathops"
+console.print_line(clib.abs(-9).to_string());
+```
+
+The module is named after the header in PascalCase, so `math-ops.h` becomes `MathOps`. The compiler finds the header beside the importing file, in its `-I` roots, in `--c-include` directories, and in the system include directories. Libraries are found beside the importing file. Shared libraries are rejected: load them with `SymbolLookup.library_lookup`.
+
+### How it works
+
+The compiler reads the header with libclang, which it loads at run time through the `third_party/neura-libclang` submodule. It generates the source of an ordinary Neura module whose functions call the header's functions through `Std.DynamicForeign`. That source then goes through the parser, lowering, optimization, and conversion like any other module. `neura c-bindings header.h` prints it.
+
+At build time, the tool links the libraries named by every C import with `--whole-archive`, plus wrappers for the headers' `static inline` functions, into one shared object. It uses the system C compiler (`--cc`, else `$CC`, else `cc`). The libraries must be compiled with `-fPIC`; a link failure reports the linker's message and that hint. The shared object goes into the image's [`NATV` section](https://github.com/Kayyo321/neura/wiki/NVR#imports-and-optional-source-maps) with the target it was linked for and the symbols the image uses. `neura run` loads it on the first call when the target matches, and only with `--allow-native`. A `.nir` file carries the linked object, so building from it needs neither the libraries nor a C compiler. Building twice with the same toolchain reproduces the image.
+
+Only declarations written in the imported header itself are imported, not those of the headers it includes. Each one maps to Neura as follows:
+
+| C | Neura |
+| --- | --- |
+| `_Bool`, `char`, `short`, `int`, `long`, `long long` and their unsigned forms, `float`, `double` | `bool` and the integer and float types of the same size; a plain `char` follows the platform's signedness |
+| Any pointer, including function pointers | `MemorySegment` of size 0; a `const char*` parameter also gets an overload that takes a `string` |
+| A struct | A class with one field per member, `layout()`, `of(...)`, and `read(segment)` as static functions, and `write_to(segment)`; passed and returned by value |
+| An array member of a struct | A list field of its length |
+| An enumerator | An `export const` of the enum's integer type with the C value |
+| An object-like macro that is an integer, floating, or string constant | An `export const` |
+| A global variable | `name_segment()`, `get_name()`, and `set_name(value)` unless it is `const` |
+| A variadic function | A function whose further arguments are untyped: an integer passes as an `int` when it fits and a `long long` otherwise, a float as a `double`, a bool as an `int`, and a string or segment as an address |
+| A `static inline` function | A call to an exported wrapper compiled into the image's native library |
+
+C names are kept; a name that is a Neura keyword or built-in type name gets a trailing underscore. A declaration with no mapping is left out of the module, and using it is a compile error that names the reason. This covers function-like macros, bit-fields, unions passed by value, `long double`, `_Complex`, 128-bit integers, packed or explicitly aligned structs, and flexible array members. The generated module lists every such declaration in a comment at its top.
+
 ## Upcalls
 
 `Linker.upcall_stub(target, descriptor, arena)` returns a native function pointer that calls a Neura function, the counterpart of Java's `upcallStub`. Native code such as `qsort` can call it with a comparator:
@@ -85,6 +126,9 @@ The target is a function value of type `func(ForeignValue[list]) -> ForeignValue
 
 Native code may call a stub only while a downcall from the same program is in progress and while the stub's arena is open. A call at any other time, such as from another thread or after the arena closes, ends the process with status 134. A trap in the target ends the run: native code receives zeros from that call and from every later call, and when the downcall returns the run reports the trap. Native frames are not unwound, as in Java. A variadic descriptor cannot be an upcall. The runner implements stubs with libffi closures and the image's `neura.ffi.upcall` callback ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#callbacks)), so record and replay cover upcalls: a replay calls the target again with the recorded arguments.
 
-## Runtime services
+## Runtime services and tooling
+
+C imports need libclang 14 or newer at compile time (`libclang1-19` on Debian and Ubuntu), found as [Tooling](https://github.com/Kayyo321/neura/wiki/Tooling#c-imports) describes, and a C compiler to link libraries. Running an image needs neither.
+
 
 The library binds the `neura.ffi.*` host services ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services)). Arguments and results travel as packed bytes in native byte order, described by a signature that names each C type. The runner calls native functions through libffi and loads libraries with the platform's loader.

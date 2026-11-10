@@ -144,11 +144,35 @@ struct IrStaticConstant {
     IrNode value;
 };
 
+// What a C import needs linked into the image (ForeignInterop.md): the
+// header, the static libraries and object files given with it, the C source
+// of wrappers for its static inline functions, and the symbols its
+// generated module calls. The source loader fills these; the tool links them.
+struct IrNativeUnit {
+    std::string header;
+    std::vector<std::string> libraries;
+    std::string shim;
+    std::vector<std::string> symbols;
+};
+
+// A linked shared object for the image's NATV section (NIR 1.8).
+struct IrNativeLibrary {
+    std::string triple;
+    std::vector<std::uint8_t> object;
+    std::vector<std::string> symbols;
+
+    bool operator==(const IrNativeLibrary&) const = default;
+};
+
 struct IrProgram {
     std::vector<IrSymbol> symbols;
     std::vector<IrBody> bodies;
     // Prepared constants that a downstream compilation can inline on use.
     std::vector<IrStaticConstant> static_constants{};
+    // C imports still to link; not part of a .nir file.
+    std::vector<IrNativeUnit> native_units{};
+    // The linked native library, when the program has C imports.
+    std::optional<IrNativeLibrary> native_library{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

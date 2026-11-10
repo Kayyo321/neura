@@ -1,3 +1,11 @@
+
+## C imports
+
+`check`, `emit-ir`, `build`, and `test` read the headers of [`import:c(...)`](https://github.com/Kayyo321/neura/wiki/ForeignInterop#c-imports) with libclang. The tool loads libclang when the first C import is compiled, from `--libclang <file>`, else the `NEURA_LIBCLANG` environment variable, else the platform's usual names, such as `libclang-19.so.1` and `/usr/lib/llvm-19/lib`. Builds without C imports never load it. `--c-include <dir>` adds a header search directory, and `--c-define <name[=value]>` defines a macro while reading headers.
+
+`emit-ir`, `build`, and `test` link the libraries of C imports with the system C compiler: `--cc <compiler>`, else `$CC`, else `cc`. `--c-link-arg <arg>` passes an argument to that link. `check` reads headers but does not link.
+
+`neura c-bindings [--linked] [c-options] <header.h>` prints the module that a C import of the header generates. `--linked` generates it as an import that names libraries does.
 # Tooling and project workflow
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
@@ -5,7 +13,7 @@
 
 ## Build the compiler
 
-Build with CMake 3.20 or newer and C and C++20 compilers, from a checkout that includes the `third_party/neura-libclang` submodule. [Contributing](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md#set-up-a-checkout) lists the commands for fetching it and the libclang and libffi packages that C header imports use.
+Build with CMake 3.20 or newer and C and C++20 compilers, from a checkout that includes the `third_party/neura-libclang` submodule. [Contributing](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md#set-up-a-checkout) lists the commands for fetching it, the libffi development package the build needs for native calls, and the libclang library that C header imports load.
 
 ```sh
 cmake -S . -B build

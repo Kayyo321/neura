@@ -62,6 +62,15 @@ file, and module bindings. Each occurrence has no name to read or redeclare.
 
 For project-local modules, the proposed qualified-name and file layout convention is described in [Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure). The [multi-file example](https://github.com/Kayyo321/neura/blob/main/examples/modules/multi-file/main.nra) shows a project module importing another project module.
 
+### C headers
+
+`import:c("header.h", "library.a", ...)` imports a C header and links any static libraries or object files named after it. The compiler generates the module from the header's declarations; [Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop#c-imports) defines the mapping and the native library the image carries.
+
+```neura
+let mathops = import:c("mathops.h", "libmathops.a");
+let clib = import:c("stdlib.h");
+```
+
 ### Prebuilt NeuraIR modules
 
 Use a quoted path to import a module from a prebuilt `.nir` artifact. Select a top-level project module after the closing quote when the artifact bundles several.

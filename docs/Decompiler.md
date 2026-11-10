@@ -60,7 +60,7 @@ A value is `slot:TYPE:INDEX`, `constant:TYPE:INDEX`, or `lanes:TYPE:FIRST-LANE`.
 
 ## Reconstruction form
 
-`decompile` prints the image's imports, layouts, and globals, then each function's frame and blocks. Each block is labeled with how its meaning was established:
+`decompile` prints the image's imports, callbacks, native library, layouts, and globals, then each function's frame and blocks. A native library is shown as an opaque region with its target, size, and symbols: native code is not lifted. The lossless form writes it as a `native-library` record with the object in hexadecimal and one `native-symbol` record per symbol, and each callback as a `callback` record. Each block is labeled with how its meaning was established:
 
 | Label | Meaning |
 | --- | --- |

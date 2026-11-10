@@ -38,6 +38,8 @@ own field initializers. A singleton lowers to one object allocation during
 startup and a global reference shared by every use. Both use the existing
 circuit state interfaces for global and object access.
 
+A C header import (`import:c(...)`) runs before parsing for the importing file's imports. The C import stage reads the header with libclang and generates the source of an ordinary Neura module that calls the header's functions through `Std.DynamicForeign`; that module then enters the lexer and parser like any other. The tool links the imports' static libraries into one shared object after lowering. The shared object travels in NeuraIR and in the image's `NATV` section, and the circuit never contains native code ([Foreign interop](lang/ForeignInterop.md#c-imports)).
+
 The stages should be inspectable independently. A diagnostic or test should be able to identify whether a discrepancy came from source analysis, an IR transformation, lowering, serialization, or circuit execution.
 
 ## NeuraIR and optimization

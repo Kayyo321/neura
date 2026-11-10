@@ -204,6 +204,28 @@ private:
         return true;
     }
 
+    // The module generated for a C header: its file name without the
+    // extension, in PascalCase, so "include/math-ops.h" is MathOps.
+    static std::string c_module_name(std::string_view header) {
+        const auto slash = header.find_last_of("/\\");
+        auto stem = slash == std::string_view::npos ? header : header.substr(slash + 1);
+        if (const auto dot = stem.find('.'); dot != std::string_view::npos) stem = stem.substr(0, dot);
+        std::string name;
+        bool upper = true;
+        for (const char c : stem) {
+            const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+            const bool digit = c >= '0' && c <= '9';
+            if (!letter && !digit) {
+                upper = true;
+                continue;
+            }
+            if (name.empty() && digit) name += 'H';
+            name += upper && c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+            upper = false;
+        }
+        return name.empty() ? std::string("Header") : name;
+    }
+
     bool named_function(Declaration& result, std::string_view branch_keyword) {
         result.kind = Declaration::Kind::Function;
         result.generics = generic_parameters();
@@ -914,6 +936,23 @@ private:
         }
         if (match("import")) {
             expect(":");
+            if (current().kind == TokenKind::Identifier && current().text == "c" &&
+                tokens_[cursor_ + 1].kind == TokenKind::Symbol && tokens_[cursor_ + 1].text == "(") {
+                // A C header import: a header path and any number of static
+                // libraries or object files, all string literals.
+                advance();
+                expect("(");
+                std::vector<std::string> paths;
+                do {
+                    if (current().kind != TokenKind::String)
+                        throw Diagnostic(current().span, "expected a header or library path string");
+                    paths.push_back(decode_string_literal(advance().text));
+                } while (match(","));
+                expect(")");
+                auto result = make_expression(Expr::Kind::Import, span_from(start), "C." + c_module_name(paths[0]));
+                result.c_import = std::move(paths);
+                return result;
+            }
             if (current().kind == TokenKind::String) {
                 const auto path = decode_string_literal(advance().text);
                 const auto name = match(".") ? identifier().text : std::string{};
