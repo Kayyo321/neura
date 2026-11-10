@@ -1,6 +1,9 @@
 // NeuraIR verifier checks: lowered and optimized programs are accepted, and
 // each deliberately malformed program is rejected with a specific issue.
+#include "concurrency_support.hpp"
 #include "ir-optimization/optimizer.hpp"
+#include "neura-ir/reference_storage.hpp"
+#include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
 #include "support.hpp"
 
@@ -51,6 +54,29 @@ IrNode& first(std::vector<IrNode>& nodes, IrOp op) {
     check(found != nullptr, "no node with the requested operation");
     return *found;
 }
+
+// The first scheduler call with the given operation name, wherever it is
+// written (the library's Task methods hold them).
+IrNode* find_scheduler_call(std::vector<IrNode>& nodes, std::string_view operation) {
+    for (auto& node : nodes) {
+        if (node.op == IrOp::SchedulerCall && node.text == operation) return &node;
+        for (auto* region : {&node.operands, &node.body, &node.alternative}) {
+            if (auto* found = find_scheduler_call(*region, operation)) return found;
+        }
+    }
+    return nullptr;
+}
+
+IrNode& scheduler_call(IrProgram& program, std::string_view operation) {
+    for (auto& body : program.bodies) {
+        if (auto* found = find_scheduler_call(body.instructions, operation)) return *found;
+    }
+    fail("no scheduler call named " + std::string(operation));
+}
+
+constexpr std::string_view task_fixture = "concurrency/discard.nra";
+
+IrType type_named(TypeKind kind, std::string name) { return {kind, std::move(name), no_symbol, {}}; }
 
 } // namespace
 
@@ -219,6 +245,179 @@ NEURA_TEST(verifier, failures_name_the_boundary_and_location) {
         }
         check(thrown, "invalid IR was accepted");
     }
+}
+
+// ---- Scoped tasks (NeuraIR 1.9) ----------------------------------------------
+
+NEURA_TEST(verifier, accepts_concurrent_fixtures_before_and_after_specialization) {
+    std::size_t spawns = 0;
+    for (const auto& fixture : concurrency_fixtures(environment)) {
+        auto program = lower_files({fixture.path});
+        auto issues = verify_ir(program);
+        check(issues.empty(), fixture.name + " as lowered:" + issues_text(issues));
+        // Before specialization a spawn starts a closure value; afterward it
+        // starts the allocation of the closure's capture layout.
+        bool closures = false;
+        const std::function<void(const IrNode&)> look = [&](const IrNode& node) {
+            if (node.op == IrOp::Spawn) {
+                ++spawns;
+                closures = closures || node.operands.front().op == IrOp::MakeClosure;
+            }
+            for (const auto* region : {&node.operands, &node.body, &node.alternative}) {
+                for (const auto& child : *region) look(child);
+            }
+        };
+        for (const auto& body : program.bodies) {
+            for (const auto& instruction : body.instructions) look(instruction);
+        }
+        check(closures, fixture.name + ": lowering should leave the spawned values as closures");
+        materialize_reference_storage(program);
+        specialize(program);
+        issues = verify_ir(program);
+        check(issues.empty(), fixture.name + " after specialization:" + issues_text(issues));
+        optimize(program);
+        issues = verify_ir(program);
+        check(issues.empty(), fixture.name + " after optimization:" + issues_text(issues));
+    }
+    check(spawns > 0, "the fixtures hold no spawn");
+}
+
+NEURA_TEST(verifier, rejects_spawn_outside_a_task_scope) {
+    expect_issue(environment, task_fixture, "spawn appears outside a task scope of its function body",
+                 [](IrProgram& program) {
+                     auto& body = body_of(program, "Main.main");
+                     const auto scope = std::ranges::find(body, IrOp::TaskScope, &IrNode::op);
+                     check(scope != body.end(), "main has a scope");
+                     auto inner = scope->body;
+                     const auto at = body.erase(scope) - body.begin();
+                     body.insert(body.begin() + at, inner.begin(), inner.end());
+                 });
+}
+
+NEURA_TEST(verifier, rejects_spawn_whose_operand_is_not_a_function_value_without_arguments) {
+    expect_issue(environment, task_fixture, "spawn requires the function value it starts as its operand",
+                 [](IrProgram& program) {
+                     auto& spawn = first(body_of(program, "Main.main"), IrOp::Spawn);
+                     spawn.operands.front() = IrNode{IrOp::Integer, type_named(TypeKind::Integer, "uint64"),
+                                                     spawn.span, no_symbol, "1", {}, {}, {}, {}};
+                 });
+    expect_issue(environment, task_fixture, "spawn requires a function value that takes no arguments",
+                 [](IrProgram& program) {
+                     auto& closure = first(body_of(program, "Main.main"), IrOp::Spawn).operands.front();
+                     check(closure.op == IrOp::MakeClosure, "the spawned value is a closure");
+                     // A function value type lists its parameter types and then its result.
+                     closure.type.arguments.insert(closure.type.arguments.begin(),
+                                                   type_named(TypeKind::Integer, "int32"));
+                 });
+    expect_issue(environment, task_fixture, "a spawned function value returns a value", [](IrProgram& program) {
+        auto& closure = first(body_of(program, "Main.main"), IrOp::Spawn).operands.front();
+        closure.type.arguments.front() = type_named(TypeKind::Void, "void");
+    });
+    expect_issue(environment, task_fixture, "spawn expects 1 operand(s)", [](IrProgram& program) {
+        first(body_of(program, "Main.main"), IrOp::Spawn).operands.clear();
+    });
+}
+
+NEURA_TEST(verifier, rejects_spawn_whose_type_is_not_uint64) {
+    for (const auto* wrong : {"int32", "uint32", "int64"}) {
+        expect_issue(environment, task_fixture, "spawn result must be uint64", [&](IrProgram& program) {
+            first(body_of(program, "Main.main"), IrOp::Spawn).type = type_named(TypeKind::Integer, wrong);
+        });
+    }
+    expect_issue(environment, task_fixture, "spawn result must be uint64", [](IrProgram& program) {
+        first(body_of(program, "Main.main"), IrOp::Spawn).type = type_named(TypeKind::Bool, "bool");
+    });
+}
+
+NEURA_TEST(verifier, rejects_malformed_task_scopes) {
+    expect_issue(environment, task_fixture, "task scope expects 0 operand(s)", [](IrProgram& program) {
+        auto& scope = first(body_of(program, "Main.main"), IrOp::TaskScope);
+        scope.operands.push_back(IrNode{IrOp::Boolean, type_named(TypeKind::Bool, "bool"), scope.span, no_symbol,
+                                        "true", {}, {}, {}, {}});
+    });
+    expect_issue(environment, task_fixture, "a task scope has an else region", [](IrProgram& program) {
+        auto& scope = first(body_of(program, "Main.main"), IrOp::TaskScope);
+        scope.alternative = scope.body;
+    });
+    expect_issue(environment, task_fixture, "a task scope appears outside a function body", [](IrProgram& program) {
+        // A statement of a file body runs outside every function.
+        auto scope = first(body_of(program, "Main.main"), IrOp::TaskScope);
+        scope.body.clear();
+        SymbolId file = no_symbol;
+        for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+            if (program.symbols[id].kind == SymbolKind::File && program.symbols[id].library_path.empty()) {
+                file = id;
+            }
+        }
+        check(file != no_symbol, "the fixture has a file symbol");
+        program.bodies.push_back({file, {scope}});
+    });
+    expect_issue(environment, task_fixture, "a task scope names a handle", [](IrProgram& program) {
+        auto& scope = first(body_of(program, "Main.main"), IrOp::TaskScope);
+        scope.symbol = static_cast<SymbolId>(program.symbols.size() - 1);
+    });
+}
+
+NEURA_TEST(verifier, rejects_malformed_scheduler_calls) {
+    expect_issue(environment, task_fixture, "scheduler call names unknown operation 'cancel'", [](IrProgram& program) {
+        scheduler_call(program, "join").text = "cancel";
+    });
+    expect_issue(environment, task_fixture, "scheduler call names unknown operation ''", [](IrProgram& program) {
+        scheduler_call(program, "is_finished").text.clear();
+    });
+    // Arity: join and is_finished take the task number alone.
+    expect_issue(environment, task_fixture, "scheduler call expects 1 operand(s), found 0", [](IrProgram& program) {
+        scheduler_call(program, "join").operands.clear();
+    });
+    expect_issue(environment, task_fixture, "scheduler call expects 1 operand(s), found 2", [](IrProgram& program) {
+        auto& call = scheduler_call(program, "is_finished");
+        call.operands.push_back(call.operands.front());
+    });
+    // Operand type: the task number is a uint64.
+    for (const auto* operation : {"join", "is_finished"}) {
+        expect_issue(environment, task_fixture, std::string("scheduler operation '") + operation + "' argument 1 has type",
+                     [&](IrProgram& program) {
+                         scheduler_call(program, operation).operands.front().type =
+                             type_named(TypeKind::Integer, "int32");
+                     });
+    }
+    // Result type: is_finished answers a bool, and join answers a value.
+    expect_issue(environment, task_fixture, "scheduler operation 'is_finished' has result type", [](IrProgram& program) {
+        scheduler_call(program, "is_finished").type = type_named(TypeKind::Integer, "int32");
+    });
+    expect_issue(environment, task_fixture, "scheduler operation 'join' has result type", [](IrProgram& program) {
+        scheduler_call(program, "join").type = type_named(TypeKind::Void, "void");
+    });
+    // A scheduler call names its operation in text only.
+    expect_issue(environment, task_fixture, "a scheduler call names its operation in text only", [](IrProgram& program) {
+        scheduler_call(program, "join").symbol = 0;
+    });
+    expect_issue(environment, task_fixture, "a scheduler call names its operation in text only", [](IrProgram& program) {
+        scheduler_call(program, "join").type_arguments.push_back(type_named(TypeKind::Integer, "int32"));
+    });
+}
+
+NEURA_TEST(verifier, rejects_a_poll_on_an_operation_that_is_neither_a_loop_nor_a_call) {
+    for (const auto op : {IrOp::String, IrOp::Spawn, IrOp::Discard, IrOp::Return, IrOp::Initialize, IrOp::Reference, IrOp::TaskScope}) {
+        expect_issue(environment, task_fixture, "a poll marks an operation that is neither a loop nor a call",
+                     [&](IrProgram& program) { first(body_of(program, "Main.main"), op).poll = true; });
+    }
+    // The same flag on a loop or a call is what lowering writes.
+    auto program = lower_fixture(environment, "concurrency/fold-and-dead.nra");
+    bool loop = false;
+    bool call = false;
+    const std::function<void(const IrNode&)> look = [&](const IrNode& node) {
+        loop = loop || (node.op == IrOp::Loop && node.poll);
+        call = call || ((node.op == IrOp::Call || node.op == IrOp::VirtualCall) && node.poll);
+        for (const auto* region : {&node.operands, &node.body, &node.alternative}) {
+            for (const auto& child : *region) look(child);
+        }
+    };
+    for (const auto& body : program.bodies) {
+        for (const auto& instruction : body.instructions) look(instruction);
+    }
+    check(loop && call, "lowering marks polls on loops and on calls");
+    check(verify_ir(program).empty(), "polls on loops and calls verify");
 }
 
 } // namespace neura::testing

@@ -1,0 +1,27 @@
+// A task that traps ends the run: tasks spawned earlier that already wrote
+// keep their effects, and no later effect happens.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let divide = func(value: int, by: int) -> int {
+    console.print_line("dividing " + value.to_string());
+    return value / by;
+};
+
+let tick = func(label: string) {
+    console.print_line(label);
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        scope {
+            let fine = spawn divide(8, 2);
+            spawn tick("sibling");
+            let bad = spawn divide(1, 0);
+            console.print_line("parent waits");
+            console.print_line("sum " + (fine.join() + bad.join()).to_string());
+        }
+        console.print_line("never");
+        return program.ExitCode.Ok;
+    };
+);

@@ -30,7 +30,20 @@ namespace neura::testing {
 // lists with lengths, indexing, append, remove_at, and structural versions;
 // and external calls, which are recorded as effects whose response is
 // `void`, or for a standard library host binding, the success variant `Ok`
-// when it carries no payload.
+// when it carries no payload. `neura.process.exit` ends the run with
+// Status::Exited.
+//
+// Scoped tasks (docs/lang/Concurrency.md sections 4 and 10.2): TaskScope,
+// Spawn, and the join and is_finished SchedulerCalls run on the reference
+// scheduler. The root task is task 0 and spawned tasks are numbered 1, 2, ...
+// in spawn order. One FIFO runnable queue, scheduling only at a park (join of
+// an unfinished task, scope exit with live children), a task finishing, or a
+// poll that finds its quantum spent. A tree-walking interpreter cannot
+// suspend its recursion, so each task runs on its own thread under a baton
+// that lets exactly one run at a time; every thread is joined before a run
+// reports its Outcome. Outcome::schedule lists the task chosen by every
+// scheduling decision. A spawn operand must be the allocation of a capture
+// layout, which is what specialization leaves.
 //
 // Stops with Status::Trapped at a program trap, with the NVR reason code the
 // backend must use: 1 for arithmetic (overflow, a zero divisor, MIN / -1,
@@ -74,7 +87,9 @@ struct Effect {
     bool operator==(const Effect&) const = default;
 };
 
-enum class Status { Returned, Trapped, Faulted, Unsupported, LimitReached };
+// Exited is Std.Program.Process.exit reaching the host from any task: the
+// whole run ends with Outcome::exit_status.
+enum class Status { Returned, Trapped, Faulted, Unsupported, LimitReached, Exited };
 std::string describe(Status status);
 
 struct Outcome {
@@ -86,10 +101,14 @@ struct Outcome {
     Span location;
     std::vector<Effect> effects;
     std::map<SymbolId, Value> globals;
+    // Status of an Exited outcome.
+    std::uint64_t exit_status = 0;
+    // The task chosen by each scheduling decision, in order (see Limits).
+    std::vector<std::uint64_t> schedule;
 };
 
 // Empty when `left` and `right` agree on status, result, stop reason and
-// location, effects, and final global state; otherwise a description of the
+// location, effects, exit status, schedule, and final global state; otherwise a description of the
 // first difference.
 std::string difference(const Outcome& left, const Outcome& right);
 std::string describe(const Outcome& outcome);
@@ -97,6 +116,11 @@ std::string describe(const Outcome& outcome);
 struct Limits {
     std::size_t budget = 100'000;
     std::size_t depth = 64;
+    // Polls a task counts before it yields (Concurrency.md section 10.2).
+    std::size_t quantum = 1'024;
+    // Live tasks, counting the root. A spawn past it stops the run with
+    // Status::LimitReached and the reason "task limit".
+    std::size_t max_tasks = 65'536;
 };
 
 struct Heap;
@@ -115,6 +139,10 @@ public:
     // Calls `function` from the state left by initialize(). Calls do not
     // affect one another.
     Outcome call(SymbolId function, const std::vector<Value>& arguments);
+
+    // Calls the program entry `function`, which takes one string[] parameter,
+    // with an empty argument list, from the state left by initialize().
+    Outcome call_entry(SymbolId function);
 
     // Evaluates an expression that refers to no locals or parameters.
     Outcome evaluate(const IrNode& expression);

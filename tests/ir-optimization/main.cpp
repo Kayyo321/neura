@@ -9,7 +9,7 @@
 int main(int argc, char** argv) {
     using namespace neura::testing;
     if (argc != 3) {
-        std::cerr << "usage: neura_ir_tests <structure|verifier|behavior> <source-dir>\n";
+        std::cerr << "usage: neura_ir_tests <structure|verifier|behavior|concurrency> <source-dir>\n";
         return 2;
     }
     const std::string suite = argv[1];

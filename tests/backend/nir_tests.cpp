@@ -2,6 +2,7 @@
 
 #include "fixtures.hpp"
 
+#include "ir-optimization/concurrency_support.hpp"
 #include "lexer/lexer.hpp"
 #include "neura-ir/linker.hpp"
 #include "neura-ir/nir_format.hpp"
@@ -10,6 +11,11 @@
 #include "parser/syntax.hpp"
 
 #include "backend/converter.hpp"
+
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <iterator>
 
 namespace neura::testing {
 namespace {
@@ -36,7 +42,8 @@ bool same(const Span& a, const Span& b, const std::string& where) {
 bool same(const std::vector<IrNode>& a, const std::vector<IrNode>& b, const std::string& where);
 
 bool same(const IrNode& a, const IrNode& b, const std::string& where) {
-    if (a.op != b.op || a.symbol != b.symbol || a.text != b.text || a.type_arguments != b.type_arguments) {
+    if (a.op != b.op || a.symbol != b.symbol || a.text != b.text || a.type_arguments != b.type_arguments ||
+        a.poll != b.poll) {
         mismatch = where + ": node differs";
         return false;
     }
@@ -122,7 +129,50 @@ std::vector<Source> sources(const Environment& environment) {
             result.push_back({entry.path().filename().string(), {entry.path()}, {}});
         }
     }
+    // Programs that spawn tasks carry polls, which the round trip must keep.
+    for (const auto& fixture : concurrency_fixtures(environment)) {
+        result.push_back({"concurrency " + fixture.name, {fixture.path}, {}});
+    }
     return result;
+}
+
+// Points every span and file symbol of `program` that names `from` at `to`.
+void rename_file(IrProgram& program, const std::string& from, const std::string& to) {
+    const auto rename = [&](Span& span) {
+        if (span.file == from) span.file = to;
+    };
+    const std::function<void(IrNode&)> node = [&](IrNode& item) {
+        rename(item.span);
+        for (auto* region : {&item.operands, &item.body, &item.alternative}) {
+            for (auto& child : *region) node(child);
+        }
+    };
+    for (auto& symbol : program.symbols) {
+        rename(symbol.span);
+        if (symbol.kind == SymbolKind::File && symbol.name == from) symbol.name = to;
+    }
+    for (auto& body : program.bodies) {
+        for (auto& instruction : body.instructions) node(instruction);
+    }
+    for (auto& constant : program.static_constants) node(constant.value);
+}
+
+void for_each_node(const IrProgram& program, const std::function<void(const IrNode&)>& visit) {
+    const std::function<void(const IrNode&)> walk = [&](const IrNode& item) {
+        visit(item);
+        for (const auto* region : {&item.operands, &item.body, &item.alternative}) {
+            for (const auto& child : *region) walk(child);
+        }
+    };
+    for (const auto& body : program.bodies) {
+        for (const auto& instruction : body.instructions) walk(instruction);
+    }
+}
+
+std::vector<std::uint8_t> read_bytes(const fs::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    check(file.good(), "cannot read " + path.string());
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
 void expect_nir_error(const std::vector<std::uint8_t>& bytes, std::string_view fragment,
@@ -271,6 +321,154 @@ NEURA_TEST(nir, minor_version_follows_the_features_used) {
     check_equal(static_cast<int>(statics[6]), 5, "lazy statics require NeuraIR 1.5");
     statics[6] = 4;
     expect_nir_error(statics, "class initializers require NeuraIR format 1.5");
+}
+
+// NeuraIR 1.9 (Concurrency.md section 13): tasks and polls are the only reason
+// to write it. The files in nir-versions/before-tasks were written by the
+// compiler as it stood before the task operations existed (the parent of the
+// commit that added them), from the programs of the same names, with the
+// source path in each file replaced by nir-versions/<name>.nra. The current
+// writer must reproduce them byte for byte, and the current reader must
+// accept them.
+NEURA_TEST(nir, programs_without_tasks_keep_the_bytes_of_the_previous_writer) {
+    const auto versions = backend_dir(environment) / "nir-versions";
+    struct Golden {
+        const char* name;
+        fs::path source;
+        int minor;
+    };
+    const std::vector<Golden> goldens{
+        {"punctuation", environment.examples() / "modules" / "multi-file" / "acme" / "greetings" / "punctuation.nra", 0},
+        {"loops", versions / "loops.nra", 1},
+        {"aggregates", versions / "aggregates.nra", 2},
+        {"operators", versions / "operators.nra", 2},
+        {"range", versions / "range.nra", 4},
+        {"statics", versions / "statics.nra", 5},
+    };
+    for (const auto& golden : goldens) {
+        const std::string name = golden.name;
+        const auto expected = read_bytes(versions / "before-tasks" / (name + ".nir"));
+        check_equal(static_cast<int>(expected[6]), golden.minor, name + ": golden minor version");
+        auto program = lower_files({golden.source});
+        bool polled = false;
+        for_each_node(program, [&](const IrNode& item) { polled = polled || item.poll; });
+        check(!polled && !has_spawn(program), name + ": a program without tasks has no poll");
+        rename_file(program, fs::canonical(golden.source).string(), "nir-versions/" + name + ".nra");
+        const auto written = write_nir(program);
+        check(written == expected, name + ": the current writer's bytes differ from the previous writer's (" +
+                                       std::to_string(written.size()) + " and " + std::to_string(expected.size()) +
+                                       " bytes)");
+        // Running the poll pass on it changes nothing, since there is no spawn.
+        insert_polls(program);
+        check(write_nir(program) == expected, name + ": insert_polls changed a program without tasks");
+        std::uint16_t minor = 99;
+        const auto read = read_nir(expected, name, &minor);
+        check_equal(static_cast<int>(minor), golden.minor, name + ": minor version read");
+        check(write_nir(read) == expected, name + ": the old file does not rewrite to itself");
+    }
+}
+
+NEURA_TEST(nir, programs_with_tasks_are_written_as_1_9_and_keep_their_polls) {
+    std::size_t polls = 0;
+    std::size_t spawns = 0;
+    for (const auto& fixture : concurrency_fixtures(environment)) {
+        const auto program = lower_files({fixture.path});
+        check(has_spawn(program), fixture.name + ": the fixture spawns");
+        const auto bytes = write_nir(program);
+        check_equal(static_cast<int>(bytes[4]) + 256 * static_cast<int>(bytes[5]), 1, fixture.name + " major version");
+        check_equal(static_cast<int>(bytes[6]), 9, fixture.name + " is NeuraIR 1.9");
+        std::uint16_t minor = 0;
+        const auto read = read_nir(bytes, fixture.name, &minor);
+        check_equal(static_cast<int>(minor), 9, fixture.name + " minor version read");
+        std::size_t before = 0;
+        std::size_t after = 0;
+        for_each_node(program, [&](const IrNode& item) {
+            before += item.poll ? 1 : 0;
+            spawns += item.op == IrOp::Spawn ? 1 : 0;
+        });
+        for_each_node(read, [&](const IrNode& item) { after += item.poll ? 1 : 0; });
+        check(before > 0, fixture.name + ": lowering placed no poll");
+        check_equal(after, before, fixture.name + " polls after the round trip");
+        mismatch.clear();
+        check(same_program(program, read), fixture.name + ": " + mismatch);
+        polls += before;
+
+        // The poll bit is part of the bytes: clearing every poll of a program
+        // with a spawn leaves it 1.9 but changes the file.
+        auto unpolled = program;
+        const std::function<void(IrNode&)> clear = [&](IrNode& item) {
+            item.poll = false;
+            for (auto* region : {&item.operands, &item.body, &item.alternative}) {
+                for (auto& child : *region) clear(child);
+            }
+        };
+        for (auto& body : unpolled.bodies) {
+            for (auto& instruction : body.instructions) clear(instruction);
+        }
+        const auto without = write_nir(unpolled);
+        check_equal(static_cast<int>(without[6]), 9, fixture.name + " without polls is still 1.9");
+        check(without != bytes, fixture.name + ": polls are not part of the bytes");
+    }
+    std::cout << "  " << polls << " polls and " << spawns << " spawns survived the round trip in 1.9 files\n";
+}
+
+NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
+    const auto program = lower_files({environment.fixtures() / "concurrency" / "discard.nra"});
+    const auto bytes = write_nir(program);
+    check_equal(static_cast<int>(bytes[6]), 9, "discard.nir is NeuraIR 1.9");
+
+    // A poll bit on an operation that is neither a loop nor a call.
+    IrProgram misplaced;
+    misplaced.symbols.push_back(IrSymbol{SymbolKind::Function, "f", {}, no_symbol, no_symbol, no_symbol, {}, {}, {}, {},
+                                         false, false, false, true});
+    IrNode literal{};
+    literal.op = IrOp::Boolean;
+    literal.poll = true;
+    misplaced.bodies.push_back({0, {literal}});
+    const auto misplaced_bytes = write_nir(misplaced);
+    check_equal(static_cast<int>(misplaced_bytes[6]), 9, "a poll makes the file 1.9");
+    expect_nir_error(misplaced_bytes, "a poll marks only a loop or a call");
+    // A poll bit on a spawn, a scope, or a scheduler call is misplaced as well.
+    for (const auto op : {IrOp::Spawn, IrOp::TaskScope, IrOp::SchedulerCall}) {
+        auto other = misplaced;
+        other.bodies.front().instructions.front().op = op;
+        expect_nir_error(write_nir(other), "a poll marks only a loop or a call");
+    }
+    // The same node without the poll bit is readable.
+    auto clean = misplaced;
+    clean.bodies.front().instructions.front().poll = false;
+    check_equal(read_nir(write_nir(clean), "clean").bodies.size(), std::size_t{1}, "a plain node reads");
+
+    // Minor 10 is newer than this reader.
+    auto newer = bytes;
+    newer[6] = 10;
+    expect_nir_error(newer, "NeuraIR format 1.10 is not supported; this reader accepts 1.0 through 1.9");
+    newer[6] = 200;
+    expect_nir_error(newer, "this reader accepts 1.0 through 1.9");
+
+    // An operation tag above the newest one, in a 1.9 file.
+    IrProgram above;
+    above.symbols = misplaced.symbols;
+    IrNode tagged{};
+    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::SchedulerCall) + 1);
+    above.bodies.push_back({0, {tagged}});
+    const auto above_bytes = write_nir(above);
+    check_equal(static_cast<int>(above_bytes[6]), 9, "an operation above the 1.7 set is written as 1.9");
+    expect_nir_error(above_bytes, "invalid operation tag " + std::to_string(static_cast<int>(tagged.op)));
+    // The newest operation itself is accepted.
+    IrProgram newest = above;
+    newest.bodies.front().instructions.front().op = IrOp::SchedulerCall;
+    check_equal(read_nir(write_nir(newest), "newest").bodies.size(), std::size_t{1}, "SchedulerCall reads");
+
+    // A file that claims an older minor cannot use the task operations: 1.8
+    // has neither the tags nor the poll bit.
+    auto older = bytes;
+    older[6] = 8;
+    try {
+        read_nir(older, "older.nir");
+        fail("a 1.8 header on a file with task operations was accepted");
+    } catch (const NirError&) {
+    }
 }
 
 NEURA_TEST(nir, linking_coalesces_shared_definitions_and_preserves_metadata) {
