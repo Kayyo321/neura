@@ -2,6 +2,8 @@
 
 Read the [project design](docs/Project.md) for the compiler and circuit model, the [language overview](docs/lang/Overview.md) for source-level behavior, and the [coding style guide](docs/style/CodingStyle.md) when writing `.nra` files. Check [language design decisions](docs/lang/Status.md) before treating a proposed feature or illustrative example as a conformance requirement. Follow the [repository rules](README.md#rules-for-agents) when using a coding agent.
 
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md). Report a vulnerability with the public security report form, as the [security policy](SECURITY.md) describes. [Governance](GOVERNANCE.md) states who reviews and merges changes and who publishes releases.
+
 ## Set up a checkout
 
 Neura has one submodule, [`third_party/neura-libclang`](https://github.com/Kayyo321/neura-libclang). It contains the pinned libclang C API headers and a loader that opens the system libclang at run time, so the build never links libclang. CMake configuration fails, printing the commands below, when the submodule has not been fetched.
@@ -75,7 +77,10 @@ Specify the workload, artifact configuration, execution environment, and baselin
 
 ## Submit a pull request
 
+Every change reaches `main` through a pull request. Create a branch from the current `main`, name it for its purpose (for example `feature/enum-payloads`, `fix/shift-count-trap`, or `docs/numbers-rounding`), and keep it to one topic so it can be reviewed and merged quickly. Open the pull request against `main` and fill in its template. [Governance](GOVERNANCE.md#how-a-change-reaches-main) lists what a pull request needs before it is merged.
+
 - Keep the patch focused and describe the affected stage and contract. Link the relevant design decision when behavior changes.
+- Add a line to the **Unreleased** section of the [changelog](CHANGELOG.md) when the change alters behavior a user can observe.
 - Include a reproducer or example, test evidence, and any compatibility or migration details a reviewer needs.
 - For changes to circuit encoding or runtime behavior, state the input domain, execution limits, and assumptions behind the verification. Include a small artifact or reproducible way to generate it when reviewers need one.
 - For dependency, build, or runtime changes, describe how they affect repeatability and what a reviewer needs to reproduce the results.
