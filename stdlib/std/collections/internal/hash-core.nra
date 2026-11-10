@@ -52,35 +52,29 @@ export let HashCore = module (
         let tombstones: int = 0;
         let initial_size: int = 8;
 
-        export let init = func(table_size: int) -> void {
+        export let init = func(table_size: int) {
             initial_size = table_size;
             index = empty_index(table_size);
             mask = table_size - 1;
         };
 
         // T.
-        export let table_size = func() -> int {
-            return mask + 1;
-        };
+        export let table_size = func -> int => mask + 1;
 
         // The number of dense entries, live or dead.
-        export let used = func() -> int {
-            return hashes.length;
-        };
+        export let used = func -> int => hashes.length;
 
-        export let home = func(hash: uint32) -> int {
-            return (hash & (mask as uint32)) as int;
-        };
+        export let home = func(hash: uint32) -> int => (hash & (mask as uint32)) as int;
 
         // Rule 1: a new entry needs a compaction first.
-        export let is_full = func() -> bool {
+        export let is_full = func -> bool {
             let entries = (mask + 1) >> 1;
             return hashes.length == entries || count + tombstones == entries;
         };
 
         // The table size for a rule 1 compaction: doubled when more than half
         // of E is live. Traps with "invalid argument: capacity" above 2^30.
-        export let grown_size = func() -> int {
+        export let grown_size = func -> int {
             let size = mask + 1;
             if (count > (size >> 2)) {
                 if (size >= MaximumSize) {
@@ -115,13 +109,13 @@ export let HashCore = module (
         export let claim = func(slot: int, hash: uint32) -> int {
             let entry = hashes.length;
             if (index[slot] == Tombstone) {
-                tombstones = tombstones - 1;
+                tombstones -= 1;
             }
             index[slot] = entry;
             hashes.append(hash);
             live.append(true);
-            count = count + 1;
-            modifications = modifications + 1;
+            count += 1;
+            modifications += 1;
             return entry;
         };
 
@@ -131,14 +125,14 @@ export let HashCore = module (
         export let release = func(slot: int) -> int {
             let entry = index[slot];
             index[slot] = Tombstone;
-            tombstones = tombstones + 1;
+            tombstones += 1;
             live[entry] = false;
-            count = count - 1;
-            modifications = modifications + 1;
+            count -= 1;
+            modifications += 1;
             let length = hashes.length;
             if (entry == length - 1) {
                 while (length > 0 && !live[length - 1]) {
-                    length = length - 1;
+                    length -= 1;
                     hashes.remove_at(length);
                     live.remove_at(length);
                 }
@@ -147,13 +141,13 @@ export let HashCore = module (
         };
 
         // Rule 2: more dead entries than live ones, and at least 8.
-        export let needs_compaction = func() -> bool {
+        export let needs_compaction = func -> bool {
             let dead = hashes.length - count;
             return dead > count && dead >= 8;
         };
 
         // The old entry numbers of the live entries, in order.
-        export let live_entries = func() -> int[list] {
+        export let live_entries = func -> int[list] {
             let order: int[list] = [];
             let length = live.length;
             let entry = 0;
@@ -161,7 +155,7 @@ export let HashCore = module (
                 if (live[entry]) {
                     order.append(entry);
                 }
-                entry = entry + 1;
+                entry += 1;
             }
             return order;
         };
@@ -169,31 +163,31 @@ export let HashCore = module (
         // Rebuilds the dense lists and the index from `order` (from
         // live_entries) for a table of `table_size` slots, by probing from
         // each cached hash for the first Empty slot.
-        export let rebuild = func(order: int[list], table_size: int) -> void {
+        export let rebuild = func(order: int[list], table_size: int) {
             hashes = reordered_hashes(hashes, order);
             live = all_live(order.length);
             index = filled_index(hashes, table_size);
             mask = table_size - 1;
             tombstones = 0;
-            modifications = modifications + 1;
+            modifications += 1;
         };
 
         // Empties the core at its initial table size.
-        export let reset = func() -> void {
+        export let reset = func {
             index = empty_index(initial_size);
             hashes = [];
             live = [];
             count = 0;
             tombstones = 0;
             mask = initial_size - 1;
-            modifications = modifications + 1;
+            modifications += 1;
         };
 
         // Traps with "invalid state: hash table ..." when an invariant is
         // broken: index slots and entries agree, at least half of the index
         // is Empty, the last entry is live, and dead entries stay within
         // max(count, 7).
-        export let validate = func() -> void {
+        export let validate = func {
             let size = mask + 1;
             if (size < MinimumSize || size > MaximumSize || (size & mask) != 0 || index.length != size) {
                 trap_with_message("invalid state: hash table size");
@@ -208,9 +202,9 @@ export let HashCore = module (
             while (entry < length) {
                 seen.append(0);
                 if (live[entry]) {
-                    live_count = live_count + 1;
+                    live_count += 1;
                 }
-                entry = entry + 1;
+                entry += 1;
             }
             if (live_count != count) {
                 trap_with_message("invalid state: hash table count");
@@ -228,14 +222,14 @@ export let HashCore = module (
             while (slot < size) {
                 let value = index[slot];
                 if (value == Tombstone) {
-                    stones = stones + 1;
-                    filled = filled + 1;
+                    stones += 1;
+                    filled += 1;
                 } else if (value != Empty) {
                     if (value < 0 || value >= length || !live[value] || seen[value] != 0) {
                         trap_with_message("invalid state: hash table index");
                     }
                     seen[value] = 1;
-                    filled = filled + 1;
+                    filled += 1;
                     // Every slot from the home slot to this one is filled.
                     let probe = (hashes[value] & (mask as uint32)) as int;
                     while (probe != slot) {
@@ -245,7 +239,7 @@ export let HashCore = module (
                         probe = (probe + 1) & mask;
                     }
                 }
-                slot = slot + 1;
+                slot += 1;
             }
             if (stones != tombstones || filled - stones != count || filled > (size >> 1)) {
                 trap_with_message("invalid state: hash table load");
@@ -262,25 +256,21 @@ export let HashCore = module (
         }
         let size = MinimumSize;
         while (size < capacity * 2) {
-            size = size * 2;
+            size *= 2;
         }
         return size;
     };
 
-    export let create = func() -> HashCore {
-        return new HashCore(MinimumSize);
-    };
+    export let create = func -> HashCore => new HashCore(MinimumSize);
 
-    export let with_capacity = func(capacity: int) -> HashCore {
-        return new HashCore(table_size_for(capacity));
-    };
+    export let with_capacity = func(capacity: int) -> HashCore => new HashCore(table_size_for(capacity));
 
     let empty_index = func(size: int) -> int[list] {
         let slots: int[list] = [];
         let i = 0;
         while (i < size) {
             slots.append(Empty);
-            i = i + 1;
+            i += 1;
         }
         return slots;
     };
@@ -291,7 +281,7 @@ export let HashCore = module (
         let i = 0;
         while (i < count) {
             result.append(old[order[i]]);
-            i = i + 1;
+            i += 1;
         }
         return result;
     };
@@ -301,7 +291,7 @@ export let HashCore = module (
         let i = 0;
         while (i < count) {
             result.append(true);
-            i = i + 1;
+            i += 1;
         }
         return result;
     };
@@ -317,7 +307,7 @@ export let HashCore = module (
                 slot = (slot + 1) & mask;
             }
             slots[slot] = entry;
-            entry = entry + 1;
+            entry += 1;
         }
         return slots;
     };

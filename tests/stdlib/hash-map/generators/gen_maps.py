@@ -16,8 +16,8 @@ body = src[:start] + '@@FACTORIES@@' + src[end:]
 def variant(name, key_type, header, factories):
     s = body
     s = s.replace('        let hash_of: func(K) -> uint32;\n        let same: func(K, K) -> bool;\n', '')
-    s = s.replace('export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(K) -> uint32, equal: func(K, K) -> bool) -> void {\n            core = table;\n            hash_of = hash;\n            same = equal;\n        };',
-                  'export let init = func(seal: Seal, table: hash_core.HashCore) -> void {\n            core = table;\n        };')
+    s = s.replace('export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(K) -> uint32, equal: func(K, K) -> bool) {\n            core = table;\n            hash_of = hash;\n            same = equal;\n        };',
+                  'export let init = func(seal: Seal, table: hash_core.HashCore) {\n            core = table;\n        };')
     s = s.replace('HashMapIterator<K, V>', name + 'Iterator<V>')
     s = s.replace('HashMapIterator', name + 'Iterator')
     s = s.replace('HashMap<K, V>', name + '<V>')
@@ -47,15 +47,12 @@ int_header = '''// An insertion-ordered hash map with int keys (Stdlib.md sectio
 // more than max(size, 7) of them. Iterators and callbacks fail fast with
 // "collection modified during iteration".
 '''
-int_factories = '''    export let create = func<V>() -> IntMap<V> {
-        return new IntMap<V>(Seal.Token, hash_core.create());
-    };
+int_factories = '''    export let create = func<V> -> IntMap<V> => new IntMap<V>(Seal.Token, hash_core.create());
 
     // A table sized for `capacity` entries. Traps with "invalid argument:
     // capacity" for a negative capacity or one above 2^29.
-    export let with_capacity = func<V>(capacity: int) -> IntMap<V> {
-        return new IntMap<V>(Seal.Token, hash_core.with_capacity(capacity));
-    };
+    export let with_capacity = func<V>(capacity: int) -> IntMap<V> =>
+        new IntMap<V>(Seal.Token, hash_core.with_capacity(capacity));
 
 '''
 string_header = '''// An insertion-ordered hash map with string keys (Stdlib.md section 9.6). It

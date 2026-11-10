@@ -1,6 +1,6 @@
 let hash_core = import:Std.Collections.Internal.HashCore;
-let iterators = import:Std.Collections.Iterator;
-let mutable_map = import:Std.Collections.MutableMap;
+let.promote _ = import:Std.Collections.Iterator;
+let.promote _ = import:Std.Collections.MutableMap;
 let optional = import:Std.Core.Optional;
 let text_depth = import:Std.Collections.Internal.TextDepth;
 
@@ -17,35 +17,29 @@ let text_depth = import:Std.Collections.Internal.TextDepth;
 export let StringMap = module (
     let Seal = enum (Token);
 
-    export let StringMap = class<V> implements mutable_map.MutableMap<string, V> (
+    export let StringMap = class<V> implements MutableMap<string, V> (
         // Never replaced, so iterators can read its modification count.
         let core: hash_core.HashCore;
         let stored_keys: string[list] = [];
         let stored_values: V[list] = [];
         let printing_depth: int = 0;
 
-        export let init = func(seal: Seal, table: hash_core.HashCore) -> void {
+        export let init = func(seal: Seal, table: hash_core.HashCore) {
             core = table;
         };
 
-        export let size = func() -> int {
-            return core.count;
-        };
+        export let size = func -> int => core.count;
 
-        export let is_empty = func() -> bool {
-            return core.count == 0;
-        };
+        export let is_empty = func -> bool => core.count == 0;
 
         // Replaces every list with a new one of the initial table size.
-        export let clear = func() -> void {
+        export let clear = func {
             core.reset();
             stored_keys = [];
             stored_values = [];
         };
 
-        export let contains_key = func(key: string) -> bool {
-            return find(key, spread(key.hash_code())) >= 0;
-        };
+        export let contains_key = func(key: string) -> bool => find(key, spread(key.hash_code())) >= 0;
 
         export let get = func(key: string) -> optional.Optional<V> {
             let slot = find(key, spread(key.hash_code()));
@@ -72,7 +66,7 @@ export let StringMap = module (
             return stored_values[core.index[slot]];
         };
 
-        export let set = func(key: string, value: V) -> void {
+        export let set = func(key: string, value: V) {
             let hash = spread(key.hash_code());
             let slot = find(key, hash);
             if (slot >= 0) {
@@ -117,7 +111,7 @@ export let StringMap = module (
             return optional.Optional<V>.Some(value);
         };
 
-        export let keys = func() -> string[list] {
+        export let keys = func -> string[list] {
             let result: string[list] = [];
             let live = core.live;
             let length = live.length;
@@ -126,12 +120,12 @@ export let StringMap = module (
                 if (live[entry]) {
                     result.append(stored_keys[entry]);
                 }
-                entry = entry + 1;
+                entry += 1;
             }
             return result;
         };
 
-        export let values = func() -> V[list] {
+        export let values = func -> V[list] {
             let result: V[list] = [];
             let live = core.live;
             let length = live.length;
@@ -140,12 +134,12 @@ export let StringMap = module (
                 if (live[entry]) {
                     result.append(stored_values[entry]);
                 }
-                entry = entry + 1;
+                entry += 1;
             }
             return result;
         };
 
-        export let entries = func() -> [string, V][list] {
+        export let entries = func -> [string, V][list] {
             let result: [string, V][list] = [];
             let live = core.live;
             let length = live.length;
@@ -155,31 +149,30 @@ export let StringMap = module (
                     let item: [string, V] = [stored_keys[entry], stored_values[entry]];
                     result.append(item);
                 }
-                entry = entry + 1;
+                entry += 1;
             }
             return result;
         };
 
         // Yields [string, V] in insertion order.
-        export let iterator = func() -> iterators.Iterator<[string, V]> {
-            return new StringMapIterator<V>(core, stored_keys, stored_values);
-        };
+        export let iterator = func -> Iterator<[string, V]> =>
+            new StringMapIterator<V>(core, stored_keys, stored_values);
 
         // Sets each entry of `other` in its iteration order.
-        export let put_all = func(other: StringMap<V>) -> void {
+        export let put_all = func(other: StringMap<V>) {
             let items = other.entries();
             let count = items.length;
             let i = 0;
             while (i < count) {
                 let [key, value] = items[i];
                 set(key, value);
-                i = i + 1;
+                i += 1;
             }
         };
 
         // In insertion order. The action must not change the map
         // structurally.
-        export let for_each = func(action: func(string, V) -> void) -> void {
+        export let for_each = func(action: func(string, V) -> void) {
             let expected = core.modifications;
             let entry = 0;
             while (entry < core.live.length) {
@@ -189,7 +182,7 @@ export let StringMap = module (
                         trap_with_message("collection modified during iteration");
                     }
                 }
-                entry = entry + 1;
+                entry += 1;
             }
         };
 
@@ -210,14 +203,14 @@ export let StringMap = module (
                         chosen.append(entry);
                     }
                 }
-                entry = entry + 1;
+                entry += 1;
             }
             // From the highest entry down, so that trailing removals never
             // renumber an entry still to be released.
             let i = chosen.length - 1;
             while (i >= 0) {
                 shorten(core.release(core.slot_of(chosen[i])));
-                i = i - 1;
+                i -= 1;
             }
             if (core.needs_compaction()) {
                 compact(core.table_size());
@@ -298,22 +291,22 @@ export let StringMap = module (
             let length = live.length;
             let entry = 0;
             while (entry < length) {
-                if (live[entry] && value.equals(stored_values[entry])) {
+                if (live[entry] && value === stored_values[entry]) {
                     return true;
                 }
-                entry = entry + 1;
+                entry += 1;
             }
             return false;
         };
 
         // Compacts at the smallest table whose entry capacity holds size().
-        export let trim = func() -> void {
+        export let trim = func {
             compact(hash_core.table_size_for(core.count));
         };
 
         // Traps with "invalid state: ..." on a broken table invariant or when
         // a live key's hash differs from its cached hash.
-        export let validate = func() -> void {
+        export let validate = func {
             core.validate();
             let length = core.hashes.length;
             if (stored_keys.length != length || stored_values.length != length) {
@@ -324,7 +317,7 @@ export let StringMap = module (
                 if (core.live[entry] && spread(stored_keys[entry].hash_code()) != core.hashes[entry]) {
                     trap_with_message("invalid state: hash table cached hash");
                 }
-                entry = entry + 1;
+                entry += 1;
             }
         };
 
@@ -344,17 +337,17 @@ export let StringMap = module (
             while (i < count) {
                 let [key, value] = items[i];
                 let slot = find(key, spread(key.hash_code()));
-                if (slot < 0 || !stored_values[core.index[slot]].equals(value)) {
+                if (slot < 0 || !(stored_values[core.index[slot]] === value)) {
                     return false;
                 }
-                i = i + 1;
+                i += 1;
             }
             return true;
         };
 
         // The wrapping sum over entries of the key hash exclusive-or the
         // value hash.
-        export let.override hash_code = func() -> uint32 {
+        export let.override hash_code = func -> uint32 {
             let total: uint64 = 0;
             let live = core.live;
             let length = live.length;
@@ -364,14 +357,14 @@ export let StringMap = module (
                     let mixed = stored_keys[entry].hash_code() ^ stored_values[entry].hash_code();
                     total = (total + (mixed as uint64)) & 4294967295;
                 }
-                entry = entry + 1;
+                entry += 1;
             }
             return total as uint32;
         };
 
         // `{k: v, k2: v2}` in iteration order; the map itself as a direct key
         // or value prints "(this collection)".
-        export let.override to_string = func() -> string {
+        export let.override to_string = func -> string {
             if (printing_depth != 0 && printing_depth == text_depth.current()) {
                 return "(this collection)";
             }
@@ -384,7 +377,7 @@ export let StringMap = module (
                 if (live[entry]) {
                     parts.append(stored_keys[entry].to_string() + ": " + stored_values[entry].to_string());
                 }
-                entry = entry + 1;
+                entry += 1;
             }
             text_depth.leave();
             printing_depth = saved;
@@ -400,7 +393,7 @@ export let StringMap = module (
             let mask = core.mask;
             let slot = (hash & (mask as uint32)) as int;
             let free = -1;
-            while (true) {
+            do {
                 let entry = slots[slot];
                 if (entry == -1) {
                     if (free < 0) {
@@ -420,7 +413,7 @@ export let StringMap = module (
             return -1;
         };
 
-        let insert = func(key: string, value: V, hash: uint32, slot: int) -> void {
+        let insert = func(key: string, value: V, hash: uint32, slot: int) {
             let target = slot;
             if (core.is_full()) {
                 compact(core.grown_size());
@@ -431,7 +424,7 @@ export let StringMap = module (
             stored_values.append(value);
         };
 
-        let release = func(slot: int) -> void {
+        let release = func(slot: int) {
             shorten(core.release(slot));
             if (core.needs_compaction()) {
                 compact(core.table_size());
@@ -440,7 +433,7 @@ export let StringMap = module (
 
         // Drops owner entries above `length` after the core removed trailing
         // dead entries.
-        let shorten = func(length: int) -> void {
+        let shorten = func(length: int) {
             while (stored_keys.length > length) {
                 let last = stored_keys.length - 1;
                 stored_keys.remove_at(last);
@@ -448,7 +441,7 @@ export let StringMap = module (
             }
         };
 
-        let compact = func(table_size: int) -> void {
+        let compact = func(table_size: int) {
             let order = core.live_entries();
             stored_keys = reordered<string>(stored_keys, order);
             stored_values = reordered<V>(stored_values, order);
@@ -457,54 +450,49 @@ export let StringMap = module (
     );
 
     // Compares the core's modification count before every step.
-    let StringMapIterator = class<V> implements iterators.Iterator<[string, V]> (
+    let StringMapIterator = class<V> implements Iterator<[string, V]> (
         let core: hash_core.HashCore;
         let source_keys: string[list];
         let source_values: V[list];
         let expected: uint64;
         let position: int = 0;
 
-        export let init = func(table: hash_core.HashCore, keys: string[list], values: V[list]) -> void {
+        export let init = func(table: hash_core.HashCore, keys: string[list], values: V[list]) {
             core = table;
             source_keys = keys;
             source_values = values;
             expected = table.modifications;
         };
 
-        export let has_next = func() -> bool {
+        export let has_next = func -> bool {
             if (core.modifications != expected) {
                 trap_with_message("collection modified during iteration");
             }
             let live = core.live;
             while (position < live.length && !live[position]) {
-                position = position + 1;
+                position += 1;
             }
             return position < live.length;
         };
 
-        export let next = func() -> [string, V] {
+        export let next = func -> [string, V] {
             if (!has_next()) {
                 trap_with_message("no such element");
             }
             let item: [string, V] = [source_keys[position], source_values[position]];
-            position = position + 1;
+            position += 1;
             return item;
         };
     );
 
-    export let create = func<V>() -> StringMap<V> {
-        return new StringMap<V>(Seal.Token, hash_core.create());
-    };
+    export let create = func<V> -> StringMap<V> => new StringMap<V>(Seal.Token, hash_core.create());
 
     // A table sized for `capacity` entries. Traps with "invalid argument:
     // capacity" for a negative capacity or one above 2^29.
-    export let with_capacity = func<V>(capacity: int) -> StringMap<V> {
-        return new StringMap<V>(Seal.Token, hash_core.with_capacity(capacity));
-    };
+    export let with_capacity = func<V>(capacity: int) -> StringMap<V> =>
+        new StringMap<V>(Seal.Token, hash_core.with_capacity(capacity));
 
-    let spread = func(hash: uint32) -> uint32 {
-        return hash ^ (hash >> 16);
-    };
+    let spread = func(hash: uint32) -> uint32 => hash ^ (hash >> 16);
 
     let reordered = func<T>(old: T[list], order: int[list]) -> T[list] {
         let result: T[list] = [];
@@ -512,7 +500,7 @@ export let StringMap = module (
         let i = 0;
         while (i < count) {
             result.append(old[order[i]]);
-            i = i + 1;
+            i += 1;
         }
         return result;
     };
