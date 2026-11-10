@@ -1,103 +1,77 @@
 let calendar = import:Std.Time.Internal.Calendar;
-let comparable = import:Std.Core.Comparable;
+let.promote _ = import:Std.Core.Comparable;
 let hashing = import:Std.Core.Hash;
-let ordering = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Ordering;
 let result = import:Std.Core.Result;
 
 // A signed count of nanoseconds in one int64, about 292 years either way
 // (Stdlib.md section 12.1). Every factory and member uses checked
 // arithmetic: a result outside int64 traps with reason 1.
 export let Duration = module (
-    export let Duration = class implements comparable.Comparable<Duration> (
+    export let Duration = class implements Comparable<Duration> (
         let total: int64;
 
-        export let init = func(nanos: int64) -> void {
+        export let init = func(nanos: int64) {
             total = nanos;
         };
 
-        export let plus = func(other: Duration) -> Duration {
-            return new Duration(total + other.total);
-        };
+        export let plus = func(other: Duration) -> Duration => new Duration(total + other.total);
 
-        export let minus = func(other: Duration) -> Duration {
-            return new Duration(total - other.total);
-        };
+        export let minus = func(other: Duration) -> Duration => new Duration(total - other.total);
 
-        export let multiplied_by = func(factor: int64) -> Duration {
-            return new Duration(total * factor);
-        };
+        export let multiplied_by = func(factor: int64) -> Duration => new Duration(total * factor);
 
         // Truncates toward zero. A zero divisor traps (reason 1), as does
         // the most negative duration divided by -1.
-        export let divided_by = func(divisor: int64) -> Duration {
-            return new Duration(total / divisor);
-        };
+        export let divided_by = func(divisor: int64) -> Duration => new Duration(total / divisor);
 
-        export let negated = func() -> Duration {
-            return new Duration(-total);
-        };
+        export let negated = func -> Duration => new Duration(-total);
 
-        export let abs = func() -> Duration {
+        export let abs = func -> Duration {
             if (total < 0) {
                 return new Duration(-total);
             }
             return new Duration(total);
         };
 
-        export let is_zero = func() -> bool {
-            return total == 0;
-        };
+        export let is_zero = func -> bool => total == 0;
 
-        export let is_negative = func() -> bool {
-            return total < 0;
-        };
+        export let is_negative = func -> bool => total < 0;
 
-        export let to_nanos = func() -> int64 {
-            return total;
-        };
+        export let to_nanos = func -> int64 => total;
 
         // The to_ conversions truncate toward zero.
-        export let to_micros = func() -> int64 {
-            return total / 1000;
-        };
+        export let to_micros = func -> int64 => total / 1000;
 
-        export let to_millis = func() -> int64 {
-            return total / 1000000;
-        };
+        export let to_millis = func -> int64 => total / 1000000;
 
-        export let to_seconds = func() -> int64 {
-            return total / calendar.NanosPerSecond;
-        };
+        export let to_seconds = func -> int64 => total / calendar.NanosPerSecond;
 
         // The nanoseconds converted to float64, divided by 10^9. Exact
         // conversion, so correctly rounded, while the count is at most 2^53.
-        export let to_seconds_float64 = func() -> float64 {
-            return (total as float64) / 1000000000.0;
-        };
+        export let to_seconds_float64 = func -> float64 => (total as float64) / 1000000000.0;
 
-        export let compare_to = func(other: Duration) -> ordering.Ordering {
+        export let compare_to = func(other: Duration) -> Ordering {
             if (total < other.total) {
-                return ordering.Ordering.Less;
+                return Ordering.Less;
             }
             if (total > other.total) {
-                return ordering.Ordering.Greater;
+                return Ordering.Greater;
             }
-            return ordering.Ordering.Equal;
+            return Ordering.Equal;
         };
 
         export let.override equals = func(other: class) -> bool {
             return other is Duration && total == (other as Duration).total;
         };
 
-        export let.override hash_code = func() -> uint32 {
-            return hashing.combine(17, hashing.of_int64(total));
-        };
+        export let.override hash_code = func -> uint32 => hashing.combine(17, hashing.of_int64(total));
 
         // ISO 8601: PT, then hours, minutes, and seconds with their unit
         // letters, zero units omitted, the fraction trimmed of trailing
         // zeros. Zero is PT0S; a negative duration is - and the text of its
         // magnitude.
-        export let.override to_string = func() -> string {
+        export let.override to_string = func -> string {
             let magnitude = magnitude_of(total);
             if (magnitude == 0) {
                 return "PT0S";
@@ -105,7 +79,7 @@ export let Duration = module (
             let hours = magnitude / 3600000000000;
             let rest = magnitude % 3600000000000;
             let minutes = rest / 60000000000;
-            rest = rest % 60000000000;
+            rest %= 60000000000;
             let seconds = rest / 1000000000;
             let nanos = rest % 1000000000;
             let text = "PT";
@@ -118,43 +92,26 @@ export let Duration = module (
             if (seconds > 0 || nanos > 0) {
                 text = text + seconds.to_string() + trimmed_fraction(nanos) + "S";
             }
-            if (total < 0) {
-                return "-" + text;
-            }
-            return text;
+            return total < 0 ? "-" + text : text;
         };
     );
 
     export const Zero: Duration = new Duration(0);
 
-    export let of_nanos = func(nanos: int64) -> Duration {
-        return new Duration(nanos);
-    };
+    export let of_nanos = func(nanos: int64) -> Duration => new Duration(nanos);
 
-    export let of_micros = func(micros: int64) -> Duration {
-        return new Duration(micros * 1000);
-    };
+    export let of_micros = func(micros: int64) -> Duration => new Duration(micros * 1000);
 
-    export let of_millis = func(millis: int64) -> Duration {
-        return new Duration(millis * 1000000);
-    };
+    export let of_millis = func(millis: int64) -> Duration => new Duration(millis * 1000000);
 
-    export let of_seconds = func(seconds: int64) -> Duration {
-        return new Duration(seconds * calendar.NanosPerSecond);
-    };
+    export let of_seconds = func(seconds: int64) -> Duration => new Duration(seconds * calendar.NanosPerSecond);
 
-    export let of_minutes = func(minutes: int64) -> Duration {
-        return new Duration(minutes * calendar.NanosPerMinute);
-    };
+    export let of_minutes = func(minutes: int64) -> Duration => new Duration(minutes * calendar.NanosPerMinute);
 
-    export let of_hours = func(hours: int64) -> Duration {
-        return new Duration(hours * calendar.NanosPerHour);
-    };
+    export let of_hours = func(hours: int64) -> Duration => new Duration(hours * calendar.NanosPerHour);
 
     // A day is 24 hours.
-    export let of_days = func(days: int64) -> Duration {
-        return new Duration(days * calendar.NanosPerDay);
-    };
+    export let of_days = func(days: int64) -> Duration => new Duration(days * calendar.NanosPerDay);
 
     // An optional sign, P, an optional day count with D, then optionally T
     // and at least one of hours (H), minutes (M), and seconds (S) in that
@@ -169,14 +126,11 @@ export let Duration = module (
         if (scan.accept(45)) {
             negative = true;
         } else {
-            scan.accept(43);
+            let _ = scan.accept(43);
         }
         scan.expect(80, "'P'");
         // The magnitude may reach 2^63 only for a negative duration.
-        let limit: uint64 = 9223372036854775807;
-        if (negative) {
-            limit = 9223372036854775808;
-        }
+        let limit: uint64 = negative ? 9223372036854775808 : 9223372036854775807;
         let state = new Accumulator(limit);
         let has_days = false;
         if (scan.peek_digit()) {
@@ -232,12 +186,12 @@ export let Duration = module (
         export let magnitude: uint64 = 0;
         let limit: uint64;
 
-        export let init = func(bound: uint64) -> void {
+        export let init = func(bound: uint64) {
             limit = bound;
         };
 
         // Adds value * unit + extra, or reports OutOfRange at `start`.
-        export let add = func(scan: calendar.Scanner, start: int, value: uint64, unit: uint64, extra: uint64) -> void {
+        export let add = func(scan: calendar.Scanner, start: int, value: uint64, unit: uint64, extra: uint64) {
             if (!scan.ok()) {
                 return;
             }
@@ -250,7 +204,7 @@ export let Duration = module (
                 scan.out_of_range(start, "duration out of range");
                 return;
             }
-            magnitude = magnitude + part;
+            magnitude += part;
         };
     );
 
@@ -291,7 +245,7 @@ export let Duration = module (
         let digits = calendar.padded(nanos as int64, 9);
         let end = 9;
         while (digits.byte_at(end - 1) == 48) {
-            end = end - 1;
+            end--;
         }
         return "." + digits.slice(0, end);
     };

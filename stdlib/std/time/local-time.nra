@@ -1,41 +1,31 @@
 let calendar = import:Std.Time.Internal.Calendar;
-let comparable = import:Std.Core.Comparable;
+let.promote _ = import:Std.Core.Comparable;
 let duration = import:Std.Time.Duration;
 let hashing = import:Std.Core.Hash;
-let ordering = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Ordering;
 let result = import:Std.Core.Result;
 
 // A time of day, stored as nanoseconds since midnight (Stdlib.md section
 // 12.1). There are no leap seconds.
 export let LocalTime = module (
-    export let LocalTime = class implements comparable.Comparable<LocalTime> (
+    export let LocalTime = class implements Comparable<LocalTime> (
         let nanos_of_day: int64;
 
-        export let init = func(nanos: int64) -> void {
+        export let init = func(nanos: int64) {
             nanos_of_day = nanos;
         };
 
-        export let hour = func() -> int {
-            return (nanos_of_day / calendar.NanosPerHour) as int;
-        };
+        export let hour = func -> int => (nanos_of_day / calendar.NanosPerHour) as int;
 
-        export let minute = func() -> int {
-            return (nanos_of_day / calendar.NanosPerMinute % 60) as int;
-        };
+        export let minute = func -> int => (nanos_of_day / calendar.NanosPerMinute % 60) as int;
 
-        export let second = func() -> int {
-            return (nanos_of_day / calendar.NanosPerSecond % 60) as int;
-        };
+        export let second = func -> int => (nanos_of_day / calendar.NanosPerSecond % 60) as int;
 
         // 0 through 999,999,999.
-        export let nano = func() -> int {
-            return (nanos_of_day % calendar.NanosPerSecond) as int;
-        };
+        export let nano = func -> int => (nanos_of_day % calendar.NanosPerSecond) as int;
 
         // 0 through 86,399,999,999,999.
-        export let to_nano_of_day = func() -> int64 {
-            return nanos_of_day;
-        };
+        export let to_nano_of_day = func -> int64 => nanos_of_day;
 
         // Wraps around midnight in either direction.
         export let plus = func(span: duration.Duration) -> LocalTime {
@@ -43,29 +33,25 @@ export let LocalTime = module (
             return new LocalTime((nanos_of_day + shift) % calendar.NanosPerDay);
         };
 
-        export let compare_to = func(other: LocalTime) -> ordering.Ordering {
+        export let compare_to = func(other: LocalTime) -> Ordering {
             if (nanos_of_day < other.nanos_of_day) {
-                return ordering.Ordering.Less;
+                return Ordering.Less;
             }
             if (nanos_of_day > other.nanos_of_day) {
-                return ordering.Ordering.Greater;
+                return Ordering.Greater;
             }
-            return ordering.Ordering.Equal;
+            return Ordering.Equal;
         };
 
         export let.override equals = func(other: class) -> bool {
             return other is LocalTime && nanos_of_day == (other as LocalTime).nanos_of_day;
         };
 
-        export let.override hash_code = func() -> uint32 {
-            return hashing.combine(17, hashing.of_int64(nanos_of_day));
-        };
+        export let.override hash_code = func -> uint32 => hashing.combine(17, hashing.of_int64(nanos_of_day));
 
         // HH:MM:SS, then a fraction of 3, 6, or 9 digits (the shortest that
         // is exact) when the nanoseconds are not zero.
-        export let.override to_string = func() -> string {
-            return calendar.time_text(nanos_of_day);
-        };
+        export let.override to_string = func -> string => calendar.time_text(nanos_of_day);
     );
 
     export const Midnight: LocalTime = new LocalTime(0);

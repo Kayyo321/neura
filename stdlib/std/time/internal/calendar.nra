@@ -23,13 +23,9 @@ export let Calendar = module (
     export const SecondsPerDay: int64 = 86400;
     export const MaxOffsetSeconds: int = 64800;
 
-    export let floor_div = func(a: int64, b: int64) -> int64 {
-        return int64s.floor_div(a, b);
-    };
+    export let floor_div = func(a: int64, b: int64) -> int64 => int64s.floor_div(a, b);
 
-    export let floor_mod = func(a: int64, b: int64) -> int64 {
-        return int64s.floor_mod(a, b);
-    };
+    export let floor_mod = func(a: int64, b: int64) -> int64 => int64s.floor_mod(a, b);
 
     export let is_leap = func(year: int64) -> bool {
         // The rule repeats every 400 years, and 4 and 100 divide 400.
@@ -85,7 +81,7 @@ export let Calendar = module (
         }
         let year = (year_of_cycle as int64) + cycle * 400;
         if (month <= 2) {
-            year = year + 1;
+            year++;
         }
         return [year, month, day];
     };
@@ -96,7 +92,7 @@ export let Calendar = module (
         let count = text.byte_length;
         while (count < width) {
             text = "0" + text;
-            count = count + 1;
+            count++;
         }
         return text;
     };
@@ -166,40 +162,34 @@ export let Calendar = module (
         let failure_offset: int = 0;
         let failure_message: string = "";
 
-        export let init = func(text: string) -> void {
+        export let init = func(text: string) {
             source = text;
             if (text.byte_length == 0) {
                 fail(error.ParseErrorKind.Empty, 0, "empty input");
             }
         };
 
-        export let ok = func() -> bool {
-            return !failed;
-        };
+        export let ok = func -> bool => !failed;
 
-        export let position = func() -> int {
-            return cursor;
-        };
+        export let position = func -> int => cursor;
 
-        export let at_end = func() -> bool {
-            return cursor >= source.byte_length;
-        };
+        export let at_end = func -> bool => cursor >= source.byte_length;
 
         // The byte at the cursor, or -1 at the end or after a failure.
-        export let peek = func() -> int {
+        export let peek = func -> int {
             if (failed || cursor >= source.byte_length) {
                 return -1;
             }
             return source.byte_at(cursor) as int;
         };
 
-        export let peek_digit = func() -> bool {
+        export let peek_digit = func -> bool {
             let b = peek();
             return b >= 48 && b <= 57;
         };
 
         // Keeps the first failure only.
-        export let fail = func(kind: error.ParseErrorKind, offset: int, message: string) -> void {
+        export let fail = func(kind: error.ParseErrorKind, offset: int, message: string) {
             if (!failed) {
                 failed = true;
                 failure_kind = kind;
@@ -210,7 +200,7 @@ export let Calendar = module (
 
         // The byte at the cursor does not fit: UnexpectedEnd at the text's
         // length at the end, otherwise InvalidCharacter at the cursor.
-        export let unexpected = func(expected: string) -> void {
+        export let unexpected = func(expected: string) {
             if (cursor >= source.byte_length) {
                 fail(error.ParseErrorKind.UnexpectedEnd, source.byte_length, "unexpected end of input, expected " + expected);
             } else {
@@ -218,20 +208,20 @@ export let Calendar = module (
             }
         };
 
-        export let out_of_range = func(offset: int, message: string) -> void {
+        export let out_of_range = func(offset: int, message: string) {
             fail(error.ParseErrorKind.OutOfRange, offset, message);
         };
 
         // Consumes the byte when it is `b`.
         export let accept = func(b: int) -> bool {
             if (peek() == b) {
-                cursor = cursor + 1;
+                cursor++;
                 return true;
             }
             return false;
         };
 
-        export let expect = func(b: int, expected: string) -> void {
+        export let expect = func(b: int, expected: string) {
             if (!accept(b)) {
                 unexpected(expected);
             }
@@ -246,7 +236,7 @@ export let Calendar = module (
                     return 0;
                 }
                 value = value * 10 + ((peek() - 48) as int64);
-                cursor = cursor + 1;
+                cursor++;
             }
             return value;
         };
@@ -254,15 +244,15 @@ export let Calendar = module (
         // One or more digits as [value, digit count]. A value of 10^18 or
         // more stops growing (it stays at least 10^18), so callers can
         // report OutOfRange without overflow.
-        export let digits = func() -> [uint64, int] {
+        export let digits = func -> [uint64, int] {
             let value: uint64 = 0;
             let count = 0;
             while (peek_digit()) {
                 if (value < 1000000000000000000) {
                     value = value * 10 + ((peek() - 48) as uint64);
                 }
-                count = count + 1;
-                cursor = cursor + 1;
+                count++;
+                cursor++;
             }
             if (count == 0) {
                 unexpected("digit");
@@ -271,33 +261,33 @@ export let Calendar = module (
         };
 
         // After a point: one through nine digits, scaled to nanoseconds.
-        export let fraction = func() -> int {
+        export let fraction = func -> int {
             let value = 0;
             let count = 0;
             while (count < 9 && peek_digit()) {
                 value = value * 10 + (peek() - 48);
-                count = count + 1;
-                cursor = cursor + 1;
+                count++;
+                cursor++;
             }
             if (count == 0) {
                 unexpected("digit");
                 return 0;
             }
             while (count < 9) {
-                value = value * 10;
-                count = count + 1;
+                value *= 10;
+                count++;
             }
             return value;
         };
 
         // Any byte left over is an InvalidCharacter.
-        export let finish = func() -> void {
+        export let finish = func {
             if (!failed && cursor < source.byte_length) {
                 fail(error.ParseErrorKind.InvalidCharacter, cursor, "unexpected character");
             }
         };
 
-        export let failure = func() -> error.Error {
+        export let failure = func -> error.Error {
             return error.Error.Parse { kind: failure_kind, offset: failure_offset, message: failure_message };
         };
     );

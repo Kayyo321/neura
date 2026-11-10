@@ -1,47 +1,39 @@
 let calendar = import:Std.Time.Internal.Calendar;
-let comparable = import:Std.Core.Comparable;
+let.promote _ = import:Std.Core.Comparable;
 let weekdays = import:Std.Time.DayOfWeek;
 let hashing = import:Std.Core.Hash;
-let ordering = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Ordering;
 let result = import:Std.Core.Result;
 
 // A date in the proleptic Gregorian calendar, years -999,999 through
 // 999,999 (Stdlib.md section 12.1). Day counts are days since 1970-01-01.
 export let LocalDate = module (
-    export let LocalDate = class implements comparable.Comparable<LocalDate> (
+    export let LocalDate = class implements Comparable<LocalDate> (
         let year_value: int;
         let month_value: int;
         let day_value: int;
 
-        export let init = func(year: int, month: int, day: int) -> void {
+        export let init = func(year: int, month: int, day: int) {
             year_value = year;
             month_value = month;
             day_value = day;
         };
 
-        export let year = func() -> int {
-            return year_value;
-        };
+        export let year = func -> int => year_value;
 
         // 1 through 12.
-        export let month = func() -> int {
-            return month_value;
-        };
+        export let month = func -> int => month_value;
 
         // 1 through the length of the month.
-        export let day = func() -> int {
-            return day_value;
-        };
+        export let day = func -> int => day_value;
 
-        export let to_epoch_day = func() -> int64 {
+        export let to_epoch_day = func -> int64 {
             return calendar.epoch_day_of(year_value as int64, month_value, day_value);
         };
 
         // These trap with "invalid argument: date out of range" when the
         // result's year is outside -999,999 through 999,999.
-        export let plus_days = func(days: int64) -> LocalDate {
-            return of_epoch_day(to_epoch_day() + days);
-        };
+        export let plus_days = func(days: int64) -> LocalDate => of_epoch_day(to_epoch_day() + days);
 
         // Month and year changes clamp the day to the end of the target
         // month.
@@ -56,30 +48,24 @@ export let LocalDate = module (
         };
 
         // other's epoch day minus this one's.
-        export let days_until = func(other: LocalDate) -> int64 {
-            return other.to_epoch_day() - to_epoch_day();
-        };
+        export let days_until = func(other: LocalDate) -> int64 => other.to_epoch_day() - to_epoch_day();
 
-        export let day_of_week = func() -> weekdays.DayOfWeek {
+        export let day_of_week = func -> weekdays.DayOfWeek {
             // Epoch day 0 is a Thursday, ordinal 3.
             return weekdays.of_ordinal(calendar.floor_mod(to_epoch_day() + 3, 7) as int);
         };
 
         // 1 through 366.
-        export let day_of_year = func() -> int {
+        export let day_of_year = func -> int {
             let first = calendar.epoch_day_of(year_value as int64, 1, 1);
             return (to_epoch_day() - first + 1) as int;
         };
 
-        export let is_leap_year = func() -> bool {
-            return calendar.is_leap(year_value as int64);
-        };
+        export let is_leap_year = func -> bool => calendar.is_leap(year_value as int64);
 
-        export let length_of_month = func() -> int {
-            return calendar.month_length(year_value as int64, month_value);
-        };
+        export let length_of_month = func -> int => calendar.month_length(year_value as int64, month_value);
 
-        export let compare_to = func(other: LocalDate) -> ordering.Ordering {
+        export let compare_to = func(other: LocalDate) -> Ordering {
             if (year_value != other.year_value) {
                 return order(year_value < other.year_value);
             }
@@ -89,7 +75,7 @@ export let LocalDate = module (
             if (day_value != other.day_value) {
                 return order(day_value < other.day_value);
             }
-            return ordering.Ordering.Equal;
+            return Ordering.Equal;
         };
 
         export let.override equals = func(other: class) -> bool {
@@ -100,7 +86,7 @@ export let LocalDate = module (
             return year_value == date.year_value && month_value == date.month_value && day_value == date.day_value;
         };
 
-        export let.override hash_code = func() -> uint32 {
+        export let.override hash_code = func -> uint32 {
             let hash = hashing.combine(17, year_value.hash_code());
             hash = hashing.combine(hash, month_value.hash_code());
             return hashing.combine(hash, day_value.hash_code());
@@ -108,7 +94,7 @@ export let LocalDate = module (
 
         // YYYY-MM-DD; a year outside 0000 through 9999 has a sign and at
         // least four digits.
-        export let.override to_string = func() -> string {
+        export let.override to_string = func -> string {
             return calendar.date_text(year_value as int64, month_value, day_value);
         };
     );
@@ -173,10 +159,5 @@ export let LocalDate = module (
         return new LocalDate(year as int, month, day);
     };
 
-    let order = func(less: bool) -> ordering.Ordering {
-        if (less) {
-            return ordering.Ordering.Less;
-        }
-        return ordering.Ordering.Greater;
-    };
+    let order = func(less: bool) -> Ordering => less ? Ordering.Less : Ordering.Greater;
 );

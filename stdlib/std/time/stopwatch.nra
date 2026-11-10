@@ -1,29 +1,27 @@
-let clock = import:Std.Time.Clock;
-let duration = import:Std.Time.Duration;
+let.promote _ = import:Std.Time.Clock;
+let.promote _ = import:Std.Time.Duration;
 let result = import:Std.Core.Result;
-let unit = import:Std.Core.Unit;
+let.promote _ = import:Std.Core.Unit;
 
 // Measures elapsed time with a Clock's monotonic reading (Stdlib.md section
 // 12.1). Time accumulates across start and stop pairs until reset.
 export let Stopwatch = module (
     export let Stopwatch = class (
-        let source: clock.Clock;
+        let source: Clock;
         let running: bool = false;
-        let started_at: duration.Duration = duration.Zero;
-        let accumulated: duration.Duration = duration.Zero;
+        let started_at: Duration = Zero;
+        let accumulated: Duration = Zero;
 
-        export let init = func(time_source: clock.Clock) -> void {
+        export let init = func(time_source: Clock) {
             source = time_source;
         };
 
-        export let is_running = func() -> bool {
-            return running;
-        };
+        export let is_running = func -> bool => running;
 
         // Starts measuring. Traps with "invalid state: stopwatch is
         // running" when it already is; a failed clock read is returned and
         // leaves it stopped.
-        export let start = func() -> result.Result<unit.Unit> {
+        export let start = func -> result.Result<Unit> {
             if (running) {
                 trap_with_message("invalid state: stopwatch is running");
             }
@@ -31,10 +29,10 @@ export let Stopwatch = module (
                 result.Result.Ok(reading) => {
                     started_at = reading;
                     running = true;
-                    return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+                    return result.Result<Unit>.Ok(Unit.Value);
                 },
                 result.Result.Err(failure) => {
-                    return result.Result<unit.Unit>.Err(failure);
+                    return result.Result<Unit>.Err(failure);
                 },
             }
         };
@@ -42,7 +40,7 @@ export let Stopwatch = module (
         // Stops measuring and keeps the time so far. Traps with "invalid
         // state: stopwatch is stopped" when it is not running; a failed
         // clock read is returned and leaves it running.
-        export let stop = func() -> result.Result<unit.Unit> {
+        export let stop = func -> result.Result<Unit> {
             if (!running) {
                 trap_with_message("invalid state: stopwatch is stopped");
             }
@@ -50,35 +48,33 @@ export let Stopwatch = module (
                 result.Result.Ok(reading) => {
                     accumulated = accumulated.plus(reading.minus(started_at));
                     running = false;
-                    return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+                    return result.Result<Unit>.Ok(Unit.Value);
                 },
                 result.Result.Err(failure) => {
-                    return result.Result<unit.Unit>.Err(failure);
+                    return result.Result<Unit>.Err(failure);
                 },
             }
         };
 
         // Stops and clears the measured time.
-        export let reset = func() -> void {
+        export let reset = func {
             running = false;
-            accumulated = duration.Zero;
+            accumulated = Zero;
         };
 
         // The time measured so far, including the current run. A stopped
         // stopwatch does not read the clock.
-        export let elapsed = func() -> result.Result<duration.Duration> {
+        export let elapsed = func -> result.Result<Duration> {
             if (!running) {
-                return result.Result<duration.Duration>.Ok(accumulated);
+                return result.Result<Duration>.Ok(accumulated);
             }
             return match (source.monotonic()) {
-                result.Result.Ok(reading) => result.Result<duration.Duration>.Ok(accumulated.plus(reading.minus(started_at))),
-                result.Result.Err(failure) => result.Result<duration.Duration>.Err(failure),
+                result.Result.Ok(reading) => result.Result<Duration>.Ok(accumulated.plus(reading.minus(started_at))),
+                result.Result.Err(failure) => result.Result<Duration>.Err(failure),
             };
         };
     );
 
     // A stopped stopwatch over `time_source`.
-    export let create = func(time_source: clock.Clock) -> Stopwatch {
-        return new Stopwatch(time_source);
-    };
+    export let create = func(time_source: Clock) -> Stopwatch => new Stopwatch(time_source);
 );
