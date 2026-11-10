@@ -21,6 +21,7 @@ std::string_view spelling(SymbolKind kind) {
     case SymbolKind::TypeParameter: return "type_parameter";
     case SymbolKind::Enum: return "enum";
     case SymbolKind::Variant: return "variant";
+    case SymbolKind::Interface: return "interface";
     }
     return "<invalid>";
 }
@@ -88,6 +89,23 @@ std::string_view spelling(IrOp op) {
     case IrOp::ComparisonChain: return "comparison_chain";
     case IrOp::ScopedValue: return "scoped_value";
     case IrOp::SelectValue: return "select_value";
+    case IrOp::MakeClosure: return "make_closure";
+    case IrOp::CallClosure: return "call_closure";
+    case IrOp::Nil: return "nil";
+    case IrOp::ClassHash: return "class_hash";
+    case IrOp::ClassText: return "class_text";
+    case IrOp::ClassIs: return "class_is";
+    case IrOp::ClassCast: return "class_cast";
+    case IrOp::ValueEquals: return "value_equals";
+    case IrOp::ValueHash: return "value_hash";
+    case IrOp::ValueText: return "value_text";
+    case IrOp::TextLength: return "text_length";
+    case IrOp::TextByteAt: return "text_byte_at";
+    case IrOp::TextSlice: return "text_slice";
+    case IrOp::TextFromUtf8: return "text_from_utf8";
+    case IrOp::TextEqual: return "text_equal";
+    case IrOp::ReinterpretFloat: return "reinterpret_float";
+    case IrOp::TrapMessage: return "trap_message";
     }
     return "<invalid>";
 }
@@ -184,9 +202,26 @@ void print_symbol(std::ostream& output, SymbolId id, const IrSymbol& symbol) {
         output << " payload=";
         print_type_arguments(output, symbol.payload_types);
     }
+    if (!symbol.library_path.empty()) {
+        output << " library=";
+        print_quoted(output, symbol.library_path);
+    }
+    if (symbol.host_binding) {
+        output << " host=";
+        print_quoted(output, symbol.host_binding->name);
+        output << " version=" << symbol.host_binding->version;
+    }
     if (symbol.bound) {
         output << " bound=";
         print_type(output, *symbol.bound);
+    }
+    if (!symbol.additional_bounds.empty()) {
+        output << " additional_bounds=";
+        print_type_arguments(output, symbol.additional_bounds);
+    }
+    if (!symbol.interfaces.empty()) {
+        output << " interfaces=";
+        print_type_arguments(output, symbol.interfaces);
     }
     if (symbol.exported) {
         output << " export";

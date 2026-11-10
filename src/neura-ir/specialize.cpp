@@ -1,8 +1,10 @@
 #include "specialize.hpp"
+#include "nominal.hpp"
 
 #include <algorithm>
 #include <deque>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -133,6 +135,11 @@ public:
                 auto rewritten_field = type(payload[field], context, span);
                 program_.symbols[id].payload_types[field] = std::move(rewritten_field);
             }
+            const auto interfaces = program_.symbols[id].interfaces;
+            for (std::size_t interface = 0; interface < interfaces.size(); ++interface) {
+                auto rewritten_interface = type(interfaces[interface], context, span);
+                program_.symbols[id].interfaces[interface] = std::move(rewritten_interface);
+            }
         }
         for (std::size_t i = 0; i < original_bodies_; ++i) {
             const auto owner = program_.bodies[i].owner;
@@ -153,6 +160,10 @@ public:
             program_.bodies.push_back({item.owner, std::move(copied)});
         }
         check_result();
+        // Template bodies belong to pre-specialization IR. Their references
+        // still use structural types, while concrete declarations have been
+        // rewritten to layouts. Only instantiated bodies enter optimization.
+        std::erase_if(program_.bodies, [&](const IrBody& body) { return in_template(body.owner); });
     }
 
 private:
@@ -172,10 +183,10 @@ private:
     }
 
     std::size_t depth(const IrType& type) const {
-        if ((type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.size() == 1) {
-            return 1 + depth(type.arguments.front());
+        if (!type.arguments.empty()) {
+            return 1 + depth(type.arguments);
         }
-        if (type.kind == TypeKind::Object) {
+        if (type.kind == TypeKind::Object || type.kind == TypeKind::Enum) {
             const auto found = instance_depth_.find(type.symbol);
             return found == instance_depth_.end() ? 0 : found->second;
         }
@@ -213,10 +224,13 @@ private:
         for (auto& argument : result.arguments) {
             argument = type(argument, context, where);
         }
-        if (result.kind == TypeKind::Object && result.symbol != no_symbol && result.symbol < original_symbols_ &&
+        if (is_function_value(result) && std::ranges::all_of(result.arguments, concrete)) {
+            return callable_type(result, where);
+        }
+        if ((result.kind == TypeKind::Object || result.kind == TypeKind::Enum) && result.symbol < original_symbols_ &&
             !program_.symbols[result.symbol].generics.empty() && !result.arguments.empty() &&
             std::ranges::all_of(result.arguments, concrete)) {
-            const auto instance = class_instance(result.symbol, result.arguments, where, context);
+            const auto instance = nominal_instance(result.symbol, result.arguments, where, context);
             return program_.symbols[instance].type;
         }
         return result;
@@ -227,9 +241,50 @@ private:
         return program_.symbols.size() - 1;
     }
 
-    SymbolId class_instance(SymbolId generic, const std::vector<IrType>& arguments, const Span& where,
-                            const Context& context) {
-        const auto name = key(IrType{TypeKind::Object, "", generic, arguments});
+    IrType callable_type(const IrType& signature, const Span& span) {
+        const auto signature_key = key(signature);
+        if (const auto found = callable_types_.find(signature_key); found != callable_types_.end()) {
+            return symbol(found->second).type;
+        }
+        IrSymbol layout{};
+        layout.kind = SymbolKind::Class;
+        layout.name = "$signature" + std::to_string(callable_types_.size());
+        layout.span = span;
+        const auto layout_id = add(std::move(layout));
+        std::string name = "func(";
+        for (std::size_t i = 0; i + 1 < signature.arguments.size(); ++i) {
+            name += (i == 0 ? "" : ", ") + display(signature.arguments[i]);
+        }
+        name += ") -> " + display(signature.arguments.back());
+        symbol(layout_id).type = {TypeKind::Object, std::move(name), layout_id, {}};
+        instance_depth_[layout_id] = 1 + depth(signature.arguments);
+        callable_types_.emplace(signature_key, layout_id);
+
+        IrSymbol method{};
+        method.kind = SymbolKind::Function;
+        method.name = "$invoke";
+        method.span = span;
+        method.owner = layout_id;
+        method.type = signature.arguments.back();
+        const auto method_id = add(std::move(method));
+        for (std::size_t i = 0; i + 1 < signature.arguments.size(); ++i) {
+            IrSymbol parameter{};
+            parameter.kind = SymbolKind::Parameter;
+            parameter.name = "$arg" + std::to_string(i);
+            parameter.span = span;
+            parameter.owner = method_id;
+            parameter.type = signature.arguments[i];
+            const auto id = add(std::move(parameter));
+            symbol(method_id).parameters.push_back(id);
+        }
+        callable_methods_.emplace(layout_id, method_id);
+        return symbol(layout_id).type;
+    }
+
+    SymbolId nominal_instance(SymbolId generic, const std::vector<IrType>& arguments, const Span& where,
+                              const Context& context) {
+        const auto kind = symbol(generic).type.kind;
+        const auto name = key(IrType{kind, "", generic, arguments});
         if (const auto found = instances_.find(name); found != instances_.end()) {
             return found->second;
         }
@@ -241,7 +296,7 @@ private:
         copy.name = display_name;
         copy.generics.clear();
         const auto instance = add(std::move(copy));
-        symbol(instance).type = {TypeKind::Object, display_name, instance, {}};
+        symbol(instance).type = {kind, display_name, instance, {}};
         instances_.emplace(name, instance);
         instance_depth_[instance] = 1 + depth(arguments);
         instance_of_[instance] = {generic, arguments};
@@ -252,18 +307,52 @@ private:
             substitution.emplace(generics[i], arguments[i]);
         }
         Context inner{&substitution, nullptr, no_symbol, instance, instance, origin, true};
-        // Fields and non-generic methods are copied now, so that dispatch by
-        // name finds them; generic methods are copied when called.
+        const auto interfaces = program_.symbols[generic].interfaces;
+        for (std::size_t interface = 0; interface < interfaces.size(); ++interface) {
+            auto concrete_interface = type(interfaces[interface], inner, where);
+            symbol(instance).interfaces[interface] = std::move(concrete_interface);
+        }
+        // Variants, fields and the non-generic methods that dispatch can reach
+        // are copied now so that variant remapping and dispatch can find
+        // them. Other methods of a class are copied when first referenced, so
+        // a method whose signature names a larger instance of its own class
+        // (Sequence<T>.enumerate() -> Sequence<[int, T]>) instantiates that
+        // class only when the program calls it.
+        instance_origin_[instance] = origin;
+        std::set<std::string> dispatched;
+        if (kind == TypeKind::Object && symbol(generic).kind == SymbolKind::Class) {
+            std::set<SymbolId> seen;
+            for (const auto& interface : symbol(instance).interfaces) {
+                interface_methods(interface.symbol, dispatched, seen);
+            }
+            for (auto base = symbol(generic).base; base != no_symbol; base = symbol(base).base) {
+                for (const auto& interface : symbol(base).interfaces) {
+                    interface_methods(interface.symbol, dispatched, seen);
+                }
+            }
+        }
         for (const auto member : members_[generic]) {
             // A copy: creating instances appends to the symbol table.
             const IrSymbol item = program_.symbols[member];
-            if (item.kind == SymbolKind::Field) {
+            if (item.kind == SymbolKind::Variant) {
+                IrSymbol variant = item;
+                variant.owner = instance;
+                variant.type = symbol(instance).type;
+                for (auto& payload : variant.payload_types) {
+                    payload = type(payload, inner, item.span);
+                }
+                member_map_[instance][member] = add(std::move(variant));
+            } else if (item.kind == SymbolKind::Field) {
                 IrSymbol field = item;
                 field.owner = instance;
                 field.type = type(item.type, inner, item.span);
                 member_map_[instance][member] = add(std::move(field));
             } else if (item.kind == SymbolKind::Function && item.generics.empty()) {
-                member_map_[instance][member] = clone_function(member, instance, substitution, item.name, inner);
+                if (deferrable(item, instance, dispatched)) {
+                    deferred_[instance].insert(member);
+                } else {
+                    member_map_[instance][member] = clone_function(member, instance, substitution, item.name, inner);
+                }
             }
         }
         if (const auto body = body_of_.find(generic); body != body_of_.end()) {
@@ -333,14 +422,64 @@ private:
     }
 
     // The copy of `member` in a class instance, or `member` itself when its
-    // owner is not generic.
-    SymbolId member_of(SymbolId member, SymbolId instance) const {
+    // owner is not generic. A deferred method is copied on first use.
+    SymbolId member_of(SymbolId member, SymbolId instance) {
         if (const auto found = member_map_.find(instance); found != member_map_.end()) {
             if (const auto copy = found->second.find(member); copy != found->second.end()) {
                 return copy->second;
             }
         }
+        if (const auto deferred = deferred_.find(instance);
+            deferred != deferred_.end() && deferred->second.erase(member) != 0) {
+            const auto& [generic, arguments] = instance_of_.at(instance);
+            Substitution substitution;
+            const auto& generics = program_.symbols[generic].generics;
+            for (std::size_t i = 0; i < generics.size() && i < arguments.size(); ++i) {
+                substitution.emplace(generics[i], arguments[i]);
+            }
+            Context inner{&substitution, nullptr, no_symbol, instance, instance, instance_origin_.at(instance), true};
+            const auto name = program_.symbols[member].name;
+            const auto copy = clone_function(member, instance, substitution, name, inner);
+            member_map_[instance][member] = copy;
+            return copy;
+        }
         return member;
+    }
+
+    // Whether a method of a class instance can be copied on first use: it
+    // is not a constructor, destructor, override, interface implementation,
+    // or compiler-generated member, so no dispatch reaches it by name.
+    bool deferrable(const IrSymbol& method, SymbolId instance, const std::set<std::string>& dispatched) const {
+        if (program_.symbols[instance].type.kind != TypeKind::Object) {
+            return false;
+        }
+        const auto generic = instance_of_.at(instance).first;
+        if (program_.symbols[generic].kind != SymbolKind::Class) {
+            return false;
+        }
+        return method.overrides == no_symbol && method.name != "init" && method.name != "deinit" &&
+               !method.name.starts_with("$") && !dispatched.contains(method.name);
+    }
+
+    // The method names of an interface and of the interfaces it extends.
+    void interface_methods(SymbolId interface, std::set<std::string>& names, std::set<SymbolId>& seen) const {
+        auto declaration = interface;
+        if (const auto found = instance_of_.find(interface); found != instance_of_.end()) {
+            declaration = found->second.first;
+        }
+        if (declaration == no_symbol || !seen.insert(declaration).second) {
+            return;
+        }
+        if (const auto found = members_.find(declaration); found != members_.end()) {
+            for (const auto member : found->second) {
+                if (program_.symbols[member].kind == SymbolKind::Function) {
+                    names.insert(program_.symbols[member].name);
+                }
+            }
+        }
+        for (const auto& base : program_.symbols[declaration].interfaces) {
+            interface_methods(base.symbol, names, seen);
+        }
     }
 
     bool owned_by_generic_class(SymbolId member) const {
@@ -349,7 +488,7 @@ private:
         }
         const auto owner = program_.symbols[member].owner;
         return owner != no_symbol && owner < original_symbols_ &&
-               program_.symbols[owner].kind == SymbolKind::Class && !program_.symbols[owner].generics.empty();
+               class_or_interface(program_.symbols[owner].kind) && !program_.symbols[owner].generics.empty();
     }
 
     std::vector<IrNode> region(const std::vector<IrNode>& nodes, Context& context) {
@@ -374,6 +513,29 @@ private:
         for (const auto& argument : node.type_arguments) {
             result.type_arguments.push_back(type(argument, context, node.span));
         }
+        if (node.op == IrOp::CallClosure) {
+            result.op = IrOp::VirtualCall;
+            result.symbol = callable_methods_.at(result.operands.front().type.symbol);
+            return result;
+        }
+        if (node.op == IrOp::MakeClosure) {
+            const auto generic = symbol(node.symbol).owner;
+            const auto layout = result.type_arguments.empty()
+                ? generic : nominal_instance(generic, result.type_arguments, node.span, context);
+            const auto base = result.type.symbol;
+            symbol(layout).base = base;
+            const auto method = callable_methods_.at(base);
+            for (const auto member : members_[generic]) {
+                if (symbol(member).name == "$invoke") {
+                    symbol(member_of(member, layout)).overrides = method;
+                    break;
+                }
+            }
+            result.op = IrOp::Allocate;
+            result.symbol = member_of(node.symbol, layout);
+            result.type_arguments.clear();
+            return result;
+        }
         if (node.symbol == no_symbol) {
             return result;
         }
@@ -384,6 +546,17 @@ private:
             }
         }
         switch (node.op) {
+        case IrOp::Reference:
+        case IrOp::EnumConstruct:
+            if (result.type.kind == TypeKind::Enum) {
+                result.symbol = member_of(node.symbol, result.type.symbol);
+            }
+            break;
+        case IrOp::EnumProject:
+            if (!result.operands.empty()) {
+                result.symbol = member_of(node.symbol, result.operands.front().type.symbol);
+            }
+            break;
         case IrOp::Initialize:
             if (context.original != no_symbol && context.symbols &&
                 program_.symbols[node.symbol].kind == SymbolKind::Local &&
@@ -418,7 +591,16 @@ private:
             const auto target = node.symbol;
             SymbolId owner = program_.symbols[target].owner;
             if (owned_by_generic_class(target) && node.op == IrOp::VirtualCall && !result.operands.empty()) {
-                owner = result.operands.front().type.symbol;
+                if (symbol(owner).kind == SymbolKind::Interface) {
+                    const auto views = nominal_views(program_, result.operands.front().type);
+                    const auto match = std::ranges::find_if(views, [&](const IrType& view) {
+                        const auto instance = instance_of_.find(view.symbol);
+                        return instance != instance_of_.end() && instance->second.first == owner;
+                    });
+                    if (match != views.end()) owner = match->symbol;
+                } else {
+                    owner = result.operands.front().type.symbol;
+                }
             }
             if (!program_.symbols[target].generics.empty()) {
                 result.symbol = function_instance(target, owner, result.type_arguments, node.span, context);
@@ -443,7 +625,7 @@ private:
     void check_nodes(const std::vector<IrNode>& nodes, const std::string& where) const {
         for (const auto& node : nodes) {
             check_type(node.type, where);
-            if (!node.type_arguments.empty()) {
+            if (!node.type_arguments.empty() && node.op != IrOp::ClassIs) {
                 throw std::logic_error("specialization left type arguments in " + where);
             }
             check_nodes(node.operands, where);
@@ -456,6 +638,12 @@ private:
         for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
             if (id >= original_symbols_ || !in_template(id)) {
                 check_type(program_.symbols[id].type, "symbol " + program_.symbols[id].name);
+                for (const auto& payload : program_.symbols[id].payload_types) {
+                    check_type(payload, "payload of " + program_.symbols[id].name);
+                }
+                for (const auto& interface : program_.symbols[id].interfaces) {
+                    check_type(interface, "interface of " + program_.symbols[id].name);
+                }
             }
         }
         for (const auto& body : program_.bodies) {
@@ -475,6 +663,12 @@ private:
     std::map<SymbolId, std::size_t> instance_depth_;
     std::map<SymbolId, std::pair<SymbolId, std::vector<IrType>>> instance_of_;
     std::map<SymbolId, std::map<SymbolId, SymbolId>> member_map_;
+    // Methods of class instances not copied yet, and where each instance's
+    // chain of instantiations started.
+    std::map<SymbolId, std::set<SymbolId>> deferred_;
+    std::map<SymbolId, Origin> instance_origin_;
+    std::map<std::string, SymbolId> callable_types_;
+    std::map<SymbolId, SymbolId> callable_methods_;
     std::deque<Work> work_;
 };
 

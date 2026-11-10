@@ -31,6 +31,7 @@ bool always_returns(const std::vector<IrNode>& region) {
     return std::ranges::any_of(region, [](const IrNode& node) {
         switch (node.op) {
         case IrOp::Return: return true;
+        case IrOp::TrapMessage: return true;
         case IrOp::Block: return always_returns(node.body);
         case IrOp::Branch: return always_returns(node.body) && always_returns(node.alternative);
         case IrOp::Loop: return infinite_loop(node);
@@ -44,6 +45,7 @@ bool never_completes(const IrNode& statement) {
     case IrOp::Return:
     case IrOp::Break:
     case IrOp::Continue:
+    case IrOp::TrapMessage:
         return true;
     case IrOp::Block:
         return std::ranges::any_of(statement.body, never_completes);

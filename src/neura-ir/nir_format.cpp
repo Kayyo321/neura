@@ -14,14 +14,23 @@ constexpr std::uint32_t absent = 0xffffffffU;
 // Bounds the reader's recursion and that of the passes that later walk the
 // program, with room to spare under sanitizers.
 constexpr std::size_t max_depth = 1024;
-constexpr std::uint8_t max_symbol_kind = static_cast<std::uint8_t>(SymbolKind::Variant);
 // The last operation tag of each minor version.
 constexpr std::uint8_t max_op_1_0 = static_cast<std::uint8_t>(IrOp::Discard);
 constexpr std::uint8_t max_op_1_1 = static_cast<std::uint8_t>(IrOp::Fail);
 constexpr std::uint8_t max_op_1_2 = static_cast<std::uint8_t>(IrOp::SelectValue);
+constexpr std::uint8_t max_op_1_3 = static_cast<std::uint8_t>(IrOp::ValueText);
 
-bool needs_tuple_format(const IrType& type) {
-    return type.kind == TypeKind::Tuple || std::ranges::any_of(type.arguments, needs_tuple_format);
+std::uint16_t type_minor(const IrType& type) {
+    if (is_function_value(type) || (type.kind == TypeKind::Enum && !type.arguments.empty())) return 3;
+    return type.kind == TypeKind::Tuple ? 2 : 0;
+}
+
+std::uint16_t required_minor(const IrType& type) {
+    auto version = type_minor(type);
+    for (const auto& argument : type.arguments) {
+        version = std::max(version, required_minor(argument));
+    }
+    return version;
 }
 
 bool new_operator(const IrNode& node) {
@@ -33,22 +42,28 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (op > max_op_1_1 || new_operator(node) || needs_tuple_format(node.type) ||
-            std::ranges::any_of(node.type_arguments, needs_tuple_format)) {
-            return 2;
+        if (op > max_op_1_2) return 3;
+        if (op > max_op_1_1 || new_operator(node)) {
+            version = std::max<std::uint16_t>(version, 2);
+        } else if (op > max_op_1_0 || (node.op == IrOp::Loop && !node.alternative.empty())) {
+            version = std::max<std::uint16_t>(version, 1);
         }
-        if (op > max_op_1_0 || (node.op == IrOp::Loop && !node.alternative.empty())) {
-            version = 1;
+        version = std::max(version, required_minor(node.type));
+        for (const auto& argument : node.type_arguments) {
+            version = std::max(version, required_minor(argument));
         }
         for (const auto* region : {&node.operands, &node.body, &node.alternative}) {
             version = std::max(version, required_minor(*region));
         }
-        if (version == 2) return version;
+        if (version == 3) return version;
     }
     return version;
 }
 
-enum Flag : std::uint8_t { Exported = 1, Constant = 2, External = 4, HasBody = 8, HasPayload = 16 };
+enum Flag : std::uint8_t {
+    Exported = 1, Constant = 2, External = 4, HasBody = 8, HasPayload = 16, HostBound = 32, LibraryFile = 64,
+    HasInterfacesOrBounds = 128
+};
 
 class Writer {
 public:
@@ -71,14 +86,20 @@ public:
         u16(nir_major_version);
         std::uint16_t version = 0;
         for (const auto& item : program.symbols) {
-            if (!item.payload_types.empty() || needs_tuple_format(item.type) ||
-                (item.bound && needs_tuple_format(*item.bound))) {
-                version = 2;
+            if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
+                !item.interfaces.empty() || !item.additional_bounds.empty()) {
+                version = 3;
                 break;
+            }
+            version = std::max(version, required_minor(item.type));
+            if (item.bound) version = std::max(version, required_minor(*item.bound));
+            if (!item.payload_types.empty()) version = std::max<std::uint16_t>(version, 2);
+            for (const auto& payload : item.payload_types) {
+                version = std::max(version, required_minor(payload));
             }
         }
         for (const auto& body : program.bodies) {
-            if (version == 2) break;
+            if (version == 3) break;
             version = std::max(version, required_minor(body.instructions));
         }
         u16(version);
@@ -191,10 +212,23 @@ private:
         if (value.bound) {
             type(*value.bound);
         }
+        const bool extra_types = !value.interfaces.empty() || !value.additional_bounds.empty();
         u8(static_cast<std::uint8_t>((value.exported ? Exported : 0) | (value.constant ? Constant : 0) |
                                      (value.external ? External : 0) | (value.has_body ? HasBody : 0) |
-                                     (value.payload_types.empty() ? 0 : HasPayload)));
+                                     (value.payload_types.empty() ? 0 : HasPayload) |
+                                     (value.host_binding ? HostBound : 0) |
+                                     (value.library_path.empty() ? 0 : LibraryFile) |
+                                     (extra_types ? HasInterfacesOrBounds : 0)));
         if (!value.payload_types.empty()) types(value.payload_types);
+        if (value.host_binding) {
+            text(value.host_binding->name);
+            u32(value.host_binding->version);
+        }
+        if (!value.library_path.empty()) text(value.library_path);
+        if (extra_types) {
+            types(value.interfaces);
+            types(value.additional_bounds);
+        }
     }
 
     void nodes(const std::vector<IrNode>& values) {
@@ -231,14 +265,14 @@ public:
         }
         position_ = magic.size();
         const auto major = u16();
-        const auto minor = u16();
-        if (major != nir_major_version || minor > nir_minor_version) {
-            fail("NeuraIR format " + std::to_string(major) + "." + std::to_string(minor) +
-                 " is not supported; this reader accepts 1.0 through 1.2");
+        minor_ = u16();
+        if (major != nir_major_version || minor_ > nir_minor_version) {
+            fail("NeuraIR format " + std::to_string(major) + "." + std::to_string(minor_) +
+                 " is not supported; this reader accepts 1.0 through 1.3");
         }
-        max_op_ = minor == 0 ? max_op_1_0 : minor == 1 ? max_op_1_1 : max_op_1_2;
-        latches_ = minor > 0;
-        aggregates_ = minor >= 2;
+        max_op_ = minor_ == 0 ? max_op_1_0 : minor_ == 1 ? max_op_1_1 : minor_ == 2 ? max_op_1_2 : max_op_1_3;
+        latches_ = minor_ > 0;
+        aggregates_ = minor_ >= 2;
         const auto file_count = count(4);
         files_.reserve(file_count);
         for (std::uint32_t i = 0; i < file_count; ++i) {
@@ -369,6 +403,7 @@ private:
         value.name = text();
         value.symbol = reference();
         value.arguments = types(depth + 1);
+        if (type_minor(value) > minor_) fail("a structural function or generic enum type requires NeuraIR format 1.3");
         return value;
     }
 
@@ -394,7 +429,8 @@ private:
 
     IrSymbol symbol() {
         IrSymbol value{};
-        value.kind = static_cast<SymbolKind>(tag(max_symbol_kind, "symbol kind"));
+        const auto max_kind = minor_ >= 3 ? SymbolKind::Interface : SymbolKind::Variant;
+        value.kind = static_cast<SymbolKind>(tag(static_cast<std::uint8_t>(max_kind), "symbol kind"));
         value.name = text();
         value.span = span();
         // References may point forward, so they are checked against the
@@ -413,7 +449,8 @@ private:
             value.bound = type(0);
         }
         const auto flags = u8();
-        const auto allowed = Exported | Constant | External | HasBody | (aggregates_ ? HasPayload : 0);
+        const auto allowed = Exported | Constant | External | HasBody | (aggregates_ ? HasPayload : 0) |
+                             (minor_ >= 3 ? HostBound | LibraryFile | HasInterfacesOrBounds : 0);
         if ((flags & ~allowed) != 0) {
             fail("invalid symbol flags");
         }
@@ -424,6 +461,17 @@ private:
         if ((flags & HasPayload) != 0) {
             value.payload_types = types(0);
             if (value.payload_types.empty()) fail("a payload flag requires at least one payload type");
+        }
+        if ((flags & HostBound) != 0) value.host_binding = IrHostBinding{text(), u32()};
+        if ((flags & LibraryFile) != 0) {
+            value.library_path = text();
+            if (value.library_path.empty()) fail("a library file needs a nonempty identity");
+        }
+        if ((flags & HasInterfacesOrBounds) != 0) {
+            value.interfaces = types(0);
+            value.additional_bounds = types(0);
+            if (value.interfaces.empty() && value.additional_bounds.empty())
+                fail("an interface/bounds flag needs at least one type");
         }
         return value;
     }
@@ -462,6 +510,7 @@ private:
     std::string origin_;
     std::vector<std::string> files_;
     std::uint32_t symbol_count_ = 0;
+    std::uint16_t minor_ = 0;
     std::uint8_t max_op_ = max_op_1_0;
     bool latches_ = false;
     bool aggregates_ = false;

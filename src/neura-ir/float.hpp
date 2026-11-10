@@ -30,6 +30,7 @@ inline constexpr FloatFormat binary32{8, 23};
 inline constexpr FloatFormat binary64{11, 52};
 
 std::optional<FloatFormat> float_format(const IrType& type);
+std::optional<IrType> float_bits_type(const IrType& type);
 
 enum class FloatLiteralError { Malformed, Overflow, Underflow };
 

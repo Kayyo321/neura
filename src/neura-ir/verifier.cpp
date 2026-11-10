@@ -2,6 +2,9 @@
 
 #include "aggregate.hpp"
 #include "control_flow.hpp"
+#include "float.hpp"
+#include "host_binding.hpp"
+#include "nominal.hpp"
 #include "integer.hpp"
 
 #include <algorithm>
@@ -35,6 +38,13 @@ std::string describe(const IrType& type) {
     if ((type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.size() == 1) {
         return describe(type.arguments.front()) + (type.kind == TypeKind::Array ? "[]" : "[list]");
     }
+    if (is_function_value(type)) {
+        std::string result = "func(";
+        for (std::size_t i = 0; i + 1 < type.arguments.size(); ++i) {
+            result += (i == 0 ? "" : ", ") + describe(type.arguments[i]);
+        }
+        return result + ") -> " + describe(type.arguments.back());
+    }
     std::string result = type.name.empty() ? std::string(kind_name(type.kind)) : type.name;
     if (!type.arguments.empty()) {
         result += '<';
@@ -59,6 +69,7 @@ bool is_statement(IrOp op) {
     case IrOp::Continue:
     case IrOp::Destroy:
     case IrOp::Fail:
+    case IrOp::TrapMessage:
         return true;
     default:
         return false;
@@ -121,42 +132,35 @@ private:
             (type.symbol != no_symbol || !type.name.empty() || type.arguments.empty() ||
              std::ranges::any_of(type.arguments, [](const IrType& element) {
                  return element.kind == TypeKind::Void || element.kind == TypeKind::Module ||
-                        element.kind == TypeKind::Callable;
+                        (element.kind == TypeKind::Callable && !is_function_value(element));
              }))) {
             report(span, "a tuple must have one or more value types and no symbol");
         }
+        if (type.kind == TypeKind::Callable && (!type.arguments.empty() || type.name == "func") &&
+            (!is_function_value(type) || type.name != "func" ||
+             std::ranges::any_of(type.arguments.begin(), type.arguments.end() - 1,
+                                 [](const IrType& part) { return part.kind == TypeKind::Void; }))) {
+            report(span, "a function type requires a result and non-void parameters");
+        }
         if (type.kind == TypeKind::Enum &&
-            (!valid(type.symbol) || symbol(type.symbol).kind != SymbolKind::Enum || !type.arguments.empty())) {
-            report(span, "an enum type must name an enum declaration");
+            (!valid(type.symbol) || symbol(type.symbol).kind != SymbolKind::Enum ||
+             type.arguments.size() != symbol(type.symbol).generics.size())) {
+            report(span, "an enum type must name an enum declaration with its type arguments");
         }
         for (const auto& argument : type.arguments) {
             check_type_references(argument, span);
         }
     }
 
-    bool assignable(const IrType& actual, const IrType& expected, unsigned depth = 0) const {
-        if (actual == expected) {
-            return true;
-        }
-        if (depth > 8 || !valid(actual.symbol)) {
-            return false;
-        }
-        const auto& bound = symbol(actual.symbol).bound;
-        if (actual.kind == TypeKind::TypeParameter && bound) {
-            return assignable(*bound, expected, depth + 1);
-        }
-        if (actual.kind != TypeKind::Object || expected.kind != TypeKind::Object ||
-            !expected.arguments.empty()) {
-            return false;
-        }
-        std::size_t steps = 0;
-        for (auto base = symbol(actual.symbol).base; valid(base) && steps < program_.symbols.size();
-             base = symbol(base).base, ++steps) {
-            if (base == expected.symbol) {
-                return true;
-            }
-        }
-        return false;
+    bool assignable(const IrType& actual, const IrType& expected) const {
+        return nominal_assignable(program_, actual, expected);
+    }
+
+    bool class_reference(const IrType& type, unsigned depth = 0) const {
+        return (type.kind == TypeKind::Object && valid(type.symbol) &&
+                class_or_interface(symbol(type.symbol).kind)) ||
+            (type.kind == TypeKind::TypeParameter && depth < 8 && valid(type.symbol) &&
+             symbol(type.symbol).bound && class_reference(*symbol(type.symbol).bound, depth + 1));
     }
 
     void require_assignable(const IrType& actual, const IrType& expected, const Span& span,
@@ -195,6 +199,30 @@ private:
             if (entry.bound) {
                 check_type_references(*entry.bound, entry.span);
             }
+            if (!entry.additional_bounds.empty() &&
+                (entry.kind != SymbolKind::TypeParameter || !entry.bound)) {
+                report(entry.span, "additional bounds require a bounded type parameter");
+            }
+            for (const auto& bound : entry.additional_bounds) {
+                check_type_references(bound, entry.span);
+                if (bound.kind != TypeKind::Object) report(entry.span, "a bound requires a class or interface");
+            }
+            if (!entry.interfaces.empty() && !class_or_interface(entry.kind)) {
+                report(entry.span, "only classes and interfaces can have interface bases");
+            }
+            for (const auto& interface : entry.interfaces) {
+                check_type_references(interface, entry.span);
+                if (interface.kind != TypeKind::Object || !valid(interface.symbol) ||
+                    symbol(interface.symbol).kind != SymbolKind::Interface ||
+                    symbol(interface.symbol).generics.size() != interface.arguments.size()) {
+                    report(entry.span, "interface base must refer to an interface");
+                    continue;
+                }
+                const auto views = nominal_views(program_, interface);
+                if (std::ranges::find(views, id, &IrType::symbol) != views.end()) {
+                    report(entry.span, "cyclic interface inheritance");
+                }
+            }
             if (entry.kind == SymbolKind::Variant &&
                 (!valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Enum ||
                  entry.type.kind != TypeKind::Enum || entry.type.symbol != entry.owner)) {
@@ -206,7 +234,31 @@ private:
             for (const auto& payload : entry.payload_types) {
                 check_type_references(payload, entry.span);
                 if (payload.kind == TypeKind::Void || payload.kind == TypeKind::Module ||
-                    payload.kind == TypeKind::Callable) report(entry.span, "an enum payload needs a value type");
+                    (payload.kind == TypeKind::Callable && !is_function_value(payload))) {
+                    report(entry.span, "an enum payload needs a value type");
+                }
+            }
+            if (!entry.library_path.empty() &&
+                (entry.kind != SymbolKind::File || !entry.library_path.starts_with("std/") ||
+                 !entry.library_path.ends_with(".nra") || entry.library_path.find("/../") != std::string::npos ||
+                 entry.library_path.find("/./") != std::string::npos ||
+                 entry.library_path.find("//") != std::string::npos)) {
+                report(entry.span, "invalid standard library file identity");
+            }
+            if (entry.host_binding) {
+                const auto file = source_file(program_, id);
+                if (entry.kind != SymbolKind::Function || !entry.external || entry.has_body ||
+                    entry.overrides != no_symbol || !entry.generics.empty() ||
+                    !valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Module ||
+                    !valid(file) || symbol(file).library_path.empty() ||
+                    entry.host_binding->version == 0 || !host_service_name(entry.host_binding->name) ||
+                    !host_variants(program_, entry.type)) {
+                    report(entry.span, "invalid standard library host binding");
+                }
+                for (auto parameter : entry.parameters) {
+                    if (valid(parameter) && !host_data_type(symbol(parameter).type))
+                        report(entry.span, "this parameter cannot cross the host boundary");
+                }
             }
         }
     }
@@ -235,6 +287,7 @@ private:
             case SymbolKind::File:
             case SymbolKind::Module:
             case SymbolKind::Class:
+            case SymbolKind::Interface:
                 break;
             default:
                 report(span, "symbol " + name(body.owner) + " cannot own a body");
@@ -358,6 +411,12 @@ private:
                 report(node.span, "fail names unknown failure '" + node.text + "'");
             }
             break;
+        case IrOp::TrapMessage:
+            if (expect_operands(node, 1, "trap with a message")) {
+                check_value(node.operands.front(), context);
+                expect_type(node.operands.front(), TypeKind::String, "trap message");
+            }
+            break;
         case IrOp::Destroy:
             if (expect_operands(node, 1, "destroy")) {
                 const auto& object = node.operands.front();
@@ -455,6 +514,41 @@ private:
             check_value(operand, context);
         }
         switch (node.op) {
+        case IrOp::ValueEquals:
+        case IrOp::ValueHash:
+        case IrOp::ValueText: {
+            const bool equality = node.op == IrOp::ValueEquals;
+            if (expect_operands(node, equality ? 2 : 1, "value member") && equality)
+                require_assignable(node.operands[1].type, node.operands[0].type, node.span, "equals argument");
+            const auto expected = equality ? IrType{TypeKind::Bool, "bool", no_symbol, {}} :
+                node.op == IrOp::ValueHash ? IrType{TypeKind::Integer, "uint32", no_symbol, {}} :
+                IrType{TypeKind::String, "string", no_symbol, {}};
+            if (node.type != expected) report(node.span, "value member has an invalid result type");
+            break;
+        }
+        case IrOp::Nil:
+            expect_operands(node, 0, "nil");
+            if (!class_reference(node.type)) report(node.span, "nil must have a class reference type");
+            break;
+        case IrOp::ClassHash:
+        case IrOp::ClassText:
+        case IrOp::ClassCast:
+        case IrOp::ClassIs: {
+            if (expect_operands(node, 1, "class operation") && !class_reference(node.operands.front().type))
+                report(node.span, "class operation requires a class reference");
+            if (node.op == IrOp::ClassCast && !class_reference(node.type))
+                report(node.span, "class cast must produce a class reference");
+            if (node.op == IrOp::ClassIs) {
+                expect_type(node, TypeKind::Bool, "class test");
+                if (node.type_arguments.size() != 1 || !class_reference(node.type_arguments.front()))
+                    report(node.span, "class test must name a class reference type");
+            } else if (node.op == IrOp::ClassHash && node.type != IrType{TypeKind::Integer, "uint32", no_symbol, {}}) {
+                report(node.span, "class hash must produce uint32");
+            } else if (node.op == IrOp::ClassText) {
+                expect_type(node, TypeKind::String, "class text");
+            }
+            break;
+        }
         case IrOp::Load: check_load(node, context); break;
         case IrOp::Field:
             check_symbol_kind(node, {SymbolKind::Field}, "field");
@@ -474,15 +568,16 @@ private:
         case IrOp::Reference:
             expect_operands(node, 0, "reference");
             check_symbol_kind(node, {SymbolKind::Variant, SymbolKind::Module, SymbolKind::Import,
-                                     SymbolKind::Class, SymbolKind::Alias, SymbolKind::Enum},
+                                     SymbolKind::Class, SymbolKind::Interface, SymbolKind::Alias, SymbolKind::Enum},
                               "reference");
             if (valid(node.symbol) && symbol(node.symbol).kind == SymbolKind::Variant &&
-                (node.type != symbol(node.symbol).type || has_enum_payload(program_, symbol(node.symbol).owner)))
+                (node.type.kind != TypeKind::Enum || node.type.symbol != symbol(node.symbol).owner ||
+                 has_enum_payload(program_, symbol(node.symbol).owner)))
                 report(node.span, "a payload enum value requires a variant constructor");
             break;
         case IrOp::Receiver:
             expect_operands(node, 0, "receiver");
-            check_symbol_kind(node, {SymbolKind::Class, SymbolKind::Module}, "receiver");
+            check_symbol_kind(node, {SymbolKind::Class, SymbolKind::Interface, SymbolKind::Module}, "receiver");
             break;
         case IrOp::Collection:
             if (!is_collection(node.type)) {
@@ -538,6 +633,21 @@ private:
         case IrOp::Binary: check_binary(node); break;
         case IrOp::ShortCircuit: check_short_circuit(node, context); break;
         case IrOp::ComparisonChain: check_comparison_chain(node, context); break;
+        case IrOp::TextLength:
+        case IrOp::TextByteAt:
+        case IrOp::TextSlice:
+        case IrOp::TextFromUtf8:
+        case IrOp::TextEqual:
+            check_text_operation(node);
+            break;
+        case IrOp::ReinterpretFloat:
+            if (expect_operands(node, 1, "float bit reinterpretation")) {
+                const auto& source = node.operands.front().type;
+                if (float_bits_type(source) != std::optional{node.type} &&
+                    float_bits_type(node.type) != std::optional{source})
+                    report(node.span, "float bit reinterpretation requires an unsigned integer of the same width");
+            }
+            break;
         case IrOp::ScopedValue:
             check_scoped_value(node, context);
             break;
@@ -551,6 +661,12 @@ private:
             }
             check_arity(node, 0);
             check_type_arguments(node);
+            break;
+        case IrOp::MakeClosure:
+            check_make_closure(node);
+            break;
+        case IrOp::CallClosure:
+            check_call_closure(node);
             break;
         case IrOp::VirtualCall:
             if (check_symbol_kind(node, {SymbolKind::Function}, "virtual call") &&
@@ -664,6 +780,66 @@ private:
         }
     }
 
+    void check_make_closure(const IrNode& node) {
+        if (!is_function_value(node.type)) {
+            report(node.span, "closure construction requires a function type");
+            return;
+        }
+        if (!check_symbol_kind(node, {SymbolKind::Function}, "closure constructor")) return;
+        const auto& constructor = symbol(node.symbol);
+        if (constructor.name != "init" || !constructor.has_body || !valid(constructor.owner) ||
+            symbol(constructor.owner).kind != SymbolKind::Class ||
+            !symbol(constructor.owner).name.starts_with("$closure")) {
+            report(node.span, "closure constructor must initialize a closure environment");
+            return;
+        }
+        const auto& layout = symbol(constructor.owner);
+        if (node.type_arguments.size() != layout.generics.size()) {
+            report(node.span, "closure environment has the wrong number of type arguments");
+            return;
+        }
+        const auto instantiate = [&](IrType type) {
+            return substitute_type(std::move(type), layout.generics, node.type_arguments);
+        };
+        check_arity(node, 0);
+        for (std::size_t i = 0; i < std::min(node.operands.size(), constructor.parameters.size()); ++i) {
+            if (valid(constructor.parameters[i])) {
+                require_assignable(node.operands[i].type, instantiate(symbol(constructor.parameters[i]).type),
+                                   node.operands[i].span, "captured value");
+            }
+        }
+        const auto method = std::ranges::find_if(program_.symbols, [&](const IrSymbol& item) {
+            return item.owner == constructor.owner && item.name == "$invoke" && item.kind == SymbolKind::Function;
+        });
+        const auto& signature = node.type.arguments;
+        if (method == program_.symbols.end() || !method->has_body || method->parameters.size() + 1 != signature.size() ||
+            instantiate(method->type) != signature.back()) {
+            report(node.span, "closure body does not have its declared function type");
+            return;
+        }
+        for (std::size_t i = 0; i < method->parameters.size(); ++i) {
+            if (!valid(method->parameters[i]) || instantiate(symbol(method->parameters[i]).type) != signature[i]) {
+                report(node.span, "closure parameter does not have its declared type");
+            }
+        }
+    }
+
+    void check_call_closure(const IrNode& node) {
+        if (node.symbol != no_symbol || !node.type_arguments.empty() || node.operands.empty() ||
+            !is_function_value(node.operands.front().type)) {
+            report(node.span, "a function-value call needs a callable operand and no type arguments");
+            return;
+        }
+        const auto& signature = node.operands.front().type.arguments;
+        if (node.operands.size() != signature.size() || node.type != signature.back()) {
+            report(node.span, "function-value call does not match its signature");
+            return;
+        }
+        for (std::size_t i = 1; i < node.operands.size(); ++i) {
+            require_assignable(node.operands[i].type, signature[i - 1], node.operands[i].span, "function argument");
+        }
+    }
+
     // A generic call supplies one type argument per type parameter, and each
     // satisfies its parameter's bound. Lowering checks bounds too, but a .nir
     // file reaches the backend without lowering.
@@ -678,17 +854,17 @@ private:
             return;
         }
         for (std::size_t i = 0; i < generics.size(); ++i) {
-            if (!valid(generics[i]) || !symbol(generics[i]).bound) {
-                continue;
-            }
-            auto bound = *symbol(generics[i]).bound;
-            for (std::size_t j = 0; j < generics.size(); ++j) {
-                bound = substitute(std::move(bound), generics[j], node.type_arguments[j]);
-            }
-            if (!assignable(node.type_arguments[i], bound)) {
-                report(node.span, "type argument " + describe(node.type_arguments[i]) + " does not satisfy the bound " +
-                                  describe(bound) + " of " + name(generics[i]));
-            }
+            if (!valid(generics[i])) continue;
+            const auto& parameter = symbol(generics[i]);
+            const auto check = [&](const IrType& declared) {
+                const auto bound = substitute_type(declared, generics, node.type_arguments);
+                if (!assignable(node.type_arguments[i], bound)) {
+                    report(node.span, "type argument " + describe(node.type_arguments[i]) + " does not satisfy the bound " +
+                                      describe(bound) + " of " + name(generics[i]));
+                }
+            };
+            if (parameter.bound) check(*parameter.bound);
+            for (const auto& bound : parameter.additional_bounds) check(bound);
         }
     }
 
@@ -802,10 +978,43 @@ private:
         }
     }
 
+    void check_text_operation(const IrNode& node) {
+        const IrType integer{TypeKind::Integer, "int32", no_symbol, {}};
+        const IrType byte{TypeKind::Integer, "uint8", no_symbol, {}};
+        const IrType boolean{TypeKind::Bool, "bool", no_symbol, {}};
+        const IrType text{TypeKind::String, "string", no_symbol, {}};
+        if (node.op == IrOp::TextFromUtf8) {
+            if (expect_operands(node, 1, "string.from_utf8")) {
+                const auto& source = node.operands.front().type;
+                if (!is_collection(source) || source.arguments.front() != byte) {
+                    report(node.span, "string.from_utf8 requires an array or list of bytes");
+                }
+            }
+            if (node.type != IrType{TypeKind::Tuple, {}, no_symbol, {boolean, text}}) {
+                report(node.span, "string.from_utf8 must return [bool, string]");
+            }
+            return;
+        }
+        const std::size_t arity = node.op == IrOp::TextLength ? 1 : node.op == IrOp::TextSlice ? 3 : 2;
+        if (expect_operands(node, arity, "text operation")) {
+            require_assignable(node.operands.front().type, text, node.span, "text receiver");
+            const auto& argument_type = node.op == IrOp::TextEqual ? text : integer;
+            for (std::size_t i = 1; i < arity; ++i)
+                require_assignable(node.operands[i].type, argument_type, node.operands[i].span, "text argument");
+        }
+        const auto& result_type = node.op == IrOp::TextLength ? integer : node.op == IrOp::TextByteAt ? byte
+                                : node.op == IrOp::TextSlice ? text : boolean;
+        if (node.type != result_type) report(node.span, "text operation has an invalid result type");
+        if (node.op == IrOp::TextEqual && node.text != "==" && node.text != "!=") {
+            report(node.span, "text comparison requires == or !=");
+        }
+    }
+
     void check_enum_construct(const IrNode& node) {
         if (!check_symbol_kind(node, {SymbolKind::Variant}, "enum construction")) return;
         const auto& variant = symbol(node.symbol);
-        if (node.type != variant.type || !has_enum_payload(program_, variant.owner))
+        if (node.type.kind != TypeKind::Enum || node.type.symbol != variant.owner ||
+            !has_enum_payload(program_, variant.owner))
             report(node.span, "enum construction result must be its variant's enum with payloads");
         if (!expect_operands(node, variant.payload_types.size(), "enum construction")) return;
         const auto order = enum_field_order(node.text, variant.payload_types.size());
@@ -814,8 +1023,17 @@ private:
             return;
         }
         for (std::size_t i = 0; i < node.operands.size(); ++i)
-            require_assignable(node.operands[i].type, variant.payload_types[(*order)[i]],
+            require_assignable(node.operands[i].type, enum_payload_type(node.type, variant.payload_types[(*order)[i]]),
                                node.operands[i].span, "enum payload");
+    }
+
+    IrType enum_payload_type(const IrType& type, IrType field) const {
+        if (type.kind == TypeKind::Enum && valid(type.symbol)) {
+            const auto& generics = symbol(type.symbol).generics;
+            for (std::size_t i = 0; i < std::min(generics.size(), type.arguments.size()); ++i)
+                field = substitute(std::move(field), generics[i], type.arguments[i]);
+        }
+        return field;
     }
 
     void check_projection(const IrNode& node) {
@@ -830,14 +1048,15 @@ private:
         } else {
             if (!check_symbol_kind(node, {SymbolKind::Variant}, "enum projection")) return;
             const auto& variant = symbol(node.symbol);
-            if (source != variant.type) {
+            if (source.kind != TypeKind::Enum || source.symbol != variant.owner) {
                 report(node.span, "enum projection requires a value of the variant's enum type");
                 return;
             }
             fields = &variant.payload_types;
         }
         const auto index = aggregate_index(node.text);
-        if (!index || *index >= fields->size() || node.type != (*fields)[*index])
+        if (!index || *index >= fields->size() ||
+            node.type != (node.op == IrOp::Project ? (*fields)[*index] : enum_payload_type(source, (*fields)[*index])))
             report(node.span, "projection index or result type does not match the aggregate field");
     }
 
@@ -848,6 +1067,10 @@ private:
         const auto& left = node.operands[0].type;
         const auto& right = node.operands[1].type;
         const auto& op = node.text;
+        if ((op == "==" || op == "!=") && class_reference(left) && class_reference(right)) {
+            expect_type(node, TypeKind::Bool, "class comparison");
+            return;
+        }
         if (is_shift(op)) {
             if (left.kind != TypeKind::Integer || right.kind != TypeKind::Integer || node.type != left) {
                 report(node.span, "a shift takes two integers and produces the left operand's type");

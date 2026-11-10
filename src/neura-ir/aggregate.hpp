@@ -15,6 +15,29 @@ inline bool has_enum_payload(const IrProgram& program, SymbolId enumeration) {
     });
 }
 
+// Whether `equals`, `hash_code`, and `to_string` are built in for a type
+// (Types.md): scalars, strings, fieldless enums, class references, and
+// tuples, arrays, and lists of such types. Enums with payloads and function
+// values have none.
+inline bool supports_value_members(const IrProgram& program, const IrType& type) {
+    switch (type.kind) {
+    case TypeKind::Void:
+    case TypeKind::Module:
+    case TypeKind::Callable:
+        return false;
+    case TypeKind::Enum:
+        return !has_enum_payload(program, type.symbol);
+    case TypeKind::Array:
+    case TypeKind::List:
+    case TypeKind::Tuple:
+        return std::ranges::all_of(type.arguments, [&](const IrType& part) {
+            return supports_value_members(program, part);
+        });
+    default:
+        return true;
+    }
+}
+
 inline std::size_t enum_ordinal(const IrProgram& program, SymbolId variant) {
     const auto owner = program.symbols[variant].owner;
     std::size_t ordinal = 0;

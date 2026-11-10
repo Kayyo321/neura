@@ -115,6 +115,12 @@ std::uint64_t FloatFormat::canonical_nan() const {
     return exponent | (std::uint64_t{1} << (fraction_bits - 1));
 }
 
+std::optional<IrType> float_bits_type(const IrType& type) {
+    const auto format = float_format(type);
+    if (!format) return std::nullopt;
+    return IrType{TypeKind::Integer, "uint" + std::to_string(format->width()), no_symbol, {}};
+}
+
 std::optional<FloatFormat> float_format(const IrType& type) {
     if (type.kind != TypeKind::Float) {
         return {};

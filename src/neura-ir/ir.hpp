@@ -3,6 +3,7 @@
 #include "util/diagnostic.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <iosfwd>
 #include <optional>
 #include <string>
@@ -29,9 +30,20 @@ struct IrType {
     bool operator==(const IrType&) const = default;
 };
 
+// Callable references to named declarations and built-in methods have no
+// structural signature. Function values list parameter types then the result.
+inline bool is_function_value(const IrType& type) {
+    return type.kind == TypeKind::Callable && type.symbol == no_symbol && !type.arguments.empty();
+}
+
 enum class SymbolKind {
     File, Module, Class, Alias, Import, Field, Function, Parameter, Local, Global,
-    TypeParameter, Enum, Variant
+    TypeParameter, Enum, Variant, Interface
+};
+
+struct IrHostBinding {
+    std::string name;
+    std::uint32_t version = 0;
 };
 
 struct IrSymbol {
@@ -51,6 +63,13 @@ struct IrSymbol {
     bool has_body = false;
     // Only enum variants have payload types, in declaration order.
     std::vector<IrType> payload_types{};
+    // Set on files loaded from the trusted standard library root.
+    std::string library_path{};
+    std::optional<IrHostBinding> host_binding{};
+    // Implemented or extended interfaces, with their type arguments.
+    std::vector<IrType> interfaces{};
+    // The first bound stays in bound for compatibility with older NIR.
+    std::vector<IrType> additional_bounds{};
 };
 
 enum class IrOp {
@@ -64,7 +83,13 @@ enum class IrOp {
     Tuple, Project, EnumConstruct, EnumTag, EnumProject, ComparisonChain,
     // ScopedValue has local initializers followed by a result expression in
     // body. SelectValue evaluates one result region based on its operand.
-    ScopedValue, SelectValue
+    ScopedValue, SelectValue,
+    // NeuraIR 1.3. Specialization gives structural function values concrete
+    // object layouts and rewrites these operations to allocation and dispatch.
+    MakeClosure, CallClosure,
+    TextLength, TextByteAt, TextSlice, TextFromUtf8, TextEqual, ReinterpretFloat, TrapMessage,
+    Nil, ClassHash, ClassText, ClassIs, ClassCast,
+    ValueEquals, ValueHash, ValueText
 };
 
 struct IrNode {
