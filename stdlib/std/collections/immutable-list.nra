@@ -162,26 +162,20 @@ export let ImmutableList = module (
             if (that.size() != count) {
                 return false;
             }
-            let i = 0;
-            while (i < count) {
-                if (!storage[i].equals(that.get(i))) {
+            for (let i = 0; i < count; i++) {
+                if (!(storage[i] === that.get(i))) {
                     return false;
                 }
-                i = i + 1;
             }
             return true;
         };
 
         // The list formula of section 5.2.
-        export let.override hash_code = func() -> uint32 {
-            return storage.hash_code();
-        };
+        export let.override hash_code = func -> uint32 => storage.hash_code();
 
         // `[a, b, c]`. The elements exist before the list, so it can never
         // contain itself.
-        export let.override to_string = func() -> string {
-            return storage.to_string();
-        };
+        export let.override to_string = func -> string => storage.to_string();
     );
 
     let ImmutableListIterator = class<T> implements iterators.Iterator<T> (

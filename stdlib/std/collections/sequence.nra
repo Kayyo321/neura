@@ -568,9 +568,7 @@ export let Sequence = module (
             return groups;
         };
 
-        export let.override to_string = func() -> string {
-            return "Sequence";
-        };
+        export let.override to_string = func -> string => "Sequence";
 
         // Marks the sequence used and returns its has_next function, for an
         // operation of another sequence that consumes this one.

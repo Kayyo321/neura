@@ -1,3 +1,5 @@
+let hashing = import:Std.Core.Hash;
+
 // An immutable arithmetic progression of int values (Stdlib.md section 6.5):
 // `start` inclusive, `end` exclusive, and a nonzero `step`. A negative step
 // counts down while the value is greater than `end`. Positions and sizes are
@@ -17,17 +19,29 @@ export let IntRange = module (
             increment = step_value;
         };
 
-        export let start = func() -> int {
-            return first;
+        export let start = func -> int => first;
+
+        export let end = func -> int => limit;
+
+        export let step = func -> int => increment;
+
+        // Progressions compare by their defining bounds and step.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is IntRange)) {
+                return false;
+            }
+            let that = other as IntRange;
+            return first == that.first && limit == that.limit && increment == that.increment;
         };
 
-        export let end = func() -> int {
-            return limit;
+        export let.override hash_code = func -> uint32 {
+            let start_hash = hashing.combine(17, first.hash_code());
+            let bounds_hash = hashing.combine(start_hash, limit.hash_code());
+            return hashing.combine(bounds_hash, increment.hash_code());
         };
 
-        export let step = func() -> int {
-            return increment;
-        };
+        export let.override to_string = func -> string =>
+            first.to_string() + ".." + limit.to_string() + ":" + increment.to_string();
 
         // The number of values. Computed in int64; a range with more than
         // Int32.Max values traps (reason 1) in the conversion to int.
@@ -35,12 +49,7 @@ export let IntRange = module (
             return count() as int;
         };
 
-        export let is_empty = func() -> bool {
-            if (increment > 0) {
-                return first >= limit;
-            }
-            return first <= limit;
-        };
+        export let is_empty = func -> bool => (increment > 0) ? first >= limit : first <= limit;
 
         export let contains = func(value: int) -> bool {
             let offset = (value as int64) - (first as int64);
@@ -69,12 +78,12 @@ export let IntRange = module (
             if (increment > 0) {
                 while (current < stop) {
                     values.append(current as int);
-                    current = current + stride;
+                    current += stride;
                 }
             } else {
                 while (current > stop) {
                     values.append(current as int);
-                    current = current + stride;
+                    current += stride;
                 }
             }
             return values;

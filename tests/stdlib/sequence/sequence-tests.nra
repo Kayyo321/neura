@@ -265,11 +265,14 @@ let SequenceTests = module (
         test.assert_equal_string("[100, 200]", keys.to_string());
     };
 
-    export let test_identity_and_text = func() -> void {
+    export let test_identity_and_text = func {
         let s = sequence.range(0, 2);
         let t = sequence.range(0, 2);
         test.assert_equal_string("Sequence", s.to_string());
-        test.assert(s.equals(s));
-        test.assert(!s.equals(t));
+        test.assert(s === s);
+        test.assert(!(s === t));
+        let hash = s.hash_code();
+        test.assert_equal_int32(2, s.count());
+        test.assert(hash == s.hash_code());
     };
 );

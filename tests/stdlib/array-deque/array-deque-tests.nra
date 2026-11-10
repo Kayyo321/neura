@@ -121,14 +121,17 @@ let ArrayDequeTests = module (
     };
 
     // Equality and hashing are by identity; the text lists the elements.
-    export let test_identity_and_text = func() -> void {
+    export let test_identity_and_text = func {
         let a = array_deque.of<int>([1, 2]);
         let b = array_deque.of<int>([1, 2]);
-        test.assert(a.equals(a));
-        test.assert(!a.equals(b));
+        test.assert(a === a);
+        test.assert(!(a === b));
         let as_class: class = a;
-        test.assert(as_class.hash_code() == as_class.hash_code());
+        let hash = as_class.hash_code();
         test.assert_equal_string("[1, 2]", a.to_string());
+        a.add_last(3);
+        test.assert(hash == as_class.hash_code());
+        a.remove_last();
         let objects = array_deque.create<class>();
         objects.add_last(objects);
         objects.add_first(nil);

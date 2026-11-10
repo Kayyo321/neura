@@ -7,7 +7,7 @@ let IntRangeTests = module (
         test.assert_equal_string(expected, values.to_string());
         test.assert_equal_int32(values.length, r.size());
         test.assert_equal_bool(values.length == 0, r.is_empty());
-        for (let i = 0; i < values.length; i = i + 1) {
+        for (let i = 0; i < values.length; i++) {
             test.assert_equal_int32(values[i], r.get(i));
             test.assert(r.contains(values[i]));
         }
@@ -22,6 +22,22 @@ let IntRangeTests = module (
         test.assert_equal_int32(-2, s.start());
         test.assert_equal_int32(2, s.end());
         test.assert_equal_int32(1, s.step());
+    };
+
+    export let test_value_members = func {
+        let a = ranges.stepped(1, 10, 3);
+        let b = ranges.stepped(1, 10, 3);
+        test.assert(a != b);
+        test.assert(a === b && b === a);
+        test.assert(a.hash_code() == b.hash_code());
+        test.assert(a.hash_code() == 507721);
+        test.assert(!(a === ranges.stepped(2, 10, 3)));
+        test.assert(!(a === ranges.stepped(1, 9, 3)));
+        test.assert(!(a === ranges.stepped(1, 10, 2)));
+        test.assert(!(a === nil));
+        test.assert_equal_string("1..10:3", a.to_string());
+        test.assert_equal_string("-4..-11:-3", ranges.stepped(-4, -11, -3).to_string());
+        test.assert(ranges.of(1, 10) === ranges.stepped(1, 10, 1));
     };
 
     export let test_of = func() -> void {

@@ -18,26 +18,19 @@ export let ArrayDeque = module (
         let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
         let printing_depth: int = 0;
 
-        let changed = func() -> void {
-            modifications.value = modifications.value + 1;
+        let changed = func {
+            modifications.value += 1;
         };
 
-        export let size = func() -> int {
-            return front.length + back.length;
-        };
+        export let size = func -> int => front.length + back.length;
 
-        export let is_empty = func() -> bool {
-            return front.length == 0 && back.length == 0;
-        };
+        export let is_empty = func -> bool => front.length == 0 && back.length == 0;
 
         // The element at `index` from the first, in constant time. A bounds
         // trap for an index outside 0 through size() - 1.
         export let get = func(index: int) -> T {
             let split = front.length;
-            if (index < split) {
-                return front[split - 1 - index];
-            }
-            return back[index - split];
+            return (index < split) ? front[split - 1 - index] : back[index - split];
         };
 
         export let add_first = func(value: T) -> void {
@@ -179,12 +172,12 @@ export let ArrayDeque = module (
         // By equals, with `value` as the receiver.
         export let contains = func(value: T) -> bool {
             for (let element in front) {
-                if (value.equals(element)) {
+                if (value === element) {
                     return true;
                 }
             }
             for (let element in back) {
-                if (value.equals(element)) {
+                if (value === element) {
                     return true;
                 }
             }

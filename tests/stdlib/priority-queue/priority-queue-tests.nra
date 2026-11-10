@@ -148,12 +148,15 @@ let PriorityQueueTests = module (
     };
 
     // Equality and hashing are by identity.
-    export let test_identity_and_text = func() -> void {
+    export let test_identity_and_text = func {
         let a = priority_queue.from_list<int>([1], compare);
         let b = priority_queue.from_list<int>([1], compare);
-        test.assert(a.equals(a));
-        test.assert(!a.equals(b));
+        test.assert(a === a);
+        test.assert(!(a === b));
+        let hash = a.hash_code();
         test.assert_equal_string("[1]", a.to_string());
+        a.enqueue(2);
+        test.assert(hash == a.hash_code());
     };
 
     export let test_interfaces = func() -> void {

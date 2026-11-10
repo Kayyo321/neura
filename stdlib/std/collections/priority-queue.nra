@@ -69,7 +69,7 @@ export let PriorityQueue = module (
         let sift_down = func(start: int, item: T, expected: uint64) -> void {
             let count = heap.length;
             let index = start;
-            while (true) {
+            do {
                 let child = 2 * index + 1;
                 if (child >= count) {
                     break;
@@ -88,13 +88,9 @@ export let PriorityQueue = module (
             heap[index] = item;
         };
 
-        export let size = func() -> int {
-            return heap.length;
-        };
+        export let size = func -> int => heap.length;
 
-        export let is_empty = func() -> bool {
-            return heap.length == 0;
-        };
+        export let is_empty = func -> bool => heap.length == 0;
 
         export let enqueue = func(value: T) -> void {
             let expected = modifications.value;
@@ -154,7 +150,7 @@ export let PriorityQueue = module (
         // By equals, with `value` as the receiver.
         export let contains = func(value: T) -> bool {
             for (let element in heap) {
-                if (value.equals(element)) {
+                if (value === element) {
                     return true;
                 }
             }
