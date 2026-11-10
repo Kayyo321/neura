@@ -1,0 +1,82 @@
+let.promote _ = import:Std.DynamicForeign.MemoryLayout;
+let.promote _ = import:Std.DynamicForeign.MemorySegment;
+let native = import:Std.DynamicForeign.Internal.Native;
+let scopes = import:Std.DynamicForeign.Internal.Scope;
+
+/// @brief An owner of native memory and libraries (ForeignInterop.md), the counterpart of Java's Arena.
+///
+/// A confined arena frees everything it allocated, and unloads the libraries loaded through it, when it is
+/// closed; later access through its segments traps. Neura has one thread, so a confined arena is also a shared
+/// one. The global arena is never closed; its memory lives until the end of the run. Allocated memory is zeroed.
+/// Needs the native capability.
+/// @see [Std.DynamicForeign.Arena](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-Arena)
+export let Arena = module (
+    /// @brief A lifetime for native memory.
+    export let Arena = class (
+        /// @brief The scope shared with the arena's segments.
+        let lifetime: scopes.Scope;
+
+        /// @brief Use of_confined or global.
+        export let init = func(scope: scopes.Scope) {
+            lifetime = scope;
+        };
+
+        /// @brief `size` zeroed bytes aligned to `alignment`, a power of two up to 4096.
+        export let allocate = func(size: int64, alignment: int64) -> MemorySegment {
+            if (size < 0) {
+                trap_with_message("invalid argument: negative size");
+            }
+            if (alignment < 1 || alignment > 4096 || (alignment & (alignment - 1)) != 0) {
+                trap_with_message("invalid argument: alignment is not a power of two up to 4096");
+            }
+            let address = native.allocate(lifetime.id(), size, alignment);
+            return new MemorySegment(address, size, lifetime);
+        }
+        /// @brief Zeroed memory for one value of `layout`.
+        or func(layout: MemoryLayout) -> MemorySegment => allocate(layout.byte_size(), layout.byte_alignment());
+
+        /// @brief Zeroed memory for `count` consecutive values of `layout`.
+        export let allocate_array = func(layout: MemoryLayout, count: int64) -> MemorySegment {
+            if (count < 0) {
+                trap_with_message("invalid argument: negative element count");
+            }
+            let element = align_up(layout.byte_size(), layout.byte_alignment());
+            return allocate(element * count, layout.byte_alignment());
+        };
+
+        /// @brief The UTF-8 bytes of `text` followed by a NUL, as a C string. Traps if `text` contains a NUL.
+        export let allocate_utf8 = func(text: string) -> MemorySegment {
+            let segment = allocate((text.byte_length as int64) + 1, 1);
+            segment.set_utf8(0, text);
+            return segment;
+        };
+
+        /// @brief A copy of `bytes` in native memory.
+        export let allocate_bytes = func(bytes: uint8[list]) -> MemorySegment {
+            let segment = allocate(bytes.length as int64, 1);
+            segment.copy_from_bytes(0, bytes);
+            return segment;
+        };
+
+        /// @brief Whether the arena is still open.
+        export let is_alive = func -> bool => lifetime.is_alive();
+
+        /// @brief The scope shared with the arena's segments, for library code.
+        export let scope = func -> scopes.Scope => lifetime;
+
+        /// @brief Frees the arena's memory and unloads its libraries. Closing twice, or closing the global arena,
+        /// traps.
+        export let close = func {
+            lifetime.close();
+        };
+    );
+
+    /// @brief A new arena that frees its memory when closed (Java's Arena.ofConfined).
+    export let of_confined = func -> Arena => new Arena(new scopes.Scope(false));
+
+    /// @brief The same as of_confined: Neura runs on one thread (Java's Arena.ofShared).
+    export let of_shared = func -> Arena => of_confined();
+
+    /// @brief The arena whose memory lives until the end of the run (Java's Arena.global).
+    export let global = func -> Arena => new Arena(scopes.global());
+);

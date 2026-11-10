@@ -1,0 +1,109 @@
+let.promote _ = import:Std.DynamicForeign.MemorySegment;
+
+/// @brief A value passed to or returned from a native function (ForeignInterop.md).
+///
+/// A struct passed or returned by value travels as a segment that holds its bytes.
+/// @see [Std.DynamicForeign.ForeignValue](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-ForeignValue)
+export let ForeignValue = module (
+    /// @brief A native argument or result, tagged by its carrier.
+    export let ForeignValue = enum (
+        Void,
+        Bool(bool),
+        Int8(int8),
+        UInt8(uint8),
+        Int16(int16),
+        UInt16(uint16),
+        Int32(int32),
+        UInt32(uint32),
+        Int64(int64),
+        UInt64(uint64),
+        Float32(float32),
+        Float64(float64),
+        Address(MemorySegment),
+        Struct(MemorySegment)
+    );
+
+    /// @brief Traps with "invalid argument: expected <kind>, got <value>".
+    let mismatch = func(expected: string, value: ForeignValue) {
+        trap_with_message("invalid argument: expected " + expected + ", got " + describe(value));
+    };
+
+    /// @brief The value of a Bool result.
+    export let as_bool = func(value: ForeignValue) -> bool {
+        match (value) {
+            ForeignValue.Bool(v) => { return v; },
+            _ => { mismatch("Bool", value); return false; },
+        }
+    };
+
+    /// @brief The value of any signed or unsigned integer result that fits in an int32.
+    export let as_int32 = func(value: ForeignValue) -> int32 => as_int64(value) as int32;
+
+    /// @brief The value of any integer result that fits in an int64, or of a Bool as 0 or 1.
+    export let as_int64 = func(value: ForeignValue) -> int64 {
+        match (value) {
+            ForeignValue.Bool(v) => { return v ? 1 : 0; },
+            ForeignValue.Int8(v) => { return v as int64; },
+            ForeignValue.UInt8(v) => { return v as int64; },
+            ForeignValue.Int16(v) => { return v as int64; },
+            ForeignValue.UInt16(v) => { return v as int64; },
+            ForeignValue.Int32(v) => { return v as int64; },
+            ForeignValue.UInt32(v) => { return v as int64; },
+            ForeignValue.Int64(v) => { return v; },
+            ForeignValue.UInt64(v) => { return v as int64; },
+            _ => { mismatch("an integer", value); return 0; },
+        }
+    };
+
+    /// @brief The value of a UInt64 result, or of any non-negative integer result.
+    export let as_uint64 = func(value: ForeignValue) -> uint64 {
+        match (value) {
+            ForeignValue.UInt64(v) => { return v; },
+            _ => { return as_int64(value) as uint64; },
+        }
+    };
+
+    /// @brief The value of a Float32 result.
+    export let as_float32 = func(value: ForeignValue) -> float32 {
+        match (value) {
+            ForeignValue.Float32(v) => { return v; },
+            _ => { mismatch("Float32", value); return 0.0 as float32; },
+        }
+    };
+
+    /// @brief The value of a Float32 or Float64 result as a float64.
+    export let as_float64 = func(value: ForeignValue) -> float64 {
+        match (value) {
+            ForeignValue.Float32(v) => { return v as float64; },
+            ForeignValue.Float64(v) => { return v; },
+            _ => { mismatch("a float", value); return 0.0; },
+        }
+    };
+
+    /// @brief The segment of an Address or Struct result.
+    export let as_segment = func(value: ForeignValue) -> MemorySegment {
+        match (value) {
+            ForeignValue.Address(v) => { return v; },
+            ForeignValue.Struct(v) => { return v; },
+            _ => { mismatch("Address", value); return null_segment(); },
+        }
+    };
+
+    /// @brief A short description such as `Int32(8)`.
+    export let describe = func(value: ForeignValue) -> string => match (value) {
+        ForeignValue.Void => "Void",
+        ForeignValue.Bool(v) => "Bool(" + v.to_string() + ")",
+        ForeignValue.Int8(v) => "Int8(" + v.to_string() + ")",
+        ForeignValue.UInt8(v) => "UInt8(" + v.to_string() + ")",
+        ForeignValue.Int16(v) => "Int16(" + v.to_string() + ")",
+        ForeignValue.UInt16(v) => "UInt16(" + v.to_string() + ")",
+        ForeignValue.Int32(v) => "Int32(" + v.to_string() + ")",
+        ForeignValue.UInt32(v) => "UInt32(" + v.to_string() + ")",
+        ForeignValue.Int64(v) => "Int64(" + v.to_string() + ")",
+        ForeignValue.UInt64(v) => "UInt64(" + v.to_string() + ")",
+        ForeignValue.Float32(v) => "Float32(" + v.to_string() + ")",
+        ForeignValue.Float64(v) => "Float64(" + v.to_string() + ")",
+        ForeignValue.Address(v) => "Address(" + v.to_string() + ")",
+        ForeignValue.Struct(v) => "Struct(" + v.to_string() + ")",
+    };
+);

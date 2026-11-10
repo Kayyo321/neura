@@ -154,6 +154,31 @@ NEURA_TEST(vm, graph_overflow_traps_before_the_exit) {
     expect_trap(image, TrapKind::GraphOverflow, "node 0");
 }
 
+NEURA_TEST(vm, traps_map_to_signal_exit_statuses) {
+    const auto status = [](TrapKind kind, std::uint32_t reason = 0) {
+        nvm::Trap trap;
+        trap.kind = kind;
+        trap.reason = reason;
+        return nvm::exit_status(trap);
+    };
+    check(status(TrapKind::Program, 1) == 136, "arithmetic traps use ArithmeticError");
+    check(status(TrapKind::Program, 2) == 139, "bounds traps use SegmentationFault");
+    check(status(TrapKind::Program, 3) == 134, "message traps use Abort");
+    check(status(TrapKind::Program, 4) == 132, "invalid dispatch uses IllegalInstruction");
+    check(status(TrapKind::Program, 5) == 134, "modification during iteration uses Abort");
+    check(status(TrapKind::Program, 99) == 132, "an undefined reason uses IllegalInstruction");
+    check(status(TrapKind::InvalidCast) == 134, "a failed cast uses Abort");
+    for (const auto kind : {TrapKind::UninitializedSlot, TrapKind::UninitializedField, TrapKind::UninitializedGlobal,
+                            TrapKind::InvalidHandle, TrapKind::NilReference, TrapKind::IndexOutOfBounds,
+                            TrapKind::FrameLimit})
+        check(status(kind) == 139, std::string(nvm::describe(kind)) + " uses SegmentationFault");
+    for (const auto kind : {TrapKind::GraphOverflow, TrapKind::NonBinaryLane, TrapKind::InvalidSelector,
+                            TrapKind::ReferenceType, TrapKind::InvalidText, TrapKind::InvalidCompletion})
+        check(status(kind) == 132, std::string(nvm::describe(kind)) + " uses IllegalInstruction");
+    check(status(TrapKind::HeapLimit) == 137 && status(TrapKind::HandleLimit) == 137, "exhaustion uses OutOfMemory");
+    check(status(TrapKind::StepLimit) == 152, "the step limit uses CpuTimeExceeded");
+}
+
 NEURA_TEST(vm, uninitialized_state_traps) {
     auto image = logic_model();
     // Return slot 3 before anything writes it.

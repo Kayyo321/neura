@@ -52,10 +52,12 @@ Collection operations must also check length and allocation arithmetic for overf
 
 The spelling of bounds and allocation errors, error handling, ownership and aliasing, collection equality, and general allocation APIs remain to be specified. In particular, a fixed array length does not imply immutable elements or exclusive ownership.
 
-A negative index fails with trap reason 2 (bounds failure); an index at or past the length is a bounds fault detected by NVM. Both end the run with status 70.
+A negative index fails with trap reason 2 (bounds failure); an index at or past the length is a bounds fault detected by NVM. Both end the run with status 139, `ExitCode.SegmentationFault` ([Errors](Errors.md)).
 
 ## Iteration
 
 `for (let element in collection) { ... }` visits an array's or a list's elements in index order ([Core language](CoreLanguage.md#loops)). Assigning to elements by index during the loop is allowed. Appending to or removing from a list while a for-each loop visits it, through any alias, makes the loop trap with reason 5 before its next advance; each list carries a structural version that every successful `append` and `remove_at` changes.
+
+The same loop visits any value that implements `Std.Collections.Iterable<T>`, calling `iterator()` once and then `has_next()` and `next()` ([Core language](CoreLanguage.md#loops)). Every standard-library collection, `Sequence`, and `Std.Core.IntRange` implement it, and a program's own classes can too. A source that is not an array, list, or `Iterable<T>` is rejected, as is an element annotation that differs from `T`.
 
 See [collections.nra](../../examples/types/collections.nra) for examples of indexing, mutation, and nested types; the test driver in `tests/backend/examples/collections-driver.nra` builds and runs it.

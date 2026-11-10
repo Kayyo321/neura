@@ -1,3 +1,4 @@
+// status: 134
 // stderr: failure during singleton startup
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

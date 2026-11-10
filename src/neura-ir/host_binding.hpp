@@ -25,6 +25,11 @@ inline bool host_data_type(const IrType& type) {
     }
 }
 
+// A bodyless function bound to a host service, or a function with a body
+// that the runtime calls back (NVR CALB); both use IrSymbol::host_binding.
+inline bool host_import(const IrSymbol& symbol) { return symbol.host_binding && !symbol.has_body; }
+inline bool host_callback(const IrSymbol& symbol) { return symbol.host_binding && symbol.has_body; }
+
 inline bool host_service_name(std::string_view name) {
     return !name.empty() && name.find('.') != std::string_view::npos && name.front() != '.' &&
            name.back() != '.' && name.find("..") == std::string_view::npos &&

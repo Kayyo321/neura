@@ -286,6 +286,22 @@ let f = func(values: int32[]) -> void {
     }
 };
 ]=] "3:20" "expected string, got int32")
+check_rejection(for-each-class [=[
+let Bag = class (
+    export let size: int32 = 0;
+);
+let f = func(bag: Bag) -> void {
+    for (let item in bag) {
+    }
+};
+]=] "6:22" "for-each requires an array or list or Iterable<T>, got Bag")
+check_rejection(for-each-iterable-element-type [=[
+let ranges = import:Std.Core.IntRange;
+let f = func(r: ranges.IntRange) -> void {
+    for (let item: string in r) {
+    }
+};
+]=] "4:20" "expected string, got int32")
 check_rejection(for-step-break [=[
 let f = func() -> void {
     for (let i: int32 = 0; i < 3; break) {
@@ -460,3 +476,12 @@ let Record = class<T> (
 ]=] "3:[1-9][0-9]*" "static member cannot use an enclosing class type parameter")
 check_rejection(singleton-new "let one = singleton (); let another = new one();" "2:39" "singleton cannot be constructed")
 check_rejection(singleton-destroy "let one = singleton (); destroy one;" "2:33" "singleton cannot be destroyed")
+
+# Host callbacks are reserved for the trusted standard library.
+check_rejection(user-host-callback [=[
+let Tools = module (
+    let handler = func(value: int64) -> int64 {
+        return value;
+    } callback("user.callback", 1);
+);
+]=] "3:5" "host callbacks are only allowed in standard library modules")

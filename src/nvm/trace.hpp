@@ -5,25 +5,45 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace neura::nvm {
 
+struct TraceCallback;
+
 // One host interaction of a run: the request as the import's name and version
-// with its arguments, and the response the runner gave.
+// with its arguments, the callbacks the service made while serving it, and
+// the response the runner gave.
 struct TraceEntry {
     std::string import;
     std::uint32_t version = 0;
     std::vector<HostValue> arguments;
+    std::vector<TraceCallback> callbacks;
     HostCompletion completion;
 
-    bool operator==(const TraceEntry& other) const {
-        return import == other.import && version == other.version && arguments == other.arguments &&
-               completion.success == other.completion.success && completion.value == other.completion.value &&
-               completion.exit_status == other.completion.exit_status;
-    }
+    bool operator==(const TraceEntry& other) const;
 };
+
+// A callback into the program during a host request (NVR CALB): its name,
+// version, and arguments, the host requests it made, and its result, absent
+// when the run ended during it.
+struct TraceCallback {
+    std::string name;
+    std::uint32_t version = 0;
+    std::vector<HostValue> arguments;
+    std::vector<TraceEntry> entries;
+    std::optional<HostValue> result;
+
+    bool operator==(const TraceCallback&) const = default;
+};
+
+inline bool TraceEntry::operator==(const TraceEntry& other) const {
+    return import == other.import && version == other.version && arguments == other.arguments &&
+           callbacks == other.callbacks && completion.success == other.completion.success &&
+           completion.value == other.completion.value && completion.exit_status == other.completion.exit_status;
+}
 
 // How a run ended.
 struct TraceOutcome {

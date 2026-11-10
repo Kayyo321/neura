@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure .*: cast failed.*argument-cast-trap[.]nra:
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

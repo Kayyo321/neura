@@ -1,0 +1,77 @@
+// run-options: --allow-native
+// args: @NATIVE_DIR@/libmathops.so
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let arenas = import:Std.DynamicForeign.Arena;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let methods = import:Std.DynamicForeign.MethodHandle;
+let descriptor_types = import:Std.DynamicForeign.FunctionDescriptor;
+let values = import:Std.DynamicForeign.ForeignValue;
+
+// Scalars of every width, strings, out-parameters, a variadic call, and a
+// global variable.
+export let Main = module:program.Entry (
+    let lib: lookups.SymbolLookup = nil;
+
+    let handle = func(name: string, descriptor: descriptor_types.FunctionDescriptor) -> methods.MethodHandle =>
+        linkers.native_linker().downcall_handle(lib.find_or_trap(name), descriptor);
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        lib = result.expect<lookups.SymbolLookup>(lookups.library_lookup(args[0], arena), "load libmathops");
+
+        let add64 = handle("add64", descriptors.of(layouts.Int64, layouts.Int64, layouts.Int64));
+        let big: int64 = 9000000000;
+        console.print_line(values.describe(add64.invoke(big, -1)));
+        let scale = handle("scale", descriptors.of(layouts.Float64, layouts.Float64, layouts.Float32));
+        console.print_line(values.describe(scale.invoke(1.5, 4.0)));
+        let low_byte = handle("low_byte", descriptors.of(layouts.UInt8, layouts.UInt32));
+        console.print_line(values.describe(low_byte.invoke(1193215)));
+        let negate8 = handle("negate8", descriptors.of(layouts.Int8, layouts.Int8));
+        console.print_line(values.describe(negate8.invoke(-128)));
+        console.print_line(values.describe(negate8.invoke(5)));
+        let is_even = handle("is_even", descriptors.of(layouts.Bool, layouts.Int32));
+        console.print_line(values.describe(is_even.invoke(10)));
+        console.print_line(values.describe(is_even.invoke(7)));
+
+        let length = handle("string_length", descriptors.of(layouts.Int32, layouts.Address));
+        console.print_line(values.describe(length.invoke("héllo")));
+        let greeting = handle("greeting", descriptors.of(layouts.Address));
+        let text = values.as_segment(greeting.invoke()).reinterpret(64);
+        console.print_line(text.get_utf8(0));
+
+        let divide = handle("divide", descriptors.of_void(layouts.Int32, layouts.Int32, layouts.Address,
+                                                          layouts.Address));
+        let quotient = arena.allocate(layouts.Int32);
+        let remainder = arena.allocate(layouts.Int32);
+        console.print_line(values.describe(divide.invoke(17, 5, quotient, remainder)));
+        console.print_line(quotient.get_int32(0).to_string() + " r " + remainder.get_int32(0).to_string());
+
+        let sum_ints = linkers.native_linker().downcall_handle(lib.find_or_trap("sum_ints"),
+            descriptors.of(layouts.Int32, layouts.Int32, layouts.Int32, layouts.Int32, layouts.Int32), 1);
+        console.print_line(values.describe(sum_ints.invoke(3, 10, 20, 30)));
+
+        let bump = handle("bump_counter", descriptors.of(layouts.Int32));
+        bump.invoke();
+        bump.invoke();
+        let counter = lib.find_or_trap("mathops_counter").reinterpret(4);
+        console.print_line("counter " + counter.get_int32(0).to_string());
+        counter.set_int32(0, 40);
+        console.print_line(values.describe(bump.invoke()));
+
+        let buffer = arena.allocate(16, 8);
+        buffer.set_int16(0, -2);
+        buffer.set_uint16(2, 65535);
+        buffer.set_float32(4, 0.5 as float32);
+        buffer.set_uint64(8, 18446744073709551615);
+        console.print_line(buffer.get_int16(0).to_string() + " " + buffer.get_uint16(2).to_string() + " " +
+                           buffer.get_float32(4).to_string() + " " + buffer.get_uint64(8).to_string());
+        console.print_line(buffer.get_int64(8).to_string() + " " + buffer.as_slice(2, 2).get_uint8(1).to_string());
+        arena.close();
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,346 @@
+let float32s = import:Std.Core.Float32;
+let float64s = import:Std.Core.Float64;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Variadic;
+let.promote _ = import:Std.DynamicForeign.Arena;
+let.promote _ = import:Std.DynamicForeign.ForeignValue;
+let.promote _ = import:Std.DynamicForeign.FunctionDescriptor;
+let.promote _ = import:Std.DynamicForeign.MemoryLayout;
+let.promote _ = import:Std.DynamicForeign.MemorySegment;
+let native = import:Std.DynamicForeign.Internal.Native;
+
+/// @brief The provider's wire formats for native signatures and values (ForeignInterop.md), shared by
+/// downcalls and upcalls.
+export let Codec = module (
+    /// @brief The provider's signature for `descriptor`: version 1, the fixed-argument count (65535 when not
+    /// variadic), the argument count, the result type, and each argument type.
+    export let signature = func(descriptor: FunctionDescriptor, variadic_index: int) -> uint8[list] {
+        let layouts = descriptor.argument_layouts();
+        if (variadic_index >= 0) {
+            if (variadic_index > layouts.length) {
+                trap_with_message("invalid argument: first variadic index past the arguments");
+            }
+            for (let i = variadic_index; i < layouts.length; i++) {
+                check_promoted(layouts[i]);
+            }
+        }
+        let encoded: uint8[list] = [];
+        encoded.append(1);
+        put_u16(encoded, (variadic_index < 0) ? 65535 : variadic_index);
+        put_u16(encoded, layouts.length);
+        match (descriptor.return_layout()) {
+            Optional.Some(layout) => {
+                encode_type(encoded, layout, true);
+            },
+            Optional.None => {
+                encoded.append(0);
+            },
+        }
+        for (let layout in layouts) {
+            encode_type(encoded, layout, true);
+        }
+        return encoded;
+    };
+
+    /// @brief The number of bytes a value of `layout` occupies in a packed argument or result list.
+    export let packed_size = func(layout: MemoryLayout) -> int64 =>
+        (layout.shape() == Shape.Struct) ? layout.byte_size() : carrier_size(layout.carrier());
+
+    /// @brief Appends a little-endian uint16.
+    let put_u16 = func(bytes: uint8[list], value: int) {
+        bytes.append((value & 255) as uint8);
+        bytes.append(((value >> 8) & 255) as uint8);
+    };
+
+    /// @brief The provider's tag for a scalar carrier.
+    let tag_of = func(carrier: Carrier) -> uint8 => match (carrier) {
+        Carrier.Bool => 1,
+        Carrier.Int8 => 2,
+        Carrier.UInt8 => 3,
+        Carrier.Int16 => 4,
+        Carrier.UInt16 => 5,
+        Carrier.Int32 => 6,
+        Carrier.UInt32 => 7,
+        Carrier.Int64 => 8,
+        Carrier.UInt64 => 9,
+        Carrier.Float32 => 10,
+        Carrier.Float64 => 11,
+        Carrier.Address => 12,
+    };
+
+    /// @brief Traps for a variadic argument that C's default argument promotions would widen.
+    let check_promoted = func(layout: MemoryLayout) {
+        if (layout.shape() == Shape.Value) {
+            let carrier = layout.carrier();
+            if (carrier == Carrier.Bool || carrier == Carrier.Int8 || carrier == Carrier.UInt8 ||
+                carrier == Carrier.Int16 || carrier == Carrier.UInt16 || carrier == Carrier.Float32) {
+                trap_with_message("invalid argument: a variadic argument must be promoted to int, long, double, " +
+                                  "or an address");
+            }
+        }
+    };
+
+    /// @brief Appends the provider's type description of `layout`. A struct passed by value must have C's
+    /// natural layout; unions and arrays cannot be passed by value.
+    let encode_type = func(bytes: uint8[list], layout: MemoryLayout, top: bool) {
+        match (layout.shape()) {
+            Shape.Value => {
+                bytes.append(tag_of(layout.carrier()));
+            },
+            Shape.Struct => {
+                check_natural(layout);
+                let fields: MemoryLayout[list] = [];
+                for (let member in layout.member_layouts()) {
+                    flatten(fields, member);
+                }
+                if (fields.length == 0) {
+                    trap_with_message("unsupported: an empty struct cannot be passed by value");
+                }
+                bytes.append(13);
+                put_u16(bytes, fields.length);
+                for (let field in fields) {
+                    encode_type(bytes, field, false);
+                }
+            },
+            Shape.Union => {
+                trap_with_message("unsupported: a union cannot be passed by value");
+            },
+            Shape.Sequence => {
+                trap_with_message("unsupported: an array cannot be passed by value; pass its address");
+            },
+            Shape.Padding => {
+                trap_with_message("invalid argument: a padding layout cannot be passed");
+            },
+        }
+    };
+
+    /// @brief The members of a struct as passed by value: padding dropped and array elements repeated.
+    let flatten = func(fields: MemoryLayout[list], member: MemoryLayout) {
+        match (member.shape()) {
+            Shape.Padding => {},
+            Shape.Sequence => {
+                let element = member.member_layouts()[0];
+                for (let i: int64 = 0; i < member.element_count(); i++) {
+                    flatten(fields, element);
+                }
+            },
+            _ => {
+                fields.append(member);
+            },
+        }
+    };
+
+    /// @brief Traps unless the struct's offsets and size are the ones C's natural layout gives its members.
+    let check_natural = func(layout: MemoryLayout) {
+        let members = layout.member_layouts();
+        let offsets = layout.member_offsets();
+        let position: int64 = 0;
+        let alignment: int64 = 1;
+        for (let i = 0; i < members.length; i++) {
+            let member = members[i];
+            if (member.shape() == Shape.Padding) {
+                continue;
+            }
+            position = align_up(position, member.byte_alignment());
+            if (offsets[i] != position) {
+                trap_with_message("unsupported: a struct passed by value needs C's natural layout");
+            }
+            position += member.byte_size();
+            if (member.byte_alignment() > alignment) {
+                alignment = member.byte_alignment();
+            }
+        }
+        if (align_up(position, alignment) != layout.byte_size()) {
+            trap_with_message("unsupported: a struct passed by value needs C's natural layout");
+        }
+    };
+
+    /// @brief Traps with "invalid argument: argument does not fit <layout>".
+    export let unfit = func(layout: MemoryLayout) -> ForeignValue {
+        trap_with_message("invalid argument: argument does not fit " + layout.to_string());
+    };
+
+    /// @brief Converts an untyped argument to the value `layout` describes.
+    export let convert = func(arg: Argument, layout: MemoryLayout) -> ForeignValue {
+        if (layout.shape() == Shape.Struct) {
+            return match (arg) {
+                Argument.Object(object) => (object is MemorySegment)
+                    ? ForeignValue.Struct(object as MemorySegment) : unfit(layout),
+                _ => unfit(layout),
+            };
+        }
+        let carrier = layout.carrier();
+        if (carrier == Carrier.Address) {
+            return match (arg) {
+                Argument.Object(object) => (object == nil) ? ForeignValue.Address(null_segment())
+                    : (object is MemorySegment) ? ForeignValue.Address(object as MemorySegment) : unfit(layout),
+                _ => unfit(layout),
+            };
+        }
+        if (carrier == Carrier.Bool) {
+            return match (arg) {
+                Argument.Boolean(value) => ForeignValue.Bool(value),
+                _ => unfit(layout),
+            };
+        }
+        if (carrier == Carrier.Float32 || carrier == Carrier.Float64) {
+            return match (arg) {
+                Argument.Floating32(v) => (carrier == Carrier.Float32) ? ForeignValue.Float32(v)
+                    : ForeignValue.Float64(v as float64),
+                Argument.Floating(v) => (carrier == Carrier.Float32) ? ForeignValue.Float32(v as float32)
+                    : ForeignValue.Float64(v),
+                _ => unfit(layout),
+            };
+        }
+        return match (arg) {
+            Argument.Signed(value) => integer_signed(value, carrier, layout),
+            Argument.Unsigned(value) => integer_unsigned(value, carrier, layout),
+            _ => unfit(layout),
+        };
+    };
+
+    /// @brief A signed argument as the integer carrier, when it fits.
+    let integer_signed = func(value: int64, carrier: Carrier, layout: MemoryLayout) -> ForeignValue {
+        if (value < 0 && (carrier == Carrier.UInt8 || carrier == Carrier.UInt16 || carrier == Carrier.UInt32 ||
+                          carrier == Carrier.UInt64)) {
+            return unfit(layout);
+        }
+        return (value < 0) ? fitted(value, carrier, layout) : integer_unsigned(value as uint64, carrier, layout);
+    };
+
+    /// @brief A negative argument as a signed carrier, when it fits.
+    let fitted = func(value: int64, carrier: Carrier, layout: MemoryLayout) -> ForeignValue => match (carrier) {
+        Carrier.Int8 => (value >= -128) ? ForeignValue.Int8(value as int8) : unfit(layout),
+        Carrier.Int16 => (value >= -32768) ? ForeignValue.Int16(value as int16) : unfit(layout),
+        Carrier.Int32 => (value >= -2147483648) ? ForeignValue.Int32(value as int32) : unfit(layout),
+        Carrier.Int64 => ForeignValue.Int64(value),
+        _ => unfit(layout),
+    };
+
+    /// @brief A non-negative argument as the integer carrier, when it fits.
+    let integer_unsigned = func(value: uint64, carrier: Carrier, layout: MemoryLayout) -> ForeignValue =>
+        match (carrier) {
+            Carrier.Int8 => (value <= 127) ? ForeignValue.Int8(value as int8) : unfit(layout),
+            Carrier.UInt8 => (value <= 255) ? ForeignValue.UInt8(value as uint8) : unfit(layout),
+            Carrier.Int16 => (value <= 32767) ? ForeignValue.Int16(value as int16) : unfit(layout),
+            Carrier.UInt16 => (value <= 65535) ? ForeignValue.UInt16(value as uint16) : unfit(layout),
+            Carrier.Int32 => (value <= 2147483647) ? ForeignValue.Int32(value as int32) : unfit(layout),
+            Carrier.UInt32 => (value <= 4294967295) ? ForeignValue.UInt32(value as uint32) : unfit(layout),
+            Carrier.Int64 => (value <= 9223372036854775807) ? ForeignValue.Int64(value as int64) : unfit(layout),
+            Carrier.UInt64 => ForeignValue.UInt64(value),
+            _ => unfit(layout),
+        };
+
+    /// @brief Traps with "invalid argument: expected <layout>, got <value>".
+    let wrong = func(value: ForeignValue, layout: MemoryLayout) {
+        trap_with_message("invalid argument: expected " + layout.to_string() + ", got " + describe(value));
+    };
+
+    /// @brief Appends the bytes of `value`, which must have the carrier or struct size of `layout`.
+    export let encode_value = func(bytes: uint8[list], value: ForeignValue, layout: MemoryLayout) {
+        if (layout.shape() == Shape.Struct) {
+            match (value) {
+                ForeignValue.Struct(segment) => {
+                    if (segment.byte_size() != layout.byte_size()) {
+                        trap_with_message("invalid argument: struct segment size differs from its layout");
+                    }
+                    for (let b in segment.to_bytes()) {
+                        bytes.append(b);
+                    }
+                },
+                _ => {
+                    wrong(value, layout);
+                },
+            }
+            return;
+        }
+        let carrier = layout.carrier();
+        let size = carrier_size(carrier) as int;
+        match (value) {
+            ForeignValue.Bool(v) => {
+                if (carrier != Carrier.Bool) { wrong(value, layout); }
+                native.put(bytes, v ? 1 : 0, size);
+            },
+            ForeignValue.Int8(v) => {
+                if (carrier != Carrier.Int8) { wrong(value, layout); }
+                native.put(bytes, native.signed_bits(v as int64), size);
+            },
+            ForeignValue.UInt8(v) => {
+                if (carrier != Carrier.UInt8) { wrong(value, layout); }
+                native.put(bytes, v as uint64, size);
+            },
+            ForeignValue.Int16(v) => {
+                if (carrier != Carrier.Int16) { wrong(value, layout); }
+                native.put(bytes, native.signed_bits(v as int64), size);
+            },
+            ForeignValue.UInt16(v) => {
+                if (carrier != Carrier.UInt16) { wrong(value, layout); }
+                native.put(bytes, v as uint64, size);
+            },
+            ForeignValue.Int32(v) => {
+                if (carrier != Carrier.Int32) { wrong(value, layout); }
+                native.put(bytes, native.signed_bits(v as int64), size);
+            },
+            ForeignValue.UInt32(v) => {
+                if (carrier != Carrier.UInt32) { wrong(value, layout); }
+                native.put(bytes, v as uint64, size);
+            },
+            ForeignValue.Int64(v) => {
+                if (carrier != Carrier.Int64) { wrong(value, layout); }
+                native.put(bytes, native.signed_bits(v), size);
+            },
+            ForeignValue.UInt64(v) => {
+                if (carrier != Carrier.UInt64) { wrong(value, layout); }
+                native.put(bytes, v, size);
+            },
+            ForeignValue.Float32(v) => {
+                if (carrier != Carrier.Float32) { wrong(value, layout); }
+                native.put(bytes, float32s.to_bits(v) as uint64, size);
+            },
+            ForeignValue.Float64(v) => {
+                if (carrier != Carrier.Float64) { wrong(value, layout); }
+                native.put(bytes, float64s.to_bits(v), size);
+            },
+            ForeignValue.Address(segment) => {
+                if (carrier != Carrier.Address) { wrong(value, layout); }
+                if (!segment.is_null()) {
+                    segment.scope().check_alive();
+                }
+                native.put(bytes, native.signed_bits(segment.address()), size);
+            },
+            _ => {
+                wrong(value, layout);
+            },
+        }
+    };
+
+    /// @brief The value the bytes at `offset` hold for `layout`; a struct is copied into `allocator`.
+    export let decode_value = func(bytes: uint8[list], offset: int, layout: MemoryLayout, allocator: Arena)
+        -> ForeignValue {
+        if (layout.shape() == Shape.Struct) {
+            let segment = allocator.allocate(layout);
+            let part: uint8[list] = [];
+            for (let i = 0; i < (layout.byte_size() as int); i++) {
+                part.append(bytes[offset + i]);
+            }
+            segment.copy_from_bytes(0, part);
+            return ForeignValue.Struct(segment);
+        }
+        let carrier = layout.carrier();
+        let bits = native.get(bytes, offset, carrier_size(carrier) as int);
+        return match (carrier) {
+            Carrier.Bool => ForeignValue.Bool(bits != 0),
+            Carrier.Int8 => ForeignValue.Int8(native.sign_extend(bits, 1) as int8),
+            Carrier.UInt8 => ForeignValue.UInt8(bits as uint8),
+            Carrier.Int16 => ForeignValue.Int16(native.sign_extend(bits, 2) as int16),
+            Carrier.UInt16 => ForeignValue.UInt16(bits as uint16),
+            Carrier.Int32 => ForeignValue.Int32(native.sign_extend(bits, 4) as int32),
+            Carrier.UInt32 => ForeignValue.UInt32(bits as uint32),
+            Carrier.Int64 => ForeignValue.Int64(native.sign_extend(bits, 8)),
+            Carrier.UInt64 => ForeignValue.UInt64(bits),
+            Carrier.Float32 => ForeignValue.Float32(float32s.from_bits(bits as uint32)),
+            Carrier.Float64 => ForeignValue.Float64(float64s.from_bits(bits)),
+            Carrier.Address => ForeignValue.Address(of_address(native.sign_extend(bits, 8))),
+        };
+    };
+);

@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: radix outside 2 through 36
 let console = import:Std.Io.Console;
 let uint8s = import:Std.Core.UInt8;

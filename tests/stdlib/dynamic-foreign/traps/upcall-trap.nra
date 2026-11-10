@@ -1,0 +1,31 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): comparator failed
+// run-options: --allow-native
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let arenas = import:Std.DynamicForeign.Arena;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let values = import:Std.DynamicForeign.ForeignValue;
+
+// A trap inside an upcall ends the run once the native call returns; native
+// code sees zeros from the failed callback.
+export let Main = module:program.Entry (
+    let failing = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
+        console.print_line("in comparator");
+        trap_with_message("comparator failed");
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        let linker = linkers.native_linker();
+        let numbers = arena.allocate_array(layouts.Int32, 3);
+        let qsort = linker.downcall_handle(linker.default_lookup().find_or_trap("qsort"),
+            descriptors.of_void(layouts.Address, layouts.UInt64, layouts.UInt64, layouts.Address));
+        let stub = linker.upcall_stub(failing, descriptors.of(layouts.Int32, layouts.Address, layouts.Address), arena);
+        qsort.invoke(numbers, 3, 4, stub);
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

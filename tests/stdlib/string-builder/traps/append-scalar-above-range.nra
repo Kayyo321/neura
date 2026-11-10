@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: not a Unicode scalar value
 let builders = import:Std.Core.StringBuilder;
 let console = import:Std.Io.Console;

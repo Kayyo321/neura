@@ -1,5 +1,5 @@
 // status: 1
-// stderr: replay-version\.trace: line 1: unsupported trace version 2; expected 1
+// stderr: replay-version\.trace: line 1: unsupported trace version 3; expected 1 or 2
 // run-options: --replay @AREA_DIR@/traps/replay-version.trace
 let program = import:Std.Program;
 

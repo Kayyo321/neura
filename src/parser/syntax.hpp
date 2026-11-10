@@ -127,6 +127,9 @@ struct Declaration {
     std::vector<Declaration> members;
     std::vector<Statement> body;
     std::optional<std::pair<std::string, std::uint32_t>> host_binding{};
+    // `callback("service", version)` after a block body: a function the
+    // runtime may call during a host request (trusted library only).
+    std::optional<std::pair<std::string, std::uint32_t>> host_callback{};
     std::vector<TypeSyntax> interfaces{};
     // Additional signatures in an `or func` declaration.
     std::vector<Declaration> overloads{};

@@ -1,0 +1,20 @@
+// status: 134
+// stderr: invalid argument: a variadic argument must be promoted
+// run-options: --allow-native
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+
+// A float in a variadic position would be promoted to double by C, so the
+// descriptor is rejected.
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let linker = linkers.native_linker();
+        let printf = linker.default_lookup().find_or_trap("printf");
+        console.print_line("found");
+        linker.downcall_handle(printf, descriptors.of(layouts.Int32, layouts.Address, layouts.Float32), 1);
+        return program.ExitCode.Ok;
+    };
+);

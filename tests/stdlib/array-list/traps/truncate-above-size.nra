@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: size above current size
 let array_list = import:Std.Collections.ArrayList;
 let console = import:Std.Io.Console;

@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: duplicate key
 let immutable_map = import:Std.Collections.ImmutableMap;
 let program = import:Std.Program;

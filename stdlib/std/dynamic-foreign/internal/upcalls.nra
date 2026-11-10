@@ -1,0 +1,51 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.DynamicForeign.Arena;
+let.promote _ = import:Std.DynamicForeign.ForeignValue;
+let.promote _ = import:Std.DynamicForeign.FunctionDescriptor;
+let.promote _ = import:Std.DynamicForeign.MemoryLayout;
+let codec = import:Std.DynamicForeign.Internal.Codec;
+
+/// @brief The registry of upcall stubs and the callback through which native code reaches them
+/// (ForeignInterop.md, Upcalls).
+///
+/// The runner calls `dispatch` (host callback `neura.ffi.upcall` version 1) when native code calls a stub during
+/// a downcall. The registry keeps every target alive until the end of the run.
+export let Upcalls = module (
+    /// @brief The Neura function of each stub, by stub number.
+    let targets: (func(ForeignValue[list]) -> ForeignValue)[list] = [];
+    /// @brief The C signature of each stub, by stub number.
+    let signatures: FunctionDescriptor[list] = [];
+
+    /// @brief Registers `target` with `descriptor` and returns its stub number.
+    export let register = func(target: func(ForeignValue[list]) -> ForeignValue, descriptor: FunctionDescriptor)
+        -> int64 {
+        targets.append(target);
+        signatures.append(descriptor);
+        return (targets.length - 1) as int64;
+    };
+
+    /// @brief Decodes the packed arguments of stub `stub`, calls its target, and encodes the result. A struct
+    /// argument is a copy that lives until the target returns. A result that does not match the descriptor traps
+    /// with "invalid argument: ...".
+    let dispatch = func(stub: int64, arguments: uint8[list]) -> uint8[list] {
+        let index = stub as int;
+        let descriptor = signatures[index];
+        let arena = of_confined();
+        let values: ForeignValue[list] = [];
+        let offset = 0;
+        for (let layout in descriptor.argument_layouts()) {
+            values.append(codec.decode_value(arguments, offset, layout, arena));
+            offset += codec.packed_size(layout) as int;
+        }
+        let result = targets[index](values);
+        let bytes: uint8[list] = [];
+        match (descriptor.return_layout()) {
+            Optional.Some(layout) => {
+                codec.encode_value(bytes, result, layout);
+            },
+            Optional.None => {},
+        }
+        arena.close();
+        return bytes;
+    } callback("neura.ffi.upcall", 1);
+);

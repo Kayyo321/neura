@@ -43,10 +43,6 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// Process status for a run that ends in a trap, distinct from load and
-// usage errors (1). A completed run returns the entry function's status.
-constexpr int trap_status = 70;
-
 void usage(std::ostream& out) {
     out << "usage: neura check [-I source-root] <file.nra>...\n"
            "       neura docs <file.nra>... [-o <file.json>]\n"
@@ -70,6 +66,7 @@ void usage(std::ostream& out) {
            "  --allow-env              environment variables\n"
            "  --allow-clock            wall and monotonic clocks and sleeping\n"
            "  --allow-entropy          operating-system entropy\n"
+           "  --allow-native           native libraries, memory, and calls (unsafe)\n"
            "  --record <file>          (run) write every host request and response to a trace\n"
            "  --profile                (run) print the steps each function took\n"
            "  --replay <file>          (run) answer host requests from a trace instead of services\n";
@@ -269,6 +266,8 @@ Options read_options(int argc, char** argv) {
             options.capabilities.clock = true;
         } else if (runs && arg == "--allow-entropy") {
             options.capabilities.entropy = true;
+        } else if (runs && arg == "--allow-native") {
+            options.capabilities.native = true;
         } else if (options.command == Command::Run && arg == "--record") {
             options.record = fs::path(next());
         } else if (options.command == Command::Run && arg == "--replay") {
@@ -574,7 +573,7 @@ int run(const Options& options) {
     }
     if (!result.completed) {
         std::cerr << path.string() << ": trap: " << neura::nvm::describe(result.trap, image) << '\n';
-        return trap_status;
+        return neura::nvm::exit_status(result.trap);
     }
     return result.status;
 }

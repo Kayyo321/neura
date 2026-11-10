@@ -1,0 +1,19 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid state: arena closed
+// run-options: --allow-native
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let arenas = import:Std.DynamicForeign.Arena;
+
+// A segment cannot be used after its arena closes.
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        let segment = arena.allocate(4, 4);
+        segment.set_int32(0, 1);
+        arena.close();
+        console.print_line(segment.is_alive().to_string());
+        console.print_line(segment.get_int32(0).to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -38,6 +38,44 @@ std::string_view describe(TrapKind kind) {
     return "trap";
 }
 
+int exit_status(const Trap& trap) {
+    constexpr int illegal_instruction = 132;
+    constexpr int abort = 134;
+    constexpr int arithmetic_error = 136;
+    constexpr int out_of_memory = 137;
+    constexpr int segmentation_fault = 139;
+    constexpr int cpu_time_exceeded = 152;
+    switch (trap.kind) {
+    case TrapKind::Program:
+        switch (trap.reason) {
+        case 1: return arithmetic_error;
+        case 2: return segmentation_fault;
+        case 3: return abort;
+        case 4: return illegal_instruction;
+        case 5: return abort;
+        default: return illegal_instruction;
+        }
+    case TrapKind::InvalidCast: return abort;
+    case TrapKind::UninitializedSlot:
+    case TrapKind::UninitializedField:
+    case TrapKind::UninitializedGlobal:
+    case TrapKind::InvalidHandle:
+    case TrapKind::NilReference:
+    case TrapKind::IndexOutOfBounds:
+    case TrapKind::FrameLimit: return segmentation_fault;
+    case TrapKind::GraphOverflow:
+    case TrapKind::NonBinaryLane:
+    case TrapKind::InvalidSelector:
+    case TrapKind::ReferenceType:
+    case TrapKind::InvalidText:
+    case TrapKind::InvalidCompletion: return illegal_instruction;
+    case TrapKind::HeapLimit:
+    case TrapKind::HandleLimit: return out_of_memory;
+    case TrapKind::StepLimit: return cpu_time_exceeded;
+    }
+    return illegal_instruction;
+}
+
 namespace {
 
 constexpr auto max_text_bytes = static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
@@ -225,6 +263,10 @@ public:
         if (!pending_) {
             throw std::logic_error("complete() called without a pending host request");
         }
+        if (finished_) {
+            pending_.reset();
+            return;
+        }
         const auto pending = *pending_;
         pending_.reset();
         try {
@@ -264,6 +306,68 @@ public:
         }
     }
 
+    std::optional<HostValue> invoke_callback(std::string_view name, std::uint32_t version,
+                                             const std::vector<HostValue>& arguments,
+                                             const Execution::HostHandler& host) {
+        if (finished_) return std::nullopt;
+        if (!pending_) {
+            throw std::logic_error("invoke_callback() called without a pending host request");
+        }
+        const auto saved = pending_;
+        const auto restore = [&] { pending_ = saved; };
+        try {
+            const auto found = std::ranges::find_if(image_.callbacks, [&](const nvr::Callback& callback) {
+                return callback.name == name && callback.interface_version == version;
+            });
+            if (found == image_.callbacks.end()) {
+                fault(TrapKind::InvalidCompletion, "no callback " + std::string(name) + " version " +
+                                                       std::to_string(version));
+            }
+            const auto& function = image_.functions[found->function];
+            if (arguments.size() != function.parameter_count) {
+                fault(TrapKind::InvalidCompletion, "callback " + std::string(name) + " takes " +
+                                                       std::to_string(function.parameter_count) + " argument(s)");
+            }
+            std::vector<std::uint64_t> values;
+            std::vector<std::uint64_t> temporary_roots;
+            auto remaining = limits_.max_heap_cells;
+            for (std::size_t i = 0; i < arguments.size(); ++i) {
+                values.push_back(host_to_value(arguments[i], function.frame_types[i], temporary_roots, remaining, 0));
+                temporary_roots.push_back(values.back());
+            }
+            pending_.reset();
+            push_frame(found->function, values, nvr::absent, 0);
+            frames_.back().boundary = true;
+            for (;;) {
+                auto event = step();
+                if (!event) continue;
+                if (event->kind == Event::Kind::Completed) {
+                    auto budget = limits_.max_heap_cells;
+                    std::optional<HostValue> result = HostValue{};
+                    if (type(function.result_type).kind != nvr::TypeKind::Void) {
+                        result = value_to_host(event->result, function.result_type, budget, 0);
+                    }
+                    restore();
+                    return result;
+                }
+                if (event->kind == Event::Kind::HostRequest) {
+                    complete(host(event->request));
+                    if (finished_) {
+                        restore();
+                        return std::nullopt;
+                    }
+                }
+            }
+        } catch (const Fault& fault) {
+            Event event;
+            event.kind = Event::Kind::Trapped;
+            event.trap = fault.trap;
+            finished_ = event;
+            restore();
+            return std::nullopt;
+        }
+    }
+
     std::uint64_t steps() const { return steps_; }
     std::uint64_t peak_heap_cells() const { return peak_cells_; }
     const std::vector<std::uint64_t>& function_steps() const { return function_steps_; }
@@ -293,6 +397,8 @@ private:
         // Where the caller receives the result.
         std::uint32_t return_slot = nvr::absent;
         std::uint32_t return_block = 0;
+        // The first frame of a callback: its return ends invoke_callback.
+        bool boundary = false;
     };
 
     struct Pending {
@@ -682,8 +788,9 @@ private:
             const auto result = arguments.empty() ? 0 : arguments.front();
             const auto return_slot = frame.return_slot;
             const auto return_block = frame.return_block;
+            const auto boundary = frame.boundary;
             frames_.pop_back();
-            if (frames_.empty()) {
+            if (frames_.empty() || boundary) {
                 Event event;
                 event.kind = Event::Kind::Completed;
                 event.status = static_cast<std::int32_t>(static_cast<std::uint32_t>(result & mask(32)));
@@ -1103,20 +1210,56 @@ Event Execution::advance() { return state_->advance(); }
 
 void Execution::complete(const HostCompletion& completion) { state_->complete(completion); }
 
+std::optional<HostValue> Execution::invoke_callback(std::string_view name, std::uint32_t version,
+                                                    const std::vector<HostValue>& arguments,
+                                                    const HostHandler& host) {
+    return state_->invoke_callback(name, version, arguments, host);
+}
+
 std::uint64_t Execution::steps() const { return state_->steps(); }
 std::uint64_t Execution::peak_heap_cells() const { return state_->peak_heap_cells(); }
 const std::vector<std::uint64_t>& Execution::function_steps() const { return state_->function_steps(); }
+
+namespace {
+
+// Serves host requests with bound services and lets them call back into the
+// execution, counting every request, nested ones included.
+class ServiceCallbacks final : public CallbackContext {
+public:
+    ServiceCallbacks(Execution& execution, const Bindings& bindings, std::uint64_t& requests)
+        : execution_(execution), bindings_(bindings), requests_(requests) {}
+
+    HostCompletion serve(const HostRequest& request) {
+        ++requests_;
+        auto with_callbacks = request;
+        with_callbacks.callbacks = this;
+        return bindings_.services.at(request.import)->invoke(with_callbacks);
+    }
+
+    std::optional<HostValue> call(std::string_view name, std::uint32_t version,
+                                  const std::vector<HostValue>& arguments) override {
+        return execution_.invoke_callback(name, version, arguments,
+                                          [this](const HostRequest& nested) { return serve(nested); });
+    }
+
+private:
+    Execution& execution_;
+    const Bindings& bindings_;
+    std::uint64_t& requests_;
+};
+
+} // namespace
 
 RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const std::string> arguments,
               RunLimits limits) {
     Execution execution(image, arguments, limits);
     RunResult result;
+    ServiceCallbacks callbacks(execution, bindings, result.host_requests);
     for (;;) {
         const auto event = execution.advance();
         switch (event.kind) {
         case Event::Kind::HostRequest:
-            ++result.host_requests;
-            execution.complete(bindings.services.at(event.request.import)->invoke(event.request));
+            execution.complete(callbacks.serve(event.request));
             break;
         case Event::Kind::Completed:
             result.completed = true;

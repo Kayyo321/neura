@@ -1,0 +1,8 @@
+[i32(x)i32(y)] size 8
+3, -9
+Int32(43)
+[i8(tag)f64(weight)i16(count)] size 24 weight at 8 count at 16
+65 0.25 8
+Float64(67.0)
+[[i32(x)i32(y)](origin)3:i16(steps)] 4 8 16
+[i8(small)|f64(large)] 8

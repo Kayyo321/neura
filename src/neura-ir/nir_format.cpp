@@ -1,4 +1,5 @@
 #include "nir_format.hpp"
+#include "host_binding.hpp"
 #include "integer.hpp"
 
 #include <algorithm>
@@ -115,6 +116,7 @@ public:
             }
             if (is_static_initializer(item)) version = std::max<std::uint16_t>(version, 5);
             if (is_static_scope(item)) version = std::max<std::uint16_t>(version, 4);
+            if (host_callback(item)) version = std::max<std::uint16_t>(version, 8);
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
                 version = std::max<std::uint16_t>(version, 3);
@@ -127,7 +129,7 @@ public:
             }
         }
         for (const auto& body : program.bodies) {
-            if (version == 7) break;
+            if (version >= 7) break;
             version = std::max(version, required_minor(body.instructions));
         }
         u16(version);
@@ -516,7 +518,11 @@ private:
             value.payload_types = types(0);
             if (value.payload_types.empty()) fail("a payload flag requires at least one payload type");
         }
-        if ((flags & HostBound) != 0) value.host_binding = IrHostBinding{text(), u32()};
+        if ((flags & HostBound) != 0) {
+            value.host_binding = IrHostBinding{text(), u32()};
+            // NIR 1.8: a host binding on a function with a body is a callback.
+            if (value.has_body && minor_ < 8) fail("a host callback needs NIR 1.8");
+        }
         if ((flags & LibraryFile) != 0) {
             value.library_path = text();
             if (value.library_path.empty()) fail("a library file needs a nonempty identity");

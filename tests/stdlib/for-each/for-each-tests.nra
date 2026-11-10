@@ -1,0 +1,128 @@
+let int32 = import:Std.Core.Int32;
+let ranges = import:Std.Core.IntRange;
+let array_deque = import:Std.Collections.ArrayDeque;
+let array_list = import:Std.Collections.ArrayList;
+let bit_set = import:Std.Collections.BitSet;
+let hash_map = import:Std.Collections.HashMap;
+let hash_set = import:Std.Collections.HashSet;
+let immutable_list = import:Std.Collections.ImmutableList;
+let immutable_map = import:Std.Collections.ImmutableMap;
+let immutable_set = import:Std.Collections.ImmutableSet;
+let int_map = import:Std.Collections.IntMap;
+let iterables = import:Std.Collections.Iterable;
+let linked_list = import:Std.Collections.LinkedList;
+let ordinal_map = import:Std.Collections.OrdinalMap;
+let priority_queue = import:Std.Collections.PriorityQueue;
+let sequences = import:Std.Collections.Sequence;
+let string_map = import:Std.Collections.StringMap;
+let tree_map = import:Std.Collections.TreeMap;
+let tree_set = import:Std.Collections.TreeSet;
+let test = import:Std.Test;
+
+// For-each over every public Iterable in the standard library
+// (CoreLanguage.md, for-each over Iterable<T>; Stdlib.md section 5.4).
+let ForEachTests = module (
+    // The sum of the elements, visited through the generic for-each protocol.
+    let sum = func<C: iterables.Iterable<int>>(items: C) -> int {
+        let total = 0;
+        for (let value in items) {
+            total += value;
+        }
+        return total;
+    };
+
+    // The sum of the keys and the sum of the values of a map's entries.
+    let entry_sums = func<C: iterables.Iterable<[int, int]>>(entries: C) -> [int, int] {
+        let keys = 0;
+        let values = 0;
+        for (let entry in entries) {
+            keys += entry[0];
+            values += entry[1];
+        }
+        return [keys, values];
+    };
+
+    export let test_lists_and_queues = func {
+        test.assert_equal_int32(10, sum<array_list.ArrayList<int>>(array_list.of<int>([1, 2, 3, 4])));
+        test.assert_equal_int32(10, sum<linked_list.LinkedList<int>>(linked_list.of<int>([1, 2, 3, 4])));
+        test.assert_equal_int32(10, sum<array_deque.ArrayDeque<int>>(array_deque.of<int>([1, 2, 3, 4])));
+        test.assert_equal_int32(10, sum<immutable_list.ImmutableList<int>>(immutable_list.of<int>([1, 2, 3, 4])));
+        let queue = priority_queue.create<int>(int32.compare);
+        queue.enqueue(4);
+        queue.enqueue(1);
+        queue.enqueue(5);
+        test.assert_equal_int32(10, sum<priority_queue.PriorityQueue<int>>(queue));
+    };
+
+    export let test_sets = func {
+        let hashed = hash_set.create<int>();
+        hashed.add(3);
+        hashed.add(7);
+        hashed.add(3);
+        test.assert_equal_int32(10, sum<hash_set.HashSet<int>>(hashed));
+        let sorted = tree_set.create<int>(int32.compare);
+        sorted.add(9);
+        sorted.add(1);
+        test.assert_equal_int32(10, sum<tree_set.TreeSet<int>>(sorted));
+        test.assert_equal_int32(10, sum<immutable_set.ImmutableSet<int>>(immutable_set.of<int>([2, 8, 2])));
+        test.assert_equal_int32(10, sum<bit_set.BitSet>(bit_set.of([0, 4, 6])));
+    };
+
+    export let test_maps = func {
+        let hashed = hash_map.create<int, int>();
+        hashed.set(1, 10);
+        hashed.set(2, 20);
+        let sums = entry_sums<hash_map.HashMap<int, int>>(hashed);
+        test.assert_equal_int32(3, sums[0]);
+        test.assert_equal_int32(30, sums[1]);
+        let sorted = tree_map.create<int, int>(int32.compare);
+        sorted.set(4, 1);
+        sorted.set(5, 2);
+        sums = entry_sums<tree_map.TreeMap<int, int>>(sorted);
+        test.assert_equal_int32(9, sums[0]);
+        test.assert_equal_int32(3, sums[1]);
+        let by_int = int_map.create<int>();
+        by_int.set(6, 60);
+        sums = entry_sums<int_map.IntMap<int>>(by_int);
+        test.assert_equal_int32(6, sums[0]);
+        test.assert_equal_int32(60, sums[1]);
+        let ordinals = ordinal_map.create<int>(4);
+        ordinals.set(3, 30);
+        ordinals.set(0, 1);
+        sums = entry_sums<ordinal_map.OrdinalMap<int>>(ordinals);
+        test.assert_equal_int32(3, sums[0]);
+        test.assert_equal_int32(31, sums[1]);
+        let fixed = immutable_map.of<int, int>([[7, 70]]);
+        sums = entry_sums<immutable_map.ImmutableMap<int, int>>(fixed);
+        test.assert_equal_int32(7, sums[0]);
+        test.assert_equal_int32(70, sums[1]);
+        let named = string_map.create<int>();
+        named.set("a", 1);
+        named.set("bc", 2);
+        let lengths = 0;
+        for (let entry in named) {
+            lengths += entry[0].byte_length * entry[1];
+        }
+        test.assert_equal_int32(5, lengths);
+    };
+
+    export let test_sequences_and_ranges = func {
+        test.assert_equal_int32(10, sum<sequences.Sequence<int>>(sequences.range(0, 5)));
+        test.assert_equal_int32(6, sum<sequences.Sequence<int>>(sequences.from_list<int>([1, 2, 3])));
+        test.assert_equal_int32(12, sum<ranges.IntRange>(ranges.stepped(0, 7, 2)));
+    };
+
+    export let test_direct_loops = func {
+        let total = 0;
+        for (let value in array_list.of<int>([5, 6])) {
+            total += value;
+        }
+        for (let value in ranges.of(0, 3)) {
+            total += value;
+        }
+        for (let value: int in bit_set.of([1, 2])) {
+            total += value;
+        }
+        test.assert_equal_int32(17, total);
+    };
+);

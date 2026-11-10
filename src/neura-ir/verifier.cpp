@@ -322,7 +322,20 @@ private:
                  entry.library_path.find("//") != std::string::npos)) {
                 report(entry.span, "invalid standard library file identity");
             }
-            if (entry.host_binding) {
+            if (host_callback(entry)) {
+                const auto file = source_file(program_, id);
+                if (entry.kind != SymbolKind::Function || entry.external || entry.overrides != no_symbol ||
+                    !entry.generics.empty() || !valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Module ||
+                    !valid(file) || symbol(file).library_path.empty() || entry.host_binding->version == 0 ||
+                    !host_service_name(entry.host_binding->name) ||
+                    (entry.type.kind != TypeKind::Void && !host_data_type(entry.type))) {
+                    report(entry.span, "invalid standard library host callback");
+                }
+                for (auto parameter : entry.parameters) {
+                    if (valid(parameter) && !host_data_type(symbol(parameter).type))
+                        report(entry.span, "this parameter cannot cross the host boundary");
+                }
+            } else if (entry.host_binding) {
                 const auto file = source_file(program_, id);
                 if (entry.kind != SymbolKind::Function || !entry.external || entry.has_body ||
                     entry.overrides != no_symbol || !entry.generics.empty() ||

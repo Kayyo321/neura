@@ -16,6 +16,7 @@
 #include "nvr/names.hpp"
 
 #include <algorithm>
+#include <tuple>
 #include <array>
 #include <deque>
 #include <filesystem>
@@ -49,6 +50,13 @@ struct OpenBlock {
 // A virtual call or destruction whose targets depend on the classes the
 // program instantiates. Its block is built after every reachable function
 // has been converted.
+// The variants of Std.Program.ExitCode: each payload-free variant with its
+// process status, and Status(int), whose payload is the status.
+struct ExitVariants {
+    std::vector<std::pair<SymbolId, std::int32_t>> fixed;
+    SymbolId status = no_symbol;
+};
+
 struct Dispatch {
     std::uint32_t function = 0;
     std::uint32_t block = 0;
@@ -162,7 +170,7 @@ private:
     void compile_value_member(IrOp op);
     void append_text_bytes(const Operand& buffer, const Operand& text, const Span& span);
     void compile_start();
-    void return_standard_status(const Operand& value, const std::array<SymbolId, 3>& variants, const Span& span);
+    void return_standard_status(const Operand& value, const ExitVariants& variants, const Span& span);
     void field_initializers(SymbolId cls);
     void self_parameter(SymbolId cls);
     void parameters(SymbolId function);
@@ -225,7 +233,7 @@ public:
     SymbolId resolve_member(SymbolId concrete, SymbolId declared) const;
     SymbolId implementation(SymbolId cls, SymbolId method) const;
     bool derives(SymbolId cls, SymbolId base) const;
-    std::optional<std::array<SymbolId, 3>> standard_exit_variants(SymbolId enumeration) const;
+    std::optional<ExitVariants> standard_exit_variants(SymbolId enumeration) const;
     const nvr::Import& import_at(std::uint32_t index) const { return image_.imports.at(index); }
     const std::vector<IrNode>& body(SymbolId owner) const;
     const std::vector<const IrNode*>& field_initializers(SymbolId cls) const;
@@ -298,6 +306,9 @@ private:
     std::vector<Startup> startup_;
     std::set<SymbolId> instantiated_;
     std::vector<Dispatch> dispatches_;
+    std::set<SymbolId> callback_symbols_;
+    std::vector<nvr::Callback> callbacks_;
+    void add_reached_callbacks();
 };
 
 // ---------------------------------------------------------------------------
@@ -311,28 +322,49 @@ std::uint32_t Converter::type_index(const nvr::Type& type) {
     return it->second;
 }
 
-std::optional<std::array<SymbolId, 3>> Converter::standard_exit_variants(SymbolId enumeration) const {
+std::optional<ExitVariants> Converter::standard_exit_variants(SymbolId enumeration) const {
     if (enumeration == no_symbol) return std::nullopt;
     const auto& item = symbol(enumeration);
     if (item.kind != SymbolKind::Enum || item.name != "ExitCode" || item.owner == no_symbol) return std::nullopt;
     const auto& program = symbol(item.owner);
     if (program.kind != SymbolKind::Module || program.name != "Program" || program.owner == no_symbol ||
         symbol(program.owner).library_path != "std/program.nra") return std::nullopt;
-    const std::array<std::string_view, 3> names{"Ok", "Failure", "Status"};
-    std::array variants{no_symbol, no_symbol, no_symbol};
+    // The variants Std.Program.ExitCode may declare, with their fixed process
+    // statuses. Status(int) carries its own status and has no entry here.
+    struct Named {
+        std::string_view name;
+        std::int32_t status;
+    };
+    static constexpr std::array<Named, 13> fixed{{
+        {"Ok", 0}, {"Failure", 1}, {"SeriousFailure", 2}, {"CommandNotFound", 127},
+        {"IllegalInstruction", 132}, {"Breakpoint", 133}, {"Abort", 134}, {"ArithmeticError", 136},
+        {"OutOfMemory", 137}, {"BusError", 138}, {"SegmentationFault", 139}, {"CpuTimeExceeded", 152},
+        {"FileSizeExceeded", 153},
+    }};
+    std::array<SymbolId, fixed.size()> found{};
+    found.fill(no_symbol);
+    ExitVariants variants;
     for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
         const auto& value = symbol(id);
         if (value.kind != SymbolKind::Variant || value.owner != enumeration) continue;
-        const auto position = std::ranges::find(names, value.name);
-        if (position == names.end()) return std::nullopt;
-        auto& variant = variants[static_cast<std::size_t>(position - names.begin())];
+        if (value.name == "Status") {
+            if (variants.status != no_symbol ||
+                value.payload_types != std::vector{IrType{TypeKind::Integer, "int32", no_symbol, {}}})
+                return std::nullopt;
+            variants.status = id;
+            continue;
+        }
+        const auto position = std::ranges::find(fixed, value.name, &Named::name);
+        if (position == fixed.end() || !value.payload_types.empty()) return std::nullopt;
+        auto& variant = found[static_cast<std::size_t>(position - fixed.begin())];
         if (variant != no_symbol) return std::nullopt;
         variant = id;
     }
-    if (std::ranges::find(variants, no_symbol) != variants.end() ||
-        !symbol(variants[0]).payload_types.empty() || !symbol(variants[1]).payload_types.empty() ||
-        symbol(variants[2]).payload_types != std::vector{IrType{TypeKind::Integer, "int32", no_symbol, {}}})
-        return std::nullopt;
+    // Ok, Failure, and Status are required. The named statuses are optional,
+    // so a library tree or prebuilt module that predates them still builds.
+    if (variants.status == no_symbol || found[0] == no_symbol || found[1] == no_symbol) return std::nullopt;
+    for (std::size_t i = 0; i < fixed.size(); ++i)
+        if (found[i] != no_symbol) variants.fixed.emplace_back(found[i], fixed[i].status);
     return variants;
 }
 
@@ -570,7 +602,7 @@ std::optional<std::uint32_t> Converter::external_import(SymbolId function, const
     // declared parameters, succeeds with the Ok payload or no value, and fails
     // with a uint32 code (docs/runtime/NVM.md, Host calls).
     const auto& item = symbol(function);
-    if (!item.host_binding) return std::nullopt;
+    if (!host_import(item)) return std::nullopt;
     nvr::Import import;
     import.name = item.host_binding->name;
     import.interface_version = item.host_binding->version;
@@ -966,10 +998,16 @@ Conversion Converter::run() {
                 }
             }
         }
+        add_reached_callbacks();
         if (next_function_ == origins_.size()) {
             break;
         }
     }
+    // The CALB table, ordered by name and version for a stable image.
+    std::sort(callbacks_.begin(), callbacks_.end(), [](const nvr::Callback& a, const nvr::Callback& b) {
+        return std::tie(a.name, a.interface_version) < std::tie(b.name, b.interface_version);
+    });
+    image_.callbacks = callbacks_;
     for (const auto& dispatch : dispatches_) {
         build_dispatch(dispatch);
     }
@@ -981,6 +1019,23 @@ Conversion Converter::run() {
     }
     image_.entry = 0;
     return {std::move(image_), std::move(origins_)};
+}
+
+void Converter::add_reached_callbacks() {
+    // A host callback (NVR CALB) is part of the image when converted code
+    // reaches the module that declares it: the module's other functions are
+    // what register work for the host to call back.
+    std::set<SymbolId> reached;
+    for (const auto& origin : origins_) {
+        if (origin.symbol < program_.symbols.size()) reached.insert(symbol(origin.symbol).owner);
+    }
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        const auto& item = symbol(id);
+        if (!host_callback(item) || callback_symbols_.contains(id) || !reached.contains(item.owner)) continue;
+        callback_symbols_.insert(id);
+        const auto index = function({Role::Function, id, item.owner});
+        callbacks_.push_back({item.host_binding->name, item.host_binding->version, index});
+    }
 }
 
 void Converter::build_dispatch(const Dispatch& dispatch) {
@@ -3014,7 +3069,7 @@ void FunctionCompiler::compile_start() {
     finish();
 }
 
-void FunctionCompiler::return_standard_status(const Operand& value, const std::array<SymbolId, 3>& variants,
+void FunctionCompiler::return_standard_status(const Operand& value, const ExitVariants& variants,
                                                const Span& span) {
     const auto boolean = c_.scalar(nvr::TypeKind::Bool);
     const auto tag_type = c_.scalar(nvr::TypeKind::Unsigned, 32);
@@ -3029,19 +3084,16 @@ void FunctionCompiler::return_standard_status(const Operand& value, const std::a
         exit.arguments = {std::move(status)};
         close({exit});
     };
-    const auto ok = new_block();
-    const auto not_ok = new_block();
-    branch(matches(variants[0]), ok, not_ok);
-    begin(ok, span);
-    complete(immediate(function_.result_type, 0));
-    begin(not_ok, span);
-    const auto failure = new_block();
-    const auto with_status = new_block();
-    branch(matches(variants[1]), failure, with_status);
-    begin(failure, span);
-    complete(immediate(function_.result_type, 1));
-    begin(with_status, span);
-    const auto status = state(nvr::StateOp::ReadField, c_.payload_start(variants[2], span),
+    // One comparison per fixed variant, in table order, then Status(n).
+    for (const auto& [variant, fixed_status] : variants.fixed) {
+        const auto matched = new_block();
+        const auto other = new_block();
+        branch(matches(variant), matched, other);
+        begin(matched, span);
+        complete(immediate(function_.result_type, static_cast<std::uint64_t>(fixed_status)));
+        begin(other, span);
+    }
+    const auto status = state(nvr::StateOp::ReadField, c_.payload_start(variants.status, span),
                               {value}, function_.result_type, span);
     // status < 0, then status > 255: each block compares the status with one
     // constant, as a source comparison does, so the decompiler lifts both.

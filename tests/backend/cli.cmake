@@ -167,7 +167,7 @@ endforeach()
 # Arguments after -- reach the entry function as UTF-8 text.
 build_image("${TEST_DIR}/first-argument.nvr" "${tests}/arguments/first-argument.nra")
 expect_run("first argument" "${TEST_DIR}/first-argument.nvr" "first: héllo\n" 0 "" -- "héllo" second)
-expect_run("no arguments" "${TEST_DIR}/first-argument.nvr" "" 70
+expect_run("no arguments" "${TEST_DIR}/first-argument.nvr" "" 139
     "trap: index out of bounds: index 0 for length 0 in function [0-9]+ block [0-9]+ at first-argument[.]nra:8:40")
 
 # Runnable examples.
@@ -276,7 +276,8 @@ endif()
 same_bytes("range image reassembly" "${TEST_DIR}/ranges-and-variadics.nvr"
            "${TEST_DIR}/ranges-and-variadics-reassembled.nvr")
 
-# Runtime traps: stdout up to the trap, a diagnostic, and status 70.
+# Runtime traps: stdout up to the trap, a diagnostic, and the status of the
+# trap's class.
 file(GLOB traps "${tests}/traps/*.nra")
 list(SORT traps)
 foreach(trap IN LISTS traps)

@@ -15,6 +15,7 @@ This release carries the language below from source through NeuraIR, optimizatio
 | Collections | Arrays, lists, stepped ranges, `length`, indexing, `append`, `remove_at`, structural versions, and for-each over built-ins or `Iterable<T>` | [Collections](Collections.md) |
 | Errors | Expected failures as returned values, plus runtime traps and explicit message traps | [Errors](Errors.md) |
 | Testing | `neura test` with the `Std.Test` assertions | [Testing](Testing.md) |
+| Foreign interop | `Std.DynamicForeign`: native libraries, symbol lookup, arena-owned native memory, layouts, and downcalls through the platform C ABI, under `--allow-native` | [Foreign interop](ForeignInterop.md) |
 | Tooling | `check`, `docs` for `///` comments, `emit-ir`, `build`, `run` (with capabilities, `--record`, `--replay`, `--stats`, `--profile`), `test`, `disassemble`, `assemble`, `decompile` | [Tooling](Tooling.md), [Decompiler](../Decompiler.md) |
 | Standard library | The `Std` source modules of the [implementation plan](Stdlib.md), installed with the tool, and the host providers they bind; see [Standard library](StandardLibrary.md) for the module list and [section 18 of the plan](Stdlib.md#18-implementation-decisions) for decisions made while implementing it | [Standard library](StandardLibrary.md) |
 
@@ -24,7 +25,7 @@ This release carries the language below from source through NeuraIR, optimizatio
 | --- | --- |
 | Standard library extensions | `Std.Concurrent`, time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](Stdlib.md#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
 | Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](ResourcesConcurrency.md)). |
-| Foreign interop | Java and other foreign-function interop are not part of the language. |
+| Foreign interop | Interop with Java and other managed runtimes. Native code runs only on Linux x86-64 in this release's tests; other platforms build the same provider but are unverified. |
 | Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](ProjectStructure.md)). |
 
 ## Open language decisions
@@ -51,9 +52,9 @@ These remain open. The compiler rejects or does not offer the affected construct
 
 [Neuron conversion and execution](../Backend.md#semantic-decisions) records how conversion implements each rule.
 
-- Integer overflow, a zero divisor, `MIN / -1`, and an out-of-range conversion trap with reason 1. Division truncates toward zero.
+- Integer overflow, a zero divisor, `MIN / -1`, and an out-of-range conversion trap with reason 1. Division truncates toward zero. Each class of trap ends the run with its own process status ([Errors](Errors.md)).
 - A negative index traps with reason 2; a list modified during for-each traps with reason 5.
-- The entry point is the unique override of `Std.Program.Entry.main`. `Ok` is status 0, `Failure` 1, and `Status(n)` is `n` for 0 through 255; any other `n` traps. The built-in `SysIo` and `Test` modules are retired, and importing either is an error that names its replacement.
+- The entry point is the unique override of `Std.Program.Entry.main`. `Ok` is status 0, `Failure` 1, and `Status(n)` is `n` for 0 through 255; any other `n` traps. The named variants from `SeriousFailure` (2) to `FileSizeExceeded` (153) have fixed statuses ([Modules](Modules.md#program-entry)). The built-in `SysIo` and `Test` modules are retired, and importing either is an error that names its replacement.
 - An instance field without an initializer starts uninitialized, and reading it before a store faults. Static fields follow the preparation and first-use rules in [Static initialization](Types.md#static-initialization). Construction and `destroy` follow the order in [Object lifecycle](ObjectLifecycle.md).
 - `Console.print_line` traps with reason 3 when the write fails, and a failed `Std.Test` assertion is a message trap with reason 3.
 

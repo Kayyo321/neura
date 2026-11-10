@@ -1,3 +1,4 @@
+// status: 134
 // stderr: a singleton cannot be destroyed
 let program = import:Std.Program;
 

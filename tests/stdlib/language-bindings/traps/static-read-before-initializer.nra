@@ -1,3 +1,4 @@
+// status: 139
 // stderr: read of an uninitialized global
 let program = import:Std.Program;
 

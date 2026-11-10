@@ -340,6 +340,12 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
     };
     add_fs_services(adder, *tables_, capabilities_, prefixes_);
     add_net_services(adder, *tables_, capabilities_);
+    add_ffi_services(adder, *tables_, capabilities_);
+}
+
+void StandardServices::set_embedded_object(std::string object) {
+    embedded_object_ = std::move(object);
+    tables_->native.embedded_object = &embedded_object_;
 }
 
 StandardServices::~StandardServices() { end_run(); }
@@ -355,6 +361,7 @@ void StandardServices::register_all(HostRegistry& registry) {
 void StandardServices::end_run() {
     close_files(*tables_);
     close_sockets(*tables_);
+    close_native(*tables_);
 }
 
 std::size_t StandardServices::open_files() const { return tables_->files.size(); }

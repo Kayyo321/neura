@@ -1,5 +1,5 @@
 // status: 1
-// stderr: replay-malformed\.trace: line 3: expected 'ok', 'error', or 'exit' after a request
+// stderr: replay-malformed\.trace: line 3: expected 'callback', 'ok', 'error', or 'exit' after a request
 // run-options: --replay @AREA_DIR@/traps/replay-malformed.trace
 let program = import:Std.Program;
 

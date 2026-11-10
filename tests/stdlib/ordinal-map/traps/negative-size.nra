@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: negative size
 let console = import:Std.Io.Console;
 let ordinal_map = import:Std.Collections.OrdinalMap;

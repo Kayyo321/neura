@@ -1,4 +1,4 @@
-// status: 70
+// status: 152
 // run-options: --max-steps 1000
 // stderr: step limit exceeded: 1000 steps
 // An empty endless loop compiles to a block that only jumps to itself; jump

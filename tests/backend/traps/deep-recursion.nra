@@ -1,4 +1,4 @@
-// status: 70
+// status: 139
 // run-options: --max-frames 100
 // stderr: frame depth limit exceeded
 let console = import:Std.Io.Console;

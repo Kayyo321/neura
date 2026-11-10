@@ -208,7 +208,10 @@ private:
         result.kind = Declaration::Kind::Function;
         result.generics = generic_parameters();
         const bool expression_body = function_body(result, branch_keyword);
-        if (!result.has_body && current().kind == TokenKind::Identifier && current().text == "host") {
+        const bool host = !result.has_body && current().kind == TokenKind::Identifier && current().text == "host";
+        const bool callback = result.has_body && !expression_body && current().kind == TokenKind::Identifier &&
+                              current().text == "callback";
+        if (host || callback) {
             advance();
             expect("(");
             const auto& service = current();
@@ -224,7 +227,8 @@ private:
                 throw Diagnostic(version.span, "host service version must be a positive uint32");
             advance();
             expect(")");
-            result.host_binding.emplace(service.text.substr(1, service.text.size() - 2), number);
+            auto& binding = host ? result.host_binding : result.host_callback;
+            binding.emplace(service.text.substr(1, service.text.size() - 2), number);
         }
         return expression_body;
     }

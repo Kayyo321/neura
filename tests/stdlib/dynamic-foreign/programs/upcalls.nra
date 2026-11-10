@@ -1,0 +1,71 @@
+// run-options: --allow-native
+// args: @NATIVE_DIR@/libmathops.so
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let arenas = import:Std.DynamicForeign.Arena;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let values = import:Std.DynamicForeign.ForeignValue;
+let segments = import:Std.DynamicForeign.MemorySegment;
+
+// Upcalls: qsort from the C library and sort_ints from libmathops call a
+// Neura comparator through a stub; the comparator prints from inside the
+// native call.
+export let Main = module:program.Entry (
+    let calls: int = 0;
+    let seen: bool = false;
+
+    let compare = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
+        let left = values.as_segment(arguments[0]).reinterpret(4).get_int32(0);
+        let right = values.as_segment(arguments[1]).reinterpret(4).get_int32(0);
+        calls += 1;
+        return values.ForeignValue.Int32((left < right) ? -1 : (left > right) ? 1 : 0);
+    };
+
+    let descending = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
+        let left = values.as_segment(arguments[0]).reinterpret(4).get_int32(0);
+        let right = values.as_segment(arguments[1]).reinterpret(4).get_int32(0);
+        if (!seen && (left == 7 || right == 7)) {
+            console.print_line("saw 7 inside the native sort");
+            seen = true;
+        }
+        return values.ForeignValue.Int32((left > right) ? -1 : (left < right) ? 1 : 0);
+    };
+
+    let show = func(numbers: segments.MemorySegment, count: int) -> string {
+        let text = "";
+        for (let i = 0; i < count; i++) {
+            text = text + ((i > 0) ? " " : "") + numbers.get_int32((i * 4) as int64).to_string();
+        }
+        return text;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        let linker = linkers.native_linker();
+        let comparator = descriptors.of(layouts.Int32, layouts.Address, layouts.Address);
+        let numbers = arena.allocate_array(layouts.Int32, 5);
+        let input = [5, -3, 9, 0, 2];
+        for (let i = 0; i < 5; i++) {
+            numbers.set_int32((i * 4) as int64, input[i]);
+        }
+        let qsort = linker.downcall_handle(linker.default_lookup().find_or_trap("qsort"),
+            descriptors.of_void(layouts.Address, layouts.UInt64, layouts.UInt64, layouts.Address));
+        let ascending = linker.upcall_stub(compare, comparator, arena);
+        qsort.invoke(numbers, 5, 4, ascending);
+        console.print_line(show(numbers, 5));
+        console.print_line((calls > 0).to_string());
+
+        let lib = result.expect<lookups.SymbolLookup>(lookups.library_lookup(args[0], arena), "load libmathops");
+        let sort_ints = linker.downcall_handle(lib.find_or_trap("sort_ints"),
+            descriptors.of_void(layouts.Address, layouts.Int32, layouts.Address));
+        numbers.set_int32(8, 7);
+        sort_ints.invoke(numbers, 5, linker.upcall_stub(descending, comparator, arena));
+        console.print_line(show(numbers, 5));
+        arena.close();
+        return program.ExitCode.Ok;
+    };
+);

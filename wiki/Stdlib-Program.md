@@ -17,21 +17,23 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Program** · [`export let ExitCode = enum (Ok, Failure, Status(int))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L10)
-  Ok is status 0, Failure is 1, and Status gives 0 through 255; any other Status traps with "invalid argument: exit status".
-- **Program** · [`export let Entry = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L13)
+- **Program** · [`export let ExitCode = enum ( Ok, Failure, Status(int), SeriousFailure, CommandNotFound, IllegalInstruction, Breakpoint, Abort, ArithmeticError, OutOfMemory, BusError, SegmentationFault, CpuTimeExceeded, FileSizeExceeded )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L17)
+  A process exit status. Ok is 0, Failure is 1, and Status gives 0 through 255; any other Status traps with "invalid argument: exit status". The named variants follow the shell convention of 128 plus the Linux signal number for a process ended by that signal. SeriousFailure is 2, CommandNotFound 127, IllegalInstruction 132 (SIGILL), Breakpoint 133 (SIGTRAP), Abort 134 (SIGABRT), ArithmeticError 136 (SIGFPE, including integer division by zero), OutOfMemory 137 (SIGKILL, as sent by an out-of-memory killer), BusError 138 (SIGBUS), SegmentationFault 139 (SIGSEGV), CpuTimeExceeded 152 (SIGXCPU), and FileSizeExceeded 153 (SIGXFSZ). Platforms that number SIGXCPU and SIGXFSZ 30 and 31, such as MIPS, report 158 and 159 for those signals instead. A runtime trap ends the run with the status of the variant that names its class.
+- **Program** · [`export let status_of = func(code: ExitCode) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L36)
+  The process status `code` stands for: 0 through 255. Traps with "invalid argument: exit status" for a Status outside that range.
+- **Program** · [`export let Entry = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L64)
   The module contract implemented by a runnable program.
-- **Program.Entry** · [`export let main = func(args: string[]) -> ExitCode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L15)
+- **Program.Entry** · [`export let main = func(args: string[]) -> ExitCode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L66)
   Runs the program with its command-line arguments and returns its exit status.
-- **Program** · [`export let Environment = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L19)
+- **Program** · [`export let Environment = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L70)
   Looks up process environment variables through the host.
-- **Program.Environment** · [`export let Lookup = enum (Found(string), Missing, Failed(Error))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L21)
+- **Program.Environment** · [`export let Lookup = enum (Found(string), Missing, Failed(Error))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L72)
   Distinguishes a present value, a missing name, and a failed lookup.
-- **Program.Environment** · [`export let get = func(name: string) -> Lookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L30)
+- **Program.Environment** · [`export let get = func(name: string) -> Lookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L81)
   The value of an environment variable. Needs the env capability; without it the lookup fails with CapabilityDenied.
-- **Program** · [`export let Process = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L41)
+- **Program** · [`export let Process = module`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L92)
   Provides explicit termination of the current run.
-- **Program.Process** · [`export let exit = func(status: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L49)
+- **Program.Process** · [`export let exit = func(status: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/program.nra#L100)
   Ends the run with `status` (0 through 255) and does not return. Returning from main is preferred.
 <!-- END SOURCE API -->
 
@@ -44,9 +46,10 @@ The following sections preserve the relevant descriptions and later implementati
 This module replaces `SysIo.Entry` ([section 4.6](Stdlib-Design#46-retiring-sysio-and-test)). It needs P3.
 
 - **`Entry`** is a module with one requirement, `main(args: string[]) → ExitCode`. A program's entry module inherits it and overrides `main`, exactly as programs inherit `SysIo.Entry` today. Program arguments arrive only through this parameter.
-- **`ExitCode`** is a payload enum: `Ok`, `Failure`, and `Status(int)`. They map to process statuses 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. The first plan kept the old one-variant enum; a payload enum lets a program return any status without a host call.
+- **`ExitCode`** is a payload enum: `Ok`, `Failure`, `Status(int)`, and the named statuses `SeriousFailure` (2), `CommandNotFound` (127), `IllegalInstruction` (132), `Breakpoint` (133), `Abort` (134), `ArithmeticError` (136), `OutOfMemory` (137), `BusError` (138), `SegmentationFault` (139), `CpuTimeExceeded` (152), and `FileSizeExceeded` (153). `Ok`, `Failure`, and `Status` map to 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. The first plan kept the old one-variant enum; a payload enum lets a program return any status without a host call. Neura enums cannot carry explicit integer values, so the compiler and `status_of(code) → int` hold the table; the named variants follow declaration order after `Status`, so the original three keep their ordinals.
+- **`status_of(code: ExitCode) → int`** returns the status a variant stands for, trapping for an invalid `Status`.
 - **`Environment.get(name: string) → Lookup`**, where `Lookup` is a payload enum: `Found(string)`, `Missing`, and `Failed(Error)`. A purpose-built enum reads better here than a `Result` of an `Optional`. Needs P2.
-- **`Process.exit(status: int)`** ends the run with that status through `neura.process.exit` and does not return. A status outside 0 through 255 traps. Needs P2. Returning from `main` is preferred; `exit` is for leaving from deep inside a program.
+- **`Process.exit(status: int)`** ends the run with that status through `neura.process.exit` and does not return. A status outside 0 through 255 traps. The overload `Process.exit(code: ExitCode)` exits with `status_of(code)`. Needs P2. Returning from `main` is preferred; `exit` is for leaving from deep inside a program.
 
 ### 18.2 Program, console, and testing
 

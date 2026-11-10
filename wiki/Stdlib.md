@@ -85,6 +85,22 @@ The [full design and implementation decisions](Stdlib-Design) preserve the histo
 | [`Std.Digest.Crc32`](Stdlib-Digest-Crc32) | [Contracts](Stdlib-Digest-Crc32#detailed-contracts) | [Declarations](Stdlib-Digest-Crc32#exported-declarations) |
 | [`Std.Digest.Sha256`](Stdlib-Digest-Sha256) | [Contracts](Stdlib-Digest-Sha256#detailed-contracts) | [Declarations](Stdlib-Digest-Sha256#exported-declarations) |
 
+### `Std.DynamicForeign`
+
+Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Needs `--allow-native`.
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.DynamicForeign.Arena`](Stdlib-DynamicForeign-Arena) | [Contracts](Stdlib-DynamicForeign-Arena#detailed-contracts) | [Declarations](Stdlib-DynamicForeign-Arena#exported-declarations) |
+| [`Std.DynamicForeign.ForeignValue`](Stdlib-DynamicForeign-ForeignValue) | [Contracts](Stdlib-DynamicForeign-ForeignValue#detailed-contracts) | [Declarations](Stdlib-DynamicForeign-ForeignValue#exported-declarations) |
+| [`Std.DynamicForeign.FunctionDescriptor`](Stdlib-DynamicForeign-FunctionDescriptor) | [Contracts](Stdlib-DynamicForeign-FunctionDescriptor#detailed-contracts) | [Declarations](Stdlib-DynamicForeign-FunctionDescriptor#exported-declarations) |
+| [`Std.DynamicForeign.Linker`](Stdlib-DynamicForeign-Linker) | [Contracts](Stdlib-DynamicForeign-Linker#detailed-contracts) | [Declarations](Stdlib-DynamicForeign-Linker#exported-declarations) |
+| [`Std.DynamicForeign.MemoryLayout`](Stdlib-DynamicForeign-MemoryLayout) | [Contracts](Stdlib-DynamicForeign-MemoryLayout#detailed-contracts) | [Declarations](Stdlib-DynamicForeign-MemoryLayout#exported-declarations) |
+| [`Std.DynamicForeign.MemorySegment`](Stdlib-DynamicForeign-MemorySegment) | [Contracts](Stdlib-DynamicForeign-MemorySegment#detailed-contracts) | [Declarations](Stdlib-DynamicForeign-MemorySegment#exported-declarations) |
+| [`Std.DynamicForeign.MethodHandle`](Stdlib-DynamicForeign-MethodHandle) | [Contracts](Stdlib-DynamicForeign-MethodHandle#detailed-contracts) | [Declarations](Stdlib-DynamicForeign-MethodHandle#exported-declarations) |
+| [`Std.DynamicForeign.SymbolLookup`](Stdlib-DynamicForeign-SymbolLookup) | [Contracts](Stdlib-DynamicForeign-SymbolLookup#detailed-contracts) | [Declarations](Stdlib-DynamicForeign-SymbolLookup#exported-declarations) |
+| [`Std.DynamicForeign.ValueLayout`](Stdlib-DynamicForeign-ValueLayout) | [Contracts](Stdlib-DynamicForeign-ValueLayout#detailed-contracts) | [Declarations](Stdlib-DynamicForeign-ValueLayout#exported-declarations) |
+
 ### `Std.Encoding`
 
 | Module | Detailed contracts | Exported declarations |

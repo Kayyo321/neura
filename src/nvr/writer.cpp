@@ -203,6 +203,22 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
             indices(o, graph.outputs);
         });
     });
+    if (!image.callbacks.empty()) {
+        add("CALB", true, [&](Output& out) {
+            vector(out, image.callbacks, [](Output& o, const Callback& callback) {
+                o.text(callback.name);
+                o.u32(callback.interface_version);
+                o.u32(callback.function);
+            });
+        });
+    }
+    if (image.native_library) {
+        add("NATV", true, [&](Output& out) {
+            out.text(image.native_library->triple);
+            out.bytes(image.native_library->object);
+            vector(out, image.native_library->symbols, [](Output& o, const std::string& symbol) { o.text(symbol); });
+        });
+    }
     add("IMPT", true, [&](Output& out) {
         vector(out, image.imports, [](Output& o, const Import& import) {
             o.text(import.name);
@@ -268,6 +284,7 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
 } // namespace
 
 std::uint16_t required_minor_version(const Image& image) {
+    if (!image.callbacks.empty() || image.native_library) return 4;
     std::uint16_t version = 0;
     if (std::ranges::any_of(image.layouts, [](const Layout& layout) { return !layout.interfaces.empty(); }))
         version = 2;

@@ -1,0 +1,10 @@
+i32(int) 4 4
+i64(long) 8 8
+a(void*) 8 8
+u64(size_t) 8 8
+f64(double) 8 8
+true
+UInt64(5)
+Int32(12)
+true
+NotFound: cannot load native library (./no-such-library.so)

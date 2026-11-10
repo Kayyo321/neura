@@ -1,0 +1,238 @@
+let float32s = import:Std.Core.Float32;
+let float64s = import:Std.Core.Float64;
+let native = import:Std.DynamicForeign.Internal.Native;
+let scopes = import:Std.DynamicForeign.Internal.Scope;
+
+/// @brief A bounded view of native memory (ForeignInterop.md), the counterpart of Java's MemorySegment.
+///
+/// Every access checks that the arena that owns the segment is open and that the bytes lie inside the segment;
+/// a violation traps with "invalid state: arena closed" or "invalid argument: out of bounds". A segment made from
+/// a raw address, such as a pointer returned by native code, has size 0 until `reinterpret` gives it a size.
+/// Values use the runner's native byte order. Needs the native capability.
+/// @see [Std.DynamicForeign.MemorySegment](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-MemorySegment)
+export let MemorySegment = module (
+    /// @brief A native address, a size in bytes, and the scope that owns the memory.
+    export let MemorySegment = class (
+        /// @brief The address of the first byte.
+        let base: int64;
+        /// @brief The number of accessible bytes.
+        let length: int64;
+        /// @brief The owning scope; the global scope for raw addresses.
+        let owner: scopes.Scope;
+
+        /// @brief Use Arena.allocate or of_address; this constructor trusts its arguments.
+        export let init = func(address_value: int64, size: int64, scope: scopes.Scope) {
+            base = address_value;
+            length = size;
+            owner = scope;
+        };
+
+        /// @brief The native address of the first byte.
+        export let address = func -> int64 => base;
+
+        /// @brief The number of accessible bytes.
+        export let byte_size = func -> int64 => length;
+
+        /// @brief Whether the address is 0.
+        export let is_null = func -> bool => base == 0;
+
+        /// @brief Whether the owning arena is still open.
+        export let is_alive = func -> bool => owner.is_alive();
+
+        /// @brief The scope that owns the memory; library code passes it on to derived segments.
+        export let scope = func -> scopes.Scope => owner;
+
+        /// @brief The same address with `size` accessible bytes, for memory whose extent native code defines.
+        /// Like Java's reinterpret, this is unsafe: the size is not checked against the real allocation.
+        export let reinterpret = func(size: int64) -> MemorySegment {
+            if (size < 0) {
+                trap_with_message("invalid argument: negative size");
+            }
+            return new MemorySegment(base, size, owner);
+        };
+
+        /// @brief The `size` bytes starting at `offset`, sharing this segment's scope.
+        export let as_slice = func(offset: int64, size: int64) -> MemorySegment {
+            check(offset, size);
+            return new MemorySegment(base + offset, size, owner);
+        };
+
+        /// @brief The bytes from `offset` to the end, sharing this segment's scope.
+        export let as_slice_from = func(offset: int64) -> MemorySegment => as_slice(offset, length - offset);
+
+        /// @brief Reads a C `_Bool`; any nonzero byte is true.
+        export let get_bool = func(offset: int64) -> bool => load(offset, 1) != 0;
+        /// @brief Reads a signed byte.
+        export let get_int8 = func(offset: int64) -> int8 => native.sign_extend(load(offset, 1), 1) as int8;
+        /// @brief Reads an unsigned byte.
+        export let get_uint8 = func(offset: int64) -> uint8 => load(offset, 1) as uint8;
+        /// @brief Reads a 16-bit signed integer.
+        export let get_int16 = func(offset: int64) -> int16 => native.sign_extend(load(offset, 2), 2) as int16;
+        /// @brief Reads a 16-bit unsigned integer.
+        export let get_uint16 = func(offset: int64) -> uint16 => load(offset, 2) as uint16;
+        /// @brief Reads a 32-bit signed integer.
+        export let get_int32 = func(offset: int64) -> int32 => native.sign_extend(load(offset, 4), 4) as int32;
+        /// @brief Reads a 32-bit unsigned integer.
+        export let get_uint32 = func(offset: int64) -> uint32 => load(offset, 4) as uint32;
+        /// @brief Reads a 64-bit signed integer.
+        export let get_int64 = func(offset: int64) -> int64 => native.sign_extend(load(offset, 8), 8);
+        /// @brief Reads a 64-bit unsigned integer.
+        export let get_uint64 = func(offset: int64) -> uint64 => load(offset, 8);
+        /// @brief Reads an IEEE binary32 float.
+        export let get_float32 = func(offset: int64) -> float32 => float32s.from_bits(load(offset, 4) as uint32);
+        /// @brief Reads an IEEE binary64 float.
+        export let get_float64 = func(offset: int64) -> float64 => float64s.from_bits(load(offset, 8));
+        /// @brief Reads a pointer as a segment of size 0 in the global scope.
+        export let get_address = func(offset: int64) -> MemorySegment =>
+            new MemorySegment(native.sign_extend(load(offset, 8), 8), 0, scopes.global());
+
+        /// @brief Writes a C `_Bool` as 0 or 1.
+        export let set_bool = func(offset: int64, value: bool) => store(offset, value ? 1 : 0, 1);
+        /// @brief Writes a signed byte.
+        export let set_int8 = func(offset: int64, value: int8) => store(offset, native.signed_bits(value as int64), 1);
+        /// @brief Writes an unsigned byte.
+        export let set_uint8 = func(offset: int64, value: uint8) => store(offset, value as uint64, 1);
+        /// @brief Writes a 16-bit signed integer.
+        export let set_int16 = func(offset: int64, value: int16) =>
+            store(offset, native.signed_bits(value as int64), 2);
+        /// @brief Writes a 16-bit unsigned integer.
+        export let set_uint16 = func(offset: int64, value: uint16) => store(offset, value as uint64, 2);
+        /// @brief Writes a 32-bit signed integer.
+        export let set_int32 = func(offset: int64, value: int32) =>
+            store(offset, native.signed_bits(value as int64), 4);
+        /// @brief Writes a 32-bit unsigned integer.
+        export let set_uint32 = func(offset: int64, value: uint32) => store(offset, value as uint64, 4);
+        /// @brief Writes a 64-bit signed integer.
+        export let set_int64 = func(offset: int64, value: int64) => store(offset, native.signed_bits(value), 8);
+        /// @brief Writes a 64-bit unsigned integer.
+        export let set_uint64 = func(offset: int64, value: uint64) => store(offset, value, 8);
+        /// @brief Writes an IEEE binary32 float.
+        export let set_float32 = func(offset: int64, value: float32) =>
+            store(offset, float32s.to_bits(value) as uint64, 4);
+        /// @brief Writes an IEEE binary64 float.
+        export let set_float64 = func(offset: int64, value: float64) => store(offset, float64s.to_bits(value), 8);
+        /// @brief Writes the address of `value`.
+        export let set_address = func(offset: int64, value: MemorySegment) =>
+            store(offset, native.signed_bits(value.address()), 8);
+
+        /// @brief The UTF-8 text from `offset` up to the first NUL byte, which must lie inside the segment.
+        /// Traps with "invalid argument: unterminated string" or "invalid argument: text is not valid UTF-8".
+        export let get_utf8 = func(offset: int64) -> string {
+            check(offset, 0);
+            let limit = length - offset;
+            let count = native.c_string_length(base + offset, limit);
+            if (count >= limit) {
+                trap_with_message("invalid argument: unterminated string");
+            }
+            let [valid, text] = string.from_utf8(native.read(base + offset, count));
+            if (!valid) {
+                trap_with_message("invalid argument: text is not valid UTF-8");
+            }
+            return text;
+        };
+
+        /// @brief Writes the UTF-8 bytes of `text` and a NUL at `offset`. Traps if `text` contains a NUL.
+        export let set_utf8 = func(offset: int64, text: string) {
+            let bytes: uint8[list] = [];
+            for (let i = 0; i < text.byte_length; i++) {
+                let b = text.byte_at(i);
+                if (b == 0) {
+                    trap_with_message("invalid argument: text contains a NUL byte");
+                }
+                bytes.append(b);
+            }
+            bytes.append(0);
+            copy_from_bytes(offset, bytes);
+        };
+
+        /// @brief A copy of all the bytes.
+        export let to_bytes = func -> uint8[list] {
+            check(0, length);
+            return native.read(base, length);
+        };
+
+        /// @brief Copies `bytes` into the segment at `offset`.
+        export let copy_from_bytes = func(offset: int64, bytes: uint8[list]) {
+            check(offset, bytes.length as int64);
+            native.write(base + offset, bytes);
+        };
+
+        /// @brief Copies all of `source` to the start of this segment.
+        export let copy_from = func(source: MemorySegment) {
+            copy_from_bytes(0, source.to_bytes());
+        };
+
+        /// @brief Sets every byte to `value`.
+        export let fill = func(value: uint8) {
+            let bytes: uint8[list] = [];
+            for (let i: int64 = 0; i < length; i++) {
+                bytes.append(value);
+            }
+            copy_from_bytes(0, bytes);
+        };
+
+        /// @brief Segments are equal when their addresses and sizes are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is MemorySegment)) {
+                return false;
+            }
+            let that = other as MemorySegment;
+            return base == that.base && length == that.length;
+        };
+
+        /// @brief Hashes the address and size.
+        export let.override hash_code = func -> uint32 => (base.to_string() + ":" + length.to_string()).hash_code();
+
+        /// @brief `MemorySegment(address, size)` with the address in hexadecimal.
+        export let.override to_string = func -> string =>
+            "MemorySegment(0x" + hex(base) + ", " + length.to_string() + ")";
+
+        /// @brief Traps unless the scope is open and `size` bytes at `offset` lie inside the segment.
+        export let check = func(offset: int64, size: int64) {
+            owner.check_alive();
+            if (offset < 0 || size < 0 || offset > length || size > length - offset) {
+                trap_with_message("invalid argument: out of bounds");
+            }
+            if (base == 0 && size > 0) {
+                trap_with_message("invalid argument: null segment");
+            }
+        };
+
+        /// @brief Reads `size` bytes at `offset` as the low bytes of a uint64.
+        let load = func(offset: int64, size: int) -> uint64 {
+            check(offset, size as int64);
+            return native.get(native.read(base + offset, size as int64), 0, size);
+        };
+
+        /// @brief Writes the low `size` bytes of `bits` at `offset`.
+        let store = func(offset: int64, bits: uint64, size: int) {
+            check(offset, size as int64);
+            let bytes: uint8[list] = [];
+            native.put(bytes, bits, size);
+            native.write(base + offset, bytes);
+        };
+    );
+
+    /// @brief Lowercase hexadecimal digits of an address.
+    let hex = func(value: int64) -> string {
+        let bits = native.signed_bits(value);
+        if (bits == 0) {
+            return "0";
+        }
+        let digits = "0123456789abcdef";
+        let text = "";
+        while (bits != 0) {
+            let digit = (bits & 15) as int;
+            text = digits.slice(digit, digit + 1) + text;
+            bits = bits >> 4;
+        }
+        return text;
+    };
+
+    /// @brief The null address, with size 0.
+    export let null_segment = func -> MemorySegment => new MemorySegment(0, 0, scopes.global());
+
+    /// @brief A segment of size 0 at a raw address in the global scope (Java's MemorySegment.ofAddress). Use
+    /// reinterpret to give it a size.
+    export let of_address = func(address: int64) -> MemorySegment => new MemorySegment(address, 0, scopes.global());
+);

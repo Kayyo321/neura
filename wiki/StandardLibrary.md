@@ -40,6 +40,8 @@ export let App = module:program.Entry (
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` |
 | `Std.Log` | `Logger` |
 | `Std.Test` | The assertions of [Testing](https://github.com/Kayyo321/neura/wiki/Testing) |
+| `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` ([Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop)) |
+| `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` ([Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop)) |
 
 Expected failures are `Result<T>` values whose error is the `Error` enum; absent values are `Optional<T>`. A violated precondition traps with one of the messages of [section 5.1](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#51-failure-model).
 

@@ -17,7 +17,7 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 3;
+inline constexpr std::uint16_t minor_version = 4;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -182,6 +182,28 @@ struct Import {
     bool operator==(const Import&) const = default;
 };
 
+// NVR 1.4. A function the runtime may call while a host request is in
+// progress, named like an import: a host service delivers the arguments and
+// receives the result (Std.DynamicForeign upcalls).
+struct Callback {
+    std::string name;
+    std::uint32_t interface_version = 0;
+    std::uint32_t function = 0;
+
+    bool operator==(const Callback&) const = default;
+};
+
+// NVR 1.4. A shared object linked from C imports. A runner loads it only for
+// neura.ffi.library.embedded, and only on the target it names.
+struct NativeLibrary {
+    std::string triple;
+    std::vector<std::uint8_t> object;
+    // The symbols the image's C imports use, in ascending byte order.
+    std::vector<std::string> symbols;
+
+    bool operator==(const NativeLibrary&) const = default;
+};
+
 struct SourceLocation {
     std::uint32_t function = 0;
     std::uint32_t block = 0;
@@ -213,6 +235,9 @@ struct Image {
     std::vector<Import> imports;
     std::vector<Function> functions;
     std::uint32_t entry = 0;
+    // NVR 1.4: the CALB and NATV sections, present only when used.
+    std::vector<Callback> callbacks;
+    std::optional<NativeLibrary> native_library;
     // The optional SMAP section. Absent when the image carries no source map.
     std::optional<std::vector<SourceLocation>> source_map;
     // Unknown optional sections in ascending tag order.

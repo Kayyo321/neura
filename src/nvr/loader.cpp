@@ -356,12 +356,16 @@ struct DirectoryEntry {
 
 struct KnownSection {
     const char* tag;
+    // The directory's required flag for the section.
     bool required;
+    // Whether every image carries the section. CALB and NATV (NVR 1.4) are
+    // required for execution when present, and absent when unused.
+    bool always = true;
 };
 
-constexpr std::array<KnownSection, 9> known_sections{{
-    {"CONS", true}, {"FUNC", true}, {"GLOB", true}, {"GRPH", true}, {"IMPT", true},
-    {"LAYO", true}, {"META", true}, {"SMAP", false}, {"TYPE", true},
+constexpr std::array<KnownSection, 11> known_sections{{
+    {"CALB", true, false}, {"CONS", true}, {"FUNC", true}, {"GLOB", true}, {"GRPH", true}, {"IMPT", true},
+    {"LAYO", true}, {"META", true}, {"NATV", true, false}, {"SMAP", false, false}, {"TYPE", true},
 }};
 
 const KnownSection* known(const std::array<char, 4>& tag) {
@@ -402,6 +406,8 @@ private:
         return t.kind == TypeKind::Unsigned && t.width == width;
     }
 
+    void callbacks();
+    void native_library();
     void types();
     void layouts();
     void constants();
@@ -432,7 +438,43 @@ void Validator::run() {
     imports();
     functions();
     entry();
+    callbacks();
+    native_library();
     source_map();
+}
+
+void Validator::callbacks() {
+    std::set<std::pair<std::string, std::uint32_t>> seen;
+    for (std::size_t i = 0; i < image_.callbacks.size(); ++i) {
+        const auto& callback = image_.callbacks[i];
+        const auto where = "callback " + std::to_string(i);
+        if (callback.name.empty() || callback.interface_version == 0) {
+            invalid(where + ": a callback needs a name and a positive version");
+        }
+        if (!seen.emplace(callback.name, callback.interface_version).second) {
+            invalid(where + ": duplicate callback " + callback.name + " version " +
+                    std::to_string(callback.interface_version));
+        }
+        if (callback.function >= image_.functions.size()) {
+            invalid(where + ": function " + std::to_string(callback.function) + " is out of range");
+        }
+        if (callback.function == image_.entry) {
+            invalid(where + ": the entry function cannot be a callback");
+        }
+    }
+}
+
+void Validator::native_library() {
+    if (!image_.native_library) return;
+    const auto& library = *image_.native_library;
+    if (library.triple.empty() || library.object.empty()) {
+        invalid("native library: a target triple and an object are required");
+    }
+    for (std::size_t i = 1; i < library.symbols.size(); ++i) {
+        if (!(library.symbols[i - 1] < library.symbols[i])) {
+            invalid("native library: symbols are not unique and in ascending order");
+        }
+    }
 }
 
 void Validator::types() {
@@ -1281,7 +1323,7 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
                                   " bytes follow the last section");
     }
     for (const auto& section : known_sections) {
-        if (section.required && !sections.contains(section.tag)) {
+        if (section.required && section.always && !sections.contains(section.tag)) {
             fail(Kind::Malformed, std::string("directory: missing required section ") + section.tag);
         }
     }
@@ -1341,6 +1383,26 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
     });
     section("FUNC", [&](Reader& in) { image.functions = read_functions(in, image.types); });
     section("META", [&](Reader& in) { image.entry = in.u32(); });
+    if (sections.contains("CALB")) {
+        section("CALB", [&](Reader& in) {
+            image.callbacks = in.vector(12, "callback table", [](Reader& r) {
+                Callback callback;
+                callback.name = r.text("callback name");
+                callback.interface_version = r.u32();
+                callback.function = r.u32();
+                return callback;
+            });
+        });
+    }
+    if (sections.contains("NATV")) {
+        section("NATV", [&](Reader& in) {
+            NativeLibrary library;
+            library.triple = in.text("native target triple");
+            library.object = in.bytes("native object");
+            library.symbols = in.vector(4, "native symbol list", [](Reader& r) { return r.text("native symbol"); });
+            image.native_library = std::move(library);
+        });
+    }
     if (sections.contains("SMAP")) {
         section("SMAP", [&](Reader& in) {
             image.source_map = in.vector(location_size, "source map", [](Reader& r) {

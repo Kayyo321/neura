@@ -1,4 +1,4 @@
-// status: 70
+// status: 139
 // stderr: read of an uninitialized global: global [0-9]+ in function 0 block [0-9]+ at uninitialized-global\.nra:16:20
 let console = import:Std.Io.Console;
 let program = import:Std.Program;

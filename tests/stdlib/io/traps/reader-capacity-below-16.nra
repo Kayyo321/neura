@@ -1,4 +1,4 @@
-// status: 70
+// status: 134
 // stderr: explicit program failure \(trap reason 3\): invalid argument: capacity below 16
 let buffered_reader = import:Std.Io.BufferedReader;
 let buffered_writer = import:Std.Io.BufferedWriter;

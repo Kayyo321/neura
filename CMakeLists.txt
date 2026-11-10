@@ -23,6 +23,7 @@ neura_target_defaults(neura_nvr)
 # The Neura Virtual Machine. It depends only on the image format, so a
 # runtime-only distribution needs no compiler code.
 add_library(neura_nvm STATIC
+    src/nvm/ffi_provider.cpp
     src/nvm/fs_provider.cpp
     src/nvm/host.cpp
     src/nvm/machine.cpp
@@ -33,6 +34,13 @@ add_library(neura_nvm STATIC
     src/nvm/trace_file.cpp
 )
 target_link_libraries(neura_nvm PUBLIC neura_nvr)
+# Std.DynamicForeign calls native functions through libffi and loads
+# libraries with the platform loader.
+if(NOT WIN32)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBFFI REQUIRED IMPORTED_TARGET libffi)
+    target_link_libraries(neura_nvm PRIVATE PkgConfig::LIBFFI ${CMAKE_DL_LIBS})
+endif()
 neura_target_defaults(neura_nvm)
 
 add_library(neura_compiler STATIC
@@ -181,6 +189,22 @@ if(BUILD_TESTING)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/install.cmake"
     )
 
+    # A small C library for the foreign-interop tests, built as a shared
+    # library for Std.DynamicForeign and as a position-independent static
+    # archive for C imports.
+    enable_language(C)
+    foreach(kind IN ITEMS SHARED STATIC)
+        string(TOLOWER "${kind}" suffix)
+        add_library(neura_test_mathops_${suffix} ${kind} tests/native/mathops.c)
+        set_target_properties(neura_test_mathops_${suffix} PROPERTIES
+            OUTPUT_NAME mathops
+            POSITION_INDEPENDENT_CODE ON
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-tests"
+            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-tests"
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
+    endforeach()
+    set(neura_native_test_dir "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
+
     # The standard library: one fixture installs the tool and the library
     # into a fresh prefix, and each area of tests/stdlib runs against that
     # installation (tests/stdlib/area.cmake describes the layout).
@@ -204,10 +228,20 @@ if(BUILD_TESTING)
             "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
             "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/stdlib-tests/${area}"
             "-DAREA=${area}"
+            "-DNATIVE_TEST_DIR=${neura_native_test_dir}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/area.cmake"
         )
         set_tests_properties(stdlib-${area} PROPERTIES FIXTURES_REQUIRED stdlib)
     endforeach()
+
+    add_test(NAME native-replay COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-replay"
+        "-DNATIVE_DIR=${neura_native_test_dir}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/replay.cmake"
+    )
+    set_tests_properties(native-replay PROPERTIES FIXTURES_REQUIRED stdlib)
 
     # Cost baseline of representative library workloads (tests/benchmarks).
     add_test(NAME benchmarks COMMAND ${CMAKE_COMMAND}

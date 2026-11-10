@@ -84,7 +84,7 @@ foreach(mode IN ITEMS optimized unoptimized)
     expect(0 "" "" build ${flags} "${TEST_DIR}/main.nir" -o "${TEST_DIR}/main.nvr")
     expect(42 "bound host success\n" "" run "${TEST_DIR}/main.nvr")
     expect(1 "" "" run "${TEST_DIR}/main.nvr" -- failure)
-    expect(70 "" "invalid argument: exit status" run "${TEST_DIR}/main.nvr" -- invalid status)
+    expect(134 "" "invalid argument: exit status" run "${TEST_DIR}/main.nvr" -- invalid status)
 endforeach()
 
 file(WRITE "${TEST_DIR}/internal.nra" "let helper = import:Std.Internal.Helper;")

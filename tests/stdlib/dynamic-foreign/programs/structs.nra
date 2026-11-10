@@ -1,0 +1,55 @@
+// run-options: --allow-native
+// args: @NATIVE_DIR@/libmathops.so
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let arenas = import:Std.DynamicForeign.Arena;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let memory = import:Std.DynamicForeign.MemoryLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let values = import:Std.DynamicForeign.ForeignValue;
+
+// Structs passed and returned by value, including one with padding, and
+// layout offsets.
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        let lib = result.expect<lookups.SymbolLookup>(lookups.library_lookup(args[0], arena), "load libmathops");
+        let linker = linkers.native_linker();
+
+        let point = memory.struct_layout(layouts.Int32.with_name("x"), layouts.Int32.with_name("y"));
+        console.print_line(point.to_string() + " size " + point.byte_size().to_string());
+        let make_point = linker.downcall_handle(lib.find_or_trap("make_point"),
+                                                descriptors.of(point, layouts.Int32, layouts.Int32));
+        let made = values.as_segment(make_point.invoke_with(arena, 3, -9));
+        console.print_line(made.get_int32(point.byte_offset("x")).to_string() + ", " +
+                           made.get_int32(point.byte_offset("y")).to_string());
+        let point_sum = linker.downcall_handle(lib.find_or_trap("point_sum"), descriptors.of(layouts.Int32, point));
+        made.set_int32(point.byte_offset("y"), 40);
+        console.print_line(values.describe(point_sum.invoke(made)));
+
+        let mixed = memory.struct_layout(layouts.Int8.with_name("tag"), layouts.Float64.with_name("weight"),
+                                         layouts.Int16.with_name("count"));
+        console.print_line(mixed.to_string() + " size " + mixed.byte_size().to_string() + " weight at " +
+                           mixed.byte_offset("weight").to_string() + " count at " +
+                           mixed.byte_offset("count").to_string());
+        let make_mixed = linker.downcall_handle(lib.find_or_trap("make_mixed"),
+            descriptors.of(mixed, layouts.Int8, layouts.Float64, layouts.Int16));
+        let value = values.as_segment(make_mixed.invoke_with(arena, 65, 0.25, 8));
+        console.print_line(value.get_int8(0).to_string() + " " + value.get_float64(8).to_string() + " " +
+                           value.get_int16(16).to_string());
+        let weight = linker.downcall_handle(lib.find_or_trap("mixed_weight"), descriptors.of(layouts.Float64, mixed));
+        console.print_line(values.describe(weight.invoke(value)));
+
+        let nested = memory.struct_layout(point.with_name("origin"), memory.sequence_layout(3, layouts.Int16)
+                                                                         .with_name("steps"));
+        console.print_line(nested.to_string() + " " + nested.byte_offset("origin", "y").to_string() + " " +
+                           nested.byte_offset("steps").to_string() + " " + nested.byte_size().to_string());
+        let either = memory.union_layout(layouts.Int8.with_name("small"), layouts.Float64.with_name("large"));
+        console.print_line(either.to_string() + " " + either.byte_size().to_string());
+        arena.close();
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,5 +1,6 @@
 #include "trace_file.hpp"
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <charconv>
@@ -265,15 +266,36 @@ std::string format_trace_value(const HostValue& value) {
     return text;
 }
 
-std::string write_trace(const Trace& trace) {
-    std::string out = "neura-trace " + std::to_string(trace_file_version) + "\n";
-    for (const auto& entry : trace.entries) {
+namespace {
+
+bool has_callbacks(const std::vector<TraceEntry>& entries) {
+    return std::ranges::any_of(entries, [](const TraceEntry& entry) { return !entry.callbacks.empty(); });
+}
+
+void write_entries(std::string& out, const std::vector<TraceEntry>& entries) {
+    for (const auto& entry : entries) {
         if (!valid_import_name(entry.import)) {
             throw std::invalid_argument("import name '" + entry.import + "' cannot be written to a trace");
         }
         out += "request " + entry.import + " " + std::to_string(entry.version) + " ";
         write_list(out, entry.arguments);
         out += '\n';
+        for (const auto& callback : entry.callbacks) {
+            if (!valid_import_name(callback.name)) {
+                throw std::invalid_argument("callback name '" + callback.name + "' cannot be written to a trace");
+            }
+            out += "callback " + callback.name + " " + std::to_string(callback.version) + " ";
+            write_list(out, callback.arguments);
+            out += '\n';
+            write_entries(out, callback.entries);
+            if (callback.result) {
+                out += "return ";
+                write_value(out, *callback.result);
+            } else {
+                out += "ended";
+            }
+            out += '\n';
+        }
         const auto& completion = entry.completion;
         if (completion.exit_status) {
             out += "exit " + std::to_string(*completion.exit_status);
@@ -283,6 +305,15 @@ std::string write_trace(const Trace& trace) {
         }
         out += '\n';
     }
+}
+
+} // namespace
+
+std::string write_trace(const Trace& trace) {
+    // Version 2 adds callbacks; a trace without them stays version 1.
+    const auto version = has_callbacks(trace.entries) ? trace_file_version : 1;
+    std::string out = "neura-trace " + std::to_string(version) + "\n";
+    write_entries(out, trace.entries);
     const auto& outcome = trace.outcome;
     if (outcome.completed) {
         out += "outcome completed " + std::to_string(outcome.status) + "\n";
@@ -301,7 +332,10 @@ Trace read_trace(std::string_view text) {
     std::size_t start = 0;
     bool header = false;
     bool outcome = false;
-    std::optional<TraceEntry> pending;
+    // Requests awaiting their completion and callbacks awaiting their
+    // return, innermost last; they alternate, starting with a request.
+    std::vector<TraceEntry> requests;
+    std::vector<TraceCallback> callbacks;
     while (start < text.size()) {
         auto end = text.find('\n', start);
         if (end == std::string_view::npos) end = text.size();
@@ -316,8 +350,8 @@ Trace read_trace(std::string_view text) {
             if (keyword != "neura-trace") reader.error("expected the header 'neura-trace " +
                                                        std::to_string(trace_file_version) + "'");
             const auto version = reader.number(reader.word());
-            if (version != trace_file_version) {
-                reader.error("unsupported trace version " + std::to_string(version) + "; expected " +
+            if (version != 1 && version != trace_file_version) {
+                reader.error("unsupported trace version " + std::to_string(version) + "; expected 1 or " +
                              std::to_string(trace_file_version));
             }
             reader.finish();
@@ -325,8 +359,23 @@ Trace read_trace(std::string_view text) {
             continue;
         }
         if (outcome) reader.error("text after the outcome line");
-        if (pending) {
-            auto& completion = pending->completion;
+        // Inside a request, a callback line opens a callback; inside a
+        // callback, a request line opens a nested request.
+        const bool in_request = requests.size() > callbacks.size();
+        if (in_request && keyword == "callback") {
+            TraceCallback callback;
+            callback.name = std::string(reader.word());
+            if (!valid_import_name(callback.name)) reader.error("invalid callback name");
+            const auto version = reader.number(reader.word());
+            if (version > 0xffffffffU) reader.error("version exceeds 32 bits");
+            callback.version = static_cast<std::uint32_t>(version);
+            callback.arguments = reader.list();
+            reader.finish();
+            callbacks.push_back(std::move(callback));
+            continue;
+        }
+        if (in_request) {
+            auto& completion = requests.back().completion;
             if (keyword == "ok" || keyword == "error") {
                 completion.success = keyword == "ok";
                 completion.value = reader.value();
@@ -335,11 +384,21 @@ Trace read_trace(std::string_view text) {
                 if (status > 255) reader.error("exit status " + std::to_string(status) + " exceeds 255");
                 completion = HostCompletion::terminate(static_cast<std::int32_t>(status));
             } else {
-                reader.error("expected 'ok', 'error', or 'exit' after a request");
+                reader.error("expected 'callback', 'ok', 'error', or 'exit' after a request");
             }
             reader.finish();
-            trace.entries.push_back(std::move(*pending));
-            pending.reset();
+            auto entry = std::move(requests.back());
+            requests.pop_back();
+            (callbacks.empty() ? trace.entries : callbacks.back().entries).push_back(std::move(entry));
+            continue;
+        }
+        if (!callbacks.empty() && (keyword == "return" || keyword == "ended")) {
+            auto& callback = callbacks.back();
+            if (keyword == "return") callback.result = reader.value();
+            reader.finish();
+            auto finished = std::move(callback);
+            callbacks.pop_back();
+            requests.back().callbacks.push_back(std::move(finished));
             continue;
         }
         if (keyword == "request") {
@@ -351,7 +410,9 @@ Trace read_trace(std::string_view text) {
             entry.version = static_cast<std::uint32_t>(version);
             entry.arguments = reader.list();
             reader.finish();
-            pending = std::move(entry);
+            requests.push_back(std::move(entry));
+        } else if (!callbacks.empty()) {
+            reader.error("expected 'request', 'return', or 'ended' in a callback");
         } else if (keyword == "outcome") {
             const auto kind = reader.word();
             if (kind == "completed") {
@@ -380,7 +441,8 @@ Trace read_trace(std::string_view text) {
         }
     }
     if (!header) throw TraceFormatError(line_number, "missing the header 'neura-trace 1'");
-    if (pending) throw TraceFormatError(line_number, "the last request has no completion");
+    if (!callbacks.empty()) throw TraceFormatError(line_number, "the last callback has no return");
+    if (!requests.empty()) throw TraceFormatError(line_number, "the last request has no completion");
     if (!outcome) throw TraceFormatError(line_number, "missing the outcome line");
     return trace;
 }

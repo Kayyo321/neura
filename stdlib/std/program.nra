@@ -5,9 +5,60 @@ let host_error = import:Std.Core.Internal.HostError;
 /// overrides main; arguments arrive only through its parameter.
 /// @see [Std.Program](https://github.com/Kayyo321/neura/wiki/Stdlib-Program)
 export let Program = module (
-    /// @brief Ok is status 0, Failure is 1, and Status gives 0 through 255; any other Status traps with
-    /// "invalid argument: exit status".
-    export let ExitCode = enum (Ok, Failure, Status(int));
+    /// @brief A process exit status. Ok is 0, Failure is 1, and Status gives 0 through 255; any other Status
+    /// traps with "invalid argument: exit status". The named variants follow the shell convention of 128 plus
+    /// the Linux signal number for a process ended by that signal.
+    /// @details SeriousFailure is 2, CommandNotFound 127, IllegalInstruction 132 (SIGILL), Breakpoint 133
+    /// (SIGTRAP), Abort 134 (SIGABRT), ArithmeticError 136 (SIGFPE, including integer division by zero),
+    /// OutOfMemory 137 (SIGKILL, as sent by an out-of-memory killer), BusError 138 (SIGBUS), SegmentationFault
+    /// 139 (SIGSEGV), CpuTimeExceeded 152 (SIGXCPU), and FileSizeExceeded 153 (SIGXFSZ). Platforms that number
+    /// SIGXCPU and SIGXFSZ 30 and 31, such as MIPS, report 158 and 159 for those signals instead. A runtime trap
+    /// ends the run with the status of the variant that names its class.
+    export let ExitCode = enum (
+        Ok,
+        Failure,
+        Status(int),
+        SeriousFailure,
+        CommandNotFound,
+        IllegalInstruction,
+        Breakpoint,
+        Abort,
+        ArithmeticError,
+        OutOfMemory,
+        BusError,
+        SegmentationFault,
+        CpuTimeExceeded,
+        FileSizeExceeded
+    );
+
+    /// @brief The process status `code` stands for: 0 through 255. Traps with "invalid argument: exit status"
+    /// for a Status outside that range.
+    export let status_of = func(code: ExitCode) -> int {
+        return match (code) {
+            ExitCode.Ok => 0,
+            ExitCode.Failure => 1,
+            ExitCode.Status(value) => checked_status(value),
+            ExitCode.SeriousFailure => 2,
+            ExitCode.CommandNotFound => 127,
+            ExitCode.IllegalInstruction => 132,
+            ExitCode.Breakpoint => 133,
+            ExitCode.Abort => 134,
+            ExitCode.ArithmeticError => 136,
+            ExitCode.OutOfMemory => 137,
+            ExitCode.BusError => 138,
+            ExitCode.SegmentationFault => 139,
+            ExitCode.CpuTimeExceeded => 152,
+            ExitCode.FileSizeExceeded => 153,
+        };
+    };
+
+    /// @brief `value` when it is a valid process status; traps otherwise.
+    let checked_status = func(value: int) -> int {
+        if (value < 0 || value > 255) {
+            trap_with_message("invalid argument: exit status");
+        }
+        return value;
+    };
 
     /// @brief The module contract implemented by a runnable program.
     export let Entry = module (
@@ -58,6 +109,10 @@ export let Program = module (
                     trap_with_message("invalid state: process exit failed");
                 },
             }
+        }
+        /// @brief Ends the run with the status `code` stands for and does not return.
+        or func(code: ExitCode) {
+            exit(status_of(code));
         };
     );
 );

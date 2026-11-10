@@ -47,11 +47,27 @@ struct HostSignature {
     HostType error;
 };
 
+// Calls the image's callbacks (NVR CALB) while a host request is in
+// progress, for providers whose external code calls back into the program,
+// such as a native function that calls an upcall stub.
+class CallbackContext {
+public:
+    virtual ~CallbackContext() = default;
+    // Runs the callback registered as `name` and `version` to completion and
+    // returns its result, or nothing when the run ended during it (a trap or
+    // a process exit), or when the image has no such callback.
+    virtual std::optional<HostValue> call(std::string_view name, std::uint32_t version,
+                                          const std::vector<HostValue>& arguments) = 0;
+};
+
 struct HostRequest {
     // Execution-local sequence number, starting at zero for each run.
     std::uint64_t sequence = 0;
     std::uint32_t import = 0;
     std::vector<HostValue> arguments;
+    // Set by the runner for the duration of the request; null when callbacks
+    // are unavailable.
+    CallbackContext* callbacks = nullptr;
 };
 
 struct HostCompletion {

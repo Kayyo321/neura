@@ -8,8 +8,17 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 
 namespace neura::nvm {
+
+namespace provider {
+// An upcall stub (ffi_provider.cpp); destroyed with UpcallDeleter.
+struct Upcall;
+struct UpcallDeleter {
+    void operator()(Upcall* upcall) const;
+};
+} // namespace provider
 
 struct StandardServices::Tables {
     struct File {
@@ -25,6 +34,31 @@ struct StandardServices::Tables {
     std::int64_t next_file = 1;
     std::map<std::int64_t, Socket> sockets;
     std::int64_t next_socket = 1;
+    // Native memory and libraries of Std.DynamicForeign. Arena 0 is the
+    // global arena, released at the end of the run.
+    using Upcall = provider::Upcall;
+    struct Arena {
+        std::vector<void*> blocks;
+        std::vector<void*> libraries;
+        // Upcall stubs whose arena this is; closing it disables them.
+        std::vector<Upcall*> upcalls;
+    };
+    struct Native {
+        std::map<std::int64_t, Arena> arenas;
+        std::int64_t next_arena = 1;
+        Arena global;
+        // Library handles by ID; ID 0 is the process's default lookup.
+        std::map<std::int64_t, void*> libraries;
+        std::int64_t next_library = 1;
+        // The image's embedded shared object, if any, and its library ID
+        // once loaded.
+        const std::string* embedded_object = nullptr;
+        std::int64_t embedded_id = 0;
+        // Every upcall stub of the run. Stubs stay allocated until the run
+        // ends, so a call through a disabled stub is detected, not a crash.
+        std::vector<std::unique_ptr<Upcall, provider::UpcallDeleter>> upcalls;
+    };
+    Native native;
 };
 
 namespace provider {
@@ -75,7 +109,13 @@ using Adder = std::function<void(HostSignature, FunctionService::Handler)>;
 void add_fs_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities,
                      const std::vector<ResolvedPath>& prefixes);
 void add_net_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
+void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
 void close_files(StandardServices::Tables& tables);
+void close_native(StandardServices::Tables& tables);
+// The target triple this runner was built for.
+std::string native_triple();
+// Loads a shared object held in memory and returns its handle, or nullptr.
+void* load_embedded_object(const std::string& object);
 void close_sockets(StandardServices::Tables& tables);
 
 } // namespace provider

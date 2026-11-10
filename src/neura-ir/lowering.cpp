@@ -1320,6 +1320,27 @@ void Lowering::resolve(SymbolId id) {
             symbol(id).external = true;
             symbol(id).host_binding = IrHostBinding{decl.host_binding->first, decl.host_binding->second};
         }
+        if (decl.host_callback) {
+            // A callback: a function with a body that a host service may
+            // call while it serves a request (NVR CALB). Its signature uses
+            // host data like a binding's, and its result is host data or
+            // void.
+            const auto file = source_file(program_, id);
+            if (file == no_symbol || symbol(file).library_path.empty() ||
+                symbol(symbol(id).owner).kind != SymbolKind::Module)
+                throw Diagnostic(decl.span, "host callbacks are only allowed in standard library modules");
+            if (!decl.generics.empty() || decl.override_member ||
+                std::ranges::any_of(decl.parameters, &Parameter::variadic) ||
+                !host_service_name(decl.host_callback->first))
+                throw Diagnostic(decl.span, "a host callback needs a non-generic function and a qualified service name");
+            for (auto parameter : symbol(id).parameters) {
+                if (!host_data_type(symbol(parameter).type))
+                    throw Diagnostic(symbol(parameter).span, "this parameter cannot cross the host boundary");
+            }
+            if (symbol(id).type.kind != TypeKind::Void && !host_data_type(symbol(id).type))
+                throw Diagnostic(decl.span, "a host callback result must be void or cross the host boundary");
+            symbol(id).host_binding = IrHostBinding{decl.host_callback->first, decl.host_callback->second};
+        }
     } else {
         resolve_binding(id, decl);
     }
@@ -3120,7 +3141,7 @@ IrNode Lowering::for_each_iterable(const Statement& stmt, Context& context, IrNo
 
     const auto& declaration = *stmt.declaration;
     auto declared = declaration.type ? type(*declaration.type, context) : element;
-    require_type(element, declared, declaration.span);
+    require_type(element, declared, declaration.type ? declaration.type->span : declaration.span);
     const auto element_id = add(SymbolKind::Local, declaration.name, declaration.span, context.owner);
     symbol(element_id).type = declared;
     symbol(element_id).constant = declaration.constant;

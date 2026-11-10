@@ -13,7 +13,9 @@
 #                          `// args: ...`; <name>.out holds the stdout.
 #                          In option and argument text, @AREA_DIR@ stands
 #                          for the area's source directory (for checked-in
-#                          traces given to --replay).
+#                          traces given to --replay), and @NATIVE_DIR@ for
+#                          the directory of the C test library built from
+#                          tests/native (libmathops).
 #   <area>/programs/*.nra  Programs run to completion, with the same header
 #                          lines (status defaults to 0) and a .out file. Each
 #                          image also round-trips through disassemble and
@@ -46,6 +48,7 @@ foreach(file IN LISTS test_files)
     file(STRINGS "${file}" test_options_line REGEX "^// test-options: ")
     string(REGEX REPLACE "^// test-options: " "" test_options "${test_options_line}")
     string(REPLACE "@AREA_DIR@" "${area_dir}" test_options "${test_options}")
+    string(REPLACE "@NATIVE_DIR@" "${NATIVE_TEST_DIR}" test_options "${test_options}")
     separate_arguments(test_options)
     neura(first "${TEST_DIR}" test --stats ${test_options} ${support} "${file}")
     if(NOT first_status STREQUAL "0")
@@ -72,6 +75,9 @@ function(read_header prefix source default_status)
     file(STRINGS "${source}" options_line REGEX "^// run-options: ")
     file(STRINGS "${source}" args_line REGEX "^// args: ")
     set(status "${default_status}")
+    if(NOT status_line AND status STREQUAL "")
+        message(FATAL_ERROR "${source}: a trap program needs a '// status:' header naming its exit status")
+    endif()
     if(status_line)
         string(REGEX REPLACE "^// status: " "" status "${status_line}")
     endif()
@@ -80,6 +86,8 @@ function(read_header prefix source default_status)
     string(REGEX REPLACE "^// args: " "" args "${args_line}")
     string(REPLACE "@AREA_DIR@" "${area_dir}" options "${options}")
     string(REPLACE "@AREA_DIR@" "${area_dir}" args "${args}")
+    string(REPLACE "@NATIVE_DIR@" "${NATIVE_TEST_DIR}" options "${options}")
+    string(REPLACE "@NATIVE_DIR@" "${NATIVE_TEST_DIR}" args "${args}")
     separate_arguments(options)
     separate_arguments(args)
     set("${prefix}_status" "${status}" PARENT_SCOPE)
@@ -141,4 +149,6 @@ function(check_programs kind default_status)
 endfunction()
 
 check_programs(programs 0)
-check_programs(traps 70)
+# A trap's status depends on its class (nvm::exit_status), so each trap
+# program states it.
+check_programs(traps "")

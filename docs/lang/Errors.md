@@ -2,7 +2,7 @@
 
 Neura distinguishes expected failures, which a program handles, from runtime failures, which end the run.
 
-**Expected failures are returned values.** A function that can fail returns a value that says so, such as an enum variant or an object describing the failure, and its caller inspects it. There is no exception mechanism and no implicit propagation. A standard result type with construction, inspection, and propagation conventions belongs to the [standard library](StandardLibrary.md), which is outside this release; until it exists, programs declare their own enums and classes for outcomes.
+**Expected failures are returned values.** A function that can fail returns a value that says so, such as an enum variant or an object describing the failure, and its caller inspects it. There is no exception mechanism and no implicit propagation. The [standard library](StandardLibrary.md) provides `Std.Core.Result` and `Std.Core.Optional` for this; a program can also declare its own enums and classes for outcomes.
 
 ```neura
 export let Parse = enum (Ok, Empty, TooLong);
@@ -18,6 +18,18 @@ let check = func(words: string[], limit: int) -> Parse {
 };
 ```
 
-**Runtime failures trap.** Integer overflow, a zero divisor, an out-of-range conversion ([Numbers](Numbers.md)), a negative index, a list modified during for-each, a failed console write, and a failed test assertion are program traps with documented reason codes. An index at or past a collection's length, a read of an uninitialized field or global, use of a destroyed object, and exhausted run limits are faults that NVM detects. Both end the run immediately with process status 70 and a diagnostic that names the source location when the image has a source map ([NVM](../runtime/NVM.md)). A trap cannot be caught, and no cleanup runs after it.
+**Runtime failures trap.** Integer overflow, a zero divisor, an out-of-range conversion ([Numbers](Numbers.md)), a negative index, a list modified during for-each, a failed console write, and a failed test assertion are program traps with documented reason codes. An index at or past a collection's length, a read of an uninitialized field or global, use of a destroyed object, and exhausted run limits are faults that NVM detects. Both end the run immediately with a diagnostic that names the source location when the image has a source map ([NVM](../runtime/NVM.md)). A trap cannot be caught, and no cleanup runs after it.
+
+The process status names the trap's class with the shell convention for a process that a signal ended, 128 plus the Linux signal number, and the matching [`Std.Program.ExitCode`](Modules.md#program-entry) variant:
+
+| Trap | Status | `ExitCode` variant |
+| --- | --- | --- |
+| Integer overflow, a zero divisor, `MIN / -1`, an out-of-range conversion (reason 1) | 136 | `ArithmeticError` |
+| A negative index (reason 2), an index at or past the length, a read of an uninitialized slot, field, or global, an invalid handle, a nil class reference, or the frame depth limit | 139 | `SegmentationFault` |
+| An explicit message trap or failed assertion (reason 3), a list modified during for-each (reason 5), or a failed class cast | 134 | `Abort` |
+| Invalid dispatch (reason 4), or a malformed graph, text, or host completion | 132 | `IllegalInstruction` |
+| The heap or handle limit | 137 | `OutOfMemory` |
+| The step limit | 152 | `CpuTimeExceeded` |
+
 
 For the intended use cases, see [errors.nra](../../examples/guide/errors.nra). Its commented pseudocode illustrates a file-read failure and invalid input; file input belongs to the standard library.

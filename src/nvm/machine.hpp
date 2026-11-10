@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -68,6 +69,13 @@ struct Trap {
 };
 
 std::string_view describe(TrapKind kind);
+// The process status for a run that ends in `trap`. Each class of trap uses
+// the status of the POSIX signal its native equivalent raises (128 + n on
+// Linux), named by Std.Program.ExitCode: arithmetic 136, bounds, nil and
+// uninitialized reads and frame depth 139, explicit failures and failed
+// casts 134, invalid dispatch and malformed graphs 132, heap and handle
+// exhaustion 137, and the step limit 152.
+int exit_status(const Trap& trap);
 // A one-line diagnostic for `trap`, with a source location when available.
 // Test reports omit internal function and block numbers.
 std::string describe(const Trap& trap, const nvr::Image& image, bool include_indices = true);
@@ -112,8 +120,18 @@ public:
     Event advance();
 
     // Supplies the response to the pending host request. The value is
-    // type-checked against the import; an ill-typed response traps.
+    // type-checked against the import; an ill-typed response traps. After a
+    // callback ended the run, the response is ignored.
     void complete(const HostCompletion& completion);
+
+    // While a host request is pending, runs the callback `name` `version`
+    // (NVR CALB) with `arguments` until it returns, answering the host
+    // requests it makes with `host`. Returns its result, or nothing when the
+    // run ended during the callback (a trap, a process exit, or an
+    // unknown callback); the next advance() then reports how it ended.
+    using HostHandler = std::function<HostCompletion(const HostRequest&)>;
+    std::optional<HostValue> invoke_callback(std::string_view name, std::uint32_t version,
+                                             const std::vector<HostValue>& arguments, const HostHandler& host);
 
     std::uint64_t steps() const;
     // The largest live heap size reached so far, in the cells of
