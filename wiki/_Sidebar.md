@@ -20,8 +20,11 @@
 - [Testing](Testing)
 - [Resources and concurrency](ResourcesConcurrency)
 - [Project structure](ProjectStructure)
-- [Standard library overview](StandardLibrary)
-- [Standard library reference](Stdlib)
+
+**Standard library**
+
+- [Overview](StandardLibrary)
+- [Library reference and contents](Stdlib)
 
 **Compiler and circuits**
 

@@ -3,7 +3,7 @@
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
 
-The standard library is Neura source installed with the tool below `share/neura/stdlib` and resolved for every `Std.*` import without an `-I` option ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#standard-library-imports)). It is compiled together with each program, and an image contains only the library code the program reaches. The [implementation plan](https://github.com/Kayyo321/neura/wiki/Stdlib) specifies its contracts and algorithms; [section 18](https://github.com/Kayyo321/neura/wiki/Stdlib#18-implementation-decisions) records the decisions made where the plan was open.
+The standard library is Neura source installed with the tool below `share/neura/stdlib` and resolved for every `Std.*` import without an `-I` option ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#standard-library-imports)). It is compiled together with each program, and an image contains only the library code the program reaches. The [library reference](https://github.com/Kayyo321/neura/wiki/Stdlib) links to individual modules; the [implementation plan](https://github.com/Kayyo321/neura/wiki/Stdlib-Design) specifies their design and algorithms, and [section 18](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#18-implementation-decisions) records decisions made where the plan was open.
 
 Each type has its own module, named after it: `Std.Collections.ArrayList` is `stdlib/std/collections/array-list.nra` and exports the class `ArrayList` and its module functions. Import each module you use; there is no prelude.
 
@@ -41,13 +41,13 @@ export let App = module:program.Entry (
 | `Std.Log` | `Logger` |
 | `Std.Test` | The assertions of [Testing](https://github.com/Kayyo321/neura/wiki/Testing) |
 
-Expected failures are `Result<T>` values whose error is the `Error` enum; absent values are `Optional<T>`. A violated precondition traps with one of the messages of [section 5.1](https://github.com/Kayyo321/neura/wiki/Stdlib#51-failure-model).
+Expected failures are `Result<T>` values whose error is the `Error` enum; absent values are `Optional<T>`. A violated precondition traps with one of the messages of [section 5.1](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#51-failure-model).
 
 `RegexFlags` compares and hashes its three option values. A compiled `Regex` uses its pattern and the options recorded at compilation, and its text is the pattern. A `RegexMatch` uses its input, capture offsets, and group names, and its text is the whole match. `FileMetadata` uses the entry kind, size, and modification time for equality and hashing. Its text is `Kind(size, modified)`, with `nil` when the modification time is absent. Mutating flags or metadata can change their hashes.
 
 ## String
 
-`Std.Core.String` is the companion module for the immutable `string` primitive. It inherits the receiver-first functions of [`Std.Text.Strings`](https://github.com/Kayyo321/neura/wiki/Stdlib#81-strings), including `contains`, `repeat`, UTF-8 construction, and ASCII case mapping. Import the module to call those functions explicitly or use the [primitive member syntax](https://github.com/Kayyo321/neura/wiki/Types#primitive-companions) on a string value.
+`Std.Core.String` is the companion module for the immutable `string` primitive. It inherits the receiver-first functions of [`Std.Text.Strings`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#81-strings), including `contains`, `repeat`, UTF-8 construction, and ASCII case mapping. Import the module to call those functions explicitly or use the [primitive member syntax](https://github.com/Kayyo321/neura/wiki/Types#primitive-companions) on a string value.
 
 Text positions and range lengths count UTF-8 bytes except in the explicit UTF-16 adapters. Use `byte_length` for bytes, `scalar_count` for Unicode scalar values, and `utf16_length` for UTF-16 code units. A slice includes its start and excludes its end. Byte slice endpoints must be on UTF-8 boundaries.
 
@@ -66,7 +66,7 @@ Text positions and range lengths count UTF-8 bytes except in the explicit UTF-16
 | `trim(s)`, `strip(s)`, `strip_leading(s)`, `strip_trailing(s)`, `is_blank(s)` | `trim` removes values through U+0020 at either end. The other operations use the whitespace definition below. An empty string is blank. |
 | `lines(s)` | Split at CR, LF, or CRLF. The empty string gives no lines. A terminal separator contributes no extra line. |
 | `indent(s, count)`, `strip_indent(s)` | `indent` adds spaces for positive counts or removes up to the magnitude in leading whitespace scalars for negative counts, then ends each line with LF. `strip_indent` removes the indentation common to nonblank lines and the final line, strips trailing whitespace from each line, and normalizes separators to LF. A terminal separator fixes the common indentation at zero. |
-| `matches(s, pattern)`, `replace_all(s, pattern, replacement)`, `replace_first_regex(s, pattern, replacement)` | Compile with [`Std.Text.Regex`](https://github.com/Kayyo321/neura/wiki/Stdlib#84-regex). `matches` requires a whole-string match. An invalid pattern or replacement traps. |
+| `matches(s, pattern)`, `replace_all(s, pattern, replacement)`, `replace_first_regex(s, pattern, replacement)` | Compile with [`Std.Text.Regex`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#84-regex). `matches` requires a whole-string match. An invalid pattern or replacement traps. |
 | `split_regex(s, pattern)`, `split_regex_limit(s, pattern, limit)`, `split_with_delimiters(s, pattern, limit)` | Split at regular-expression matches. Limits must be positive and count pieces before interleaving matched delimiters. The last piece holds the remainder, and empty pieces are kept. |
 | `formatted(s, args...)`, `vformatted(s, args)` | Use the [console format grammar](#console-formatting) and return the result as text. The second accepts a prebuilt `Argument[]`. Invalid formats trap. Neither writes to a stream. |
 | `value_of<T>(value)`, `transform<T>(s, operation)` | Format a value that supports `to_string` or apply a callback of type `func(string) -> T`. |

@@ -10,7 +10,11 @@ Neura is a statically typed language whose compiler translates programs into det
 
 ## Language reference
 
-The reference covers [core syntax and control flow](CoreLanguage), [numbers](Numbers), [types](Types), [modules and imports](Modules), [collections](Collections), [object lifecycle](ObjectLifecycle), [polymorphism](Polymorphism), [errors](Errors), [testing](Testing), [resources and concurrency](ResourcesConcurrency), and [project structure](ProjectStructure). The [standard library overview](StandardLibrary) and [library reference](Stdlib) describe the available APIs and their contracts.
+The reference covers [core syntax and control flow](CoreLanguage), [numbers](Numbers), [types](Types), [modules and imports](Modules), [collections](Collections), [object lifecycle](ObjectLifecycle), [polymorphism](Polymorphism), [errors](Errors), [testing](Testing), [resources and concurrency](ResourcesConcurrency), and [project structure](ProjectStructure).
+
+## Standard library
+
+Start with the [standard library overview](StandardLibrary), then use the [library reference and contents](Stdlib) to find individual libraries, their APIs, and their contracts.
 
 ## Compiler and execution
 

@@ -41,7 +41,7 @@ String equality compares UTF-8 bytes. `text.byte_length` returns the byte count 
 
 ### Primitive companions
 
-Booleans, sized integers and floats, and strings have [standard library companions](https://github.com/Kayyo321/neura/wiki/Stdlib#7-primitive-companion-modules). A primitive-qualified call such as `int32.parse("42")` looks up an exported function in that companion. A call on a value passes it as the first argument to a function whose first parameter has the same primitive type.
+Booleans, sized integers and floats, and strings have [standard library companions](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#7-primitive-companion-modules). A primitive-qualified call such as `int32.parse("42")` looks up an exported function in that companion. A call on a value passes it as the first argument to a function whose first parameter has the same primitive type.
 
 ```neura
 let score: int16 = -7;

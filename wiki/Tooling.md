@@ -57,9 +57,9 @@ Console input and output and `Std.Program.Process.exit` are always available. Ot
 
 | Option | Grants |
 | --- | --- |
-| `--allow-fs` | Files and directories ([`Std.Fs`](https://github.com/Kayyo321/neura/wiki/Stdlib#112-stdfs)) |
+| `--allow-fs` | Files and directories ([`Std.Fs`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#112-stdfs)) |
 | `--allow-fs=prefix,...` | Files and directories at or below the listed paths, after resolving symbolic links |
-| `--allow-net` | TCP connections and listeners ([`Std.Net`](https://github.com/Kayyo321/neura/wiki/Stdlib#114-stdnet)) |
+| `--allow-net` | TCP connections and listeners ([`Std.Net`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#114-stdnet)) |
 | `--allow-env` | Environment variables (`Std.Program.Environment`) |
 | `--allow-clock` | The wall and monotonic clocks and sleeping (`Std.Time.SystemClock`) |
 | `--allow-entropy` | Operating-system entropy (`Std.Random.Random.from_entropy`) |

@@ -6,7 +6,7 @@ The IR optimization stage takes validated NeuraIR from the frontend and returns 
 Lexer -> Parser -> NeuraIR -> IR optimization -> IRtoNeuronConversion -> output
 ```
 
-The passes live in [`src/ir-optimization/`](https://github.com/Kayyo321/neura/blob/main/src/ir-optimization). The NeuraIR verifier that checks the stage boundaries is in [`src/neura-ir/verifier.cpp`](https://github.com/Kayyo321/neura/blob/main/src/neura-ir/verifier.cpp), so that later stages can reuse it. This page states what the stage guarantees, what each pass assumes, and what the tests establish. The general behavior contract is in [the project design](Project#neurair-and-optimization).
+The passes live in [`src/ir-optimization/`](https://github.com/Kayyo321/neura/tree/main/src/ir-optimization). The NeuraIR verifier that checks the stage boundaries is in [`src/neura-ir/verifier.cpp`](https://github.com/Kayyo321/neura/blob/main/src/neura-ir/verifier.cpp), so that later stages can reuse it. This page states what the stage guarantees, what each pass assumes, and what the tests establish. The general behavior contract is in [the project design](Project#neurair-and-optimization).
 
 ## Inspect IR before and after optimization
 
@@ -120,7 +120,7 @@ The verifier reports issues in a deterministic order and is independent of the p
 
 ## Tests and the limits of the evidence
 
-The tests are in [`tests/ir-optimization/`](https://github.com/Kayyo321/neura/blob/main/tests/ir-optimization). Run them with `ctest --test-dir build --output-on-failure`. The CTest entries keep the kinds of evidence separate:
+The tests are in [`tests/ir-optimization/`](https://github.com/Kayyo321/neura/tree/main/tests/ir-optimization). Run them with `ctest --test-dir build --output-on-failure`. The CTest entries keep the kinds of evidence separate:
 
 | Test | Kind of evidence |
 | --- | --- |

@@ -19,13 +19,13 @@ This release carries the language below from source through NeuraIR, optimizatio
 | Errors | Expected failures as returned values, plus runtime traps and explicit message traps | [Errors](https://github.com/Kayyo321/neura/wiki/Errors) |
 | Testing | `neura test` with the `Std.Test` assertions | [Testing](https://github.com/Kayyo321/neura/wiki/Testing) |
 | Tooling | `check`, `docs` for `///` comments, `emit-ir`, `build`, `run` (with capabilities, `--record`, `--replay`, `--stats`, `--profile`), `test`, `disassemble`, `assemble`, `decompile` | [Tooling](https://github.com/Kayyo321/neura/wiki/Tooling), [Decompiler](https://github.com/Kayyo321/neura/wiki/Decompiler) |
-| Standard library | The `Std` source modules of the [implementation plan](https://github.com/Kayyo321/neura/wiki/Stdlib), installed with the tool, and the host providers they bind; see [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary) for the module list and [section 18 of the plan](https://github.com/Kayyo321/neura/wiki/Stdlib#18-implementation-decisions) for decisions made while implementing it | [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary) |
+| Standard library | The `Std` source modules of the [implementation plan](https://github.com/Kayyo321/neura/wiki/Stdlib-Design), installed with the tool, and the host providers they bind; see [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary) for the module list and [section 18 of the plan](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#18-implementation-decisions) for decisions made while implementing it | [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary) |
 
 ## Outside this release
 
 | Area | Status |
 | --- | --- |
-| Standard library extensions | `Std.Concurrent`, time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](https://github.com/Kayyo321/neura/wiki/Stdlib#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
+| Standard library extensions | `Std.Concurrent`, time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
 | Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](https://github.com/Kayyo321/neura/wiki/ResourcesConcurrency)). |
 | Foreign interop | Java and other foreign-function interop are not part of the language. |
 | Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure)). |

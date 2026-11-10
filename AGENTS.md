@@ -5,6 +5,7 @@
 - Read [README.md](README.md) for project scope and [docs/Project.md](docs/Project.md) for the compiler, circuit runtime, and decompiler contracts.
 - Read the relevant page in [the language design](docs/lang/Overview.md) before changing syntax or behavior. Use [language status](docs/lang/Status.md) to identify unresolved decisions. Treat `.nra` files under [examples](examples/) as illustrations unless a conformance test establishes the behavior.
 - Follow [the Neura coding style](docs/style/CodingStyle.md) for `.nra` code, including examples and fixtures. Follow [CONTRIBUTING.md](CONTRIBUTING.md) for change and verification expectations.
+- When updating wiki content, follow [wiki maintenance](docs/Wiki.md) to keep the repository sources and the separately hosted GitHub wiki in sync.
 - Preserve existing work. Keep edits within the requested feature and avoid unrelated formatting, renames, dependencies, or generated files.
 
 ## Keep compiler stages separate

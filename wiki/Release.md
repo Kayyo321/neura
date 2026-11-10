@@ -54,21 +54,21 @@ Each feature of this release with the tests that establish it. A feature counts 
 
 ## Standard library
 
-Every module of the [implementation plan](Stdlib) has a test area `stdlib-<area>` that runs its tests optimized twice (identical output and step counts) and unoptimized, and builds and runs its trap and output programs in both modes; program images also round-trip through assembly and decompile.
+Every module of the [standard library reference](Stdlib) has a test area `stdlib-<area>` that runs its tests optimized twice (identical output and step counts) and unoptimized, and builds and runs its trap and output programs in both modes; program images also round-trip through assembly and decompile.
 
 | Feature | Specification | Tests | Kind |
 | --- | --- | --- | --- |
-| Core values | [Stdlib 5–6](Stdlib#5-core-contracts) | `stdlib-core`, `-comparators`, `-int-range` | End to end |
-| Integer, Bool, and float companions | [Stdlib 7](Stdlib#7-primitive-companion-modules) | `stdlib-integers` (every 7.2 recipe at its boundaries, Python vectors), `-bool`, `-floats` (an exact Fraction model, parse corpus), `-floats-exhaustive` (every `float16` and `bfloat16` round trip) | Exhaustive (16-bit floats), sampled |
+| Core values | [Stdlib 5–6](Stdlib-Design#5-core-contracts) | `stdlib-core`, `-comparators`, `-int-range` | End to end |
+| Integer, Bool, and float companions | [Stdlib 7](Stdlib-Design#7-primitive-companion-modules) | `stdlib-integers` (every 7.2 recipe at its boundaries, Python vectors), `-bool`, `-floats` (an exact Fraction model, parse corpus), `-floats-exhaustive` (every `float16` and `bfloat16` round trip) | Exhaustive (16-bit floats), sampled |
 | Unicode 17.0 case, locale tailoring, and character encodings | [String](StandardLibrary#unicode-case-and-locale) | `stdlib-string` (full mappings, locale contexts, UTF-8/16/32, legacy charsets, and malformed input) | End to end |
-| Text | [Stdlib 8](Stdlib#8-stdtext) | `stdlib-strings` (Python UTF-8 vectors; agreement with the NVM validator), `-scalars`, `-regex` (Python `re` and ECMAScript corpora), `-string-builder` | Sampled, exhaustive (2- and 3-byte UTF-8 prefixes) |
-| Collections | [Stdlib 9](Stdlib#9-stdcollections) | `stdlib-<collection>` for every collection: seeded model tests of at least 10,000 operations with `validate()`, fail-fast iterators through aliases, reclamation under a heap limit | Sampled (seeded), end to end |
-| Math | [Stdlib 10](Stdlib#10-stdmath) | `stdlib-math`, `-big-integer`, `-big-decimal` (Python reference vectors) | Sampled |
-| Time and randomness | [Stdlib 12](Stdlib#12-time-and-randomness) | `stdlib-duration`, `-instant`, `-clock`, `-local-date`, `-local-time`, `-local-date-time`, `-zone-offset`, `-random`, `-uuid` (Python models; replayed entropy) | Sampled |
-| Data formats and digests | [Stdlib 13](Stdlib#13-data-formats) | `stdlib-utf8`, `-hex`, `-base64`, `-csv`, `-json`, `-crc32`, `-sha256` (published vectors) | Published vectors, sampled |
-| Logging | [Stdlib 14.1](Stdlib#141-stdlog) | `stdlib-logger` | End to end |
-| Reference evaluator agreement | [Stdlib 17](Stdlib#17-verification) | `backend-reference` (every library test function under the NeuraIR reference evaluator and NVM; tests that need host responses or exceed the evaluator's budget are counted, not compared) | Differential |
-| Cost baseline | [Stdlib 17](Stdlib#17-verification) | `benchmarks` (steps, peak heap cells, neurons, and image bytes against `tests/benchmarks/baseline.txt`; step growth between two sizes) | Measured |
+| Text | [Stdlib 8](Stdlib-Design#8-stdtext) | `stdlib-strings` (Python UTF-8 vectors; agreement with the NVM validator), `-scalars`, `-regex` (Python `re` and ECMAScript corpora), `-string-builder` | Sampled, exhaustive (2- and 3-byte UTF-8 prefixes) |
+| Collections | [Stdlib 9](Stdlib-Design#9-stdcollections) | `stdlib-<collection>` for every collection: seeded model tests of at least 10,000 operations with `validate()`, fail-fast iterators through aliases, reclamation under a heap limit | Sampled (seeded), end to end |
+| Math | [Stdlib 10](Stdlib-Design#10-stdmath) | `stdlib-math`, `-big-integer`, `-big-decimal` (Python reference vectors) | Sampled |
+| Time and randomness | [Stdlib 12](Stdlib-Design#12-time-and-randomness) | `stdlib-duration`, `-instant`, `-clock`, `-local-date`, `-local-time`, `-local-date-time`, `-zone-offset`, `-random`, `-uuid` (Python models; replayed entropy) | Sampled |
+| Data formats and digests | [Stdlib 13](Stdlib-Design#13-data-formats) | `stdlib-utf8`, `-hex`, `-base64`, `-csv`, `-json`, `-crc32`, `-sha256` (published vectors) | Published vectors, sampled |
+| Logging | [Stdlib 14.1](Stdlib-Design#141-stdlog) | `stdlib-logger` | End to end |
+| Reference evaluator agreement | [Stdlib 17](Stdlib-Design#17-verification) | `backend-reference` (every library test function under the NeuraIR reference evaluator and NVM; tests that need host responses or exceed the evaluator's budget are counted, not compared) | Differential |
+| Cost baseline | [Stdlib 17](Stdlib-Design#17-verification) | `benchmarks` (steps, peak heap cells, neurons, and image bytes against `tests/benchmarks/baseline.txt`; step growth between two sizes) | Measured |
 
 ## Decompiler
 
@@ -81,4 +81,4 @@ Every module of the [implementation plan](Stdlib) has a test area `stdlib-<area>
 
 ## Not in this release
 
-The deferred standard library areas of [Stdlib section 15.1](Stdlib#151-deferred-and-excluded); concurrency; foreign interop; and packages ([Status](Status#outside-this-release)). MSVC builds are not verified.
+The deferred standard library areas of [Stdlib section 15.1](Stdlib-Design#151-deferred-and-excluded); concurrency; foreign interop; and packages ([Status](Status#outside-this-release)). MSVC builds are not verified.

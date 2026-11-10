@@ -91,7 +91,7 @@ The standard console service is `neura.console.write_line` version 1. It takes a
 
 ### Host services
 
-`neura run` and `neura test` register these services. Each is version 1, and each failure is a `uint32` error code: 1 `NotFound`, 2 `PermissionDenied`, 3 `AlreadyExists`, 4 `InvalidInput`, 5 `Interrupted`, 6 `UnexpectedEnd`, 7 `NotADirectory`, 8 `IsADirectory`, 9 `DirectoryNotEmpty`, 10 `ConnectionRefused`, 11 `ConnectionReset`, 12 `TimedOut`, 13 `Unsupported`, 14 `CapabilityDenied`, and 100 for any other failure ([Stdlib](Stdlib#45-host-services) maps codes to `IoErrorKind`). File and socket IDs are opaque `int64` values numbered from 1 in each run and never reused within it.
+`neura run` and `neura test` register these services. Each is version 1, and each failure is a `uint32` error code: 1 `NotFound`, 2 `PermissionDenied`, 3 `AlreadyExists`, 4 `InvalidInput`, 5 `Interrupted`, 6 `UnexpectedEnd`, 7 `NotADirectory`, 8 `IsADirectory`, 9 `DirectoryNotEmpty`, 10 `ConnectionRefused`, 11 `ConnectionReset`, 12 `TimedOut`, 13 `Unsupported`, 14 `CapabilityDenied`, and 100 for any other failure ([Stdlib](Stdlib-Design#45-host-services) maps codes to `IoErrorKind`). File and socket IDs are opaque `int64` values numbered from 1 in each run and never reused within it.
 
 | Service | Parameters | Success | Behavior |
 | --- | --- | --- | --- |

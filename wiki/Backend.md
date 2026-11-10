@@ -103,7 +103,7 @@ These choices follow the existing contracts where they apply. Where the language
 | Enums | [Specified](Types#enums) | Fieldless enums use `uint32` ordinals. Payload enums use typed layouts with an ordinal tag and the active fields. The legacy exit enum uses `int32`. |
 | Construction | Proposed in [Object lifecycle](ObjectLifecycle) | The base constructor runs, then this class's field initializers, then the rest of the declared `init`. Fields without an initializer start uninitialized; reading one before a store traps. |
 | Destruction | Proposed | Cleanup dispatches on the runtime class and runs each `deinit` from the most derived class toward the bases. Then the object is freed. A later use of the handle traps. |
-| Console write failure | [Specified](Stdlib#111-stdio) | `Console.print_line` traps with reason 3 and `console write failed`; `try_print_line` and the other console forms return an `Io` error. |
+| Console write failure | [Specified](Stdlib-Design#111-stdio) | `Console.print_line` traps with reason 3 and `console write failed`; `try_print_line` and the other console forms return an `Io` error. |
 | Assertions | [Specified](Testing) | A failed `Std.Test` assertion is a message trap (reason 3) whose message the test runner reports. |
 | For-each modification | [Specified](CoreLanguage#loops) | A changed list version traps with reason 5 at the `for` statement. |
 | Short-circuit operands | Specified | The right operand is speculated in the graph only when the optimizer's `pure_and_total` predicate holds: it cannot fail, change state, or request an effect. Otherwise it gets a block of its own, reached only when the left operand does not decide the result. |
