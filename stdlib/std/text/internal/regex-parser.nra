@@ -53,12 +53,12 @@ export let RegexParser = module (
         let length: int = 0;
         let last_was_assertion: bool = false;
 
-        export let init = func(text: string) -> void {
+        export let init = func(text: string) {
             pattern = text;
             length = text.byte_length;
         };
 
-        export let parse = func() -> void {
+        export let parse = func {
             let [node, node_size] = parse_alternation();
             if (failed) {
                 return;
@@ -71,7 +71,7 @@ export let RegexParser = module (
             size = node_size;
         };
 
-        let fail = func(kind: error.ParseErrorKind, offset: int, message: string) -> void {
+        let fail = func(kind: error.ParseErrorKind, offset: int, message: string) {
             if (!failed) {
                 failed = true;
                 error_kind = kind;
@@ -80,30 +80,26 @@ export let RegexParser = module (
             }
         };
 
-        let fail_syntax = func(offset: int, message: string) -> void {
+        let fail_syntax = func(offset: int, message: string) {
             fail(error.ParseErrorKind.Syntax, offset, message);
         };
 
-        let fail_end = func(message: string) -> void {
+        let fail_end = func(message: string) {
             fail(error.ParseErrorKind.UnexpectedEnd, length, message);
         };
 
-        let peek = func() -> uint8 {
-            return pattern.byte_at(position);
-        };
+        let peek = func -> uint8 => pattern.byte_at(position);
 
-        let at_end = func() -> bool {
-            return position >= length;
-        };
+        let at_end = func -> bool => position >= length;
 
         // Fails when a node's instruction count leaves no room in a program.
-        let check_size = func(node_size: int, offset: int) -> void {
+        let check_size = func(node_size: int, offset: int) {
             if (node_size > MaxBody) {
                 fail(error.ParseErrorKind.OutOfRange, offset, "pattern exceeds 10000 instructions");
             }
         };
 
-        let parse_alternation = func() -> [Node, int] {
+        let parse_alternation = func -> [Node, int] {
             let start = position;
             let [first, first_size] = parse_concat();
             if (failed) {
@@ -115,7 +111,7 @@ export let RegexParser = module (
             let branches: Node[list] = [first];
             let total = first_size;
             while (!at_end() && peek() == 124) {
-                position = position + 1;
+                position += 1;
                 let [branch, branch_size] = parse_concat();
                 if (failed) {
                     return [Node.Empty, 0];
@@ -130,7 +126,7 @@ export let RegexParser = module (
             return [Node.Alternate(branches), total];
         };
 
-        let parse_concat = func() -> [Node, int] {
+        let parse_concat = func -> [Node, int] {
             let items: Node[list] = [];
             let total = 0;
             while (!at_end()) {
@@ -148,7 +144,7 @@ export let RegexParser = module (
                     return [Node.Empty, 0];
                 }
                 items.append(item);
-                total = total + item_size;
+                total += item_size;
                 check_size(total, item_start);
                 if (failed) {
                     return [Node.Empty, 0];
@@ -163,7 +159,7 @@ export let RegexParser = module (
             return [Node.Concat(items), total];
         };
 
-        let parse_atom = func() -> [Node, int] {
+        let parse_atom = func -> [Node, int] {
             last_was_assertion = false;
             let b = peek();
             if (b == 40) {
@@ -173,16 +169,16 @@ export let RegexParser = module (
                 return parse_class();
             }
             if (b == 46) {
-                position = position + 1;
+                position += 1;
                 return [Node.Any, 1];
             }
             if (b == 94) {
-                position = position + 1;
+                position += 1;
                 last_was_assertion = true;
                 return [Node.Assert(Anchor.StartText), 1];
             }
             if (b == 36) {
-                position = position + 1;
+                position += 1;
                 last_was_assertion = true;
                 return [Node.Assert(Anchor.EndText), 1];
             }
@@ -209,13 +205,13 @@ export let RegexParser = module (
             let min = 0;
             let max = -1;
             if (b == 42) {
-                position = position + 1;
+                position += 1;
             } else if (b == 43) {
                 min = 1;
-                position = position + 1;
+                position += 1;
             } else if (b == 63) {
                 max = 1;
-                position = position + 1;
+                position += 1;
             } else if (b == 123) {
                 let [low, high] = parse_counts();
                 if (failed) {
@@ -233,7 +229,7 @@ export let RegexParser = module (
             let greedy = true;
             if (!at_end() && peek() == 63) {
                 greedy = false;
-                position = position + 1;
+                position += 1;
             }
             if (!at_end()) {
                 let next = peek();
@@ -255,9 +251,8 @@ export let RegexParser = module (
         };
 
         // {n}, {n,}, or {n,m} at the current position.
-        let parse_counts = func() -> [int, int] {
-            let open = position;
-            position = position + 1;
+        let parse_counts = func -> [int, int] {
+            let open = position++;
             let low = parse_count();
             if (failed) {
                 return [0, 0];
@@ -272,7 +267,7 @@ export let RegexParser = module (
             }
             let high = low;
             if (!at_end() && peek() == 44) {
-                position = position + 1;
+                position += 1;
                 high = -1;
                 if (!at_end() && peek() != 125) {
                     high = parse_count();
@@ -297,7 +292,7 @@ export let RegexParser = module (
                 fail_syntax(open, "invalid repetition");
                 return [0, 0];
             }
-            position = position + 1;
+            position += 1;
             if (high >= 0 && low > high) {
                 fail_syntax(open, "repetition minimum exceeds maximum");
                 return [0, 0];
@@ -307,14 +302,14 @@ export let RegexParser = module (
 
         // Decimal digits, or -1 when there are none. A value above the
         // repetition limit fails at its first digit.
-        let parse_count = func() -> int {
+        let parse_count = func -> int {
             let start = position;
             let value = 0;
             while (!at_end() && peek() >= 48 && peek() <= 57) {
                 if (value <= MaxRepetition) {
                     value = value * 10 + ((peek() - 48) as int);
                 }
-                position = position + 1;
+                position += 1;
             }
             if (position == start) {
                 return -1;
@@ -326,10 +321,10 @@ export let RegexParser = module (
             return value;
         };
 
-        let parse_group = func() -> [Node, int] {
+        let parse_group = func -> [Node, int] {
             let open = position;
-            position = position + 1;
-            depth = depth + 1;
+            position += 1;
+            depth += 1;
             if (depth > MaxNesting) {
                 fail(error.ParseErrorKind.OutOfRange, open, "group nesting exceeds 250");
                 return [Node.Empty, 0];
@@ -337,7 +332,7 @@ export let RegexParser = module (
             let capturing = true;
             let name = "";
             if (!at_end() && peek() == 63) {
-                position = position + 1;
+                position += 1;
                 if (at_end()) {
                     fail_end("missing )");
                     return [Node.Empty, 0];
@@ -345,9 +340,9 @@ export let RegexParser = module (
                 let kind = peek();
                 if (kind == 58) {
                     capturing = false;
-                    position = position + 1;
+                    position += 1;
                 } else if (kind == 80 || kind == 60) {
-                    position = position + 1;
+                    position += 1;
                     if (kind == 80) {
                         if (at_end()) {
                             fail_end("missing group name");
@@ -361,7 +356,7 @@ export let RegexParser = module (
                             fail_syntax(open, "unsupported group syntax");
                             return [Node.Empty, 0];
                         }
-                        position = position + 1;
+                        position += 1;
                     } else if (!at_end() && (peek() == 61 || peek() == 33)) {
                         fail_syntax(open, "lookbehind is not supported");
                         return [Node.Empty, 0];
@@ -380,8 +375,7 @@ export let RegexParser = module (
             }
             let index = 0;
             if (capturing) {
-                groups = groups + 1;
-                index = groups;
+                index = ++groups;
                 names.append(name);
             }
             let [inner, inner_size] = parse_alternation();
@@ -392,8 +386,8 @@ export let RegexParser = module (
                 fail_end("missing )");
                 return [Node.Empty, 0];
             }
-            position = position + 1;
-            depth = depth - 1;
+            position += 1;
+            depth -= 1;
             last_was_assertion = false;
             if (!capturing) {
                 return [inner, inner_size];
@@ -404,7 +398,7 @@ export let RegexParser = module (
         };
 
         // An identifier ended by >, unique among the pattern's group names.
-        let parse_group_name = func() -> string {
+        let parse_group_name = func -> string {
             let start = position;
             while (!at_end() && peek() != 62) {
                 let b = peek();
@@ -414,7 +408,7 @@ export let RegexParser = module (
                     fail_syntax(start, "invalid group name");
                     return "";
                 }
-                position = position + 1;
+                position += 1;
             }
             if (at_end()) {
                 fail_end("missing group name terminator");
@@ -425,7 +419,7 @@ export let RegexParser = module (
                 return "";
             }
             let name = pattern.slice(start, position);
-            position = position + 1;
+            position += 1;
             for (let existing in names) {
                 if (existing == name) {
                     fail_syntax(start, "duplicate group name");
@@ -435,22 +429,22 @@ export let RegexParser = module (
             return name;
         };
 
-        let parse_class = func() -> [Node, int] {
-            position = position + 1;
+        let parse_class = func -> [Node, int] {
+            position += 1;
             let negated = false;
             if (!at_end() && peek() == 94) {
                 negated = true;
-                position = position + 1;
+                position += 1;
             }
             let ranges: uint32[list] = [];
             let first = true;
-            while (true) {
+            do {
                 if (at_end()) {
                     fail_end("unterminated character class");
                     return [Node.Empty, 0];
                 }
                 if (peek() == 93 && !first) {
-                    position = position + 1;
+                    position += 1;
                     break;
                 }
                 first = false;
@@ -464,7 +458,7 @@ export let RegexParser = module (
                         fail_syntax(item_start, "invalid class range");
                         return [Node.Empty, 0];
                     }
-                    position = position + 1;
+                    position += 1;
                     let high = parse_class_atom(ranges);
                     if (failed) {
                         return [Node.Empty, 0];
@@ -492,7 +486,7 @@ export let RegexParser = module (
                 return value as int;
             }
             let escape_start = position;
-            position = position + 1;
+            position += 1;
             if (at_end()) {
                 fail_end("incomplete escape");
                 return 0;
@@ -504,7 +498,7 @@ export let RegexParser = module (
             }
             let shorthand = shorthand_ranges(b);
             if (shorthand.length > 0) {
-                position = position + 1;
+                position += 1;
                 for (let bound in shorthand) {
                     ranges.append(bound);
                 }
@@ -513,16 +507,16 @@ export let RegexParser = module (
             return parse_escaped_scalar(escape_start);
         };
 
-        let parse_escape = func() -> [Node, int] {
+        let parse_escape = func -> [Node, int] {
             let escape_start = position;
-            position = position + 1;
+            position += 1;
             if (at_end()) {
                 fail_end("incomplete escape");
                 return [Node.Empty, 0];
             }
             let b = peek();
             if (b == 98 || b == 66) {
-                position = position + 1;
+                position += 1;
                 last_was_assertion = true;
                 if (b == 98) {
                     return [Node.Assert(Anchor.WordBoundary), 1];
@@ -530,11 +524,11 @@ export let RegexParser = module (
                 return [Node.Assert(Anchor.NotWordBoundary), 1];
             }
             if (b == 100 || b == 119 || b == 115) {
-                position = position + 1;
+                position += 1;
                 return [Node.Class { ranges: shorthand_ranges(b), negated: false }, 1];
             }
             if (b == 68 || b == 87 || b == 83) {
-                position = position + 1;
+                position += 1;
                 return [Node.Class { ranges: shorthand_ranges(b + 32), negated: true }, 1];
             }
             let value = parse_escaped_scalar(escape_start);
@@ -548,19 +542,19 @@ export let RegexParser = module (
         let parse_escaped_scalar = func(escape_start: int) -> int {
             let b = peek();
             if (b == 116) {
-                position = position + 1;
+                position += 1;
                 return 9;
             }
             if (b == 110) {
-                position = position + 1;
+                position += 1;
                 return 10;
             }
             if (b == 114) {
-                position = position + 1;
+                position += 1;
                 return 13;
             }
             if (b == 117) {
-                position = position + 1;
+                position += 1;
                 return parse_unicode_escape(escape_start);
             }
             if (b >= 49 && b <= 57 || b == 107) {
@@ -572,7 +566,7 @@ export let RegexParser = module (
                 return 0;
             }
             if (scalar_values.is_ascii_punctuation(b as uint32)) {
-                position = position + 1;
+                position += 1;
                 return b as int;
             }
             fail_syntax(escape_start, "invalid escape");
@@ -589,7 +583,7 @@ export let RegexParser = module (
                 fail_syntax(escape_start, "invalid \\u escape");
                 return 0;
             }
-            position = position + 1;
+            position += 1;
             let value: uint32 = 0;
             let digits = 0;
             while (!at_end() && peek() != 125) {
@@ -599,14 +593,14 @@ export let RegexParser = module (
                     return 0;
                 }
                 value = value * 16 + (digit as uint32);
-                digits = digits + 1;
-                position = position + 1;
+                digits += 1;
+                position += 1;
             }
             if (at_end()) {
                 fail_end("incomplete escape");
                 return 0;
             }
-            position = position + 1;
+            position += 1;
             if (digits == 0) {
                 fail_syntax(escape_start, "invalid \\u escape");
                 return 0;

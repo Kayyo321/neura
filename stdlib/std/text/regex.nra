@@ -59,23 +59,17 @@ export let Regex = module (
         let slots: int[list] = [];
         let names: string[list] = [];
 
-        export let init = func(text: string, captured: int[list], group_names: string[list]) -> void {
+        export let init = func(text: string, captured: int[list], group_names: string[list]) {
             input = text;
             slots = captured;
             names = group_names;
         };
 
-        export let start = func() -> int {
-            return slots[0];
-        };
+        export let start = func -> int => slots[0];
 
-        export let end = func() -> int {
-            return slots[1];
-        };
+        export let end = func -> int => slots[1];
 
-        export let text = func() -> string {
-            return input.slice(slots[0], slots[1]);
-        };
+        export let text = func -> string => input.slice(slots[0], slots[1]);
 
         export let.override equals = func(other: class) -> bool {
             if (!(other is RegexMatch)) {
@@ -111,11 +105,10 @@ export let Regex = module (
         // The named group's text, or None when it did not participate. A
         // name the pattern does not define traps with "invalid argument: no
         // such group".
-        export let named_group = func(name: string) -> optional.Optional<string> {
-            return group(group_index(names, name));
-        };
+        export let named_group = func(name: string) -> optional.Optional<string> =>
+            group(group_index(names, name));
 
-        let check_group = func(index: int) -> void {
+        let check_group = func(index: int) {
             if (index < 0 || index > names.length) {
                 trap_with_message("invalid argument: no such group");
             }
@@ -128,24 +121,20 @@ export let Regex = module (
         let names: string[list] = [];
 
         // Called by compile_with; the program type is internal to the library.
-        export let init = func(text: string, compiled: machine.Program, group_names: string[list]) -> void {
+        export let init = func(text: string, compiled: machine.Program, group_names: string[list]) {
             source = text;
             program = compiled;
             names = group_names;
         };
 
-        export let is_match = func(input: string) -> bool {
-            return machine.search(program, input, 0, machine.Earliest).length > 0;
-        };
+        export let is_match = func(input: string) -> bool =>
+            machine.search(program, input, 0, machine.Earliest).length > 0;
 
         // Whether the pattern matches the whole input.
-        export let matches_fully = func(input: string) -> bool {
-            return machine.search(program, input, 0, machine.Whole).length > 0;
-        };
+        export let matches_fully = func(input: string) -> bool =>
+            machine.search(program, input, 0, machine.Whole).length > 0;
 
-        export let find = func(input: string) -> RegexMatch {
-            return match_at(input, 0);
-        };
+        export let find = func(input: string) -> RegexMatch => match_at(input, 0);
 
         // The first match starting at or after the offset, or nil. The offset
         // must be a character boundary from 0 through the byte length;
@@ -187,9 +176,8 @@ export let Regex = module (
         // does not have traps with "invalid argument: no such group"; any
         // other $ traps with "invalid argument: malformed replacement". The
         // replacement is checked before matching.
-        export let replace_all = func(input: string, replacement: string) -> string {
-            return replace_matches(input, replacement, find_all(input));
-        };
+        export let replace_all = func(input: string, replacement: string) -> string =>
+            replace_matches(input, replacement, find_all(input));
 
         // Replaces the first match, with the rules of replace_all.
         export let replace_first = func(input: string, replacement: string) -> string {
@@ -216,13 +204,9 @@ export let Regex = module (
         };
 
         // The number of capturing groups, not counting group 0.
-        export let group_count = func() -> int {
-            return names.length;
-        };
+        export let group_count = func -> int => names.length;
 
-        export let pattern = func() -> string {
-            return source;
-        };
+        export let pattern = func -> string => source;
 
         export let.override equals = func(other: class) -> bool {
             if (!(other is Regex)) {
@@ -277,9 +261,8 @@ export let Regex = module (
     );
 
     // Compiles the pattern with every flag off.
-    export let compile = func(pattern: string) -> result.Result<Regex> {
-        return compile_with(pattern, new RegexFlags());
-    };
+    export let compile = func(pattern: string) -> result.Result<Regex> =>
+        compile_with(pattern, new RegexFlags());
 
     // Compiles the pattern; a syntax error or an exceeded limit is a Parse
     // error at the offending pattern offset. The flags are read once.
@@ -308,7 +291,7 @@ export let Regex = module (
             if (names[k] == name) {
                 return k + 1;
             }
-            k = k + 1;
+            k += 1;
         }
         trap_with_message("invalid argument: no such group");
     };
@@ -323,7 +306,7 @@ export let Regex = module (
             let b = replacement.byte_at(i);
             if (b != 36) {
                 literal.append(b);
-                i = i + 1;
+                i += 1;
                 continue;
             }
             if (i + 1 >= length) {
@@ -332,21 +315,21 @@ export let Regex = module (
             let next = replacement.byte_at(i + 1);
             if (next == 36) {
                 literal.append(36);
-                i = i + 2;
+                i += 2;
                 continue;
             }
             let index = -1;
             if (next >= 48 && next <= 57) {
                 index = (next - 48) as int;
-                i = i + 2;
+                i += 2;
                 if (i < length && replacement.byte_at(i) >= 48 && replacement.byte_at(i) <= 57) {
                     index = index * 10 + ((replacement.byte_at(i) - 48) as int);
-                    i = i + 1;
+                    i += 1;
                 }
             } else if (next == 123) {
                 let close = i + 2;
                 while (close < length && replacement.byte_at(close) != 125) {
-                    close = close + 1;
+                    close += 1;
                 }
                 if (close >= length || close == i + 2) {
                     trap_with_message("invalid argument: malformed replacement");
@@ -382,12 +365,12 @@ export let Regex = module (
             if (value < 1000) {
                 value = value * 10 + ((b - 48) as int);
             }
-            k = k + 1;
+            k += 1;
         }
         return value;
     };
 
-    let check_offset = func(s: string, offset: int) -> void {
+    let check_offset = func(s: string, offset: int) {
         if (offset < 0 || offset > s.byte_length) {
             trap_with_message("invalid argument: offset out of range");
         }
@@ -409,18 +392,18 @@ export let Regex = module (
         return 4;
     };
 
-    let append_bytes = func(bytes: uint8[list], s: string, start: int, end: int) -> void {
+    let append_bytes = func(bytes: uint8[list], s: string, start: int, end: int) {
         let i = start;
         while (i + 4 <= end) {
             bytes.append(s.byte_at(i));
             bytes.append(s.byte_at(i + 1));
             bytes.append(s.byte_at(i + 2));
             bytes.append(s.byte_at(i + 3));
-            i = i + 4;
+            i += 4;
         }
         while (i < end) {
             bytes.append(s.byte_at(i));
-            i = i + 1;
+            i += 1;
         }
     };
 

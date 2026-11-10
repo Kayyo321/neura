@@ -15,9 +15,7 @@ let result = import:Std.Core.Result;
 // where they can, and build new text in one uint8 list converted once.
 export let Strings = module (
     // Constant time.
-    export let byte_length = func(s: string) -> int {
-        return s.byte_length;
-    };
+    export let byte_length = func(s: string) -> int => s.byte_length;
 
     // The number of bytes that are not continuation bytes. Linear.
     export let scalar_count = func(s: string) -> int {
@@ -26,21 +24,17 @@ export let Strings = module (
         let i = 0;
         while (i < length) {
             if ((s.byte_at(i) & 192) != 128) {
-                count = count + 1;
+                count += 1;
             }
-            i = i + 1;
+            i += 1;
         }
         return count;
     };
 
-    export let is_empty = func(s: string) -> bool {
-        return s.byte_length == 0;
-    };
+    export let is_empty = func(s: string) -> bool => s.byte_length == 0;
 
     // The byte at the offset; the built-in read traps outside the string.
-    export let byte_at = func(s: string, offset: int) -> uint8 {
-        return s.byte_at(offset);
-    };
+    export let byte_at = func(s: string, offset: int) -> uint8 => s.byte_at(offset);
 
     // The scalar value of the character starting at the offset. An offset
     // outside the string is a built-in bounds trap; a continuation byte traps
@@ -88,23 +82,15 @@ export let Strings = module (
     };
 
     // The built-in slice: both ends on boundaries and start not above end.
-    export let slice = func(s: string, start: int, end: int) -> string {
-        return s.slice(start, end);
-    };
+    export let slice = func(s: string, start: int, end: int) -> string => s.slice(start, end);
 
-    export let slice_from = func(s: string, start: int) -> string {
-        return s.slice(start, s.byte_length);
-    };
+    export let slice_from = func(s: string, start: int) -> string => s.slice(start, s.byte_length);
 
     // Same bytes (Stdlib.md section 5.2).
-    export let equals = func(a: string, b: string) -> bool {
-        return a == b;
-    };
+    export let equals = func(a: string, b: string) -> bool => a == b;
 
     // Start with 0; for each byte, 31 times the hash plus the byte, wrapping.
-    export let hash = func(s: string) -> uint32 {
-        return s.hash_code();
-    };
+    export let hash = func(s: string) -> uint32 => s.hash_code();
 
     // Byte-wise lexicographic order; a proper prefix sorts first. This is
     // also the order of the scalar values.
@@ -128,7 +114,7 @@ export let Strings = module (
                 }
                 return ordering.Ordering.Greater;
             }
-            i = i + 1;
+            i += 1;
         }
         if (a_length < b_length) {
             return ordering.Ordering.Less;
@@ -136,9 +122,7 @@ export let Strings = module (
         return ordering.Ordering.Greater;
     };
 
-    export let starts_with = func(s: string, prefix: string) -> bool {
-        return matches_at(s, prefix, 0);
-    };
+    export let starts_with = func(s: string, prefix: string) -> bool => matches_at(s, prefix, 0);
 
     export let ends_with = func(s: string, suffix: string) -> bool {
         let start = s.byte_length - suffix.byte_length;
@@ -148,15 +132,11 @@ export let Strings = module (
         return matches_at(s, suffix, start);
     };
 
-    export let contains = func(s: string, needle: string) -> bool {
-        return find(s, needle, 0) >= 0;
-    };
+    export let contains = func(s: string, needle: string) -> bool => find(s, needle, 0) >= 0;
 
     // The offset of the first occurrence, or -1. An empty needle matches
     // at 0.
-    export let index_of = func(s: string, needle: string) -> int {
-        return find(s, needle, 0);
-    };
+    export let index_of = func(s: string, needle: string) -> int => find(s, needle, 0);
 
     // The offset of the first occurrence at or after `from`, or -1. An
     // empty needle matches at `from`. `from` must be a boundary from 0
@@ -179,7 +159,7 @@ export let Strings = module (
             if (s.byte_at(i) == first && matches_at(s, needle, i)) {
                 return i;
             }
-            i = i - 1;
+            i -= 1;
         }
         return -1;
     };
@@ -188,9 +168,8 @@ export let Strings = module (
     // left to right. Empty pieces are kept; the empty string gives one
     // piece. An empty separator traps with "invalid argument: empty
     // separator".
-    export let split = func(s: string, separator: string) -> string[list] {
-        return split_pieces(s, separator, 2147483647);
-    };
+    export let split = func(s: string, separator: string) -> string[list] =>
+        split_pieces(s, separator, 2147483647);
 
     // As split, with at most `limit` pieces; the last piece holds the rest.
     // A limit below 1 traps with "invalid argument: limit below 1".
@@ -213,12 +192,12 @@ export let Strings = module (
             if (s.byte_at(i) == 10) {
                 let end = i;
                 if (end > start && s.byte_at(end - 1) == 13) {
-                    end = end - 1;
+                    end -= 1;
                 }
                 pieces.append(s.slice(start, end));
                 start = i + 1;
             }
-            i = i + 1;
+            i += 1;
         }
         if (start < length || length == 0) {
             pieces.append(s.slice(start, length));
@@ -244,7 +223,7 @@ export let Strings = module (
             }
             let part = parts[k];
             append_bytes(bytes, part, 0, part.byte_length);
-            k = k + 1;
+            k += 1;
         }
         return text_of(bytes);
     };
@@ -265,7 +244,7 @@ export let Strings = module (
         let k = 0;
         while (k < count) {
             append_bytes(bytes, s, 0, s.byte_length);
-            k = k + 1;
+            k += 1;
         }
         return text_of(bytes);
     };
@@ -276,7 +255,7 @@ export let Strings = module (
         let end = trimmed_end(s);
         let start = 0;
         while (start < end && is_space(s.byte_at(start))) {
-            start = start + 1;
+            start += 1;
         }
         return s.slice(start, end);
     };
@@ -285,14 +264,12 @@ export let Strings = module (
         let length = s.byte_length;
         let start = 0;
         while (start < length && is_space(s.byte_at(start))) {
-            start = start + 1;
+            start += 1;
         }
         return s.slice(start, length);
     };
 
-    export let trim_end = func(s: string) -> string {
-        return s.slice(0, trimmed_end(s));
-    };
+    export let trim_end = func(s: string) -> string => s.slice(0, trimmed_end(s));
 
     // The rest of the string when it starts with the prefix.
     export let strip_prefix = func(s: string, prefix: string) -> optional.Optional<string> {
@@ -313,24 +290,18 @@ export let Strings = module (
 
     // Replaces every non-overlapping occurrence, left to right. An empty
     // target traps with "invalid argument: empty target".
-    export let replace = func(s: string, target: string, replacement: string) -> string {
-        return replace_up_to(s, target, replacement, 2147483647);
-    };
+    export let replace = func(s: string, target: string, replacement: string) -> string =>
+        replace_up_to(s, target, replacement, 2147483647);
 
     // Replaces the first occurrence. An empty target traps as in replace.
-    export let replace_first = func(s: string, target: string, replacement: string) -> string {
-        return replace_up_to(s, target, replacement, 1);
-    };
+    export let replace_first = func(s: string, target: string, replacement: string) -> string =>
+        replace_up_to(s, target, replacement, 1);
 
     // a through z become A through Z; every other byte is unchanged.
-    export let to_ascii_upper = func(s: string) -> string {
-        return map_ascii_letters(s, 97, 122, -32);
-    };
+    export let to_ascii_upper = func(s: string) -> string => map_ascii_letters(s, 97, 122, -32);
 
     // A through Z become a through z; every other byte is unchanged.
-    export let to_ascii_lower = func(s: string) -> string {
-        return map_ascii_letters(s, 65, 90, 32);
-    };
+    export let to_ascii_lower = func(s: string) -> string => map_ascii_letters(s, 65, 90, 32);
 
     // Equal after mapping A through Z to a through z in both strings.
     export let equals_ignore_ascii_case = func(a: string, b: string) -> bool {
@@ -348,7 +319,7 @@ export let Strings = module (
             if (x != y && fold(x) != fold(y)) {
                 return false;
             }
-            i = i + 1;
+            i += 1;
         }
         return true;
     };
@@ -390,7 +361,7 @@ export let Strings = module (
                 append_bytes(bytes, s, i, end);
                 end = i;
             }
-            i = i - 1;
+            i -= 1;
         }
         return text_of(bytes);
     };
@@ -421,7 +392,7 @@ export let Strings = module (
                     message: invalid_message(bytes, i, -size),
                 });
             }
-            i = i + size;
+            i += size;
         }
         trap_with_message("invalid state: UTF-8 validators disagree");
     };
@@ -442,13 +413,13 @@ export let Strings = module (
                 let end = i + size;
                 while (i < end) {
                     output.append(bytes[i]);
-                    i = i + 1;
+                    i += 1;
                 }
             } else {
                 output.append(239);
                 output.append(191);
                 output.append(189);
-                i = i - size;
+                i -= size;
             }
         }
         return text_of(output);
@@ -529,12 +500,12 @@ export let Strings = module (
                     return i;
                 }
             }
-            i = i + 1;
+            i += 1;
         }
         return -1;
     };
 
-    let check_offset = func(s: string, offset: int) -> void {
+    let check_offset = func(s: string, offset: int) {
         if (offset < 0 || offset > s.byte_length) {
             trap_with_message("invalid argument: offset out of range");
         }
@@ -558,7 +529,7 @@ export let Strings = module (
             }
             pieces.append(s.slice(start, found));
             start = found + n;
-            remaining = remaining - 1;
+            remaining -= 1;
         }
         pieces.append(s.slice(start, s.byte_length));
         return pieces;
@@ -580,7 +551,7 @@ export let Strings = module (
             append_bytes(bytes, s, start, found);
             append_bytes(bytes, replacement, 0, replacement.byte_length);
             start = found + n;
-            remaining = remaining - 1;
+            remaining -= 1;
             if (remaining > 0) {
                 found = find(s, target, start);
             }
@@ -599,7 +570,7 @@ export let Strings = module (
             if (b >= low && b <= high) {
                 break;
             }
-            i = i + 1;
+            i += 1;
         }
         if (i == length) {
             return s;
@@ -612,7 +583,7 @@ export let Strings = module (
                 b = ((b as int) + delta) as uint8;
             }
             bytes.append(b);
-            i = i + 1;
+            i += 1;
         }
         return text_of(bytes);
     };
@@ -637,40 +608,38 @@ export let Strings = module (
         return missing;
     };
 
-    let append_copies = func(bytes: uint8[list], pad: string, count: int) -> void {
+    let append_copies = func(bytes: uint8[list], pad: string, count: int) {
         let k = 0;
         while (k < count) {
             append_bytes(bytes, pad, 0, pad.byte_length);
-            k = k + 1;
+            k += 1;
         }
     };
 
-    let is_space = func(b: uint8) -> bool {
-        return b == 32 || (b >= 9 && b <= 13);
-    };
+    let is_space = func(b: uint8) -> bool => b == 32 || (b >= 9 && b <= 13);
 
     let trimmed_end = func(s: string) -> int {
         let end = s.byte_length;
         while (end > 0 && is_space(s.byte_at(end - 1))) {
-            end = end - 1;
+            end -= 1;
         }
         return end;
     };
 
     // Appends the bytes of s from `start` up to `end`, four at a time where
     // possible.
-    let append_bytes = func(bytes: uint8[list], s: string, start: int, end: int) -> void {
+    let append_bytes = func(bytes: uint8[list], s: string, start: int, end: int) {
         let i = start;
         while (i + 4 <= end) {
             bytes.append(s.byte_at(i));
             bytes.append(s.byte_at(i + 1));
             bytes.append(s.byte_at(i + 2));
             bytes.append(s.byte_at(i + 3));
-            i = i + 4;
+            i += 4;
         }
         while (i < end) {
             bytes.append(s.byte_at(i));
-            i = i + 1;
+            i += 1;
         }
     };
 
@@ -683,7 +652,7 @@ export let Strings = module (
         return text;
     };
 
-    let append_scalar = func(bytes: uint8[list], value: uint32) -> void {
+    let append_scalar = func(bytes: uint8[list], value: uint32) {
         if (value < 128) {
             bytes.append(value as uint8);
         } else if (value < 2048) {
@@ -748,7 +717,7 @@ export let Strings = module (
             }
             low = 128;
             high = 191;
-            k = k + 1;
+            k += 1;
         }
         return size;
     };
