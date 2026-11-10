@@ -1,6 +1,6 @@
-let comparable = import:Std.Core.Comparable;
+let.promote _ = import:Std.Core.Comparable;
 let optional = import:Std.Core.Optional;
-let ordering = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Ordering;
 
 // A file system path held as normalized text (Stdlib.md section 11.2). The
 // separator is `/` on every host. Construction collapses repeated
@@ -9,29 +9,23 @@ let ordering = import:Std.Core.Ordering;
 // Equality, hash, ordering (by UTF-8 bytes), and text use the normalized
 // text.
 export let Path = module (
-    export let Path = class implements comparable.Comparable<Path> (
+    export let Path = class implements Comparable<Path> (
         let text: string = ".";
 
         // Normalizes `raw`; Path.of is the usual spelling.
-        export let init = func(raw: string) -> void {
+        export let init = func(raw: string) {
             text = normalize(raw);
         };
 
-        export let is_absolute = func() -> bool {
-            return absolute_text(text);
-        };
+        export let is_absolute = func -> bool => absolute_text(text);
 
         // This path followed by `other`; an absolute `other` replaces it.
-        export let join = func(other: string) -> Path {
-            if (absolute_text(other)) {
-                return new Path(other);
-            }
-            return new Path(text + "/" + other);
-        };
+        export let join = func(other: string) -> Path =>
+            absolute_text(other) ? new Path(other) : new Path(text + "/" + other);
 
         // The path without its last component, or nil for the root, `.`, and
         // a single relative component.
-        export let parent = func() -> Path {
+        export let parent = func -> Path {
             let parts = split(text);
             if (parts.length == 0) {
                 return nil;
@@ -45,7 +39,7 @@ export let Path = module (
 
         // The last component; None for the root, `.`, and a path ending in
         // `..`.
-        export let file_name = func() -> optional.Optional<string> {
+        export let file_name = func -> optional.Optional<string> {
             let parts = split(text);
             if (parts.length == 0 || parts[parts.length - 1] == "..") {
                 return optional.Optional<string>.None;
@@ -54,7 +48,7 @@ export let Path = module (
         };
 
         // The file name without its extension.
-        export let stem = func() -> optional.Optional<string> {
+        export let stem = func -> optional.Optional<string> {
             return match (file_name()) {
                 optional.Optional.Some(name) => optional.Optional<string>.Some(name.slice(0, stem_end(name))),
                 optional.Optional.None => optional.Optional<string>.None,
@@ -63,7 +57,7 @@ export let Path = module (
 
         // The text after the last `.` of the file name, when that dot is not
         // the name's first character.
-        export let extension = func() -> optional.Optional<string> {
+        export let extension = func -> optional.Optional<string> {
             match (file_name()) {
                 optional.Optional.Some(name) => {
                     let end = stem_end(name);
@@ -80,7 +74,7 @@ export let Path = module (
 
         // The components in order, starting with "/" for an absolute path.
         // The path `.` has none.
-        export let components = func() -> string[list] {
+        export let components = func -> string[list] {
             let parts = split(text);
             if (!is_absolute()) {
                 return parts;
@@ -95,7 +89,7 @@ export let Path = module (
         // Removes each `..` together with the component before it, without
         // consulting the file system. `..` directly below the root is
         // removed; leading `..` of a relative path are kept.
-        export let resolve_lexically = func() -> Path {
+        export let resolve_lexically = func -> Path {
             let kept: string[list] = [];
             for (let part in split(text)) {
                 if (part == "..") {
@@ -127,7 +121,7 @@ export let Path = module (
                 if (mine[i] != theirs[i]) {
                     return false;
                 }
-                i = i + 1;
+                i++;
             }
             return true;
         };
@@ -143,7 +137,7 @@ export let Path = module (
             let theirs = split(base.to_string());
             let common = 0;
             while (common < mine.length && common < theirs.length && mine[common] == theirs[common]) {
-                common = common + 1;
+                common++;
             }
             let parts: string[list] = [];
             let i = common;
@@ -152,19 +146,17 @@ export let Path = module (
                     return nil;
                 }
                 parts.append("..");
-                i = i + 1;
+                i++;
             }
             i = common;
             while (i < mine.length) {
                 parts.append(mine[i]);
-                i = i + 1;
+                i++;
             }
             return new Path(assemble(false, parts));
         };
 
-        export let compare_to = func(other: Path) -> ordering.Ordering {
-            return compare_text(text, other.to_string());
-        };
+        export let compare_to = func(other: Path) -> Ordering => compare_text(text, other.to_string());
 
         export let.override equals = func(other: class) -> bool {
             if (!(other is Path)) {
@@ -173,22 +165,14 @@ export let Path = module (
             return text == (other as Path).to_string();
         };
 
-        export let.override hash_code = func() -> uint32 {
-            return text.hash_code();
-        };
+        export let.override hash_code = func -> uint32 => text.hash_code();
 
-        export let.override to_string = func() -> string {
-            return text;
-        };
+        export let.override to_string = func -> string => text;
     );
 
-    export let of = func(text: string) -> Path {
-        return new Path(text);
-    };
+    export let of = func(text: string) -> Path => new Path(text);
 
-    let absolute_text = func(text: string) -> bool {
-        return text.byte_length > 0 && text.byte_at(0) == 47;
-    };
+    let absolute_text = func(text: string) -> bool => text.byte_length > 0 && text.byte_at(0) == 47;
 
     // The components of `text` other than empty ones and `.`.
     let split = func(text: string) -> string[list] {
@@ -206,36 +190,28 @@ export let Path = module (
                 }
                 start = i + 1;
             }
-            i = i + 1;
+            i++;
         }
         return parts;
     };
 
     let assemble = func(absolute: bool, parts: string[list]) -> string {
         if (parts.length == 0) {
-            if (absolute) {
-                return "/";
-            }
-            return ".";
+            return absolute ? "/" : ".";
         }
-        let result = "";
-        if (absolute) {
-            result = "/";
-        }
+        let result = absolute ? "/" : "";
         let i = 0;
         while (i < parts.length) {
             if (i > 0) {
-                result = result + "/";
+                result += "/";
             }
-            result = result + parts[i];
-            i = i + 1;
+            result += parts[i];
+            i++;
         }
         return result;
     };
 
-    let normalize = func(raw: string) -> string {
-        return assemble(absolute_text(raw), split(raw));
-    };
+    let normalize = func(raw: string) -> string => assemble(absolute_text(raw), split(raw));
 
     // The byte index of the dot that starts the extension, or the name's
     // length when there is none.
@@ -245,30 +221,30 @@ export let Path = module (
             if (name.byte_at(i) == 46) {
                 return i;
             }
-            i = i - 1;
+            i--;
         }
         return name.byte_length;
     };
 
-    let compare_text = func(a: string, b: string) -> ordering.Ordering {
+    let compare_text = func(a: string, b: string) -> Ordering {
         let i = 0;
         while (i < a.byte_length && i < b.byte_length) {
             let x = a.byte_at(i);
             let y = b.byte_at(i);
             if (x < y) {
-                return ordering.Ordering.Less;
+                return Ordering.Less;
             }
             if (x > y) {
-                return ordering.Ordering.Greater;
+                return Ordering.Greater;
             }
-            i = i + 1;
+            i++;
         }
         if (a.byte_length < b.byte_length) {
-            return ordering.Ordering.Less;
+            return Ordering.Less;
         }
         if (a.byte_length > b.byte_length) {
-            return ordering.Ordering.Greater;
+            return Ordering.Greater;
         }
-        return ordering.Ordering.Equal;
+        return Ordering.Equal;
     };
 );

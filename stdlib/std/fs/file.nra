@@ -1,10 +1,10 @@
 let bytes = import:Std.Io.Internal.Bytes;
-let closeable = import:Std.Io.Closeable;
-let file_handle = import:Std.Fs.Internal.FileHandle;
+let.promote _ = import:Std.Io.Closeable;
+let.promote _ = import:Std.Fs.Internal.FileHandle;
 let host_error = import:Std.Core.Internal.HostError;
-let paths = import:Std.Fs.Path;
+let.promote _ = import:Std.Fs.Path;
 let result = import:Std.Core.Result;
-let unit = import:Std.Core.Unit;
+let.promote _ = import:Std.Core.Unit;
 
 // An open file (Stdlib.md section 11.2), unbuffered. Its bound read method
 // is a byte source and its bound write method a byte sink. Needs the fs
@@ -26,12 +26,12 @@ export let File = module (
     let seek_file = func(file: int64, offset: int64, origin: int) -> IdOutcome host("neura.fs.seek", 1);
     let close_file = func(file: int64) -> DoneOutcome host("neura.fs.close", 1);
 
-    export let File = class implements closeable.Closeable (
-        let handle: file_handle.FileHandle = nil;
+    export let File = class implements Closeable (
+        let handle: FileHandle = nil;
         let open_now: bool = true;
 
         // Use File.open; the handle comes from the library.
-        export let init = func(opened: file_handle.FileHandle) -> void {
+        export let init = func(opened: FileHandle) {
             handle = opened;
         };
 
@@ -49,16 +49,16 @@ export let File = module (
         };
 
         // Writes every byte, repeating partial host writes.
-        export let write = func(data: uint8[list]) -> result.Result<unit.Unit> {
+        export let write = func(data: uint8[list]) -> result.Result<Unit> {
             if (!open_now) {
-                return result.Result<unit.Unit>.Err(bytes.closed("file", handle.path));
+                return result.Result<Unit>.Err(bytes.closed("file", handle.path));
             }
             let remaining = data;
             while (remaining.length > 0) {
                 match (write_file(handle.id, remaining)) {
                     CountOutcome.Ok(count) => {
                         if (count <= 0) {
-                            return result.Result<unit.Unit>.Err(bytes.no_progress("file write failed", handle.path));
+                            return result.Result<Unit>.Err(bytes.no_progress("file write failed", handle.path));
                         }
                         if (count >= remaining.length) {
                             return bytes.ok();
@@ -66,7 +66,7 @@ export let File = module (
                         remaining = bytes.copy_range(remaining, count, remaining.length);
                     },
                     CountOutcome.Error(code) => {
-                        return result.Result<unit.Unit>.Err(host_error.io(code, "file write failed", handle.path));
+                        return result.Result<Unit>.Err(host_error.io(code, "file write failed", handle.path));
                     },
                 }
             }
@@ -85,7 +85,7 @@ export let File = module (
         };
 
         // The file's size in bytes. The position is unchanged.
-        export let size = func() -> result.Result<int64> {
+        export let size = func -> result.Result<int64> {
             let here: int64 = 0;
             match (seek(0, SeekOrigin.Current)) {
                 result.Result.Ok(position) => {
@@ -112,22 +112,22 @@ export let File = module (
 
         // Releases the file. Closing again does nothing and returns Ok; the
         // file is closed even when the host reports an error.
-        export let close = func() -> result.Result<unit.Unit> {
+        export let close = func -> result.Result<Unit> {
             if (!open_now) {
                 return bytes.ok();
             }
             open_now = false;
             return match (close_file(handle.id)) {
                 DoneOutcome.Ok => bytes.ok(),
-                DoneOutcome.Error(code) => result.Result<unit.Unit>.Err(host_error.io(code, "file close failed", handle.path)),
+                DoneOutcome.Error(code) => result.Result<Unit>.Err(host_error.io(code, "file close failed", handle.path)),
             };
         };
     );
 
-    export let open = func(path: paths.Path, mode: OpenMode) -> result.Result<File> {
+    export let open = func(path: Path, mode: OpenMode) -> result.Result<File> {
         let text = path.to_string();
         return match (open_file(text, mode as int)) {
-            IdOutcome.Ok(id) => result.Result<File>.Ok(new File(new file_handle.FileHandle(id, text))),
+            IdOutcome.Ok(id) => result.Result<File>.Ok(new File(new FileHandle(id, text))),
             IdOutcome.Error(code) => result.Result<File>.Err(host_error.io(code, "file open failed", text)),
         };
     };

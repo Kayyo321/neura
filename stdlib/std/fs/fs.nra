@@ -4,9 +4,9 @@ let files = import:Std.Fs.File;
 let hashing = import:Std.Core.Hash;
 let host_error = import:Std.Core.Internal.HostError;
 let instant = import:Std.Time.Instant;
-let paths = import:Std.Fs.Path;
+let.promote _ = import:Std.Fs.Path;
 let result = import:Std.Core.Result;
-let unit = import:Std.Core.Unit;
+let.promote _ = import:Std.Core.Unit;
 
 // File system operations (Stdlib.md section 11.2). Every function needs the
 // fs capability. Functions that open files close them on every path before
@@ -57,7 +57,7 @@ export let Fs = module (
     // Bytes per read and write of copy_file and read_bytes.
     export const CopyBufferSize: int = 65536;
 
-    export let read_bytes = func(path: paths.Path) -> result.Result<uint8[list]> {
+    export let read_bytes = func(path: Path) -> result.Result<uint8[list]> {
         match (files.open(path, files.OpenMode.Read)) {
             result.Result.Ok(file) => {
                 return read_open(file);
@@ -69,7 +69,7 @@ export let Fs = module (
     };
 
     // The file's text; invalid UTF-8 fails with InvalidData.
-    export let read_text = func(path: paths.Path) -> result.Result<string> {
+    export let read_text = func(path: Path) -> result.Result<string> {
         match (read_bytes(path)) {
             result.Result.Ok(data) => {
                 let [valid, text] = string.from_utf8(data);
@@ -85,21 +85,21 @@ export let Fs = module (
     };
 
     // Creates or truncates the file and writes the bytes.
-    export let write_bytes = func(path: paths.Path, data: uint8[list]) -> result.Result<unit.Unit> {
+    export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit> {
         return write_mode(path, data, files.OpenMode.Write);
     };
 
-    export let write_text = func(path: paths.Path, text: string) -> result.Result<unit.Unit> {
+    export let write_text = func(path: Path, text: string) -> result.Result<Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Write);
     };
 
     // Creates the file if needed and writes the text at its end.
-    export let append_text = func(path: paths.Path, text: string) -> result.Result<unit.Unit> {
+    export let append_text = func(path: Path, text: string) -> result.Result<Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Append);
     };
 
     // Ok(false) for NotFound; other failures are errors. Follows links.
-    export let exists = func(path: paths.Path) -> result.Result<bool> {
+    export let exists = func(path: Path) -> result.Result<bool> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(_) => result.Result<bool>.Ok(true),
             StatOutcome.Error(code) => missing_or_error(code, path.to_string()),
@@ -108,7 +108,7 @@ export let Fs = module (
 
     // The kind, size in bytes, and last modification time of an entry,
     // following links.
-    export let metadata = func(path: paths.Path) -> result.Result<FileMetadata> {
+    export let metadata = func(path: Path) -> result.Result<FileMetadata> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(status) => result.Result<FileMetadata>.Ok(metadata_of(status)),
             StatOutcome.Error(code) => result.Result<FileMetadata>.Err(host_error.io(code, "metadata failed", path.to_string())),
@@ -116,28 +116,28 @@ export let Fs = module (
     };
 
     // The directory's entries joined to `path`, sorted by name bytes.
-    export let list = func(path: paths.Path) -> result.Result<paths.Path[list]> {
+    export let list = func(path: Path) -> result.Result<Path[list]> {
         match (list_names(path.to_string())) {
             NamesOutcome.Ok(names) => {
-                let entries: paths.Path[list] = [];
+                let entries: Path[list] = [];
                 for (let name in names) {
                     entries.append(path.join(name));
                 }
-                return result.Result<paths.Path[list]>.Ok(entries);
+                return result.Result<Path[list]>.Ok(entries);
             },
             NamesOutcome.Error(code) => {
-                return result.Result<paths.Path[list]>.Err(host_error.io(code, "list directory failed", path.to_string()));
+                return result.Result<Path[list]>.Err(host_error.io(code, "list directory failed", path.to_string()));
             },
         }
     };
 
-    export let create_directory = func(path: paths.Path) -> result.Result<unit.Unit> {
+    export let create_directory = func(path: Path) -> result.Result<Unit> {
         return done(make_directory(path.to_string()), "create directory failed", path.to_string());
     };
 
     // Creates the directory and any missing parents; succeeds when the
     // directory already exists.
-    export let create_directories = func(path: paths.Path) -> result.Result<unit.Unit> {
+    export let create_directories = func(path: Path) -> result.Result<Unit> {
         let text = path.to_string();
         match (make_directory(text)) {
             DoneOutcome.Ok => {
@@ -149,12 +149,12 @@ export let Fs = module (
                 }
                 let parent = path.parent();
                 if (code != 1 || parent == nil) {
-                    return result.Result<unit.Unit>.Err(host_error.io(code, "create directory failed", text));
+                    return result.Result<Unit>.Err(host_error.io(code, "create directory failed", text));
                 }
                 match (create_directories(parent)) {
                     result.Result.Ok(_) => {},
                     result.Result.Err(failure) => {
-                        return result.Result<unit.Unit>.Err(failure);
+                        return result.Result<Unit>.Err(failure);
                     },
                 }
             },
@@ -167,19 +167,19 @@ export let Fs = module (
 
     // Removes a file or another entry that is not a directory, such as a
     // link (the link, not its target).
-    export let remove_file = func(path: paths.Path) -> result.Result<unit.Unit> {
+    export let remove_file = func(path: Path) -> result.Result<Unit> {
         return done(remove_path(path.to_string(), false), "remove file failed", path.to_string());
     };
 
     // Removes an empty directory.
-    export let remove_directory = func(path: paths.Path) -> result.Result<unit.Unit> {
+    export let remove_directory = func(path: Path) -> result.Result<Unit> {
         return done(remove_path(path.to_string(), true), "remove directory failed", path.to_string());
     };
 
     // Removes `path` and, for a directory, everything below it: depth first,
     // in sorted order. Links and other entries of kind Other are removed
     // without descending into them. Stops at the first error.
-    export let remove_tree = func(path: paths.Path) -> result.Result<unit.Unit> {
+    export let remove_tree = func(path: Path) -> result.Result<Unit> {
         let text = path.to_string();
         match (stat_path(text, false)) {
             StatOutcome.Ok(status) => {
@@ -188,7 +188,7 @@ export let Fs = module (
                 }
             },
             StatOutcome.Error(code) => {
-                return result.Result<unit.Unit>.Err(host_error.io(code, "remove tree failed", text));
+                return result.Result<Unit>.Err(host_error.io(code, "remove tree failed", text));
             },
         }
         match (list(path)) {
@@ -197,33 +197,33 @@ export let Fs = module (
                     match (remove_tree(entry)) {
                         result.Result.Ok(_) => {},
                         result.Result.Err(failure) => {
-                            return result.Result<unit.Unit>.Err(failure);
+                            return result.Result<Unit>.Err(failure);
                         },
                     }
                 }
             },
             result.Result.Err(failure) => {
-                return result.Result<unit.Unit>.Err(failure);
+                return result.Result<Unit>.Err(failure);
             },
         }
         return remove_directory(path);
     };
 
     // Renames or moves an entry, replacing an existing file at `to`.
-    export let rename = func(from: paths.Path, to: paths.Path) -> result.Result<unit.Unit> {
+    export let rename = func(from: Path, to: Path) -> result.Result<Unit> {
         return done(rename_path(from.to_string(), to.to_string()), "rename failed", from.to_string());
     };
 
     // Copies a file's bytes through a 65,536-byte buffer, replacing an
     // existing target. Both files are closed on every path.
-    export let copy_file = func(from: paths.Path, to: paths.Path) -> result.Result<unit.Unit> {
+    export let copy_file = func(from: Path, to: Path) -> result.Result<Unit> {
         let source: files.File = nil;
         match (files.open(from, files.OpenMode.Read)) {
             result.Result.Ok(opened) => {
                 source = opened;
             },
             result.Result.Err(failure) => {
-                return result.Result<unit.Unit>.Err(failure);
+                return result.Result<Unit>.Err(failure);
             },
         }
         let target: files.File = nil;
@@ -232,11 +232,11 @@ export let Fs = module (
                 target = opened;
             },
             result.Result.Err(failure) => {
-                source.close();
-                return result.Result<unit.Unit>.Err(failure);
+                let _ = source.close();
+                return result.Result<Unit>.Err(failure);
             },
         }
-        while (true) {
+        do {
             match (source.read(CopyBufferSize)) {
                 result.Result.Ok(chunk) => {
                     if (chunk.length == 0) {
@@ -245,24 +245,24 @@ export let Fs = module (
                     match (target.write(chunk)) {
                         result.Result.Ok(_) => {},
                         result.Result.Err(failure) => {
-                            source.close();
-                            target.close();
-                            return result.Result<unit.Unit>.Err(failure);
+                            let _ = source.close();
+                            let _ = target.close();
+                            return result.Result<Unit>.Err(failure);
                         },
                     }
                 },
                 result.Result.Err(failure) => {
-                    source.close();
-                    target.close();
-                    return result.Result<unit.Unit>.Err(failure);
+                    let _ = source.close();
+                    let _ = target.close();
+                    return result.Result<Unit>.Err(failure);
                 },
             }
         }
         match (source.close()) {
             result.Result.Ok(_) => {},
             result.Result.Err(failure) => {
-                target.close();
-                return result.Result<unit.Unit>.Err(failure);
+                let _ = target.close();
+                return result.Result<Unit>.Err(failure);
             },
         }
         return target.close();
@@ -270,7 +270,7 @@ export let Fs = module (
 
     let read_open = func(file: files.File) -> result.Result<uint8[list]> {
         let data: uint8[list] = [];
-        while (true) {
+        do {
             match (file.read(CopyBufferSize)) {
                 result.Result.Ok(chunk) => {
                     if (chunk.length == 0) {
@@ -283,7 +283,7 @@ export let Fs = module (
                     }
                 },
                 result.Result.Err(failure) => {
-                    file.close();
+                    let _ = file.close();
                     return result.Result<uint8[list]>.Err(failure);
                 },
             }
@@ -295,7 +295,7 @@ export let Fs = module (
     };
 
     // A failed write is reported after the file is closed.
-    let write_mode = func(path: paths.Path, data: uint8[list], mode: files.OpenMode) -> result.Result<unit.Unit> {
+    let write_mode = func(path: Path, data: uint8[list], mode: files.OpenMode) -> result.Result<Unit> {
         match (files.open(path, mode)) {
             result.Result.Ok(file) => {
                 match (file.write(data)) {
@@ -303,13 +303,13 @@ export let Fs = module (
                         return file.close();
                     },
                     result.Result.Err(failure) => {
-                        file.close();
-                        return result.Result<unit.Unit>.Err(failure);
+                        let _ = file.close();
+                        return result.Result<Unit>.Err(failure);
                     },
                 }
             },
             result.Result.Err(failure) => {
-                return result.Result<unit.Unit>.Err(failure);
+                return result.Result<Unit>.Err(failure);
             },
         }
     };
@@ -331,31 +331,31 @@ export let Fs = module (
         return result.Result<bool>.Err(host_error.io(code, "metadata failed", path));
     };
 
-    let existing_directory = func(text: string) -> result.Result<unit.Unit> {
+    let existing_directory = func(text: string) -> result.Result<Unit> {
         return match (stat_path(text, true)) {
             StatOutcome.Ok(status) => directory_or_exists(status[0], text),
-            StatOutcome.Error(code) => result.Result<unit.Unit>.Err(host_error.io(code, "create directory failed", text)),
+            StatOutcome.Error(code) => result.Result<Unit>.Err(host_error.io(code, "create directory failed", text)),
         };
     };
 
-    let directory_or_exists = func(kind: int, text: string) -> result.Result<unit.Unit> {
+    let directory_or_exists = func(kind: int, text: string) -> result.Result<Unit> {
         if (kind == 1) {
             return bytes.ok();
         }
-        return result.Result<unit.Unit>.Err(host_error.io(3, "create directory failed", text));
+        return result.Result<Unit>.Err(host_error.io(3, "create directory failed", text));
     };
 
-    let retry_failed = func(code: uint32, text: string) -> result.Result<unit.Unit> {
+    let retry_failed = func(code: uint32, text: string) -> result.Result<Unit> {
         if (code == 3) {
             return existing_directory(text);
         }
-        return result.Result<unit.Unit>.Err(host_error.io(code, "create directory failed", text));
+        return result.Result<Unit>.Err(host_error.io(code, "create directory failed", text));
     };
 
-    let done = func(outcome: DoneOutcome, message: string, path: string) -> result.Result<unit.Unit> {
+    let done = func(outcome: DoneOutcome, message: string, path: string) -> result.Result<Unit> {
         return match (outcome) {
             DoneOutcome.Ok => bytes.ok(),
-            DoneOutcome.Error(code) => result.Result<unit.Unit>.Err(host_error.io(code, message, path)),
+            DoneOutcome.Error(code) => result.Result<Unit>.Err(host_error.io(code, message, path)),
         };
     };
 );
