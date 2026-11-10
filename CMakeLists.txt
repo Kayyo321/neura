@@ -372,6 +372,14 @@ if(BUILD_TESTING)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
     endforeach()
     set(neura_native_test_dir "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
+    if(TARGET neura_launcher)
+        add_test(NAME native-policy COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=$<TARGET_FILE:neura>"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-executable-policy"
+            "-DMATHOPS=$<TARGET_FILE:neura_test_mathops_shared>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/policy.cmake")
+    endif()
 
     # The standard library: one fixture installs the tool and the library
     # into a fresh prefix, and each area of tests/stdlib runs against that
@@ -413,11 +421,16 @@ if(BUILD_TESTING)
     )
     set_tests_properties(c-import PROPERTIES FIXTURES_REQUIRED stdlib)
 
+    set(native_replay_options)
+    if(TARGET neura_launcher)
+        list(APPEND native_replay_options "-DNATIVE_TOOLCHAIN=$<TARGET_FILE:neura>")
+    endif()
     add_test(NAME native-replay COMMAND ${CMAKE_COMMAND}
         "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-replay"
         "-DNATIVE_DIR=${neura_native_test_dir}"
+        ${native_replay_options}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/replay.cmake"
     )
     set_tests_properties(native-replay PROPERTIES FIXTURES_REQUIRED stdlib)

@@ -65,6 +65,7 @@ void usage(std::ostream& out) {
            "       neura build [-I source-root] [--no-optimize] [--no-source-map] <file.nra>... -o <file.nvr>\n"
            "       neura build [--no-optimize] [--no-source-map] <file.nir> -o <file.nvr>\n"
            "       neura build --native <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
+           "       neura inspect <file> [-o <file.nvr>]\n"
            "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [capabilities] "
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
@@ -105,10 +106,10 @@ void usage(std::ostream& out) {
            "  --c-link-arg <arg>       pass an argument to that link\n";
 }
 
-enum class Command { Check, Docs, EmitIr, Build, Run, Test, Disassemble, Assemble, Decompile, CBindings };
+enum class Command { Check, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble, Assemble, Decompile, CBindings };
 
 constexpr const char* commands =
-    "expected check, docs, emit-ir, build, run, test, disassemble, assemble, decompile, or c-bindings";
+    "expected check, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, or c-bindings";
 
 struct Options {
     Command command = Command::Check;
@@ -117,6 +118,7 @@ struct Options {
     bool provenance = true;
     bool doxygen = false;
     bool native_executable = false;
+    bool sealed = false;
     // Report execution costs: steps, peak heap cells, and image size.
     bool stats = false;
     std::vector<fs::path> files;
@@ -188,6 +190,50 @@ std::uint64_t parse_limit(std::string_view option, const char* text) {
     return value;
 }
 
+template <class Next>
+bool parse_policy_option(Options& options, std::string_view arg, Next next) {
+    if (arg == "--max-steps") {
+        options.limits.max_steps = parse_limit(arg, next());
+    } else if (arg == "--max-frames") {
+        const auto value = parse_limit(arg, next());
+        if (value > 0xffffffffU) {
+            throw std::runtime_error("--max-frames is too large");
+        }
+        options.limits.max_frames = static_cast<std::uint32_t>(value);
+    } else if (arg == "--max-heap-cells") {
+        options.limits.max_heap_cells = parse_limit(arg, next());
+    } else if (arg == "--allow-fs") {
+        options.capabilities.fs = true;
+        options.all_paths = true;
+    } else if (arg.starts_with("--allow-fs=")) {
+        options.capabilities.fs = true;
+        auto list = arg.substr(std::string_view("--allow-fs=").size());
+        for (;;) {
+            const auto comma = list.find(',');
+            const auto prefix = list.substr(0, comma);
+            if (prefix.empty()) {
+                throw std::runtime_error("--allow-fs= expects a comma-separated list of path prefixes");
+            }
+            options.capabilities.fs_prefixes.emplace_back(prefix);
+            if (comma == std::string_view::npos) break;
+            list.remove_prefix(comma + 1);
+        }
+    } else if (arg == "--allow-net") {
+        options.capabilities.net = true;
+    } else if (arg == "--allow-env") {
+        options.capabilities.env = true;
+    } else if (arg == "--allow-clock") {
+        options.capabilities.clock = true;
+    } else if (arg == "--allow-entropy") {
+        options.capabilities.entropy = true;
+    } else if (arg == "--allow-native") {
+        options.capabilities.native = true;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 Options read_options(int argc, char** argv) {
     if (argc < 2) {
         throw std::runtime_error(commands);
@@ -204,6 +250,8 @@ Options read_options(int argc, char** argv) {
         options.command = Command::EmitIr;
     } else if (command == "build") {
         options.command = Command::Build;
+    } else if (command == "inspect") {
+        options.command = Command::Inspect;
     } else if (command == "run") {
         options.command = Command::Run;
     } else if (command == "test") {
@@ -225,7 +273,9 @@ Options read_options(int argc, char** argv) {
                           options.command == Command::CBindings;
     const bool single_input = options.command == Command::Run || options.command == Command::Disassemble ||
                               options.command == Command::Assemble || options.command == Command::Decompile ||
-                              options.command == Command::CBindings;
+                              options.command == Command::CBindings || options.command == Command::Inspect;
+    const bool builds = options.command == Command::Build;
+    std::optional<std::string_view> first_policy_flag;
     bool positional_only = false;
     for (int i = 2; i < argc; ++i) {
         const std::string_view arg = argv[i];
@@ -236,6 +286,10 @@ Options read_options(int argc, char** argv) {
             }
             return argv[i];
         };
+        if (!positional_only && (runs || builds) && parse_policy_option(options, arg, next)) {
+            if (builds && !first_policy_flag) first_policy_flag = arg;
+            continue;
+        }
         if (positional_only) {
             if (options.command == Command::Run) {
                 options.arguments.emplace_back(arg);
@@ -268,6 +322,10 @@ Options read_options(int argc, char** argv) {
         } else if (arg == "--native") {
             if (options.command != Command::Build) throw std::runtime_error("--native applies only to build");
             options.native_executable = true;
+        } else if (arg == "--sealed") {
+            if (!builds) throw std::runtime_error("--sealed applies only with --native");
+            options.sealed = true;
+            if (!first_policy_flag) first_policy_flag = arg;
         } else if (arg == "--no-source-map") {
             if (options.command != Command::Build) {
                 throw std::runtime_error("--no-source-map applies only to build");
@@ -275,52 +333,16 @@ Options read_options(int argc, char** argv) {
             options.source_map = false;
         } else if (arg == "-o") {
             if (options.command != Command::Docs && options.command != Command::EmitIr &&
-                options.command != Command::Build &&
+                options.command != Command::Build && options.command != Command::Inspect &&
                 options.command != Command::Disassemble && options.command != Command::Assemble &&
                 options.command != Command::Decompile) {
-                throw std::runtime_error("-o applies only to docs, emit-ir, build, disassemble, assemble, and decompile");
+                throw std::runtime_error("-o applies only to docs, emit-ir, build, inspect, disassemble, assemble, and decompile");
             }
             options.output = fs::path(next());
-        } else if (runs && arg == "--max-steps") {
-            options.limits.max_steps = parse_limit(arg, next());
-        } else if (runs && arg == "--max-frames") {
-            const auto value = parse_limit(arg, next());
-            if (value > 0xffffffffU) {
-                throw std::runtime_error("--max-frames is too large");
-            }
-            options.limits.max_frames = static_cast<std::uint32_t>(value);
-        } else if (runs && arg == "--max-heap-cells") {
-            options.limits.max_heap_cells = parse_limit(arg, next());
         } else if (options.command == Command::Run && arg == "--profile") {
             options.limits.profile = true;
         } else if (runs && arg == "--stats") {
             options.stats = true;
-        } else if (runs && arg == "--allow-fs") {
-            options.capabilities.fs = true;
-            options.all_paths = true;
-        } else if (runs && arg.starts_with("--allow-fs=")) {
-            options.capabilities.fs = true;
-            auto list = arg.substr(std::string_view("--allow-fs=").size());
-            for (;;) {
-                const auto comma = list.find(',');
-                const auto prefix = list.substr(0, comma);
-                if (prefix.empty()) {
-                    throw std::runtime_error("--allow-fs= expects a comma-separated list of path prefixes");
-                }
-                options.capabilities.fs_prefixes.emplace_back(prefix);
-                if (comma == std::string_view::npos) break;
-                list.remove_prefix(comma + 1);
-            }
-        } else if (runs && arg == "--allow-net") {
-            options.capabilities.net = true;
-        } else if (runs && arg == "--allow-env") {
-            options.capabilities.env = true;
-        } else if (runs && arg == "--allow-clock") {
-            options.capabilities.clock = true;
-        } else if (runs && arg == "--allow-entropy") {
-            options.capabilities.entropy = true;
-        } else if (runs && arg == "--allow-native") {
-            options.capabilities.native = true;
         } else if (compiles && arg == "--c-include") {
             options.c_import.include_dirs.push_back(fs::canonical(next()).string());
         } else if (compiles && arg == "--c-define") {
@@ -350,6 +372,9 @@ Options read_options(int argc, char** argv) {
         } else {
             options.files.push_back(fs::canonical(argv[i]));
         }
+    }
+    if (first_policy_flag && !options.native_executable) {
+        throw std::runtime_error(std::string(*first_policy_flag) + " applies only with --native");
     }
     if (options.files.empty()) {
         throw std::runtime_error(options.command == Command::Run ? "expected an image file"
@@ -382,6 +407,10 @@ Options read_options(int argc, char** argv) {
 
 bool is_nir_input(const fs::path& path) {
     return path.extension() == ".nir";
+}
+
+bool has_image_magic(std::span<const std::uint8_t> bytes) {
+    return bytes.size() >= 4 && std::ranges::equal(bytes.first(4), std::string_view("NEUR"));
 }
 
 // Runs `arguments` and returns its exit status, with standard output and
@@ -583,7 +612,7 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
         descriptor->nvr_major != neura::nvr::major_version) {
         throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
     }
-    if (bytes.size() >= 8 && std::ranges::equal(bytes.first(4), std::string_view("NEUR"))) {
+    if (bytes.size() >= 8 && has_image_magic(bytes)) {
         const unsigned major = bytes[4] | (unsigned{bytes[5]} << 8);
         const unsigned minor = bytes[6] | (unsigned{bytes[7]} << 8);
         if (major == 1 && minor > descriptor->nvr_minor) {
@@ -596,7 +625,7 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
         throw std::runtime_error("--native: the image's native library is for " + image.native_library->triple +
                                  "; the launcher is for " + descriptor->triple);
     }
-    const neura::launcher::Policy policy;
+    const neura::launcher::Policy policy{options.capabilities, options.limits, options.sealed};
     neura::launcher::write_executable(*options.output, launcher, bytes, policy);
     note_denied_imports(image, policy.capabilities);
 }
@@ -616,7 +645,10 @@ int build(const Options& options) {
 
 neura::nvr::Image load_image(const fs::path& path, std::size_t* byte_count = nullptr) {
     try {
-        const auto bytes = read_file(path);
+        auto bytes = read_file(path);
+        if (!has_image_magic(bytes) && neura::launcher::is_container(bytes)) {
+            bytes = neura::launcher::read_container(bytes).image;
+        }
         auto image = neura::nvr::load(bytes);
         if (byte_count) *byte_count = bytes.size();
         return image;
@@ -624,6 +656,44 @@ neura::nvr::Image load_image(const fs::path& path, std::size_t* byte_count = nul
         throw std::runtime_error(path.string() + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
                                  error.what());
     }
+}
+
+int inspect(const Options& options) {
+    const auto& path = options.files.front();
+    const auto bytes = read_file(path);
+    const auto executable = neura::launcher::read_container(bytes);
+    const auto descriptor = neura::launcher::read_descriptor(std::span(bytes).first(executable.launcher_size));
+    if (!descriptor) throw std::runtime_error(path.string() + ": not a Neura launcher");
+    const auto image = neura::nvr::load(executable.image);
+    if (options.output) write_file(*options.output, executable.image);
+
+    const auto& policy = executable.policy;
+    const auto& caps = policy.capabilities;
+    std::cout << "native executable: " << path.filename().string() << '\n'
+              << "launcher: neura " << descriptor->toolchain_version << ", " << descriptor->triple << ", "
+              << (descriptor->flavor == 0 ? "default" : "static") << ", runs NVR up to "
+              << descriptor->nvr_major << '.' << descriptor->nvr_minor << '\n'
+              << "capabilities: console, process exit";
+    if (caps.fs) {
+        std::cout << ", files";
+        if (!caps.fs_prefixes.empty()) {
+            std::cout << " (" << caps.fs_prefixes.front();
+            for (const auto& prefix : std::span(caps.fs_prefixes).subspan(1)) std::cout << ", " << prefix;
+            std::cout << ')';
+        }
+    }
+    if (caps.net) std::cout << ", network";
+    if (caps.env) std::cout << ", environment";
+    if (caps.clock) std::cout << ", clock";
+    if (caps.entropy) std::cout << ", entropy";
+    if (caps.native) std::cout << ", native";
+    std::cout << "\nlimits: steps " << policy.limits.max_steps << ", frames " << policy.limits.max_frames
+              << ", heap cells " << policy.limits.max_heap_cells
+              << "\nrun options: " << (policy.sealed ? "sealed" : "accepted")
+              << "\nimage: " << executable.image.size() << " bytes, NVR 1." << image.minor_version
+              << ", " << image.graphs.size() << " graphs, source map " << (image.source_map ? "present" : "absent")
+              << ", native library " << (image.native_library ? "present" : "absent") << '\n';
+    return 0;
 }
 
 void write_text(const Options& options, const std::string& text) {
@@ -931,6 +1001,8 @@ int main(int argc, char** argv) {
             return emit_ir(options);
         case Command::Build:
             return build(options);
+        case Command::Inspect:
+            return inspect(options);
         case Command::Run:
             return run(options);
         case Command::Test:

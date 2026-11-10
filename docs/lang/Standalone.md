@@ -1,6 +1,6 @@
 # Native executables: implementation plan for `neura build --native`
 
-Phase 1 implements `neura build --native` with the default launcher and policy on Linux x86-64. The remaining phases add build-time policy options, executable inspection, and launcher variants. A native executable contains the program's image and the runtime that executes it, so the file can run on a machine without an installed Neura toolchain.
+Phases 1 and 2 implement `neura build --native` with the default launcher on Linux x86-64, recorded policies and limits, and executable inspection. Phase 3 adds the static launcher, target selection, and installation. A native executable contains the program's image and the runtime that executes it, so the file can run on a machine without an installed Neura toolchain.
 
 ## 1. How to read this plan
 
