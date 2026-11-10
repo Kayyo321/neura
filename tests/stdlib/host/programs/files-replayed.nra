@@ -30,7 +30,7 @@ export let FilesReplayed = module:program.Entry (
         report(fs.copy_file(dir.join("a.txt"), dir.join("nested/b.txt")));
         match (fs.read_text(dir.join("nested/b.txt"))) {
             result.Result.Ok(text) => {
-                console.print(text);
+                console.write(text);
             },
             result.Result.Err(failure) => {
                 console.print_line(error.message(failure));

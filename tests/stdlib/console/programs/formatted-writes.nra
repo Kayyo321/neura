@@ -1,0 +1,21 @@
+// run-options: --replay @AREA_DIR@/programs/formatted-writes.trace
+// stderr: ^error 7 = b, a
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+export let FormattedWrites = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print("{}: ", "value");
+        console.println("{:#x} {{ok}}", 31);
+        console.eprint("error {}", 7);
+        console.eprintln(" = {1}, {0}", "a", "b");
+        test.assert_ok<unit.Unit>(console.try_println("{:04d}", 17));
+        test.assert_ok<unit.Unit>(console.try_eprint("{} ", "try"));
+        test.assert_ok<unit.Unit>(console.try_eprintln("{:>3s}", "ok"));
+        console.write("{}");
+        console.println("");
+        return program.ExitCode.Ok;
+    };
+);

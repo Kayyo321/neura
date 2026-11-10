@@ -1,0 +1,11 @@
+// stderr: invalid format: parse error at 12: format argument index out of range
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let InvalidFormat = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.println("before");
+        console.println("prefix {}: {}", 42);
+        return program.ExitCode.Ok;
+    };
+);

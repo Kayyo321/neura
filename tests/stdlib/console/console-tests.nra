@@ -5,7 +5,7 @@ let unit = import:Std.Core.Unit;
 // Console output with the real streams. Input and failure cases replay
 // checked-in traces under programs/ and traps/.
 let ConsoleTests = module (
-    export let test_print_forms = func() -> void {
+    export let test_print_forms = func {
         console.print("print without a line end; ");
         console.print_line("print_line");
         console.error_line("error_line to the error stream");
@@ -16,7 +16,7 @@ let ConsoleTests = module (
         console.print_line("é🙂");
     };
 
-    export let test_streams_as_sinks = func() -> void {
+    export let test_streams_as_sinks = func {
         let output = console.output();
         let error = console.error();
         let line: uint8[list] = [115, 105, 110, 107, 10];

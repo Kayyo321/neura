@@ -1,0 +1,81 @@
+let console = import:Std.Io.Console;
+let errors = import:Std.Core.Error;
+let test = import:Std.Test;
+let variadic = import:Std.Core.Variadic;
+
+let FormattingTests = module (
+    let Label = class (
+        export let.override to_string = func -> string => "example";
+    );
+
+    export let test_format_values = func {
+        test.assert_equal_string("hello 42 true", console.format("{} {} {}", "hello", 42, true));
+        test.assert_equal_string("{second} / first / second", console.format("{{{1}}} / {0} / {1}", "first", "second"));
+        test.assert_equal_string("{}", console.format("{{}}"));
+        test.assert_equal_string("static 8", console.Formatter.format("{} {}", "static", 8));
+        test.assert_equal_string("example / nil", console.format("{} / {}", new Label(), nil));
+        test.assert_equal_string("text -5", test.assert_ok<string>(console.try_format("{} {}", "text", -5)));
+        let packed: variadic.Argument[] = [variadic.Argument.Text("packed"), variadic.Argument.Signed(-9)];
+        test.assert_equal_string("packed -9", console.vformat("{} {}", packed));
+        test.assert_equal_string("-9", test.assert_ok<string>(console.try_vformat("{1}", packed)));
+        let count = 0;
+        test.assert_equal_string("1 0 1", console.format("{1} {0} {1}", count++, count++));
+        test.assert_equal_int32(2, count);
+    };
+
+    export let test_format_integer_and_text_presentations = func {
+        test.assert_equal_string("0X000F|-0x00e|101|010|+00007",
+            console.format("{:#06X}|{:#06x}|{:b}|{:#o}|{:+06d}", 15, -14, 5, 8, 7));
+        let minimum: int64 = -9223372036854775808;
+        let maximum: uint64 = 18446744073709551615;
+        test.assert_equal_string("-9223372036854775808 18446744073709551615",
+            console.format("{} {}", minimum, maximum));
+        test.assert_equal_string("🙂é🙂🙂🙂|x   |🙂|1|  true",
+            console.format("{:🙂^5.2}|{:<4}|{:c}|{:d}|{:>6}", "é🙂x", "x", 128578, true, true));
+        test.assert_equal_string("\"a\\n\\\"b\"", console.format("{:?}", "a\n\"b"));
+        test.assert_equal_string("  é", console.format("{0:>{1}.{2}s}", "é🙂x", 3, 1));
+    };
+
+    export let test_format_float_presentations = func {
+        test.assert_equal_string("+003.25|1.25e+00|1.25E+00|-0.00",
+            console.format("{:+07.2f}|{:.2e}|{:.2E}|{:.2f}", 3.25, 1.25, 1.25, -0.0));
+        test.assert_equal_string("   1.25|1.25|1.25e-06|10.",
+            console.format("{:{}.{}f}|{:.3g}|{:.3g}|{:#.0f}", 1.25, 7, 2, 1.25, 0.00000125, 10.0));
+        test.assert_equal_string("1.8p+0|1.0P+0|-1.2p+0|1.p+1",
+            console.format("{:a}|{:.1A}|{:.1a}|{:#a}", 1.5, 1.03125, -1.09375, 2.0));
+        let half: float16 = 0.1;
+        let bfloat: bfloat16 = 0.1;
+        let single: float32 = 0.1;
+        test.assert_equal_string("0.1 0.1 0.1", console.format("{} {} {}", half, bfloat, single));
+    };
+
+    export let test_format_errors = func {
+        check_format_error("cannot mix automatic and explicit argument indexes",
+            test.assert_err<string>(console.try_format("{} {0}", 1)));
+        check_format_error("unmatched closing brace", test.assert_err<string>(console.try_format("}")));
+        check_format_error("unclosed replacement field", test.assert_err<string>(console.try_format("{")));
+        check_format_error("format argument index out of range", test.assert_err<string>(console.try_format("{2}", 1)));
+        check_format_error("format specification is invalid for the argument type",
+            test.assert_err<string>(console.try_format("{:x}", "text")));
+        check_format_error("dynamic width or precision requires an integer",
+            test.assert_err<string>(console.try_format("{:{}}", "text", false)));
+        check_format_error("dynamic width or precision out of range",
+            test.assert_err<string>(console.try_format("{:{}}", "text", -1)));
+        check_format_error("format number out of range", test.assert_err<string>(console.try_format("{:2147483648}", 1)));
+        check_format_error("floating-point precision exceeds 100", test.assert_err<string>(console.try_format("{:.101f}", 1.0)));
+        check_format_error("character value is not a Unicode scalar", test.assert_err<string>(console.try_format("{:c}", 55296)));
+        let evaluations = 0;
+        check_format_error("format argument index out of range",
+            test.assert_err<string>(console.try_format("{} {}", evaluations++)));
+        test.assert_equal_int32(1, evaluations);
+    };
+
+    let check_format_error = func(expected: string, problem: errors.Error) {
+        match (problem) {
+            errors.Error.Parse { kind: _, offset: _, message } => {
+                test.assert_equal_string(expected, message);
+            },
+            _ => { test.fail("expected a formatting parse error"); },
+        }
+    };
+);

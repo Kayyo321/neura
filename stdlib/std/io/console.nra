@@ -1,10 +1,12 @@
 let bytes = import:Std.Io.Internal.Bytes;
 let errors = import:Std.Core.Error;
 let failure = import:Std.Core.Failure;
+let formatting = import:Std.Io.Internal.Formatting;
 let host_error = import:Std.Core.Internal.HostError;
 let optional = import:Std.Core.Optional;
 let result = import:Std.Core.Result;
 let unit = import:Std.Core.Unit;
+let variadic = import:Std.Core.Variadic;
 
 // Console input and output (Stdlib.md section 11.1). Output is unbuffered:
 // each write is one host request (repeated only to finish a partial write),
@@ -22,6 +24,25 @@ export let Console = module (
     // Input read ahead of the caller: pending[pending_start] onwards.
     let pending: uint8[list] = [];
     let pending_start: int = 0;
+
+    // Explicit argument arrays support forwarding and runtime-built packs.
+    export let try_vformat = func(pattern: string, args: variadic.Argument[]) -> result.Result<string> {
+        return formatting.try_vformat(pattern, args);
+    };
+
+    export let vformat = func(pattern: string, args: variadic.Argument[]) -> string {
+        return result.expect<string>(try_vformat(pattern, args), "invalid format");
+    };
+
+    export let try_format = func(pattern: string, args: ...) -> result.Result<string> {
+        return try_vformat(pattern, args);
+    };
+
+    export let format = func(pattern: string, args: ...) -> string => vformat(pattern, args);
+
+    export let Formatter = class (
+        export static let format = func(pattern: string, args: ...) -> string => vformat(pattern, args);
+    );
 
     // Writes the text and one LF. A failed write traps with
     // "console write failed".
@@ -43,14 +64,57 @@ export let Console = module (
         };
     };
 
-    // Writes the text to the output stream without a line end. A failed
-    // write traps with "console write failed".
-    export let print = func(s: string) -> void {
-        check_written(try_print(s));
+    // Formatted output to stdout and stderr, with or without a final LF.
+    export let print = func(pattern: string, args: ...) {
+        check_written(try_formatted(pattern, args, try_write));
     };
 
-    export let try_print = func(s: string) -> result.Result<unit.Unit> {
+    export let try_print = func(pattern: string, args: ...) -> result.Result<unit.Unit> {
+        return try_formatted(pattern, args, try_write);
+    };
+
+    export let println = func(pattern: string, args: ...) {
+        check_written(try_formatted(pattern, args, try_print_line));
+    };
+
+    export let try_println = func(pattern: string, args: ...) -> result.Result<unit.Unit> {
+        return try_formatted(pattern, args, try_print_line);
+    };
+
+    export let eprint = func(pattern: string, args: ...) {
+        check_written(try_formatted(pattern, args, try_write_error));
+    };
+
+    export let try_eprint = func(pattern: string, args: ...) -> result.Result<unit.Unit> {
+        return try_formatted(pattern, args, try_write_error);
+    };
+
+    export let eprintln = func(pattern: string, args: ...) {
+        check_written(try_formatted(pattern, args, try_error_line));
+    };
+
+    export let try_eprintln = func(pattern: string, args: ...) -> result.Result<unit.Unit> {
+        return try_formatted(pattern, args, try_error_line);
+    };
+
+    export let write = func(s: string) {
+        check_written(try_write(s));
+    };
+
+    export let try_write = func(s: string) -> result.Result<unit.Unit> {
         return write_all(1, bytes.of_string(s));
+    };
+
+    let try_write_error = func(s: string) -> result.Result<unit.Unit> {
+        return write_all(2, bytes.of_string(s));
+    };
+
+    let try_formatted = func(pattern: string, args: variadic.Argument[], writer: func(string) -> result.Result<unit.Unit>)
+        -> result.Result<unit.Unit> {
+        return match (try_vformat(pattern, args)) {
+            result.Result.Ok(text) => writer(text),
+            result.Result.Err(problem) => result.Result<unit.Unit>.Err(problem),
+        };
     };
 
     // Writes the text and one LF to the error stream. A failed write traps
@@ -183,8 +247,13 @@ export let Console = module (
     let check_written = func(written: result.Result<unit.Unit>) -> void {
         match (written) {
             result.Result.Ok(_) => {},
-            result.Result.Err(_) => {
-                failure.trap("console write failed");
+            result.Result.Err(problem) => {
+                match (problem) {
+                    errors.Error.Parse { kind: _, offset: _, message: _ } => {
+                        failure.trap("invalid format: " + errors.message(problem));
+                    },
+                    _ => { failure.trap("console write failed"); },
+                }
             },
         }
     };
