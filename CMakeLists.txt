@@ -153,7 +153,7 @@ if(BUILD_TESTING)
 
     add_test(NAME backend-stdlib COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
-        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/stdlib-tests"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/backend-stdlib-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/stdlib.cmake"
     )
 
