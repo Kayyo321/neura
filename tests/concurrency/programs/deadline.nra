@@ -1,0 +1,81 @@
+// Deadlines and timers (Concurrency.md sections 6 and 7). They read the run's monotonic clock, so the run needs
+// --allow-clock, and the output never contains a duration: only which operation ended and how.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let cancellation = import:Std.Concurrent.Cancellation;
+let channels = import:Std.Concurrent.Channel;
+let durations = import:Std.Time.Duration;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let timers = import:Std.Concurrent.Timer;
+
+let received = func(r: channels.Received<int>) -> string => match (r) {
+    channels.Received.Value(value) => "value " + value.to_string(),
+    channels.Received.Closed => "closed",
+    channels.Received.Cancelled => "cancelled",
+};
+
+let is_set = func(deadline: optional.Optional<durations.Duration>) -> bool => match (deadline) {
+    optional.Optional.Some(_) => true,
+    optional.Optional.None => false,
+};
+
+let wait_for_a_value = func(incoming: channels.Receiver<int>) -> void {
+    console.print_line("task: deadline set is " + is_set(cancellation.remaining()).to_string());
+    console.print_line("task: receive -> " + received(incoming.receive()));
+    console.print_line("task: cancelled is " + cancellation.requested().to_string());
+};
+
+// A deadline cancels a task parked in a receive, and the scope waits for the task.
+let deadline_wakes_a_receive = func -> void {
+    let [out, incoming, closer] = channels.open<int>(0);
+    scope (request) {
+        match (request.cancel_after(durations.of_millis(5))) {
+            result.Result.Ok(_) => { console.print_line("deadline armed: " + is_set(request.deadline()).to_string()); },
+            result.Result.Err(failure) => { console.print_line("no clock"); },
+        }
+        spawn wait_for_a_value(incoming);
+    }
+    console.print_line("the scope exited");
+};
+
+// A select that gives up on a channel after a time: the timer arm commits when nothing else does.
+let timer_gives_up = func -> void {
+    let [out, incoming, closer] = channels.open<int>(0);
+    match (timers.after(durations.of_millis(3))) {
+        result.Result.Ok(timer) => {
+            select {
+                let message = incoming.receive() => { console.print_line("select: got " + received(message)); },
+                let fired = timer.wait() => { console.print_line("select: timer " + fired.to_string()); },
+            }
+        },
+        result.Result.Err(_) => { console.print_line("no clock"); },
+    }
+};
+
+// A ready arm commits, and the timer that has not fired is left alone.
+let ready_arm_beats_the_timer = func -> void {
+    let [out, incoming, closer] = channels.open<int>(1);
+    out.send(7);
+    match (timers.after(durations.of_hours(1))) {
+        result.Result.Ok(timer) => {
+            select {
+                let fired = timer.wait() => { console.print_line("select: timer " + fired.to_string()); },
+                let message = incoming.receive() => { console.print_line("select: got " + received(message)); },
+            }
+        },
+        result.Result.Err(_) => { console.print_line("no clock"); },
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        console.print_line("== a deadline wakes a parked receive");
+        deadline_wakes_a_receive();
+        console.print_line("== a timer arm gives up on a channel");
+        timer_gives_up();
+        console.print_line("== a ready arm is taken instead of an unfired timer");
+        ready_arm_beats_the_timer();
+        return program.ExitCode.Ok;
+    };
+);

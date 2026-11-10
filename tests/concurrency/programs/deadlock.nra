@@ -1,0 +1,34 @@
+// Deadlock (Concurrency.md section 10.5): when no task is runnable, no timer is armed, and no host request is
+// pending, no event can wake a task. The run ends with a diagnostic, the wait chain, a task dump, and status 134.
+// Here the root waits for a task that waits for a value from a task that waits for the root's channel.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let tasks = import:Std.Concurrent.Task;
+
+let wait_for = func(name: string, incoming: channels.Receiver<int>, reply: channels.Sender<int>) -> int {
+    console.print_line(name + " waits");
+    match (incoming.receive()) {
+        channels.Received.Value(value) => {
+            reply.send(value);
+            return value;
+        },
+        _ => { return -1; },
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let [first_out, first, first_closer] = channels.open<int>(0);
+        let [second_out, second, second_closer] = channels.open<int>(0);
+        console.print_line("before the deadlock");
+        scope {
+            let one = spawn wait_for("one", first, second_out);
+            let two = spawn wait_for("two", second, first_out);
+            console.print_line("root joins one");
+            console.print_line(one.join().to_string());
+        }
+        console.print_line("not reached");
+        return program.ExitCode.Ok;
+    };
+);

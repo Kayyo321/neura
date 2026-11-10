@@ -1,0 +1,180 @@
+let channels = import:Std.Concurrent.Channel;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let task_handles = import:Std.Concurrent.Task;
+
+/// @brief Helpers that run a group of calls as tasks and combine their results (Concurrency.md section 4.2).
+/// Each helper opens its own scope, so it has cancelled and drained every call it started before it returns.
+/// The calls observe cancellation through Std.Concurrent.Cancellation.requested and through their parked channel
+/// operations.
+///
+/// A call is a function value that takes no arguments. Each helper takes the calls as a list, which a literal
+/// writes when the parameter's type is expected and a loop builds for a width known only at run time. A call
+/// must be task-safe and its captures transferable, as for any spawn. Results are returned in lists: the language
+/// cannot build an array whose length is known only at run time, and a function with type parameters cannot be
+/// overloaded for arrays as well.
+/// @see [Std.Concurrent.Tasks](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Tasks)
+export let Tasks = module (
+    /// @brief Runs every call as a task and returns their results in the order of the calls. Waits for all of
+    /// them; nothing is cancelled.
+    export let all = func<T>(calls: (func() -> T)[list]) -> T[list] {
+        scope {
+            let pending: task_handles.Task<T>[list] = [];
+            for (let call: func() -> T in calls) {
+                pending.append(spawn call());
+            }
+            let values: T[list] = [];
+            for (let task: task_handles.Task<T> in pending) {
+                values.append(task.join());
+            }
+            return values;
+        }
+    };
+
+    /// @brief Runs every call as a task. If all return Ok, returns their values in the order of the calls.
+    /// Otherwise returns the first Err in the order the calls completed, after cancelling the calls still
+    /// running and waiting for every one of them to finish. If the calling task is cancelled while it waits, the
+    /// calls are cancelled the same way and the result is an Err with the code tasks.cancelled.
+    export let all_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T[list]> {
+        let erased: (func() -> result.Result<Erased>)[list] = [];
+        for (let call: func() -> result.Result<T> in calls) {
+            erased.append(erase<T>(call));
+        }
+        return match (all_ok_erased(erased)) {
+            result.Result.Ok(cells) => result.Result<T[list]>.Ok(unwrap_all<T>(cells)),
+            result.Result.Err(failure) => result.Result<T[list]>.Err(failure),
+        };
+    };
+
+    /// @brief Runs every call as a task and returns the first Ok in the order the calls completed, after
+    /// cancelling the calls still running and waiting for every one of them to finish. If every call fails,
+    /// returns the Err of the one that completed last. With no calls, or if the calling task is cancelled while
+    /// it waits, the result is an Err with the code tasks.empty or tasks.cancelled.
+    export let first_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T> {
+        let erased: (func() -> result.Result<Erased>)[list] = [];
+        for (let call: func() -> result.Result<T> in calls) {
+            erased.append(erase<T>(call));
+        }
+        return match (first_ok_erased(erased)) {
+            result.Result.Ok(cell) => result.Result<T>.Ok((cell as Cell<T>).value),
+            result.Result.Err(failure) => result.Result<T>.Err(failure),
+        };
+    };
+
+    // What a call's value becomes while it is handled without its type. A scope handle cannot be used inside a
+    // function with type parameters (tests/concurrency/defects/scope-name-in-generic.nra), so the two helpers
+    // that cancel run in functions without them, on values wrapped in a Cell.
+    let Erased = class (
+        export let init = func { };
+    );
+
+    let Cell = class<T>:Erased (
+        export let value: T;
+
+        export let init = func(held: T) {
+            super.init();
+            value = held;
+        };
+    );
+
+    // The call, with its Ok value wrapped in a Cell.
+    let erase = func<T>(call: func() -> result.Result<T>) -> func() -> result.Result<Erased> =>
+        func() -> result.Result<Erased> => match (call()) {
+            result.Result.Ok(value) => result.Result<Erased>.Ok(new Cell<T>(value)),
+            result.Result.Err(failure) => result.Result<Erased>.Err(failure),
+        };
+
+    let unwrap_all = func<T>(cells: Erased[list]) -> T[list] {
+        let values: T[list] = [];
+        for (let cell: Erased in cells) {
+            values.append((cell as Cell<T>).value);
+        }
+        return values;
+    };
+
+    let all_ok_erased = func(calls: (func() -> result.Result<Erased>)[list]) -> result.Result<Erased[list]> {
+        let count = calls.length;
+        let [done, completions, closer] = channels.open<int>(count);
+        scope (group) {
+            let pending: task_handles.Task<result.Result<Erased>>[list] = [];
+            for (let call: func() -> result.Result<Erased> in calls) {
+                pending.append(spawn run_indexed(call, pending.length, done));
+            }
+            let remaining = count;
+            while (remaining > 0) {
+                match (completions.receive()) {
+                    channels.Received.Value(index) => {
+                        remaining -= 1;
+                        match (pending[index].join()) {
+                            result.Result.Err(failure) => {
+                                group.cancel();
+                                return result.Result<Erased[list]>.Err(failure);
+                            },
+                            _ => { },
+                        }
+                    },
+                    _ => {
+                        group.cancel();
+                        return result.Result<Erased[list]>.Err(
+                            error.custom("tasks.cancelled", "cancelled before every call finished"));
+                    },
+                }
+            }
+            let values: Erased[list] = [];
+            for (let task: task_handles.Task<result.Result<Erased>> in pending) {
+                match (task.join()) {
+                    result.Result.Ok(value) => { values.append(value); },
+                    result.Result.Err(failure) => {
+                        return result.Result<Erased[list]>.Err(failure);
+                    },
+                }
+            }
+            return result.Result<Erased[list]>.Ok(values);
+        }
+    };
+
+    let first_ok_erased = func(calls: (func() -> result.Result<Erased>)[list]) -> result.Result<Erased> {
+        let count = calls.length;
+        if (count == 0) {
+            return result.Result<Erased>.Err(error.custom("tasks.empty", "no calls to run"));
+        }
+        let [done, completions, closer] = channels.open<int>(count);
+        scope (group) {
+            let pending: task_handles.Task<result.Result<Erased>>[list] = [];
+            for (let call: func() -> result.Result<Erased> in calls) {
+                pending.append(spawn run_indexed(call, pending.length, done));
+            }
+            let last = error.custom("tasks.cancelled", "cancelled before any call succeeded");
+            let remaining = count;
+            while (remaining > 0) {
+                match (completions.receive()) {
+                    channels.Received.Value(index) => {
+                        remaining -= 1;
+                        match (pending[index].join()) {
+                            result.Result.Ok(value) => {
+                                group.cancel();
+                                return result.Result<Erased>.Ok(value);
+                            },
+                            result.Result.Err(failure) => {
+                                last = failure;
+                            },
+                        }
+                    },
+                    _ => {
+                        group.cancel();
+                        return result.Result<Erased>.Err(last);
+                    },
+                }
+            }
+            return result.Result<Erased>.Err(last);
+        }
+    };
+
+    // Runs a call and then reports its index on the channel, which has room for every call.
+    let run_indexed = func(call: func() -> result.Result<Erased>, index: int, done: channels.Sender<int>)
+            -> result.Result<Erased> {
+        let outcome = call();
+        done.send(index);
+        return outcome;
+    };
+);

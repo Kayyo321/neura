@@ -1,0 +1,91 @@
+// Std.Concurrent.WorkerGroup (Concurrency.md section 9): a bounded queue sheds overload with try_submit, a group
+// drains its queued jobs when it is closed, and cancellation stops its workers with jobs still queued.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let groups = import:Std.Concurrent.WorkerGroup;
+
+let handle = func(job: int) -> void {
+    console.print_line("handled job " + job.to_string());
+};
+
+// Counts jobs the group took and jobs it turned away.
+let Tally = class (
+    export let taken: int = 0;
+    export let shed: int = 0;
+    export let init = func { };
+);
+
+// Overload: ten jobs arrive at once, the queue holds three, and the workers cannot run before the body waits.
+let shed_overload = func -> void {
+    let tally = new Tally();
+    groups.with_workers<int>(2, 3, handle, func(group: groups.WorkerGroup<int>) -> void {
+        for (let job: int = 1; job <= 10; job++) {
+            match (group.try_submit(job)) {
+                groups.TrySubmitOutcome.Submitted => { tally.taken += 1; },
+                groups.TrySubmitOutcome.Full => { tally.shed += 1; },
+                groups.TrySubmitOutcome.Closed => { console.print_line("unexpected: closed"); },
+            }
+        }
+        console.print_line("offered 10 jobs: " + tally.taken.to_string() + " taken, " + tally.shed.to_string() + " shed");
+    });
+    console.print_line("with_workers returned: the queued jobs were drained");
+};
+
+// submit waits for room, and close_and_drain returns only when everything submitted has been handled.
+let drain_on_close = func -> void {
+    groups.with_workers<int>(2, 2, handle, func(group: groups.WorkerGroup<int>) -> void {
+        for (let job: int = 21; job <= 26; job++) {
+            console.print_line("submit " + job.to_string() + " -> " + group.submit(job).to_string());
+        }
+        group.close_and_drain();
+        console.print_line("close_and_drain returned");
+        console.print_line("submit after the close -> " + group.submit(27).to_string());
+        console.print_line("try_submit after the close -> " + group.try_submit(28).to_string());
+    });
+};
+
+// A job that waits at a gate nobody opens, so cancellation finds the worker parked in the job.
+let blocked = func(gate: channels.Receiver<int>) -> func(int) -> void {
+    return func(job: int) -> void {
+        console.print_line("job " + job.to_string() + " starts");
+        gate.receive();
+        console.print_line("job " + job.to_string() + " ends");
+    };
+};
+
+let serve = func(gate: channels.Receiver<int>, started: channels.Sender<int>) -> void {
+    groups.with_workers<int>(1, 4, blocked(gate), func(group: groups.WorkerGroup<int>) -> void {
+        for (let job: int = 31; job <= 34; job++) {
+            group.submit(job);
+        }
+        started.send(0);
+        // The body waits as well, and is woken by the same cancellation.
+        gate.receive();
+        console.print_line("body: woken by the cancellation");
+    });
+    console.print_line("serve: with_workers returned");
+};
+
+let stop_on_cancellation = func -> void {
+    let [gate_out, gate, gate_closer] = channels.open<int>(0);
+    let [started_out, started, started_closer] = channels.open<int>(1);
+    scope (outer) {
+        spawn serve(gate, started_out);
+        started.receive();
+        outer.cancel();
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        console.print_line("== shedding overload");
+        shed_overload();
+        console.print_line("== draining on close");
+        drain_on_close();
+        console.print_line("== stopping on cancellation");
+        stop_on_cancellation();
+        console.print_line("done");
+        return program.ExitCode.Ok;
+    };
+);

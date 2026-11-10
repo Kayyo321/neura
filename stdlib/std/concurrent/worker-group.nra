@@ -1,0 +1,115 @@
+let cancellation = import:Std.Concurrent.Cancellation;
+let channels = import:Std.Concurrent.Channel;
+
+/// @brief A fixed number of workers over a bounded queue of jobs (Concurrency.md section 9). A service bounds
+/// its in-flight work with a group and a queue long before it reaches the run-wide limits of section 10.3.
+/// Because tasks need a scope, a group exists only inside with_workers, which starts the workers, runs the body
+/// that submits the jobs, and drains the queue before it returns.
+/// @see [Std.Concurrent.WorkerGroup](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-WorkerGroup)
+export let WorkerGroup = module (
+    /// @brief What submit reports. Closure and cancellation are expected events, not errors.
+    export let SubmitOutcome = enum (Submitted, Closed, Cancelled);
+
+    /// @brief What try_submit reports.
+    export let TrySubmitOutcome = enum (Submitted, Full, Closed);
+
+    /// @brief The handle through which a body gives a group its jobs. It holds channel ends, so it can be given
+    /// to a task. A job is a value of the transferable type T.
+    export let WorkerGroup = class<T> (
+        let queue: channels.Sender<T>;
+        let closer: channels.Closer<T>;
+        let stopped: channels.Receiver<int>;
+        let workers: int;
+        let drained: bool = false;
+
+        /// @brief Wraps the ends of a group's channels. Use with_workers.
+        export let init = func(jobs: channels.Sender<T>, closing: channels.Closer<T>,
+                stops: channels.Receiver<int>, worker_count: int) {
+            queue = jobs;
+            closer = closing;
+            stopped = stops;
+            workers = worker_count;
+        };
+
+        /// @brief Queues the job. Waits while the queue is full. Reports Closed once close_and_drain has closed
+        /// the queue, and Cancelled when the submitting task is cancelled while it waits; the job is then not
+        /// queued.
+        export let submit = func(job: T) -> SubmitOutcome => match (queue.send(job)) {
+            channels.SendOutcome.Sent => SubmitOutcome.Submitted,
+            channels.SendOutcome.Closed => SubmitOutcome.Closed,
+            channels.SendOutcome.Cancelled => SubmitOutcome.Cancelled,
+        };
+
+        /// @brief Queues the job if there is room. Never waits, so a service that must shed load counts Full.
+        export let try_submit = func(job: T) -> TrySubmitOutcome => match (queue.try_send(job)) {
+            channels.TrySendOutcome.Sent => TrySubmitOutcome.Submitted,
+            channels.TrySendOutcome.Full => TrySubmitOutcome.Full,
+            channels.TrySendOutcome.Closed => TrySubmitOutcome.Closed,
+        };
+
+        /// @brief Closes the queue and returns once every queued job has been processed and every worker has
+        /// stopped. Later submissions report Closed. Call it from one task; on this handle a second call returns
+        /// at once. If the calling task is cancelled while it waits, it returns early and with_workers waits for
+        /// the workers instead.
+        export let close_and_drain = func {
+            closer.close();
+            if (drained) {
+                return;
+            }
+            drained = true;
+            let remaining = workers;
+            while (remaining > 0) {
+                match (stopped.receive()) {
+                    channels.Received.Value(_) => {
+                        remaining -= 1;
+                    },
+                    _ => {
+                        return;
+                    },
+                }
+            }
+        };
+    );
+
+    /// @brief Starts `workers` tasks that take jobs from a queue of `capacity` jobs and run `work` on each; runs
+    /// `body` with the group; then closes the queue, lets the workers finish every queued job, and returns once
+    /// they have stopped. A worker also stops when its scope is cancelled, leaving queued jobs unprocessed; the
+    /// jobs it was running finish first. T must be transferable and `work` task-safe, with transferable
+    /// captures, as for any spawn. Fewer than one worker or a negative capacity traps with `invalid argument:
+    /// workers` or `invalid argument: capacity`.
+    export let with_workers = func<T>(workers: int, capacity: int, work: func(T) -> void,
+            body: func(WorkerGroup<T>) -> void) {
+        if (workers < 1) {
+            trap_with_message("invalid argument: workers");
+        }
+        if (capacity < 0) {
+            trap_with_message("invalid argument: capacity");
+        }
+        let [jobs, next_job, closer] = channels.open<T>(capacity);
+        let [stops, stopped, stops_closer] = channels.open<int>(workers);
+        scope {
+            for (let index: int = 0; index < workers; index++) {
+                spawn run_worker<T>(work, next_job, stops, index);
+            }
+            let group = new WorkerGroup<T>(jobs, closer, stopped, workers);
+            body(group);
+            group.close_and_drain();
+        }
+    };
+
+    // Takes jobs until the queue is closed and empty, or this task is cancelled, then reports that it stopped.
+    let run_worker = func<T>(work: func(T) -> void, next_job: channels.Receiver<T>, stops: channels.Sender<int>, index: int) {
+        let running = true;
+        while (running && !cancellation.requested()) {
+            match (next_job.receive()) {
+                channels.Received.Value(job) => {
+                    work(job);
+                },
+                _ => {
+                    running = false;
+                },
+            }
+        }
+        stops.send(index);
+    };
+);

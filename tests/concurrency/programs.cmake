@@ -44,7 +44,9 @@ endfunction()
 
 # name, expected status, and a pattern the standard error of a run must match
 # (empty: standard error must be empty). Extra arguments are run options.
-set(fixtures fan-out values detached child-trap child-exit task-limit)
+set(fixtures fan-out values detached child-trap child-exit task-limit
+    channel-order backpressure select-rotation cancellation tasks-helpers worker-group
+    collect-parked queued-limit deadlock deadline spawn-sites)
 set(status_fan-out 0)
 set(status_values 0)
 set(status_detached 0)
@@ -52,6 +54,15 @@ set(status_child-trap 136)
 set(stderr_child-trap "child-trap.nvr: trap: source arithmetic failure \\(trap reason 1\\): \\(task 2 spawned at child-trap.nra:10:21 by task 1 spawned at child-trap.nra:18:24 by task 0\\) in function [0-9]+ block [0-9]+ at child-trap.nra:6:50\n$")
 set(status_child-exit 7)
 set(status_task-limit 0)
+foreach(phase2 IN ITEMS channel-order backpressure select-rotation cancellation tasks-helpers worker-group
+        collect-parked queued-limit deadline spawn-sites)
+    set(status_${phase2} 0)
+endforeach()
+# A deadlock ends the run with status 134 (Abort), the diagnostic, the wait chain, and a task dump (10.5).
+set(status_deadlock 134)
+set(stderr_deadlock "^[^\n]*deadlock.nvr: trap: deadlock: all tasks are parked\nwait chain: task 0 \\(parked: join of task 1\\) -> task 1 \\(parked: receive on channel 1 \\(0 of 0 queued, 0 senders waiting\\)\\)\ntask 0  root  parked: join of task 1\n")
+# Timers and deadlines read the monotonic clock; the output never contains a duration.
+set(options_deadline --allow-clock)
 
 file(GLOB found "${programs}/*.nra")
 list(LENGTH found found_count)
@@ -74,7 +85,7 @@ foreach(name IN LISTS fixtures)
     same_bytes("${name}: repeated build" "${name}.nvr" "${name}.again.nvr")
 
     # The recorded output, at the default quantum.
-    neura(run run "${name}.nvr")
+    neura(run run ${options_${name}} "${name}.nvr")
     if(NOT run_status STREQUAL "${status_${name}}" OR NOT run_stdout STREQUAL "${expected}")
         message(FATAL_ERROR "${name}: expected status ${status_${name}} and the recorded output, got ${run_status}\n${run_stdout}\n${run_stderr}")
     endif()
@@ -91,9 +102,9 @@ foreach(name IN LISTS fixtures)
     # included.
     set(distinct "")
     foreach(quantum IN LISTS quanta)
-        neura(optimized run --stats --task-quantum ${quantum} "${name}.nvr")
-        neura(repeated run --stats --task-quantum ${quantum} "${name}.nvr")
-        neura(unoptimized run --task-quantum ${quantum} "${name}.unoptimized.nvr")
+        neura(optimized run --stats ${options_${name}} --task-quantum ${quantum} "${name}.nvr")
+        neura(repeated run --stats ${options_${name}} --task-quantum ${quantum} "${name}.nvr")
+        neura(unoptimized run ${options_${name}} --task-quantum ${quantum} "${name}.unoptimized.nvr")
         if(NOT optimized_status STREQUAL "${status_${name}}")
             message(FATAL_ERROR "${name}, quantum ${quantum}: status ${optimized_status}\n${optimized_stderr}")
         endif()
@@ -166,6 +177,169 @@ endif()
 neura(bounded run --stats --max-heap-cells 60000 detached.nvr)
 if(NOT bounded_status STREQUAL "0" OR NOT bounded_stderr MATCHES "peak tasks 1025, peak queued messages 0, peak pending requests 0\n")
     message(FATAL_ERROR "detached: expected the tasks of one quantum to be live at most\n${bounded_stderr}")
+endif()
+
+# ---------------------------------------------------------------------------
+# Phase 2 and 3 evidence beyond the shared matrix above.
+
+# A full buffer parks its senders: the buffer never held more than its capacity (2), though three producers
+# and a slow consumer ran. The fixture's own output shows the producers waiting.
+neura(pressure run --stats backpressure.nvr)
+if(NOT pressure_status STREQUAL "0" OR NOT pressure_stderr MATCHES "peak queued messages 2,")
+    message(FATAL_ERROR "backpressure: the buffer was not bounded by its capacity\n${pressure_stderr}")
+endif()
+file(READ "${programs}/backpressure.expected" pressure_expected)
+string(REGEX MATCH "slow consumer: ([0-9]+) of 18 sends waited" slow_line "${pressure_expected}")
+set(slow_waits "${CMAKE_MATCH_1}")
+string(REGEX MATCH "fast consumer: ([0-9]+) of 18 sends waited" fast_line "${pressure_expected}")
+set(fast_waits "${CMAKE_MATCH_1}")
+if(slow_line STREQUAL "" OR fast_line STREQUAL "" OR NOT slow_waits GREATER fast_waits OR NOT fast_waits GREATER 0)
+    message(FATAL_ERROR "backpressure: a slow consumer should make more sends wait (${slow_waits}) than a fast one (${fast_waits})")
+endif()
+
+# Collection with parked tasks and buffered messages. 120 parked senders cost about 8,000 live cells, so the
+# limit leaves little room: only a collector that keeps parked frames, held values, and buffered messages as roots
+# and reclaims the garbage can finish. The unlimited run's peak is larger, and the output is the same.
+neura(unlimited run --stats collect-parked.nvr)
+neura(limited run --stats --max-heap-cells 9500 collect-parked.nvr)
+file(READ "${programs}/collect-parked.expected" collect_expected)
+if(NOT unlimited_status STREQUAL "0" OR NOT limited_status STREQUAL "0" OR
+   NOT unlimited_stdout STREQUAL "${collect_expected}" OR NOT limited_stdout STREQUAL "${collect_expected}")
+    message(FATAL_ERROR "collect-parked: expected the same complete output with and without a heap limit\n"
+                        "${unlimited_stderr}\n${limited_stdout}\n${limited_stderr}")
+endif()
+string(REGEX MATCH "peak heap cells ([0-9]+)," unlimited_peak_text "${unlimited_stderr}")
+set(unlimited_peak "${CMAKE_MATCH_1}")
+string(REGEX MATCH "peak heap cells ([0-9]+)," limited_peak_text "${limited_stderr}")
+set(limited_peak "${CMAKE_MATCH_1}")
+if(unlimited_peak STREQUAL "" OR limited_peak STREQUAL "" OR NOT limited_peak LESS_EQUAL 9500 OR
+   NOT unlimited_peak GREATER 9500)
+    message(FATAL_ERROR "collect-parked: expected a peak of at most 9500 cells under the limit and more without it, "
+                        "got ${limited_peak} and ${unlimited_peak}")
+endif()
+if(NOT limited_stderr MATCHES "peak tasks 121,")
+    message(FATAL_ERROR "collect-parked: the senders were not all parked at once\n${limited_stderr}")
+endif()
+# A limit below the live data still traps, at the allocation that does not fit.
+neura(starved run --max-heap-cells 5000 collect-parked.nvr)
+if(starved_status STREQUAL "0" OR NOT starved_stderr MATCHES "trap: heap limit exceeded")
+    message(FATAL_ERROR "collect-parked: a heap limit below the live data did not trap\n${starved_stderr}")
+endif()
+
+# --max-queued-messages: the ninth buffered value traps with status 137 at the send that would exceed the limit,
+# naming the task that sent it; a limit equal to the peak (12) lets the run finish.
+neura(queued run --max-queued-messages 8 queued-limit.nvr)
+if(NOT queued_status STREQUAL "137" OR
+   NOT queued_stdout MATCHES "second channel holds 2, 8 buffered in all\n$" OR queued_stdout MATCHES "second channel holds 3" OR
+   NOT queued_stderr MATCHES "trap: queued message limit exceeded: buffering another message \\(task 1 spawned at queued-limit.nra:25:13 by task 0\\)")
+    message(FATAL_ERROR "queued-limit: expected status 137 after eight buffered values\n${queued_status}\n${queued_stdout}\n${queued_stderr}")
+endif()
+neura(queued_enough run --max-queued-messages 12 queued-limit.nvr)
+file(READ "${programs}/queued-limit.expected" queued_expected)
+if(NOT queued_enough_status STREQUAL "0" OR NOT queued_enough_stdout STREQUAL "${queued_expected}")
+    message(FATAL_ERROR "queued-limit: a limit equal to the peak should not trap\n${queued_enough_stderr}")
+endif()
+
+# Deadlock: the message, the wait chain, and the dump of every task, at status 134 (Abort).
+neura(deadlocked run deadlock.nvr)
+foreach(line IN ITEMS
+        "trap: deadlock: all tasks are parked\n"
+        "wait chain: task 0 \\(parked: join of task 1\\) -> task 1 \\(parked: receive on channel 1 "
+        "\n  task 1  spawned at deadlock.nra:26:23  parked: receive on channel 1 \\(0 of 0 queued, 0 senders waiting\\)\n"
+        "\n  task 2  spawned at deadlock.nra:27:23  parked: receive on channel 2 \\(0 of 0 queued, 0 senders waiting\\)\n"
+        "\n      wait_for at deadlock.nra:11:12\n")
+    if(NOT deadlocked_stderr MATCHES "${line}")
+        message(FATAL_ERROR "deadlock: the diagnostic lacks '${line}'\n${deadlocked_stderr}")
+    endif()
+endforeach()
+if(NOT deadlocked_status STREQUAL "134" OR NOT deadlocked_stdout STREQUAL "before the deadlock\nroot joins one\none waits\ntwo waits\n")
+    message(FATAL_ERROR "deadlock: expected status 134 and the output printed before it\n${deadlocked_status}\n${deadlocked_stdout}")
+endif()
+
+# Trace events (14.2): one JSON line per scheduler event. The counts follow from the program: spawn-sites spawns
+# eight tasks (five at one site, one each at three others), each starts once and finishes once, and the seven values
+# sent are the seven received. Two runs give identical files, and --trace-wall-time adds the only field that
+# differs.
+neura(first_trace run --trace-events trace-a.jsonl spawn-sites.nvr)
+neura(second_trace run --trace-events trace-b.jsonl spawn-sites.nvr)
+same_bytes("trace events of two runs" trace-a.jsonl trace-b.jsonl)
+file(READ "${TEST_DIR}/trace-a.jsonl" trace)
+string(REGEX MATCHALL "[^\n]+" trace_lines "${trace}")
+foreach(event IN ITEMS spawn start finish send receive park wake)
+    set(count_${event} 0)
+endforeach()
+set(spawned "")
+set(started "")
+set(finished "")
+set(sites "")
+foreach(line IN LISTS trace_lines)
+    string(JSON event ERROR_VARIABLE invalid GET "${line}" event)
+    if(NOT invalid STREQUAL "NOTFOUND")
+        message(FATAL_ERROR "trace events: not a JSON line with an event: ${line}\n${invalid}")
+    endif()
+    string(JSON tick GET "${line}" tick)
+    string(JSON task GET "${line}" task)
+    if(NOT DEFINED count_${event})
+        set(count_${event} 0)
+    endif()
+    math(EXPR count_${event} "${count_${event}} + 1" OUTPUT_FORMAT DECIMAL)
+    if(event STREQUAL "spawn")
+        string(JSON child GET "${line}" child)
+        string(JSON site GET "${line}" at)
+        list(APPEND spawned "${child}")
+        list(APPEND sites "${site}")
+    elseif(event STREQUAL "start" AND NOT task STREQUAL "0")
+        list(APPEND started "${task}")
+    elseif(event STREQUAL "finish")
+        list(APPEND finished "${task}")
+    endif()
+endforeach()
+set(expected_spawn 8)
+set(expected_finish 8)
+set(expected_send 7)
+set(expected_receive 7)
+foreach(event IN ITEMS spawn finish send receive)
+    if(NOT count_${event} EQUAL expected_${event})
+        message(FATAL_ERROR "trace events: expected ${expected_${event}} '${event}' events, got ${count_${event}}")
+    endif()
+endforeach()
+foreach(list_name IN ITEMS spawned started finished)
+    list(SORT ${list_name} COMPARE NATURAL)
+    if(NOT "${${list_name}}" STREQUAL "1;2;3;4;5;6;7;8")
+        message(FATAL_ERROR "trace events: tasks ${list_name}: ${${list_name}}; expected each of 1 to 8 once")
+    endif()
+endforeach()
+foreach(site_count IN ITEMS "spawn-sites.nra:27:17=5" "spawn-sites.nra:29:24=1" "spawn-sites.nra:14:9=1" "spawn-sites.nra:15:9=1")
+    string(REPLACE "=" ";" site_and_count "${site_count}")
+    list(GET site_and_count 0 site_name)
+    list(GET site_and_count 1 site_expected)
+    set(matching "${sites}")
+    list(FILTER matching INCLUDE REGEX "^${site_name}$")
+    list(LENGTH matching site_found)
+    if(NOT site_found EQUAL site_expected)
+        message(FATAL_ERROR "trace events: ${site_name} spawned ${site_found} tasks, expected ${site_expected}")
+    endif()
+endforeach()
+neura(timed_trace run --trace-events trace-wall.jsonl --trace-wall-time spawn-sites.nvr)
+file(READ "${TEST_DIR}/trace-wall.jsonl" wall_trace)
+string(REGEX REPLACE ",\"wall_ns\":[0-9]+" "" without_wall "${wall_trace}")
+if(NOT wall_trace MATCHES "\"wall_ns\":[0-9]+" OR NOT without_wall STREQUAL "${trace}")
+    message(FATAL_ERROR "trace events: --trace-wall-time should add wall_ns and nothing else")
+endif()
+
+# The profile lists each spawn site once with its task count.
+neura(profiled run --profile spawn-sites.nvr)
+foreach(site IN ITEMS "27:17  tasks 5 " "14:9  tasks 1 " "15:9  tasks 1 " "29:24  tasks 1 ")
+    string(REGEX MATCHALL "\n  spawn-sites.nra:${site}" found_sites "${profiled_stderr}")
+    list(LENGTH found_sites site_count)
+    if(NOT site_count EQUAL 1)
+        message(FATAL_ERROR "profile: expected the spawn site ${site} once, found ${site_count}\n${profiled_stderr}")
+    endif()
+endforeach()
+string(REGEX MATCHALL "\n  spawn-sites.nra:[0-9:]+  tasks" all_sites "${profiled_stderr}")
+list(LENGTH all_sites all_site_count)
+if(NOT all_site_count EQUAL 4 OR NOT profiled_stderr MATCHES "\n  root  tasks 1 ")
+    message(FATAL_ERROR "profile: expected the root and four spawn sites\n${profiled_stderr}")
 endif()
 
 # Limits and their statuses.

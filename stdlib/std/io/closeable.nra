@@ -1,3 +1,4 @@
+let error = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 
@@ -12,4 +13,21 @@ export let Closeable = module (
         /// @brief Releases the resource. The resource is closed even if the first call returns an error.
         let close = func -> Result<Unit>;
     );
+
+    /// @brief Closes the resource and combines that with the outcome of the work that used it. This is the
+    /// closing rule of the scoped helpers such as File.with_open (Concurrency.md section 7): when the close
+    /// succeeds the outcome is returned unchanged; when it fails after an Ok, the close error is returned; when
+    /// it fails after an Err, the result is a Context error whose cause is the outcome's error and whose
+    /// message carries the close error's message. Call it exactly once, after the work, on every ordinary
+    /// completion.
+    export let release = func<T>(resource: Closeable, outcome: Result<T>) -> Result<T> {
+        return match (resource.close()) {
+            Result.Ok(_) => outcome,
+            Result.Err(closing) => match (outcome) {
+                Result.Ok(_) => Result<T>.Err(closing),
+                Result.Err(failure) => Result<T>.Err(error.Error.Context {
+                    message: "closing the resource also failed: " + error.message(closing), cause: failure }),
+            },
+        };
+    };
 );

@@ -1,0 +1,18 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: workers
+let console = import:Std.Io.Console;
+let groups = import:Std.Concurrent.WorkerGroup;
+let program = import:Std.Program;
+
+let work = func(job: int) -> void { };
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        groups.with_workers<int>(0, 2, work, func(group: groups.WorkerGroup<int>) -> void {
+            console.print_line("body");
+        });
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

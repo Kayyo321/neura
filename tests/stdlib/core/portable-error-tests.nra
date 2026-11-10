@@ -1,0 +1,161 @@
+let channels = import:Std.Concurrent.Channel;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// PortableError, the transferable copy of Error (Stdlib.md section 6.3, Concurrency.md section 5.1).
+let PortableErrorTests = module (
+    let Declined = class:error.ErrorDetail (
+        export let amount: int;
+        export let init = func(value: int) -> void {
+            super.init();
+            amount = value;
+        };
+        export let.override code = func() -> string {
+            return "billing.card_declined";
+        };
+        export let.override message = func() -> string {
+            return "card declined for " + amount.to_string();
+        };
+    );
+
+    // One error of every variant; the last is a Context nested two deep over a Custom.
+    let samples = func -> error.Error[list] {
+        let all: error.Error[list] = [];
+        all.append(error.Error.Io { kind: error.IoErrorKind.NotFound, message: "no file", path: "a.txt" });
+        all.append(error.Error.Io { kind: error.IoErrorKind.Closed, message: "stream closed", path: "" });
+        all.append(error.Error.Parse { kind: error.ParseErrorKind.OutOfRange, offset: 7, message: "too big" });
+        all.append(error.Error.Encoding { offset: 3, message: "bad byte" });
+        all.append(error.custom("app.code", "plain custom"));
+        all.append(error.Error.Custom(new Declined(5)));
+        all.append(error.context(error.context(error.custom("x.root", "root"), "middle"), "outer"));
+        return all;
+    };
+
+    // Every variant of Error and of PortableError reaches the round trip through to_portable.
+    export let test_round_trip_keeps_the_message_of_every_variant = func() -> void {
+        let all = samples();
+        for (let original: error.Error in all) {
+            let back = error.from_portable(error.to_portable(original));
+            test.assert_equal_string(error.message(original), error.message(back));
+        }
+        test.assert_equal_int32(7, all.length);
+    };
+
+    export let test_non_custom_variants_come_back_equal = func() -> void {
+        let io = error.Error.Io { kind: error.IoErrorKind.NotFound, message: "no file", path: "a.txt" };
+        test.assert(error.equals(io, error.from_portable(error.to_portable(io))));
+        let parse = error.Error.Parse { kind: error.ParseErrorKind.OutOfRange, offset: 7, message: "too big" };
+        test.assert(error.equals(parse, error.from_portable(error.to_portable(parse))));
+        let encoding = error.Error.Encoding { offset: 3, message: "bad byte" };
+        test.assert(error.equals(encoding, error.from_portable(error.to_portable(encoding))));
+    };
+
+    export let test_custom_comes_back_as_a_simple_detail = func() -> void {
+        match (error.from_portable(error.to_portable(error.Error.Custom(new Declined(5))))) {
+            error.Error.Custom(detail) => {
+                test.assert(detail is error.SimpleDetail);
+                test.assert(!(detail is Declined));
+                test.assert_equal_string("billing.card_declined", detail.code());
+                test.assert_equal_string("card declined for 5", detail.message());
+            },
+            _ => { test.fail("expected Custom"); },
+        }
+        // The flattened form carries exactly the code and the message.
+        match (error.to_portable(error.Error.Custom(new Declined(5)))) {
+            error.PortableError.Custom { code, message } => {
+                test.assert_equal_string("billing.card_declined", code);
+                test.assert_equal_string("card declined for 5", message);
+            },
+            _ => { test.fail("expected a flattened Custom"); },
+        }
+    };
+
+    export let test_nested_context_keeps_every_link = func() -> void {
+        let original = error.context(error.context(error.Error.Custom(new Declined(9)), "middle"), "outer");
+        let portable = error.to_portable(original);
+        match (portable) {
+            error.PortableError.Context { message, cause } => {
+                test.assert_equal_string("outer", message);
+                match (cause) {
+                    error.PortableError.Context { message: inner, cause: root } => {
+                        test.assert_equal_string("middle", inner);
+                        match (root) {
+                            error.PortableError.Custom { code, message: text } => {
+                                test.assert_equal_string("billing.card_declined", code);
+                                test.assert_equal_string("card declined for 9", text);
+                            },
+                            _ => { test.fail("expected Custom at the root"); },
+                        }
+                    },
+                    _ => { test.fail("expected a second Context"); },
+                }
+            },
+            _ => { test.fail("expected Context"); },
+        }
+        let back = error.from_portable(portable);
+        test.assert_equal_string("outer: middle: card declined for 9", error.message(back));
+        let links = error.chain(back);
+        test.assert_equal_int32(3, links.length);
+        test.assert_equal_string("card declined for 9", error.message(error.root_cause(back)));
+    };
+
+    let send_errors = func(out: channels.Sender<error.PortableError>, closer: channels.Closer<error.PortableError>) -> int {
+        let sent = 0;
+        for (let original: error.Error in samples()) {
+            match (out.send(error.to_portable(original))) {
+                channels.SendOutcome.Sent => { sent += 1; },
+                _ => { test.fail("a send did not commit"); },
+            }
+        }
+        closer.close();
+        return sent;
+    };
+
+    // A PortableError really crosses a channel between two tasks: the producer sends one of every variant (capacity
+    // 2, so it parks and the tasks interleave) and the consumer rebuilds the errors and compares messages.
+    export let test_portable_errors_cross_a_channel_between_two_tasks = func() -> void {
+        let [out, incoming, closer] = channels.open<error.PortableError>(2);
+        let received: error.Error[list] = [];
+        let produced = 0;
+        scope {
+            let producer = spawn send_errors(out, closer);
+            let running = true;
+            while (running) {
+                match (incoming.receive()) {
+                    channels.Received.Value(portable) => { received.append(error.from_portable(portable)); },
+                    _ => { running = false; },
+                }
+            }
+            produced = producer.join();
+        }
+        let expected = samples();
+        test.assert_equal_int32(7, produced);
+        test.assert_equal_int32(7, received.length);
+        for (let i: int = 0; i < expected.length; i++) {
+            test.assert_equal_string(error.message(expected[i]), error.message(received[i]));
+        }
+    };
+
+    // A Result<PortableError-flattened> failure sent by a worker and rebuilt by the receiver.
+    export let test_a_failed_result_can_be_reported_through_a_channel = func() -> void {
+        let [out, incoming, closer] = channels.open<error.PortableError>(1);
+        let outcome: result.Result<int> = result.Result<int>.Ok(0);
+        scope {
+            spawn report_failure(out);
+            match (incoming.receive()) {
+                channels.Received.Value(portable) => {
+                    outcome = result.Result<int>.Err(error.from_portable(portable));
+                },
+                _ => { test.fail("no failure arrived"); },
+            }
+        }
+        let failure = test.assert_err<int>(outcome);
+        test.assert_equal_string("worker: card declined for 12", error.message(failure));
+    };
+
+    let report_failure = func(out: channels.Sender<error.PortableError>) -> void {
+        let failed = error.context(error.Error.Custom(new Declined(12)), "worker");
+        out.send(error.to_portable(failed));
+    };
+);

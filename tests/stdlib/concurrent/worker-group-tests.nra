@@ -1,0 +1,235 @@
+let cancellation = import:Std.Concurrent.Cancellation;
+let channels = import:Std.Concurrent.Channel;
+let groups = import:Std.Concurrent.WorkerGroup;
+let test = import:Std.Test;
+
+// Std.Concurrent.WorkerGroup: every job runs once, submit parks on a full queue, try_submit sheds load,
+// close_and_drain finishes the queue, and cancellation stops the workers with jobs left unprocessed.
+let WorkerGroupTests = module (
+    // A counter a body can update, since a body cannot reassign a binding it captures.
+    let Tally = class (
+        export let count: int = 0;
+        export let init = func { };
+        export let bump = func { count += 1; };
+    );
+
+    let drain = func(source: channels.Receiver<int>) -> int[list] {
+        let seen: int[list] = [];
+        let more = true;
+        while (more) {
+            match (source.try_receive()) {
+                channels.TryReceived.Value(value) => { seen.append(value); },
+                _ => { more = false; },
+            }
+        }
+        return seen;
+    };
+
+    let sum = func(values: int[list]) -> int {
+        let total = 0;
+        for (let value: int in values) {
+            total += value;
+        }
+        return total;
+    };
+
+    // A worker function that records each job it runs.
+    let recording = func(processed: channels.Sender<int>) -> func(int) -> void {
+        return func(job: int) -> void {
+            processed.send(job);
+        };
+    };
+
+    export let test_every_job_runs_exactly_once = func() -> void {
+        let [processed, results, closer] = channels.open<int>(64);
+        groups.with_workers<int>(3, 4, recording(processed), func(group: groups.WorkerGroup<int>) -> void {
+            for (let job: int = 1; job <= 20; job++) {
+                test.assert(group.submit(job) == groups.SubmitOutcome.Submitted);
+            }
+        });
+        // with_workers returned, so the workers have stopped and all 20 results are there.
+        let seen = drain(results);
+        test.assert_equal_int32(20, seen.length);
+        test.assert_equal_int32(210, sum(seen));
+        let counts: int[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        for (let job: int in seen) {
+            counts[job] += 1;
+        }
+        for (let job: int = 1; job <= 20; job++) {
+            test.assert_equal_int32(1, counts[job]);
+        }
+    };
+
+    export let test_close_and_drain_finishes_every_queued_job = func() -> void {
+        let [processed, results, closer] = channels.open<int>(64);
+        let after_drain = new Tally();
+        groups.with_workers<int>(2, 8, recording(processed), func(group: groups.WorkerGroup<int>) -> void {
+            for (let job: int = 1; job <= 8; job++) {
+                group.submit(job);
+            }
+            // Nothing has run yet: the workers start when this task next waits.
+            test.assert_equal_int32(0, drain(results).length);
+            group.close_and_drain();
+            after_drain.count = drain(results).length;
+        });
+        test.assert_equal_int32(8, after_drain.count);
+    };
+
+    export let test_submissions_after_the_close_report_closed = func() -> void {
+        let [processed, results, closer] = channels.open<int>(8);
+        groups.with_workers<int>(1, 2, recording(processed), func(group: groups.WorkerGroup<int>) -> void {
+            group.submit(1);
+            group.close_and_drain();
+            test.assert(group.submit(2) == groups.SubmitOutcome.Closed);
+            test.assert(group.try_submit(3) == groups.TrySubmitOutcome.Closed);
+            // A second close does nothing.
+            group.close_and_drain();
+        });
+        let seen = drain(results);
+        test.assert_equal_int32(1, seen.length);
+        test.assert_equal_int32(1, seen[0]);
+    };
+
+    // The queue holds two jobs and the workers have not run yet, so the third and later jobs are shed.
+    export let test_try_submit_reports_full_and_never_waits = func() -> void {
+        let [processed, results, closer] = channels.open<int>(64);
+        let accepted = new Tally();
+        let shed = new Tally();
+        groups.with_workers<int>(2, 2, recording(processed), func(group: groups.WorkerGroup<int>) -> void {
+            for (let job: int = 1; job <= 6; job++) {
+                match (group.try_submit(job)) {
+                    groups.TrySubmitOutcome.Submitted => { accepted.bump(); },
+                    groups.TrySubmitOutcome.Full => { shed.bump(); },
+                    groups.TrySubmitOutcome.Closed => { test.fail("the queue is open"); },
+                }
+            }
+        });
+        test.assert_equal_int32(2, accepted.count);
+        test.assert_equal_int32(4, shed.count);
+        let seen = drain(results);
+        test.assert_equal_int32(2, seen.length);
+        test.assert_equal_int32(3, sum(seen));
+    };
+
+    let submit_from_a_task = func(group: groups.WorkerGroup<int>, job: int) -> groups.SubmitOutcome => group.submit(job);
+
+    // The group is a transferable handle: tasks other than the body's can submit through it.
+    export let test_the_group_can_be_given_to_tasks = func() -> void {
+        let [processed, results, closer] = channels.open<int>(8);
+        let outcomes = new Tally();
+        groups.with_workers<int>(2, 4, recording(processed), func(group: groups.WorkerGroup<int>) -> void {
+            scope {
+                let first = spawn submit_from_a_task(group, 1);
+                let second = spawn submit_from_a_task(group, 2);
+                if (first.join() == groups.SubmitOutcome.Submitted) {
+                    outcomes.bump();
+                }
+                if (second.join() == groups.SubmitOutcome.Submitted) {
+                    outcomes.bump();
+                }
+            }
+        });
+        test.assert_equal_int32(2, outcomes.count);
+        test.assert_equal_int32(3, sum(drain(results)));
+    };
+
+    // A worker that blocks until the gate gives it a value: with one worker, the jobs queue up behind the first.
+    let gated = func(gate: channels.Receiver<int>, processed: channels.Sender<int>) -> func(int) -> void {
+        return func(job: int) -> void {
+            gate.receive();
+            processed.send(job);
+        };
+    };
+
+    // submit waits while the queue is full and goes on when a worker takes a job.
+    export let test_submit_waits_while_the_queue_is_full = func() -> void {
+        let [open_gate, gate, gate_closer] = channels.open<int>(8);
+        let [processed, results, closer] = channels.open<int>(64);
+        let submitted_after_wait = new Tally();
+        groups.with_workers<int>(1, 1, gated(gate, processed), func(group: groups.WorkerGroup<int>) -> void {
+            // The queue holds one job. Submitting job 1 fills it; job 2 waits until the worker, which starts when
+            // this task waits, takes job 1 and blocks at the gate. Job 2 then fills the queue again.
+            group.submit(1);
+            group.submit(2);
+            test.assert_equal_int32(0, drain(results).length);
+            open_gate.send(0);
+            open_gate.send(0);
+            open_gate.send(0);
+            // The queue is full, so job 3 has to wait for the worker to take job 2.
+            test.assert(group.try_submit(99) == groups.TrySubmitOutcome.Full);
+            test.assert(group.submit(3) == groups.SubmitOutcome.Submitted);
+            submitted_after_wait.bump();
+        });
+        test.assert_equal_int32(1, submitted_after_wait.count);
+        let seen = drain(results);
+        test.assert_equal_int32(3, seen.length);
+        test.assert_equal_int32(1, seen[0]);
+        test.assert_equal_int32(2, seen[1]);
+        test.assert_equal_int32(3, seen[2]);
+    };
+
+    // The service fixture of the specification in miniature: overload is shed by the full queue, accepted jobs are
+    // drained on shutdown.
+    export let test_a_busy_group_sheds_load_and_drains_the_rest = func() -> void {
+        let [open_gate, gate, gate_closer] = channels.open<int>(64);
+        let [processed, results, closer] = channels.open<int>(64);
+        let accepted = new Tally();
+        let shed = new Tally();
+        groups.with_workers<int>(2, 3, gated(gate, processed), func(group: groups.WorkerGroup<int>) -> void {
+            for (let job: int = 1; job <= 10; job++) {
+                match (group.try_submit(job)) {
+                    groups.TrySubmitOutcome.Submitted => { accepted.bump(); },
+                    _ => { shed.bump(); },
+                }
+            }
+            for (let permit: int = 0; permit < 10; permit++) {
+                open_gate.send(permit);
+            }
+        });
+        test.assert_equal_int32(3, accepted.count);
+        test.assert_equal_int32(7, shed.count);
+        test.assert_equal_int32(3, drain(results).length);
+    };
+
+    // A worker running job 1 is parked at a gate that nobody opens. Cancelling the scope wakes it, it finishes the
+    // job it was on and stops, and the three jobs still queued are not run.
+    let run_cancelled_group = func(gate: channels.Receiver<int>, processed: channels.Sender<int>,
+            started: channels.Sender<int>) -> int {
+        let announce_and_wait = func(job: int) -> void {
+            started.send(job);
+            gate.receive();
+            processed.send(job);
+        };
+        let queued = new Tally();
+        groups.with_workers<int>(1, 4, announce_and_wait, func(group: groups.WorkerGroup<int>) -> void {
+            for (let job: int = 1; job <= 4; job++) {
+                if (group.submit(job) == groups.SubmitOutcome.Submitted) {
+                    queued.bump();
+                }
+            }
+            // Parks until cancelled: nothing ever arrives on the gate, and the worker holds its one receiver.
+            gate.receive();
+        });
+        return queued.count;
+    };
+
+    export let test_cancellation_stops_the_workers_and_leaves_queued_jobs = func() -> void {
+        let [open_gate, gate, gate_closer] = channels.open<int>(0);
+        let [processed, results, closer] = channels.open<int>(64);
+        let [started, began, began_closer] = channels.open<int>(64);
+        let queued = 0;
+        scope (outer) {
+            let service = spawn run_cancelled_group(gate, processed, started);
+            // Job 1 has begun, so the worker is parked at the gate.
+            began.receive();
+            outer.cancel();
+            queued = service.join();
+        }
+        test.assert_equal_int32(4, queued);
+        // The worker was woken (Cancelled) while holding job 1 and finished it; jobs 2 to 4 never started.
+        let ran = drain(results);
+        test.assert_equal_int32(1, ran.length);
+        test.assert_equal_int32(1, ran[0]);
+        test.assert_equal_int32(0, drain(began).length);
+    };
+);

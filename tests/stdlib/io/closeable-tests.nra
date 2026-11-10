@@ -1,0 +1,63 @@
+let closeable = import:Std.Io.Closeable;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Std.Io.Closeable.release is the closing rule of the scoped helpers such as File.with_open (Concurrency.md
+// section 7, "Resources"): a close that succeeds leaves the outcome alone, a close that fails after Ok is the
+// result, and a close that fails after Err reports both. The resource below fails its close on request.
+let CloseableTests = module (
+    // A resource that counts its closes and reports an error from each when it was built to.
+    let Resource = class implements closeable.Closeable (
+        let fails: bool;
+        export let closes: int = 0;
+        export let init = func(failing: bool) { fails = failing; };
+        export let close = func -> result.Result<unit.Unit> {
+            closes = closes + 1;
+            if (fails) {
+                return result.Result<unit.Unit>.Err(error.custom("test.close", "the close failed"));
+            }
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        };
+    );
+
+    let body_failure = func -> error.Error => error.custom("test.body", "the body failed");
+
+    let code_of = func(failure: error.Error) -> string => match (failure) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "not custom",
+    };
+
+    export let test_release_with_a_good_close_returns_the_outcome = func() -> void {
+        let first = new Resource(false);
+        test.assert_equal_int32(5, test.assert_ok<int>(closeable.release<int>(first, result.Result<int>.Ok(5))));
+        test.assert_equal_int32(1, first.closes);
+        let second = new Resource(false);
+        let failure = test.assert_err<int>(closeable.release<int>(second, result.Result<int>.Err(body_failure())));
+        test.assert_equal_string("test.body", code_of(failure));
+        test.assert_equal_int32(1, second.closes);
+    };
+
+    export let test_release_with_a_failed_close_after_ok_returns_the_close_error = func() -> void {
+        let resource = new Resource(true);
+        let failure = test.assert_err<int>(closeable.release<int>(resource, result.Result<int>.Ok(5)));
+        test.assert_equal_string("test.close", code_of(failure));
+        test.assert_equal_int32(1, resource.closes);
+    };
+
+    export let test_release_with_both_failing_reports_both = func() -> void {
+        let resource = new Resource(true);
+        let failure = test.assert_err<int>(closeable.release<int>(resource, result.Result<int>.Err(body_failure())));
+        match (failure) {
+            error.Error.Context { message, cause } => {
+                test.assert_equal_string("closing the resource also failed: the close failed", message);
+                test.assert_equal_string("test.body", code_of(cause));
+            },
+            _ => { test.fail("expected a Context error"); },
+        }
+        test.assert_equal_string("closing the resource also failed: the close failed: the body failed",
+            error.message(failure));
+        test.assert_equal_int32(1, resource.closes);
+    };
+);

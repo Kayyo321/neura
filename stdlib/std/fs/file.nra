@@ -146,4 +146,27 @@ export let File = module (
             IdOutcome.Error(code) => result.Result<File>.Err(host_error.io(code, "file open failed", text)),
         };
     };
+
+    /// @brief Opens the file, runs `body` with it in a scope this helper owns, and closes it exactly once on
+    /// every ordinary completion (Concurrency.md section 7, "Resources"). If the open fails, returns that error
+    /// and does not call the body. Otherwise returns the body's result, with two exceptions for a failed close:
+    /// a body Err becomes a Context error whose cause is the body's error and whose message carries the close
+    /// error's message, and a body Ok becomes the close error (Std.Io.Closeable.release does the combining). The
+    /// file is closed even if the body closed it already, which reports no error. A trap in the body ends the run without cleanup, and the runner then
+    /// closes the files the run left open. Needs the fs capability.
+    export let with_open = func<T>(path: Path, mode: OpenMode,
+            body: func(File) -> result.Result<T>) -> result.Result<T> {
+        return match (open(path, mode)) {
+            result.Result.Ok(file) => release<T>(file, run_body<T>(file, body)),
+            result.Result.Err(failure) => result.Result<T>.Err(failure),
+        };
+    };
+
+    // Runs the body in a scope the helper owns, so that whatever the body or the helper started inside it has
+    // finished before the file is closed.
+    let run_body = func<T>(file: File, body: func(File) -> result.Result<T>) -> result.Result<T> {
+        scope {
+            return body(file);
+        }
+    };
 );
