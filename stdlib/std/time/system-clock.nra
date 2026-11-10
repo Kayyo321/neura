@@ -7,6 +7,12 @@ let.promote _ = import:Std.Core.Unit;
 
 /// @brief The host's clocks (Stdlib.md section 12.1). Needs the clock capability; without it every member fails
 /// with CapabilityDenied.
+///
+/// Overlap and cancellation (Concurrency.md section 10.4). `sleep` overlaps in a program with tasks: the calling
+/// task waits for a deadline on the run's monotonic clock and the other tasks run; no thread sleeps. It uses
+/// version 2 of its host service, so cancelling the task's scope while it sleeps ends it with an Io error of
+/// kind Cancelled, unless the time had already passed. A cancelled sleep has no effect other than ending early.
+/// `now` and `monotonic` read the clock at once and are not cancellable. Without tasks `sleep` waits as before.
 /// @see [Std.Time.SystemClock](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-SystemClock)
 export let SystemClock = module (
     /// @brief Carries the provider's UTC epoch seconds and nanosecond fraction or an error code.
@@ -19,8 +25,9 @@ export let SystemClock = module (
     let wall_clock = func -> WallOutcome host("neura.clock.wall", 1);
     /// @brief Requests the current monotonic reading from the provider.
     let monotonic_clock = func -> NanosOutcome host("neura.clock.monotonic", 1);
-    /// @brief Asks the provider to wait for the specified nanosecond count.
-    let sleep_for = func(nanos: int64) -> DoneOutcome host("neura.clock.sleep", 1);
+    /// @brief Asks the provider to wait for the specified nanosecond count. Overlapping and cancellable
+    /// (version 2).
+    let sleep_for = func(nanos: int64) -> DoneOutcome host("neura.clock.sleep", 2);
 
     /// @brief A clock whose operations use the runtime's clock capability.
     export let SystemClock = class implements Clock (
@@ -41,7 +48,7 @@ export let SystemClock = module (
         };
 
         /// @brief Waits for the duration; a zero or negative duration asks the host to wait for zero
-        /// nanoseconds.
+        /// nanoseconds. Fails with Cancelled when the task's scope is cancelled first.
         export let sleep = func(span: Duration) -> result.Result<Unit> {
             let nanos = span.to_nanos();
             return match (sleep_for(nanos < 0 ? 0 : nanos)) {

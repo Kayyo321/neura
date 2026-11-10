@@ -1,5 +1,6 @@
 #include "machine.hpp"
 
+#include "driver.hpp"
 #include "graph_device.hpp"
 #include "run_support.hpp"
 #include "scalar_text.hpp"
@@ -3047,38 +3048,31 @@ void SteadyTaskClock::wait_until(std::int64_t deadline) {
 
 RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const std::string> arguments,
               RunLimits limits, TaskClock* clock) {
-    SteadyTaskClock steady;
-    if (!clock) clock = &steady;
-    Execution execution(image, arguments, limits);
     std::uint64_t requests = 0;
-    detail::ServiceCallbacks callbacks(execution, bindings, requests);
-    for (;;) {
-        const auto event = execution.advance();
-        switch (event.kind) {
-        case Event::Kind::HostRequest:
-            if (event.overlapping) {
-                // This driver starts nothing in the background: it serves
-                // the request now and hands the response back at once.
-                execution.deliver(event.request.sequence, callbacks.serve(event.request));
-            } else {
+    if (!image.transferable_layouts) {
+        // An image without tasks answers every request before it continues.
+        Execution execution(image, arguments, limits);
+        detail::ServiceCallbacks callbacks(execution, bindings, requests);
+        for (;;) {
+            const auto event = execution.advance();
+            if (event.kind == Event::Kind::HostRequest) {
                 execution.complete(callbacks.serve(event.request));
+            } else {
+                return detail::finished_result(execution, event, requests);
             }
-            break;
-        case Event::Kind::Poll:
-            if (event.timer) execution.advance_clock(clock->now());
-            break;
-        case Event::Kind::Waiting:
-            if (!event.timer) throw std::logic_error("the run waits for a request this driver never started");
-            clock->wait_until(event.deadline);
-            execution.advance_clock(clock->now());
-            break;
-        case Event::Kind::Cancel:
-            break;
-        case Event::Kind::Completed:
-        case Event::Kind::Trapped:
-            return detail::finished_result(execution, event, requests);
         }
     }
+    SteadyTaskClock steady;
+    if (!clock) clock = &steady;
+    const auto modes = host_modes_for(image, bindings);
+    if (!limits.host_modes) limits.host_modes = &modes;
+    Execution execution(image, arguments, limits);
+    detail::ServiceCallbacks callbacks(execution, bindings, requests);
+    DriveHooks hooks;
+    hooks.serve = [&](const Event& event) { return callbacks.serve(event.request); };
+    hooks.issued = [&](const Event&, bool) { ++requests; };
+    const auto last = drive(execution, bindings, *clock, hooks);
+    return detail::finished_result(execution, last, requests);
 }
 
 } // namespace neura::nvm

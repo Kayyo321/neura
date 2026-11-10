@@ -17,51 +17,51 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Error** · [`export let IoErrorKind = enum ( NotFound, PermissionDenied, AlreadyExists, InvalidInput, Interrupted, UnexpectedEnd, NotADirectory, IsADirectory, DirectoryNotEmpty, ConnectionRefused, ConnectionReset, TimedOut, Unsupported, CapabilityDenied, Closed, InvalidData, Other )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L9)
-  Host error codes 1 through 14 map to the first fourteen kinds in order. The library produces Closed and InvalidData itself.
-- **Error** · [`export let ParseErrorKind = enum (Empty, InvalidCharacter, OutOfRange, UnexpectedEnd, Syntax)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L16)
+- **Error** · [`export let IoErrorKind = enum ( NotFound, PermissionDenied, AlreadyExists, InvalidInput, Interrupted, UnexpectedEnd, NotADirectory, IsADirectory, DirectoryNotEmpty, ConnectionRefused, ConnectionReset, TimedOut, Unsupported, CapabilityDenied, Closed, InvalidData, Other, Cancelled )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L11)
+  Host error codes 1 through 14 map to the first fourteen kinds in order. The library produces Closed and InvalidData itself. Host error code 15 maps to Cancelled, the answer of a cancellable host request (a read, write, accept, connect, or sleep in a task whose scope was cancelled) that was cancelled before it finished. Cancelled comes last so that the kinds before it keep their order.
+- **Error** · [`export let ParseErrorKind = enum (Empty, InvalidCharacter, OutOfRange, UnexpectedEnd, Syntax)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L18)
   Classifies malformed text, premature endings, and out-of-range values.
-- **Error** · [`export let ErrorDetail = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L20)
+- **Error** · [`export let ErrorDetail = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L22)
   The base of errors defined outside the library. `code` is a stable identifier such as billing.card_declined.
-- **Error.ErrorDetail** · [`export let code = func() -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L22)
+- **Error.ErrorDetail** · [`export let code = func() -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L24)
   Returns the detail's application-defined code.
-- **Error.ErrorDetail** · [`export let message = func() -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L24)
+- **Error.ErrorDetail** · [`export let message = func() -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L26)
   Returns the detail's human-readable message.
-- **Error** · [`export let SimpleDetail = class:ErrorDetail`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L28)
+- **Error** · [`export let SimpleDetail = class:ErrorDetail`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L30)
   Stores a custom error's code and message as strings.
-- **Error.SimpleDetail** · [`export let init = func(code_value: string, message_value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L35)
+- **Error.SimpleDetail** · [`export let init = func(code_value: string, message_value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L37)
   Initializes both parts of the error detail.
-- **Error.SimpleDetail** · [`export let.override code = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L42)
+- **Error.SimpleDetail** · [`export let.override code = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L44)
   Returns the stored error code.
-- **Error.SimpleDetail** · [`export let.override message = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L45)
+- **Error.SimpleDetail** · [`export let.override message = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L47)
   Returns the stored detail message.
-- **Error.SimpleDetail** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L48)
+- **Error.SimpleDetail** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L50)
   Two simple details are equal when their code and message are.
-- **Error.SimpleDetail** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L57)
+- **Error.SimpleDetail** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L59)
   Combines the hashes of the code and message.
-- **Error.SimpleDetail** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L61)
+- **Error.SimpleDetail** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L63)
   Returns the formatted custom error detail.
-- **Error** · [`export let Error = enum ( Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom(ErrorDetail), Context { message: string, cause: Error } )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L65)
+- **Error** · [`export let Error = enum ( Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom(ErrorDetail), Context { message: string, cause: Error } )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L67)
   Represents an expected failure and its category-specific context.
-- **Error** · [`export let custom = func(code: string, text: string) -> Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L74)
+- **Error** · [`export let custom = func(code: string, text: string) -> Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L76)
   A Custom error holding a SimpleDetail.
-- **Error** · [`export let context = func(cause: Error, text: string) -> Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L78)
+- **Error** · [`export let context = func(cause: Error, text: string) -> Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L80)
   Wraps an error with a message that describes the operation that failed.
-- **Error** · [`export let io_kind_name = func(kind: IoErrorKind) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L82)
+- **Error** · [`export let io_kind_name = func(kind: IoErrorKind) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L84)
   Returns the spelling of an I/O error category.
-- **Error** · [`export let parse_kind_name = func(kind: ParseErrorKind) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L85)
+- **Error** · [`export let parse_kind_name = func(kind: ParseErrorKind) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L87)
   Returns the spelling of a parse error category.
-- **Error** · [`export let message = func(e: Error) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L88)
+- **Error** · [`export let message = func(e: Error) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L90)
   Formats an error with its category and context.
-- **Error** · [`export let root_cause = func(e: Error) -> Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L105)
+- **Error** · [`export let root_cause = func(e: Error) -> Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L107)
   Follows Context causes to the end.
-- **Error** · [`export let chain = func(e: Error) -> Error[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L120)
+- **Error** · [`export let chain = func(e: Error) -> Error[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L122)
   The error, then each cause in order.
-- **Error** · [`export let equals = func(a: Error, b: Error) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L139)
+- **Error** · [`export let equals = func(a: Error, b: Error) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L141)
   Structural equality. Custom details compare with their equals member.
-- **Error** · [`export let hash = func(e: Error) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L183)
+- **Error** · [`export let hash = func(e: Error) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L185)
   Starts from the variant's position and combines each field's hash.
-- **Error** · [`export let to_string = func(e: Error) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L196)
+- **Error** · [`export let to_string = func(e: Error) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L198)
   The same text as message.
 <!-- END SOURCE API -->
 
@@ -139,7 +139,7 @@ There is no accessor for the error alone: `match` reads it.
 | `Custom` | One `ErrorDetail` | An error defined outside the library. |
 | `Context` | `message: string`, `cause: Error` | Another error with a description of what was being attempted. |
 
-- `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`. The first fourteen map from host error codes 1 through 14. `Closed` and `InvalidData` are produced by the library.
+- `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`, `Cancelled`. The first fourteen map from host error codes 1 through 14, and `Cancelled` from code 15, the answer of a cancelled version 2 request (Concurrency, section 10.4); it comes last so that the kinds before it keep their order. `Closed` and `InvalidData` are produced by the library.
 - `ParseErrorKind`, in order: `Empty`, `InvalidCharacter`, `OutOfRange`, `UnexpectedEnd`, `Syntax`.
 - **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works today. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
 - Adding a variant to `Error` breaks every `match` without a wildcard arm, so the variant list changes only with a major version. Code that only reports errors should end its `match` with a wildcard arm that calls `Errors.message`.

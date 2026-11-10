@@ -9,13 +9,14 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace neura::nvm {
 
 // Error codes of the standard host services (Stdlib.md section 4.5). The
-// library maps 1 through 14 to the IoErrorKind values of the same order and
-// every other code to Other.
+// library maps 1 through 14 to the IoErrorKind values of the same order, 15
+// to Cancelled, and every other code to Other.
 namespace host_error {
 inline constexpr std::uint32_t not_found = 1;
 inline constexpr std::uint32_t permission_denied = 2;
@@ -31,6 +32,10 @@ inline constexpr std::uint32_t connection_reset = 11;
 inline constexpr std::uint32_t timed_out = 12;
 inline constexpr std::uint32_t unsupported = 13;
 inline constexpr std::uint32_t capability_denied = 14;
+// The answer of a cancellable overlapping request (version 2 of
+// neura.net.connect, accept, read, and write, neura.console.read, and
+// neura.clock.sleep) that was cancelled before it finished.
+inline constexpr std::uint32_t cancelled = 15;
 // The one code the providers use for every failure without a kind of its
 // own, including an exhausted ID table.
 inline constexpr std::uint32_t other = 100;
@@ -97,6 +102,10 @@ public:
         std::uint32_t error = 0;
     };
     virtual Read read(std::size_t max) = 0;
+    // The descriptor that read() takes its bytes from, or -1 when it has
+    // none. When it is readable, read() does not block, so an overlapping
+    // read can wait for it.
+    virtual int descriptor() const { return -1; }
 };
 
 // Reads a file descriptor, normally standard input.
@@ -104,6 +113,9 @@ class DescriptorSource final : public ConsoleSource {
 public:
     explicit DescriptorSource(int descriptor) : descriptor_(descriptor) {}
     Read read(std::size_t max) override;
+#ifndef _WIN32
+    int descriptor() const override { return descriptor_; }
+#endif
 
 private:
     int descriptor_;
@@ -126,20 +138,33 @@ private:
 class FunctionService final : public HostService {
 public:
     using Handler = std::function<HostCompletion(const HostRequest&)>;
+    using Begin = std::function<std::variant<HostCompletion, PendingOperation>(const HostRequest&)>;
     FunctionService(HostSignature signature, Handler handler)
         : signature_(std::move(signature)), handler_(std::move(handler)) {}
+    // An overlapping service: `handler` serves it when it is called without
+    // tasks around (it may block), and `begin` starts it without blocking.
+    FunctionService(HostSignature signature, Handler handler, Begin begin, bool cancellable)
+        : signature_(std::move(signature)), handler_(std::move(handler)), begin_(std::move(begin)),
+          cancellable_(cancellable) {}
     const HostSignature& signature() const override { return signature_; }
     HostCompletion invoke(const HostRequest& request) override { return handler_(request); }
+    bool overlapping() const override { return static_cast<bool>(begin_); }
+    bool cancellable() const override { return begin_ && cancellable_; }
+    std::variant<HostCompletion, PendingOperation> begin(const HostRequest& request) override {
+        return begin_ ? begin_(request) : HostService::begin(request);
+    }
 
 private:
     HostSignature signature_;
     Handler handler_;
+    Begin begin_;
+    bool cancellable_ = false;
 };
 
 // The standard providers of neura run and neura test (Stdlib.md section 4.5):
 //
 //   neura.console.write(int32 stream, uint8[list] bytes) -> int32 count
-//   neura.console.read(int32 max) -> uint8[list]
+//   neura.console.read(int32 max) -> uint8[list]     (overlapping; version 2 cancellable)
 //   neura.fs.open(string path, int32 mode) -> int64 file
 //   neura.fs.read(int64 file, int32 max) -> uint8[list]
 //   neura.fs.write(int64 file, uint8[list] bytes) -> int32 count
@@ -152,16 +177,19 @@ private:
 //   neura.fs.rename(string from, string to) -> void
 //   neura.clock.wall() -> [int64 seconds, int32 nanos]
 //   neura.clock.monotonic() -> int64 nanos
-//   neura.clock.sleep(int64 nanos) -> void
+//   neura.clock.sleep(int64 nanos) -> void            (overlapping; version 2 cancellable)
 //   neura.entropy.fill(int32 count) -> uint8[list]
 //   neura.env.get(string name) -> [bool found, string value]
 //   neura.process.exit(int32 status) -> void (terminal)
 //   neura.net.connect(string host, int32 port, int64 timeout_nanos) -> int64 socket
+//                                                     (overlapping; version 2 cancellable)
 //   neura.net.listen(string host, int32 port) -> int64 listener
 //   neura.net.local_port(int64 socket) -> int32 port
-//   neura.net.accept(int64 listener) -> int64 socket
+//   neura.net.accept(int64 listener) -> int64 socket  (overlapping; version 2 cancellable)
 //   neura.net.read(int64 socket, int32 max, int64 timeout_nanos) -> uint8[list]
+//                                                     (overlapping; version 2 cancellable)
 //   neura.net.write(int64 socket, uint8[list] bytes) -> int32 count
+//                                                     (overlapping; version 2 cancellable)
 //   neura.net.close(int64 socket) -> void
 //   neura.ffi.abi() -> [string triple, uint8[list] layouts]
 //   neura.ffi.arena.open() -> int64 arena
@@ -176,7 +204,11 @@ private:
 //   neura.ffi.strlen(int64 address, int64 max) -> int64 length
 //   neura.ffi.call(int64 function, uint8[list] signature, uint8[list] arguments) -> uint8[list] result
 //
-// All are version 1 with a uint32 error. IDs are opaque, numbered from 1 in
+// All are version 1 with a uint32 error. The six marked services also exist
+// as version 2, with the same signature and behavior, whose requests can be
+// cancelled; in an image with tasks both versions overlap (Concurrency.md
+// section 10.4), so a waiting task does not hold up the others. A cancelled
+// request answers host_error::cancelled unless it finished first. IDs are opaque, numbered from 1 in
 // each run, and never reused within a run. end_run() closes every file and
 // socket the run left open and restarts the numbering; the destructor does
 // the same.
@@ -204,6 +236,9 @@ public:
 
 private:
     void add(HostSignature signature, FunctionService::Handler handler);
+    // Adds version 1 of an overlapping service, then version 2, the
+    // cancellable form of the same service.
+    void add_overlapping(HostSignature signature, FunctionService::Handler handler, FunctionService::Begin begin);
 
     ConsoleSink& output_;
     ConsoleSink& error_;

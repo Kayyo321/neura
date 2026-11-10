@@ -1,0 +1,164 @@
+// A TCP echo service on the loopback interface, served by tasks. Two server
+// tasks each own a listener on a port the system chooses, and two client tasks
+// connect to them and send a line. The tasks overlap: while one waits in
+// accept, connect, read, or write, the others run (Concurrency.md section
+// 10.4). A listener and a stream are class instances, which do not cross a
+// spawn (section 5.1), so each connection is served by the task that owns its
+// listener; the ports and the results cross through channels.
+let channels = import:Std.Concurrent.Channel;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let listeners = import:Std.Net.TcpListener;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let streams = import:Std.Net.TcpStream;
+
+let bytes_of = func(text: string) -> uint8[list] {
+    let out: uint8[list] = [];
+    let i = 0;
+    while (i < text.byte_length) {
+        out.append(text.byte_at(i));
+        i = i + 1;
+    }
+    return out;
+};
+
+let text_of = func(data: uint8[list]) -> string {
+    let [valid, text] = string.from_utf8(data);
+    if (!valid) {
+        return "<invalid>";
+    }
+    return text;
+};
+
+// Echoes everything the peer sends until it closes its side; the number of
+// bytes echoed, or -1 on a failure.
+let echo_all = func(stream: streams.TcpStream) -> int {
+    let total = 0;
+    let more = true;
+    while (more) {
+        match (stream.read(64)) {
+            result.Result.Ok(chunk) => {
+                if (chunk.length == 0) {
+                    more = false;
+                } else {
+                    total = total + chunk.length;
+                    stream.write(chunk);
+                }
+            },
+            result.Result.Err(_) => {
+                more = false;
+                total = 0 - 1;
+            },
+        }
+    }
+    return total;
+};
+
+let serve = func(ports: channels.Sender<int>, served: channels.Sender<int>) {
+    match (listeners.bind("127.0.0.1", 0)) {
+        result.Result.Err(_) => {
+            ports.send(0 - 1);
+            served.send(0 - 1);
+        },
+        result.Result.Ok(listener) => {
+            ports.send(listener.local_port());
+            match (listener.accept()) {
+                result.Result.Err(_) => {
+                    served.send(0 - 1);
+                },
+                result.Result.Ok(stream) => {
+                    served.send(echo_all(stream));
+                    stream.close();
+                },
+            }
+            listener.close();
+        },
+    }
+};
+
+let ask = func(stream: streams.TcpStream, line: string) -> string {
+    let sent = stream.write(bytes_of(line));
+    // Half-close is not offered, so read exactly what was sent.
+    let reply: uint8[list] = [];
+    let wanted = line.byte_length;
+    while (reply.length < wanted) {
+        match (stream.read(64)) {
+            result.Result.Ok(chunk) => {
+                if (chunk.length == 0) {
+                    return "<closed early>";
+                }
+                for (let b in chunk) {
+                    reply.append(b);
+                }
+            },
+            result.Result.Err(_) => {
+                return "<read failed>";
+            },
+        }
+    }
+    return text_of(reply);
+};
+
+let client = func(id: int, ports: channels.Receiver<int>, replies: channels.Sender<string>) {
+    let port = 0 - 1;
+    match (ports.receive()) {
+        channels.Received.Value(chosen) => {
+            port = chosen;
+        },
+        _ => {},
+    }
+    if (port < 0) {
+        replies.send("<no port>");
+        return;
+    }
+    match (streams.connect("127.0.0.1", port, durations.of_seconds(5))) {
+        result.Result.Err(_) => {
+            replies.send("<connect failed>");
+        },
+        result.Result.Ok(stream) => {
+            replies.send(ask(stream, "hello from client " + id.to_string()));
+            stream.close();
+        },
+    }
+};
+
+let collect = func(label: string, replies: channels.Receiver<string>, served: channels.Receiver<int>) {
+    match (replies.receive()) {
+        channels.Received.Value(text) => {
+            console.print_line(label + " heard: " + text);
+        },
+        _ => {
+            console.print_line(label + " heard nothing");
+        },
+    }
+    match (served.receive()) {
+        channels.Received.Value(count) => {
+            console.print_line(label + " server echoed " + count.to_string() + " bytes");
+        },
+        _ => {
+            console.print_line(label + " server reported nothing");
+        },
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let ports0 = channels.open<int>(1);
+        let ports1 = channels.open<int>(1);
+        let served0 = channels.open<int>(1);
+        let served1 = channels.open<int>(1);
+        let replies0 = channels.open<string>(1);
+        let replies1 = channels.open<string>(1);
+        scope {
+            spawn serve(ports0[0], served0[0]);
+            spawn serve(ports1[0], served1[0]);
+            spawn client(0, ports0[1], replies0[0]);
+            spawn client(1, ports1[1], replies1[0]);
+            collect("client 0", replies0[1], served0[1]);
+            collect("client 1", replies1[1], served1[1]);
+        }
+        console.print_line("all done");
+        return program.ExitCode.Ok;
+    };
+);

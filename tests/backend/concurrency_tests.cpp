@@ -3,6 +3,7 @@
 
 #include "nvm/layered.hpp"
 #include "nvm/trace.hpp"
+#include "nvm/trace_file.hpp"
 #include "decompiler/assembly.hpp"
 
 #include <fstream>
@@ -392,18 +393,22 @@ NEURA_TEST(concurrency, scheduler_exits_through_fleet) {
     }
 }
 
-NEURA_TEST(concurrency, rejects_serial_trace_for_scheduler_image) {
-    const auto image = nvr::load(nvr::encode(tasks_model()));
-    try {
-        (void)nvm::record(image, {}, {});
-        fail("record accepted a scheduler image with the serial trace format");
-    } catch (const std::invalid_argument&) {
-    }
-    try {
-        (void)nvm::replay(image, {}, {});
-        fail("replay accepted a scheduler image with the serial trace format");
-    } catch (const std::invalid_argument&) {
-    }
+NEURA_TEST(concurrency, task_images_use_the_concurrent_trace_version_and_serial_images_reject_it) {
+    // An image with tasks records the concurrent trace (version 3) even when
+    // it makes no request.
+    auto fixture = tasks_model();
+    const auto image = nvr::load(nvr::encode(fixture));
+    CapturingConsole console;
+    nvm::HostRegistry registry;
+    registry.add(console);
+    const auto recorded = nvm::record(image, nvm::bind(image, registry), {});
+    check(recorded.settings.has_value(), "a task image records its settings");
+    check(nvm::write_trace(recorded).starts_with("neura-trace 3\nsettings quantum 1024 "), "version 3");
+    // A serial image refuses a trace of an image with tasks.
+    const auto serial = nvr::load(nvr::encode(hello_model()));
+    const auto replayed = nvm::replay(serial, recorded, {});
+    check(!replayed.matches && replayed.difference.find("image with tasks") != std::string::npos,
+          "a serial image does not replay a concurrent trace: " + replayed.difference);
 }
 
 } // namespace neura::testing

@@ -12,6 +12,7 @@
 #include <thread>
 
 #ifndef _WIN32
+#include <poll.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -74,6 +75,20 @@ std::uint32_t host_error::from_errno(int error) {
 }
 
 namespace provider {
+
+bool readable_now(int descriptor) {
+#ifdef _WIN32
+    (void)descriptor;
+    return false;
+#else
+    pollfd entry{descriptor, POLLIN, 0};
+    for (;;) {
+        const int ready = ::poll(&entry, 1, 0);
+        if (ready >= 0) return ready > 0;
+        if (errno != EINTR) return false;
+    }
+#endif
+}
 
 int timeout_milliseconds(std::int64_t nanos) {
     if (nanos <= 0) return -1;
@@ -257,12 +272,35 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         if (written.written == 0 && written.failed) return fail(host_error::other);
         return HostCompletion::ok(int32_value(static_cast<std::int32_t>(written.written)));
     });
-    add(signature("neura.console.read", {int32()}, byte_list()), [this](const HostRequest& request) {
+    const FunctionService::Handler read_input = [this](const HostRequest& request) {
         const auto max = as_int32(request.arguments.at(0));
         if (max < 1) return fail(host_error::invalid_input);
         auto read = input_.read(std::min(static_cast<std::size_t>(max), max_read_bytes));
         if (read.error != 0) return fail(read.error);
         return HostCompletion::ok(bytes_value(std::move(read.bytes)));
+    };
+    // Overlapping: input that is not a descriptor (in memory) completes at
+    // once. A descriptor is waited for, and a read that finds it readable
+    // does not block.
+    add_overlapping(signature("neura.console.read", {int32()}, byte_list()), read_input,
+                    [this, read_input](const HostRequest& request) -> std::variant<HostCompletion, PendingOperation> {
+        const auto max = as_int32(request.arguments.at(0));
+        const auto descriptor = input_.descriptor();
+        if (max < 1 || descriptor < 0) return read_input(request);
+        PendingOperation operation;
+        operation.descriptor = descriptor;
+        operation.readable = true;
+        const auto count = std::min(static_cast<std::size_t>(max), max_read_bytes);
+        operation.attempt = [this, descriptor, count](bool cancelled) -> std::optional<HostCompletion> {
+            if (!readable_now(descriptor)) {
+                if (cancelled) return cancelled_answer();
+                return std::nullopt;
+            }
+            auto read = input_.read(count);
+            if (read.error != 0) return fail(read.error);
+            return HostCompletion::ok(bytes_value(std::move(read.bytes)));
+        };
+        return operation;
     });
 
     // Process exit: not an external capability, so always allowed.
@@ -304,12 +342,28 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
                              .count();
         return HostCompletion::ok(int64_value(now));
     });
-    add(signature("neura.clock.sleep", {int64()}, void_type()), [this](const HostRequest& request) {
+    const FunctionService::Handler sleep = [this](const HostRequest& request) {
         if (!capabilities_.clock) return denied();
         const auto nanos = as_int64(request.arguments.at(0));
         if (nanos < 0) return fail(host_error::invalid_input);
         std::this_thread::sleep_for(std::chrono::nanoseconds(nanos));
         return HostCompletion::ok();
+    };
+    // Overlapping: a deadline on the task clock; no thread sleeps.
+    add_overlapping(signature("neura.clock.sleep", {int64()}, void_type()), sleep,
+                    [this](const HostRequest& request) -> std::variant<HostCompletion, PendingOperation> {
+        if (!capabilities_.clock) return denied();
+        const auto nanos = as_int64(request.arguments.at(0));
+        if (nanos < 0) return fail(host_error::invalid_input);
+        if (nanos == 0) return HostCompletion::ok();
+        PendingOperation operation;
+        operation.deadline = deadline_after(request.now, nanos);
+        operation.attempt = [](bool cancelled) -> std::optional<HostCompletion> {
+            if (cancelled) return cancelled_answer();
+            return std::nullopt;
+        };
+        operation.expire = [] { return HostCompletion::ok(); };
+        return operation;
     });
 
     add(signature("neura.entropy.fill", {int32()}, byte_list()), [this](const HostRequest& request) {
@@ -339,7 +393,11 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         add(std::move(signature), std::move(handler));
     };
     add_fs_services(adder, *tables_, capabilities_, prefixes_);
-    add_net_services(adder, *tables_, capabilities_);
+    const OverlapAdder overlap = [this](HostSignature signature, FunctionService::Handler handler,
+                                        FunctionService::Begin begin) {
+        add_overlapping(std::move(signature), std::move(handler), std::move(begin));
+    };
+    add_net_services(adder, overlap, *tables_, capabilities_);
     add_ffi_services(adder, *tables_, capabilities_);
 }
 
@@ -352,6 +410,15 @@ StandardServices::~StandardServices() { end_run(); }
 
 void StandardServices::add(HostSignature signature, FunctionService::Handler handler) {
     services_.push_back(std::make_unique<FunctionService>(std::move(signature), std::move(handler)));
+}
+
+void StandardServices::add_overlapping(HostSignature signature, FunctionService::Handler handler,
+                                       FunctionService::Begin begin) {
+    auto cancellable = signature;
+    cancellable.version = 2;
+    services_.push_back(std::make_unique<FunctionService>(std::move(signature), handler, begin, false));
+    services_.push_back(
+        std::make_unique<FunctionService>(std::move(cancellable), std::move(handler), std::move(begin), true));
 }
 
 void StandardServices::register_all(HostRegistry& registry) {

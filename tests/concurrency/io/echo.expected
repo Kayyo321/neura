@@ -1,0 +1,5 @@
+client 0 heard: hello from client 0
+client 0 server echoed 19 bytes
+client 1 heard: hello from client 1
+client 1 server echoed 19 bytes
+all done

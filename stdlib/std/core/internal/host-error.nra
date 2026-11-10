@@ -1,7 +1,7 @@
 let.promote _ = import:Std.Core.Error;
 
 /// @brief Maps a host service's uint32 error code to an Io error (Stdlib.md section 4.5). Codes 1 through 14
-/// are the first fourteen IoErrorKind values in order; every other code is Other.
+/// are the first fourteen IoErrorKind values in order, code 15 is Cancelled, and every other code is Other.
 export let HostError = module (
     /// @brief Maps a provider error code to its library I/O category, defaulting to Other.
     export let kind_of = func(code: uint32) -> IoErrorKind {
@@ -19,6 +19,7 @@ export let HostError = module (
         if (code == 12) { return IoErrorKind.TimedOut; }
         if (code == 13) { return IoErrorKind.Unsupported; }
         if (code == 14) { return IoErrorKind.CapabilityDenied; }
+        if (code == 15) { return IoErrorKind.Cancelled; }
         return IoErrorKind.Other;
     };
 

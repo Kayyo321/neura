@@ -1,15 +1,26 @@
 let bytes = import:Std.Io.Internal.Bytes;
 let.promote _ = import:Std.Io.Closeable;
 let.promote _ = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
 let host_error = import:Std.Core.Internal.HostError;
 let.promote _ = import:Std.Core.Result;
 let socket = import:Std.Net.Internal.Socket;
 let.promote _ = import:Std.Core.Unit;
 
-/// @brief A connected, blocking TCP stream (Stdlib.md section 11.4).
+/// @brief A connected TCP stream (Stdlib.md section 11.4).
 ///
 /// Its bound read method is a byte source and its bound write method a byte sink. Needs the net capability.
 /// After close every operation except close fails with Closed.
+///
+/// Overlap and cancellation (Concurrency.md section 10.4). In a program with tasks, `connect`, `read`, and
+/// `write` overlap: the calling task waits and the other tasks run. They use version 2 of their host services,
+/// so cancelling the task's scope while one waits ends it with an Io error of kind Cancelled, unless the
+/// operation finished first, in which case it reports its own result and its effect stays. A cancelled
+/// operation has done this much: a cancelled `connect` leaves no connection, and no stream is returned; a
+/// cancelled `read` consumed no bytes; a cancelled `write` reports in its message how many bytes it had
+/// written, and those bytes were sent. `close` and `set_read_timeout` do not wait and are not cancellable.
+/// Name resolution in `connect` still blocks every task for its duration. Without tasks each operation waits
+/// as before.
 /// @see [Std.Net.TcpStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-TcpStream)
 export let TcpStream = module (
     /// @brief Represents a host success with an identifier or position, or an unsigned host error code.
@@ -20,12 +31,14 @@ export let TcpStream = module (
     let CountOutcome = enum (Ok(int), Error(uint32));
     /// @brief Represents host success without a value or an unsigned host error code.
     let DoneOutcome = enum (Ok, Error(uint32));
-    /// @brief Requests a connection with the given timeout in nanoseconds.
-    let connect_socket = func(host: string, port: int, timeout_nanos: int64) -> IdOutcome host("neura.net.connect", 1);
-    /// @brief Requests bytes from the socket subject to its current read timeout.
-    let read_socket = func(socket: int64, max: int, timeout_nanos: int64) -> BytesOutcome host("neura.net.read", 1);
-    /// @brief Requests a write and receives a possibly partial byte count.
-    let write_socket = func(socket: int64, data: uint8[list]) -> CountOutcome host("neura.net.write", 1);
+    /// @brief Requests a connection with the given timeout in nanoseconds. Overlapping and cancellable (version 2).
+    let connect_socket = func(host: string, port: int, timeout_nanos: int64) -> IdOutcome host("neura.net.connect", 2);
+    /// @brief Requests bytes from the socket subject to its current read timeout. Overlapping and cancellable
+    /// (version 2).
+    let read_socket = func(socket: int64, max: int, timeout_nanos: int64) -> BytesOutcome host("neura.net.read", 2);
+    /// @brief Requests a write and receives a possibly partial byte count. Overlapping and cancellable
+    /// (version 2); a cancelled request with nothing written answers Cancelled.
+    let write_socket = func(socket: int64, data: uint8[list]) -> CountOutcome host("neura.net.write", 2);
     /// @brief Requests that the provider release the socket handle.
     let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
@@ -56,12 +69,15 @@ export let TcpStream = module (
             };
         };
 
-        /// @brief Writes every byte, repeating partial host writes.
+        /// @brief Writes every byte, repeating partial host writes. When the task's scope is cancelled while the
+        /// write waits, it fails with Cancelled and the message "stream write cancelled after N bytes", where N
+        /// is the number of bytes already sent.
         export let write = func(data: uint8[list]) -> Result<Unit> {
             if (!open_now) {
                 return Result<Unit>.Err(bytes.closed("stream", handle.address));
             }
             let remaining = data;
+            let written = 0;
             while (remaining.length > 0) {
                 match (write_socket(handle.id, remaining)) {
                     CountOutcome.Ok(count) => {
@@ -71,9 +87,14 @@ export let TcpStream = module (
                         if (count >= remaining.length) {
                             return bytes.ok();
                         }
+                        written = written + count;
                         remaining = bytes.copy_range(remaining, count, remaining.length);
                     },
                     CountOutcome.Error(code) => {
+                        if (code == 15) {
+                            return Result<Unit>.Err(host_error.io(code,
+                                "stream write cancelled after " + written.to_string() + " bytes", handle.address));
+                        }
                         return Result<Unit>.Err(host_error.io(code, "stream write failed", handle.address));
                     },
                 }
@@ -113,6 +134,43 @@ export let TcpStream = module (
         return match (connect_socket(host, port, nanos)) {
             IdOutcome.Ok(id) => Result<TcpStream>.Ok(new TcpStream(new socket.Handle(id, address))),
             IdOutcome.Error(code) => Result<TcpStream>.Err(host_error.io(code, "connect failed", address)),
+        };
+    };
+
+    /// @brief Connects to `host` and `port` without a time limit, runs `body` with the stream, and closes the
+    /// stream exactly once however the body ends (Concurrency.md section 7, "Resources").
+    ///
+    /// - If the connection fails, the open error is returned and `body` is not called.
+    /// - `body` runs in a scope the helper owns, so every task started in that scope has finished before the
+    ///   stream is closed.
+    /// - The stream is closed after the body returns a value, after it returns an error, and after it returns
+    ///   because its scope was cancelled.
+    /// - A body `Ok` whose close fails returns the close error. A body `Err` whose close fails returns a
+    ///   `Context` error whose cause is the body's error and whose message names the close error's message.
+    ///
+    /// A trap in the body ends the run without closing; the runner then closes every socket the run left open.
+    export let with_connection = func<T>(host: string, port: int, body: func(TcpStream) -> Result<T>) -> Result<T> {
+        let opened = connect(host, port, of_nanos(0));
+        return match (opened) {
+            Result.Err(problem) => Result<T>.Err(problem),
+            Result.Ok(stream) => run_and_close<T>(stream, body),
+        };
+    };
+
+    /// @brief Runs the body in its own scope, then closes the stream and combines the two results.
+    let run_and_close = func<T>(stream: TcpStream, body: func(TcpStream) -> Result<T>) -> Result<T> {
+        let outcome: Result<T> = Result<T>.Err(errors.custom("net.unreachable", "with_connection body did not run"));
+        scope {
+            outcome = body(stream);
+        }
+        let closed = stream.close();
+        return match (closed) {
+            Result.Ok(_) => outcome,
+            Result.Err(close_problem) => match (outcome) {
+                Result.Ok(_) => Result<T>.Err(close_problem),
+                Result.Err(cause) => Result<T>.Err(
+                    errors.context(cause, "close failed after the body failed: " + errors.message(close_problem))),
+            },
         };
     };
 

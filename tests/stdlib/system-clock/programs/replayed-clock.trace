@@ -7,9 +7,9 @@ request neura.console.write_line 1 ["2026-11-09T19:30:15.250Z"]
 ok 0
 request neura.clock.monotonic 1 []
 ok 81234000000
-request neura.clock.sleep 1 [25000000]
+request neura.clock.sleep 2 [25000000]
 ok 0
-request neura.clock.sleep 1 [0]
+request neura.clock.sleep 2 [0]
 ok 0
 request neura.clock.monotonic 1 []
 ok 81259000001

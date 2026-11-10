@@ -217,14 +217,16 @@ Every interaction with the outside world is a host service with a name, a versio
 | --- | --- | --- | --- | --- |
 | `neura.console.write_line` | 1 | text | none | `Console.print_line`; its error code 1 maps to `Other` |
 | `neura.console.write` | 1 | stream (1 output, 2 error), bytes | count written | `Console` |
-| `neura.console.read` | 1 | maximum count | bytes; empty at end of input | `Console` |
+| `neura.console.read` | 1, 2 | maximum count | bytes; empty at end of input | `Console` (version 2); overlaps in an image with tasks |
 | `neura.fs.open`, `read`, `write`, `seek`, `close` | 1 | path and mode; file ID and count, bytes, or offset and origin | file ID, bytes, count, or position | `File` |
 | `neura.fs.stat`, `list`, `make_directory`, `remove`, `rename` | 1 | path text (two for rename); `stat` also takes a follow-links flag and `remove` a directory flag | kind, size, and modified time; list of names; none | `Fs` |
-| `neura.clock.wall`, `monotonic`, `sleep` | 1 | none, none, nanoseconds | seconds and nanoseconds; nanoseconds; none | `SystemClock` |
+| `neura.clock.wall`, `monotonic` | 1 | none | seconds and nanoseconds; nanoseconds | `SystemClock` |
+| `neura.clock.sleep` | 1, 2 | nanoseconds | none | `SystemClock` (version 2); overlaps in an image with tasks |
 | `neura.entropy.fill` | 1 | count | bytes | `Random.from_entropy` |
 | `neura.env.get` | 1 | name text | found flag and value text | `Environment` |
 | `neura.process.exit` | 1 | status | does not return | `Process.exit` |
-| `neura.net.connect`, `listen`, `local_port`, `accept`, `read`, `write`, `close` | 1 | [section 11.4](#114-stdnet) | socket ID, port, bytes, or count | `Std.Net` |
+| `neura.net.listen`, `local_port`, `close` | 1 | [section 11.4](#114-stdnet) | socket ID or port | `Std.Net` |
+| `neura.net.connect`, `accept`, `read`, `write` | 1, 2 | [section 11.4](#114-stdnet) | socket ID, bytes, or count | `Std.Net` (version 2); overlap in an image with tasks |
 | `neura.ffi.abi`, `arena.open`, `arena.close`, `alloc`, `library.open`, `library.default`, `library.embedded`, `symbol`, `read`, `write`, `strlen`, `call` | 1 | [NVM](NVM#host-services) | layouts, IDs, addresses, bytes, or packed results | `Std.DynamicForeign` |
 
 The exact signatures are in [NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services). The retired `neura.test.assert` and `neura.test.assert_equal_int32` services are no longer registered.
@@ -456,7 +458,7 @@ There is no accessor for the error alone: `match` reads it.
 | `Custom` | One `ErrorDetail` | An error defined outside the library. |
 | `Context` | `message: string`, `cause: Error` | Another error with a description of what was being attempted. |
 
-- `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`. The first fourteen map from host error codes 1 through 14. `Closed` and `InvalidData` are produced by the library.
+- `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`, `Cancelled`. The first fourteen map from host error codes 1 through 14, and `Cancelled` from code 15, the answer of a cancelled version 2 request ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#104-host-io)); it comes last so that the kinds before it keep their order. `Closed` and `InvalidData` are produced by the library.
 - `ParseErrorKind`, in order: `Empty`, `InvalidCharacter`, `OutOfRange`, `UnexpectedEnd`, `Syntax`.
 - **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works today. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
 - Adding a variant to `Error` breaks every `match` without a wildcard arm, so the variant list changes only with a major version. Code that only reports errors should end its `match` with a wildcard arm that calls `Errors.message`.

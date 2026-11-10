@@ -1,0 +1,221 @@
+// Scenarios for the driver of overlapping host requests (Concurrency.md
+// sections 10.4 and 11). They use the library's own bindings, which the test
+// serves with fake providers (tests/backend/concurrency_io_tests.cpp): a
+// connect to host "fake" hands out socket number `port` at once, a read of a
+// socket waits until that socket is closed, and closing a socket releases it.
+// The first argument selects the scenario. Nothing here uses a real clock,
+// socket, or file.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let net = import:Std.Net.TcpStream;
+let result = import:Std.Core.Result;
+
+// An overlapping request that completes at once but is delivered, like every
+// answer, at the next scheduling point.
+let open_fake = func(tag: int) -> result.Result<net.TcpStream> =>
+    net.connect("fake", tag, durations.of_nanos(0));
+
+let pause = func {
+    open_fake(0);
+};
+
+// Waits until the fake provider has `tag` released: the length of what it
+// returns is ten times the tag.
+let wait_for = func(tag: int) -> result.Result<int> {
+    return match (open_fake(tag)) {
+        result.Result.Err(problem) => result.Result<int>.Err(problem),
+        result.Result.Ok(stream) => match (stream.read(1)) {
+            result.Result.Ok(chunk) => result.Result<int>.Ok(chunk.length),
+            result.Result.Err(problem) => result.Result<int>.Err(problem),
+        },
+    };
+};
+
+// Releases `tag` by closing the fake socket of that number.
+let release = func(tag: int) {
+    match (open_fake(tag)) {
+        result.Result.Ok(stream) => { stream.close(); },
+        result.Result.Err(_) => { },
+    }
+};
+
+let report = func(label: string, tag: int, outcome: result.Result<int>) {
+    match (outcome) {
+        result.Result.Ok(value) => {
+            console.print_line(label + " " + tag.to_string() + " -> " + value.to_string());
+        },
+        result.Result.Err(problem) => {
+            console.print_line(label + " " + tag.to_string() + " failed: " + errors.message(problem));
+        },
+    }
+};
+
+let waiter = func(tag: int) {
+    report("wait", tag, wait_for(tag));
+};
+
+let busy = func(rounds: int) {
+    let total = 0;
+    for (let i: int = 0; i < rounds; i++) {
+        total = total + i;
+    }
+    console.print_line("busy done " + total.to_string());
+};
+
+// Releases tag 2 and then tag 1, with a scheduling point between them, so
+// the completions are delivered in the order the provider reported them and
+// not in the order the requests were made.
+let releaser = func {
+    console.print_line("release 2");
+    release(2);
+    pause();
+    console.print_line("release 1");
+    release(1);
+};
+
+let exiter = func {
+    program.Process.exit(7);
+    console.print_line("exit returned");
+};
+
+let finisher = func {
+    console.print_line("finisher runs");
+    release(99);
+    pause();
+    console.print_line("finisher after the exit");
+};
+
+// A producer passes what its request returned through a channel.
+let producer = func(tag: int, out: channels.Sender<int>) {
+    match (wait_for(tag)) {
+        result.Result.Ok(value) => {
+            out.send(value);
+        },
+        result.Result.Err(_) => {
+            out.send(0 - 1);
+        },
+    }
+};
+
+let received = func(label: string, rx: channels.Receiver<int>) {
+    match (rx.receive()) {
+        channels.Received.Value(value) => { console.print_line(label + " " + value.to_string()); },
+        channels.Received.Closed => { console.print_line(label + " closed"); },
+        channels.Received.Cancelled => { console.print_line(label + " cancelled"); },
+    }
+};
+
+// The recorded scenario: channels, overlapping requests, a request nobody
+// completes, and a deadline on the scope that ends it.
+let mixed = func {
+    scope (limit) {
+        let ends = channels.open<int>(2);
+        let tx = ends[0];
+        let rx = ends[1];
+        limit.cancel_after(durations.of_millis(50));
+        spawn producer(1, tx);
+        spawn producer(2, tx);
+        spawn waiter(99);
+        spawn releaser();
+        received("first", rx);
+        received("second", rx);
+        console.print_line("root done");
+    }
+    console.print_line("scope closed");
+};
+
+// TcpStream.with_connection against the fake provider: socket 66 fails to
+// close (connection reset), socket 13 fails to open (connection refused).
+let outcome_text = func(outcome: result.Result<int>) -> string {
+    return match (outcome) {
+        result.Result.Ok(value) => "Ok " + value.to_string(),
+        result.Result.Err(problem) => "Err " + errors.message(problem),
+    };
+};
+
+let with_connection_cases = func {
+    console.print_line("ok body, close fails: " + outcome_text(net.with_connection<int>("fake", 66,
+        func(stream: net.TcpStream) -> result.Result<int> { return result.Result<int>.Ok(5); })));
+    console.print_line("err body, close fails: " + outcome_text(net.with_connection<int>("fake", 66,
+        func(stream: net.TcpStream) -> result.Result<int> {
+            return result.Result<int>.Err(errors.custom("test.failed", "the body failed"));
+        })));
+    console.print_line("ok body, close works: " + outcome_text(net.with_connection<int>("fake", 7,
+        func(stream: net.TcpStream) -> result.Result<int> { return result.Result<int>.Ok(6); })));
+    console.print_line("err body, close works: " + outcome_text(net.with_connection<int>("fake", 7,
+        func(stream: net.TcpStream) -> result.Result<int> {
+            return result.Result<int>.Err(errors.custom("test.failed", "the body failed"));
+        })));
+    console.print_line("open fails: " + outcome_text(net.with_connection<int>("fake", 13,
+        func(stream: net.TcpStream) -> result.Result<int> {
+            console.print_line("the body must not run");
+            return result.Result<int>.Ok(1);
+        })));
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let which = arguments[0];
+        if (which == "order") {
+            scope {
+                spawn waiter(1);
+                spawn waiter(2);
+                spawn releaser();
+            }
+        } else if (which == "starve") {
+            scope {
+                spawn waiter(0);
+                spawn busy(5000);
+            }
+        } else if (which == "limit") {
+            scope {
+                spawn waiter(1);
+                spawn waiter(2);
+                spawn waiter(3);
+            }
+        } else if (which == "completion-first") {
+            scope (s) {
+                spawn waiter(7);
+                pause();
+                release(7);
+                s.cancel();
+            }
+        } else if (which == "cancel-first") {
+            scope (s) {
+                spawn waiter(7);
+                pause();
+                s.cancel();
+                pause();
+                release(7);
+            }
+        } else if (which == "exit") {
+            scope {
+                spawn exiter();
+                spawn finisher();
+            }
+        } else if (which == "pending") {
+            let ends = channels.open<int>(0);
+            let rx = ends[1];
+            scope {
+                spawn producer(5, ends[0]);
+                received("got", rx);
+            }
+        } else if (which == "deadlock") {
+            let ends = channels.open<int>(0);
+            received("never", ends[1]);
+        } else if (which == "mixed") {
+            mixed();
+        } else if (which == "with-connection") {
+            with_connection_cases();
+        } else if (which == "single") {
+            scope {
+                report("single", 0, wait_for(0));
+                console.print_line("single task done");
+            }
+        }
+        return program.ExitCode.Ok;
+    };
+);
