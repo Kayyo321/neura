@@ -33,25 +33,25 @@ export let Sha256 = module (
         let total: uint64 = 0;
         let finished: bool = false;
 
-        export let init = func() -> void {
-            for (let t = 0; t < 64; t = t + 1) {
+        export let init = func {
+            for (let t = 0; t < 64; t++) {
                 schedule.append(0);
             }
         };
 
         // Adds the bytes to the message. Whole blocks are read in place from
         // `bytes`; only the bytes of an incomplete block are copied.
-        export let update = func(bytes: uint8[list]) -> void {
+        export let update = func(bytes: uint8[list]) {
             if (finished) {
                 trap_with_message("invalid state: digest finished");
             }
             let count = bytes.length;
-            total = total + (count as uint64);
+            total += (count as uint64);
             let i = 0;
             if (pending.length > 0) {
                 while (i < count && pending.length < 64) {
                     pending.append(bytes[i]);
-                    i = i + 1;
+                    i++;
                 }
                 if (pending.length < 64) {
                     return;
@@ -61,17 +61,17 @@ export let Sha256 = module (
             }
             while (i + 64 <= count) {
                 compress(bytes, i);
-                i = i + 64;
+                i += 64;
             }
             while (i < count) {
                 pending.append(bytes[i]);
-                i = i + 1;
+                i++;
             }
         };
 
         // Pads the message, ends the digest, and returns the 32 bytes of the
         // hash.
-        export let finish = func() -> uint8[list] {
+        export let finish = func -> uint8[list] {
             if (finished) {
                 trap_with_message("invalid state: digest finished");
             }
@@ -106,15 +106,15 @@ export let Sha256 = module (
         // from about 140,000 to about 33,000 but multiplies the neurons and
         // the image size by four, and the measured run time does not change.
         // The rolled loops are kept.
-        let compress = func(block: uint8[list], offset: int) -> void {
+        let compress = func(block: uint8[list], offset: int) {
             let w = schedule;
             let p = offset;
-            for (let t = 0; t < 16; t = t + 1) {
+            for (let t = 0; t < 16; t++) {
                 w[t] = ((block[p] as uint32) << 24) | ((block[p + 1] as uint32) << 16)
                     | ((block[p + 2] as uint32) << 8) | (block[p + 3] as uint32);
-                p = p + 4;
+                p += 4;
             }
-            for (let t = 16; t < 64; t = t + 1) {
+            for (let t = 16; t < 64; t++) {
                 let x = w[t - 15];
                 let y = w[t - 2];
                 let small_s0 = ((x >> 7) | (x << 25)) ^ ((x >> 18) | (x << 14)) ^ (x >> 3);
@@ -132,7 +132,7 @@ export let Sha256 = module (
             let g = words[6];
             let h = words[7];
             let k = RoundConstants;
-            for (let t = 0; t < 64; t = t + 1) {
+            for (let t = 0; t < 64; t++) {
                 let big_s1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7));
                 let choose = (e & f) ^ ((~e) & g);
                 // Below 5 * 2^32.
@@ -160,9 +160,7 @@ export let Sha256 = module (
     );
 
     // A new digest with no bytes added.
-    export let create = func() -> Sha256 {
-        return new Sha256();
-    };
+    export let create = func -> Sha256 => new Sha256();
 
     // The 32-byte hash of the bytes.
     export let of = func(bytes: uint8[list]) -> uint8[list] {

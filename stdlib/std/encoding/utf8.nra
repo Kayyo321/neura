@@ -1,4 +1,4 @@
-let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 
 // UTF-8 (Stdlib.md section 13.1) with the validity rules of section 8.1:
@@ -7,22 +7,16 @@ let strings = import:Std.Text.Strings;
 // Strings.from_bytes reports.
 export let Utf8 = module (
     // A copy of the string's bytes.
-    export let encode = func(s: string) -> uint8[list] {
-        return strings.to_bytes(s);
-    };
+    export let encode = func(s: string) -> uint8[list] => strings.to_bytes(s);
 
     // The text, or an Encoding error at the offset `validate` returns. The
     // message is "invalid start byte", "invalid continuation byte", or
     // "unexpected end of data".
-    export let decode = func(bytes: uint8[list]) -> result.Result<string> {
-        return strings.from_bytes(bytes);
-    };
+    export let decode = func(bytes: uint8[list]) -> Result<string> => strings.from_bytes(bytes);
 
     // The text with each maximal ill-formed subsequence (Unicode's maximal
     // subpart practice) replaced by one U+FFFD.
-    export let decode_lossy = func(bytes: uint8[list]) -> string {
-        return strings.from_bytes_lossy(bytes);
-    };
+    export let decode_lossy = func(bytes: uint8[list]) -> string => strings.from_bytes_lossy(bytes);
 
     // -1 when the bytes are valid UTF-8; otherwise the offset of the first
     // byte that cannot begin or continue a valid sequence's prefix, which is
@@ -38,7 +32,7 @@ export let Utf8 = module (
         while (i < count) {
             let lead = bytes[i];
             if (lead < 128) {
-                i = i + 1;
+                i++;
                 continue;
             }
             // The sequence length and the range of the second byte.
@@ -71,12 +65,12 @@ export let Utf8 = module (
             if (second < low || second > high) {
                 return i;
             }
-            for (let k = 2; k < size; k = k + 1) {
+            for (let k = 2; k < size; k++) {
                 if ((bytes[i + k] & 192) != 128) {
                     return i;
                 }
             }
-            i = i + size;
+            i += size;
         }
         return -1;
     };

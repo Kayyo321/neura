@@ -9,16 +9,16 @@ export let Crc32 = module (
     // The 256-entry byte table, computed by the first checksum that needs it.
     let table: uint32[list] = [];
 
-    let ready_table = func() -> uint32[list] {
+    let ready_table = func -> uint32[list] {
         if (table.length == 0) {
             let entries: uint32[list] = [];
-            for (let n: uint32 = 0; n < 256; n = n + 1) {
+            for (let n: uint32 = 0; n < 256; n++) {
                 let c = n;
-                for (let k = 0; k < 8; k = k + 1) {
+                for (let k = 0; k < 8; k++) {
                     if ((c & 1) == 1) {
                         c = Polynomial ^ (c >> 1);
                     } else {
-                        c = c >> 1;
+                        c >>= 1;
                     }
                 }
                 entries.append(c);
@@ -40,11 +40,11 @@ export let Crc32 = module (
             c = entries[((c ^ (bytes[i + 1] as uint32)) & 255) as int] ^ (c >> 8);
             c = entries[((c ^ (bytes[i + 2] as uint32)) & 255) as int] ^ (c >> 8);
             c = entries[((c ^ (bytes[i + 3] as uint32)) & 255) as int] ^ (c >> 8);
-            i = i + 4;
+            i += 4;
         }
         while (i < count) {
             c = entries[((c ^ (bytes[i] as uint32)) & 255) as int] ^ (c >> 8);
-            i = i + 1;
+            i++;
         }
         return c;
     };
@@ -54,32 +54,26 @@ export let Crc32 = module (
     export let Crc32 = class (
         let register: uint32 = 4294967295;
 
-        export let init = func() -> void {
+        export let init = func {
         };
 
         // Adds the bytes to the checksum.
-        export let update = func(bytes: uint8[list]) -> void {
+        export let update = func(bytes: uint8[list]) {
             register = advance(register, bytes);
         };
 
         // The checksum of every byte added since creation or the last reset.
         // Reading it does not end the computation.
-        export let value = func() -> uint32 {
-            return register ^ AllOnes;
-        };
+        export let value = func -> uint32 => register ^ AllOnes;
 
-        export let reset = func() -> void {
+        export let reset = func {
             register = AllOnes;
         };
     );
 
     // A new checksum with no bytes added.
-    export let create = func() -> Crc32 {
-        return new Crc32();
-    };
+    export let create = func -> Crc32 => new Crc32();
 
     // The checksum of the bytes.
-    export let of = func(bytes: uint8[list]) -> uint32 {
-        return advance(AllOnes, bytes) ^ AllOnes;
-    };
+    export let of = func(bytes: uint8[list]) -> uint32 => advance(AllOnes, bytes) ^ AllOnes;
 );

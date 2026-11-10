@@ -1,5 +1,5 @@
-let error = import:Std.Core.Error;
-let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
 
 // Base 16 (Stdlib.md section 13.1). The encoder writes lowercase digits;
 // the decoder accepts either case.
@@ -8,16 +8,16 @@ export let Hex = module (
     // decode that needs it.
     let digit_values: uint8[list] = [];
 
-    let ready_values = func() -> uint8[list] {
+    let ready_values = func -> uint8[list] {
         if (digit_values.length == 0) {
             let values: uint8[list] = [];
-            for (let b = 0; b < 256; b = b + 1) {
+            for (let b = 0; b < 256; b++) {
                 values.append(255);
             }
-            for (let v: uint8 = 0; v < 10; v = v + 1) {
+            for (let v: uint8 = 0; v < 10; v++) {
                 values[(48 + v) as int] = v;
             }
-            for (let v: uint8 = 10; v < 16; v = v + 1) {
+            for (let v: uint8 = 10; v < 16; v++) {
                 values[(55 + v) as int] = v;
                 values[(87 + v) as int] = v;
             }
@@ -45,7 +45,7 @@ export let Hex = module (
     // with an Encoding error at its offset ("invalid hex digit"); an odd
     // number of digits fails at the text's length ("odd number of hex
     // digits").
-    export let decode = func(text: string) -> result.Result<uint8[list]> {
+    export let decode = func(text: string) -> Result<uint8[list]> {
         let values = ready_values();
         let count = text.byte_length;
         let bytes: uint8[list] = [];
@@ -60,7 +60,7 @@ export let Hex = module (
                 return failure(i + 1, "invalid hex digit");
             }
             bytes.append((high << 4) | low);
-            i = i + 2;
+            i += 2;
         }
         if (i < count) {
             if (values[text.byte_at(i) as int] > 15) {
@@ -68,10 +68,9 @@ export let Hex = module (
             }
             return failure(count, "odd number of hex digits");
         }
-        return result.Result<uint8[list]>.Ok(bytes);
+        return Result<uint8[list]>.Ok(bytes);
     };
 
-    let failure = func(offset: int, message: string) -> result.Result<uint8[list]> {
-        return result.Result<uint8[list]>.Err(error.Error.Encoding { offset: offset, message: message });
-    };
+    let failure = func(offset: int, message: string) -> Result<uint8[list]> =>
+        Result<uint8[list]>.Err(Error.Encoding { offset: offset, message: message });
 );

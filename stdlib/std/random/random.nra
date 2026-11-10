@@ -1,7 +1,7 @@
-let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Error;
 let host_error = import:Std.Core.Internal.HostError;
 let maths = import:Std.Math.Math;
-let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Result;
 let uint64s = import:Std.Core.UInt64;
 
 // A seeded pseudo-random generator: xoshiro256** over four uint64 words,
@@ -20,7 +20,7 @@ export let Random = module (
         let has_spare: bool = false;
         let spare: float64 = 0.0;
 
-        export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64) -> void {
+        export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64) {
             s0 = a;
             s1 = b;
             s2 = c;
@@ -28,27 +28,23 @@ export let Random = module (
         };
 
         // One step: rotate_left(s1 * 5, 7) * 9, then the state transition.
-        export let next_uint64 = func() -> uint64 {
+        export let next_uint64 = func -> uint64 {
             let output = times9(rotate(times5(s1), 7));
             let t = s1 << 17;
-            s2 = s2 ^ s0;
-            s3 = s3 ^ s1;
-            s1 = s1 ^ s2;
-            s0 = s0 ^ s3;
-            s2 = s2 ^ t;
+            s2 ^= s0;
+            s3 ^= s1;
+            s1 ^= s2;
+            s0 ^= s3;
+            s2 ^= t;
             s3 = rotate(s3, 45);
             return output;
         };
 
         // The high 32 bits of one step.
-        export let next_uint32 = func() -> uint32 {
-            return (next_uint64() >> 32) as uint32;
-        };
+        export let next_uint32 = func -> uint32 => (next_uint64() >> 32) as uint32;
 
         // The top bit of one step.
-        export let next_bool = func() -> bool {
-            return (next_uint64() >> 63) == 1;
-        };
+        export let next_bool = func -> bool => (next_uint64() >> 63) == 1;
 
         // Uniform in 0 up to but excluding `bound`: next_uint32 masked to
         // the smallest all-ones mask covering bound - 1, drawn until below
@@ -74,15 +70,14 @@ export let Random = module (
 
         // The top 53 bits of one step times 2^-53: uniform in 0 up to but
         // excluding 1.
-        export let next_float64 = func() -> float64 {
-            return ((next_uint64() >> 11) as float64) * 0.00000000000000011102230246251565404236316680908203125;
-        };
+        export let next_float64 = func -> float64 =>
+            ((next_uint64() >> 11) as float64) * 0.00000000000000011102230246251565404236316680908203125;
 
         // A standard normal value by Marsaglia's polar method: u and v are
         // next_float64() * 2 - 1, drawn in pairs until s = u^2 + v^2 is
         // below 1 and not 0; then m = sqrt(-2 log(s) / s) with Std.Math,
         // u * m is returned and v * m is kept for the next call.
-        export let next_gaussian = func() -> float64 {
+        export let next_gaussian = func -> float64 {
             if (has_spare) {
                 has_spare = false;
                 return spare;
@@ -90,13 +85,11 @@ export let Random = module (
             let u = 0.0;
             let v = 0.0;
             let s = 0.0;
-            let searching = true;
-            while (searching) {
+            do {
                 u = next_float64() * 2.0 - 1.0;
                 v = next_float64() * 2.0 - 1.0;
                 s = u * u + v * v;
-                searching = !(s < 1.0 && s != 0.0);
-            }
+            } while (!(s < 1.0 && s != 0.0));
             let factor = maths.sqrt(-2.0 * maths.log(s) / s);
             spare = v * factor;
             has_spare = true;
@@ -116,8 +109,8 @@ export let Random = module (
                 let k = 0;
                 while (k < 8 && bytes.length < count) {
                     bytes.append((word & 255) as uint8);
-                    word = word >> 8;
-                    k = k + 1;
+                    word >>= 8;
+                    k++;
                 }
             }
             return bytes;
@@ -125,14 +118,14 @@ export let Random = module (
 
         // Fisher-Yates: for i from the last index down to 1, swaps i with
         // next_int_below(i + 1).
-        export let shuffle = func<T>(items: T[list]) -> void {
+        export let shuffle = func<T>(items: T[list]) {
             let i = items.length - 1;
             while (i >= 1) {
                 let j = next_int_below(i + 1);
                 let held = items[i];
                 items[i] = items[j];
                 items[j] = held;
-                i = i - 1;
+                i--;
             }
         };
 
@@ -148,18 +141,17 @@ export let Random = module (
         // Uniform below a bound from 1 through 2^32 - 1.
         let below = func(bound: uint32) -> uint32 {
             let mask = bound - 1;
-            mask = mask | (mask >> 1);
-            mask = mask | (mask >> 2);
-            mask = mask | (mask >> 4);
-            mask = mask | (mask >> 8);
-            mask = mask | (mask >> 16);
-            while (true) {
+            mask |= (mask >> 1);
+            mask |= (mask >> 2);
+            mask |= (mask >> 4);
+            mask |= (mask >> 8);
+            mask |= (mask >> 16);
+            do {
                 let candidate = next_uint32() & mask;
                 if (candidate < bound) {
                     return candidate;
                 }
             }
-            return 0;
         };
     );
 
@@ -184,28 +176,26 @@ export let Random = module (
     // Seeds with 8 bytes from neura.entropy.fill, read as a little-endian
     // uint64. Needs the entropy capability; a denied or failed request is
     // an Io error (CapabilityDenied when denied).
-    export let from_entropy = func() -> result.Result<Random> {
-        return match (fill_entropy(8)) {
-            FillOutcome.Ok(bytes) => seeded_from(bytes),
-            FillOutcome.Error(code) => result.Result<Random>.Err(host_error.io(code, "entropy request failed", "")),
-        };
+    export let from_entropy = func -> Result<Random> => match (fill_entropy(8)) {
+        FillOutcome.Ok(bytes) => seeded_from(bytes),
+        FillOutcome.Error(code) => Result<Random>.Err(host_error.io(code, "entropy request failed", "")),
     };
 
-    let seeded_from = func(bytes: uint8[list]) -> result.Result<Random> {
+    let seeded_from = func(bytes: uint8[list]) -> Result<Random> {
         if (bytes.length != 8) {
-            let wrong = error.Error.Io {
-                kind: error.IoErrorKind.InvalidData, message: "entropy source returned " + bytes.length.to_string() + " bytes",
+            let wrong = Error.Io {
+                kind: IoErrorKind.InvalidData, message: "entropy source returned " + bytes.length.to_string() + " bytes",
                 path: ""
             };
-            return result.Result<Random>.Err(wrong);
+            return Result<Random>.Err(wrong);
         }
         let seed: uint64 = 0;
         let i = 7;
         while (i >= 0) {
             seed = (seed << 8) | (bytes[i] as uint64);
-            i = i - 1;
+            i--;
         }
-        return result.Result<Random>.Ok(seeded(seed));
+        return Result<Random>.Ok(seeded(seed));
     };
 
     // The SplitMix64 output function for a state.
@@ -217,16 +207,10 @@ export let Random = module (
     };
 
     // x * 5 and x * 9 modulo 2^64 as a shift and a wrapping add.
-    let times5 = func(x: uint64) -> uint64 {
-        return uint64s.wrapping_add(x << 2, x);
-    };
+    let times5 = func(x: uint64) -> uint64 => uint64s.wrapping_add(x << 2, x);
 
-    let times9 = func(x: uint64) -> uint64 {
-        return uint64s.wrapping_add(x << 3, x);
-    };
+    let times9 = func(x: uint64) -> uint64 => uint64s.wrapping_add(x << 3, x);
 
     // A rotation by 1 through 63.
-    let rotate = func(x: uint64, count: int) -> uint64 {
-        return (x << count) | (x >> (64 - count));
-    };
+    let rotate = func(x: uint64, count: int) -> uint64 => (x << count) | (x >> (64 - count));
 );

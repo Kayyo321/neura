@@ -1,12 +1,12 @@
 let big_decimals = import:Std.Math.BigDecimal;
-let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Error;
 let float64s = import:Std.Core.Float64;
 let hashing = import:Std.Core.Hash;
-let optional = import:Std.Core.Optional;
-let ordering = import:Std.Core.Ordering;
-let result = import:Std.Core.Result;
+let.promote optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
 let sorting = import:Std.Collections.Sorting;
-let string_maps = import:Std.Collections.StringMap;
+let.promote string_maps = import:Std.Collections.StringMap;
 
 // JSON (RFC 8259; Stdlib.md section 13.1). A value is the recursive payload
 // enum JsonValue. Numbers keep their JSON text, so nothing is lost in a
@@ -33,9 +33,7 @@ export let Json = module (
     const MaxDepth: int = 512;
 
     // A Number with the integer's decimal text.
-    export let number_of_int64 = func(v: int64) -> JsonValue {
-        return JsonValue.Number(v.to_string());
-    };
+    export let number_of_int64 = func(v: int64) -> JsonValue => JsonValue.Number(v.to_string());
 
     // A Number with the float's shortest round-trip text (Stdlib.md section
     // 7.5), which is valid JSON number text. NaN and the infinities trap
@@ -48,22 +46,22 @@ export let Json = module (
     };
 
     // The value of the first member with the name.
-    export let member = func(members: [string, JsonValue][list], name: string) -> optional.Optional<JsonValue> {
+    export let member = func(members: [string, JsonValue][list], name: string) -> Optional<JsonValue> {
         for (let entry in members) {
             if (entry[0] == name) {
-                return optional.Optional<JsonValue>.Some(entry[1]);
+                return Optional<JsonValue>.Some(entry[1]);
             }
         }
-        return optional.Optional<JsonValue>.None;
+        return Optional<JsonValue>.None;
     };
 
     // Some(the value) when the text is a JSON number with no fraction and no
     // exponent whose value fits in int64; otherwise None, including for text
     // that is not a JSON number.
-    export let number_to_int64 = func(text: string) -> optional.Optional<int64> {
+    export let number_to_int64 = func(text: string) -> Optional<int64> {
         let count = text.byte_length;
         if (scan_number(text, 0) != count) {
-            return optional.Optional<int64>.None;
+            return Optional<int64>.None;
         }
         let negative = text.byte_at(0) == 45;
         let i = 0;
@@ -75,22 +73,22 @@ export let Json = module (
         while (i < count) {
             let b = text.byte_at(i);
             if (b < 48 || b > 57) {
-                return optional.Optional<int64>.None;
+                return Optional<int64>.None;
             }
             let digit = (b - 48) as int64;
             if (value < -922337203685477580 || (value == -922337203685477580 && digit > 8)) {
-                return optional.Optional<int64>.None;
+                return Optional<int64>.None;
             }
             value = value * 10 - digit;
-            i = i + 1;
+            i++;
         }
         if (negative) {
-            return optional.Optional<int64>.Some(value);
+            return Optional<int64>.Some(value);
         }
         if (value == -9223372036854775807 - 1) {
-            return optional.Optional<int64>.None;
+            return Optional<int64>.None;
         }
-        return optional.Optional<int64>.Some(-value);
+        return Optional<int64>.Some(-value);
     };
 
     // The float64 nearest the number, ties to even (Float64.parse). Text that
@@ -98,8 +96,8 @@ export let Json = module (
     export let number_to_float64 = func(text: string) -> float64 {
         require_number(text);
         return match (float64s.parse(text)) {
-            result.Result.Ok(v) => v,
-            result.Result.Err(_) => trapped_float("invalid state: Float64.parse rejected JSON number text"),
+            Result.Ok(v) => v,
+            Result.Err(_) => trapped_float("invalid state: Float64.parse rejected JSON number text"),
         };
     };
 
@@ -112,8 +110,8 @@ export let Json = module (
     export let number_to_big_decimal = func(text: string) -> big_decimals.BigDecimal {
         require_number(text);
         return match (big_decimals.parse(text)) {
-            result.Result.Ok(v) => v,
-            result.Result.Err(_) => trapped_decimal("invalid argument: number exponent out of range"),
+            Result.Ok(v) => v,
+            Result.Err(_) => trapped_decimal("invalid argument: number exponent out of range"),
         };
     };
 
@@ -135,17 +133,17 @@ export let Json = module (
     //   the escape's backslash.
     // - OutOfRange, "nesting deeper than 512": at the bracket that opens the
     //   513th level.
-    export let parse = func(text: string) -> result.Result<JsonValue> {
+    export let parse = func(text: string) -> Result<JsonValue> {
         let parser = new Parser();
         parser.document(text);
         if (parser.failed) {
-            return result.Result<JsonValue>.Err(error.Error.Parse {
+            return Result<JsonValue>.Err(Error.Parse {
                 kind: parser.failure_kind,
                 offset: parser.failure_offset,
                 message: parser.failure_message,
             });
         }
-        return result.Result<JsonValue>.Ok(parser.value);
+        return Result<JsonValue>.Ok(parser.value);
     };
 
     // The value's JSON text with no whitespace. A Number whose text is not
@@ -226,21 +224,19 @@ export let Json = module (
     // "0" for zero and otherwise an optional "-", the significant digits
     // without leading or trailing zeros, "e", and the decimal exponent that
     // makes them an integer: 120.50 is "1205e-1".
-    export let hash = func(value: JsonValue) -> uint32 {
-        return match (value) {
-            JsonValue.Null => 1,
-            JsonValue.Boolean(b) => hashing.combine(2, hashing.of_bool(b)),
-            JsonValue.Number(text) => hashing.combine(3, canonical_number(text).hash_code()),
-            JsonValue.Text(s) => hashing.combine(4, s.hash_code()),
-            JsonValue.Array(items) => array_hash(items),
-            JsonValue.Object(members) => object_hash(members),
-        };
+    export let hash = func(value: JsonValue) -> uint32 => match (value) {
+        JsonValue.Null => 1,
+        JsonValue.Boolean(b) => hashing.combine(2, hashing.of_bool(b)),
+        JsonValue.Number(text) => hashing.combine(3, canonical_number(text).hash_code()),
+        JsonValue.Text(s) => hashing.combine(4, s.hash_code()),
+        JsonValue.Array(items) => array_hash(items),
+        JsonValue.Object(members) => object_hash(members),
     };
 
     // A StringMap from each member name to its value, in member order. For
     // a repeated name the last value wins and the name keeps its first
     // position, as in parse.
-    export let index = func(members: [string, JsonValue][list]) -> string_maps.StringMap<JsonValue> {
+    export let index = func(members: [string, JsonValue][list]) -> StringMap<JsonValue> {
         let map = string_maps.create<JsonValue>();
         for (let entry in members) {
             map.set(entry[0], entry[1]);
@@ -260,20 +256,20 @@ export let Json = module (
         export let value: JsonValue = JsonValue.Null;
         let text_value: string = "";
         export let failed: bool = false;
-        export let failure_kind: error.ParseErrorKind = error.ParseErrorKind.Syntax;
+        export let failure_kind: ParseErrorKind = ParseErrorKind.Syntax;
         export let failure_offset: int = 0;
         export let failure_message: string = "";
 
-        export let init = func() -> void {
+        export let init = func {
         };
 
         // Parses the whole text; afterwards `value` or the failure fields
         // hold the outcome.
-        export let document = func(text: string) -> void {
+        export let document = func(text: string) {
             let count = text.byte_length;
             let p = skip_whitespace(text, count, 0);
             if (p == count) {
-                fail(error.ParseErrorKind.Empty, count, "no value");
+                fail(ParseErrorKind.Empty, count, "no value");
                 return;
             }
             p = value_at(text, count, p, 0);
@@ -282,11 +278,11 @@ export let Json = module (
             }
             p = skip_whitespace(text, count, p);
             if (p < count) {
-                fail(error.ParseErrorKind.Syntax, p, "unexpected text after value");
+                fail(ParseErrorKind.Syntax, p, "unexpected text after value");
             }
         };
 
-        let fail = func(kind: error.ParseErrorKind, offset: int, message: string) -> int {
+        let fail = func(kind: ParseErrorKind, offset: int, message: string) -> int {
             if (!failed) {
                 failed = true;
                 failure_kind = kind;
@@ -296,9 +292,8 @@ export let Json = module (
             return -1;
         };
 
-        let end_of_input = func(count: int) -> int {
-            return fail(error.ParseErrorKind.UnexpectedEnd, count, "unexpected end of input");
-        };
+        let end_of_input = func(count: int) -> int =>
+            fail(ParseErrorKind.UnexpectedEnd, count, "unexpected end of input");
 
         // The value at the first non-whitespace byte at or after `start`;
         // `depth` arrays and objects enclose it.
@@ -348,7 +343,7 @@ export let Json = module (
                 value = JsonValue.Null;
                 return literal(text, count, p, "null");
             }
-            return fail(error.ParseErrorKind.Syntax, p, "expected a value");
+            return fail(ParseErrorKind.Syntax, p, "expected a value");
         };
 
         let literal = func(text: string, count: int, p: int, word: string) -> int {
@@ -360,13 +355,13 @@ export let Json = module (
                     return end;
                 }
             }
-            for (let k = 0; k < length; k = k + 1) {
+            for (let k = 0; k < length; k++) {
                 let at = p + k;
                 if (at == count) {
                     return end_of_input(count);
                 }
                 if (text.byte_at(at) != word.byte_at(k)) {
-                    return fail(error.ParseErrorKind.InvalidCharacter, at, "invalid literal");
+                    return fail(ParseErrorKind.InvalidCharacter, at, "invalid literal");
                 }
             }
             return p + length;
@@ -379,14 +374,14 @@ export let Json = module (
             }
             let b = text.byte_at(at);
             if (b >= 48 && b <= 57) {
-                return fail(error.ParseErrorKind.InvalidCharacter, at, "leading zero");
+                return fail(ParseErrorKind.InvalidCharacter, at, "leading zero");
             }
-            return fail(error.ParseErrorKind.InvalidCharacter, at, "expected a digit");
+            return fail(ParseErrorKind.InvalidCharacter, at, "expected a digit");
         };
 
         let array_at = func(text: string, count: int, start: int, depth: int) -> int {
             if (depth > MaxDepth) {
-                return fail(error.ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
+                return fail(ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
             }
             let items: JsonValue[list] = [];
             let p = skip_whitespace(text, count, start + 1);
@@ -394,7 +389,7 @@ export let Json = module (
                 value = JsonValue.Array(items);
                 return p + 1;
             }
-            while (true) {
+            do {
                 p = value_at(text, count, p, depth);
                 if (p < 0) {
                     return p;
@@ -416,35 +411,34 @@ export let Json = module (
                     return p + 1;
                 }
                 if (b != 44) {
-                    return fail(error.ParseErrorKind.Syntax, p, "expected ',' or ']'");
+                    return fail(ParseErrorKind.Syntax, p, "expected ',' or ']'");
                 }
-                p = p + 1;
+                p++;
             }
-            return -1;
         };
 
         let object_at = func(text: string, count: int, start: int, depth: int) -> int {
             if (depth > MaxDepth) {
-                return fail(error.ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
+                return fail(ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
             }
             let members: [string, JsonValue][list] = [];
             // The member names, read without unpacking the tuples, and the
             // member positions by name once the object is large enough
             // that scanning for a repeated name would cost more.
             let names: string[list] = [];
-            let positions: string_maps.StringMap<int> = nil;
+            let positions: StringMap<int> = nil;
             let p = skip_whitespace(text, count, start + 1);
             if (p < count && text.byte_at(p) == 125) {
                 value = JsonValue.Object(members);
                 return p + 1;
             }
-            while (true) {
+            do {
                 p = skip_whitespace(text, count, p);
                 if (p == count) {
                     return end_of_input(count);
                 }
                 if (text.byte_at(p) != 34) {
-                    return fail(error.ParseErrorKind.Syntax, p, "expected a member name");
+                    return fail(ParseErrorKind.Syntax, p, "expected a member name");
                 }
                 p = string_at(text, count, p);
                 if (p < 0) {
@@ -463,7 +457,7 @@ export let Json = module (
                     colon = text.byte_at(p);
                 }
                 if (colon != 58) {
-                    return fail(error.ParseErrorKind.Syntax, p, "expected ':'");
+                    return fail(ParseErrorKind.Syntax, p, "expected ':'");
                 }
                 p = value_at(text, count, p + 1, depth);
                 if (p < 0) {
@@ -473,7 +467,7 @@ export let Json = module (
                 let existing = -1;
                 if (positions == nil) {
                     let size = names.length;
-                    for (let k = 0; k < size; k = k + 1) {
+                    for (let k = 0; k < size; k++) {
                         if (names[k] == name) {
                             existing = k;
                             break;
@@ -481,7 +475,7 @@ export let Json = module (
                     }
                     if (existing < 0 && size == 16) {
                         positions = string_maps.create<int>();
-                        for (let k = 0; k < size; k = k + 1) {
+                        for (let k = 0; k < size; k++) {
                             positions.set(names[k], k);
                         }
                         positions.set(name, size);
@@ -514,11 +508,10 @@ export let Json = module (
                     return p + 1;
                 }
                 if (b != 44) {
-                    return fail(error.ParseErrorKind.Syntax, p, "expected ',' or '}'");
+                    return fail(ParseErrorKind.Syntax, p, "expected ',' or '}'");
                 }
-                p = p + 1;
+                p++;
             }
-            return -1;
         };
 
         // The string whose opening quote is at `start`, into `text_value`.
@@ -540,7 +533,7 @@ export let Json = module (
                     return i + 1;
                 }
                 if (b < 32) {
-                    return fail(error.ParseErrorKind.InvalidCharacter, i, "control character in string");
+                    return fail(ParseErrorKind.InvalidCharacter, i, "control character in string");
                 }
                 if (b != 92) {
                     let end = plain_end(text, count, i);
@@ -573,10 +566,10 @@ export let Json = module (
                 } else if (e == 116) {
                     decoded = 9;
                 } else {
-                    return fail(error.ParseErrorKind.InvalidCharacter, i, "invalid escape");
+                    return fail(ParseErrorKind.InvalidCharacter, i, "invalid escape");
                 }
                 out.append(decoded);
-                i = i + 2;
+                i += 2;
             }
             return end_of_input(count);
         };
@@ -592,7 +585,7 @@ export let Json = module (
             let scalar = unit as uint32;
             let next = at + 6;
             if (unit >= 56320 && unit <= 57343) {
-                return fail(error.ParseErrorKind.InvalidCharacter, at, "unpaired surrogate");
+                return fail(ParseErrorKind.InvalidCharacter, at, "unpaired surrogate");
             }
             if (unit >= 55296 && unit <= 56319) {
                 // A high surrogate needs a \u escape of a low surrogate next.
@@ -600,17 +593,17 @@ export let Json = module (
                     return end_of_input(count);
                 }
                 if (text.byte_at(next) != 92 || text.byte_at(next + 1) != 117) {
-                    return fail(error.ParseErrorKind.InvalidCharacter, at, "unpaired surrogate");
+                    return fail(ParseErrorKind.InvalidCharacter, at, "unpaired surrogate");
                 }
                 let low = hex_unit(text, count, next);
                 if (low < 0) {
                     return -1;
                 }
                 if (low < 56320 || low > 57343) {
-                    return fail(error.ParseErrorKind.InvalidCharacter, at, "unpaired surrogate");
+                    return fail(ParseErrorKind.InvalidCharacter, at, "unpaired surrogate");
                 }
                 scalar = 65536 + (((unit - 55296) as uint32) << 10) + ((low - 56320) as uint32);
-                next = next + 6;
+                next += 6;
             }
             append_scalar(out, scalar);
             return next;
@@ -620,7 +613,7 @@ export let Json = module (
         // -1 after recording a failure.
         let hex_unit = func(text: string, count: int, at: int) -> int {
             let unit = 0;
-            for (let k = 2; k < 6; k = k + 1) {
+            for (let k = 2; k < 6; k++) {
                 if (at + k >= count) {
                     return end_of_input(count);
                 }
@@ -634,7 +627,7 @@ export let Json = module (
                     digit = b - 55;
                 }
                 if (digit < 0) {
-                    return fail(error.ParseErrorKind.InvalidCharacter, at, "invalid \\u escape");
+                    return fail(ParseErrorKind.InvalidCharacter, at, "invalid \\u escape");
                 }
                 unit = unit * 16 + digit;
             }
@@ -651,7 +644,7 @@ export let Json = module (
             if (b != 32 && b != 10 && b != 13 && b != 9) {
                 return i;
             }
-            i = i + 1;
+            i++;
         }
         return count;
     };
@@ -670,32 +663,32 @@ export let Json = module (
                 || b2 == 34 || b2 == 92 || b2 < 32 || b3 == 34 || b3 == 92 || b3 < 32) {
                 break;
             }
-            i = i + 4;
+            i += 4;
         }
         while (i < count) {
             let b = text.byte_at(i);
             if (b == 34 || b == 92 || b < 32) {
                 return i;
             }
-            i = i + 1;
+            i++;
         }
         return count;
     };
 
     // Appends the bytes of `text` from `start` up to `end`, four at a time
     // where possible.
-    let copy_bytes = func(out: uint8[list], text: string, start: int, end: int) -> void {
+    let copy_bytes = func(out: uint8[list], text: string, start: int, end: int) {
         let i = start;
         while (i + 4 <= end) {
             out.append(text.byte_at(i));
             out.append(text.byte_at(i + 1));
             out.append(text.byte_at(i + 2));
             out.append(text.byte_at(i + 3));
-            i = i + 4;
+            i += 4;
         }
         while (i < end) {
             out.append(text.byte_at(i));
-            i = i + 1;
+            i++;
         }
     };
 
@@ -708,14 +701,14 @@ export let Json = module (
         let count = text.byte_length;
         let i = start;
         if (i < count && text.byte_at(i) == 45) {
-            i = i + 1;
+            i++;
         }
         if (i == count) {
             return -1 - i;
         }
         let b = text.byte_at(i);
         if (b == 48) {
-            i = i + 1;
+            i++;
             if (i < count && is_digit(text.byte_at(i))) {
                 return -1 - i;
             }
@@ -725,16 +718,16 @@ export let Json = module (
             return -1 - i;
         }
         if (i < count && text.byte_at(i) == 46) {
-            i = i + 1;
+            i++;
             if (i == count || !is_digit(text.byte_at(i))) {
                 return -1 - i;
             }
             i = digits_end(text, i + 1);
         }
         if (i < count && (text.byte_at(i) == 101 || text.byte_at(i) == 69)) {
-            i = i + 1;
+            i++;
             if (i < count && (text.byte_at(i) == 43 || text.byte_at(i) == 45)) {
-                i = i + 1;
+                i++;
             }
             if (i == count || !is_digit(text.byte_at(i))) {
                 return -1 - i;
@@ -755,23 +748,21 @@ export let Json = module (
             if (b0 < 48 || b0 > 57 || b1 < 48 || b1 > 57 || b2 < 48 || b2 > 57 || b3 < 48 || b3 > 57) {
                 break;
             }
-            i = i + 4;
+            i += 4;
         }
         while (i < count) {
             let b = text.byte_at(i);
             if (b < 48 || b > 57) {
                 return i;
             }
-            i = i + 1;
+            i++;
         }
         return i;
     };
 
-    let is_digit = func(b: uint8) -> bool {
-        return b >= 48 && b <= 57;
-    };
+    let is_digit = func(b: uint8) -> bool => b >= 48 && b <= 57;
 
-    let require_number = func(text: string) -> void {
+    let require_number = func(text: string) {
         if (scan_number(text, 0) != text.byte_length) {
             trap_with_message("invalid argument: number text");
         }
@@ -789,7 +780,7 @@ export let Json = module (
 
     // Appends the value's text. A negative indent writes no whitespace;
     // otherwise `level` is the nesting depth of the value.
-    let write_value = func(out: uint8[list], value: JsonValue, indent: int, level: int) -> void {
+    let write_value = func(out: uint8[list], value: JsonValue, indent: int, level: int) {
         match (value) {
             JsonValue.Null => {
                 copy_bytes(out, "null", 0, 4);
@@ -811,7 +802,7 @@ export let Json = module (
             JsonValue.Array(items) => {
                 out.append(91);
                 let count = items.length;
-                for (let i = 0; i < count; i = i + 1) {
+                for (let i = 0; i < count; i++) {
                     if (i > 0) {
                         out.append(44);
                     }
@@ -826,7 +817,7 @@ export let Json = module (
             JsonValue.Object(members) => {
                 out.append(123);
                 let count = members.length;
-                for (let i = 0; i < count; i = i + 1) {
+                for (let i = 0; i < count; i++) {
                     if (i > 0) {
                         out.append(44);
                     }
@@ -847,20 +838,20 @@ export let Json = module (
         }
     };
 
-    let new_line = func(out: uint8[list], indent: int, level: int) -> void {
+    let new_line = func(out: uint8[list], indent: int, level: int) {
         if (indent < 0) {
             return;
         }
         out.append(10);
         let spaces = indent * level;
-        for (let k = 0; k < spaces; k = k + 1) {
+        for (let k = 0; k < spaces; k++) {
             out.append(32);
         }
     };
 
     // Appends the string in quotes, escaping the quote, the backslash, and
     // every byte below 0x20.
-    let append_string = func(out: uint8[list], s: string) -> void {
+    let append_string = func(out: uint8[list], s: string) {
         out.append(34);
         let count = s.byte_length;
         let i = 0;
@@ -877,12 +868,12 @@ export let Json = module (
                     out.append(b1);
                     out.append(b2);
                     out.append(b3);
-                    i = i + 4;
+                    i += 4;
                     continue;
                 }
             }
             let b = s.byte_at(i);
-            i = i + 1;
+            i++;
             if (b >= 32 && b != 34 && b != 92) {
                 out.append(b);
             } else {
@@ -913,7 +904,7 @@ export let Json = module (
         out.append(34);
     };
 
-    let append_scalar = func(out: uint8[list], value: uint32) -> void {
+    let append_scalar = func(out: uint8[list], value: uint32) {
         if (value < 128) {
             out.append(value as uint8);
         } else if (value < 2048) {
@@ -955,7 +946,7 @@ export let Json = module (
         if (count != b.length) {
             return false;
         }
-        for (let i = 0; i < count; i = i + 1) {
+        for (let i = 0; i < count; i++) {
             if (!equals(a[i], b[i])) {
                 return false;
             }
@@ -971,7 +962,7 @@ export let Json = module (
         // Members in the same order with equal values make equal objects.
         let i = 0;
         while (i < count && a[i][0] == b[i][0] && equals(a[i][1], b[i][1])) {
-            i = i + 1;
+            i++;
         }
         if (i == count) {
             return true;
@@ -1013,7 +1004,7 @@ export let Json = module (
         sorting.sort<uint32>(pairs, compare_hashes);
         let total: uint64 = 0;
         let count = pairs.length;
-        for (let i = 0; i < count; i = i + 1) {
+        for (let i = 0; i < count; i++) {
             if (i == 0 || pairs[i] != pairs[i - 1]) {
                 total = (total + (pairs[i] as uint64)) & 4294967295;
             }
@@ -1021,14 +1012,14 @@ export let Json = module (
         return hashing.combine(hashing.combine(6, count as uint32), total as uint32);
     };
 
-    let compare_hashes = func(a: uint32, b: uint32) -> ordering.Ordering {
+    let compare_hashes = func(a: uint32, b: uint32) -> Ordering {
         if (a < b) {
-            return ordering.Ordering.Less;
+            return Ordering.Less;
         }
         if (a > b) {
-            return ordering.Ordering.Greater;
+            return Ordering.Greater;
         }
-        return ordering.Ordering.Equal;
+        return Ordering.Equal;
     };
 
     // The canonical text of a JSON number: "0" for zero; otherwise an
@@ -1048,21 +1039,21 @@ export let Json = module (
         let fraction_start = integer_end;
         let fraction_end = integer_end;
         if (fraction_start < count && text.byte_at(fraction_start) == 46) {
-            fraction_start = fraction_start + 1;
+            fraction_start++;
             fraction_end = digits_end(text, fraction_start);
         }
         // The significant digits, read through the integer part and then
         // the fraction.
         let digits: uint8[list] = [];
         let started = false;
-        for (let k = i; k < integer_end; k = k + 1) {
+        for (let k = i; k < integer_end; k++) {
             let b = text.byte_at(k);
             if (b != 48 || started) {
                 started = true;
                 digits.append(b);
             }
         }
-        for (let k = fraction_start; k < fraction_end; k = k + 1) {
+        for (let k = fraction_start; k < fraction_end; k++) {
             let b = text.byte_at(k);
             if (b != 48 || started) {
                 started = true;
@@ -1077,20 +1068,20 @@ export let Json = module (
         let adjustment = (fraction_start - fraction_end) as int64;
         while (digits[digits.length - 1] == 48) {
             digits.remove_at(digits.length - 1);
-            adjustment = adjustment + 1;
+            adjustment++;
         }
         let exponent = "0";
         let exponent_negative = false;
         if (fraction_end < count) {
             let e = fraction_end + 1;
             if (text.byte_at(e) == 43) {
-                e = e + 1;
+                e++;
             } else if (text.byte_at(e) == 45) {
                 exponent_negative = true;
-                e = e + 1;
+                e++;
             }
             while (e < count - 1 && text.byte_at(e) == 48) {
-                e = e + 1;
+                e++;
             }
             exponent = text.slice(e, count);
         }
@@ -1110,7 +1101,7 @@ export let Json = module (
         let length = digits.byte_length;
         if (length <= 18) {
             let value: int64 = 0;
-            for (let k = 0; k < length; k = k + 1) {
+            for (let k = 0; k < length; k++) {
                 value = value * 10 + ((digits.byte_at(k) - 48) as int64);
             }
             if (negative) {
@@ -1126,7 +1117,7 @@ export let Json = module (
         }
         // Ten leading zeros absorb any carry: the adjustment is below 10^10.
         let bytes: uint8[list] = [48, 48, 48, 48, 48, 48, 48, 48, 48, 48];
-        for (let k = 0; k < length; k = k + 1) {
+        for (let k = 0; k < length; k++) {
             bytes.append(digits.byte_at(k));
         }
         length = bytes.length;
@@ -1137,22 +1128,22 @@ export let Json = module (
             let digit = total % 10;
             carry = total / 10;
             if (digit < 0) {
-                digit = digit + 10;
-                carry = carry - 1;
+                digit += 10;
+                carry--;
             }
             bytes[k] = (digit + 48) as uint8;
-            k = k - 1;
+            k--;
         }
         // Drop leading zeros a borrow left; at least 18 digits remain.
         let first = 0;
         while (bytes[first] == 48) {
-            first = first + 1;
+            first++;
         }
         let kept: uint8[list] = [];
         if (negative) {
             kept.append(45);
         }
-        for (let m = first; m < length; m = m + 1) {
+        for (let m = first; m < length; m++) {
             kept.append(bytes[m]);
         }
         let [_, sum] = string.from_utf8(kept);
