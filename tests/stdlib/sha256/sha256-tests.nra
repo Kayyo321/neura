@@ -1,0 +1,152 @@
+let hex = import:Std.Encoding.Hex;
+let sha256s = import:Std.Digest.Sha256;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// SHA-256. The message vectors are the FIPS 180-4 examples (NIST's "abc",
+// the 448-bit and 896-bit messages, and the empty message); the other
+// expected digests were computed with python3's hashlib over the same
+// seeded byte sequences, chosen around the 55-, 56-, and 64-byte padding
+// boundaries.
+let Sha256Tests = module (
+    // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
+    let seeded = func(int length, uint64 seed) -> uint8[list] {
+        let bytes: uint8[list] = [];
+        let x = seed;
+        for (let i = 0; i < length; i = i + 1) {
+            x = (x * 1103515245 + 12345) & 2147483647;
+            bytes.append(((x >> 16) & 255) as uint8);
+        }
+        return bytes;
+    };
+
+    let check_text = func(string text, string expected) -> void {
+        test.assert_equal_string(expected, hex.encode(sha256s.of(strings.to_bytes(text))));
+    };
+
+    // The digest of the bytes in one update, in updates of `piece` bytes,
+    // and in two updates split at `piece`.
+    let check_pieces = func(uint8[list] bytes, int piece, string expected) -> void {
+        let digest = sha256s.create();
+        let chunk: uint8[list] = [];
+        for (let b in bytes) {
+            chunk.append(b);
+            if (chunk.length == piece) {
+                digest.update(chunk);
+                chunk = [];
+            }
+        }
+        digest.update(chunk);
+        test.assert_equal_string(expected, hex.encode(digest.finish()));
+        let halves = sha256s.create();
+        let head: uint8[list] = [];
+        let tail: uint8[list] = [];
+        for (let i = 0; i < bytes.length; i = i + 1) {
+            if (i < piece) {
+                head.append(bytes[i]);
+            } else {
+                tail.append(bytes[i]);
+            }
+        }
+        halves.update(head);
+        halves.update(tail);
+        test.assert_equal_string(expected, hex.encode(halves.finish()));
+    };
+
+    let check_lcg = func(int length, uint64 seed, string expected) -> void {
+        let bytes = seeded(length, seed);
+        let digest = sha256s.of(bytes);
+        test.assert_equal_int32(32, digest.length);
+        test.assert_equal_string(expected, hex.encode(digest));
+    };
+
+    export let test_fips_vectors = func() -> void {
+        check_text("", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        check_text("abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        check_text("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+        check_text("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu",
+            "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1");
+    };
+
+    export let test_known_texts = func() -> void {
+        check_text("a", "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb");
+        check_text("message digest", "f7846f55cf23e14eebeab5b4e1550cad5b509e3348fbc4efa3a1413d393cb650");
+        check_text("The quick brown fox jumps over the lazy dog",
+            "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592");
+        let all: uint8[list] = [];
+        for (let b = 0; b < 256; b = b + 1) {
+            all.append(b as uint8);
+        }
+        test.assert_equal_string("40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
+            hex.encode(sha256s.of(all)));
+    };
+
+    export let test_seeded_lengths = func() -> void {
+        check_lcg(0, 7, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        check_lcg(1, 8, "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35");
+        check_lcg(2, 9, "4663740b5c69c5e9d6e042bf21355d62ef61128d07c6ece9427533c7e76e914c");
+        check_lcg(3, 10, "5f17c951f27df9ee4ad46583f97e7c1003b3b529c67c86df2204ec2a7c3594c7");
+        check_lcg(31, 38, "c792d3b4f9bd9a21601ad447f67d0d0fddf1620bb9aae0e5baec9271280d0ba2");
+        check_lcg(55, 62, "96ac2cc2de424ce8d862b49abebff9a4c45f0e615832bf0a3f2b7dfca72021bc");
+        check_lcg(56, 63, "6466fcc162d136272ad9db50874decc3523eb316417dcab6c7ac01c573b672fe");
+        check_lcg(57, 64, "95805a27268427c4babb3a0bc2e75a65a65f1b39a4f7cb6dd404af8c0807b2fb");
+        check_lcg(63, 70, "f0ad924d80ec7d0138b9e26011c45f0c25d890e348000aa0f5bd433d5dd7b048");
+        check_lcg(64, 71, "9995e5997fec5d5f246e6ef9ed454d34400cdd19c03d2365045522216bfc552f");
+        check_lcg(65, 72, "484181ea58fc8126e7e786b4ca7a16a79e15a02e11e4c15d1c6b15b85b7097cc");
+        check_lcg(100, 107, "3e58fbc8e4fd3005ae7f7a14cfb4d2adeee1450997c92421f95979cc5271cd3d");
+        check_lcg(119, 126, "2bea7658a04a9c5311dbb090889d98131ff3492a125bc3445af956397dd7eca8");
+        check_lcg(120, 127, "3a5d51a2749f3c89df1d8e2c5c3a6aab0b7264c1b9cd5976b92c7cb55f7af166");
+        check_lcg(121, 128, "f26c1575672a8ba39045d6ca47c542f0d15dd098caf7ecaec2f51eb36864c119");
+        check_lcg(127, 134, "7b37f5f86faec93babf505c598f3097d2ea8a744462ce71bd705ea370ea51655");
+        check_lcg(128, 135, "926c0f9ac68d8d0065ac0aaacaf2938355c9d197e40c6814d7734fd5945d638a");
+        check_lcg(129, 136, "1e3a08c83fdf30da7a158139f74572955dc44b09892b24f579d9b1394fdce978");
+        check_lcg(191, 198, "817bf15a0c29ee3a2de9f57fcf411d8d4573572c4b71303a49905a0893b51b4d");
+        check_lcg(192, 199, "fc312ebaf27acb5bd4216e8b155b48ebc5f63b4111124f42502104b155bcc9fd");
+        check_lcg(193, 200, "02cae21dd2f4b67e8a1236773222183c32abde5569967805b1c9e9b32a5b4e4a");
+        check_lcg(255, 262, "f924922654c5364d2d5c6f95fa08ae1e58ae45dc444c75572c6d111af51fd81a");
+        check_lcg(256, 263, "b397d3090249ec1a40c45d146b88e37b74c63d280dbee0f384e06c3a17532bf3");
+        check_lcg(1000, 1007, "aeba194b1ffef4f328cc1c89f24b146800f5ba4365adb98809e10e87b2b3d385");
+    };
+
+    export let test_incremental_updates = func() -> void {
+        let bytes = seeded(193, 200);
+        let expected = "02cae21dd2f4b67e8a1236773222183c32abde5569967805b1c9e9b32a5b4e4a";
+        check_pieces(bytes, 1, expected);
+        check_pieces(bytes, 3, expected);
+        check_pieces(bytes, 55, expected);
+        check_pieces(bytes, 56, expected);
+        check_pieces(bytes, 63, expected);
+        check_pieces(bytes, 64, expected);
+        check_pieces(bytes, 65, expected);
+        check_pieces(bytes, 128, expected);
+        check_pieces(bytes, 192, expected);
+    };
+
+    export let test_constructor_and_empty_updates = func() -> void {
+        let digest = new sha256s.Sha256();
+        digest.update([]);
+        digest.update(strings.to_bytes("ab"));
+        digest.update([]);
+        digest.update(strings.to_bytes("c"));
+        test.assert_equal_string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            hex.encode(digest.finish()));
+        test.assert_equal_string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            hex.encode(sha256s.create().finish()));
+    };
+
+    // 100,000 bytes of 'a' in 1,000-byte updates (python3 hashlib). The
+    // one-million-byte FIPS vector is the program programs/million-a.
+    export let test_hundred_thousand_a = func() -> void {
+        let chunk: uint8[list] = [];
+        for (let i = 0; i < 1000; i = i + 1) {
+            chunk.append(97);
+        }
+        let digest = sha256s.create();
+        for (let i = 0; i < 100; i = i + 1) {
+            digest.update(chunk);
+        }
+        test.assert_equal_string("6d1cf22d7cc09b085dfc25ee1a1f3ae0265804c607bc2074ad253bcc82fd81ee",
+            hex.encode(digest.finish()));
+    };
+);

@@ -1,0 +1,21 @@
+let console = import:Std.Io.Console;
+let hex = import:Std.Encoding.Hex;
+let program = import:Std.Program;
+let sha256s = import:Std.Digest.Sha256;
+
+// The FIPS 180-4 one-million-'a' message, added in 1,000 updates of 1,000
+// bytes. About 14 million NVM steps.
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let chunk: uint8[list] = [];
+        for (let i = 0; i < 1000; i = i + 1) {
+            chunk.append(97);
+        }
+        let digest = sha256s.create();
+        for (let i = 0; i < 1000; i = i + 1) {
+            digest.update(chunk);
+        }
+        console.print_line(hex.encode(digest.finish()));
+        return program.ExitCode.Ok;
+    };
+);

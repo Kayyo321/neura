@@ -1,0 +1,173 @@
+// SHA-256 (FIPS 180-4; Stdlib.md section 13.2). Words are uint32 values, so
+// a rotation is two shifts and an or. A sum modulo 2^32 follows the wrapping
+// recipe of Stdlib.md section 7.2: widen each term to uint64, add, mask with
+// 4294967295, and convert back. The mask is a literal because a named
+// constant is a global read, which costs an NVM step at every use.
+export let Sha256 = module (
+    // The round constants: the first 32 bits of the fractional parts of the
+    // cube roots of the first 64 primes.
+    let RoundConstants: uint32[] = [
+        1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221,
+        3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580,
+        3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986,
+        2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895,
+        666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037,
+        2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344,
+        430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779,
+        1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298
+    ];
+
+    // A running digest. `finish` ends it: a later update or finish traps
+    // with "invalid state: digest finished".
+    export let Sha256 = class (
+        // The eight hash words, initially the first 32 bits of the
+        // fractional parts of the square roots of the first eight primes.
+        let state: uint32[list] = [
+            1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225
+        ];
+        // The message schedule, reused by every block.
+        let schedule: uint32[list] = [];
+        // The bytes of an incomplete block, fewer than 64.
+        let pending: uint8[list] = [];
+        // The number of message bytes added so far.
+        let total: uint64 = 0;
+        let finished: bool = false;
+
+        export let init = func() -> void {
+            for (let t = 0; t < 64; t = t + 1) {
+                schedule.append(0);
+            }
+        };
+
+        // Adds the bytes to the message. Whole blocks are read in place from
+        // `bytes`; only the bytes of an incomplete block are copied.
+        export let update = func(uint8[list] bytes) -> void {
+            if (finished) {
+                trap_with_message("invalid state: digest finished");
+            }
+            let count = bytes.length;
+            total = total + (count as uint64);
+            let i = 0;
+            if (pending.length > 0) {
+                while (i < count && pending.length < 64) {
+                    pending.append(bytes[i]);
+                    i = i + 1;
+                }
+                if (pending.length < 64) {
+                    return;
+                }
+                compress(pending, 0);
+                pending = [];
+            }
+            while (i + 64 <= count) {
+                compress(bytes, i);
+                i = i + 64;
+            }
+            while (i < count) {
+                pending.append(bytes[i]);
+                i = i + 1;
+            }
+        };
+
+        // Pads the message, ends the digest, and returns the 32 bytes of the
+        // hash.
+        export let finish = func() -> uint8[list] {
+            if (finished) {
+                trap_with_message("invalid state: digest finished");
+            }
+            finished = true;
+            let bits = total * 8;
+            let tail = pending;
+            pending = [];
+            tail.append(128);
+            while (tail.length % 64 != 56) {
+                tail.append(0);
+            }
+            for (let shift = 56; shift >= 0; shift = shift - 8) {
+                tail.append(((bits >> shift) & 255) as uint8);
+            }
+            for (let offset = 0; offset < tail.length; offset = offset + 64) {
+                compress(tail, offset);
+            }
+            let digest: uint8[list] = [];
+            for (let word in state) {
+                digest.append((word >> 24) as uint8);
+                digest.append(((word >> 16) & 255) as uint8);
+                digest.append(((word >> 8) & 255) as uint8);
+                digest.append((word & 255) as uint8);
+            }
+            return digest;
+        };
+
+        // Processes the 64-byte block at the offset.
+        //
+        // Cost note: unrolling the rounds (eight per loop iteration, with the
+        // schedule in a 16-word window of locals) cuts the NVM steps for 10 KB
+        // from about 140,000 to about 33,000 but multiplies the neurons and
+        // the image size by four, and the measured run time does not change.
+        // The rolled loops are kept.
+        let compress = func(uint8[list] block, int offset) -> void {
+            let w = schedule;
+            let p = offset;
+            for (let t = 0; t < 16; t = t + 1) {
+                w[t] = ((block[p] as uint32) << 24) | ((block[p + 1] as uint32) << 16)
+                    | ((block[p + 2] as uint32) << 8) | (block[p + 3] as uint32);
+                p = p + 4;
+            }
+            for (let t = 16; t < 64; t = t + 1) {
+                let x = w[t - 15];
+                let y = w[t - 2];
+                let small_s0 = ((x >> 7) | (x << 25)) ^ ((x >> 18) | (x << 14)) ^ (x >> 3);
+                let small_s1 = ((y >> 17) | (y << 15)) ^ ((y >> 19) | (y << 13)) ^ (y >> 10);
+                w[t] = (((w[t - 16] as uint64) + (small_s0 as uint64) + (w[t - 7] as uint64) + (small_s1 as uint64))
+                    & 4294967295) as uint32;
+            }
+            let words = state;
+            let a = words[0];
+            let b = words[1];
+            let c = words[2];
+            let d = words[3];
+            let e = words[4];
+            let f = words[5];
+            let g = words[6];
+            let h = words[7];
+            let k = RoundConstants;
+            for (let t = 0; t < 64; t = t + 1) {
+                let big_s1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7));
+                let choose = (e & f) ^ ((~e) & g);
+                // Below 5 * 2^32.
+                let t1 = (h as uint64) + (big_s1 as uint64) + (choose as uint64) + (k[t] as uint64) + (w[t] as uint64);
+                let big_s0 = ((a >> 2) | (a << 30)) ^ ((a >> 13) | (a << 19)) ^ ((a >> 22) | (a << 10));
+                let majority = (a & b) ^ (a & c) ^ (b & c);
+                h = g;
+                g = f;
+                f = e;
+                e = (((d as uint64) + t1) & 4294967295) as uint32;
+                d = c;
+                c = b;
+                b = a;
+                a = ((t1 + (big_s0 as uint64) + (majority as uint64)) & 4294967295) as uint32;
+            }
+            words[0] = (((words[0] as uint64) + (a as uint64)) & 4294967295) as uint32;
+            words[1] = (((words[1] as uint64) + (b as uint64)) & 4294967295) as uint32;
+            words[2] = (((words[2] as uint64) + (c as uint64)) & 4294967295) as uint32;
+            words[3] = (((words[3] as uint64) + (d as uint64)) & 4294967295) as uint32;
+            words[4] = (((words[4] as uint64) + (e as uint64)) & 4294967295) as uint32;
+            words[5] = (((words[5] as uint64) + (f as uint64)) & 4294967295) as uint32;
+            words[6] = (((words[6] as uint64) + (g as uint64)) & 4294967295) as uint32;
+            words[7] = (((words[7] as uint64) + (h as uint64)) & 4294967295) as uint32;
+        };
+    );
+
+    // A new digest with no bytes added.
+    export let create = func() -> Sha256 {
+        return new Sha256();
+    };
+
+    // The 32-byte hash of the bytes.
+    export let of = func(uint8[list] bytes) -> uint8[list] {
+        let digest = new Sha256();
+        digest.update(bytes);
+        return digest.finish();
+    };
+);

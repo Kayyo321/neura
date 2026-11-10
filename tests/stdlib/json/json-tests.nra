@@ -1,0 +1,625 @@
+let big_decimals = import:Std.Math.BigDecimal;
+let error = import:Std.Core.Error;
+let json = import:Std.Encoding.Json;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// JSON (RFC 8259) as Stdlib.md section 13.1 specifies it. The y_ and n_
+// tests follow JSONTestSuite's categories (must accept, must reject) with
+// the expected text and error offsets written out here. The round-trip
+// vectors are random documents that python3's json.dumps wrote (seeded);
+// the expected compact and pretty text is json.dumps with
+// separators=(",", ":") and with indent=2, both with ensure_ascii=False.
+let JsonTests = module (
+    let parsed = func(string text) -> json.JsonValue {
+        return test.assert_ok<json.JsonValue>(json.parse(text));
+    };
+
+    let accept = func(string text, string expected) -> void {
+        test.assert_equal_string(expected, json.write(parsed(text)));
+    };
+
+    let reject = func(string text, error.ParseErrorKind kind, int offset, string message) -> void {
+        match (test.assert_err<json.JsonValue>(json.parse(text))) {
+            error.Error.Parse { kind: actual, offset: at, message: reason } => {
+                test.assert_equal_string(message, reason);
+                test.assert_equal_int32(offset, at);
+                test.assert_equal_string(kind.to_string(), actual.to_string());
+            },
+            _ => {
+                test.fail("expected a Parse error");
+            },
+        }
+    };
+
+    let check_round_trip = func(string source, string compact, string pretty) -> void {
+        let value = parsed(source);
+        test.assert_equal_string(compact, json.write(value));
+        test.assert_equal_string(pretty, json.write_pretty(value, 2));
+        let again = parsed(compact);
+        test.assert(json.equals(value, again));
+        test.assert_equal_uint64(json.hash(value) as uint64, json.hash(again) as uint64);
+        test.assert_equal_string(compact, json.write(parsed(pretty)));
+    };
+
+    let number = func(string text) -> json.JsonValue {
+        return json.JsonValue.Number(text);
+    };
+
+    let same = func(json.JsonValue a, json.JsonValue b) -> void {
+        test.assert(json.equals(a, b));
+        test.assert(json.equals(b, a));
+        test.assert_equal_uint64(json.hash(a) as uint64, json.hash(b) as uint64);
+    };
+
+    let different = func(json.JsonValue a, json.JsonValue b) -> void {
+        test.assert(!json.equals(a, b));
+        test.assert(!json.equals(b, a));
+    };
+
+    let nested = func(string open, string close, int depth) -> string {
+        return strings.repeat(open, depth) + strings.repeat(close, depth);
+    };
+
+    export let test_y_structures = func() -> void {
+        accept("[]", "[]");
+        accept("{}", "{}");
+        accept(" [ ] ", "[]");
+        accept("\t\n\r [ 1 , 2 ] \n", "[1,2]");
+        accept("[[[[[]]]]]", "[[[[[]]]]]");
+        accept("[null,true,false]", "[null,true,false]");
+        accept("{\"a\" : 1 , \"b\" :2}", "{\"a\":1,\"b\":2}");
+        accept("{\"\":0}", "{\"\":0}");
+        accept("{\"a\":{\"b\":{\"c\":[1,{\"d\":null}]}}}", "{\"a\":{\"b\":{\"c\":[1,{\"d\":null}]}}}");
+        accept("[{}, [], {\"x\": []}]", "[{},[],{\"x\":[]}]");
+    };
+
+    // RFC 8259 allows any value at the top.
+    export let test_y_scalars = func() -> void {
+        accept("true", "true");
+        accept("false", "false");
+        accept("null", "null");
+        accept(" \"str\" ", "\"str\"");
+        accept("42", "42");
+        accept("-0.5", "-0.5");
+    };
+
+    // Numbers keep their text.
+    export let test_y_numbers = func() -> void {
+        accept("[1]", "[1]");
+        accept("[-0]", "[-0]");
+        accept("[-1]", "[-1]");
+        accept("[1.5]", "[1.5]");
+        accept("[1E22]", "[1E22]");
+        accept("[1e+2,1e-2,1E-2,1E+2]", "[1e+2,1e-2,1E-2,1E+2]");
+        accept("[0e1,-0.0e-0,0.000]", "[0e1,-0.0e-0,0.000]");
+        accept("[123e65,20e1,123.456e78]", "[123e65,20e1,123.456e78]");
+        accept("[-9223372036854775809]", "[-9223372036854775809]");
+        accept("[100000000000000000000000000000000000000000]", "[100000000000000000000000000000000000000000]");
+        accept("[1e999999999999999999999]", "[1e999999999999999999999]");
+    };
+
+    export let test_y_strings = func() -> void {
+        accept("[\"\"]", "[\"\"]");
+        accept("[\" \"]", "[\" \"]");
+        accept("[\"\\u0060\\u012a\\u12AB\"]", "[\"`Īካ\"]");
+        accept("[\"\\\"\\\\\\/\\b\\f\\n\\r\\t\"]", "[\"\\\"\\\\/\\b\\f\\n\\r\\t\"]");
+        accept("[\"\\ud834\\udd1e\"]", "[\"𝄞\"]");
+        accept("[\"\\uD83D\\uDE00x\"]", "[\"😀x\"]");
+        accept("[\"\\u0000\"]", "[\"\\u0000\"]");
+        accept("[\"\\u001f\\u001B\\u0010\"]", "[\"\\u001f\\u001b\\u0010\"]");
+        accept("[\"é日本🙂\"]", "[\"é日本🙂\"]");
+        accept("[\"\\u00e9\"]", "[\"é\"]");
+        accept("[\"\\uFFFF\\uffFE\"]", "[\"" + strings.from_scalars([65535, 65534]) + "\"]");
+        accept("[\"a/b\"]", "[\"a/b\"]");
+        accept("[\"\\u2028\\u2029\"]", "[\"" + strings.from_scalars([8232, 8233]) + "\"]");
+    };
+
+    // A repeated name keeps its first position and takes the last value.
+    export let test_y_duplicate_names = func() -> void {
+        accept("{\"a\":\"b\",\"a\":\"c\"}", "{\"a\":\"c\"}");
+        accept("{\"a\":1,\"b\":2,\"a\":3}", "{\"a\":3,\"b\":2}");
+        accept("{\"a\":1,\"b\":2,\"a\":3,\"b\":[],\"c\":0,\"a\":null}", "{\"a\":null,\"b\":[],\"c\":0}");
+        // Past 16 members the parser indexes the names.
+        let source = "{";
+        let expected = "{";
+        for (let i = 0; i < 40; i = i + 1) {
+            if (i > 0) {
+                source = source + ",";
+            }
+            source = source + "\"k" + (i % 25).to_string() + "\":" + i.to_string();
+            if (i < 25) {
+                if (i > 0) {
+                    expected = expected + ",";
+                }
+                let last = i;
+                if (i + 25 < 40) {
+                    last = i + 25;
+                }
+                expected = expected + "\"k" + i.to_string() + "\":" + last.to_string();
+            }
+        }
+        accept(source + "}", expected + "}");
+    };
+
+    export let test_y_depth_limit = func() -> void {
+        let deepest = nested("[", "]", 512);
+        test.assert_equal_string(deepest, json.write(parsed(deepest)));
+        let objects = strings.repeat("{\"a\":", 511) + "[]" + strings.repeat("}", 511);
+        test.assert_equal_string(objects, json.write(parsed(objects)));
+    };
+
+    export let test_n_empty_and_end = func() -> void {
+        reject("", error.ParseErrorKind.Empty, 0, "no value");
+        reject("   ", error.ParseErrorKind.Empty, 3, "no value");
+        reject("\n", error.ParseErrorKind.Empty, 1, "no value");
+        reject("[", error.ParseErrorKind.UnexpectedEnd, 1, "unexpected end of input");
+        reject("[1", error.ParseErrorKind.UnexpectedEnd, 2, "unexpected end of input");
+        reject("[1,", error.ParseErrorKind.UnexpectedEnd, 3, "unexpected end of input");
+        reject("[1, ", error.ParseErrorKind.UnexpectedEnd, 4, "unexpected end of input");
+        reject("{", error.ParseErrorKind.UnexpectedEnd, 1, "unexpected end of input");
+        reject("{\"a\"", error.ParseErrorKind.UnexpectedEnd, 4, "unexpected end of input");
+        reject("{\"a\":", error.ParseErrorKind.UnexpectedEnd, 5, "unexpected end of input");
+        reject("{\"a\":1", error.ParseErrorKind.UnexpectedEnd, 6, "unexpected end of input");
+        reject("{\"a\":1,", error.ParseErrorKind.UnexpectedEnd, 7, "unexpected end of input");
+        reject("tru", error.ParseErrorKind.UnexpectedEnd, 3, "unexpected end of input");
+        reject("nul", error.ParseErrorKind.UnexpectedEnd, 3, "unexpected end of input");
+        reject("\"abc", error.ParseErrorKind.UnexpectedEnd, 4, "unexpected end of input");
+        reject("\"a\\", error.ParseErrorKind.UnexpectedEnd, 3, "unexpected end of input");
+        reject("\"a\\nb", error.ParseErrorKind.UnexpectedEnd, 5, "unexpected end of input");
+    };
+
+    export let test_n_structure = func() -> void {
+        reject("[1,]", error.ParseErrorKind.Syntax, 3, "expected a value");
+        reject("[,1]", error.ParseErrorKind.Syntax, 1, "expected a value");
+        reject("[\"a\",]", error.ParseErrorKind.Syntax, 5, "expected a value");
+        reject("[1 2]", error.ParseErrorKind.Syntax, 3, "expected ',' or ']'");
+        reject("[1;2]", error.ParseErrorKind.Syntax, 2, "expected ',' or ']'");
+        reject("[1}", error.ParseErrorKind.Syntax, 2, "expected ',' or ']'");
+        reject("]", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject("[1]]", error.ParseErrorKind.Syntax, 3, "unexpected text after value");
+        reject("[1] x", error.ParseErrorKind.Syntax, 4, "unexpected text after value");
+        reject("{\"a\":1}}", error.ParseErrorKind.Syntax, 7, "unexpected text after value");
+        reject("truefalse", error.ParseErrorKind.Syntax, 4, "unexpected text after value");
+        reject("[] []", error.ParseErrorKind.Syntax, 3, "unexpected text after value");
+        reject("{\"a\":1,}", error.ParseErrorKind.Syntax, 7, "expected a member name");
+        reject("{,}", error.ParseErrorKind.Syntax, 1, "expected a member name");
+        reject("{a:1}", error.ParseErrorKind.Syntax, 1, "expected a member name");
+        reject("{'a':1}", error.ParseErrorKind.Syntax, 1, "expected a member name");
+        reject("{1:1}", error.ParseErrorKind.Syntax, 1, "expected a member name");
+        reject("{\"a\" 1}", error.ParseErrorKind.Syntax, 5, "expected ':'");
+        reject("{\"a\"=1}", error.ParseErrorKind.Syntax, 4, "expected ':'");
+        reject("{\"a\":1 \"b\":2}", error.ParseErrorKind.Syntax, 7, "expected ',' or '}'");
+        reject("{\"a\":1]", error.ParseErrorKind.Syntax, 6, "expected ',' or '}'");
+        reject("{\"a\":}", error.ParseErrorKind.Syntax, 5, "expected a value");
+        reject("True", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject("+1", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject(".5", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject("[NaN]", error.ParseErrorKind.Syntax, 1, "expected a value");
+        reject("[Infinity]", error.ParseErrorKind.Syntax, 1, "expected a value");
+        reject("'a'", error.ParseErrorKind.Syntax, 0, "expected a value");
+    };
+
+    // No comments and only the four JSON whitespace characters.
+    export let test_n_comments_and_whitespace = func() -> void {
+        reject("[1] /* c */", error.ParseErrorKind.Syntax, 4, "unexpected text after value");
+        reject("// c\n[1]", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject("[1, # c\n2]", error.ParseErrorKind.Syntax, 4, "expected a value");
+        reject(strings.from_scalars([12]) + "[]", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject("[" + strings.from_scalars([11]) + "]", error.ParseErrorKind.Syntax, 1, "expected a value");
+        reject(strings.from_scalars([160]) + "[]", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject(strings.from_scalars([65279]) + "[]", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject("[]" + strings.from_scalars([0]), error.ParseErrorKind.Syntax, 2, "unexpected text after value");
+    };
+
+    export let test_n_literals = func() -> void {
+        reject("trux", error.ParseErrorKind.InvalidCharacter, 3, "invalid literal");
+        reject("nulL", error.ParseErrorKind.InvalidCharacter, 3, "invalid literal");
+        reject("[fals]", error.ParseErrorKind.InvalidCharacter, 5, "invalid literal");
+        reject("[nil]", error.ParseErrorKind.InvalidCharacter, 2, "invalid literal");
+    };
+
+    export let test_n_numbers = func() -> void {
+        reject("01", error.ParseErrorKind.InvalidCharacter, 1, "leading zero");
+        reject("-01", error.ParseErrorKind.InvalidCharacter, 2, "leading zero");
+        reject("[00]", error.ParseErrorKind.InvalidCharacter, 2, "leading zero");
+        reject("-", error.ParseErrorKind.UnexpectedEnd, 1, "unexpected end of input");
+        reject("[-]", error.ParseErrorKind.InvalidCharacter, 2, "expected a digit");
+        reject("[-a]", error.ParseErrorKind.InvalidCharacter, 2, "expected a digit");
+        reject("[-Infinity]", error.ParseErrorKind.InvalidCharacter, 2, "expected a digit");
+        reject("[- 1]", error.ParseErrorKind.InvalidCharacter, 2, "expected a digit");
+        reject("[1.]", error.ParseErrorKind.InvalidCharacter, 3, "expected a digit");
+        reject("1.", error.ParseErrorKind.UnexpectedEnd, 2, "unexpected end of input");
+        reject("[1.e5]", error.ParseErrorKind.InvalidCharacter, 3, "expected a digit");
+        reject("[1e]", error.ParseErrorKind.InvalidCharacter, 3, "expected a digit");
+        reject("[1e+]", error.ParseErrorKind.InvalidCharacter, 4, "expected a digit");
+        reject("[1E-x]", error.ParseErrorKind.InvalidCharacter, 4, "expected a digit");
+        reject("1e", error.ParseErrorKind.UnexpectedEnd, 2, "unexpected end of input");
+        reject("1E+", error.ParseErrorKind.UnexpectedEnd, 3, "unexpected end of input");
+        reject("[0x1]", error.ParseErrorKind.Syntax, 2, "expected ',' or ']'");
+        reject("[1_000]", error.ParseErrorKind.Syntax, 2, "expected ',' or ']'");
+        reject("[1.5.5]", error.ParseErrorKind.Syntax, 4, "expected ',' or ']'");
+        reject("[1e5e5]", error.ParseErrorKind.Syntax, 4, "expected ',' or ']'");
+        reject("[0.1.]", error.ParseErrorKind.Syntax, 4, "expected ',' or ']'");
+    };
+
+    export let test_n_strings = func() -> void {
+        reject("[\"\\x\"]", error.ParseErrorKind.InvalidCharacter, 2, "invalid escape");
+        reject("[\"é\\x\"]", error.ParseErrorKind.InvalidCharacter, 4, "invalid escape");
+        reject("[\"\\'\"]", error.ParseErrorKind.InvalidCharacter, 2, "invalid escape");
+        reject("[\"\\U0041\"]", error.ParseErrorKind.InvalidCharacter, 2, "invalid escape");
+        reject("[\"\\u12\"]", error.ParseErrorKind.InvalidCharacter, 2, "invalid \\u escape");
+        reject("[\"\\u00G0\"]", error.ParseErrorKind.InvalidCharacter, 2, "invalid \\u escape");
+        reject("\"\\u12", error.ParseErrorKind.UnexpectedEnd, 5, "unexpected end of input");
+        reject("[\"\\uD800\"]", error.ParseErrorKind.InvalidCharacter, 2, "unpaired surrogate");
+        reject("[\"\\uD800\\u0041\"]", error.ParseErrorKind.InvalidCharacter, 2, "unpaired surrogate");
+        reject("[\"\\uDBFF\\uDBFF\"]", error.ParseErrorKind.InvalidCharacter, 2, "unpaired surrogate");
+        reject("[\"\\uDC00\"]", error.ParseErrorKind.InvalidCharacter, 2, "unpaired surrogate");
+        reject("[\"a\\uDFFF\\uD800\"]", error.ParseErrorKind.InvalidCharacter, 3, "unpaired surrogate");
+        reject("[\"\\uD800x\"]", error.ParseErrorKind.InvalidCharacter, 2, "unpaired surrogate");
+        reject("[\"\\uD800\\n\"]", error.ParseErrorKind.InvalidCharacter, 2, "unpaired surrogate");
+        reject("[\"\\uD800\\u12\"]", error.ParseErrorKind.InvalidCharacter, 8, "invalid \\u escape");
+        reject("\"\\uD800", error.ParseErrorKind.UnexpectedEnd, 7, "unexpected end of input");
+        reject("\"\\uD800\\", error.ParseErrorKind.UnexpectedEnd, 8, "unexpected end of input");
+        reject("\"\\uD800\\u", error.ParseErrorKind.UnexpectedEnd, 9, "unexpected end of input");
+        reject("[\"a\tb\"]", error.ParseErrorKind.InvalidCharacter, 3, "control character in string");
+        reject("[\"a\nb\"]", error.ParseErrorKind.InvalidCharacter, 3, "control character in string");
+        reject("[\"\\n" + strings.from_scalars([1]) + "\"]", error.ParseErrorKind.InvalidCharacter, 4,
+            "control character in string");
+        reject("[\"" + strings.from_scalars([31]) + "\"]", error.ParseErrorKind.InvalidCharacter, 2,
+            "control character in string");
+    };
+
+    export let test_n_depth_limit = func() -> void {
+        reject(nested("[", "]", 513), error.ParseErrorKind.OutOfRange, 512, "nesting deeper than 512");
+        let objects = strings.repeat("{\"a\":", 512) + "[]" + strings.repeat("}", 512);
+        reject(objects, error.ParseErrorKind.OutOfRange, 2560, "nesting deeper than 512");
+        reject(strings.repeat("[", 20000), error.ParseErrorKind.OutOfRange, 512, "nesting deeper than 512");
+    };
+
+    export let test_python_round_trips = func() -> void {
+        check_round_trip("{\"\": -257284.4895369521, \"\\u65e5\": [], \"\\r\\\\\\f\\u001f\\u0001\": 408932980481011026781466859669, \"z/\\\\\\t\\\\~\": 0.1}",
+            "{\"\":-257284.4895369521,\"日\":[],\"\\r\\\\\\f\\u001f\\u0001\":408932980481011026781466859669,\"z/\\\\\\t\\\\~\":0.1}",
+            "{\n  \"\": -257284.4895369521,\n  \"日\": [],\n  \"\\r\\\\\\f\\u001f\\u0001\": 408932980481011026781466859669,\n  \"z/\\\\\\t\\\\~\": 0.1\n}");
+        check_round_trip("{\n \"\\nb\\u0001\\t\\n\": [\n  [\n   {\n    \"{\": -8e-26\n   }\n  ]\n ],\n \"é\\u0001,日\": \"𝄞{\\\"]🙂,\"\n}",
+            "{\"\\nb\\u0001\\t\\n\":[[{\"{\":-8e-26}]],\"é\\u0001,日\":\"𝄞{\\\"]🙂,\"}",
+            "{\n  \"\\nb\\u0001\\t\\n\": [\n    [\n      {\n        \"{\": -8e-26\n      }\n    ]\n  ],\n  \"é\\u0001,日\": \"𝄞{\\\"]🙂,\"\n}");
+        check_round_trip("[]",
+            "[]",
+            "[]");
+        check_round_trip("[true]",
+            "[true]",
+            "[\n  true\n]");
+        check_round_trip("{}",
+            "{}",
+            "{}");
+        check_round_trip("{\n \"\\t🙂\": \"{\\u001f]/{\",\n \"\\\\\\bb\": 5e-324,\n \",,\\f\\r\": null\n}",
+            "{\"\\t🙂\":\"{\\u001f]/{\",\"\\\\\\bb\":5e-324,\",,\\f\\r\":null}",
+            "{\n  \"\\t🙂\": \"{\\u001f]/{\",\n  \"\\\\\\bb\": 5e-324,\n  \",,\\f\\r\": null\n}");
+        check_round_trip("{\"\\f\": [], \"\\b/b\\\"\\n\": [-892099.076428452, [-129, 947], {\"\\ud83d\\ude42\\u0001\\ud834\\udd1e\\u00e9a{\": [\"\\\\\\u0001\\u001f\\ud834\\udd1e\\f\\b\", 2.7000000000000002e-14, \"\\ud83d\\ude42\", \"\\n]\\n\\n\\u65e5~\"], \"\\u65e5\\r ]\\u65e5\": \"\\u00e9{\\u65e5]\"}], \"/\\\"\\\\\": {\"a\\r\\f\\b\": [null, [true, 747, \"\\r\\u001fa\", 856464485342173415133841464838], 117952073923693972033660711194], \"\\u00e9\\ud83d\\ude42\\\"a{\": {}, \" \": true, \"\": [null]}}",
+            "{\"\\f\":[],\"\\b/b\\\"\\n\":[-892099.076428452,[-129,947],{\"🙂\\u0001𝄞éa{\":[\"\\\\\\u0001\\u001f𝄞\\f\\b\",2.7000000000000002e-14,\"🙂\",\"\\n]\\n\\n日~\"],\"日\\r ]日\":\"é{日]\"}],\"/\\\"\\\\\":{\"a\\r\\f\\b\":[null,[true,747,\"\\r\\u001fa\",856464485342173415133841464838],117952073923693972033660711194],\"é🙂\\\"a{\":{},\" \":true,\"\":[null]}}",
+            "{\n  \"\\f\": [],\n  \"\\b/b\\\"\\n\": [\n    -892099.076428452,\n    [\n      -129,\n      947\n    ],\n    {\n      \"🙂\\u0001𝄞éa{\": [\n        \"\\\\\\u0001\\u001f𝄞\\f\\b\",\n        2.7000000000000002e-14,\n        \"🙂\",\n        \"\\n]\\n\\n日~\"\n      ],\n      \"日\\r ]日\": \"é{日]\"\n    }\n  ],\n  \"/\\\"\\\\\": {\n    \"a\\r\\f\\b\": [\n      null,\n      [\n        true,\n        747,\n        \"\\r\\u001fa\",\n        856464485342173415133841464838\n      ],\n      117952073923693972033660711194\n    ],\n    \"é🙂\\\"a{\": {},\n    \" \": true,\n    \"\": [\n      null\n    ]\n  }\n}");
+        check_round_trip("[\n   983877.7414001042,\n   \"é日/\",\n   null,\n   \"b\\\\\\t🙂\\f\"\n]",
+            "[983877.7414001042,\"é日/\",null,\"b\\\\\\t🙂\\f\"]",
+            "[\n  983877.7414001042,\n  \"é日/\",\n  null,\n  \"b\\\\\\t🙂\\f\"\n]");
+        check_round_trip("[\n{},\n[\n[\n7374975594393464575,\n[\nnull,\n0.1,\n\"\\ud834\\udd1e]\\u001fa\",\nnull\n],\n1e-07,\n\"\\\"]\"\n],\n-107030.40166362724,\n745032161283229469935394792971\n],\nnull\n]",
+            "[{},[[7374975594393464575,[null,0.1,\"𝄞]\\u001fa\",null],1e-07,\"\\\"]\"],-107030.40166362724,745032161283229469935394792971],null]",
+            "[\n  {},\n  [\n    [\n      7374975594393464575,\n      [\n        null,\n        0.1,\n        \"𝄞]\\u001fa\",\n        null\n      ],\n      1e-07,\n      \"\\\"]\"\n    ],\n    -107030.40166362724,\n    745032161283229469935394792971\n  ],\n  null\n]");
+        check_round_trip("[\"日\"]",
+            "[\"日\"]",
+            "[\n  \"日\"\n]");
+        check_round_trip("[]",
+            "[]",
+            "[]");
+        check_round_trip("[\n   \"b~b\\fb\\\"\",\n   [\n      \"\",\n      [\n         \"\\f]\",\n         -293\n      ],\n      true,\n      \"/\"\n   ],\n   \"{\\n,b\\f日\",\n   {\n      \"𝄞\": [],\n      \"\\u0001\\u0001\": 0.0\n   }\n]",
+            "[\"b~b\\fb\\\"\",[\"\",[\"\\f]\",-293],true,\"/\"],\"{\\n,b\\f日\",{\"𝄞\":[],\"\\u0001\\u0001\":0.0}]",
+            "[\n  \"b~b\\fb\\\"\",\n  [\n    \"\",\n    [\n      \"\\f]\",\n      -293\n    ],\n    true,\n    \"/\"\n  ],\n  \"{\\n,b\\f日\",\n  {\n    \"𝄞\": [],\n    \"\\u0001\\u0001\": 0.0\n  }\n]");
+        check_round_trip("{\"\\\"\\ud834\\udd1e\\b~\\u65e5\": \"\\b\\u00e9\\ud83d\\ude42\", \"\\\\]\\u0001\\ud834\\udd1e~\\\"\": null, \"\\ud834\\udd1e\": {\"\\u65e5\\t \\\\\": {\"z\\u0001\\\" \": [\"\\ta]\\r/\\u001f\", true, \"\\b\"], \"z \": {\"\\\"/\": 689124450080015819042605328492, \"\\u001f\": \"\\u65e5\\u0001{\\\"\\f\"}}}, \"\\b\": null}",
+            "{\"\\\"𝄞\\b~日\":\"\\bé🙂\",\"\\\\]\\u0001𝄞~\\\"\":null,\"𝄞\":{\"日\\t \\\\\":{\"z\\u0001\\\" \":[\"\\ta]\\r/\\u001f\",true,\"\\b\"],\"z \":{\"\\\"/\":689124450080015819042605328492,\"\\u001f\":\"日\\u0001{\\\"\\f\"}}},\"\\b\":null}",
+            "{\n  \"\\\"𝄞\\b~日\": \"\\bé🙂\",\n  \"\\\\]\\u0001𝄞~\\\"\": null,\n  \"𝄞\": {\n    \"日\\t \\\\\": {\n      \"z\\u0001\\\" \": [\n        \"\\ta]\\r/\\u001f\",\n        true,\n        \"\\b\"\n      ],\n      \"z \": {\n        \"\\\"/\": 689124450080015819042605328492,\n        \"\\u001f\": \"日\\u0001{\\\"\\f\"\n      }\n    }\n  },\n  \"\\b\": null\n}");
+        check_round_trip("[\n [\n  null,\n  false,\n  [\n   [],\n   {\n    \"𝄞日{\": -1928134835797295524,\n    \"\\t/\": \"𝄞\",\n    \"{ \\n\\r\": \"~,]\",\n    \"𝄞a/\": null\n   }\n  ]\n ],\n {\n  \"é\": [\n   false,\n   -85,\n   -0.0\n  ]\n }\n]",
+            "[[null,false,[[],{\"𝄞日{\":-1928134835797295524,\"\\t/\":\"𝄞\",\"{ \\n\\r\":\"~,]\",\"𝄞a/\":null}]],{\"é\":[false,-85,-0.0]}]",
+            "[\n  [\n    null,\n    false,\n    [\n      [],\n      {\n        \"𝄞日{\": -1928134835797295524,\n        \"\\t/\": \"𝄞\",\n        \"{ \\n\\r\": \"~,]\",\n        \"𝄞a/\": null\n      }\n    ]\n  ],\n  {\n    \"é\": [\n      false,\n      -85,\n      -0.0\n    ]\n  }\n]");
+        check_round_trip("0.1",
+            "0.1",
+            "0.1");
+        check_round_trip("[\"\\ra\", -483345.3347819394]",
+            "[\"\\ra\",-483345.3347819394]",
+            "[\n  \"\\ra\",\n  -483345.3347819394\n]");
+        check_round_trip("[\n\"\\b\\\" \\u0001,/\",\n\"\\u65e5\\u00e9\\ud83d\\ude42\\b\\r\",\n{\n\"\": \"{\\u001f\\ud834\\udd1e]\"\n},\n[\nnull,\n{\n\"/\\raz]\": null,\n\"\": true\n}\n]\n]",
+            "[\"\\b\\\" \\u0001,/\",\"日é🙂\\b\\r\",{\"\":\"{\\u001f𝄞]\"},[null,{\"/\\raz]\":null,\"\":true}]]",
+            "[\n  \"\\b\\\" \\u0001,/\",\n  \"日é🙂\\b\\r\",\n  {\n    \"\": \"{\\u001f𝄞]\"\n  },\n  [\n    null,\n    {\n      \"/\\raz]\": null,\n      \"\": true\n    }\n  ]\n]");
+        check_round_trip("{\n \"\": [\n  false\n ]\n}",
+            "{\"\":[false]}",
+            "{\n  \"\": [\n    false\n  ]\n}");
+        check_round_trip("{\"\\u0001\\u65e5\\t\\u0001]\": \"\\fz\\t\\t\", \"{\\u00e9a~ \": true, \"]\\\\\\\"\": {\"\": null, \",\\\"{z\": {\"\\u001f\\u65e5\": 837538139746416092812826914558, \"\\ud834\\udd1e\\b]\\rz\\b\": \"\\u001f\\fb\\u65e5\\u65e5{\", \"\\t\\ud834\\udd1e]\\u0001\": {\"\\r\\u00e9\": -148250204478763784}}}}",
+            "{\"\\u0001日\\t\\u0001]\":\"\\fz\\t\\t\",\"{éa~ \":true,\"]\\\\\\\"\":{\"\":null,\",\\\"{z\":{\"\\u001f日\":837538139746416092812826914558,\"𝄞\\b]\\rz\\b\":\"\\u001f\\fb日日{\",\"\\t𝄞]\\u0001\":{\"\\ré\":-148250204478763784}}}}",
+            "{\n  \"\\u0001日\\t\\u0001]\": \"\\fz\\t\\t\",\n  \"{éa~ \": true,\n  \"]\\\\\\\"\": {\n    \"\": null,\n    \",\\\"{z\": {\n      \"\\u001f日\": 837538139746416092812826914558,\n      \"𝄞\\b]\\rz\\b\": \"\\u001f\\fb日日{\",\n      \"\\t𝄞]\\u0001\": {\n        \"\\ré\": -148250204478763784\n      }\n    }\n  }\n}");
+        check_round_trip("[]",
+            "[]",
+            "[]");
+        check_round_trip("{\n\" \\na\": [\n-4.5000000000000004e-21,\nfalse,\n0.0,\ntrue\n],\n\"a]\\n\": 146\n}",
+            "{\" \\na\":[-4.5000000000000004e-21,false,0.0,true],\"a]\\n\":146}",
+            "{\n  \" \\na\": [\n    -4.5000000000000004e-21,\n    false,\n    0.0,\n    true\n  ],\n  \"a]\\n\": 146\n}");
+        check_round_trip("{}",
+            "{}",
+            "{}");
+        check_round_trip("{}",
+            "{}",
+            "{}");
+        check_round_trip("{\n   \"\": true\n}",
+            "{\"\":true}",
+            "{\n  \"\": true\n}");
+        check_round_trip("{\"\\f{\": \"\\r\\t \\u0001\\u00e9/\", \"\": \"\\r\\u0001/b\"}",
+            "{\"\\f{\":\"\\r\\t \\u0001é/\",\"\":\"\\r\\u0001/b\"}",
+            "{\n  \"\\f{\": \"\\r\\t \\u0001é/\",\n  \"\": \"\\r\\u0001/b\"\n}");
+        check_round_trip("[\n [\n  [],\n  1e-07,\n  1.7976931348623157e+308\n ],\n [\n  [\n   \"/z\\\"\\b\\f\\u0001\",\n   null\n  ],\n  {\n   \"\": \"]/𝄞 a\",\n   \",\\r日\\u0001 \": null,\n   \"]\\\"b~/🙂\": 689322459583616654079826655622,\n   \" \": [\n    \" \\b\\t\\u001f~\\b\"\n   ]\n  },\n  -5258407522559260734,\n  false\n ],\n [\n  true,\n  321026.9281656437\n ]\n]",
+            "[[[],1e-07,1.7976931348623157e+308],[[\"/z\\\"\\b\\f\\u0001\",null],{\"\":\"]/𝄞 a\",\",\\r日\\u0001 \":null,\"]\\\"b~/🙂\":689322459583616654079826655622,\" \":[\" \\b\\t\\u001f~\\b\"]},-5258407522559260734,false],[true,321026.9281656437]]",
+            "[\n  [\n    [],\n    1e-07,\n    1.7976931348623157e+308\n  ],\n  [\n    [\n      \"/z\\\"\\b\\f\\u0001\",\n      null\n    ],\n    {\n      \"\": \"]/𝄞 a\",\n      \",\\r日\\u0001 \": null,\n      \"]\\\"b~/🙂\": 689322459583616654079826655622,\n      \" \": [\n        \" \\b\\t\\u001f~\\b\"\n      ]\n    },\n    -5258407522559260734,\n    false\n  ],\n  [\n    true,\n    321026.9281656437\n  ]\n]");
+        check_round_trip("[]",
+            "[]",
+            "[]");
+        check_round_trip("false",
+            "false",
+            "false");
+        check_round_trip("{\n\"\\\\\\n\\u0001\": {\n\"\\r\": 407\n},\n\"{\\\\\": [],\n\"\\u65e5\": {}\n}",
+            "{\"\\\\\\n\\u0001\":{\"\\r\":407},\"{\\\\\":[],\"日\":{}}",
+            "{\n  \"\\\\\\n\\u0001\": {\n    \"\\r\": 407\n  },\n  \"{\\\\\": [],\n  \"日\": {}\n}");
+        check_round_trip("{\n \"/𝄞\\u0001\\\\\": {\n  \"\\\"\\n日\": [\n   515,\n   -798\n  ]\n }\n}",
+            "{\"/𝄞\\u0001\\\\\":{\"\\\"\\n日\":[515,-798]}}",
+            "{\n  \"/𝄞\\u0001\\\\\": {\n    \"\\\"\\n日\": [\n      515,\n      -798\n    ]\n  }\n}");
+        check_round_trip("[]",
+            "[]",
+            "[]");
+        check_round_trip("[\n   false,\n   {\n      \"\": true,\n      \"]\": \"\"\n   },\n   5e-324,\n   338266385702658551909711951113\n]",
+            "[false,{\"\":true,\"]\":\"\"},5e-324,338266385702658551909711951113]",
+            "[\n  false,\n  {\n    \"\": true,\n    \"]\": \"\"\n  },\n  5e-324,\n  338266385702658551909711951113\n]");
+        check_round_trip("[]",
+            "[]",
+            "[]");
+        check_round_trip("{\"\": null, \" \\n\\fz\": {\"éé\\u001f\\n\": -379, \"\": \"\"}, \"]\\u001f\\f\": {\"/\\r]a\\\\é\": \"\\\"\", \"~\\u001f,\": \"𝄞,,\\\"\\r\", \"\\u001f \": {\"日日 🙂\": null}}}",
+            "{\"\":null,\" \\n\\fz\":{\"éé\\u001f\\n\":-379,\"\":\"\"},\"]\\u001f\\f\":{\"/\\r]a\\\\é\":\"\\\"\",\"~\\u001f,\":\"𝄞,,\\\"\\r\",\"\\u001f \":{\"日日 🙂\":null}}}",
+            "{\n  \"\": null,\n  \" \\n\\fz\": {\n    \"éé\\u001f\\n\": -379,\n    \"\": \"\"\n  },\n  \"]\\u001f\\f\": {\n    \"/\\r]a\\\\é\": \"\\\"\",\n    \"~\\u001f,\": \"𝄞,,\\\"\\r\",\n    \"\\u001f \": {\n      \"日日 🙂\": null\n    }\n  }\n}");
+        check_round_trip("{\n  \"{\\ud83d\\ude42\\n\\r\\n\": {}\n}",
+            "{\"{🙂\\n\\r\\n\":{}}",
+            "{\n  \"{🙂\\n\\r\\n\": {}\n}");
+        check_round_trip("{}",
+            "{}",
+            "{}");
+        check_round_trip("[[{\"\": \"\\ud83d\\ude42 ~\", \"b\\n\\ud83d\\ude42b\\u65e5\": [-253699.85175518494, -1.9e+26, false, false]}], \"\\b\\t\\u0001\\u65e5 ,\", true, {\"\\n{/\\u00e9\": null, \"\\n{\\ud83d\\ude42\\t\\u00e9\\u0001\": [\"\", true, false], \"\\\\b\\f\\t\\n\\\\\": true, \"\\u00e9\\r\\\\\": [\"a,a//\", [null, \"\", 450431.20111554954, null], true, true]}]",
+            "[[{\"\":\"🙂 ~\",\"b\\n🙂b日\":[-253699.85175518494,-1.9e+26,false,false]}],\"\\b\\t\\u0001日 ,\",true,{\"\\n{/é\":null,\"\\n{🙂\\té\\u0001\":[\"\",true,false],\"\\\\b\\f\\t\\n\\\\\":true,\"é\\r\\\\\":[\"a,a//\",[null,\"\",450431.20111554954,null],true,true]}]",
+            "[\n  [\n    {\n      \"\": \"🙂 ~\",\n      \"b\\n🙂b日\": [\n        -253699.85175518494,\n        -1.9e+26,\n        false,\n        false\n      ]\n    }\n  ],\n  \"\\b\\t\\u0001日 ,\",\n  true,\n  {\n    \"\\n{/é\": null,\n    \"\\n{🙂\\té\\u0001\": [\n      \"\",\n      true,\n      false\n    ],\n    \"\\\\b\\f\\t\\n\\\\\": true,\n    \"é\\r\\\\\": [\n      \"a,a//\",\n      [\n        null,\n        \"\",\n        450431.20111554954,\n        null\n      ],\n      true,\n      true\n    ]\n  }\n]");
+        check_round_trip("{}",
+            "{}",
+            "{}");
+        check_round_trip("[\n  [\n    [\n      true\n    ],\n    {\n      \"{b\\ud83d\\ude42\\ud83d\\ude42{\": [\n        true\n      ],\n      \"b\\\\\": 5031908972876292834,\n      \"\\\\~\\\"\": 304\n    },\n    {}\n  ],\n  \"a\",\n  245754080996514124767999187052,\n  1965930534294305634\n]",
+            "[[[true],{\"{b🙂🙂{\":[true],\"b\\\\\":5031908972876292834,\"\\\\~\\\"\":304},{}],\"a\",245754080996514124767999187052,1965930534294305634]",
+            "[\n  [\n    [\n      true\n    ],\n    {\n      \"{b🙂🙂{\": [\n        true\n      ],\n      \"b\\\\\": 5031908972876292834,\n      \"\\\\~\\\"\": 304\n    },\n    {}\n  ],\n  \"a\",\n  245754080996514124767999187052,\n  1965930534294305634\n]");
+        check_round_trip("[-124, [-425, \"\\t\", 5e-324], null]",
+            "[-124,[-425,\"\\t\",5e-324],null]",
+            "[\n  -124,\n  [\n    -425,\n    \"\\t\",\n    5e-324\n  ],\n  null\n]");
+    };
+
+    export let test_write_escapes = func() -> void {
+        let controls: uint32[list] = [];
+        for (let c: uint32 = 0; c < 32; c = c + 1) {
+            controls.append(c);
+        }
+        controls.append(34);
+        controls.append(92);
+        controls.append(47);
+        controls.append(127);
+        let text = json.write(json.JsonValue.Text(strings.from_scalars(controls)));
+        test.assert_equal_string("\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r"
+            + "\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b"
+            + "\\u001c\\u001d\\u001e\\u001f\\\"\\\\/" + strings.from_scalars([127]) + "\"", text);
+        test.assert_equal_string(strings.from_scalars(controls), match (parsed(text)) {
+            json.JsonValue.Text(s) => s,
+            _ => "not text",
+        });
+        // Member names are escaped the same way.
+        let members: [string, json.JsonValue][list] = [["a\"b\n", json.JsonValue.Null]];
+        test.assert_equal_string("{\"a\\\"b\\n\":null}", json.write(json.JsonValue.Object(members)));
+    };
+
+    export let test_write_pretty = func() -> void {
+        let value = parsed("{\"a\":[1,{\"b\":null,\"c\":[]},{}],\"d\":\"x\"}");
+        test.assert_equal_string("{\n  \"a\": [\n    1,\n    {\n      \"b\": null,\n      \"c\": []\n    },\n    {}\n  ],\n  \"d\": \"x\"\n}",
+            json.write_pretty(value, 2));
+        test.assert_equal_string("{\n\"a\": [\n1,\n{\n\"b\": null,\n\"c\": []\n},\n{}\n],\n\"d\": \"x\"\n}",
+            json.write_pretty(value, 0));
+        test.assert_equal_string("[\n    true\n]", json.write_pretty(parsed("[true]"), 4));
+        test.assert_equal_string("[]", json.write_pretty(parsed("[]"), 4));
+        test.assert_equal_string("\"s\"", json.write_pretty(parsed("\"s\""), 4));
+        // Every member is written, including repeated names.
+        let members: [string, json.JsonValue][list] = [["k", json.number_of_int64(1)], ["k", json.number_of_int64(2)]];
+        test.assert_equal_string("{\"k\":1,\"k\":2}", json.write(json.JsonValue.Object(members)));
+        test.assert_equal_string("{\n \"k\": 1,\n \"k\": 2\n}", json.write_pretty(json.JsonValue.Object(members), 1));
+    };
+
+    export let test_number_constructors = func() -> void {
+        test.assert_equal_string("0", json.write(json.number_of_int64(0)));
+        test.assert_equal_string("-9223372036854775808", json.write(json.number_of_int64(-9223372036854775807 - 1)));
+        test.assert_equal_string("9223372036854775807", json.write(json.number_of_int64(9223372036854775807)));
+        test.assert_equal_string("1.5", json.write(json.number_of_float64(1.5)));
+        test.assert_equal_string("-0.0", json.write(json.number_of_float64(-0.0)));
+        test.assert_equal_string("1.0e22", json.write(json.number_of_float64(1e22)));
+        test.assert_equal_string("5.0e-324", json.write(json.number_of_float64(5e-324)));
+        test.assert_equal_string("1.7976931348623157e308", json.write(json.number_of_float64(1.7976931348623157e308)));
+        test.assert_equal_string("0.1", json.write(json.number_of_float64(0.1)));
+        // The float text is valid JSON number text.
+        test.assert_equal_string("[1.0e22]", json.write(parsed("[1.0e22]")));
+    };
+
+    export let test_member = func() -> void {
+        let members: [string, json.JsonValue][list] = [
+            ["a", json.number_of_int64(1)], ["b", json.JsonValue.Null], ["a", json.number_of_int64(2)]
+        ];
+        test.assert(json.equals(json.number_of_int64(1), test.assert_some<json.JsonValue>(json.member(members, "a"))));
+        test.assert(json.equals(json.JsonValue.Null, test.assert_some<json.JsonValue>(json.member(members, "b"))));
+        test.assert_none<json.JsonValue>(json.member(members, "c"));
+        test.assert_none<json.JsonValue>(json.member(members, "A"));
+        test.assert_none<json.JsonValue>(json.member([], "a"));
+    };
+
+    export let test_number_to_int64 = func() -> void {
+        test.assert_equal_int64(0, test.assert_some<int64>(json.number_to_int64("0")));
+        test.assert_equal_int64(0, test.assert_some<int64>(json.number_to_int64("-0")));
+        test.assert_equal_int64(-42, test.assert_some<int64>(json.number_to_int64("-42")));
+        test.assert_equal_int64(9223372036854775807, test.assert_some<int64>(json.number_to_int64("9223372036854775807")));
+        test.assert_equal_int64(-9223372036854775807 - 1,
+            test.assert_some<int64>(json.number_to_int64("-9223372036854775808")));
+        test.assert_none<int64>(json.number_to_int64("9223372036854775808"));
+        test.assert_none<int64>(json.number_to_int64("-9223372036854775809"));
+        test.assert_none<int64>(json.number_to_int64("123456789012345678901234567890"));
+        test.assert_none<int64>(json.number_to_int64("1.0"));
+        test.assert_none<int64>(json.number_to_int64("1e2"));
+        test.assert_none<int64>(json.number_to_int64("1E0"));
+        test.assert_none<int64>(json.number_to_int64(""));
+        test.assert_none<int64>(json.number_to_int64("-"));
+        test.assert_none<int64>(json.number_to_int64("01"));
+        test.assert_none<int64>(json.number_to_int64("+1"));
+        test.assert_none<int64>(json.number_to_int64(" 1"));
+        test.assert_none<int64>(json.number_to_int64("abc"));
+    };
+
+    export let test_number_to_float64 = func() -> void {
+        test.assert_equal_float64(0.0, json.number_to_float64("0"));
+        test.assert_equal_float64(-0.0, json.number_to_float64("-0"));
+        test.assert_equal_float64(1.5, json.number_to_float64("1.5"));
+        test.assert_equal_float64(100.0, json.number_to_float64("1E2"));
+        test.assert_equal_float64(0.1, json.number_to_float64("0.1"));
+        test.assert_equal_float64(0.1, json.number_to_float64("1e-1"));
+        test.assert_equal_float64(1.2345678901234568e29, json.number_to_float64("123456789012345678901234567890"));
+        test.assert_equal_float64(5e-324, json.number_to_float64("5e-324"));
+        test.assert_equal_float64(2.2250738585072014e-308, json.number_to_float64("2.2250738585072014e-308"));
+        test.assert_equal_float64(1.7976931348623157e308, json.number_to_float64("1.7976931348623157e308"));
+        test.assert_equal_float64(9007199254740992.0, json.number_to_float64("9007199254740993"));
+        // Too large becomes an infinity and too small a signed zero.
+        test.assert_equal_float64(1.0 / 0.0, json.number_to_float64("1e309"));
+        test.assert_equal_float64(-0.0, json.number_to_float64("-1e-400"));
+    };
+
+    let check_decimal = func(string text, string unscaled, int scale, string plain) -> void {
+        let value = json.number_to_big_decimal(text);
+        test.assert_equal_string(unscaled, value.unscaled().to_string());
+        test.assert_equal_int32(scale, value.scale());
+        test.assert_equal_string(plain, value.to_string());
+    };
+
+    export let test_number_to_big_decimal = func() -> void {
+        check_decimal("0", "0", 0, "0");
+        check_decimal("-0", "0", 0, "0");
+        check_decimal("1.50", "150", 2, "1.50");
+        check_decimal("15e-1", "15", 1, "1.5");
+        check_decimal("-123.4500e2", "-1234500", 2, "-12345.00");
+        check_decimal("1E3", "1", -3, "1000");
+        check_decimal("0.1", "1", 1, "0.1");
+        check_decimal("123456789012345678901234567890.25", "12345678901234567890123456789025", 2,
+            "123456789012345678901234567890.25");
+        check_decimal("-9223372036854775809", "-9223372036854775809", 0, "-9223372036854775809");
+        check_decimal("5e-324", "5", 324, "0." + strings.repeat("0", 323) + "5");
+        // Equal JSON numbers give numerically equal decimals.
+        test.assert(json.number_to_big_decimal("1.0").equals(json.number_to_big_decimal("10e-1")));
+        test.assert(!json.number_to_big_decimal("0.1").equals(json.number_to_big_decimal("0.10000000000000001")));
+    };
+
+    // Numbers are equal when their exact decimal values are.
+    export let test_number_equality = func() -> void {
+        same(number("1"), number("1.0"));
+        same(number("1"), number("10e-1"));
+        same(number("1"), number("0.1e1"));
+        same(number("1"), number("100E-2"));
+        same(number("0"), number("-0"));
+        same(number("0"), number("0.000e+7"));
+        same(number("-0.0e-0"), number("0e5"));
+        same(number("123.4500e2"), number("12345"));
+        same(number("-120.50"), number("-1205e-1"));
+        same(number("1e99999999999999999999"), number("10e99999999999999999998"));
+        same(number("1e-99999999999999999999"), number("0.1e-99999999999999999998"));
+        same(number("99e999999999999999999"), number("9.9e1000000000000000000"));
+        same(number("12.5e-999999999999999999"), number("125e-1000000000000000000"));
+        same(number("100000000000000000000000"), number("1e23"));
+        different(number("1"), number("2"));
+        different(number("1e2"), number("1e3"));
+        different(number("-1"), number("1"));
+        different(number("0.1"), number("0.10000000000000001"));
+        different(number("1e99999999999999999999"), number("1e99999999999999999998"));
+        different(number("1e-99999999999999999999"), number("1e-99999999999999999998"));
+        different(number("9223372036854775807"), number("9223372036854775808"));
+    };
+
+    export let test_structural_equality = func() -> void {
+        same(json.JsonValue.Null, json.JsonValue.Null);
+        same(json.JsonValue.Boolean(true), json.JsonValue.Boolean(true));
+        different(json.JsonValue.Boolean(true), json.JsonValue.Boolean(false));
+        different(json.JsonValue.Null, json.JsonValue.Boolean(false));
+        different(json.JsonValue.Text("1"), number("1"));
+        different(json.JsonValue.Text("a"), json.JsonValue.Text("b"));
+        same(json.JsonValue.Text("é"), json.JsonValue.Text("é"));
+        same(parsed("[1, [2, 3.0]]"), parsed("[1.0,[2,3]]"));
+        different(parsed("[1, 2]"), parsed("[2, 1]"));
+        different(parsed("[1]"), parsed("[1, 1]"));
+        different(parsed("[]"), parsed("{}"));
+        // Objects compare regardless of member order.
+        same(parsed("{\"a\":1,\"b\":[true]}"), parsed("{\"b\":[true],\"a\":1.0}"));
+        same(parsed("{}"), parsed("{}"));
+        different(parsed("{\"a\":1}"), parsed("{\"a\":2}"));
+        different(parsed("{\"a\":1}"), parsed("{\"b\":1}"));
+        different(parsed("{\"a\":1}"), parsed("{\"a\":1,\"b\":1}"));
+        different(parsed("{\"a\":{\"x\":1}}"), parsed("{\"a\":{\"x\":1,\"y\":1}}"));
+    };
+
+    // Member lists built directly may repeat a name. Each member of either
+    // object must match a member of the other.
+    export let test_repeated_names_equality = func() -> void {
+        let one = json.number_of_int64(1);
+        let two = json.number_of_int64(2);
+        let a: [string, json.JsonValue][list] = [["x", one], ["x", two]];
+        let b: [string, json.JsonValue][list] = [["x", two], ["x", one]];
+        same(json.JsonValue.Object(a), json.JsonValue.Object(b));
+        let c: [string, json.JsonValue][list] = [["x", one], ["x", one], ["x", two]];
+        let d: [string, json.JsonValue][list] = [["x", one], ["x", two], ["x", two]];
+        same(json.JsonValue.Object(c), json.JsonValue.Object(d));
+        let e: [string, json.JsonValue][list] = [["x", one], ["x", json.number_of_int64(3)]];
+        different(json.JsonValue.Object(a), json.JsonValue.Object(e));
+        let f: [string, json.JsonValue][list] = [["x", one], ["x", one]];
+        let g: [string, json.JsonValue][list] = [["x", one], ["y", one]];
+        different(json.JsonValue.Object(f), json.JsonValue.Object(g));
+        different(json.JsonValue.Object(f), json.JsonValue.Object(a));
+        same(json.JsonValue.Object(f), json.JsonValue.Object(f));
+    };
+
+    // The hash values are part of the contract.
+    export let test_hash_values = func() -> void {
+        test.assert_equal_uint64(1, json.hash(json.JsonValue.Null) as uint64);
+        test.assert_equal_uint64(1293, json.hash(json.JsonValue.Boolean(true)) as uint64);
+        test.assert_equal_uint64(1299, json.hash(json.JsonValue.Boolean(false)) as uint64);
+        // "0".hash_code() is 48; "1e0" is 48655.
+        test.assert_equal_uint64(141, json.hash(number("-0.0")) as uint64);
+        test.assert_equal_uint64(50361, json.hash(number("1.0")) as uint64);
+        // "a" is 97.
+        test.assert_equal_uint64(221, json.hash(json.JsonValue.Text("a")) as uint64);
+        test.assert_equal_uint64(5, json.hash(parsed("[]")) as uint64);
+        test.assert_equal_uint64(4837, json.hash(parsed("[null,null]")) as uint64);
+        // Hash.combine(Hash.combine(6, 0), 0) and, for {"a":null},
+        // Hash.combine(Hash.combine(6, 1), Hash.combine(97, 1)).
+        test.assert_equal_uint64(5766, json.hash(parsed("{}")) as uint64);
+        test.assert_equal_uint64(8805, json.hash(parsed("{\"a\":null}")) as uint64);
+    };
+
+    export let test_index = func() -> void {
+        let members: [string, json.JsonValue][list] = [
+            ["a", json.number_of_int64(1)], ["b", json.JsonValue.Null], ["a", json.number_of_int64(2)]
+        ];
+        let map = json.index(members);
+        test.assert_equal_int32(2, map.size());
+        test.assert(json.equals(json.number_of_int64(2), test.assert_some<json.JsonValue>(map.get("a"))));
+        test.assert(json.equals(json.JsonValue.Null, test.assert_some<json.JsonValue>(map.get("b"))));
+        test.assert_none<json.JsonValue>(map.get("c"));
+        test.assert_equal<string[list]>(["a", "b"], map.keys());
+        test.assert_equal_int32(0, json.index([]).size());
+    };
+);

@@ -1,0 +1,211 @@
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+
+// Base 64 (RFC 4648; Stdlib.md section 13.1) with the standard alphabet
+// (section 4) and the URL- and filename-safe alphabet (section 5). The
+// padded encoders end the text with `=` to a multiple of four characters;
+// the _unpadded encoders omit it.
+//
+// Decoding is strict. A padded decoder requires the text's length to be a
+// multiple of four, with `=` only as one or two final characters; an
+// unpadded decoder rejects `=` and a final group of one character. Every
+// other byte outside the alphabet, including whitespace, line breaks, and
+// the other alphabet's two symbols, is rejected, and the unused low bits of
+// the last character must be zero. Failures are Encoding errors. The first
+// error in the text's structure (characters, padding, and length) is
+// reported; only a well-formed text is checked for trailing bits. The
+// messages and offsets:
+//
+// - "invalid character": a byte outside the alphabet, at its offset.
+// - "invalid padding": a `=` that cannot be padding, or a character after
+//   padding, at its offset.
+// - "unexpected padding": a `=` given to an unpadded decoder, at its offset.
+// - "unexpected end of data": the text ends inside a group, at the length.
+// - "nonzero trailing bits": the last character has unused bits set, at
+//   its offset.
+export let Base64 = module (
+    const StandardAlphabet: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const UrlAlphabet: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+    // Byte to digit value, 255 outside the alphabet. Built on first use.
+    let standard_values: uint8[list] = [];
+    let url_values: uint8[list] = [];
+
+    let values_of = func(string alphabet) -> uint8[list] {
+        let values: uint8[list] = [];
+        for (let b = 0; b < 256; b = b + 1) {
+            values.append(255);
+        }
+        for (let v = 0; v < 64; v = v + 1) {
+            values[alphabet.byte_at(v) as int] = v as uint8;
+        }
+        return values;
+    };
+
+    let ready_standard = func() -> uint8[list] {
+        if (standard_values.length == 0) {
+            standard_values = values_of(StandardAlphabet);
+        }
+        return standard_values;
+    };
+
+    let ready_url = func() -> uint8[list] {
+        if (url_values.length == 0) {
+            url_values = values_of(UrlAlphabet);
+        }
+        return url_values;
+    };
+
+    export let encode = func(uint8[list] bytes) -> string {
+        return encode_with(bytes, StandardAlphabet, true);
+    };
+
+    export let encode_unpadded = func(uint8[list] bytes) -> string {
+        return encode_with(bytes, StandardAlphabet, false);
+    };
+
+    export let encode_url = func(uint8[list] bytes) -> string {
+        return encode_with(bytes, UrlAlphabet, true);
+    };
+
+    export let encode_url_unpadded = func(uint8[list] bytes) -> string {
+        return encode_with(bytes, UrlAlphabet, false);
+    };
+
+    // Strict decoding of padded standard text.
+    export let decode = func(string text) -> result.Result<uint8[list]> {
+        return decode_with(text, ready_standard(), true);
+    };
+
+    // Strict decoding of unpadded standard text.
+    export let decode_unpadded = func(string text) -> result.Result<uint8[list]> {
+        return decode_with(text, ready_standard(), false);
+    };
+
+    // Strict decoding of padded URL-safe text.
+    export let decode_url = func(string text) -> result.Result<uint8[list]> {
+        return decode_with(text, ready_url(), true);
+    };
+
+    // Strict decoding of unpadded URL-safe text.
+    export let decode_url_unpadded = func(string text) -> result.Result<uint8[list]> {
+        return decode_with(text, ready_url(), false);
+    };
+
+    let encode_with = func(uint8[list] bytes, string alphabet, bool padded) -> string {
+        let chars: uint8[list] = [];
+        let count = bytes.length;
+        let i = 0;
+        while (i + 3 <= count) {
+            let b0 = bytes[i];
+            let b1 = bytes[i + 1];
+            let b2 = bytes[i + 2];
+            chars.append(alphabet.byte_at((b0 >> 2) as int));
+            chars.append(alphabet.byte_at((((b0 & 3) << 4) | (b1 >> 4)) as int));
+            chars.append(alphabet.byte_at((((b1 & 15) << 2) | (b2 >> 6)) as int));
+            chars.append(alphabet.byte_at((b2 & 63) as int));
+            i = i + 3;
+        }
+        let rest = count - i;
+        if (rest == 1) {
+            let b0 = bytes[i];
+            chars.append(alphabet.byte_at((b0 >> 2) as int));
+            chars.append(alphabet.byte_at(((b0 & 3) << 4) as int));
+            if (padded) {
+                chars.append(61);
+                chars.append(61);
+            }
+        } else if (rest == 2) {
+            let b0 = bytes[i];
+            let b1 = bytes[i + 1];
+            chars.append(alphabet.byte_at((b0 >> 2) as int));
+            chars.append(alphabet.byte_at((((b0 & 3) << 4) | (b1 >> 4)) as int));
+            chars.append(alphabet.byte_at(((b1 & 15) << 2) as int));
+            if (padded) {
+                chars.append(61);
+            }
+        }
+        let [_, text] = string.from_utf8(chars);
+        return text;
+    };
+
+    let decode_with = func(string text, uint8[list] values, bool padded) -> result.Result<uint8[list]> {
+        let count = text.byte_length;
+        let bytes: uint8[list] = [];
+        // Whole groups of four alphabet characters.
+        let i = 0;
+        while (i + 4 <= count) {
+            let v0 = values[text.byte_at(i) as int];
+            let v1 = values[text.byte_at(i + 1) as int];
+            let v2 = values[text.byte_at(i + 2) as int];
+            let v3 = values[text.byte_at(i + 3) as int];
+            if ((v0 | v1 | v2 | v3) > 63) {
+                break;
+            }
+            bytes.append((v0 << 2) | (v1 >> 4));
+            bytes.append(((v1 & 15) << 4) | (v2 >> 2));
+            bytes.append(((v2 & 3) << 6) | v3);
+            i = i + 4;
+        }
+        if (i == count) {
+            return result.Result<uint8[list]>.Ok(bytes);
+        }
+        // The group at i is the last one, or it holds a byte outside the
+        // alphabet. Count its alphabet characters; there are at most three.
+        let digits = 0;
+        while (i + digits < count && values[text.byte_at(i + digits) as int] < 64) {
+            digits = digits + 1;
+        }
+        let end = i + digits;
+        if (end == count) {
+            if (digits == 1 || padded) {
+                return failure(count, "unexpected end of data");
+            }
+        } else {
+            if (text.byte_at(end) != 61) {
+                return failure(end, "invalid character");
+            }
+            if (!padded) {
+                return failure(end, "unexpected padding");
+            }
+            if (digits < 2) {
+                return failure(end, "invalid padding");
+            }
+            // Two characters take two `=` and three take one; nothing may
+            // follow the padding.
+            let needed = 4 - digits;
+            for (let k = 0; k < needed; k = k + 1) {
+                if (end + k == count) {
+                    return failure(count, "unexpected end of data");
+                }
+                if (text.byte_at(end + k) != 61) {
+                    return failure(end + k, "invalid padding");
+                }
+            }
+            if (end + needed < count) {
+                return failure(end + needed, "invalid padding");
+            }
+        }
+        // A final group of two or three characters.
+        let v0 = values[text.byte_at(i) as int];
+        let v1 = values[text.byte_at(i + 1) as int];
+        if (digits == 2) {
+            if ((v1 & 15) != 0) {
+                return failure(i + 1, "nonzero trailing bits");
+            }
+            bytes.append((v0 << 2) | (v1 >> 4));
+        } else {
+            let v2 = values[text.byte_at(i + 2) as int];
+            if ((v2 & 3) != 0) {
+                return failure(i + 2, "nonzero trailing bits");
+            }
+            bytes.append((v0 << 2) | (v1 >> 4));
+            bytes.append(((v1 & 15) << 4) | (v2 >> 2));
+        }
+        return result.Result<uint8[list]>.Ok(bytes);
+    };
+
+    let failure = func(int offset, string message) -> result.Result<uint8[list]> {
+        return result.Result<uint8[list]>.Err(error.Error.Encoding { offset: offset, message: message });
+    };
+);

@@ -1,0 +1,15 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: number text
+let console = import:Std.Io.Console;
+let json = import:Std.Encoding.Json;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(json.write_pretty(json.JsonValue.Number("-0"), 2));
+        let members: [string, json.JsonValue][list] = [["n", json.JsonValue.Number("")]];
+        console.print_line(json.write_pretty(json.JsonValue.Object(members), 2));
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

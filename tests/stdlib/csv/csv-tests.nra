@@ -1,0 +1,125 @@
+let csv = import:Std.Encoding.Csv;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// CSV (RFC 4180) as Stdlib.md section 13.1 specifies it.
+let CsvTests = module (
+    let parsed = func(string text) -> string[list][list] {
+        return test.assert_ok<string[list][list]>(csv.parse(text));
+    };
+
+    let check_error = func(string text, error.ParseErrorKind kind, int offset, string message) -> void {
+        match (test.assert_err<string[list][list]>(csv.parse(text))) {
+            error.Error.Parse { kind: actual, offset: at, message: reason } => {
+                test.assert_equal_string(message, reason);
+                test.assert_equal_int32(offset, at);
+                test.assert_equal_string(kind.to_string(), actual.to_string());
+            },
+            _ => {
+                test.fail("expected a Parse error");
+            },
+        }
+    };
+
+    export let test_parse_records = func() -> void {
+        test.assert_equal<string[list][list]>([], parsed(""));
+        test.assert_equal<string[list][list]>([["a"]], parsed("a"));
+        test.assert_equal<string[list][list]>([["a", "b", "c"]], parsed("a,b,c"));
+        test.assert_equal<string[list][list]>([["a", "b"], ["c", "d"]], parsed("a,b\nc,d"));
+        test.assert_equal<string[list][list]>([["a", "b"], ["c", "d"]], parsed("a,b\r\nc,d\r\n"));
+        test.assert_equal<string[list][list]>([["a", "b"], ["c", "d"]], parsed("a,b\nc,d\n"));
+        test.assert_equal<string[list][list]>([["a"], ["b", "c", "d"], ["e"]], parsed("a\nb,c,d\r\ne"));
+    };
+
+    // A final line break adds no record; an empty line is one empty field.
+    export let test_empty_fields_and_lines = func() -> void {
+        test.assert_equal<string[list][list]>([[""]], parsed("\n"));
+        test.assert_equal<string[list][list]>([[""]], parsed("\r\n"));
+        test.assert_equal<string[list][list]>([[""], [""]], parsed("\n\n"));
+        test.assert_equal<string[list][list]>([["a"], [""], ["b"]], parsed("a\n\nb\n"));
+        test.assert_equal<string[list][list]>([["", ""]], parsed(","));
+        test.assert_equal<string[list][list]>([["a", ""]], parsed("a,"));
+        test.assert_equal<string[list][list]>([["a", ""]], parsed("a,\n"));
+        test.assert_equal<string[list][list]>([["", "", ""], ["x"]], parsed(",,\nx"));
+        test.assert_equal<string[list][list]>([["", "b"]], parsed(",b"));
+    };
+
+    export let test_quoted_fields = func() -> void {
+        test.assert_equal<string[list][list]>([[""]], parsed("\"\""));
+        test.assert_equal<string[list][list]>([["a,b", "c"]], parsed("\"a,b\",c"));
+        test.assert_equal<string[list][list]>([["line\nbreak", "x"]], parsed("\"line\nbreak\",x\n"));
+        test.assert_equal<string[list][list]>([["cr\r\nlf"]], parsed("\"cr\r\nlf\"\r\n"));
+        test.assert_equal<string[list][list]>([["say \"hi\""]], parsed("\"say \"\"hi\"\"\""));
+        test.assert_equal<string[list][list]>([["\""]], parsed("\"\"\"\""));
+        test.assert_equal<string[list][list]>([["\"\""]], parsed("\"\"\"\"\"\""));
+        test.assert_equal<string[list][list]>([["a", "", "c"]], parsed("a,\"\",c"));
+        test.assert_equal<string[list][list]>([["x", ""], ["y"]], parsed("x,\"\"\ny"));
+        test.assert_equal<string[list][list]>([["a", "b"]], parsed("\"a\",\"b\""));
+        test.assert_equal<string[list][list]>([["é,🙂"]], parsed("\"é,🙂\""));
+    };
+
+    // Spaces, tabs, a CR that does not start a CRLF, and non-ASCII text are
+    // field data.
+    export let test_data_bytes = func() -> void {
+        test.assert_equal<string[list][list]>([[" a ", "\tb"]], parsed(" a ,\tb"));
+        test.assert_equal<string[list][list]>([["a\rb", "c"]], parsed("a\rb,c"));
+        test.assert_equal<string[list][list]>([["a\r"]], parsed("a\r"));
+        test.assert_equal<string[list][list]>([[""], ["x"]], parsed("\r\nx"));
+        test.assert_equal<string[list][list]>([["\r"], ["x"]], parsed("\r\r\nx"));
+        test.assert_equal<string[list][list]>([["é", "日本"]], parsed("é,日本"));
+    };
+
+    export let test_parse_errors = func() -> void {
+        check_error("a\"b", error.ParseErrorKind.Syntax, 1, "quote in unquoted field");
+        check_error("abc,d\"", error.ParseErrorKind.Syntax, 5, "quote in unquoted field");
+        check_error(" \"a\"", error.ParseErrorKind.Syntax, 1, "quote in unquoted field");
+        check_error("\"a\"b", error.ParseErrorKind.Syntax, 3, "text after closing quote");
+        check_error("\"a\" ,b", error.ParseErrorKind.Syntax, 3, "text after closing quote");
+        check_error("x\n\"a\"\r", error.ParseErrorKind.Syntax, 5, "text after closing quote");
+        check_error("\"a\"\"", error.ParseErrorKind.UnexpectedEnd, 4, "unterminated quoted field");
+        check_error("\"", error.ParseErrorKind.UnexpectedEnd, 1, "unterminated quoted field");
+        check_error("a,\"b\nc", error.ParseErrorKind.UnexpectedEnd, 6, "unterminated quoted field");
+    };
+
+    export let test_write = func() -> void {
+        test.assert_equal_string("", csv.write([]));
+        test.assert_equal_string("a,b\nc\n", csv.write([["a", "b"], ["c"]]));
+        test.assert_equal_string("\n", csv.write([[""]]));
+        test.assert_equal_string(",\n", csv.write([["", ""]]));
+        test.assert_equal_string("\"a,b\",\"say \"\"hi\"\"\"\n", csv.write([["a,b", "say \"hi\""]]));
+        test.assert_equal_string("\"x\ny\",\"cr\r\",\"lf\r\nz\"\n", csv.write([["x\ny", "cr\r", "lf\r\nz"]]));
+        test.assert_equal_string(" a ,\té,🙂\n", csv.write([[" a ", "\té", "🙂"]]));
+        test.assert_equal_string("\n", csv.write([[]]));
+    };
+
+    // Random rows over an alphabet of the special bytes survive write then
+    // parse unchanged (every row has at least one field).
+    export let test_round_trip_seeded = func() -> void {
+        let pieces: string[] = ["a", ",", "\"", "\r", "\n", "é", " ", "\r\n", "\"\"", "b"];
+        let x: uint64 = 12345;
+        for (let trial = 0; trial < 300; trial = trial + 1) {
+            let rows: string[list][list] = [];
+            x = (x * 1103515245 + 12345) & 2147483647;
+            let row_count = ((x >> 16) % 4) as int;
+            for (let r = 0; r < row_count; r = r + 1) {
+                let row: string[list] = [];
+                x = (x * 1103515245 + 12345) & 2147483647;
+                let field_count = 1 + ((x >> 16) % 4) as int;
+                for (let f = 0; f < field_count; f = f + 1) {
+                    x = (x * 1103515245 + 12345) & 2147483647;
+                    let length = ((x >> 16) % 5) as int;
+                    let field = "";
+                    for (let k = 0; k < length; k = k + 1) {
+                        x = (x * 1103515245 + 12345) & 2147483647;
+                        field = field + pieces[((x >> 16) % 10) as int];
+                    }
+                    row.append(field);
+                }
+                rows.append(row);
+            }
+            let text = csv.write(rows);
+            test.assert_equal<string[list][list]>(rows, parsed(text));
+        }
+    };
+);

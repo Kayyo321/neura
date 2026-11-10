@@ -1,0 +1,14 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: number text
+let console = import:Std.Io.Console;
+let json = import:Std.Encoding.Json;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(json.number_to_float64("2.5").to_string());
+        let value = json.number_to_float64("2.5.0");
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

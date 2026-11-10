@@ -1,0 +1,104 @@
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// Base 16. The expected text of the seeded byte sequences and of every byte
+// value comes from python3's bytes.hex().
+let HexTests = module (
+    // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
+    let seeded_bytes = func(int length, uint64 seed) -> uint8[list] {
+        let bytes: uint8[list] = [];
+        let x = seed;
+        for (let i = 0; i < length; i = i + 1) {
+            x = (x * 1103515245 + 12345) & 2147483647;
+            bytes.append(((x >> 16) & 255) as uint8);
+        }
+        return bytes;
+    };
+
+    let check_seeded = func(int length, uint64 seed, string expected) -> void {
+        let bytes = seeded_bytes(length, seed);
+        test.assert_equal_string(expected, hex.encode(bytes));
+        test.assert_equal<uint8[list]>(bytes, test.assert_ok<uint8[list]>(hex.decode(expected)));
+        test.assert_equal<uint8[list]>(bytes, test.assert_ok<uint8[list]>(hex.decode(strings.to_ascii_upper(expected))));
+    };
+
+    let check_error = func(string text, int offset, string message) -> void {
+        match (test.assert_err<uint8[list]>(hex.decode(text))) {
+            error.Error.Encoding { offset: at, message: reason } => {
+                test.assert_equal_string(message, reason);
+                test.assert_equal_int32(offset, at);
+            },
+            _ => {
+                test.fail("expected an Encoding error");
+            },
+        }
+    };
+
+    export let test_encode_lowercase = func() -> void {
+        test.assert_equal_string("", hex.encode([]));
+        test.assert_equal_string("00010f10ff", hex.encode([0, 1, 15, 16, 255]));
+        test.assert_equal_string("666f6f626172", hex.encode(strings.to_bytes("foobar")));
+        let all: uint8[list] = [];
+        for (let b = 0; b < 256; b = b + 1) {
+            all.append(b as uint8);
+        }
+        let text = hex.encode(all);
+        test.assert_equal_string("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff", text);
+        test.assert_equal<uint8[list]>(all, test.assert_ok<uint8[list]>(hex.decode(text)));
+    };
+
+    export let test_decode_either_case = func() -> void {
+        test.assert_equal<uint8[list]>([], test.assert_ok<uint8[list]>(hex.decode("")));
+        test.assert_equal<uint8[list]>(strings.to_bytes("foobar"), test.assert_ok<uint8[list]>(hex.decode("666F6F626172")));
+        test.assert_equal<uint8[list]>([171, 205, 239, 171, 205, 239],
+            test.assert_ok<uint8[list]>(hex.decode("abCDefABcdEF")));
+        test.assert_equal<uint8[list]>([9, 144], test.assert_ok<uint8[list]>(hex.decode("0990")));
+    };
+
+    export let test_seeded_python_vectors = func() -> void {
+        check_seeded(0, 11, "");
+        check_seeded(1, 12, "4b");
+        check_seeded(2, 13, "121d");
+        check_seeded(3, 14, "d8c0e4");
+        check_seeded(16, 27, "ea024714ad5c4d84bad8ad1247ef165d");
+        check_seeded(33, 44, "15cea08263fed74055ba0479afd1b919689841a526ba7ce17bc27d42e269e41777");
+    };
+
+    export let test_errors = func() -> void {
+        check_error("g0", 0, "invalid hex digit");
+        check_error("0g", 1, "invalid hex digit");
+        check_error("00:11", 2, "invalid hex digit");
+        check_error("0011 ", 4, "invalid hex digit");
+        check_error(" 0011", 0, "invalid hex digit");
+        check_error("0x10", 1, "invalid hex digit");
+        check_error("é0", 0, "invalid hex digit");
+        check_error("00é0", 2, "invalid hex digit");
+        check_error("0G", 1, "invalid hex digit");
+        check_error("/0", 0, "invalid hex digit");
+        check_error("0:", 1, "invalid hex digit");
+        check_error("@0", 0, "invalid hex digit");
+        check_error("`0", 0, "invalid hex digit");
+        // Every byte that is not a digit fails.
+        for (let b = 0; b < 256; b = b + 1) {
+            let digit = (b >= 48 && b <= 57) || (b >= 65 && b <= 70) || (b >= 97 && b <= 102);
+            if (!digit && b < 128) {
+                let [_, text] = string.from_utf8([b as uint8, 48]);
+                check_error(text, 0, "invalid hex digit");
+            }
+        }
+    };
+
+    // An odd count fails at the text's length once every digit is valid; an
+    // earlier invalid byte is reported first.
+    export let test_odd_length = func() -> void {
+        check_error("0", 1, "odd number of hex digits");
+        check_error("abc", 3, "odd number of hex digits");
+        check_error("00112", 5, "odd number of hex digits");
+        check_error("abz", 2, "invalid hex digit");
+        check_error("zbc", 0, "invalid hex digit");
+        check_error("z", 0, "invalid hex digit");
+    };
+);

@@ -1,0 +1,17 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid state: digest finished
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let sha256s = import:Std.Digest.Sha256;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let digest = sha256s.create();
+        digest.update([97, 98, 99]);
+        let hash = digest.finish();
+        console.print_line(hash.length.to_string());
+        digest.update([100]);
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

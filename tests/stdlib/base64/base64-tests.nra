@@ -1,0 +1,157 @@
+let base64s = import:Std.Encoding.Base64;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// Base 64. The RFC 4648 section 10 vectors, then seeded byte sequences
+// whose expected text python3's base64.b64encode and urlsafe_b64encode
+// produced. Python's decoder is lenient about trailing bits; the strict
+// cases below follow Stdlib.md section 13.1.
+let Base64Tests = module (
+    // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
+    let seeded_bytes = func(int length, uint64 seed) -> uint8[list] {
+        let bytes: uint8[list] = [];
+        let x = seed;
+        for (let i = 0; i < length; i = i + 1) {
+            x = (x * 1103515245 + 12345) & 2147483647;
+            bytes.append(((x >> 16) & 255) as uint8);
+        }
+        return bytes;
+    };
+
+    let unpad = func(string text) -> string {
+        return strings.replace(text, "=", "");
+    };
+
+    let check_all = func(uint8[list] bytes, string standard, string url) -> void {
+        test.assert_equal_string(standard, base64s.encode(bytes));
+        test.assert_equal_string(url, base64s.encode_url(bytes));
+        test.assert_equal_string(unpad(standard), base64s.encode_unpadded(bytes));
+        test.assert_equal_string(unpad(url), base64s.encode_url_unpadded(bytes));
+        test.assert_equal<uint8[list]>(bytes, test.assert_ok<uint8[list]>(base64s.decode(standard)));
+        test.assert_equal<uint8[list]>(bytes, test.assert_ok<uint8[list]>(base64s.decode_url(url)));
+        test.assert_equal<uint8[list]>(bytes, test.assert_ok<uint8[list]>(base64s.decode_unpadded(unpad(standard))));
+        test.assert_equal<uint8[list]>(bytes, test.assert_ok<uint8[list]>(base64s.decode_url_unpadded(unpad(url))));
+    };
+
+    let check_text = func(string text, string standard) -> void {
+        check_all(strings.to_bytes(text), standard, standard);
+    };
+
+    let check_seeded = func(int length, uint64 seed, string standard, string url) -> void {
+        check_all(seeded_bytes(length, seed), standard, url);
+    };
+
+    let check_error = func(result.Result<uint8[list]> outcome, int offset, string message) -> void {
+        match (test.assert_err<uint8[list]>(outcome)) {
+            error.Error.Encoding { offset: at, message: text } => {
+                test.assert_equal_string(message, text);
+                test.assert_equal_int32(offset, at);
+            },
+            _ => {
+                test.fail("expected an Encoding error");
+            },
+        }
+    };
+
+    export let test_rfc4648_vectors = func() -> void {
+        check_text("", "");
+        check_text("f", "Zg==");
+        check_text("fo", "Zm8=");
+        check_text("foo", "Zm9v");
+        check_text("foob", "Zm9vYg==");
+        check_text("fooba", "Zm9vYmE=");
+        check_text("foobar", "Zm9vYmFy");
+    };
+
+    export let test_seeded_python_vectors = func() -> void {
+        check_seeded(0, 3, "", "");
+        check_seeded(1, 4, "GQ==", "GQ==");
+        check_seeded(2, 5, "3wk=", "3wk=");
+        check_seeded(3, 6, "pqv2", "pqv2");
+        check_seeded(4, 7, "bE50kg==", "bE50kg==");
+        check_seeded(5, 8, "MvDymbQ=", "MvDymbQ=");
+        check_seeded(6, 9, "+JNvn1be", "-JNvn1be");
+        check_seeded(7, 10, "vzbtpve6wg==", "vzbtpve6wg==");
+        check_seeded(8, 11, "hdhrrJiW96Y=", "hdhrrJiW96Y=");
+        check_seeded(9, 12, "S3vpszlzLYQT", "S3vpszlzLYQT");
+        check_seeded(10, 13, "Eh1mudtPYmINSw==", "Eh1mudtPYmINSw==");
+        check_seeded(11, 14, "2MDkwHwrl0AHZ7U=", "2MDkwHwrl0AHZ7U=");
+        check_seeded(12, 15, "nmNixh0IzR0BhI2s", "nmNixh0IzR0BhI2s");
+        check_seeded(31, 34, "VnS3QRZiwpWQn5R56uKljLvWkNxmPtrtO+JhiExBpQ==", "VnS3QRZiwpWQn5R56uKljLvWkNxmPtrtO-JhiExBpQ==");
+        check_seeded(32, 35, "HBc0SLc/93OKu2ysS+EnAUwdVb2tsdCFQSzkNUGr33g=", "HBc0SLc_93OKu2ysS-EnAUwdVb2tsdCFQSzkNUGr33g=");
+        check_seeded(33, 36, "47myTlgbLVGE10Tfq9+pdd5kGp7zI8cdSHZn4TYWGKZX", "47myTlgbLVGE10Tfq9-pdd5kGp7zI8cdSHZn4TYWGKZX");
+        check_seeded(57, 60, "evh86nfDLB72gISstrXaYXwAjrOL5uZn4lupBDgRffi4gQCLfLqph8vsXaQTs9G2pSWilTKaNdAJ", "evh86nfDLB72gISstrXaYXwAjrOL5uZn4lupBDgRffi4gQCLfLqph8vsXaQTs9G2pSWilTKaNdAJ");
+        check_seeded(100, 103, "yUibAo7GIWL2RMxF6Wmz8+LZnnpaLlIB9ref7XDzJbVFy+qFI5OelhG/qEhcZfgERXaM1Gy8v7/7k1TmkmdGX/XxTdV3MTDcJSrOFbNg6gYoErm2SDctC8U7/+Qkdn/2cXAbZw==", "yUibAo7GIWL2RMxF6Wmz8-LZnnpaLlIB9ref7XDzJbVFy-qFI5OelhG_qEhcZfgERXaM1Gy8v7_7k1TmkmdGX_XxTdV3MTDcJSrOFbNg6gYoErm2SDctC8U7_-Qkdn_2cXAbZw==");
+    };
+
+    export let test_every_byte_value = func() -> void {
+        let all: uint8[list] = [];
+        for (let b = 0; b < 256; b = b + 1) {
+            all.append(b as uint8);
+        }
+        check_all(all,
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==",
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6uvs7e7v8PHy8_T19vf4-fr7_P3-_w==");
+    };
+
+    // The two alphabets differ only in values 62 and 63.
+    export let test_alphabet_symbols = func() -> void {
+        check_all([251, 255, 191], "+/+/", "-_-_");
+        check_all([251, 239], "++8=", "--8=");
+        check_error(base64s.decode("-_-_"), 0, "invalid character");
+        check_error(base64s.decode_unpadded("Zm_v"), 2, "invalid character");
+        check_error(base64s.decode_url("+/+/"), 0, "invalid character");
+        check_error(base64s.decode_url_unpadded("Zm9/"), 3, "invalid character");
+    };
+
+    export let test_padding_errors = func() -> void {
+        check_error(base64s.decode("Z"), 1, "unexpected end of data");
+        check_error(base64s.decode("Zg"), 2, "unexpected end of data");
+        check_error(base64s.decode("Zg="), 3, "unexpected end of data");
+        check_error(base64s.decode("Zm9"), 3, "unexpected end of data");
+        check_error(base64s.decode("Zm9vYg"), 6, "unexpected end of data");
+        check_error(base64s.decode_url("Zm9vY"), 5, "unexpected end of data");
+        check_error(base64s.decode("Z==="), 1, "invalid padding");
+        check_error(base64s.decode("===="), 0, "invalid padding");
+        check_error(base64s.decode("Zm9v===="), 4, "invalid padding");
+        check_error(base64s.decode("Zm9v="), 4, "invalid padding");
+        check_error(base64s.decode("Zg=a"), 3, "invalid padding");
+        check_error(base64s.decode("Zg==Zg=="), 4, "invalid padding");
+        check_error(base64s.decode("Zm8=Zg=="), 4, "invalid padding");
+        check_error(base64s.decode("Zg==="), 4, "invalid padding");
+        check_error(base64s.decode_url("Zm8=="), 4, "invalid padding");
+        check_error(base64s.decode_unpadded("Zg=="), 2, "unexpected padding");
+        check_error(base64s.decode_unpadded("Zm8="), 3, "unexpected padding");
+        check_error(base64s.decode_url_unpadded("="), 0, "unexpected padding");
+        check_error(base64s.decode_unpadded("Z"), 1, "unexpected end of data");
+        check_error(base64s.decode_url_unpadded("Zm9vY"), 5, "unexpected end of data");
+    };
+
+    export let test_character_errors = func() -> void {
+        check_error(base64s.decode(" Zm9v"), 0, "invalid character");
+        check_error(base64s.decode("Zm 9v"), 2, "invalid character");
+        check_error(base64s.decode("Zm9v\n"), 4, "invalid character");
+        check_error(base64s.decode("Zm9v\r\nZm9v"), 4, "invalid character");
+        check_error(base64s.decode("Zm9\tv"), 3, "invalid character");
+        check_error(base64s.decode("Zé=="), 1, "invalid character");
+        check_error(base64s.decode("Zm.v"), 2, "invalid character");
+        check_error(base64s.decode_unpadded("Zm9vZ!"), 5, "invalid character");
+        // A character error before an incomplete end is reported first.
+        check_error(base64s.decode("Zm9v*"), 4, "invalid character");
+    };
+
+    export let test_trailing_bits = func() -> void {
+        check_error(base64s.decode("Zh=="), 1, "nonzero trailing bits");
+        check_error(base64s.decode("Zm9="), 2, "nonzero trailing bits");
+        check_error(base64s.decode_url("AB=="), 1, "nonzero trailing bits");
+        check_error(base64s.decode_unpadded("Zh"), 1, "nonzero trailing bits");
+        check_error(base64s.decode_url_unpadded("Zm9"), 2, "nonzero trailing bits");
+        // The last character's other bits may take any value.
+        test.assert_equal<uint8[list]>([102], test.assert_ok<uint8[list]>(base64s.decode("Zg==")));
+        test.assert_equal<uint8[list]>([103], test.assert_ok<uint8[list]>(base64s.decode("Zw==")));
+        test.assert_equal<uint8[list]>([102, 111], test.assert_ok<uint8[list]>(base64s.decode("Zm8=")));
+        test.assert_equal<uint8[list]>([255, 255], test.assert_ok<uint8[list]>(base64s.decode_unpadded("//8")));
+    };
+);

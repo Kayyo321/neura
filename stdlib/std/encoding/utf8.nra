@@ -1,0 +1,83 @@
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+// UTF-8 (Stdlib.md section 13.1) with the validity rules of section 8.1:
+// shortest form only, no surrogates, nothing above U+10FFFF. Encoding and
+// decoding share Std.Text.Strings, so an error here is the error
+// Strings.from_bytes reports.
+export let Utf8 = module (
+    // A copy of the string's bytes.
+    export let encode = func(string s) -> uint8[list] {
+        return strings.to_bytes(s);
+    };
+
+    // The text, or an Encoding error at the offset `validate` returns. The
+    // message is "invalid start byte", "invalid continuation byte", or
+    // "unexpected end of data".
+    export let decode = func(uint8[list] bytes) -> result.Result<string> {
+        return strings.from_bytes(bytes);
+    };
+
+    // The text with each maximal ill-formed subsequence (Unicode's maximal
+    // subpart practice) replaced by one U+FFFD.
+    export let decode_lossy = func(uint8[list] bytes) -> string {
+        return strings.from_bytes_lossy(bytes);
+    };
+
+    // -1 when the bytes are valid UTF-8; otherwise the offset of the first
+    // byte that cannot begin or continue a valid sequence's prefix, which is
+    // the length of the longest valid prefix. Valid input costs one
+    // string.from_utf8 call; invalid input is rescanned here.
+    export let validate = func(uint8[list] bytes) -> int {
+        let [valid, _] = string.from_utf8(bytes);
+        if (valid) {
+            return -1;
+        }
+        let count = bytes.length;
+        let i = 0;
+        while (i < count) {
+            let lead = bytes[i];
+            if (lead < 128) {
+                i = i + 1;
+                continue;
+            }
+            // The sequence length and the range of the second byte.
+            let size = 0;
+            let low: uint8 = 128;
+            let high: uint8 = 191;
+            if (lead >= 194 && lead <= 223) {
+                size = 2;
+            } else if (lead >= 224 && lead <= 239) {
+                size = 3;
+                if (lead == 224) {
+                    low = 160;
+                } else if (lead == 237) {
+                    high = 159;
+                }
+            } else if (lead >= 240 && lead <= 244) {
+                size = 4;
+                if (lead == 240) {
+                    low = 144;
+                } else if (lead == 244) {
+                    high = 143;
+                }
+            } else {
+                return i;
+            }
+            if (i + size > count) {
+                return i;
+            }
+            let second = bytes[i + 1];
+            if (second < low || second > high) {
+                return i;
+            }
+            for (let k = 2; k < size; k = k + 1) {
+                if ((bytes[i + k] & 192) != 128) {
+                    return i;
+                }
+            }
+            i = i + size;
+        }
+        return -1;
+    };
+);

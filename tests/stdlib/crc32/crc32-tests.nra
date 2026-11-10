@@ -1,0 +1,108 @@
+let crc32s = import:Std.Digest.Crc32;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// CRC-32 (IEEE 802.3). The expected values were computed with python3's
+// zlib.crc32; the seeded byte sequences come from the same linear
+// congruential generator in both programs.
+let Crc32Tests = module (
+    // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
+    let seeded = func(int length, uint64 seed) -> uint8[list] {
+        let bytes: uint8[list] = [];
+        let x = seed;
+        for (let i = 0; i < length; i = i + 1) {
+            x = (x * 1103515245 + 12345) & 2147483647;
+            bytes.append(((x >> 16) & 255) as uint8);
+        }
+        return bytes;
+    };
+
+    let check_text = func(string text, uint64 expected) -> void {
+        test.assert_equal_uint64(expected, crc32s.of(strings.to_bytes(text)) as uint64);
+    };
+
+    let check_lcg = func(int length, uint64 seed, uint64 expected) -> void {
+        let bytes = seeded(length, seed);
+        test.assert_equal_uint64(expected, crc32s.of(bytes) as uint64);
+        // The same bytes added one at a time and in two uneven pieces.
+        let running = crc32s.create();
+        for (let b in bytes) {
+            running.update([b]);
+        }
+        test.assert_equal_uint64(expected, running.value() as uint64);
+        let split = crc32s.create();
+        let first: uint8[list] = [];
+        let second: uint8[list] = [];
+        for (let i = 0; i < length; i = i + 1) {
+            if (i < length / 3) {
+                first.append(bytes[i]);
+            } else {
+                second.append(bytes[i]);
+            }
+        }
+        split.update(first);
+        split.update(second);
+        test.assert_equal_uint64(expected, split.value() as uint64);
+    };
+
+    // The standard check value 0xCBF43926.
+    export let test_check_value = func() -> void {
+        check_text("123456789", 3421780262);
+    };
+
+    export let test_known_texts = func() -> void {
+        check_text("", 0);
+        check_text("a", 3904355907);
+        check_text("abc", 891568578);
+        check_text("message digest", 538287487);
+        check_text("The quick brown fox jumps over the lazy dog", 1095738169);
+        let all: uint8[list] = [];
+        for (let b = 0; b < 256; b = b + 1) {
+            all.append(b as uint8);
+        }
+        test.assert_equal_uint64(688229491, crc32s.of(all) as uint64);
+    };
+
+    export let test_seeded_lengths = func() -> void {
+        check_lcg(0, 7, 0);
+        check_lcg(1, 8, 450215437);
+        check_lcg(2, 9, 4105878452);
+        check_lcg(3, 10, 1726246799);
+        check_lcg(31, 38, 3739748972);
+        check_lcg(55, 62, 256092471);
+        check_lcg(56, 63, 2408040158);
+        check_lcg(57, 64, 3007542629);
+        check_lcg(63, 70, 1084672322);
+        check_lcg(64, 71, 2535754177);
+        check_lcg(65, 72, 3817547930);
+        check_lcg(100, 107, 839221845);
+        check_lcg(119, 126, 2364667343);
+        check_lcg(120, 127, 893732824);
+        check_lcg(121, 128, 2810949683);
+        check_lcg(127, 134, 263857410);
+        check_lcg(128, 135, 2353165146);
+        check_lcg(129, 136, 2713999384);
+        check_lcg(191, 198, 3610943935);
+        check_lcg(192, 199, 195833211);
+        check_lcg(193, 200, 3197111224);
+        check_lcg(255, 262, 2924821948);
+        check_lcg(256, 263, 3014217300);
+        check_lcg(1000, 1007, 2393305714);
+    };
+
+    export let test_running_value_reset = func() -> void {
+        let crc = new crc32s.Crc32();
+        test.assert_equal_uint64(0, crc.value() as uint64);
+        crc.update(strings.to_bytes("1234"));
+        crc.update([]);
+        // Reading the value does not end the computation.
+        test.assert_equal_uint64(2615402659, crc.value() as uint64);
+        crc.update(strings.to_bytes("56789"));
+        test.assert_equal_uint64(3421780262, crc.value() as uint64);
+        test.assert_equal_uint64(3421780262, crc.value() as uint64);
+        crc.reset();
+        test.assert_equal_uint64(0, crc.value() as uint64);
+        crc.update(strings.to_bytes("abc"));
+        test.assert_equal_uint64(891568578, crc.value() as uint64);
+    };
+);

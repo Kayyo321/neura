@@ -1,0 +1,85 @@
+// The IEEE 802.3 CRC-32 checksum (Stdlib.md section 13.2): the reflected
+// polynomial 0xEDB88320, an initial value of all ones, and a final exclusive-or
+// with all ones. The check value of the ASCII text 123456789 is 0xCBF43926.
+export let Crc32 = module (
+    // 0xEDB88320 and 0xFFFFFFFF.
+    const Polynomial: uint32 = 3988292384;
+    const AllOnes: uint32 = 4294967295;
+
+    // The 256-entry byte table, computed by the first checksum that needs it.
+    let table: uint32[list] = [];
+
+    let ready_table = func() -> uint32[list] {
+        if (table.length == 0) {
+            let entries: uint32[list] = [];
+            for (let n: uint32 = 0; n < 256; n = n + 1) {
+                let c = n;
+                for (let k = 0; k < 8; k = k + 1) {
+                    if ((c & 1) == 1) {
+                        c = Polynomial ^ (c >> 1);
+                    } else {
+                        c = c >> 1;
+                    }
+                }
+                entries.append(c);
+            }
+            table = entries;
+        }
+        return table;
+    };
+
+    // Advances the running register (kept without the final exclusive-or)
+    // over the bytes.
+    let advance = func(uint32 register, uint8[list] bytes) -> uint32 {
+        let entries = ready_table();
+        let c = register;
+        let count = bytes.length;
+        let i = 0;
+        while (i + 4 <= count) {
+            c = entries[((c ^ (bytes[i] as uint32)) & 255) as int] ^ (c >> 8);
+            c = entries[((c ^ (bytes[i + 1] as uint32)) & 255) as int] ^ (c >> 8);
+            c = entries[((c ^ (bytes[i + 2] as uint32)) & 255) as int] ^ (c >> 8);
+            c = entries[((c ^ (bytes[i + 3] as uint32)) & 255) as int] ^ (c >> 8);
+            i = i + 4;
+        }
+        while (i < count) {
+            c = entries[((c ^ (bytes[i] as uint32)) & 255) as int] ^ (c >> 8);
+            i = i + 1;
+        }
+        return c;
+    };
+
+    // A running checksum. A new one, or one after reset, has the value 0,
+    // the checksum of no bytes.
+    export let Crc32 = class (
+        let register: uint32 = 4294967295;
+
+        export let init = func() -> void {
+        };
+
+        // Adds the bytes to the checksum.
+        export let update = func(uint8[list] bytes) -> void {
+            register = advance(register, bytes);
+        };
+
+        // The checksum of every byte added since creation or the last reset.
+        // Reading it does not end the computation.
+        export let value = func() -> uint32 {
+            return register ^ AllOnes;
+        };
+
+        export let reset = func() -> void {
+            register = AllOnes;
+        };
+    );
+
+    // A new checksum with no bytes added.
+    export let create = func() -> Crc32 {
+        return new Crc32();
+    };
+
+    // The checksum of the bytes.
+    export let of = func(uint8[list] bytes) -> uint32 {
+        return advance(AllOnes, bytes) ^ AllOnes;
+    };
+);
