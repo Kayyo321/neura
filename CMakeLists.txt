@@ -94,6 +94,22 @@ install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL
     FILES_MATCHING PATTERN "*.nra")
 
 include(CTest)
+
+# The libclang C API headers and a loader that opens the system libclang at
+# run time, for C header imports. Building Neura never links libclang.
+set(NEURA_LIBCLANG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/neura-libclang")
+if(NOT EXISTS "${NEURA_LIBCLANG_DIR}/include/clang-c/Index.h")
+    message(FATAL_ERROR
+        "The neura-libclang submodule is missing: "
+        "${NEURA_LIBCLANG_DIR}/include/clang-c/Index.h does not exist.\n"
+        "Fetch it from the repository root with:\n"
+        "  git submodule sync --recursive\n"
+        "  git submodule update --init --recursive\n"
+        "Add --depth 1 to the update for a shallow checkout.")
+endif()
+set(NEURA_LIBCLANG_TESTS ${BUILD_TESTING})
+add_subdirectory(third_party/neura-libclang)
+
 if(BUILD_TESTING)
     add_test(NAME frontend COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"

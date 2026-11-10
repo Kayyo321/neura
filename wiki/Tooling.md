@@ -5,7 +5,7 @@
 
 ## Build the compiler
 
-Build with CMake 3.20 or newer and a C++20 compiler.
+Build with CMake 3.20 or newer and C and C++20 compilers, from a checkout that includes the `third_party/neura-libclang` submodule. [Contributing](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md#set-up-a-checkout) lists the commands for fetching it and the libclang and libffi packages that C header imports use.
 
 ```sh
 cmake -S . -B build
