@@ -25,6 +25,7 @@ hello.nvr --> load --> bind imports --> Execution
 | `src/backend/converter.*` | `neura_compiler` | `IRtoNeuronConversion` and the build pipeline shared by both routes. |
 | `src/nvr/` | `neura_nvr` | The image model, the writer, and the validating loader. |
 | `src/nvm/` | `neura_nvm` | Execution, graph devices and layered tables, fleets, host services, the console sink, and host traces. |
+| `src/gpu/` | `neura_gpu` | Optional Vulkan graph evaluator with a dynamically loaded Vulkan loader. |
 | `src/decompiler/` | `neura_decompiler` | Assembly, lifting, and the reconstruction form ([Decompiler](Decompiler.md)). |
 
 `neura_nvm` links only `neura_nvr`, so a runtime-only distribution needs no compiler code. The `neura` executable links both and provides `neura run`.
@@ -209,6 +210,8 @@ The [release checklist](Release.md) maps each feature to its tests and states wh
 | `backend-layered` | Packed graph tables, exact CPU model evaluation over the integer circuit domains, and traps and results across the image corpus. |
 | `backend-fleet` | Step transitions and member-order equivalence across the image corpus, fleet state and limits, and all 65,536 pairs for one 8-bit function. |
 | `backend-each` | Argument-list parsing, CLI diagnostics, and serial output, statistics, and status. |
+| `gpu-device` | Vulkan graph outputs over the integer circuit domains, mixed and split batches, and buffer growth. |
+| `gpu-cli` | CPU and Vulkan runs, tests, fleets, and trace replay compared through the CLI. |
 | `backend-nir` | `.nir` round trips, deterministic encoding, both build routes give identical images, corrupt files are rejected. |
 | `backend-conversion` | Compiled functions against the IR reference evaluator: integer, structure, and float fixtures, exhaustively over 8-bit domains where the parameters allow and on sampled float operands; whole-program stdout and initialization order against the evaluator. |
 | `backend-generics` | Instance caching, determinism, the specialization limits, and specialized functions against the evaluator exhaustively over 8-bit inputs. |

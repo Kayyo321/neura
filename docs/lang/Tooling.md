@@ -66,6 +66,12 @@ Console input and output and `Std.Program.Process.exit` are always available. Ot
 
 [Neuron conversion and execution](../Backend.md) lists the supported operations and the build diagnostics for unsupported ones. The status of each example is in [Feature status](Status.md).
 
+### Choose graph execution
+
+`run` and `test` use the reference CPU evaluator by default. `--gpu=always` sends eligible graphs to Vulkan, with CPU fallback when no device is usable or a request is declined. `--gpu=off` and `--no-gpu` select the CPU. `--require-gpu` selects `always` and turns an unavailable or failed device into an error. `--gpu-software` also accepts software Vulkan devices. `--gpu-verify` checks every device result against the CPU. When a device is in use, `test` and `run --each` advance their members as a fleet, preserving serial output and host effect order.
+
+The CMake setting `NEURA_GPU=AUTO` builds the GPU backend when the Vulkan headers and `glslangValidator` are available on a supported platform. `ON` requires those tools and `OFF` builds the CPU runner. The GPU backend opens the Vulkan loader only when a run requests a device.
+
 ### Run an image over argument lists
 
 ```sh

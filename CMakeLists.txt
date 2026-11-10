@@ -46,6 +46,55 @@ if(NOT WIN32)
 endif()
 neura_target_defaults(neura_nvm)
 
+set(NEURA_GPU "AUTO" CACHE STRING "GPU graph execution: AUTO, ON, or OFF")
+set_property(CACHE NEURA_GPU PROPERTY STRINGS AUTO ON OFF)
+if(NOT NEURA_GPU MATCHES "^(AUTO|ON|OFF)$")
+    message(FATAL_ERROR "NEURA_GPU must be AUTO, ON, or OFF")
+endif()
+set(NEURA_HAS_GPU OFF)
+if(NEURA_GPU STREQUAL "AUTO" AND APPLE)
+    message(STATUS "GPU graph execution disabled: Apple platforms are outside the Vulkan backend")
+elseif(NOT NEURA_GPU STREQUAL "OFF")
+    find_path(NEURA_VULKAN_INCLUDE_DIR vulkan/vulkan.h)
+    find_program(NEURA_GLSLANG glslangValidator)
+    if(NEURA_VULKAN_INCLUDE_DIR AND NEURA_GLSLANG)
+        set(NEURA_HAS_GPU ON)
+    else()
+        set(missing)
+        if(NOT NEURA_VULKAN_INCLUDE_DIR)
+            list(APPEND missing "Vulkan headers")
+        endif()
+        if(NOT NEURA_GLSLANG)
+            list(APPEND missing "glslangValidator")
+        endif()
+        list(JOIN missing ", " missing)
+        if(NEURA_GPU STREQUAL "ON")
+            message(FATAL_ERROR "GPU graph execution needs ${missing}")
+        endif()
+        message(STATUS "GPU graph execution disabled: missing ${missing}")
+    endif()
+endif()
+
+if(NEURA_HAS_GPU)
+    set(graph_shader "${CMAKE_CURRENT_BINARY_DIR}/generated/graph_eval.spv.inc")
+    add_custom_command(OUTPUT "${graph_shader}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/generated"
+        COMMAND "${NEURA_GLSLANG}" -V --target-env vulkan1.0 -x -o "${graph_shader}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/graph_eval.comp"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/graph_eval.comp"
+        VERBATIM)
+    add_library(neura_gpu STATIC
+        src/gpu/context.cpp
+        src/gpu/device.cpp
+        src/gpu/vulkan_api.cpp
+        "${graph_shader}"
+    )
+    target_link_libraries(neura_gpu PUBLIC neura_nvm PRIVATE ${CMAKE_DL_LIBS})
+    target_include_directories(neura_gpu PRIVATE "${NEURA_VULKAN_INCLUDE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_compile_definitions(neura_gpu PRIVATE VK_NO_PROTOTYPES)
+    neura_target_defaults(neura_gpu)
+endif()
+
 add_library(neura_compiler STATIC
     src/c-import/c_import.cpp
     src/cli/source_loader.cpp
@@ -87,8 +136,12 @@ add_library(neura_decompiler STATIC
 target_link_libraries(neura_decompiler PUBLIC neura_compiler neura_nvm)
 neura_target_defaults(neura_decompiler)
 
-add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp)
+add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run.cpp)
 target_link_libraries(neura PRIVATE neura_compiler neura_nvm neura_decompiler)
+if(NEURA_HAS_GPU)
+    target_link_libraries(neura PRIVATE neura_gpu)
+    target_compile_definitions(neura PRIVATE NEURA_HAS_GPU=1)
+endif()
 neura_target_defaults(neura)
 
 # The compiler and the runner ship as one executable: `neura run` loads
@@ -178,6 +231,37 @@ if(BUILD_TESTING)
     target_include_directories(neura_backend_tests PRIVATE tests)
     neura_target_defaults(neura_backend_tests)
 
+    if(NEURA_HAS_GPU)
+        target_sources(neura_backend_tests PRIVATE tests/backend/gpu_tests.cpp)
+        target_link_libraries(neura_backend_tests PRIVATE neura_gpu)
+        target_compile_definitions(neura_backend_tests PRIVATE NEURA_HAS_GPU=1)
+        add_executable(neura_gpu_cli_test tests/backend/gpu_cli_main.cpp)
+        target_link_libraries(neura_gpu_cli_test PRIVATE neura_gpu)
+        neura_target_defaults(neura_gpu_cli_test)
+        set(gpu_cli_test_options)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_library(neura_test_vulkan_loader SHARED tests/backend/vulkan_fault_loader.cpp)
+            set_target_properties(neura_test_vulkan_loader PROPERTIES
+                OUTPUT_NAME vulkan SOVERSION 1
+                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gpu-fault-loader")
+            target_include_directories(neura_test_vulkan_loader PRIVATE "${NEURA_VULKAN_INCLUDE_DIR}")
+            target_compile_definitions(neura_test_vulkan_loader PRIVATE VK_NO_PROTOTYPES=1)
+            target_link_libraries(neura_test_vulkan_loader PRIVATE ${CMAKE_DL_LIBS})
+            neura_target_defaults(neura_test_vulkan_loader)
+            add_dependencies(neura_gpu_cli_test neura_test_vulkan_loader)
+            target_compile_definitions(neura_gpu_cli_test PRIVATE NEURA_TEST_VULKAN_FAULTS=1)
+            list(APPEND gpu_cli_test_options "-DFAULT_LOADER_DIR=$<TARGET_FILE_DIR:neura_test_vulkan_loader>")
+        endif()
+        add_test(NAME gpu-device COMMAND neura_backend_tests gpu_device "${CMAKE_CURRENT_SOURCE_DIR}")
+        add_test(NAME gpu-cli COMMAND neura_gpu_cli_test "${CMAKE_COMMAND}"
+            "-DNEURA=$<TARGET_FILE:neura>"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/gpu-cli-tests"
+            ${gpu_cli_test_options}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/gpu-cli.cmake")
+        set_tests_properties(gpu-device gpu-cli PROPERTIES SKIP_RETURN_CODE 77 LABELS gpu TIMEOUT 1800)
+    endif()
+
     foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -185,6 +269,7 @@ if(BUILD_TESTING)
 
     add_test(NAME backend-each COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
+        "-DNEURA_HAS_GPU=${NEURA_HAS_GPU}"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/backend-each-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/each.cmake"

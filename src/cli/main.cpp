@@ -2,12 +2,14 @@
 #include "backend/converter.hpp"
 #include "decompiler/assembly.hpp"
 #include "decompiler/decompile.hpp"
+#include "gpu_run.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
+#include "nvm/fleet.hpp"
 #include "nvm/host.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
@@ -58,9 +60,11 @@ void usage(std::ostream& out) {
            "       neura build [-I source-root] [--no-optimize] [--no-source-map] <file.nra>... -o <file.nvr>\n"
            "       neura build [--no-optimize] [--no-source-map] <file.nir> -o <file.nvr>\n"
            "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [capabilities] "
-           "[--record <file> | --replay <file>] [--each <lists>] <file.nvr> [-- args...]\n"
+           "[--record <file> | --replay <file>] [--each <lists>] [--gpu=always|off] [--no-gpu] "
+           "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
-           "                  [--max-heap-cells N] [--stats] [capabilities] <file.nra>...\n"
+           "                  [--max-heap-cells N] [--stats] [capabilities] [--gpu=always|off] [--no-gpu]\n"
+           "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
            "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
            "       neura assemble <file.nvra> -o <file.nvr>\n"
            "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
@@ -78,6 +82,13 @@ void usage(std::ostream& out) {
            "  --profile                (run) print the steps each function took\n"
            "  --replay <file>          (run) answer host requests from a trace instead of services\n"
            "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
+           "\n"
+           "graph execution: run and test use the CPU by default.\n"
+           "  --gpu=always             evaluate every eligible graph on a GPU when one is usable\n"
+           "  --gpu=off, --no-gpu      evaluate graphs on the CPU\n"
+           "  --require-gpu            --gpu=always, and fail unless a GPU device is available\n"
+           "  --gpu-software           also accept software Vulkan implementations\n"
+           "  --gpu-verify             check every GPU evaluation against the CPU\n"
            "\n"
            "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
            "  --c-include <dir>        search a directory for C headers\n"
@@ -112,6 +123,7 @@ struct Options {
     std::optional<fs::path> record;
     std::optional<fs::path> replay;
     std::optional<fs::path> each;
+    neura::cli::GpuOptions gpu;
     // C imports: header search and definitions, the libclang library, and
     // the C compiler and extra arguments that link the native library.
     neura::CImportOptions c_import;
@@ -208,6 +220,7 @@ Options read_options(int argc, char** argv) {
     bool positional_only = false;
     for (int i = 2; i < argc; ++i) {
         const std::string_view arg = argv[i];
+        if (!positional_only && options.gpu.parse(arg, runs)) continue;
         auto next = [&]() -> const char* {
             if (++i == argc) {
                 throw std::runtime_error("expected a value after " + std::string(arg));
@@ -347,6 +360,7 @@ Options read_options(int argc, char** argv) {
     if (options.record && options.replay) {
         throw std::runtime_error("--record and --replay cannot be combined");
     }
+    options.gpu.validate();
     if (options.all_paths) {
         options.capabilities.fs_prefixes.clear();
     }
@@ -704,7 +718,7 @@ private:
 };
 
 int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
-             std::span<neura::cli::ArgumentList> lists, std::size_t image_bytes) {
+             std::span<neura::cli::ArgumentList> lists, std::size_t image_bytes, neura::nvm::GraphDevice* device) {
     const auto& path = options.files.front();
     const auto bindings = neura::nvm::bind(image, host.registry);
     const auto report_prefix = path.string() + ": " + options.each->string() + ':';
@@ -729,12 +743,28 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
         if (first_status == 0) first_status = status;
     };
 
-    auto arguments = options.arguments;
-    for (std::size_t member = 0; member < lists.size(); ++member) {
-        auto& listed = lists[member].arguments;
-        arguments.resize(options.arguments.size());
+    const auto append_list = [](std::vector<std::string>& arguments, std::vector<std::string>& listed) {
         arguments.insert(arguments.end(), std::make_move_iterator(listed.begin()), std::make_move_iterator(listed.end()));
-        finished(member, neura::nvm::run(image, bindings, arguments, options.limits));
+    };
+    if (device) {
+        neura::nvm::Fleet fleet(image, {options.limits, device});
+        for (auto& list : lists) {
+            if (options.arguments.empty()) {
+                fleet.add(image.entry, std::move(list.arguments));
+            } else {
+                auto arguments = options.arguments;
+                append_list(arguments, list.arguments);
+                fleet.add(image.entry, std::move(arguments));
+            }
+        }
+        neura::nvm::run_fleet(fleet, bindings, finished);
+    } else {
+        auto arguments = options.arguments;
+        for (std::size_t member = 0; member < lists.size(); ++member) {
+            arguments.resize(options.arguments.size());
+            append_list(arguments, lists[member].arguments);
+            finished(member, neura::nvm::run(image, bindings, arguments, options.limits));
+        }
     }
     if (options.stats) {
         std::cerr << "stats: members " << lists.size() << ", steps " << steps.text()
@@ -749,12 +779,15 @@ int run(const Options& options) {
     std::size_t image_bytes = 0;
     const auto image = load_image(path, &image_bytes);
     auto lists = options.each ? neura::cli::read_argument_lists(*options.each) : std::vector<neura::cli::ArgumentList>{};
+    neura::cli::GpuRun gpu(options.gpu, image);
 #ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
     Host host(options.capabilities);
     provide_native_library(image, host.services);
-    if (options.each) return run_each(options, image, host, lists, image_bytes);
+    if (options.each) return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device()));
+    auto limits = options.limits;
+    limits.graph_device = gpu.device();
     neura::nvm::RunResult result;
     if (options.replay) {
         // No service runs: every response comes from the trace. Console
@@ -762,7 +795,7 @@ int run(const Options& options) {
         // replayed run prints what the recorded one printed.
         const auto expected = read_trace_file(*options.replay);
         const auto replayed = neura::nvm::replay(
-            image, expected, options.arguments, options.limits, [&](const neura::nvm::TraceEntry& entry) {
+            image, expected, options.arguments, limits, [&](const neura::nvm::TraceEntry& entry) {
                 neura::nvm::replay_console_output(entry.import, entry.version, entry.arguments, entry.completion,
                                                   host.output, host.error);
             });
@@ -772,14 +805,14 @@ int run(const Options& options) {
         result = result_of(replayed.trace);
     } else if (options.record) {
         const auto bindings = neura::nvm::bind(image, host.registry);
-        const auto trace = neura::nvm::record(image, bindings, options.arguments, options.limits);
+        const auto trace = neura::nvm::record(image, bindings, options.arguments, limits);
         host.services.end_run();
         const auto text = neura::nvm::write_trace(trace);
         write_file(*options.record, std::vector<std::uint8_t>(text.begin(), text.end()));
         result = result_of(trace);
     } else {
         const auto bindings = neura::nvm::bind(image, host.registry);
-        result = neura::nvm::run(image, bindings, options.arguments, options.limits);
+        result = neura::nvm::run(image, bindings, options.arguments, limits);
         host.services.end_run();
     }
     if (options.stats) {
@@ -792,9 +825,9 @@ int run(const Options& options) {
     }
     if (!result.completed) {
         std::cerr << path.string() << ": trap: " << neura::nvm::describe(result.trap, image) << '\n';
-        return neura::nvm::exit_status(result.trap);
+        return gpu.finish(neura::nvm::exit_status(result.trap));
     }
-    return result.status;
+    return gpu.finish(result.status);
 }
 
 // The source location of a block, when the image has a source map entry.
@@ -876,6 +909,7 @@ int run_tests(const Options& options) {
     conversion_options.entries = tests;
     auto conversion = neura::backend::convert(program, conversion_options);
     auto image = neura::nvr::load(neura::nvr::encode(conversion.image));
+    neura::cli::GpuRun gpu(options.gpu, image);
 
 #ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);
@@ -888,11 +922,7 @@ int run_tests(const Options& options) {
     provide_native_library(image, host.services);
     const auto bindings = neura::nvm::bind(image, host.registry);
     std::size_t failed = 0;
-    for (std::size_t i = 0; i < tests.size(); ++i) {
-        // The start functions share the entry signature, so any of them can
-        // be the entry of a validated image.
-        image.entry = static_cast<std::uint32_t>(i);
-        const auto result = neura::nvm::run(image, bindings, {}, options.limits);
+    const auto finished = [&](std::size_t i, const neura::nvm::RunResult& result) {
         // Each test is its own run: files and sockets it left open close now.
         host.services.end_run();
         // A test that ends the process with a nonzero status through
@@ -900,7 +930,7 @@ int run_tests(const Options& options) {
         if (result.completed && result.status != 0) {
             ++failed;
             std::cout << "FAIL " << names[i] << ": the test exited with status " << result.status << '\n';
-            continue;
+            return;
         }
         if (result.completed) {
             std::cout << "PASS " << names[i];
@@ -908,7 +938,7 @@ int run_tests(const Options& options) {
                 std::cout << " (steps " << result.steps << ", peak heap cells " << result.peak_heap_cells << ")";
             }
             std::cout << '\n';
-            continue;
+            return;
         }
         ++failed;
         std::cout << "FAIL " << names[i] << ": ";
@@ -919,10 +949,22 @@ int run_tests(const Options& options) {
             // source location identifies the fault.
             std::cout << neura::nvm::describe(result.trap, image, false) << '\n';
         }
+    };
+    if (auto* device = gpu.device()) {
+        neura::nvm::Fleet fleet(image, {options.limits, device});
+        for (std::size_t i = 0; i < tests.size(); ++i) fleet.add(static_cast<std::uint32_t>(i), {});
+        neura::nvm::run_fleet(fleet, bindings, finished);
+    } else {
+        for (std::size_t i = 0; i < tests.size(); ++i) {
+            // The start functions share the entry signature, so any of them can
+            // be the entry of a validated image.
+            image.entry = static_cast<std::uint32_t>(i);
+            finished(i, neura::nvm::run(image, bindings, {}, options.limits));
+        }
     }
     std::cout << tests.size() << " test(s), " << tests.size() - failed << " passed, " << failed << " failed\n";
     std::cout.flush();
-    return failed == 0 ? 0 : 1;
+    return gpu.finish(failed == 0 ? 0 : 1);
 }
 
 } // namespace

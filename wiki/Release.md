@@ -53,6 +53,7 @@ Each feature of this release with the tests that establish it. A feature counts 
 | Host services, capabilities, and traces | [NVM](NVM#host-services) | `backend-host` (every provider, error code, denial, partial I/O, limits, cleanup at run end, trace files); `stdlib-console`, `-io`, `-file`, `-fs`, `-net`, `-environment`, `-process`, `-system-clock`, `-host` (denied and allowed runs, replayed traces); `backend-vm`; `decompiler-behavior` (record and replay) | End to end, replay |
 | Graph devices and the layered model | [NVM](NVM#graph-devices) | `backend-layered` | Structural, exhaustive (8-bit pairs), sampled (wider), end to end |
 | Fleets and argument lists | [NVM](NVM#fleets), [Tooling](Tooling#run-an-image-over-argument-lists) | `backend-fleet`, `backend-each` | Structural, exhaustive (8-bit pairs), end to end |
+| Vulkan graph evaluation | [GPU execution](https://github.com/Kayyo321/neura/blob/main/docs/lang/GpuExecution.md) | `gpu-device`, `gpu-cli` | Exhaustive (8-bit pairs), sampled (wider), end to end |
 
 ## Standard library
 

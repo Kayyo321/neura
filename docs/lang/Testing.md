@@ -16,7 +16,7 @@ FAIL Suite.test_trap: index out of bounds: index 3 for length 1 at suite.nra:35:
 3 test(s), 1 passed, 2 failed
 ```
 
-Tests run serially in declaration order. Each test runs in a fresh execution of one image: module globals, the heap, and every object start from the program's initial state, so a test cannot observe another's effects and order does not matter. Before each test, the program's initialization runs, as it does before `main` ([Modules](Modules.md#initialization)). Output from `Std.Io.Console` appears interleaved with the report.
+Tests may be advanced together. Each test’s output, host effects, and report line appear in declaration order, exactly as when run one at a time. Each test runs in a fresh execution of one image: module globals, the heap, and every object start from the program's initial state, so a test cannot observe another's effects and order does not matter. Before each test, the program's initialization runs, as it does before `main` ([Modules](Modules.md#initialization)). Output from `Std.Io.Console` appears interleaved with the report.
 
 The runner exits with status 0 when every test passes and 1 when any test fails, when no test is found, or when the build fails. `--no-optimize` builds without optimization, and `--max-steps`, `--max-frames`, and `--max-heap-cells` limit each test as they limit `neura run`. `--stats` appends each passing test's step count and peak heap cells. The capability options of `neura run` apply to every test ([Tooling](Tooling.md#build-and-run-executables)).
 

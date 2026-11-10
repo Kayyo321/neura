@@ -1,6 +1,6 @@
 # GPU execution of neuron graphs: implementation plan
 
-This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The graph-device interface, step split, and CPU model are implemented in `neura_nvm`. The NVM fleet API and serial `neura run --each` are implemented. The Vulkan device and auto placement remain planned. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
+This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The graph-device interface, step split, and CPU model are implemented in `neura_nvm`. The NVM fleet API and serial `neura run --each` are implemented. The Vulkan evaluator and the explicit `always` and `off` modes are implemented. Auto placement remains planned. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
 
 ## 1. How to read this plan
 
@@ -863,6 +863,7 @@ New library `neura_gpu` in `src/gpu/`, namespace `neura::gpu`, linking `neura_nv
 | --- | --- |
 | `src/gpu/vulkan_api.hpp`, `.cpp` | Opens the loader and holds the function pointers. |
 | `src/gpu/device.hpp`, `.cpp` | `Context` and `VulkanGraphDevice`. |
+| `src/gpu/context_internal.hpp`, `context.cpp` | Private Vulkan context state and candidate selection. |
 | `src/gpu/calibrate.hpp`, `.cpp` | The measurements of section 11.6 and the opener the CLI gives to `AutoDevice`. |
 | `src/gpu/graph_eval.comp` | The kernel of section 8. |
 
@@ -907,6 +908,8 @@ Creation, in order:
 
 If no memory type satisfies a row, or an allocation fails, construction leaves the device in the failed state of section 9.5 with the reason `cannot allocate device memory`. A context serves one `VulkanGraphDevice` at a time. In `always` the CLI creates one for the program's image; the opener of section 11.4 creates one for the probe image, destroys it, and then creates one for the program's image. `batch_hint` returns the largest `std::size_t`.
 
+The storage-buffer range also bounds `IO` and `WIRES`. Growth uses the largest power of two within both the device and plan limits as its ceiling. An empty table binds a single dummy word without uploading records. A staging allocation without coherent memory is flushed before submission.
+
 ### 12.4 Dispatch protocol
 
 For each dispatch:
@@ -919,6 +922,8 @@ For each dispatch:
 Jobs for ineligible graphs are declined before a dispatch is built and never reach the device. Buffers grow only between dispatches. The steady clock used in step 3 serves only the wait; no run result depends on it.
 
 After a timeout the device is not idle, so its Vulkan objects must not be destroyed. A device that failed by timeout skips all teardown and leaves its resources to process exit. Any other device waits for idle and destroys its objects in reverse creation order.
+
+A dispatch counts after a successful queue submission. The device checks all status words in the dispatch before publishing any outputs, so an invalid status declines that dispatch and the remaining jobs. Failure reasons include `invalid dispatch status <n>`, `dispatch timed out after 30 seconds`, and `vk<operation> failed (<result>)`.
 
 ### 12.5 Self-test
 
