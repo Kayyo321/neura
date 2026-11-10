@@ -128,7 +128,7 @@ Native code may call a stub only while a downcall from the same program is in pr
 
 ## Runtime services and tooling
 
-C imports need libclang 14 or newer at compile time (`libclang1-19` on Debian and Ubuntu), found as [Tooling](https://github.com/Kayyo321/neura/wiki/Tooling#c-imports) describes, and a C compiler to link libraries. Running an image needs neither.
+C imports need libclang 14 or newer and its builtin headers at compile time (`libclang1-19` and `libclang-common-19-dev` on Debian and Ubuntu), found as [Tooling](https://github.com/Kayyo321/neura/wiki/Tooling#c-imports) describes, and a C compiler to link libraries. Running an image needs neither.
 
 
 The library binds the `neura.ffi.*` host services ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services)). Arguments and results travel as packed bytes in native byte order, described by a signature that names each C type. The runner calls native functions through libffi and loads libraries with the platform's loader.

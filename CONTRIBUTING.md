@@ -16,7 +16,7 @@ Neura has one submodule, [`third_party/neura-libclang`](https://github.com/Kayyo
 
 `.gitmodules` marks the submodule `shallow`, so `git submodule update` fetches only the pinned commit by default.
 
-Building needs the libffi development package (found with pkg-config), which the runner uses for native calls. C header imports need the libclang shared library from LLVM 14 or newer (19 or newer recommended). On Debian and Ubuntu, install them with `sudo apt install libclang1-19 libffi-dev`. The libclang development package is not needed. Set `NEURA_LIBCLANG` to a library's path to use it instead of the one found by the default search. The `neura-libclang-load` test loads libclang and reads a small header through it; CTest reports it as skipped when no libclang is installed, and `NEURA_LIBCLANG_REQUIRED=1` turns that into a failure.
+Building needs the libffi development package (found with pkg-config), which the runner uses for native calls. C header imports need the libclang shared library from LLVM 14 or newer (19 or newer recommended) and the Clang builtin headers of the same version, such as `stddef.h`. On Debian and Ubuntu, install them with `sudo apt install libclang1-19 libclang-common-19-dev libffi-dev`. The libclang development package, `libclang-19-dev`, is not needed. Set `NEURA_LIBCLANG` to a library's path to use it instead of the one found by the default search. The `neura-libclang-load` test loads libclang and reads a small header through it; CTest reports it as skipped when no libclang is installed, and `NEURA_LIBCLANG_REQUIRED=1` turns that into a failure.
 
 To move Neura to a newer neura-libclang commit, update the submodule in its own commit and describe the header or loader change it brings in:
 
