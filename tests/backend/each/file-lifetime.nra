@@ -1,0 +1,21 @@
+let file = import:Std.Fs.File;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let FileLifetime = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // The first member occupies one slot. The second can fill all
+        // 1,024 provider slots only if the first member's file was closed.
+        let count = args[0] == "open" ? 1 : 1024;
+        let index = 0;
+        while (index < count) {
+            match (file.open(path.of("data.txt"), file.OpenMode.Read)) {
+                result.Result.Ok(_) => { },
+                result.Result.Err(_) => { return program.ExitCode.Status(11); },
+            }
+            index += 1;
+        }
+        return program.ExitCode.Ok;
+    };
+);

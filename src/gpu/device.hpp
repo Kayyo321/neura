@@ -46,6 +46,8 @@ public:
     bool failed() const;
     const std::string& reason() const;
     const nvm::LayeredTables& tables() const;
+    std::uint64_t io_capacity() const;
+    std::uint64_t wires_capacity() const;
 
 private:
     friend class Context;

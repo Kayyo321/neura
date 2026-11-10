@@ -526,6 +526,9 @@ bool VulkanGraphDevice::failed() const { return state_->failed(); }
 const std::string& VulkanGraphDevice::reason() const { return state_->failure; }
 const nvm::LayeredTables& VulkanGraphDevice::tables() const { return state_->tables; }
 
+std::uint64_t VulkanGraphDevice::io_capacity() const { return state_->io.capacity; }
+std::uint64_t VulkanGraphDevice::wires_capacity() const { return state_->wires.capacity; }
+
 bool VulkanGraphDevice::self_test(Context& context) {
     auto fixtures = nvm::self_test_graphs();
     nvr::Image image;

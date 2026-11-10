@@ -163,8 +163,8 @@ std::vector<Captured> capture_serial_members(const nvr::Image& image, nvm::RunLi
     return reference;
 }
 
-void check_corpus_fleet(const nvr::Image& image, nvm::RunLimits limits, nvm::GraphDevice* device, std::uint32_t window,
-                        const std::vector<Captured>& reference, const std::string& label) {
+std::vector<std::uint64_t> check_corpus_fleet(const nvr::Image& image, nvm::RunLimits limits, nvm::GraphDevice* device,
+    std::uint32_t window, const std::vector<Captured>& reference, const std::string& label) {
     const auto& arguments = fleet_corpus_arguments();
     nvm::Fleet fleet(image, {limits, device, window});
     for (std::size_t member = 0; member < arguments.size(); ++member) {
@@ -177,6 +177,7 @@ void check_corpus_fleet(const nvr::Image& image, nvm::RunLimits limits, nvm::Gra
     std::size_t members = 0;
     std::size_t request = 0;
     std::string expected_output;
+    std::vector<std::uint64_t> rounds;
     nvm::run_fleet(fleet, bindings, [&](std::size_t member, const nvm::RunResult& actual) {
         check_equal(member, members, label + " completion order");
         const auto& expected = reference[member];
@@ -187,16 +188,23 @@ void check_corpus_fleet(const nvr::Image& image, nvm::RunLimits limits, nvm::Gra
         }
         expected_output += expected.output;
         check_equal(console.output(), expected_output, label + " console output");
+        rounds.push_back(fleet.rounds());
         ++members;
     });
     check_equal(members, arguments.size(), label + " members reported");
     check(fleet.done(), label + " completed fleet");
+    return rounds;
 }
 
 NEURA_TEST(fleet, corpus_matches_serial_runs) {
-    for (const auto& item : image_corpus(environment)) {
+    const auto& corpus = image_corpus(environment);
+    check(!corpus.empty(), "fleet corpus is populated");
+    std::size_t entries = 0;
+    std::uint64_t evaluated = 0;
+    for (const auto& item : corpus) {
         const auto image = nvr::load(item.bytes);
         if (image.entry == nvr::absent) continue;
+        ++entries;
         const auto limits = fleet_corpus_limits(item);
         const auto reference = capture_serial_members(image, limits);
         for (const auto window : {1U, 3U, 4'096U}) {
@@ -206,9 +214,11 @@ NEURA_TEST(fleet, corpus_matches_serial_runs) {
                 nvm::ModelDevice model(image);
                 nvm::VerifyingDevice verifying(model);
                 check_corpus_fleet(image, limits, use_device ? &verifying : nullptr, window, reference, label);
+                evaluated += model.statistics().evaluated;
             }
         }
     }
+    check(entries != 0 && evaluated != 0, "fleet corpus ran entry points and evaluated device jobs");
 }
 
 NEURA_TEST(fleet, early_host_requests_park_in_member_order) {

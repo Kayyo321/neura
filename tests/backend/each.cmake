@@ -114,10 +114,12 @@ function(bad_line body diagnostic)
 endfunction()
 
 bad_line("value\r\n" "carriage return before the line end")
+bad_line("# comment\r\n" "carriage return before the line end")
 bad_line([=[bad"quote]=] "quote or backslash in an unquoted argument")
 bad_line([=[bad\slash]=] "quote or backslash in an unquoted argument")
 bad_line([=["no closing quote]=] "unterminated quoted argument")
 bad_line([=["bad\q"]=] "invalid escape")
+bad_line([=["trailing\]=] "invalid escape")
 bad_line([=["bad\x7"]=] "invalid escape")
 bad_line([=["bad\xaz"]=] "invalid escape")
 bad_line([=["quoted"bare]=] "expected a space after a quoted argument")
@@ -132,17 +134,54 @@ file(WRITE "${lists}" "")
 invoke(run --each "${lists}" "${first}")
 expect_result("empty file" 1 "" "neura: error: ${lists}: no argument lists\n")
 
-string(REPEAT "x\n" 1048577 many)
+set(quiet_assembly "${directory}/quiet.nvra")
+set(quiet "${directory}/quiet.nvr")
+file(WRITE "${quiet_assembly}" [=[nvr 1.0 profile 1
+entry 0
+type 0 text
+type 1 array 0
+type 2 signed 32
+constant 0 type 2 bytes 00000000
+graph 0 inputs 0 outputs [ ]
+function 0 parameters 1 result 2 frame [ 1 ]
+  block 0 graph 0 selector 0 inputs [ ]
+    exit return arguments [ constant:2:0 ] assign [ ]
+]=])
+invoke(assemble "${quiet_assembly}" -o "${quiet}")
+expect_result("assemble quiet fixture" 0 "" "")
+string(REPEAT "\n" 1048576 many)
 file(WRITE "${lists}" "${many}")
 unset(many)
+invoke(run --no-gpu --stats --each "${lists}" "${quiet}")
+if(NOT status STREQUAL "0" OR NOT stdout STREQUAL "" OR
+   NOT stderr MATCHES "^stats: members 1048576, steps 1048576, [^\n]+\ngpu: off\n$")
+    message(FATAL_ERROR "exactly 1,048,576 lists should all run\n${stderr}")
+endif()
+file(APPEND "${lists}" "\n")
 invoke(run --each "${lists}" "${first}")
 expect_result("too many argument lists" 1 "" "neura: error: ${lists}: more than 1048576 argument lists\n")
 
-string(REPEAT "x" 67108865 huge)
-file(WRITE "${lists}" "${huge}")
+string(REPEAT "x" 67108861 huge)
+file(WRITE "${lists}" "#${huge}\n\n")
 unset(huge)
+invoke(run --no-gpu --stats --each "${lists}" "${quiet}")
+if(NOT status STREQUAL "0" OR NOT stdout STREQUAL "" OR
+   NOT stderr MATCHES "^stats: members 1, steps 1, [^\n]+\ngpu: off\n$")
+    message(FATAL_ERROR "exactly 64 MiB should be accepted\n${stderr}")
+endif()
+file(APPEND "${lists}" "\n")
 invoke(run --each "${lists}" "${first}")
 expect_result("file exceeds 64 MiB" 1 "" "neura: error: ${lists}: larger than 64 MiB\n")
+
+if(NOT CMAKE_HOST_WIN32)
+    set(files "${directory}/file-lifetime.nvr")
+    invoke(build "${tests}/each/file-lifetime.nra" -o "${files}")
+    expect_result("build file lifetime fixture" 0 "" "")
+    file(WRITE "${directory}/data.txt" "contents\n")
+    file(WRITE "${lists}" "open\ncheck\nopen\n")
+    invoke(run --no-gpu "--allow-fs=${directory}" --each "${lists}" "${files}")
+    expect_result("a later member starts with all file slots free" 0 "" "")
+endif()
 
 file(WRITE "${lists}" "one\n")
 foreach(mode IN ITEMS --record --replay --profile)

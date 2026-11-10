@@ -393,6 +393,63 @@ NEURA_TEST(placement, corpus_fleets_match_serial_runs) {
     check(evaluated > 0 && declined > 0, "corpus fleets exercised both device placement and CPU fallback");
 }
 
+NEURA_TEST(placement, zero_predicted_and_elapsed_leave_correction_unchanged) {
+    nvr::Image image;
+    image.graphs = {wide_graph()};
+    ScriptedClock clock;
+    AutoDevice device(image, [&](std::string&) {
+        return nvm::Opened{std::make_unique<nvm::ModelDevice>(image), {0, 0, 0, 1, 0}, slow_cpu, "model"};
+    }, {batch_size, [&] { return clock.read(); }});
+    offer_opening_work(device);
+    Jobs batch(0, 1);
+    device.evaluate(batch.jobs);
+    check(batch.jobs[0].evaluated && clock.reads == 2, "the zero-time dispatch was evaluated and timed");
+    check_equal(device.correction(), 1.0, "zero predicted and measured time leave correction unchanged");
+}
+
+NEURA_TEST(placement, prepared_corpus_matches_eager_and_serial) {
+    const auto& corpus = image_corpus(environment);
+    check(!corpus.empty(), "prepared corpus is populated");
+    std::size_t entries = 0;
+    for (const auto window : {1U, 3U, 4'096U}) {
+        std::uint64_t evaluated = 0;
+        std::uint64_t declined = 0;
+        for (const auto& item : corpus) {
+            auto image = nvr::load(item.bytes);
+            if (image.entry == nvr::absent) continue;
+            ++entries;
+            const auto limits = fleet_corpus_limits(item);
+            const auto reference = capture_serial_members(image, limits);
+            const auto warmup = static_cast<std::uint32_t>(image.graphs.size());
+            image.graphs.push_back(wide_graph());
+            const auto open_model = [&](std::string&) {
+                return nvm::Opened{std::make_unique<nvm::ModelDevice>(image), {8, 0, 0, 1, 0},
+                    {0.2, 0, 0.01}, "model"};
+            };
+            const auto label = item.label + " with window " + std::to_string(window);
+            ScriptedClock prepared_clock{.elapsed = 8};
+            ScriptedClock eager_clock{.elapsed = 8};
+            AutoDevice prepared(image, open_model, {batch_size, [&] { return prepared_clock.read(); }});
+            AutoDevice eager(image, open_model, {batch_size, [&] { return eager_clock.read(); }});
+            for (auto* device : {&prepared, &eager}) {
+                offer_opening_work(*device, warmup);
+                check(device->state() == AutoDevice::State::Active, label + " model activated");
+            }
+            nvm::VerifyingDevice eager_only(eager);
+            const auto prepared_rounds = check_corpus_fleet(image, limits, &prepared, window, reference, label + " prepared");
+            const auto eager_rounds = check_corpus_fleet(image, limits, &eager_only, window, reference, label + " eager");
+            check(prepared_rounds == eager_rounds, label + " rounds at member completion");
+            const auto counters = prepared.statistics();
+            check_equal(counters.evaluated, eager.statistics().evaluated, label + " evaluated jobs");
+            check_equal(counters.declined_placement, eager.statistics().declined_placement, label + " placement declines");
+            evaluated += counters.evaluated;
+            declined += counters.declined_placement - opening_call * batch_size;
+        }
+        check(evaluated > 0 && declined > 0, "prepared corpus placed and declined jobs at window " + std::to_string(window));
+    }
+    check(entries != 0, "prepared corpus ran entry points");
+}
+
 NEURA_TEST(placement, prepared_and_eager_fleets_agree) {
     auto image = hello_model();
     image.graphs.push_back(wide_graph());

@@ -262,8 +262,13 @@ NEURA_TEST(layered, traps_are_unchanged) {
 }
 
 NEURA_TEST(layered, corpus_runs_match_reference) {
-    for (const auto& item : image_corpus(environment)) {
+    const auto& corpus = image_corpus(environment);
+    check(!corpus.empty(), "layered corpus is populated");
+    std::size_t entries = 0;
+    std::uint64_t evaluated = 0;
+    for (const auto& item : corpus) {
         const auto image = nvr::load(item.bytes);
+        if (image.entry != nvr::absent) ++entries;
         nvm::ModelDevice model(image);
         nvm::VerifyingDevice verifying(model);
         auto limits = graph_test_limits(item);
@@ -273,7 +278,9 @@ NEURA_TEST(layered, corpus_runs_match_reference) {
         const auto actual = run_captured(image, limits, std::nullopt, arguments);
         check_same_run(actual.result, reference.result, item.label);
         check_equal(actual.output, reference.output, item.label + " console output");
+        evaluated += model.statistics().evaluated;
     }
+    check(entries != 0 && evaluated != 0, "layered corpus ran entry points and evaluated device jobs");
 }
 
 } // namespace neura::testing
