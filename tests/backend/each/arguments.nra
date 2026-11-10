@@ -1,0 +1,20 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let EachArguments = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("member");
+        for (let argument in args) {
+            console.print_line("<" + argument + ">");
+        }
+        if (args.length > 0) {
+            if (args[0] == "failure") {
+                return program.ExitCode.Status(27);
+            }
+            if (args[0] == "other-failure") {
+                return program.ExitCode.Status(42);
+            }
+        }
+        return program.ExitCode.Ok;
+    }
+);

@@ -24,7 +24,7 @@ hello.nvr --> load --> bind imports --> Execution
 | `src/backend/block_synth.*` | `neura_compiler` | Block assembly: inputs, checks, pending assignments, exits, and the selector. The converter and the decompiler share it. |
 | `src/backend/converter.*` | `neura_compiler` | `IRtoNeuronConversion` and the build pipeline shared by both routes. |
 | `src/nvr/` | `neura_nvr` | The image model, the writer, and the validating loader. |
-| `src/nvm/` | `neura_nvm` | Execution, host services, the console sink, and host traces. |
+| `src/nvm/` | `neura_nvm` | Execution, graph devices and layered tables, fleets, host services, the console sink, and host traces. |
 | `src/decompiler/` | `neura_decompiler` | Assembly, lifting, and the reconstruction form ([Decompiler](Decompiler)). |
 
 `neura_nvm` links only `neura_nvr`, so a runtime-only distribution needs no compiler code. The `neura` executable links both and provides `neura run`.
@@ -194,6 +194,8 @@ The loader validates every rule in NVR's "Writer and loader requirements" before
 
 The embedding API is `nvm::Execution`. `advance()` runs until the run completes, traps, or issues a host request. `complete()` supplies the response to a pending request, so a host can suspend the run between them. `nvm::run` drives a run with bound services synchronously. `nvm::bind` matches imports to an `nvm::HostRegistry` by name, version, and signature. Console output goes through an injectable `nvm::ConsoleSink`. `nvm::StringSink` captures exact bytes and can be given a capacity to simulate a failed or partial write. Traps report a kind, such as a program trap with its reason, a bounds fault, an invalid handle, or a limit, along with the function and block, and the source location when the image has a source map.
 
+Embedders can pass a graph device in `RunLimits`. Declined jobs use the reference evaluator. `nvm::Fleet` advances independent executions of one validated image and offers each round as a batch to an optional device. `nvm::run_fleet` drives host requests and callbacks in member order. `neura run --each` takes argument lists from a file. [NVM fleets](NVM#fleets) [Tooling](Tooling#run-an-image-over-argument-lists)
+
 ## Tests and the limits of the evidence
 
 The [release checklist](Release) maps each feature to its tests and states which checks are exhaustive, sampled, or structural. In summary:
@@ -204,6 +206,9 @@ The [release checklist](Release) maps each feature to its tests and states which
 | `backend-floats` | Float circuits against two independent references: exhaustively over every pair of the 6- and 8-lane formats e3m2 and e4m3 against a brute-force exact rational reference and a hardware double reference; exhaustively over every float16 and bfloat16 value for negation, conversions to and from wider formats and integers; on special and pseudo-random operands for float16, bfloat16, float32, and float64 arithmetic and comparisons against hardware float and double; literal conversion against `strtod` and `strtof`. |
 | `backend-format` | Hand-assembled 1.0 and 1.1 images decode to their models and the writer reproduces their bytes; malformed images, version mismatches, and 1.1 features in 1.0 images are rejected. |
 | `backend-vm` | Execution semantics of NVM. |
+| `backend-layered` | Packed graph tables, exact CPU model evaluation over the integer circuit domains, and traps and results across the image corpus. |
+| `backend-fleet` | Step transitions and member-order equivalence across the image corpus, fleet state and limits, and all 65,536 pairs for one 8-bit function. |
+| `backend-each` | Argument-list parsing, CLI diagnostics, and serial output, statistics, and status. |
 | `backend-nir` | `.nir` round trips, deterministic encoding, both build routes give identical images, corrupt files are rejected. |
 | `backend-conversion` | Compiled functions against the IR reference evaluator: integer, structure, and float fixtures, exhaustively over 8-bit domains where the parameters allow and on sampled float operands; whole-program stdout and initialization order against the evaluator. |
 | `backend-generics` | Instance caching, determinism, the specialization limits, and specialized functions against the evaluator exhaustively over 8-bit inputs. |

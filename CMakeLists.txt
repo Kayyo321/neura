@@ -24,6 +24,7 @@ neura_target_defaults(neura_nvr)
 # runtime-only distribution needs no compiler code.
 add_library(neura_nvm STATIC
     src/nvm/ffi_provider.cpp
+    src/nvm/fleet.cpp
     src/nvm/fs_provider.cpp
     src/nvm/graph_device.cpp
     src/nvm/host.cpp
@@ -86,7 +87,7 @@ add_library(neura_decompiler STATIC
 target_link_libraries(neura_decompiler PUBLIC neura_compiler neura_nvm)
 neura_target_defaults(neura_decompiler)
 
-add_executable(neura src/cli/main.cpp)
+add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp)
 target_link_libraries(neura PRIVATE neura_compiler neura_nvm neura_decompiler)
 neura_target_defaults(neura)
 
@@ -158,6 +159,7 @@ if(BUILD_TESTING)
         tests/backend/conversion_tests.cpp
     tests/backend/decompiler_tests.cpp
         tests/backend/fleet_tests.cpp
+        tests/backend/fleet_benchmark.cpp
         tests/backend/fixtures.cpp
     tests/backend/float_tests.cpp
         tests/backend/format_tests.cpp
@@ -180,6 +182,13 @@ if(BUILD_TESTING)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+
+    add_test(NAME backend-each COMMAND "${CMAKE_COMMAND}"
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/backend-each-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/each.cmake"
+    )
 
     # Standard library tests under the reference evaluator and NVM.
     add_test(NAME backend-reference COMMAND neura_backend_tests reference "${CMAKE_CURRENT_SOURCE_DIR}")

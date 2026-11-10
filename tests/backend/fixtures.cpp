@@ -330,16 +330,27 @@ const std::vector<CorpusImage>& image_corpus(const Environment& environment) {
     return corpus;
 }
 
+CapturingConsole::CapturingConsole(std::optional<std::size_t> capacity)
+    : sink_(capacity ? nvm::StringSink(*capacity) : nvm::StringSink()), console_(sink_) {}
+
+const nvm::HostSignature& CapturingConsole::signature() const { return console_.signature(); }
+
+nvm::HostCompletion CapturingConsole::invoke(const nvm::HostRequest& request) {
+    requests.push_back(request);
+    requests.back().callbacks = nullptr;
+    return console_.invoke(request);
+}
+
 Captured run_captured(const nvr::Image& image, nvm::RunLimits limits, std::optional<std::size_t> capacity,
                       const std::vector<std::string>& arguments) {
-    nvm::StringSink sink = capacity ? nvm::StringSink(*capacity) : nvm::StringSink();
-    nvm::ConsoleWriteLine console(sink);
+    CapturingConsole console(capacity);
     nvm::HostRegistry registry;
     registry.add(console);
     const auto bindings = nvm::bind(image, registry);
     Captured captured;
     captured.result = nvm::run(image, bindings, arguments, limits);
-    captured.output = sink.contents();
+    captured.output = console.output();
+    captured.requests = std::move(console.requests);
     return captured;
 }
 

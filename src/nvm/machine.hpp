@@ -15,6 +15,7 @@
 namespace neura::nvm {
 
 class GraphDevice;
+class Fleet;
 
 // Bounds a run enforces. Exhaustion traps at the operation that would exceed
 // the bound, before the allocation, frame, or block it would start.
@@ -116,6 +117,11 @@ class Execution {
 public:
     // Throws std::invalid_argument when an argument is not valid UTF-8.
     Execution(const nvr::Image& image, std::span<const std::string> arguments, RunLimits limits = {});
+    // Starts at an explicit entry-signature function (one text array,
+    // returning int32). Throws std::invalid_argument for a mismatched
+    // signature or an argument that is not valid UTF-8.
+    Execution(const nvr::Image& image, std::uint32_t entry, std::span<const std::string> arguments,
+              RunLimits limits = {});
     // Starts at `function` instead of the entry point, for embedders and
     // tests. Every parameter must be a Boolean or integer, given in its slot
     // encoding. Throws std::invalid_argument for a mismatched argument list.
@@ -168,6 +174,21 @@ public:
     const std::vector<std::uint64_t>& function_steps() const;
 
 private:
+    friend class Fleet;
+
+    static void validate_entry_arguments(const nvr::Image& image, std::uint32_t entry,
+                                         std::span<const std::string> arguments);
+    static void validate_call_arguments(const nvr::Image& image, std::uint32_t function,
+                                        std::span<const std::uint64_t> arguments);
+    void initialize();
+    std::uint64_t admission_heap_cells() const;
+    std::optional<Event> step_with_scratch(std::vector<std::int64_t>& scratch);
+    struct ReferenceRounds {
+        std::optional<Event> event;
+        std::uint64_t count = 0;
+    };
+    ReferenceRounds advance_reference_rounds(std::vector<std::int64_t>& scratch, std::uint64_t limit);
+
     class State;
     std::unique_ptr<State> state_;
 };

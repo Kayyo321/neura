@@ -77,6 +77,18 @@ Console input and output and `Std.Program.Process.exit` are always available. Ot
 
 [Neuron conversion and execution](https://github.com/Kayyo321/neura/wiki/Backend) lists the supported operations and the build diagnostics for unsupported ones. The status of each example is in [Feature status](https://github.com/Kayyo321/neura/wiki/Status).
 
+### Run an image over argument lists
+
+```sh
+neura run --each lists.txt image.nvr -- common arguments
+```
+
+`--each` loads and binds the image once. Each member runs with fresh state, the same limits and capabilities, and the common arguments followed by that line’s arguments. Host effects and member reports follow file order. Members share standard input, and the runner closes any files and sockets a member leaves open before it serves the next member.
+
+The file is read and validated in full before a member runs. LF separates lines. A final LF ends the preceding line. An empty line gives a member no extra arguments, and a line beginning with `#` is a comment. A line ending in CR is invalid, including a comment line. Spaces and tabs separate arguments and are ignored at either end. Bare arguments cannot contain quotes or backslashes. Double quotes allow spaces, tabs, and empty arguments. Inside quotes, the escapes are `\"`, `\\`, `\n`, `\r`, `\t`, and `\xHH`, where `HH` is two hexadecimal digits. A backslash without a complete escape is invalid. Each resulting argument must be UTF-8. The file must yield between 1 and 1,048,576 argument lists and fit in 64 MiB.
+
+A member with status 0 has no report. For other outcomes, standard error shows `<image>: <lists>:<line>: exit status <status>` or `<image>: <lists>:<line>: trap: <diagnostic>`. The image path is canonical and the list path retains its command-line spelling. Later members still run. The command returns the first nonzero status in file order, including the status assigned to a trap, or 0 if all members succeed. `--stats` reports the number of members, exact totals for steps and host requests, the largest member heap peak, and the costs and byte size of the loaded image. `--each` applies only to `run` and may appear once. It conflicts with `--record`, `--replay`, and `--profile`, checked in that order when more than one is present.
+
 ## Test
 
 ```sh

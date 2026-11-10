@@ -1,3 +1,4 @@
+#include "argument_lists.hpp"
 #include "backend/converter.hpp"
 #include "decompiler/assembly.hpp"
 #include "decompiler/decompile.hpp"
@@ -27,6 +28,7 @@
 #include <iterator>
 #include <optional>
 #include <set>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -56,7 +58,7 @@ void usage(std::ostream& out) {
            "       neura build [-I source-root] [--no-optimize] [--no-source-map] <file.nra>... -o <file.nvr>\n"
            "       neura build [--no-optimize] [--no-source-map] <file.nir> -o <file.nvr>\n"
            "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [capabilities] "
-           "[--record <file> | --replay <file>] <file.nvr> [-- args...]\n"
+           "[--record <file> | --replay <file>] [--each <lists>] <file.nvr> [-- args...]\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
            "                  [--max-heap-cells N] [--stats] [capabilities] <file.nra>...\n"
            "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
@@ -75,6 +77,7 @@ void usage(std::ostream& out) {
            "  --record <file>          (run) write every host request and response to a trace\n"
            "  --profile                (run) print the steps each function took\n"
            "  --replay <file>          (run) answer host requests from a trace instead of services\n"
+           "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
            "\n"
            "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
            "  --c-include <dir>        search a directory for C headers\n"
@@ -108,6 +111,7 @@ struct Options {
     bool all_paths = false;
     std::optional<fs::path> record;
     std::optional<fs::path> replay;
+    std::optional<fs::path> each;
     // C imports: header search and definitions, the libclang library, and
     // the C compiler and extra arguments that link the native library.
     neura::CImportOptions c_import;
@@ -308,6 +312,10 @@ Options read_options(int argc, char** argv) {
             options.record = fs::path(next());
         } else if (options.command == Command::Run && arg == "--replay") {
             options.replay = fs::path(next());
+        } else if (arg == "--each") {
+            if (options.command != Command::Run) throw std::runtime_error("--each applies only to run");
+            if (options.each) throw std::runtime_error("--each given more than once");
+            options.each = fs::path(next());
         } else if (arg.starts_with('-')) {
             throw std::runtime_error("unknown option: " + std::string(arg));
         } else if (options.command == Command::Run && !options.files.empty()) {
@@ -330,6 +338,11 @@ Options read_options(int argc, char** argv) {
     }
     if (options.command == Command::Assemble && !options.output) {
         throw std::runtime_error("assemble requires -o <file.nvr>");
+    }
+    if (options.each) {
+        if (options.record) throw std::runtime_error("--each cannot be combined with --record");
+        if (options.replay) throw std::runtime_error("--each cannot be combined with --replay");
+        if (options.limits.profile) throw std::runtime_error("--each cannot be combined with --profile");
     }
     if (options.record && options.replay) {
         throw std::runtime_error("--record and --replay cannot be combined");
@@ -538,9 +551,12 @@ int build(const Options& options) {
     return 0;
 }
 
-neura::nvr::Image load_image(const fs::path& path) {
+neura::nvr::Image load_image(const fs::path& path, std::size_t* byte_count = nullptr) {
     try {
-        return neura::nvr::load(read_file(path));
+        const auto bytes = read_file(path);
+        auto image = neura::nvr::load(bytes);
+        if (byte_count) *byte_count = bytes.size();
+        return image;
     } catch (const neura::nvr::LoadError& error) {
         throw std::runtime_error(path.string() + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
                                  error.what());
@@ -667,14 +683,78 @@ void print_profile(const neura::nvr::Image& image, const neura::nvm::RunResult& 
     }
 }
 
+// The exact sum of up to 1,048,576 uint64 counters fits in these two decimal parts.
+struct MemberTotal {
+    void add(std::uint64_t value) {
+        low += value % base;
+        high += value / base + low / base;
+        low %= base;
+    }
+
+    std::string text() const {
+        const auto tail = std::to_string(low);
+        if (high == 0) return tail;
+        return std::to_string(high) + std::string(18 - tail.size(), '0') + tail;
+    }
+
+private:
+    static constexpr std::uint64_t base = 1'000'000'000'000'000'000;
+    std::uint64_t high = 0;
+    std::uint64_t low = 0;
+};
+
+int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
+             std::span<neura::cli::ArgumentList> lists, std::size_t image_bytes) {
+    const auto& path = options.files.front();
+    const auto bindings = neura::nvm::bind(image, host.registry);
+    const auto report_prefix = path.string() + ": " + options.each->string() + ':';
+    MemberTotal steps;
+    MemberTotal requests;
+    std::uint64_t peak_heap_cells = 0;
+    int first_status = 0;
+    const auto finished = [&](std::size_t member, const neura::nvm::RunResult& result) {
+        host.services.end_run();
+        if (options.stats) {
+            steps.add(result.steps);
+            requests.add(result.host_requests);
+            peak_heap_cells = std::max(peak_heap_cells, result.peak_heap_cells);
+        }
+        const auto status = result.completed ? result.status : neura::nvm::exit_status(result.trap);
+        if (!result.completed) {
+            std::cerr << report_prefix << lists[member].line << ": trap: "
+                      << neura::nvm::describe(result.trap, image) << '\n';
+        } else if (status != 0) {
+            std::cerr << report_prefix << lists[member].line << ": exit status " << status << '\n';
+        }
+        if (first_status == 0) first_status = status;
+    };
+
+    auto arguments = options.arguments;
+    for (std::size_t member = 0; member < lists.size(); ++member) {
+        auto& listed = lists[member].arguments;
+        arguments.resize(options.arguments.size());
+        arguments.insert(arguments.end(), std::make_move_iterator(listed.begin()), std::make_move_iterator(listed.end()));
+        finished(member, neura::nvm::run(image, bindings, arguments, options.limits));
+    }
+    if (options.stats) {
+        std::cerr << "stats: members " << lists.size() << ", steps " << steps.text()
+                  << ", peak heap cells " << peak_heap_cells << ", host requests " << requests.text()
+                  << ", " << image_costs(image) << ", image bytes " << image_bytes << '\n';
+    }
+    return first_status;
+}
+
 int run(const Options& options) {
     const auto& path = options.files.front();
-    const auto image = load_image(path);
+    std::size_t image_bytes = 0;
+    const auto image = load_image(path, &image_bytes);
+    auto lists = options.each ? neura::cli::read_argument_lists(*options.each) : std::vector<neura::cli::ArgumentList>{};
 #ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
     Host host(options.capabilities);
     provide_native_library(image, host.services);
+    if (options.each) return run_each(options, image, host, lists, image_bytes);
     neura::nvm::RunResult result;
     if (options.replay) {
         // No service runs: every response comes from the trace. Console

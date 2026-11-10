@@ -1,6 +1,7 @@
 #include "machine.hpp"
 
 #include "graph_device.hpp"
+#include "run_support.hpp"
 #include "scalar_text.hpp"
 #include "nvr/format.hpp"
 
@@ -181,10 +182,15 @@ std::uint64_t mask(unsigned width) {
     return width >= 64 ? ~std::uint64_t{0} : (std::uint64_t{1} << width) - 1;
 }
 
-} // namespace
+void validate_utf8_arguments(std::span<const std::string> arguments) {
+    for (std::size_t i = 0; i < arguments.size(); ++i) {
+        if (!nvr::valid_utf8(arguments[i])) {
+            throw std::invalid_argument("argument " + std::to_string(i + 1) + " is not valid UTF-8");
+        }
+    }
+}
 
-std::optional<std::size_t> evaluate_graph(const nvr::Graph& graph, std::vector<std::int64_t>& wires) {
-    wires.resize(std::size_t{graph.input_lanes} + graph.nodes.size());
+std::optional<std::size_t> evaluate_nodes(const nvr::Graph& graph, std::span<std::int64_t> wires) {
     for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
         const auto& node = graph.nodes[n];
         std::int64_t sum = node.bias;
@@ -199,11 +205,21 @@ std::optional<std::size_t> evaluate_graph(const nvr::Graph& graph, std::vector<s
     return std::nullopt;
 }
 
+} // namespace
+
+std::optional<std::size_t> evaluate_graph(const nvr::Graph& graph, std::vector<std::int64_t>& wires) {
+    wires.resize(std::size_t{graph.input_lanes} + graph.nodes.size());
+    return evaluate_nodes(graph, wires);
+}
+
 std::optional<std::size_t> evaluate_outputs(const nvr::Graph& graph, std::span<const std::int64_t> inputs,
                                             std::vector<std::int64_t>& scratch, std::span<std::int64_t> outputs) {
-    scratch.resize(std::size_t{graph.input_lanes} + graph.nodes.size());
+    // Every graph wire is overwritten before it is read. Keep the scratch
+    // at its largest size when alternating between different graphs.
+    const auto wire_count = std::size_t{graph.input_lanes} + graph.nodes.size();
+    if (scratch.size() < wire_count) scratch.resize(wire_count);
     std::ranges::copy(inputs, scratch.begin());
-    if (const auto failed = evaluate_graph(graph, scratch)) {
+    if (const auto failed = evaluate_nodes(graph, std::span(scratch).first(wire_count))) {
         return failed;
     }
     for (std::size_t i = 0; i < graph.outputs.size(); ++i) {
@@ -214,36 +230,28 @@ std::optional<std::size_t> evaluate_outputs(const nvr::Graph& graph, std::span<c
 
 class Execution::State {
 public:
-    State(const nvr::Image& image, std::span<const std::string> arguments, RunLimits limits)
-        : image_(image), types_(image), limits_(limits), arguments_(arguments.begin(), arguments.end()) {
+    State(const nvr::Image& image, std::span<const std::string> arguments, RunLimits limits,
+          std::optional<std::uint32_t> entry = {})
+        : image_(image), types_(image), limits_(limits), entry_(entry) {
         check_device();
-        for (std::size_t i = 0; i < arguments_.size(); ++i) {
-            if (!nvr::valid_utf8(arguments_[i])) {
-                throw std::invalid_argument("argument " + std::to_string(i + 1) + " is not valid UTF-8");
-            }
-        }
+        if (entry_) validate_entry_arguments(image, *entry_, arguments);
+        else validate_utf8_arguments(arguments);
+        arguments_.assign(arguments.begin(), arguments.end());
     }
 
     State(const nvr::Image& image, std::uint32_t function, std::span<const std::uint64_t> arguments, RunLimits limits)
-        : image_(image), types_(image), limits_(limits), start_function_(function),
-          start_arguments_(arguments.begin(), arguments.end()) {
+        : image_(image), types_(image), limits_(limits), start_function_(function) {
         check_device();
-        if (function >= image.functions.size()) {
-            throw std::invalid_argument("function " + std::to_string(function) + " is out of range");
-        }
-        const auto& callee = image.functions[function];
-        if (arguments.size() != callee.parameter_count) {
-            throw std::invalid_argument("expected " + std::to_string(callee.parameter_count) + " argument(s)");
-        }
-        for (std::size_t i = 0; i < arguments.size(); ++i) {
-            const auto& t = image.types[callee.frame_types[i]];
-            const bool scalar = t.kind == nvr::TypeKind::Bool || t.kind == nvr::TypeKind::Signed ||
-                                t.kind == nvr::TypeKind::Unsigned || t.kind == nvr::TypeKind::Float ||
-                                t.kind == nvr::TypeKind::BFloat;
-            const auto width = t.kind == nvr::TypeKind::Bool ? 1U : t.width;
-            if (!scalar || (arguments[i] & ~mask(width)) != 0) {
-                throw std::invalid_argument("argument " + std::to_string(i) + " does not match its parameter");
-            }
+        validate_call_arguments(image, function, arguments);
+        start_arguments_.assign(arguments.begin(), arguments.end());
+    }
+
+    void initialize() {
+        if (started_) return;
+        try {
+            start();
+        } catch (const Fault& failure) {
+            trap(failure);
         }
     }
 
@@ -255,7 +263,7 @@ public:
             throw std::logic_error("advance() called while a host request is pending");
         }
         for (;;) {
-            if (auto event = step()) return std::move(*event);
+            if (auto event = step(wires_)) return std::move(*event);
         }
     }
 
@@ -381,8 +389,9 @@ public:
             pending_.reset();
             push_frame(found->function, values, nvr::absent, 0);
             frames_.back().boundary = true;
+            std::vector<std::int64_t> scratch;
             for (;;) {
-                auto event = step();
+                auto event = step(scratch);
                 if (!event) continue;
                 if (event->kind == Event::Kind::Completed) {
                     auto budget = limits_.max_heap_cells;
@@ -417,10 +426,13 @@ public:
 
     std::uint64_t steps() const { return steps_; }
     std::uint64_t live_heap_cells() const { return live_cells_; }
+    std::uint64_t admission_heap_cells() const { return finished_ ? 0 : live_cells_; }
     std::uint64_t peak_heap_cells() const { return peak_cells_; }
     const std::vector<std::uint64_t>& function_steps() const { return function_steps_; }
 
 private:
+    friend class Execution;
+
     enum class EntryKind : std::uint8_t { Object, Array, List, Text, Bytes };
 
     struct HeapEntry {
@@ -688,7 +700,8 @@ private:
             initialize_globals();
             return;
         }
-        const auto& entry_function = image_.functions[image_.entry];
+        const auto entry = entry_.value_or(image_.entry);
+        const auto& entry_function = image_.functions[entry];
         const auto array_type = entry_function.frame_types[0];
         HeapEntry array;
         array.kind = EntryKind::Array;
@@ -702,7 +715,7 @@ private:
         }
         const auto arguments = allocate(std::move(array));
         initialize_globals();
-        push_frame(image_.entry, std::vector<std::uint64_t>{arguments}, nvr::absent, 0);
+        push_frame(entry, std::vector<std::uint64_t>{arguments}, nvr::absent, 0);
     }
 
     void initialize_globals() {
@@ -814,7 +827,7 @@ private:
         step = GraphStep{block.graph, inputs_, graph.outputs.size()};
     }
 
-    std::optional<Event> step() {
+    std::optional<Event> step(std::vector<std::int64_t>& scratch) {
         GraphStep current;
         if (auto event = begin_step(current)) return event;
         const auto& graph = image_.graphs[current.graph];
@@ -824,7 +837,7 @@ private:
             limits_.graph_device->evaluate(std::span{&job, 1});
             if (job.evaluated) return finish_step(outputs_);
         }
-        if (const auto failed = evaluate_outputs(graph, current.inputs, wires_, outputs_)) {
+        if (const auto failed = evaluate_outputs(graph, current.inputs, scratch, outputs_)) {
             return fail_step(*failed);
         }
         return finish_step(outputs_);
@@ -1241,6 +1254,7 @@ private:
     const nvr::Image& image_;
     nvr::TypeSystem types_;
     RunLimits limits_;
+    std::optional<std::uint32_t> entry_;
     std::vector<std::string> arguments_;
     std::optional<std::uint32_t> start_function_;
     std::vector<std::uint64_t> start_arguments_;
@@ -1276,11 +1290,70 @@ private:
 Execution::Execution(const nvr::Image& image, std::span<const std::string> arguments, RunLimits limits)
     : state_(std::make_unique<State>(image, arguments, limits)) {}
 
+Execution::Execution(const nvr::Image& image, std::uint32_t entry, std::span<const std::string> arguments,
+                     RunLimits limits)
+    : state_(std::make_unique<State>(image, arguments, limits, entry)) {}
+
 Execution::Execution(const nvr::Image& image, std::uint32_t function, std::span<const std::uint64_t> arguments,
                      RunLimits limits)
     : state_(std::make_unique<State>(image, function, arguments, limits)) {}
 
 Execution::~Execution() = default;
+
+void Execution::validate_entry_arguments(const nvr::Image& image, std::uint32_t entry,
+                                          std::span<const std::string> arguments) {
+    if (entry >= image.functions.size()) {
+        throw std::invalid_argument("entry function " + std::to_string(entry) + " is out of range");
+    }
+    const auto& function = image.functions[entry];
+    bool takes_arguments = function.parameter_count == 1;
+    if (takes_arguments) {
+        const auto& argument = image.types[function.frame_types[0]];
+        takes_arguments = argument.kind == nvr::TypeKind::Array &&
+                          image.types[argument.reference].kind == nvr::TypeKind::Text;
+    }
+    if (!takes_arguments || image.types[function.result_type] != nvr::Type{nvr::TypeKind::Signed, 32}) {
+        throw std::invalid_argument("the entry function must take one UTF-8 text array and return int32");
+    }
+    validate_utf8_arguments(arguments);
+}
+
+void Execution::validate_call_arguments(const nvr::Image& image, std::uint32_t function,
+                                         std::span<const std::uint64_t> arguments) {
+    if (function >= image.functions.size()) {
+        throw std::invalid_argument("function " + std::to_string(function) + " is out of range");
+    }
+    const auto& callee = image.functions[function];
+    if (arguments.size() != callee.parameter_count) {
+        throw std::invalid_argument("expected " + std::to_string(callee.parameter_count) + " argument(s)");
+    }
+    for (std::size_t i = 0; i < arguments.size(); ++i) {
+        const auto& t = image.types[callee.frame_types[i]];
+        const bool scalar = t.kind == nvr::TypeKind::Bool || t.kind == nvr::TypeKind::Signed ||
+                            t.kind == nvr::TypeKind::Unsigned || t.kind == nvr::TypeKind::Float ||
+                            t.kind == nvr::TypeKind::BFloat;
+        const auto width = t.kind == nvr::TypeKind::Bool ? 1U : t.width;
+        if (!scalar || (arguments[i] & ~mask(width)) != 0) {
+            throw std::invalid_argument("argument " + std::to_string(i) + " does not match its parameter");
+        }
+    }
+}
+
+void Execution::initialize() { state_->initialize(); }
+
+std::uint64_t Execution::admission_heap_cells() const { return state_->admission_heap_cells(); }
+
+std::optional<Event> Execution::step_with_scratch(std::vector<std::int64_t>& scratch) {
+    return state_->step(scratch);
+}
+
+Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::int64_t>& scratch,
+                                                               std::uint64_t limit) {
+    for (std::uint64_t count = 0; count < limit; ++count) {
+        if (auto event = state_->step(scratch)) return {std::move(event), count + 1};
+    }
+    return {std::nullopt, limit};
+}
 
 Event Execution::advance() { return state_->advance(); }
 
@@ -1305,41 +1378,11 @@ std::uint64_t Execution::live_heap_cells() const { return state_->live_heap_cell
 std::uint64_t Execution::peak_heap_cells() const { return state_->peak_heap_cells(); }
 const std::vector<std::uint64_t>& Execution::function_steps() const { return state_->function_steps(); }
 
-namespace {
-
-// Serves host requests with bound services and lets them call back into the
-// execution, counting every request, nested ones included.
-class ServiceCallbacks final : public CallbackContext {
-public:
-    ServiceCallbacks(Execution& execution, const Bindings& bindings, std::uint64_t& requests)
-        : execution_(execution), bindings_(bindings), requests_(requests) {}
-
-    HostCompletion serve(const HostRequest& request) {
-        ++requests_;
-        auto with_callbacks = request;
-        with_callbacks.callbacks = this;
-        return bindings_.services.at(request.import)->invoke(with_callbacks);
-    }
-
-    std::optional<HostValue> call(std::string_view name, std::uint32_t version,
-                                  const std::vector<HostValue>& arguments) override {
-        return execution_.invoke_callback(name, version, arguments,
-                                          [this](const HostRequest& nested) { return serve(nested); });
-    }
-
-private:
-    Execution& execution_;
-    const Bindings& bindings_;
-    std::uint64_t& requests_;
-};
-
-} // namespace
-
 RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const std::string> arguments,
               RunLimits limits) {
     Execution execution(image, arguments, limits);
-    RunResult result;
-    ServiceCallbacks callbacks(execution, bindings, result.host_requests);
+    std::uint64_t requests = 0;
+    detail::ServiceCallbacks callbacks(execution, bindings, requests);
     for (;;) {
         const auto event = execution.advance();
         switch (event.kind) {
@@ -1347,18 +1390,8 @@ RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const
             execution.complete(callbacks.serve(event.request));
             break;
         case Event::Kind::Completed:
-            result.completed = true;
-            result.status = event.status;
-            result.steps = execution.steps();
-            result.peak_heap_cells = execution.peak_heap_cells();
-            result.function_steps = execution.function_steps();
-            return result;
         case Event::Kind::Trapped:
-            result.trap = event.trap;
-            result.steps = execution.steps();
-            result.peak_heap_cells = execution.peak_heap_cells();
-            result.function_steps = execution.function_steps();
-            return result;
+            return detail::finished_result(execution, event, requests);
         }
     }
 }

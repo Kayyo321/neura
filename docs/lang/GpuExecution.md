@@ -1,6 +1,6 @@
 # GPU execution of neuron graphs: implementation plan
 
-This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The graph-device interface, step split, and CPU model are implemented in `neura_nvm`. The CLI, fleets, Vulkan device, and auto placement remain planned. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
+This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The graph-device interface, step split, and CPU model are implemented in `neura_nvm`. The NVM fleet API and serial `neura run --each` are implemented. The Vulkan device and auto placement remain planned. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
 
 ## 1. How to read this plan
 
@@ -573,6 +573,8 @@ The **head** is the lowest-numbered member that is not Reported.
 `complete` requires the head to be Awaiting, forwards to the head's `Execution::complete`, and makes it Runnable. If that completion ended the run (a process exit, or an ill-typed response), the head's next `begin_step` returns the final event and settles it. `invoke_callback` requires the head to be Awaiting and forwards to the head's `Execution::invoke_callback`.
 
 A member holds no wire storage between rounds: its inputs are a few hundred lanes inside its `Execution`, device outputs live in the arena, and reference evaluation uses the shared scratch vector and finishes the step at once.
+
+When no device is set and every member has been admitted, the reference executor can group rounds until the head reaches its next event. Other runnable members advance through the same number of rounds, stopping at their first event. Each member sees the same inputs and state, and no admission or host response can intervene during the group. The visible events and round count remain those of the individual rounds.
 
 ### 10.6 Why a fleet equals running its members in order
 

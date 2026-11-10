@@ -51,6 +51,8 @@ Each feature of this release with the tests that establish it. A feature counts 
 | Malformed image rejection | [NVR](NVR#writer-and-loader-requirements) | `backend-format` (every truncation and the validation cases) | Exhaustive (truncations), structural |
 | Installed toolchain | [Tooling](Tooling) | `backend-install`; `stdlib-install` (the installed library matches `stdlib/`; `Std` imports resolve with no `-I`; images carry no installation path) | End to end |
 | Host services, capabilities, and traces | [NVM](NVM#host-services) | `backend-host` (every provider, error code, denial, partial I/O, limits, cleanup at run end, trace files); `stdlib-console`, `-io`, `-file`, `-fs`, `-net`, `-environment`, `-process`, `-system-clock`, `-host` (denied and allowed runs, replayed traces); `backend-vm`; `decompiler-behavior` (record and replay) | End to end, replay |
+| Graph devices and the layered model | [NVM](NVM#graph-devices) | `backend-layered` | Structural, exhaustive (8-bit pairs), sampled (wider), end to end |
+| Fleets and argument lists | [NVM](NVM#fleets), [Tooling](Tooling#run-an-image-over-argument-lists) | `backend-fleet`, `backend-each` | Structural, exhaustive (8-bit pairs), end to end |
 
 ## Standard library
 
