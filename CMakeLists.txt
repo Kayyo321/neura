@@ -434,6 +434,10 @@ if(BUILD_TESTING)
             "-DMATHOPS=$<TARGET_FILE:neura_test_mathops_static>" "-DTRIPLE=${neura_launcher_triple}"
             "-DHAS_STATIC=${NEURA_HAS_STATIC_LAUNCHER}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/c-import-executable.cmake")
+    else()
+        message(STATUS "No Neura launcher for ${CMAKE_SYSTEM_NAME}: native executable tests are not registered "
+            "(native-build, native-run, native-container, native-policy, native-install, native-c-import); "
+            "native-replay skips its launcher comparisons")
     endif()
 
     # The standard library: one fixture installs the tool and the library

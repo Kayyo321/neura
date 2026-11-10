@@ -10,6 +10,16 @@
 #include <iterator>
 #include <stdexcept>
 
+#ifndef _WIN32
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 namespace neura::runner {
 namespace fs = std::filesystem;
 
@@ -31,6 +41,7 @@ std::vector<std::uint8_t> read_file(const fs::path& path) {
     return bytes;
 }
 
+#ifdef _WIN32
 // Writes through a temporary file and renames it into place, so a failed
 // build never leaves a partial output.
 void write_file(const fs::path& path, const std::vector<std::uint8_t>& bytes) {
@@ -50,6 +61,92 @@ void write_file(const fs::path& path, const std::vector<std::uint8_t>& bytes) {
     }
     fs::rename(temporary, path);
 }
+#else
+namespace {
+
+// Owns the temporary file until it has been renamed into place.
+class TemporaryFile {
+public:
+    TemporaryFile() = default;
+    TemporaryFile(const TemporaryFile&) = delete;
+    TemporaryFile& operator=(const TemporaryFile&) = delete;
+    ~TemporaryFile() {
+        if (descriptor_ >= 0) ::close(descriptor_);
+        if (!path_.empty()) ::unlink(path_.c_str());
+    }
+
+    // Creates a new file next to the destination under a name nobody else
+    // has used. O_EXCL and O_NOFOLLOW make a planted file or symbolic link
+    // at a guessed name an error instead of a write target.
+    void create(const fs::path& destination) {
+        static std::atomic<unsigned long long> sequence{0};
+        const auto directory = destination.parent_path();
+        const auto stem = destination.filename().string();
+        const auto seed = static_cast<unsigned long long>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+        for (unsigned attempt = 0; attempt < 128; ++attempt) {
+            char suffix[64];
+            std::snprintf(suffix, sizeof suffix, ".%d.%llx.tmp", static_cast<int>(::getpid()),
+                          seed + sequence.fetch_add(1, std::memory_order_relaxed) * 0x9e3779b97f4a7c15ULL);
+            const auto candidate = directory / ("." + stem + suffix);
+            const int descriptor = ::open(candidate.c_str(),
+                                          O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+            if (descriptor >= 0) {
+                descriptor_ = descriptor;
+                path_ = candidate;
+                return;
+            }
+            if (errno != EEXIST) break;
+        }
+        throw std::runtime_error("cannot write " + destination.string() + ": " + std::strerror(errno));
+    }
+
+    void write_all(const fs::path& destination, const std::vector<std::uint8_t>& bytes) {
+        std::size_t offset = 0;
+        while (offset < bytes.size()) {
+            const auto written = ::write(descriptor_, bytes.data() + offset, bytes.size() - offset);
+            if (written < 0) {
+                if (errno == EINTR) continue;
+                throw std::runtime_error("error writing " + destination.string() + ": " + std::strerror(errno));
+            }
+            offset += static_cast<std::size_t>(written);
+        }
+        while (::fsync(descriptor_) != 0) {
+            if (errno == EINTR) continue;
+            throw std::runtime_error("error writing " + destination.string() + ": " + std::strerror(errno));
+        }
+        const int closed = ::close(descriptor_);
+        descriptor_ = -1;
+        if (closed != 0) {
+            throw std::runtime_error("error writing " + destination.string() + ": " + std::strerror(errno));
+        }
+    }
+
+    void publish(const fs::path& destination) {
+        if (::rename(path_.c_str(), destination.c_str()) != 0) {
+            throw std::runtime_error("cannot write " + destination.string() + ": " + std::strerror(errno));
+        }
+        path_.clear();
+    }
+
+private:
+    int descriptor_ = -1;
+    fs::path path_;
+};
+
+} // namespace
+
+// Writes through a uniquely named temporary file in the destination
+// directory, flushes it, and renames it into place, so a failed write never
+// leaves a partial output and an existing symbolic link at the destination is
+// replaced rather than followed.
+void write_file(const fs::path& path, const std::vector<std::uint8_t>& bytes) {
+    TemporaryFile temporary;
+    temporary.create(path);
+    temporary.write_all(path, bytes);
+    temporary.publish(path);
+}
+#endif
 
 // Gives the runner the image's embedded native library when it was linked
 // for this target; otherwise neura.ffi.library.embedded fails when used.

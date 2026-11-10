@@ -85,15 +85,41 @@ if(NOT build_notes STREQUAL expected_notes)
 endif()
 check_capabilities(default)
 
+function(denial_notes granted result)
+    set(notes "")
+    foreach(group IN LISTS groups)
+        if(NOT group IN_LIST granted)
+            string(APPEND notes
+                "neura: note: the image uses ${group} services; without --allow-${group} they fail with CapabilityDenied\n")
+        endif()
+    endforeach()
+    set(${result} "${notes}" PARENT_SCOPE)
+endfunction()
+
 foreach(group IN LISTS groups)
     build(--native "--allow-${group}" "${capability_image}" -o "only-${group}")
     check_capabilities("only-${group}" "${group}")
+    # Granting a capability removes exactly its note.
+    denial_notes("${group}" expected_notes)
+    if(NOT build_notes STREQUAL expected_notes)
+        message(FATAL_ERROR "--allow-${group} should remove only the ${group} note\n${build_notes}")
+    endif()
 endforeach()
+
+build(--native --allow-fs --allow-net --allow-env --allow-clock --allow-entropy --allow-native
+      "${capability_image}" -o everything)
+if(NOT build_notes STREQUAL "")
+    message(FATAL_ERROR "granting every capability should print no notes\n${build_notes}")
+endif()
 
 # The relative prefix is absent in the build directory. Its sibling shares
 # the same leading characters but falls outside the allowed path component.
 build(--native "--allow-fs=${absolute_prefix},relative" "${capability_image}" -o prefixed)
 check_capabilities(prefixed fs-prefixes)
+denial_notes("fs" expected_notes)
+if(NOT build_notes STREQUAL expected_notes)
+    message(FATAL_ERROR "--allow-fs=prefixes should remove the fs note\n${build_notes}")
+endif()
 
 set(ENV{NEURA_RUN_OPTIONS} "--allow-fs")
 invoke(refused "${launch_dir}" "${TEST_DIR}/default" "${MATHOPS}" "${absolute_prefix}/inside.txt")
@@ -102,6 +128,28 @@ if(NOT refused_status STREQUAL "1" OR NOT refused_stdout STREQUAL "" OR
    NOT refused_stderr MATCHES ": error: NEURA_RUN_OPTIONS: --allow-fs is not accepted by a native executable\n$")
     message(FATAL_ERROR "the launcher should reject --allow-fs before running\n${refused_stdout}${refused_stderr}")
 endif()
+
+# Malformed settings are start-up errors, and the quantum, which changes the
+# interleaving of tasks and so the order of their output, is refused.
+function(refused_options settings message_text)
+    set(ENV{NEURA_RUN_OPTIONS} "${settings}")
+    invoke(rejected "${launch_dir}" "${TEST_DIR}/default" "${MATHOPS}" "${absolute_prefix}/inside.txt")
+    unset(ENV{NEURA_RUN_OPTIONS})
+    if(NOT rejected_status STREQUAL "1" OR NOT rejected_stdout STREQUAL "" OR
+       NOT rejected_stderr MATCHES ": error: NEURA_RUN_OPTIONS: ${message_text}\n$")
+        message(FATAL_ERROR "NEURA_RUN_OPTIONS='${settings}' should fail with '${message_text}'\n${rejected_stdout}${rejected_stderr}")
+    endif()
+endfunction()
+refused_options("--task-quantum 1" "--task-quantum is not accepted by a native executable")
+refused_options("--task-quantum" "--task-quantum is not accepted by a native executable")
+refused_options("--max-steps" "expected a positive integer after --max-steps")
+refused_options("--max-steps 0" "expected a positive integer after --max-steps")
+refused_options("--max-frames x" "expected a positive integer after --max-frames")
+refused_options("--max-tasks -1" "expected a positive integer after --max-tasks")
+refused_options("--record" "expected a value after --record")
+refused_options("--replay" "expected a value after --replay")
+refused_options("--record a --replay b" "--record and --replay cannot be combined")
+refused_options("--gpu=auto" "--gpu=auto is not accepted by a native executable")
 
 function(compare_with_cpu name settings status diagnosis)
     invoke(cpu "${TEST_DIR}" "${NEURA}" run --no-gpu --stats ${ARGN} "${TEST_DIR}/${name}.nvr")

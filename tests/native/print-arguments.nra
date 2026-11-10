@@ -1,0 +1,14 @@
+// Prints every launch argument between angle brackets, one per line, so a
+// test can see empty arguments, spaces, and runner-looking options arrive
+// unchanged.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let PrintArguments = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let argument in args) {
+            console.print_line("<" + argument + ">");
+        }
+        return program.ExitCode.Ok;
+    }
+);

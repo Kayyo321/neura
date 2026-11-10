@@ -61,3 +61,54 @@ if(DEFINED NATIVE_TOOLCHAIN)
         message(FATAL_ERROR "native and neura run must replay each other's traces")
     endif()
 endif()
+
+if(DEFINED NATIVE_TOOLCHAIN)
+    # Trace output must not follow symbolic links. The old temporary name
+    # (<trace>.tmp) and the destination itself are planted as links to files
+    # the test owns; neither file may change, the trace must be written in
+    # place of the destination link, and it must replay.
+    file(MAKE_DIRECTORY "${TEST_DIR}/links")
+    file(WRITE "${TEST_DIR}/links/victim-temporary" "victim of the temporary name\n")
+    file(WRITE "${TEST_DIR}/links/victim-destination" "victim of the destination\n")
+    file(CREATE_LINK "${TEST_DIR}/links/victim-temporary" "${TEST_DIR}/links/rec.tmp" SYMBOLIC)
+    file(CREATE_LINK "${TEST_DIR}/links/victim-destination" "${TEST_DIR}/links/rec" SYMBOLIC)
+    set(ENV{NEURA_RUN_OPTIONS} "--record links/rec")
+    run(linked "${TEST_DIR}/packed")
+    unset(ENV{NEURA_RUN_OPTIONS})
+    file(READ "${TEST_DIR}/links/victim-temporary" temporary_victim)
+    file(READ "${TEST_DIR}/links/victim-destination" destination_victim)
+    if(NOT temporary_victim STREQUAL "victim of the temporary name\n" OR
+       NOT destination_victim STREQUAL "victim of the destination\n")
+        message(FATAL_ERROR "recording followed a symbolic link and changed another file")
+    endif()
+    if(IS_SYMLINK "${TEST_DIR}/links/rec" OR NOT IS_SYMLINK "${TEST_DIR}/links/rec.tmp")
+        message(FATAL_ERROR "the trace should replace the destination link and leave the planted temporary link alone")
+    endif()
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${TEST_DIR}/cpu.trace" "${TEST_DIR}/links/rec"
+        RESULT_VARIABLE different)
+    if(NOT different STREQUAL "0")
+        message(FATAL_ERROR "the trace written beside planted links differs from the CPU recording")
+    endif()
+    set(ENV{NEURA_RUN_OPTIONS} "--replay links/rec")
+    run(linked_replay "${TEST_DIR}/packed")
+    unset(ENV{NEURA_RUN_OPTIONS})
+    if(NOT linked_replay_stdout STREQUAL cpu_stdout)
+        message(FATAL_ERROR "the trace written beside planted links does not replay")
+    endif()
+    file(GLOB leftovers "${TEST_DIR}/links/.rec.*")
+    if(leftovers)
+        message(FATAL_ERROR "recording left temporary files: ${leftovers}")
+    endif()
+
+    # A destination that cannot be written reports the failure and leaves no
+    # temporary file behind.
+    file(MAKE_DIRECTORY "${TEST_DIR}/unwritable")
+    set(ENV{NEURA_RUN_OPTIONS} "--record unwritable/missing/rec")
+    execute_process(COMMAND "${TEST_DIR}/packed" WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE failed_status OUTPUT_VARIABLE failed_stdout ERROR_VARIABLE failed_stderr)
+    unset(ENV{NEURA_RUN_OPTIONS})
+    file(GLOB_RECURSE stray "${TEST_DIR}/unwritable/*")
+    if(NOT failed_status STREQUAL "1" OR NOT failed_stderr MATCHES "error: cannot write unwritable/missing/rec" OR stray)
+        message(FATAL_ERROR "a failed trace write should exit 1 without leftovers\n${failed_status}\n${failed_stderr}\n${stray}")
+    endif()
+endif()

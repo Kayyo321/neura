@@ -706,6 +706,9 @@ neura::nvr::Image load_image(const fs::path& path, std::size_t* byte_count = nul
 int inspect(const Options& options) {
     const auto& path = options.files.front();
     const auto bytes = read_file(path);
+    if (!neura::launcher::is_container(bytes) && !neura::launcher::read_descriptor(bytes)) {
+        throw std::runtime_error(path.string() + ": not a native executable (no NEURAEXE footer)");
+    }
     const auto executable = neura::launcher::read_container(bytes);
     const auto descriptor = neura::launcher::read_descriptor(std::span(bytes).first(executable.launcher_size));
     if (!descriptor) throw std::runtime_error(path.string() + ": not a Neura launcher");

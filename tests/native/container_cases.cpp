@@ -58,8 +58,14 @@ void fix_checksum(Bytes& bytes, std::size_t offset) {
     for (unsigned i = 0; i < 4; ++i) bytes[footer + 16 + i] = static_cast<std::uint8_t>(value >> (i * 8));
 }
 
-void rejects(const fs::path& file, const fs::path& directory, std::string_view label,
-             std::string_view diagnostic = "error:") {
+struct Outcome {
+    bool exited;
+    int status;
+    std::uintmax_t stdout_size;
+    std::string stderr_text;
+};
+
+Outcome execute(const fs::path& file, const fs::path& directory) {
     const auto output = directory / "captured-output";
     const auto error = directory / "captured-error";
     const auto child = fork();
@@ -79,10 +85,62 @@ void rejects(const fs::path& file, const fs::path& directory, std::string_view l
         waited = waitpid(child, &status, 0);
     } while (waited < 0 && errno == EINTR);
     const auto errors = read(error);
-    const std::string stderr_text(errors.begin(), errors.end());
-    check(waited == child && WIFEXITED(status) && WEXITSTATUS(status) == 1 &&
-          fs::file_size(output) == 0 && stderr_text.find(diagnostic) != std::string::npos,
-          std::string(label) + " did not reject before the Hello World host request: " + stderr_text);
+    check(waited == child, "waitpid failed");
+    return {static_cast<bool>(WIFEXITED(status)), WIFEXITED(status) ? WEXITSTATUS(status) : WTERMSIG(status),
+            fs::file_size(output), std::string(errors.begin(), errors.end())};
+}
+
+void rejects(const fs::path& file, const fs::path& directory, std::string_view label,
+             std::string_view diagnostic = "error:") {
+    const auto outcome = execute(file, directory);
+    check(outcome.exited && outcome.status == 1 && outcome.stdout_size == 0 &&
+          outcome.stderr_text.find(diagnostic) != std::string::npos,
+          std::string(label) + " did not reject with status 1 before the Hello World host request (exited " +
+          std::to_string(outcome.exited) + ", status " + std::to_string(outcome.status) + "): " + outcome.stderr_text);
+}
+
+void put(Bytes& bytes, std::uint64_t value, unsigned width) {
+    for (unsigned i = 0; i < width; ++i) bytes.push_back(static_cast<std::uint8_t>(value >> (i * 8)));
+}
+
+// A policy and image as the container stores them, with every length word
+// under the caller's control so that a case can make one of them lie.
+Bytes policy_payload(std::uint32_t capabilities, std::uint32_t prefix_count, const std::vector<Bytes>& prefixes,
+                     const Bytes& image, std::uint32_t image_length) {
+    Bytes payload;
+    put(payload, 0, 4);
+    put(payload, capabilities, 4);
+    put(payload, prefix_count, 4);
+    for (const auto& prefix : prefixes) {
+        put(payload, prefix.size(), 4);
+        payload.insert(payload.end(), prefix.begin(), prefix.end());
+    }
+    put(payload, 1000, 8);
+    put(payload, 100, 4);
+    put(payload, 100000, 8);
+    put(payload, image_length, 4);
+    payload.insert(payload.end(), image.begin(), image.end());
+    return payload;
+}
+
+// A file made of the launcher, the payload, and a footer. A shift moves the
+// footer's offset or size word away from the truth; the checksum covers the
+// bytes the footer states.
+Bytes assemble(const Bytes& launcher, const Bytes& payload, std::int64_t offset_shift = 0,
+               std::int64_t size_shift = 0) {
+    Bytes file = launcher;
+    file.insert(file.end(), payload.begin(), payload.end());
+    const auto offset = static_cast<std::uint64_t>(static_cast<std::int64_t>(launcher.size()) + offset_shift);
+    const auto stated_size =
+        static_cast<std::uint64_t>(static_cast<std::int64_t>(payload.size()) + size_shift - offset_shift);
+    const auto begin = std::min<std::uint64_t>(offset, file.size());
+    const auto end = std::min<std::uint64_t>(offset + stated_size, file.size());
+    put(file, offset, 8);
+    put(file, stated_size, 8);
+    put(file, crc(std::span(file).subspan(begin, end - begin)), 4);
+    put(file, 1, 4);
+    for (const char letter : std::string_view("NEURAEXE")) file.push_back(static_cast<std::uint8_t>(letter));
+    return file;
 }
 
 } // namespace
@@ -136,6 +194,81 @@ int main(int argc, char** argv) try {
     fix_checksum(changed, offset);
     write(altered, changed);
     rejects(altered, directory, "trailing payload byte", "trailing bytes after image");
+
+    // Crafted containers. The image is the good executable's own. The two
+    // controls must run, and each lie about the policy must be refused.
+    const auto launcher_bytes = read(launcher);
+    constexpr std::size_t default_policy_size = 36;
+    const Bytes image(bytes.begin() + static_cast<std::ptrdiff_t>(offset + default_policy_size),
+                      bytes.begin() + static_cast<std::ptrdiff_t>(footer));
+    const auto image_size = static_cast<std::uint32_t>(image.size());
+    constexpr std::uint32_t files_capability = 1;
+    const Bytes slash{'/'};
+    const auto craft = [&](const Bytes& file) { write(altered, file); };
+
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size)));
+    const auto control = execute(altered, directory);
+    check(control.exited && control.status == 0 && control.stdout_size != 0,
+          "the rebuilt default container must run: " + control.stderr_text);
+    craft(assemble(launcher_bytes, policy_payload(files_capability, 1, {slash}, image, image_size)));
+    const auto granted = execute(altered, directory);
+    check(granted.exited && granted.status == 0 && granted.stdout_size != 0,
+          "a container with one valid prefix must run: " + granted.stderr_text);
+
+    craft(assemble(launcher_bytes, policy_payload(files_capability, 1, {Bytes{}}, image, image_size)));
+    rejects(altered, directory, "empty file-system prefix", "file-system prefix is empty");
+    craft(assemble(launcher_bytes, policy_payload(files_capability, 2, {slash, Bytes{}}, image, image_size)));
+    rejects(altered, directory, "empty second file-system prefix", "file-system prefix is empty");
+    for (const auto& invalid : {Bytes{0xff}, Bytes{'a', 0xc0, 0x80}, Bytes{0xe2, 0x82}, Bytes{0xed, 0xa0, 0x80}}) {
+        craft(assemble(launcher_bytes, policy_payload(files_capability, 1, {invalid}, image, image_size)));
+        rejects(altered, directory, "invalid UTF-8 prefix", "not valid UTF-8");
+    }
+    craft(assemble(launcher_bytes, policy_payload(0, 1, {slash}, image, image_size)));
+    rejects(altered, directory, "prefix without the files capability", "require the files capability");
+
+    const auto remaining_after_count = policy_payload(files_capability, 0, {}, image, image_size).size() - 12;
+    const auto room = static_cast<std::uint32_t>((remaining_after_count - 24) / 4);
+    for (const std::uint32_t count : {room + 1, 0x40000000U, 0xffffffffU}) {
+        craft(assemble(launcher_bytes, policy_payload(files_capability, count, {}, image, image_size)));
+        rejects(altered, directory, "prefix count " + std::to_string(count), "invalid file-system prefix count");
+    }
+    {
+        auto lying = policy_payload(files_capability, 1, {slash}, image, image_size);
+        for (unsigned i = 0; i < 4; ++i) lying[12 + i] = 0xff;
+        craft(assemble(launcher_bytes, lying));
+        rejects(altered, directory, "prefix length beyond the payload", "invalid file-system prefix length");
+    }
+
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size + 1)));
+    rejects(altered, directory, "image length one too long", "invalid image length");
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, 0xffffffffU)));
+    rejects(altered, directory, "image length of 4 GiB", "invalid image length");
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size - 1)));
+    rejects(altered, directory, "image length one too short", "trailing bytes after image");
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, 0)));
+    rejects(altered, directory, "image length zero", "trailing bytes after image");
+
+    craft(assemble(launcher_bytes, {}));
+    rejects(altered, directory, "zero-length payload", "invalid payload bounds");
+    craft(assemble(launcher_bytes, Bytes(35, 0)));
+    rejects(altered, directory, "payload shorter than the fixed policy fields", "invalid payload bounds");
+    {
+        // The footer places the payload inside the launcher, so the policy
+        // would be read from launcher code.
+        const auto payload = policy_payload(0, 0, {}, image, image_size);
+        for (const std::int64_t inside : {-1, -4, -64, -1000}) {
+            craft(assemble(launcher_bytes, payload, inside));
+            rejects(altered, directory, "payload offset " + std::to_string(inside) + " bytes inside the launcher");
+        }
+        craft(assemble(launcher_bytes, payload, -static_cast<std::int64_t>(launcher_bytes.size())));
+        rejects(altered, directory, "payload offset zero", "invalid payload bounds");
+        craft(assemble(launcher_bytes, payload, 0, 1));
+        rejects(altered, directory, "payload size one too large", "invalid payload bounds");
+        craft(assemble(launcher_bytes, payload, 0, -1));
+        rejects(altered, directory, "payload size one too small", "invalid payload bounds");
+        craft(assemble(launcher_bytes, payload, 1, 0));
+        rejects(altered, directory, "payload offset one byte late");
+    }
 
     constexpr std::string_view bare = "this is a Neura launcher with no program; build one with neura build --native";
     rejects(launcher, directory, "bare launcher", bare);

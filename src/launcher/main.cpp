@@ -7,8 +7,15 @@
 #include <array>
 #include <charconv>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <string>
 #include <string_view>
+#include <vector>
+
+#ifdef __linux__
+#include <sys/auxv.h>
+#endif
 
 namespace {
 
@@ -57,8 +64,8 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy) {
         const auto token = next();
         std::uint64_t value = 0;
         if (!token.empty()) {
-            const auto [end, error] = std::from_chars(token.begin(), token.end(), value);
-            if (error == std::errc{} && end == token.end() && value != 0) return value;
+            const auto [end, error] = std::from_chars(token.data(), token.data() + token.size(), value);
+            if (error == std::errc{} && end == token.data() + token.size() && value != 0) return value;
         }
         throw std::runtime_error("NEURA_RUN_OPTIONS: expected a positive integer after " + std::string(flag));
     };
@@ -72,8 +79,6 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy) {
             options.limits.max_heap_cells = std::min(options.limits.max_heap_cells, limit(flag));
         } else if (flag == "--max-tasks") {
             options.limits.max_tasks = std::min(options.limits.max_tasks, limit(flag));
-        } else if (flag == "--task-quantum") {
-            options.limits.task_quantum = limit(flag);
         } else if (flag == "--no-gpu" || flag == "--gpu=off") {
             // Both options request the CPU mode this launcher already uses.
         } else if (flag == "--stats") {
@@ -97,12 +102,38 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy) {
     return options;
 }
 
+// The file the launcher is running from. /proc/self/exe is exact but needs
+// procfs; a root file system without it falls back to the path the kernel
+// recorded for the executable, then to a program name that contains a
+// slash. The container checks (footer magic, bounds, checksum) reject a
+// fallback that names some other file.
+std::filesystem::path own_file(std::string_view program, std::string& tried) {
+    std::vector<std::string> candidates{"/proc/self/exe"};
+#ifdef __linux__
+    if (const auto* execfn = reinterpret_cast<const char*>(getauxval(AT_EXECFN)); execfn && *execfn) {
+        candidates.emplace_back(execfn);
+    }
+#endif
+    if (program.find('/') != std::string_view::npos) candidates.emplace_back(program);
+    for (const auto& candidate : candidates) {
+        if (!tried.empty()) tried += ", ";
+        tried += candidate;
+        if (std::ifstream(candidate, std::ios::binary)) return candidate;
+    }
+    return {};
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     const std::string_view name = argc > 0 && *argv[0] ? argv[0] : "neura-launcher";
     try {
-        const auto executable = neura::launcher::read_container("/proc/self/exe");
+        std::string tried;
+        const auto file = own_file(argc > 0 ? argv[0] : "", tried);
+        if (file.empty()) {
+            throw std::runtime_error("could not open the executable file (tried " + tried + ")");
+        }
+        const auto executable = neura::launcher::read_container(file);
         const auto options = run_options(executable.policy);
         const auto image = neura::nvr::load(executable.image);
         std::vector<std::string> arguments;

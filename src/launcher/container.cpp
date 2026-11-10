@@ -187,6 +187,7 @@ Container read_payload(PayloadReader& input, const Footer& footer) {
         }
         prefix.resize(size);
         input.read({reinterpret_cast<std::uint8_t*>(prefix.data()), prefix.size()});
+        if (prefix.empty()) malformed("file-system prefix is empty");
         if (!nvr::valid_utf8(prefix)) malformed("file-system prefix is not valid UTF-8");
         policy.capabilities.fs_prefixes.push_back(std::move(prefix));
     }
@@ -218,6 +219,7 @@ std::vector<std::uint8_t> encode_policy(const Policy& policy, std::uint32_t imag
                           (caps.entropy ? entropy : 0U) | (caps.native ? native : 0U));
     append_integer(bytes, static_cast<std::uint32_t>(caps.fs_prefixes.size()));
     for (const auto& prefix : caps.fs_prefixes) {
+        if (prefix.empty()) malformed("file-system prefix is empty");
         if (prefix.size() > std::numeric_limits<std::uint32_t>::max()) malformed("file-system prefix is too long");
         if (!nvr::valid_utf8(prefix)) malformed("file-system prefix is not valid UTF-8");
         append_integer(bytes, static_cast<std::uint32_t>(prefix.size()));
@@ -285,12 +287,16 @@ public:
 
     void publish() {
 #ifdef _WIN32
+        if (!FlushFileBuffers(file_)) fail("flush output");
         const auto closed = CloseHandle(file_);
         file_ = INVALID_HANDLE_VALUE;
         if (!closed) fail("close output");
         if (!MoveFileExW(temporary_.c_str(), destination_.c_str(), MOVEFILE_REPLACE_EXISTING)) fail("replace output");
 #else
         if (::fchmod(file_, 0755) != 0) fail("set output mode");
+        while (::fsync(file_) != 0) {
+            if (errno != EINTR) fail("flush output");
+        }
         const auto closed = ::close(file_);
         file_ = -1;
         if (closed != 0) fail("close output");
