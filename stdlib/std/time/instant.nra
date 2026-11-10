@@ -1,0 +1,166 @@
+let calendar = import:Std.Time.Internal.Calendar;
+let comparable = import:Std.Core.Comparable;
+let duration = import:Std.Time.Duration;
+let hashing = import:Std.Core.Hash;
+let local_date = import:Std.Time.LocalDate;
+let local_date_time = import:Std.Time.LocalDateTime;
+let local_time = import:Std.Time.LocalTime;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+let zone_offset = import:Std.Time.ZoneOffset;
+
+// A point on the UTC time line: int64 seconds since 1970-01-01T00:00:00Z and
+// a nanosecond adjustment from 0 through 999,999,999 (Stdlib.md section
+// 12.1). Leap seconds are ignored, as in POSIX time. Arithmetic is checked:
+// a result beyond int64 seconds traps with reason 1.
+export let Instant = module (
+    export let Instant = class implements comparable.Comparable<Instant> (
+        let seconds: int64;
+        let nanos_value: int;
+
+        export let init = func(int64 epoch_seconds, int nanos) -> void {
+            seconds = epoch_seconds;
+            nanos_value = nanos;
+        };
+
+        export let epoch_seconds = func() -> int64 {
+            return seconds;
+        };
+
+        // 0 through 999,999,999.
+        export let nanos = func() -> int {
+            return nanos_value;
+        };
+
+        // Milliseconds since the epoch, rounded toward negative infinity.
+        export let to_epoch_millis = func() -> int64 {
+            let millis = (nanos_value / 1000000) as int64;
+            if (seconds < 0) {
+                // Keeps the partial product in range when the sum is.
+                return (seconds + 1) * 1000 + (millis - 1000);
+            }
+            return seconds * 1000 + millis;
+        };
+
+        export let plus = func(duration.Duration span) -> Instant {
+            let total = span.to_nanos();
+            let whole = seconds + calendar.floor_div(total, calendar.NanosPerSecond);
+            let part = (nanos_value as int64) + calendar.floor_mod(total, calendar.NanosPerSecond);
+            if (part >= calendar.NanosPerSecond) {
+                return new Instant(whole + 1, (part - calendar.NanosPerSecond) as int);
+            }
+            return new Instant(whole, part as int);
+        };
+
+        export let minus = func(duration.Duration span) -> Instant {
+            let total = span.to_nanos();
+            let whole = seconds - calendar.floor_div(total, calendar.NanosPerSecond);
+            let part = (nanos_value as int64) - calendar.floor_mod(total, calendar.NanosPerSecond);
+            if (part < 0) {
+                return new Instant(whole - 1, (part + calendar.NanosPerSecond) as int);
+            }
+            return new Instant(whole, part as int);
+        };
+
+        // This instant minus `other`. Traps (reason 1) when the difference
+        // does not fit a Duration.
+        export let duration_since = func(Instant other) -> duration.Duration {
+            let whole = seconds - other.seconds;
+            let part = ((nanos_value - other.nanos_value) as int64);
+            // Moves a second between the parts when their signs differ, so
+            // the product overflows only when the sum does.
+            if (whole > 0 && part < 0) {
+                whole = whole - 1;
+                part = part + calendar.NanosPerSecond;
+            } else if (whole < 0 && part > 0) {
+                whole = whole + 1;
+                part = part - calendar.NanosPerSecond;
+            }
+            return duration.of_nanos(whole * calendar.NanosPerSecond + part);
+        };
+
+        // Traps with "invalid argument: date out of range" when the local
+        // date is outside years -999,999 through 999,999.
+        export let to_local = func(zone_offset.ZoneOffset offset) -> local_date_time.LocalDateTime {
+            let local_seconds = seconds + (offset.total_seconds() as int64);
+            let day = local_date.of_epoch_day(calendar.floor_div(local_seconds, calendar.SecondsPerDay));
+            let second_of_day = calendar.floor_mod(local_seconds, calendar.SecondsPerDay);
+            let time = local_time.of_nano_of_day(second_of_day * calendar.NanosPerSecond + (nanos_value as int64));
+            return local_date_time.of(day, time);
+        };
+
+        export let compare_to = func(Instant other) -> ordering.Ordering {
+            if (seconds != other.seconds) {
+                if (seconds < other.seconds) {
+                    return ordering.Ordering.Less;
+                }
+                return ordering.Ordering.Greater;
+            }
+            if (nanos_value < other.nanos_value) {
+                return ordering.Ordering.Less;
+            }
+            if (nanos_value > other.nanos_value) {
+                return ordering.Ordering.Greater;
+            }
+            return ordering.Ordering.Equal;
+        };
+
+        export let.override equals = func(class other) -> bool {
+            if (!(other is Instant)) {
+                return false;
+            }
+            let moment = other as Instant;
+            return seconds == moment.seconds && nanos_value == moment.nanos_value;
+        };
+
+        export let.override hash_code = func() -> uint32 {
+            return hashing.combine(hashing.combine(17, hashing.of_int64(seconds)), nanos_value.hash_code());
+        };
+
+        // YYYY-MM-DDTHH:MM:SS, a fraction of 3, 6, or 9 digits (the shortest
+        // that is exact) when the nanoseconds are not zero, then Z. Years
+        // outside 0000 through 9999 have a sign and at least four digits;
+        // every int64 second count has a text.
+        export let.override to_string = func() -> string {
+            let [year, month, day] = calendar.civil_of(calendar.floor_div(seconds, calendar.SecondsPerDay));
+            let second_of_day = calendar.floor_mod(seconds, calendar.SecondsPerDay);
+            let time_of_day = second_of_day * calendar.NanosPerSecond + (nanos_value as int64);
+            return calendar.date_text(year, month, day) + "T" + calendar.time_text(time_of_day) + "Z";
+        };
+    );
+
+    export const Epoch: Instant = new Instant(0, 0);
+
+    // `nanos` may be any int: whole seconds in it move into the seconds,
+    // and a negative remainder borrows one.
+    export let of_epoch_seconds = func(int64 seconds, int nanos) -> Instant {
+        let adjustment = nanos as int64;
+        let whole = seconds + calendar.floor_div(adjustment, calendar.NanosPerSecond);
+        return new Instant(whole, calendar.floor_mod(adjustment, calendar.NanosPerSecond) as int);
+    };
+
+    export let of_epoch_millis = func(int64 millis) -> Instant {
+        let part = calendar.floor_mod(millis, 1000) * 1000000;
+        return new Instant(calendar.floor_div(millis, 1000), part as int);
+    };
+
+    // The to_string form with a fraction of one through nine digits, and Z
+    // or a numeric offset (+HH:MM or -HH:MM, at most 18:00) after the
+    // time. Years are -999,999 through 999,999. Errors are those of
+    // LocalDate.parse and LocalTime.parse for the date and time, then those
+    // of ZoneOffset.parse for the offset.
+    export let parse = func(string text) -> result.Result<Instant> {
+        let scan = new calendar.Scanner(text);
+        let [year, month, day] = calendar.read_date(scan);
+        scan.expect(84, "'T'");
+        let time_of_day = calendar.read_time(scan);
+        let offset = calendar.read_offset(scan);
+        scan.finish();
+        if (!scan.ok()) {
+            return result.Result<Instant>.Err(scan.failure());
+        }
+        let whole = calendar.floor_div(time_of_day, calendar.NanosPerSecond);
+        let seconds = calendar.epoch_day_of(year, month, day) * calendar.SecondsPerDay + whole - (offset as int64);
+        return result.Result<Instant>.Ok(new Instant(seconds, (time_of_day - whole * calendar.NanosPerSecond) as int));
+    };
+);

@@ -1,0 +1,106 @@
+let calendar = import:Std.Time.Internal.Calendar;
+let comparable = import:Std.Core.Comparable;
+let duration = import:Std.Time.Duration;
+let hashing = import:Std.Core.Hash;
+let ordering = import:Std.Core.Ordering;
+let result = import:Std.Core.Result;
+
+// A time of day, stored as nanoseconds since midnight (Stdlib.md section
+// 12.1). There are no leap seconds.
+export let LocalTime = module (
+    export let LocalTime = class implements comparable.Comparable<LocalTime> (
+        let nanos_of_day: int64;
+
+        export let init = func(int64 nanos) -> void {
+            nanos_of_day = nanos;
+        };
+
+        export let hour = func() -> int {
+            return (nanos_of_day / calendar.NanosPerHour) as int;
+        };
+
+        export let minute = func() -> int {
+            return (nanos_of_day / calendar.NanosPerMinute % 60) as int;
+        };
+
+        export let second = func() -> int {
+            return (nanos_of_day / calendar.NanosPerSecond % 60) as int;
+        };
+
+        // 0 through 999,999,999.
+        export let nano = func() -> int {
+            return (nanos_of_day % calendar.NanosPerSecond) as int;
+        };
+
+        // 0 through 86,399,999,999,999.
+        export let to_nano_of_day = func() -> int64 {
+            return nanos_of_day;
+        };
+
+        // Wraps around midnight in either direction.
+        export let plus = func(duration.Duration span) -> LocalTime {
+            let shift = calendar.floor_mod(span.to_nanos(), calendar.NanosPerDay);
+            return new LocalTime((nanos_of_day + shift) % calendar.NanosPerDay);
+        };
+
+        export let compare_to = func(LocalTime other) -> ordering.Ordering {
+            if (nanos_of_day < other.nanos_of_day) {
+                return ordering.Ordering.Less;
+            }
+            if (nanos_of_day > other.nanos_of_day) {
+                return ordering.Ordering.Greater;
+            }
+            return ordering.Ordering.Equal;
+        };
+
+        export let.override equals = func(class other) -> bool {
+            return other is LocalTime && nanos_of_day == (other as LocalTime).nanos_of_day;
+        };
+
+        export let.override hash_code = func() -> uint32 {
+            return hashing.combine(17, hashing.of_int64(nanos_of_day));
+        };
+
+        // HH:MM:SS, then a fraction of 3, 6, or 9 digits (the shortest that
+        // is exact) when the nanoseconds are not zero.
+        export let.override to_string = func() -> string {
+            return calendar.time_text(nanos_of_day);
+        };
+    );
+
+    export const Midnight: LocalTime = new LocalTime(0);
+
+    // Traps with "invalid argument: invalid time" unless hour is 0 through
+    // 23, minute and second 0 through 59, and nano 0 through 999,999,999.
+    export let of = func(int hour, int minute, int second, int nano) -> LocalTime {
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 || nano < 0 ||
+            nano > 999999999) {
+            trap_with_message("invalid argument: invalid time");
+        }
+        let seconds = (hour * 3600 + minute * 60 + second) as int64;
+        return new LocalTime(seconds * calendar.NanosPerSecond + (nano as int64));
+    };
+
+    // Traps with "invalid argument: invalid time" outside 0 through
+    // 86,399,999,999,999.
+    export let of_nano_of_day = func(int64 nanos) -> LocalTime {
+        if (nanos < 0 || nanos >= calendar.NanosPerDay) {
+            trap_with_message("invalid argument: invalid time");
+        }
+        return new LocalTime(nanos);
+    };
+
+    // HH:MM:SS with an optional fraction of one through nine digits.
+    // Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte
+    // that does not fit; OutOfRange at an hour above 23 or a minute or
+    // second above 59.
+    export let parse = func(string text) -> result.Result<LocalTime> {
+        let scan = new calendar.Scanner(text);
+        let nanos = calendar.read_time(scan);
+        scan.finish();
+        if (!scan.ok()) {
+            return result.Result<LocalTime>.Err(scan.failure());
+        }
+        return result.Result<LocalTime>.Ok(new LocalTime(nanos));
+    };
+);

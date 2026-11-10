@@ -1,0 +1,9 @@
+neura-trace 1
+# Recorded with: neura run --allow-entropy --record replayed-entropy.trace replayed-entropy.nvr
+request neura.entropy.fill 1 [8]
+ok "DB(\x1e\x01i\xd2s"
+request neura.console.write_line 1 ["17306938874459432185"]
+ok 0
+request neura.console.write_line 1 ["916"]
+ok 0
+outcome completed 0

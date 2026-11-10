@@ -1,0 +1,19 @@
+neura-trace 1
+# Written by hand: a denied request, an unexpected code, a short response, and a long one.
+request neura.entropy.fill 1 [8]
+error 14
+request neura.console.write_line 1 ["CapabilityDenied: entropy request failed"]
+ok 0
+request neura.entropy.fill 1 [8]
+error 99
+request neura.console.write_line 1 ["Other: entropy request failed"]
+ok 0
+request neura.entropy.fill 1 [8]
+ok "abc"
+request neura.console.write_line 1 ["InvalidData: entropy source returned 3 bytes"]
+ok 0
+request neura.entropy.fill 1 [8]
+ok "abcdefghi"
+request neura.console.write_line 1 ["InvalidData: entropy source returned 9 bytes"]
+ok 0
+outcome completed 0

@@ -1,0 +1,58 @@
+let clock = import:Std.Time.Clock;
+let duration = import:Std.Time.Duration;
+let instant = import:Std.Time.Instant;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// A Clock for tests (Stdlib.md section 12.1): it reads an instant that only
+// set, advance, and sleep change, and it never fails.
+export let FixedClock = module (
+    export let FixedClock = class implements clock.Clock (
+        let current: instant.Instant;
+        // The monotonic reading: the total of every advance and sleep.
+        let elapsed: duration.Duration = duration.Zero;
+
+        export let init = func(instant.Instant start) -> void {
+            current = start;
+        };
+
+        export let now = func() -> result.Result<instant.Instant> {
+            return result.Result<instant.Instant>.Ok(current);
+        };
+
+        // Starts at zero and grows only with advance and sleep, so set never
+        // moves it.
+        export let monotonic = func() -> result.Result<duration.Duration> {
+            return result.Result<duration.Duration>.Ok(elapsed);
+        };
+
+        // Advances by a positive duration and returns at once; a zero or
+        // negative duration does nothing.
+        export let sleep = func(duration.Duration span) -> result.Result<unit.Unit> {
+            if (span.to_nanos() > 0) {
+                advance(span);
+            }
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        };
+
+        // Replaces the instant; the monotonic reading does not change.
+        export let set = func(instant.Instant moment) -> void {
+            current = moment;
+        };
+
+        // Moves the instant and the monotonic reading forward. A negative
+        // duration traps with "invalid argument: negative duration", since
+        // the monotonic reading never decreases.
+        export let advance = func(duration.Duration span) -> void {
+            if (span.is_negative()) {
+                trap_with_message("invalid argument: negative duration");
+            }
+            current = current.plus(span);
+            elapsed = elapsed.plus(span);
+        };
+    );
+
+    export let of = func(instant.Instant start) -> FixedClock {
+        return new FixedClock(start);
+    };
+);

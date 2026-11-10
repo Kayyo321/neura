@@ -1,0 +1,230 @@
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let instant = import:Std.Time.Instant;
+let local_date = import:Std.Time.LocalDate;
+let local_date_time = import:Std.Time.LocalDateTime;
+let local_time = import:Std.Time.LocalTime;
+let ordering = import:Std.Core.Ordering;
+let randoms = import:Std.Random.Random;
+let test = import:Std.Test;
+let zone_offset = import:Std.Time.ZoneOffset;
+
+let InstantTests = module (
+    let check_parts = func(int64 seconds, int nanos, instant.Instant moment) -> void {
+        test.assert_equal_int64(seconds, moment.epoch_seconds());
+        test.assert_equal_int32(nanos, moment.nanos());
+    };
+
+    // Text computed with Python: dates through datetime, shifted by whole
+    // 400-year cycles for years outside 1 through 9999.
+    let check_text = func(int64 seconds, int nanos, string text, bool parses) -> void {
+        let moment = instant.of_epoch_seconds(seconds, nanos);
+        test.assert_equal_string(text, moment.to_string());
+        if (parses) {
+            let back = test.assert_ok<instant.Instant>(instant.parse(text));
+            check_parts(seconds, nanos, back);
+        } else {
+            check_error(text, error.ParseErrorKind.OutOfRange, 0);
+        }
+    };
+
+    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+        let failure = test.assert_err<instant.Instant>(instant.parse(text));
+        match (failure) {
+            error.Error.Parse { kind: actual, offset: at, message: _ } => {
+                test.assert_equal_string(kind.to_string(), actual.to_string());
+                test.assert_equal_int32(offset, at);
+            },
+            _ => {
+                test.fail("expected a parse error for " + text);
+            },
+        }
+    };
+
+    let parsed = func(string text) -> instant.Instant {
+        return test.assert_ok<instant.Instant>(instant.parse(text));
+    };
+
+    export let test_factories = func() -> void {
+        check_parts(0, 0, instant.Epoch);
+        check_parts(9, 999999999, instant.of_epoch_seconds(10, -1));
+        check_parts(12, 1, instant.of_epoch_seconds(10, 2000000001));
+        check_parts(-3, 852516352, instant.of_epoch_seconds(0, -2147483648));
+        check_parts(-1, 999000000, instant.of_epoch_millis(-1));
+        check_parts(1, 500000000, instant.of_epoch_millis(1500));
+        check_parts(-9223372036854776, 192000000, instant.of_epoch_millis(-9223372036854775807 - 1));
+        check_parts(9223372036854775, 807000000, instant.of_epoch_millis(9223372036854775807));
+    };
+
+    export let test_epoch_millis = func() -> void {
+        test.assert_equal_int64(0, instant.Epoch.to_epoch_millis());
+        test.assert_equal_int64(-1, instant.of_epoch_seconds(-1, 999999999).to_epoch_millis());
+        test.assert_equal_int64(-1000, instant.of_epoch_seconds(-1, 999999).to_epoch_millis());
+        test.assert_equal_int64(1999, instant.of_epoch_seconds(1, 999999999).to_epoch_millis());
+        test.assert_equal_int64(-9223372036854775807 - 1, instant.of_epoch_millis(-9223372036854775807 - 1).to_epoch_millis());
+        test.assert_equal_int64(9223372036854775807, instant.of_epoch_millis(9223372036854775807).to_epoch_millis());
+        let r = randoms.seeded(5);
+        for (let i = 0; i < 200; i = i + 1) {
+            let millis = ((r.next_uint64() >> 1) as int64) - 4611686018427387904;
+            test.assert_equal_int64(millis, instant.of_epoch_millis(millis).to_epoch_millis());
+        }
+    };
+
+    export let test_plus_minus = func() -> void {
+        let start = instant.of_epoch_seconds(10, 900000000);
+        check_parts(11, 100000000, start.plus(duration.of_millis(200)));
+        check_parts(10, 700000000, start.plus(duration.of_millis(-200)));
+        check_parts(9, 900000000, start.plus(duration.of_millis(-1000)));
+        check_parts(10, 700000000, start.minus(duration.of_millis(200)));
+        check_parts(11, 100000000, start.minus(duration.of_millis(-200)));
+        check_parts(-10, 100000000, start.minus(duration.of_seconds(20).plus(duration.of_millis(800))));
+        let low = duration.of_nanos(-9223372036854775807 - 1);
+        check_parts(-9223372037, 145224192, instant.Epoch.plus(low));
+        check_parts(9223372036, 854775808, instant.Epoch.minus(low));
+        check_parts(10, 900000000, start.plus(duration.Zero));
+    };
+
+    export let test_duration_since = func() -> void {
+        let a = instant.of_epoch_seconds(10, 100000000);
+        let b = instant.of_epoch_seconds(8, 900000000);
+        test.assert_equal_int64(1200000000, a.duration_since(b).to_nanos());
+        test.assert_equal_int64(-1200000000, b.duration_since(a).to_nanos());
+        test.assert_equal_int64(0, a.duration_since(a).to_nanos());
+        let top = instant.of_epoch_seconds(9223372036, 854775807);
+        test.assert_equal_int64(9223372036854775807, top.duration_since(instant.Epoch).to_nanos());
+        test.assert_equal_int64(-9223372036854775807, instant.Epoch.duration_since(top).to_nanos());
+        let bottom = instant.of_epoch_seconds(-9223372037, 145224192);
+        test.assert_equal_int64(-9223372036854775807 - 1, bottom.duration_since(instant.Epoch).to_nanos());
+        // Seconds 9223372037 and nanoseconds -999999999 only fit together.
+        let near = instant.of_epoch_seconds(9223372037, 0);
+        test.assert_equal_int64(9223372036000000001, near.duration_since(instant.of_epoch_seconds(0, 999999999)).to_nanos());
+    };
+
+    export let test_text_vectors = func() -> void {
+        check_text(0, 0, "1970-01-01T00:00:00Z", true);
+        check_text(-1, 1, "1969-12-31T23:59:59.000000001Z", true);
+        check_text(1, 999999999, "1970-01-01T00:00:01.999999999Z", true);
+        check_text(86399, 500000000, "1970-01-01T23:59:59.500Z", true);
+        check_text(86400, 120000, "1970-01-02T00:00:00.000120Z", true);
+        check_text(-86400, 7000, "1969-12-31T00:00:00.000007Z", true);
+        check_text(-86401, 123456789, "1969-12-30T23:59:59.123456789Z", true);
+        check_text(951782400, 1000, "2000-02-29T00:00:00.000001Z", true);
+        check_text(253402300799, 1000000, "9999-12-31T23:59:59.001Z", true);
+        check_text(253402300800, 0, "+10000-01-01T00:00:00Z", true);
+        check_text(-62135596800, 1, "0001-01-01T00:00:00.000000001Z", true);
+        check_text(-62135596801, 999999999, "0000-12-31T23:59:59.999999999Z", true);
+        check_text(-62167219200, 500000000, "0000-01-01T00:00:00.500Z", true);
+        check_text(-62167219201, 120000, "-0001-12-31T23:59:59.000120Z", true);
+        check_text(9223372036854775807, 7000, "+292277026596-12-04T15:30:07.000007Z", false);
+        check_text(-9223372036854775807 - 1, 123456789, "-292277022657-01-27T08:29:52.123456789Z", false);
+        check_text(31556889864403199, 1000, "+1000000000-12-31T23:59:59.000001Z", false);
+        check_text(-31557014167219200, 1000000, "-1000000000-01-01T00:00:00.001Z", false);
+        check_text(31494784780799, 0, "+999999-12-31T23:59:59Z", true);
+        check_text(-31619087596800, 1, "-999999-01-01T00:00:00.000000001Z", true);
+        check_text(-3919641752, 999999999, "1845-10-16T18:37:28.999999999Z", true);
+        check_text(7302066801, 500000000, "2201-05-24T15:53:21.500Z", true);
+        check_text(4561072142, 120000, "2114-07-15T04:29:02.000120Z", true);
+        check_text(-31429747, 7000, "1969-01-02T05:30:53.000007Z", true);
+        check_text(7974052434, 123456789, "2222-09-09T06:33:54.123456789Z", true);
+        check_text(-93584819327, 1000, "-0996-06-01T08:51:13.000001Z", true);
+        check_text(32343719179, 1000000, "2994-12-06T14:26:19.001Z", true);
+        check_text(-60669344433, 0, "0047-06-19T12:19:27Z", true);
+        check_text(31734897438, 1, "2975-08-22T01:17:18.000000001Z", true);
+        check_text(-95190065554, 999999999, "-1047-07-19T03:07:26.999999999Z", true);
+        check_text(7794594010039, 500000000, "+248970-11-07T10:47:19.500Z", true);
+        check_text(-3672902975812, 120000, "-114420-05-03T21:23:08.000120Z", true);
+        check_text(-5737945490376, 7000, "-179859-09-29T20:40:24.000007Z", true);
+        check_text(-7850602646565, 123456789, "-246806-04-22T10:37:15.123456789Z", true);
+        check_text(-349583588658, 1000, "-9108-02-19T15:35:42.000001Z", true);
+        check_text(-9854291789404310, 1000000, "-312268106-04-25T21:28:10.001Z", false);
+        check_text(8617575849148886, 0, "+273082077-08-24T00:01:26Z", false);
+        check_text(4542348641879556, 1, "+143943268-04-26T09:12:36.000000001Z", false);
+        check_text(2406984417607740, 999999999, "+76276269-10-19T12:49:00.999999999Z", false);
+        check_text(-345826264073198, 500000000, "-10956829-12-13T20:33:22.500Z", false);
+    };
+
+    export let test_parse_forms = func() -> void {
+        check_parts(0, 0, parsed("1970-01-01T00:00:00Z"));
+        check_parts(-19800, 0, parsed("1970-01-01T00:00:00+05:30"));
+        check_parts(19800, 0, parsed("1970-01-01T00:00:00-05:30"));
+        check_parts(0, 0, parsed("1970-01-01T00:00:00-00:00"));
+        check_parts(64800, 0, parsed("1970-01-01T00:00:00-18:00"));
+        check_parts(0, 100000000, parsed("1970-01-01T00:00:00.1Z"));
+        check_parts(0, 120000000, parsed("1970-01-01T00:00:00.12Z"));
+        check_parts(0, 123450000, parsed("1970-01-01T00:00:00.12345Z"));
+        check_parts(0, 123456789, parsed("1970-01-01T00:00:00.123456789Z"));
+        check_parts(951868799, 500000000, parsed("2000-02-29T23:59:59.5Z"));
+        check_parts(-62167219200, 0, parsed("+0000-01-01T00:00:00Z"));
+        check_parts(-62167219200, 0, parsed("-0000-01-01T00:00:00Z"));
+        check_parts(253402300800, 0, parsed("+10000-01-01T00:00:00Z"));
+    };
+
+    export let test_parse_errors = func() -> void {
+        check_error("", error.ParseErrorKind.Empty, 0);
+        check_error("1970-01-01T00:00:00", error.ParseErrorKind.UnexpectedEnd, 19);
+        check_error("1970-01-01", error.ParseErrorKind.UnexpectedEnd, 10);
+        check_error("1970-01-01T00:00:00+05", error.ParseErrorKind.UnexpectedEnd, 22);
+        check_error("1970-01-01T00:00:00.Z", error.ParseErrorKind.InvalidCharacter, 20);
+        check_error("1970-01-01t00:00:00Z", error.ParseErrorKind.InvalidCharacter, 10);
+        check_error("1970-01-01T00:00:00z", error.ParseErrorKind.InvalidCharacter, 19);
+        check_error("1970-01-01T00:00:00 Z", error.ParseErrorKind.InvalidCharacter, 19);
+        check_error("1970-01-01T00:00:00ZZ", error.ParseErrorKind.InvalidCharacter, 20);
+        check_error("1970-1-01T00:00:00Z", error.ParseErrorKind.InvalidCharacter, 6);
+        check_error("19700-01-01T00:00:00Z", error.ParseErrorKind.InvalidCharacter, 4);
+        check_error("+197-01-01T00:00:00Z", error.ParseErrorKind.InvalidCharacter, 4);
+        check_error("1970-01-01T00:00:00.1234567890Z", error.ParseErrorKind.InvalidCharacter, 29);
+        check_error("1970-01-01T00:00:00+0530", error.ParseErrorKind.InvalidCharacter, 22);
+        check_error("1970-13-01T00:00:00Z", error.ParseErrorKind.OutOfRange, 5);
+        check_error("1970-00-01T00:00:00Z", error.ParseErrorKind.OutOfRange, 5);
+        check_error("1971-02-29T00:00:00Z", error.ParseErrorKind.OutOfRange, 8);
+        check_error("1970-01-01T24:00:00Z", error.ParseErrorKind.OutOfRange, 11);
+        check_error("1970-01-01T00:60:00Z", error.ParseErrorKind.OutOfRange, 14);
+        check_error("1970-01-01T00:00:60Z", error.ParseErrorKind.OutOfRange, 17);
+        check_error("1970-01-01T00:00:00+19:00", error.ParseErrorKind.OutOfRange, 20);
+        check_error("1970-01-01T00:00:00+05:60", error.ParseErrorKind.OutOfRange, 23);
+        check_error("1970-01-01T00:00:00-18:01", error.ParseErrorKind.OutOfRange, 19);
+        check_error("+1000000-01-01T00:00:00Z", error.ParseErrorKind.OutOfRange, 0);
+        let failure = test.assert_err<instant.Instant>(instant.parse("1970-01-01T00:00:00"));
+        test.assert_equal_string("parse error at 19: unexpected end of input, expected 'Z', '+', or '-'", error.message(failure));
+    };
+
+    export let test_to_local = func() -> void {
+        let east = zone_offset.of_hours_minutes(5, 30);
+        let west = zone_offset.of_hours_minutes(-5, -30);
+        test.assert_equal_string("1970-01-01T05:30:00", instant.Epoch.to_local(east).to_string());
+        test.assert_equal_string("1969-12-31T18:30:00", instant.Epoch.to_local(west).to_string());
+        let moment = instant.of_epoch_seconds(-62167219201, 5);
+        test.assert_equal_string("-0001-12-31T23:59:59.000000005", moment.to_local(zone_offset.Utc).to_string());
+        let r = randoms.seeded(11);
+        for (let i = 0; i < 100; i = i + 1) {
+            let seconds = (r.next_int_between(-2147483647, 2147483647) as int64) * 1000 + (r.next_int_below(1000) as int64);
+            let at = instant.of_epoch_seconds(seconds, r.next_int_below(1000000000));
+            let offset = zone_offset.of_hours_minutes(r.next_int_between(-17, 18), 0);
+            let local = at.to_local(offset);
+            test.assert(local.at_offset(offset).equals(at));
+            test.assert(local.date().to_epoch_day() == local_date.of_epoch_day(local.date().to_epoch_day()).to_epoch_day());
+        }
+        let last = local_date_time.of(local_date.of(999999, 12, 31), local_time.of(23, 59, 59, 999999999));
+        test.assert(last.at_offset(zone_offset.Utc).to_local(zone_offset.Utc).equals(last));
+        let first = local_date_time.of(local_date.of(-999999, 1, 1), local_time.Midnight);
+        test.assert(first.at_offset(zone_offset.Utc).to_local(zone_offset.Utc).equals(first));
+    };
+
+    export let test_order_and_equality = func() -> void {
+        let a = instant.of_epoch_seconds(5, 1);
+        let b = instant.of_epoch_millis(5000).plus(duration.of_nanos(1));
+        let c = instant.of_epoch_seconds(5, 2);
+        let d = instant.of_epoch_seconds(-5, 999999999);
+        test.assert(a.equals(b) && a != b && !a.equals(c) && !a.equals(nil));
+        test.assert(a.compare_to(b) == ordering.Ordering.Equal);
+        test.assert(a.compare_to(c) == ordering.Ordering.Less);
+        test.assert(c.compare_to(a) == ordering.Ordering.Greater);
+        test.assert(d.compare_to(a) == ordering.Ordering.Less);
+        test.assert(a.compare_to(d) == ordering.Ordering.Greater);
+        test.assert(a.hash_code() == b.hash_code());
+        test.assert(a.hash_code() == hashing.combine(hashing.combine(17, hashing.of_int64(5)), 1));
+        let span: class = duration.of_seconds(5);
+        test.assert(!instant.Epoch.equals(span));
+    };
+);

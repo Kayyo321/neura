@@ -1,0 +1,17 @@
+// test-options: --allow-entropy
+let randoms = import:Std.Random.Random;
+let test = import:Std.Test;
+
+// With --allow-entropy, from_entropy seeds a working generator. Its values
+// are not reproducible, so only their ranges are checked, with members whose
+// step counts do not depend on the values (the harness compares two runs).
+let EntropyAllowedTests = module (
+    export let test_from_entropy_seeds = func() -> void {
+        let r = test.assert_ok<randoms.Random>(randoms.from_entropy());
+        for (let i = 0; i < 20; i = i + 1) {
+            let f = r.next_float64();
+            test.assert(f >= 0.0 && f < 1.0);
+        }
+        test.assert_equal_int32(16, r.fill_bytes(16).length);
+    };
+);

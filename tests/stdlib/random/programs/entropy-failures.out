@@ -1,0 +1,4 @@
+CapabilityDenied: entropy request failed
+Other: entropy request failed
+InvalidData: entropy source returned 3 bytes
+InvalidData: entropy source returned 9 bytes

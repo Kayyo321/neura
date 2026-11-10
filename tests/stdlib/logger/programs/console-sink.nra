@@ -1,0 +1,14 @@
+let console = import:Std.Io.Console;
+let logger = import:Std.Log.Logger;
+let program = import:Std.Program;
+
+// Console.print_line is a sink: each accepted record is one line.
+export let ConsoleSink = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let log = logger.create("main", console.print_line, logger.LogLevel.Info);
+        log.debug("not shown");
+        log.info("started");
+        log.error("stopped");
+        return program.ExitCode.Ok;
+    };
+);

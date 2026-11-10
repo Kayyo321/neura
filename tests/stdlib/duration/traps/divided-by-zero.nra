@@ -1,0 +1,14 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) in function [0-9]+ block [0-9]+ at std/time/duration[.]nra
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let d = duration.of_seconds(1);
+        console.print_line("before");
+        console.print_line(d.divided_by(0).to_string());
+        return program.ExitCode.Ok;
+    };
+);

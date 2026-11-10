@@ -1,0 +1,392 @@
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let local_date = import:Std.Time.LocalDate;
+let ordering = import:Std.Core.Ordering;
+let test = import:Std.Test;
+let weekdays = import:Std.Time.DayOfWeek;
+
+let LocalDateTests = module (
+    // Expected values computed with Python: datetime for the date of the
+    // same position in the 400-year cycle, shifted by whole cycles.
+    let check_day = func(int64 epoch_day, int year, int month, int day, weekdays.DayOfWeek weekday, int day_of_year,
+            bool leap, int month_length, string text) -> void {
+        let date = local_date.of_epoch_day(epoch_day);
+        test.assert_equal_int32(year, date.year());
+        test.assert_equal_int32(month, date.month());
+        test.assert_equal_int32(day, date.day());
+        test.assert_equal_int64(epoch_day, local_date.of(year, month, day).to_epoch_day());
+        test.assert_equal_string(weekday.to_string(), date.day_of_week().to_string());
+        test.assert_equal_int32(day_of_year, date.day_of_year());
+        test.assert_equal_bool(leap, date.is_leap_year());
+        test.assert_equal_int32(month_length, date.length_of_month());
+        test.assert_equal_string(text, date.to_string());
+        test.assert(test.assert_ok<local_date.LocalDate>(local_date.parse(text)).equals(date));
+    };
+
+    let check_shift = func(int year, int month, int day, int64 months, string months_text, int64 years, string years_text,
+            int64 days, string days_text, int64 until) -> void {
+        let date = local_date.of(year, month, day);
+        test.assert_equal_string(months_text, date.plus_months(months).to_string());
+        test.assert_equal_string(years_text, date.plus_years(years).to_string());
+        test.assert_equal_string(days_text, date.plus_days(days).to_string());
+        let other = date.plus_days(until);
+        test.assert_equal_int64(until, date.days_until(other));
+        test.assert_equal_int64(-until, other.days_until(date));
+    };
+
+    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+        let failure = test.assert_err<local_date.LocalDate>(local_date.parse(text));
+        match (failure) {
+            error.Error.Parse { kind: actual, offset: at, message: _ } => {
+                test.assert_equal_string(kind.to_string(), actual.to_string());
+                test.assert_equal_int32(offset, at);
+            },
+            _ => {
+                test.fail("expected a parse error for " + text);
+            },
+        }
+    };
+
+    export let test_reference_days = func() -> void {
+        check_day(-365961662, -999999, 1, 1, weekdays.DayOfWeek.Monday, 1, false, 31, "-999999-01-01");
+        check_day(364522971, 999999, 12, 31, weekdays.DayOfWeek.Friday, 365, false, 31, "+999999-12-31");
+        check_day(0, 1970, 1, 1, weekdays.DayOfWeek.Thursday, 1, false, 31, "1970-01-01");
+        check_day(-1, 1969, 12, 31, weekdays.DayOfWeek.Wednesday, 365, false, 31, "1969-12-31");
+        check_day(59, 1970, 3, 1, weekdays.DayOfWeek.Sunday, 60, false, 31, "1970-03-01");
+        check_day(60, 1970, 3, 2, weekdays.DayOfWeek.Monday, 61, false, 31, "1970-03-02");
+        check_day(11016, 2000, 2, 29, weekdays.DayOfWeek.Tuesday, 60, true, 29, "2000-02-29");
+        check_day(11017, 2000, 3, 1, weekdays.DayOfWeek.Wednesday, 61, true, 31, "2000-03-01");
+        check_day(-719162, 1, 1, 1, weekdays.DayOfWeek.Monday, 1, false, 31, "0001-01-01");
+        check_day(-719163, 0, 12, 31, weekdays.DayOfWeek.Sunday, 366, true, 31, "0000-12-31");
+        check_day(-719468, 0, 3, 1, weekdays.DayOfWeek.Wednesday, 61, true, 31, "0000-03-01");
+        check_day(-719469, 0, 2, 29, weekdays.DayOfWeek.Tuesday, 60, true, 29, "0000-02-29");
+        check_day(-719528, 0, 1, 1, weekdays.DayOfWeek.Saturday, 1, true, 31, "0000-01-01");
+        check_day(-719529, -1, 12, 31, weekdays.DayOfWeek.Friday, 365, false, 31, "-0001-12-31");
+        check_day(2932896, 9999, 12, 31, weekdays.DayOfWeek.Friday, 365, false, 31, "9999-12-31");
+        check_day(2932897, 10000, 1, 1, weekdays.DayOfWeek.Saturday, 1, true, 31, "+10000-01-01");
+        check_day(57333, 2126, 12, 22, weekdays.DayOfWeek.Sunday, 356, false, 31, "2126-12-22");
+        check_day(-104485, 1683, 12, 6, weekdays.DayOfWeek.Monday, 340, false, 31, "1683-12-06");
+        check_day(107075, 2263, 3, 1, weekdays.DayOfWeek.Sunday, 60, false, 31, "2263-03-01");
+        check_day(-105774, 1680, 5, 26, weekdays.DayOfWeek.Sunday, 147, true, 31, "1680-05-26");
+        check_day(136885, 2344, 10, 12, weekdays.DayOfWeek.Thursday, 286, true, 31, "2344-10-12");
+        check_day(-134552, 1601, 8, 11, weekdays.DayOfWeek.Saturday, 223, false, 31, "1601-08-11");
+        check_day(-102877, 1688, 5, 1, weekdays.DayOfWeek.Saturday, 122, true, 31, "1688-05-01");
+        check_day(-44856, 1847, 3, 11, weekdays.DayOfWeek.Thursday, 70, false, 31, "1847-03-11");
+        check_day(44801, 2092, 8, 29, weekdays.DayOfWeek.Friday, 242, true, 31, "2092-08-29");
+        check_day(-39014, 1863, 3, 9, weekdays.DayOfWeek.Monday, 68, false, 31, "1863-03-09");
+        check_day(-108881, 1671, 11, 23, weekdays.DayOfWeek.Monday, 327, false, 30, "1671-11-23");
+        check_day(-121629, 1636, 12, 28, weekdays.DayOfWeek.Sunday, 363, true, 31, "1636-12-28");
+        check_day(70128, 2162, 1, 2, weekdays.DayOfWeek.Saturday, 2, false, 31, "2162-01-02");
+        check_day(83710, 2199, 3, 11, weekdays.DayOfWeek.Monday, 70, false, 31, "2199-03-11");
+        check_day(-43916, 1849, 10, 6, weekdays.DayOfWeek.Saturday, 279, false, 31, "1849-10-06");
+        check_day(80029, 2189, 2, 10, weekdays.DayOfWeek.Tuesday, 41, false, 28, "2189-02-10");
+        check_day(-37370, 1867, 9, 8, weekdays.DayOfWeek.Sunday, 251, false, 30, "1867-09-08");
+        check_day(36494, 2069, 12, 1, weekdays.DayOfWeek.Sunday, 335, false, 31, "2069-12-01");
+        check_day(102517, 2250, 9, 7, weekdays.DayOfWeek.Saturday, 250, false, 30, "2250-09-07");
+        check_day(126139, 2315, 5, 12, weekdays.DayOfWeek.Wednesday, 132, false, 31, "2315-05-12");
+        check_day(-138379, 1591, 2, 18, weekdays.DayOfWeek.Monday, 49, false, 28, "1591-02-18");
+        check_day(-59221, 1807, 11, 11, weekdays.DayOfWeek.Wednesday, 315, false, 30, "1807-11-11");
+        check_day(-90353, 1722, 8, 16, weekdays.DayOfWeek.Sunday, 228, false, 31, "1722-08-16");
+        check_day(-30489, 1886, 7, 11, weekdays.DayOfWeek.Sunday, 192, false, 31, "1886-07-11");
+        check_day(-65085, 1791, 10, 21, weekdays.DayOfWeek.Friday, 294, false, 31, "1791-10-21");
+        check_day(568640, 3526, 11, 20, weekdays.DayOfWeek.Saturday, 324, false, 30, "3526-11-20");
+        check_day(-672295, 129, 4, 27, weekdays.DayOfWeek.Wednesday, 117, false, 30, "0129-04-27");
+        check_day(-135308, 1599, 7, 17, weekdays.DayOfWeek.Saturday, 198, false, 31, "1599-07-17");
+        check_day(444341, 3186, 7, 26, weekdays.DayOfWeek.Saturday, 207, false, 31, "3186-07-26");
+        check_day(-788506, -189, 2, 23, weekdays.DayOfWeek.Saturday, 54, false, 28, "-0189-02-23");
+        check_day(1042541, 4824, 5, 19, weekdays.DayOfWeek.Sunday, 140, true, 31, "4824-05-19");
+        check_day(-791308, -197, 6, 23, weekdays.DayOfWeek.Thursday, 174, false, 30, "-0197-06-23");
+        check_day(-1069017, -957, 2, 18, weekdays.DayOfWeek.Saturday, 49, false, 28, "-0957-02-18");
+        check_day(-579665, 382, 12, 7, weekdays.DayOfWeek.Tuesday, 341, false, 31, "0382-12-07");
+        check_day(-1386862, -1828, 11, 25, weekdays.DayOfWeek.Wednesday, 330, true, 30, "-1828-11-25");
+        check_day(1115362, 5023, 10, 5, weekdays.DayOfWeek.Sunday, 278, false, 31, "5023-10-05");
+        check_day(1018093, 4757, 6, 12, weekdays.DayOfWeek.Wednesday, 163, false, 30, "4757-06-12");
+        check_day(1384553, 5760, 10, 11, weekdays.DayOfWeek.Saturday, 285, true, 31, "5760-10-11");
+        check_day(123213, 2307, 5, 8, weekdays.DayOfWeek.Wednesday, 128, false, 31, "2307-05-08");
+        check_day(42772, 2087, 2, 8, weekdays.DayOfWeek.Saturday, 39, false, 28, "2087-02-08");
+        check_day(1304370, 5541, 3, 31, weekdays.DayOfWeek.Monday, 90, false, 31, "5541-03-31");
+        check_day(-439473, 766, 10, 7, weekdays.DayOfWeek.Friday, 280, false, 31, "0766-10-07");
+        check_day(-45701, 1844, 11, 16, weekdays.DayOfWeek.Saturday, 321, true, 30, "1844-11-16");
+        check_day(-1279939, -1535, 8, 24, weekdays.DayOfWeek.Monday, 236, false, 31, "-1535-08-24");
+        check_day(836924, 4261, 6, 3, weekdays.DayOfWeek.Monday, 154, false, 30, "4261-06-03");
+        check_day(-958185, -654, 7, 31, weekdays.DayOfWeek.Sunday, 212, false, 31, "-0654-07-31");
+        check_day(-505785, 585, 3, 17, weekdays.DayOfWeek.Thursday, 76, false, 31, "0585-03-17");
+        check_day(837558, 4263, 2, 27, weekdays.DayOfWeek.Friday, 58, false, 28, "4263-02-27");
+        check_day(815704, 4203, 4, 29, weekdays.DayOfWeek.Friday, 119, false, 30, "4203-04-29");
+        check_day(-103445, 1686, 10, 11, weekdays.DayOfWeek.Friday, 284, false, 31, "1686-10-11");
+        check_day(105726849, 291440, 4, 13, weekdays.DayOfWeek.Monday, 104, true, 30, "+291440-04-13");
+        check_day(-153252410, -417621, 2, 26, weekdays.DayOfWeek.Monday, 57, false, 28, "-417621-02-26");
+        check_day(-92635911, -251659, 6, 29, weekdays.DayOfWeek.Sunday, 180, false, 30, "-251659-06-29");
+        check_day(-224934557, -613880, 2, 7, weekdays.DayOfWeek.Wednesday, 38, true, 29, "-613880-02-07");
+        check_day(101454374, 279742, 8, 23, weekdays.DayOfWeek.Thursday, 235, false, 31, "+279742-08-23");
+        check_day(137078239, 377277, 6, 21, weekdays.DayOfWeek.Monday, 172, false, 30, "+377277-06-21");
+        check_day(-133742659, -364205, 1, 14, weekdays.DayOfWeek.Wednesday, 14, false, 31, "-364205-01-14");
+        check_day(-33657535, -90182, 10, 20, weekdays.DayOfWeek.Tuesday, 293, false, 31, "-90182-10-20");
+        check_day(224883377, 617679, 10, 10, weekdays.DayOfWeek.Tuesday, 283, false, 31, "+617679-10-10");
+        check_day(-107334792, -291903, 4, 27, weekdays.DayOfWeek.Saturday, 117, false, 30, "-291903-04-27");
+        check_day(-204110176, -556865, 4, 28, weekdays.DayOfWeek.Sunday, 118, false, 30, "-556865-04-28");
+        check_day(-286066534, -781254, 6, 8, weekdays.DayOfWeek.Saturday, 159, false, 30, "-781254-06-08");
+        check_day(56592441, 156914, 11, 4, weekdays.DayOfWeek.Sunday, 308, false, 30, "+156914-11-04");
+        check_day(19522201, 55419, 12, 22, weekdays.DayOfWeek.Wednesday, 356, false, 31, "+55419-12-22");
+        check_day(-2024365, -3573, 6, 24, weekdays.DayOfWeek.Thursday, 175, false, 30, "-3573-06-24");
+        check_day(125909656, 346698, 12, 6, weekdays.DayOfWeek.Tuesday, 340, false, 31, "+346698-12-06");
+        check_day(-858464, -381, 8, 10, weekdays.DayOfWeek.Saturday, 222, false, 31, "-0381-08-10");
+        check_day(-136389373, -371452, 7, 31, weekdays.DayOfWeek.Wednesday, 213, true, 31, "-371452-07-31");
+        check_day(32353758, 90551, 8, 1, weekdays.DayOfWeek.Sunday, 213, false, 31, "+90551-08-01");
+        check_day(-90750201, -246496, 5, 23, weekdays.DayOfWeek.Monday, 144, true, 31, "-246496-05-23");
+        check_day(138742160, 381833, 2, 18, weekdays.DayOfWeek.Monday, 49, false, 28, "+381833-02-18");
+        check_day(33253203, 93014, 3, 7, weekdays.DayOfWeek.Monday, 66, false, 31, "+93014-03-07");
+        check_day(-217522443, -593587, 10, 12, weekdays.DayOfWeek.Saturday, 285, false, 31, "-593587-10-12");
+        check_day(3680450, 12046, 9, 24, weekdays.DayOfWeek.Monday, 267, false, 30, "+12046-09-24");
+        check_day(-58952508, -159437, 7, 8, weekdays.DayOfWeek.Friday, 189, false, 31, "-159437-07-08");
+        check_day(-180223834, -491467, 11, 26, weekdays.DayOfWeek.Thursday, 330, false, 30, "-491467-11-26");
+        check_day(280732509, 770589, 7, 3, weekdays.DayOfWeek.Friday, 184, false, 31, "+770589-07-03");
+        check_day(-154523876, -421103, 12, 30, weekdays.DayOfWeek.Monday, 364, false, 31, "-421103-12-30");
+        check_day(-148636828, -404984, 3, 10, weekdays.DayOfWeek.Sunday, 70, true, 31, "-404984-03-10");
+        check_day(-104466298, -284050, 12, 29, weekdays.DayOfWeek.Friday, 363, false, 31, "-284050-12-29");
+        check_day(-327064605, -893503, 7, 11, weekdays.DayOfWeek.Thursday, 192, false, 31, "-893503-07-11");
+        check_day(181477571, 498838, 9, 18, weekdays.DayOfWeek.Saturday, 261, false, 30, "+498838-09-18");
+        check_day(-285327022, -779229, 2, 24, weekdays.DayOfWeek.Wednesday, 55, false, 28, "-779229-02-24");
+        check_day(-363670826, -993727, 2, 5, weekdays.DayOfWeek.Wednesday, 36, false, 28, "-993727-02-05");
+        check_day(-43613811, -117441, 6, 11, weekdays.DayOfWeek.Monday, 162, false, 30, "-117441-06-11");
+        check_day(89134275, 246011, 5, 11, weekdays.DayOfWeek.Wednesday, 131, false, 31, "+246011-05-11");
+        check_day(50548248, 140366, 5, 28, weekdays.DayOfWeek.Saturday, 148, false, 31, "+140366-05-28");
+        check_day(-79542429, -215810, 3, 24, weekdays.DayOfWeek.Wednesday, 83, false, 31, "-215810-03-24");
+        check_day(-30290778, -80964, 9, 1, weekdays.DayOfWeek.Thursday, 245, true, 30, "-80964-09-01");
+        check_day(144547767, 397728, 5, 6, weekdays.DayOfWeek.Thursday, 127, true, 31, "+397728-05-06");
+        check_day(327544744, 898757, 1, 19, weekdays.DayOfWeek.Saturday, 19, false, 31, "+898757-01-19");
+        check_day(197076207, 541546, 5, 1, weekdays.DayOfWeek.Wednesday, 121, false, 31, "+541546-05-01");
+        check_day(246727271, 677486, 4, 29, weekdays.DayOfWeek.Thursday, 119, false, 30, "+677486-04-29");
+        check_day(-266111073, -726618, 8, 18, weekdays.DayOfWeek.Sunday, 230, false, 31, "-726618-08-18");
+        check_day(-248910224, -679524, 12, 14, weekdays.DayOfWeek.Monday, 349, true, 31, "-679524-12-14");
+        check_day(-269001843, -734533, 12, 21, weekdays.DayOfWeek.Saturday, 355, false, 31, "-734533-12-21");
+        check_day(185905782, 510962, 9, 29, weekdays.DayOfWeek.Wednesday, 272, false, 30, "+510962-09-29");
+        check_day(-134320219, -365787, 9, 25, weekdays.DayOfWeek.Saturday, 268, false, 30, "-365787-09-25");
+        check_day(345665652, 948370, 5, 31, weekdays.DayOfWeek.Sunday, 151, false, 31, "+948370-05-31");
+        check_day(227476015, 624778, 3, 6, weekdays.DayOfWeek.Monday, 65, false, 31, "+624778-03-06");
+        check_day(108014561, 297703, 10, 29, weekdays.DayOfWeek.Monday, 302, false, 31, "+297703-10-29");
+        check_day(-58740430, -158856, 3, 2, weekdays.DayOfWeek.Thursday, 62, true, 31, "-158856-03-02");
+        check_day(340810235, 935076, 9, 24, weekdays.DayOfWeek.Sunday, 268, true, 30, "+935076-09-24");
+        check_day(-239748067, -654438, 2, 2, weekdays.DayOfWeek.Friday, 33, false, 28, "-654438-02-02");
+        check_day(293730542, 806176, 11, 28, weekdays.DayOfWeek.Thursday, 333, true, 30, "+806176-11-28");
+        check_day(-98225895, -266964, 8, 20, weekdays.DayOfWeek.Saturday, 233, true, 31, "-266964-08-20");
+        check_day(-249810133, -681987, 2, 1, weekdays.DayOfWeek.Friday, 32, false, 28, "-681987-02-01");
+        check_day(-359836946, -983231, 11, 27, weekdays.DayOfWeek.Thursday, 331, false, 30, "-983231-11-27");
+        check_day(-299416029, -817804, 10, 3, weekdays.DayOfWeek.Monday, 277, true, 31, "-817804-10-03");
+        check_day(-201304188, -549183, 11, 8, weekdays.DayOfWeek.Wednesday, 312, false, 30, "-549183-11-08");
+        check_day(342996147, 941061, 7, 22, weekdays.DayOfWeek.Monday, 203, false, 31, "+941061-07-22");
+        check_day(73561569, 203374, 9, 26, weekdays.DayOfWeek.Monday, 269, false, 30, "+203374-09-26");
+        check_day(198343964, 545017, 5, 1, weekdays.DayOfWeek.Thursday, 121, false, 31, "+545017-05-01");
+        check_day(-250836133, -684797, 12, 30, weekdays.DayOfWeek.Tuesday, 364, false, 31, "-684797-12-30");
+        check_day(-321737316, -878917, 2, 24, weekdays.DayOfWeek.Saturday, 55, false, 28, "-878917-02-24");
+        check_day(237316477, 651720, 6, 12, weekdays.DayOfWeek.Wednesday, 164, true, 30, "+651720-06-12");
+        check_day(-40005666, -107562, 3, 17, weekdays.DayOfWeek.Wednesday, 76, false, 31, "-107562-03-17");
+        check_day(204581377, 562094, 10, 14, weekdays.DayOfWeek.Thursday, 287, false, 31, "+562094-10-14");
+        check_day(13752094, 39621, 12, 15, weekdays.DayOfWeek.Wednesday, 349, false, 31, "+39621-12-15");
+        check_day(199645257, 548580, 2, 24, weekdays.DayOfWeek.Thursday, 55, true, 29, "+548580-02-24");
+        check_day(124174525, 341948, 4, 21, weekdays.DayOfWeek.Wednesday, 112, true, 30, "+341948-04-21");
+        check_day(-216396289, -590503, 1, 31, weekdays.DayOfWeek.Sunday, 31, false, 31, "-590503-01-31");
+        check_day(-37669902, -101167, 4, 24, weekdays.DayOfWeek.Sunday, 114, false, 30, "-101167-04-24");
+        check_day(-239597618, -654026, 1, 2, weekdays.DayOfWeek.Wednesday, 2, false, 31, "-654026-01-02");
+        check_day(304876992, 836694, 11, 8, weekdays.DayOfWeek.Thursday, 312, false, 30, "+836694-11-08");
+    };
+
+    export let test_reference_shifts = func() -> void {
+        check_shift(-442463, 12, 13, 1, "-442462-01-13", 8, "-442455-12-13", -660, "-442464-02-22", 120690406);
+        check_shift(2101, 4, 30, 17, "2102-09-30", 2, "2103-04-30", -7549475, "-18569-07-27", 303631888);
+        check_shift(365541, 6, 4, -451393, "+327925-05-04", 4, "+365545-06-04", 746, "+365543-06-20", -487212694);
+        check_shift(1762, 3, 25, -795644, "-64542-07-25", -331312, "-329550-03-25", 921, "1764-10-01", 177894176);
+        check_shift(1953, 3, 22, -381039, "-29801-12-22", 9, "1962-03-22", -753, "1951-02-28", -260971973);
+        check_shift(1456, 10, 21, 11, "1457-09-21", -8, "1448-10-21", -956, "1454-03-10", 21640390);
+        check_shift(1834, 6, 2, 792104, "+67843-02-02", -7, "1827-06-02", 97401571, "+268510-11-11", 273883253);
+        check_shift(25027, 5, 12, -24, "+25025-05-12", 6, "+25033-05-12", -26, "+25027-04-16", -161252525);
+        check_shift(119699, 7, 31, 9, "+119700-04-30", -2, "+119697-07-31", -2350383, "+113264-06-13", -140651891);
+        check_shift(361993, 3, 13, -4098, "+361651-09-13", -9, "+361984-03-13", 85498422, "+596079-12-04", -88299406);
+        check_shift(-85553, 5, 1, 2102, "-85378-07-01", -391304, "-476857-05-01", 48855185, "+48208-04-14", -200690265);
+        check_shift(1521, 9, 30, -4048, "1184-05-30", 154308, "+155829-09-30", 623, "1523-06-15", 7257333);
+        check_shift(2476, 6, 18, -13, "2475-05-18", 7, "2483-06-18", 27300139, "+77221-09-15", 270044948);
+        check_shift(1819, 11, 14, -909555, "-73977-08-14", 8, "1827-11-14", -3833592, "-8677-11-07", 198885482);
+        check_shift(1652, 4, 11, 7, "1652-11-11", -229906, "-228254-04-11", -80158292, "-217814-04-30", 115612142);
+        check_shift(-333427, 11, 20, 13, "-333426-12-20", 2, "-333425-11-20", 445, "-333425-02-08", 407543419);
+        check_shift(1944, 12, 9, 18, "1946-06-09", -262541, "-260597-12-09", 39858655, "+111074-03-25", -2406022);
+        check_shift(277623, 1, 19, 136108, "+288965-05-19", 125079, "+402702-01-19", -42906626, "+160148-09-12", 229184939);
+        check_shift(2251, 11, 27, 3465, "2540-08-27", 112341, "+114592-11-27", 195, "2252-06-09", 115761853);
+        check_shift(38208, 1, 12, -4289, "+37850-08-12", 9, "+38217-01-12", 188, "+38208-07-18", -228744664);
+        check_shift(2055, 12, 2, 2142, "2234-06-02", -85357, "-83302-12-02", 4763960, "+15099-03-14", 256221727);
+        check_shift(182890, 7, 27, -22, "+182888-09-27", -34383, "+148507-07-27", 207, "+182891-02-19", -99224144);
+        check_shift(2036, 10, 31, -320821, "-24699-09-30", 10, "2046-10-31", 302, "2037-08-29", 12620361);
+        check_shift(2501, 9, 22, -18, "2500-03-22", 210412, "+212913-09-22", -49811167, "-133877-05-20", 136226717);
+        check_shift(436250, 6, 30, -20, "+436248-10-30", -5, "+436245-06-30", 419, "+436251-08-23", -40993213);
+        check_shift(379331, 8, 29, -10, "+379330-10-29", -366179, "+13152-08-29", -290, "+379330-11-12", -467155544);
+        check_shift(-87827, 3, 12, 7, "-87827-10-12", 3, "-87824-03-12", -44801812, "-210490-01-01", 120383106);
+        check_shift(-181583, 2, 22, -3, "-181584-11-22", -8, "-181591-02-22", -8911701, "-205983-09-26", 427926392);
+        check_shift(2067, 9, 30, -29, "2065-04-30", -304037, "-301970-09-30", 194, "2068-04-11", -61456917);
+        check_shift(349938, 3, 25, 214461, "+367809-12-25", -1, "+349937-03-25", 506, "+349939-08-13", 225070116);
+        check_shift(-50944, 11, 30, -853617, "-122078-02-28", 267515, "+216571-11-30", -66457478, "-232898-07-10", -100433901);
+        check_shift(2511, 8, 31, 502723, "+44405-03-31", 3, "2514-08-31", 129, "2512-01-07", -68572266);
+        check_shift(170006, 12, 7, 596444, "+219710-08-07", -260227, "-90221-12-07", 797, "+170009-02-11", 95352409);
+        check_shift(1992, 10, 26, -14, "1991-08-26", 1, "1993-10-26", -373, "1991-10-19", 298668583);
+        check_shift(1455, 11, 30, -3855, "1134-08-30", -185015, "-183560-11-30", -565, "1454-05-14", -180627191);
+        check_shift(2063, 12, 26, -854695, "-69161-05-26", 93258, "+95321-12-26", -35630606, "-95490-09-13", -154161310);
+        check_shift(2029, 6, 22, -4871, "1623-07-22", -2, "2027-06-22", 74928056, "+207175-07-11", 190758548);
+        check_shift(-146860, 11, 30, -297443, "-171647-12-30", 1, "-146859-11-30", -746, "-146862-11-15", 168924806);
+        check_shift(150912, 2, 20, -727637, "+90275-09-20", -38635, "+112277-02-20", 570, "+150913-09-12", 193272010);
+        check_shift(1972, 12, 31, -1, "1972-11-30", 3, "1975-12-31", -468, "1971-09-20", 219433961);
+        check_shift(1765, 11, 2, 21, "1767-08-02", -279484, "-277719-11-02", -89171486, "-242378-08-08", 235614018);
+        check_shift(-444503, 10, 31, 379224, "-412901-10-31", -2, "-444505-10-31", 9, "-444503-11-09", -193378617);
+        check_shift(2229, 9, 20, 30, "2232-03-20", -340338, "-338109-09-20", 841, "2232-01-09", 1677972);
+        check_shift(1757, 9, 30, 2396, "1957-05-30", -7, "1750-09-30", -74971950, "-203509-07-09", -142653351);
+        check_shift(-113269, 11, 30, 192622, "-97217-09-30", 9, "-113260-11-30", 308, "-113268-10-03", -77545612);
+        check_shift(-291243, 12, 9, 662778, "-236011-06-09", 6, "-291237-12-09", 339, "-291242-11-13", 451330526);
+        check_shift(1874, 8, 31, 29, "1877-01-31", 66178, "+68052-08-31", -16347073, "-42883-11-25", 291706518);
+        check_shift(1820, 7, 6, -13, "1819-06-06", -5, "1815-07-06", -520, "1819-02-02", -335320951);
+        check_shift(-163004, 10, 23, -27, "-163006-07-23", -262123, "-425127-10-23", 41633394, "-49015-03-04", 202235011);
+        check_shift(415948, 7, 22, -306, "+415923-01-22", 7, "+415955-07-22", -525, "+415947-02-13", -288974566);
+        check_shift(51241, 1, 12, 435621, "+87542-10-12", 333465, "+384706-01-12", 218, "+51241-08-18", 334312811);
+        check_shift(-292553, 7, 15, 1752, "-292407-07-15", -87280, "-379833-07-15", -200, "-292554-12-27", 41970795);
+        check_shift(2055, 2, 18, 1, "2055-03-18", -1, "2054-02-18", 474, "2056-06-06", -118503281);
+        check_shift(1439, 5, 5, 4451, "1810-04-05", 161389, "+162828-05-05", 81165955, "+223664-03-05", 111472637);
+        check_shift(-488565, 7, 29, 13, "-488564-08-29", 6, "-488559-07-29", -89180976, "-732734-05-09", 493326797);
+        check_shift(1834, 9, 11, 4351, "2197-04-11", -7, "1827-09-11", 366, "1835-09-12", -95967166);
+        check_shift(169681, 12, 31, 4179, "+170030-03-31", -1, "+169680-12-31", -177, "+169681-07-07", 41903794);
+        check_shift(2383, 12, 7, -429257, "-33388-07-07", -343946, "-341563-12-07", 31162936, "+87705-02-25", 73636123);
+        check_shift(245654, 1, 22, 13, "+245655-02-22", 11415, "+257069-01-22", -625, "+245652-05-07", -342298916);
+        check_shift(1477, 3, 11, -306121, "-24033-02-11", 0, "1477-03-11", 711, "1479-02-20", -129775836);
+    };
+
+    // Consecutive days across the 400-year cycle's turns: each epoch day
+    // converts back, the weekday advances by one, and the date is the
+    // previous date's successor.
+    export let test_consecutive_days = func() -> void {
+        let starts: int64[] = [-719529, -146097, -36525, 10957, 11016, -365961662, 364522600];
+        for (let start in starts) {
+            let previous = local_date.of_epoch_day(start);
+            for (let e = start + 1; e < start + 370; e = e + 1) {
+                let date = local_date.of_epoch_day(e);
+                test.assert_equal_int64(e, date.to_epoch_day());
+                test.assert_equal_int32(((previous.day_of_week() as int) + 1) % 7, date.day_of_week() as int);
+                if (date.day() == 1) {
+                    test.assert_equal_int32(previous.length_of_month(), previous.day());
+                    if (date.month() == 1) {
+                        test.assert_equal_int32(previous.year() + 1, date.year());
+                        test.assert_equal_int32(12, previous.month());
+                        test.assert_equal_int32(1, date.day_of_year());
+                    } else {
+                        test.assert_equal_int32(previous.month() + 1, date.month());
+                    }
+                } else {
+                    test.assert_equal_int32(previous.day() + 1, date.day());
+                    test.assert_equal_int32(previous.day_of_year() + 1, date.day_of_year());
+                }
+                previous = date;
+            }
+        }
+    };
+
+    // Round trips through the whole range in steps that visit every
+    // position of the cycle's leap pattern.
+    export let test_sweep = func() -> void {
+        let e: int64 = -365961662;
+        while (e <= 364522971) {
+            let date = local_date.of_epoch_day(e);
+            test.assert_equal_int64(e, local_date.of(date.year(), date.month(), date.day()).to_epoch_day());
+            e = e + 182623;
+        }
+    };
+
+    export let test_of_and_try_of = func() -> void {
+        let date = local_date.of(2024, 2, 29);
+        test.assert_equal_int32(2024, date.year());
+        test.assert(local_date.try_of(2024, 2, 29).equals(date));
+        test.assert(local_date.try_of(2023, 2, 29) == nil);
+        test.assert(local_date.try_of(2024, 13, 1) == nil);
+        test.assert(local_date.try_of(2024, 0, 1) == nil);
+        test.assert(local_date.try_of(2024, 4, 31) == nil);
+        test.assert(local_date.try_of(2024, 4, 0) == nil);
+        test.assert(local_date.try_of(1000000, 1, 1) == nil);
+        test.assert(local_date.try_of(-1000000, 1, 1) == nil);
+        test.assert(local_date.try_of(1900, 2, 29) == nil);
+        test.assert(local_date.try_of(2000, 2, 29) != nil);
+        test.assert(local_date.try_of(-4, 2, 29) != nil);
+        test.assert(local_date.try_of(-100, 2, 29) == nil);
+        test.assert(local_date.try_of(999999, 12, 31) != nil);
+        test.assert(local_date.try_of(-999999, 1, 1) != nil);
+    };
+
+    export let test_clamping = func() -> void {
+        let end = local_date.of(2024, 1, 31);
+        test.assert_equal_string("2024-02-29", end.plus_months(1).to_string());
+        test.assert_equal_string("2023-02-28", end.plus_months(-11).to_string());
+        test.assert_equal_string("2024-04-30", end.plus_months(3).to_string());
+        test.assert_equal_string("2025-01-31", end.plus_months(12).to_string());
+        let leap = local_date.of(2024, 2, 29);
+        test.assert_equal_string("2025-02-28", leap.plus_years(1).to_string());
+        test.assert_equal_string("2028-02-29", leap.plus_years(4).to_string());
+        test.assert_equal_string("1900-02-28", leap.plus_years(-124).to_string());
+        test.assert_equal_string("-0001-02-28", local_date.of(0, 2, 29).plus_years(-1).to_string());
+        test.assert_equal_string("2024-02-29", leap.plus_days(0).to_string());
+        test.assert_equal_string("+999999-12-31", local_date.of(999999, 11, 30).plus_days(31).to_string());
+    };
+
+    export let test_text = func() -> void {
+        test.assert_equal_string("0000-01-01", local_date.of(0, 1, 1).to_string());
+        test.assert_equal_string("-0001-12-31", local_date.of(-1, 12, 31).to_string());
+        test.assert_equal_string("-10000-01-01", local_date.of(-10000, 1, 1).to_string());
+        test.assert_equal_string("9999-12-31", local_date.of(9999, 12, 31).to_string());
+        test.assert_equal_string("+10000-01-01", local_date.of(10000, 1, 1).to_string());
+        test.assert_equal_string("0987-06-05", local_date.of(987, 6, 5).to_string());
+    };
+
+    export let test_parse = func() -> void {
+        test.assert(test.assert_ok<local_date.LocalDate>(local_date.parse("+2024-02-29")).equals(local_date.of(2024, 2, 29)));
+        test.assert(test.assert_ok<local_date.LocalDate>(local_date.parse("-0000-01-01")).equals(local_date.of(0, 1, 1)));
+        test.assert(test.assert_ok<local_date.LocalDate>(local_date.parse("+0999999-12-31")).equals(local_date.of(999999, 12, 31)));
+        check_error("", error.ParseErrorKind.Empty, 0);
+        check_error("2024", error.ParseErrorKind.UnexpectedEnd, 4);
+        check_error("2024-02-2", error.ParseErrorKind.UnexpectedEnd, 9);
+        check_error("+", error.ParseErrorKind.UnexpectedEnd, 1);
+        check_error("+123", error.ParseErrorKind.UnexpectedEnd, 4);
+        check_error("202a-01-01", error.ParseErrorKind.InvalidCharacter, 3);
+        check_error("2024/01/01", error.ParseErrorKind.InvalidCharacter, 4);
+        check_error("12024-01-01", error.ParseErrorKind.InvalidCharacter, 4);
+        check_error("+123-01-01", error.ParseErrorKind.InvalidCharacter, 4);
+        check_error(" 2024-01-01", error.ParseErrorKind.InvalidCharacter, 0);
+        check_error("2024-01-01T", error.ParseErrorKind.InvalidCharacter, 10);
+        check_error("2024-01-1x", error.ParseErrorKind.InvalidCharacter, 9);
+        check_error("+1000000-01-01", error.ParseErrorKind.OutOfRange, 0);
+        check_error("-99999999999999999999999-01-01", error.ParseErrorKind.OutOfRange, 0);
+        check_error("2024-13-01", error.ParseErrorKind.OutOfRange, 5);
+        check_error("2024-00-01", error.ParseErrorKind.OutOfRange, 5);
+        check_error("2023-02-29", error.ParseErrorKind.OutOfRange, 8);
+        check_error("2024-04-31", error.ParseErrorKind.OutOfRange, 8);
+        check_error("2024-04-00", error.ParseErrorKind.OutOfRange, 8);
+        check_error("2024-13-45x", error.ParseErrorKind.OutOfRange, 5);
+        let failure = test.assert_err<local_date.LocalDate>(local_date.parse("2023-02-29"));
+        test.assert_equal_string("parse error at 8: day out of range", error.message(failure));
+    };
+
+    export let test_order_and_equality = func() -> void {
+        let a = local_date.of(2024, 3, 1);
+        let b = local_date.of_epoch_day(a.to_epoch_day());
+        test.assert(a.equals(b) && a != b && a.hash_code() == b.hash_code());
+        let expected = hashing.combine(hashing.combine(hashing.combine(17, 2024), 3), 1);
+        test.assert(a.hash_code() == expected);
+        test.assert(!a.equals(nil) && !a.equals(local_date.of(2024, 3, 2)));
+        test.assert(a.compare_to(b) == ordering.Ordering.Equal);
+        test.assert(a.compare_to(local_date.of(2024, 3, 2)) == ordering.Ordering.Less);
+        test.assert(a.compare_to(local_date.of(2024, 2, 29)) == ordering.Ordering.Greater);
+        test.assert(a.compare_to(local_date.of(-2025, 12, 31)) == ordering.Ordering.Greater);
+        test.assert(a.compare_to(local_date.of(2025, 1, 1)) == ordering.Ordering.Less);
+    };
+
+    export let test_day_of_week_module = func() -> void {
+        test.assert(weekdays.of_ordinal(0) == weekdays.DayOfWeek.Monday);
+        test.assert(weekdays.of_ordinal(6) == weekdays.DayOfWeek.Sunday);
+        test.assert(weekdays.plus(weekdays.DayOfWeek.Sunday, 1) == weekdays.DayOfWeek.Monday);
+        test.assert(weekdays.plus(weekdays.DayOfWeek.Monday, -1) == weekdays.DayOfWeek.Sunday);
+        test.assert(weekdays.plus(weekdays.DayOfWeek.Thursday, 0) == weekdays.DayOfWeek.Thursday);
+        test.assert(weekdays.plus(weekdays.DayOfWeek.Wednesday, -9223372036854775807 - 1) == weekdays.DayOfWeek.Tuesday);
+        test.assert(weekdays.plus(weekdays.DayOfWeek.Wednesday, 9223372036854775807) == weekdays.DayOfWeek.Wednesday);
+        test.assert_equal_string("Friday", weekdays.DayOfWeek.Friday.to_string());
+    };
+);

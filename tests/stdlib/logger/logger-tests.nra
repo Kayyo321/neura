@@ -1,0 +1,134 @@
+let cell = import:Std.Core.Cell;
+let clock = import:Std.Time.Clock;
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let logger = import:Std.Log.Logger;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+let LoggerTests = module (
+    // A clock whose now() fails while `failing` is set.
+    let BrokenClock = class implements clock.Clock (
+        export let failing: bool = true;
+
+        export let now = func() -> result.Result<instant.Instant> {
+            if (failing) {
+                return result.Result<instant.Instant>.Err(error.custom("test.clock", "no time"));
+            }
+            return result.Result<instant.Instant>.Ok(instant.of_epoch_seconds(0, 1000));
+        };
+
+        export let monotonic = func() -> result.Result<duration.Duration> {
+            return result.Result<duration.Duration>.Ok(duration.Zero);
+        };
+
+        export let sleep = func(duration.Duration span) -> result.Result<unit.Unit> {
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        };
+    );
+
+    let collector = func(string[list] lines) -> func(string) -> void {
+        return func(string line) -> void {
+            lines.append(line);
+        };
+    };
+
+    let check_lines = func(string[list] expected, string[list] actual) -> void {
+        test.assert_equal_string(expected.to_string(), actual.to_string());
+    };
+
+    export let test_record_format_and_levels = func() -> void {
+        let lines: string[list] = [];
+        let log = logger.create("app.db", collector(lines), logger.LogLevel.Trace);
+        log.trace("t");
+        log.debug("d");
+        log.info("i");
+        log.warn("w");
+        log.error("e");
+        log.log(logger.LogLevel.Warn, "via log");
+        log.log(logger.LogLevel.Off, "never");
+        let expected: string[list] = [
+            "TRACE app.db: t", "DEBUG app.db: d", "INFO app.db: i", "WARN app.db: w", "ERROR app.db: e", "WARN app.db: via log"
+        ];
+        check_lines(expected, lines);
+    };
+
+    export let test_threshold_and_set_level = func() -> void {
+        let lines: string[list] = [];
+        let log = logger.create("svc", collector(lines), logger.LogLevel.Warn);
+        log.trace("no");
+        log.debug("no");
+        log.info("no");
+        log.warn("yes 1");
+        log.error("yes 2");
+        test.assert(!log.is_enabled(logger.LogLevel.Info));
+        test.assert(log.is_enabled(logger.LogLevel.Warn));
+        test.assert(log.is_enabled(logger.LogLevel.Error));
+        test.assert(!log.is_enabled(logger.LogLevel.Off));
+        log.set_level(logger.LogLevel.Debug);
+        test.assert(log.is_enabled(logger.LogLevel.Debug) && !log.is_enabled(logger.LogLevel.Trace));
+        log.debug("yes 3");
+        log.trace("no");
+        log.set_level(logger.LogLevel.Off);
+        test.assert(!log.is_enabled(logger.LogLevel.Error));
+        log.error("no");
+        log.set_level(logger.LogLevel.Trace);
+        test.assert(log.is_enabled(logger.LogLevel.Trace) && !log.is_enabled(logger.LogLevel.Off));
+        let expected: string[list] = ["WARN svc: yes 1", "ERROR svc: yes 2", "DEBUG svc: yes 3"];
+        check_lines(expected, lines);
+    };
+
+    export let test_log_lazy = func() -> void {
+        let lines: string[list] = [];
+        let calls = cell.of<int>(0);
+        let make = func() -> string {
+            calls.value = calls.value + 1;
+            return "built " + calls.value.to_string();
+        };
+        let log = logger.create("lazy", collector(lines), logger.LogLevel.Info);
+        log.log_lazy(logger.LogLevel.Debug, make);
+        test.assert_equal_int32(0, calls.value);
+        log.log_lazy(logger.LogLevel.Off, make);
+        test.assert_equal_int32(0, calls.value);
+        log.log_lazy(logger.LogLevel.Info, make);
+        test.assert_equal_int32(1, calls.value);
+        log.log_lazy(logger.LogLevel.Error, make);
+        test.assert_equal_int32(2, calls.value);
+        let expected: string[list] = ["INFO lazy: built 1", "ERROR lazy: built 2"];
+        check_lines(expected, lines);
+    };
+
+    export let test_timed_records = func() -> void {
+        let lines: string[list] = [];
+        let fixed = fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
+        let log = logger.create_timed("timed", collector(lines), logger.LogLevel.Info, fixed);
+        log.info("first");
+        fixed.advance(duration.of_millis(1500));
+        log.warn("second");
+        log.debug("hidden");
+        let broken = new BrokenClock();
+        let other = logger.create_timed("broken", collector(lines), logger.LogLevel.Trace, broken);
+        other.trace("no clock");
+        broken.failing = false;
+        other.info("clock back");
+        let expected: string[list] = [
+            "2023-11-14T22:13:20Z INFO timed: first", "2023-11-14T22:13:21.500Z WARN timed: second",
+            "- TRACE broken: no clock", "1970-01-01T00:00:00.000001Z INFO broken: clock back"
+        ];
+        check_lines(expected, lines);
+    };
+
+    // A sink that counts failures in a captured Cell, as the contract
+    // suggests for sinks that can fail.
+    export let test_counting_sink = func() -> void {
+        let count = cell.of<int>(0);
+        let log = logger.create("count", func(string line) -> void { count.value = count.value + line.byte_length; },
+            logger.LogLevel.Info);
+        log.info("abc");
+        test.assert_equal_int32(15, count.value);
+        test.assert((logger.LogLevel.Trace as int) == 0 && (logger.LogLevel.Off as int) == 5);
+    };
+);

@@ -1,0 +1,127 @@
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let local_date = import:Std.Time.LocalDate;
+let local_date_time = import:Std.Time.LocalDateTime;
+let local_time = import:Std.Time.LocalTime;
+let ordering = import:Std.Core.Ordering;
+let test = import:Std.Test;
+let zone_offset = import:Std.Time.ZoneOffset;
+
+let LocalDateTimeTests = module (
+    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+        let failure = test.assert_err<local_date_time.LocalDateTime>(local_date_time.parse(text));
+        match (failure) {
+            error.Error.Parse { kind: actual, offset: at, message: _ } => {
+                test.assert_equal_string(kind.to_string(), actual.to_string());
+                test.assert_equal_int32(offset, at);
+            },
+            _ => {
+                test.fail("expected a parse error for " + text);
+            },
+        }
+    };
+
+    let at = func(int year, int month, int day, int hour, int minute, int second, int nano) -> local_date_time.LocalDateTime {
+        return local_date_time.of(local_date.of(year, month, day), local_time.of(hour, minute, second, nano));
+    };
+
+    // Expected text computed with Python over the total nanoseconds.
+    let check_plus = func(int year, int month, int day, int64 time_of_day, int64 shift, string text) -> void {
+        let start = local_date_time.of(local_date.of(year, month, day), local_time.of_nano_of_day(time_of_day));
+        let moved = start.plus(duration.of_nanos(shift));
+        test.assert_equal_string(text, moved.to_string());
+        test.assert(test.assert_ok<local_date_time.LocalDateTime>(local_date_time.parse(text)).equals(moved));
+    };
+
+    export let test_parts = func() -> void {
+        let date = local_date.of(2024, 2, 29);
+        let time = local_time.of(12, 0, 0, 0);
+        let moment = local_date_time.of(date, time);
+        test.assert(moment.date().equals(date) && moment.time().equals(time));
+        test.assert_equal_string("2024-02-29T12:00:00", moment.to_string());
+        test.assert_equal_string("-0044-03-15T00:00:00.000001", at(-44, 3, 15, 0, 0, 0, 1000).to_string());
+    };
+
+    export let test_plus_carries = func() -> void {
+        test.assert_equal_string("2024-03-01T00:30:00", at(2024, 2, 29, 23, 30, 0, 0).plus(duration.of_hours(1)).to_string());
+        test.assert_equal_string("2023-12-31T23:59:59.999999999", at(2024, 1, 1, 0, 0, 0, 0).plus(duration.of_nanos(-1)).to_string());
+        test.assert_equal_string("2024-01-01T00:00:00", at(2024, 1, 1, 0, 0, 0, 0).plus(duration.Zero).to_string());
+        let low = duration.of_nanos(-9223372036854775807 - 1);
+        test.assert_equal_string("1677-09-21T00:12:43.145224192", at(1970, 1, 1, 0, 0, 0, 0).plus(low).to_string());
+        check_plus(214070, 9, 25, 86399999999999, -86400000000000, "+214070-09-24T23:59:59.999999999");
+        check_plus(133128, 5, 19, 36692000000000, -32571976512261, "+133128-05-19T01:08:40.023487739");
+        check_plus(165711, 1, 18, 86399999999999, 0, "+165711-01-18T23:59:59.999999999");
+        check_plus(123563, 11, 8, 86399999999999, 6172621865212, "+123563-11-09T01:42:52.621865211");
+        check_plus(118415, 3, 31, 58295642000000, 86400000000000, "+118415-04-01T16:11:35.642");
+        check_plus(-242822, 6, 14, 86399999999999, -86400000000000, "-242822-06-13T23:59:59.999999999");
+        check_plus(209218, 8, 16, 15453262000000, -86400000000000, "+209218-08-15T04:17:33.262");
+        check_plus(82001, 12, 21, 0, 50265187221406, "+82001-12-21T13:57:45.187221406");
+        check_plus(-208645, 1, 14, 1075000000000, 6552539364843190278, "-208438-09-05T14:07:19.843190278");
+        check_plus(167874, 8, 1, 86399999999999, 140290149758274, "+167874-08-03T14:58:10.149758273");
+        check_plus(-219823, 3, 18, 54396302000000, 0, "-219823-03-18T15:06:36.302");
+        check_plus(-63243, 12, 16, 0, 0, "-63243-12-16T00:00:00");
+        check_plus(-1236, 11, 11, 52723000000000, -563537203334817, "-1236-11-05T02:06:25.796665183");
+        check_plus(-235812, 12, 15, 55433100275596, -86400000000000, "-235812-12-14T15:23:53.100275596");
+        check_plus(-72695, 10, 21, 73535619000000, 1596020975287286351, "-72644-05-19T07:35:10.906286351");
+        check_plus(203815, 12, 7, 44962061000000, 0, "+203815-12-07T12:29:22.061");
+        check_plus(-248696, 12, 12, 86399999999999, 27508955912117, "-248696-12-13T07:38:28.955912116");
+        check_plus(13436, 2, 24, 34297837000000, -86400000000000, "+13436-02-23T09:31:37.837");
+        check_plus(143869, 7, 7, 26737554000000, 0, "+143869-07-07T07:25:37.554");
+        check_plus(97944, 12, 18, 27747804000000, 3110713595415559266, "+98043-07-15T22:49:03.219559266");
+        check_plus(115348, 6, 27, 49724986771844, -672304001861380, "+115348-06-19T19:03:40.984910464");
+        check_plus(-265045, 4, 18, 86399999999999, 3352944558054835151, "-264939-07-19T05:29:18.054835150");
+        check_plus(11831, 2, 8, 54923442000000, -502863853343651750, "+11815-03-04T10:51:10.098348250");
+        check_plus(151792, 7, 9, 34226024000000, 37068645431281, "+151792-07-09T19:48:14.669431281");
+        check_plus(-166157, 2, 11, 54645197436726, -86400000000000, "-166157-02-10T15:10:45.197436726");
+        check_plus(160661, 1, 14, 6735219550653, 0, "+160661-01-14T01:52:15.219550653");
+        check_plus(85786, 9, 5, 86399999999999, 634003377426264, "+85786-09-13T08:06:43.377426263");
+        check_plus(-115283, 1, 14, 86399999999999, 86400000000000, "-115283-01-15T23:59:59.999999999");
+        check_plus(212145, 12, 21, 6889759000000, -86400000000000, "+212145-12-20T01:54:49.759");
+        check_plus(198072, 5, 3, 71435000000000, 29099084202949, "+198072-05-04T03:55:34.084202949");
+        check_plus(-103475, 7, 8, 32875813814492, 664176842889210, "-103475-07-16T01:37:32.656703702");
+        check_plus(253873, 6, 18, 73001255000000, 0, "+253873-06-18T20:16:41.255");
+        check_plus(-235160, 11, 22, 0, 7473583935791, "-235160-11-22T02:04:33.583935791");
+        check_plus(-201386, 2, 23, 64321260000000, 86400000000000, "-201386-02-24T17:52:01.260");
+        check_plus(-53943, 10, 14, 65940226760510, 259769468161636, "-53943-10-17T18:28:29.694922146");
+        check_plus(-144102, 4, 21, 86399999999999, 630804465927583, "-144102-04-29T07:13:24.465927582");
+        check_plus(-176649, 5, 10, 72833000000000, 0, "-176649-05-10T20:13:53");
+        check_plus(-185783, 1, 19, 86399999999999, -9814103937609, "-185783-01-19T21:16:25.896062390");
+        check_plus(-160831, 5, 31, 3597000000000, 86400000000000, "-160831-06-01T00:59:57");
+        check_plus(185333, 6, 13, 44188617000000, 35133461289413, "+185333-06-13T22:02:02.078289413");
+    };
+
+    export let test_at_offset = func() -> void {
+        let moment = at(1970, 1, 1, 5, 30, 0, 7);
+        let east = moment.at_offset(zone_offset.of_hours_minutes(5, 30));
+        test.assert_equal_int64(0, east.epoch_seconds());
+        test.assert_equal_int32(7, east.nanos());
+        test.assert_equal_int64(21600, moment.at_offset(zone_offset.of_hours_minutes(0, -30)).epoch_seconds());
+        test.assert_equal_int64(19800, moment.at_offset(zone_offset.Utc).epoch_seconds());
+        test.assert_equal_int64(-62167219200, at(0, 1, 1, 0, 0, 0, 0).at_offset(zone_offset.Utc).epoch_seconds());
+        test.assert_equal_int64(31494784780799, at(999999, 12, 31, 23, 59, 59, 0).at_offset(zone_offset.Utc).epoch_seconds());
+    };
+
+    export let test_parse = func() -> void {
+        check_error("", error.ParseErrorKind.Empty, 0);
+        check_error("2024-02-29", error.ParseErrorKind.UnexpectedEnd, 10);
+        check_error("2024-02-29T12:00", error.ParseErrorKind.UnexpectedEnd, 16);
+        check_error("2024-02-29 12:00:00", error.ParseErrorKind.InvalidCharacter, 10);
+        check_error("2024-02-29T12:00:00Z", error.ParseErrorKind.InvalidCharacter, 19);
+        check_error("2024-02-30T12:00:00", error.ParseErrorKind.OutOfRange, 8);
+        check_error("2024-02-29T12:61:00", error.ParseErrorKind.OutOfRange, 14);
+        test.assert(test.assert_ok<local_date_time.LocalDateTime>(local_date_time.parse("+10000-01-01T00:00:00.5")).equals(at(10000, 1, 1, 0, 0, 0, 500000000)));
+    };
+
+    export let test_order_and_equality = func() -> void {
+        let a = at(2024, 5, 6, 7, 8, 9, 10);
+        let b = local_date_time.of(local_date.of(2024, 5, 6), local_time.of_nano_of_day(25689000000010));
+        test.assert(a.equals(b) && a != b && a.hash_code() == b.hash_code() && !a.equals(nil));
+        let expected = hashing.combine(hashing.combine(17, local_date.of(2024, 5, 6).hash_code()), local_time.of(7, 8, 9, 10).hash_code());
+        test.assert(a.hash_code() == expected);
+        test.assert(a.compare_to(b) == ordering.Ordering.Equal);
+        test.assert(a.compare_to(at(2024, 5, 6, 7, 8, 9, 11)) == ordering.Ordering.Less);
+        test.assert(a.compare_to(at(2024, 5, 5, 23, 0, 0, 0)) == ordering.Ordering.Greater);
+        test.assert(a.compare_to(at(2024, 5, 7, 0, 0, 0, 0)) == ordering.Ordering.Less);
+    };
+);

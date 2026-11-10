@@ -1,0 +1,23 @@
+// run-options: --replay @AREA_DIR@/programs/replayed-entropy.trace
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let program = import:Std.Program;
+let randoms = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+
+// from_entropy answered from a recorded trace: the 8 bytes are read as a
+// little-endian seed, so the output equals seeded() with that seed.
+export let ReplayedEntropy = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        match (randoms.from_entropy()) {
+            result.Result.Ok(r) => {
+                console.print_line(r.next_uint64().to_string());
+                console.print_line(r.next_int_below(1000).to_string());
+            },
+            result.Result.Err(failure) => {
+                console.print_line("failed: " + error.message(failure));
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,17 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) in function [0-9]+ block [0-9]+ at std/time/duration[.]nra
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let fixed = fixed_clock.of(instant.Epoch);
+        fixed.advance(duration.of_nanos(9223372036854775807));
+        console.print_line("before");
+        fixed.advance(duration.of_nanos(1));
+        return program.ExitCode.Ok;
+    };
+);

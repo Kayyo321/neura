@@ -1,0 +1,17 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: date out of range
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let local_date = import:Std.Time.LocalDate;
+let local_date_time = import:Std.Time.LocalDateTime;
+let local_time = import:Std.Time.LocalTime;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let last = local_date_time.of(local_date.of(999999, 12, 31), local_time.of(23, 59, 59, 999999999));
+        console.print_line("before");
+        console.print_line(last.plus(duration.of_nanos(1)).to_string());
+        return program.ExitCode.Ok;
+    };
+);

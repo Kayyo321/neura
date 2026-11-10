@@ -1,0 +1,52 @@
+let clock = import:Std.Time.Clock;
+let duration = import:Std.Time.Duration;
+let host_error = import:Std.Core.Internal.HostError;
+let instant = import:Std.Time.Instant;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// The host's clocks (Stdlib.md section 12.1). Needs the clock capability;
+// without it every member fails with CapabilityDenied.
+export let SystemClock = module (
+    let WallOutcome = enum (Ok([int64, int]), Error(uint32));
+    let NanosOutcome = enum (Ok(int64), Error(uint32));
+    let DoneOutcome = enum (Ok, Error(uint32));
+    let wall_clock = func() -> WallOutcome host("neura.clock.wall", 1);
+    let monotonic_clock = func() -> NanosOutcome host("neura.clock.monotonic", 1);
+    let sleep_for = func(int64 nanos) -> DoneOutcome host("neura.clock.sleep", 1);
+
+    export let SystemClock = class implements clock.Clock (
+        // The host's wall clock as an instant.
+        export let now = func() -> result.Result<instant.Instant> {
+            return match (wall_clock()) {
+                WallOutcome.Ok(reading) => result.Result<instant.Instant>.Ok(instant.of_epoch_seconds(reading[0], reading[1])),
+                WallOutcome.Error(code) => result.Result<instant.Instant>.Err(host_error.io(code, "clock read failed", "")),
+            };
+        };
+
+        // The host's monotonic clock, from an origin fixed for the run.
+        export let monotonic = func() -> result.Result<duration.Duration> {
+            return match (monotonic_clock()) {
+                NanosOutcome.Ok(nanos) => result.Result<duration.Duration>.Ok(duration.of_nanos(nanos)),
+                NanosOutcome.Error(code) => result.Result<duration.Duration>.Err(host_error.io(code, "clock read failed", "")),
+            };
+        };
+
+        // Waits for the duration; a zero or negative duration asks the host
+        // to wait for zero nanoseconds.
+        export let sleep = func(duration.Duration span) -> result.Result<unit.Unit> {
+            let nanos = span.to_nanos();
+            if (nanos < 0) {
+                nanos = 0;
+            }
+            return match (sleep_for(nanos)) {
+                DoneOutcome.Ok => result.Result<unit.Unit>.Ok(unit.Unit.Value),
+                DoneOutcome.Error(code) => result.Result<unit.Unit>.Err(host_error.io(code, "sleep failed", "")),
+            };
+        };
+    );
+
+    export let create = func() -> SystemClock {
+        return new SystemClock();
+    };
+);

@@ -1,0 +1,100 @@
+let error = import:Std.Core.Error;
+let ordering = import:Std.Core.Ordering;
+let randoms = import:Std.Random.Random;
+let test = import:Std.Test;
+let uuids = import:Std.Random.Uuid;
+
+let UuidTests = module (
+    // Expected text and hash from Python: the generator's fill_bytes(16)
+    // with the version and variant bits set (uuid.UUID confirms version 4,
+    // RFC 4122 variant), and the hash 17 combined with each byte.
+    let check_random = func(uint64 seed, string first, uint32 first_hash, string second, uint32 second_hash) -> void {
+        let r = randoms.seeded(seed);
+        let a = uuids.random(r);
+        let b = uuids.random(r);
+        test.assert_equal_string(first, a.to_string());
+        test.assert_equal_string(second, b.to_string());
+        test.assert(a.hash_code() == first_hash);
+        test.assert(b.hash_code() == second_hash);
+        test.assert(test.assert_ok<uuids.Uuid>(uuids.parse(first)).equals(a));
+        let bytes = a.to_bytes();
+        test.assert_equal_int32(16, bytes.length);
+        test.assert_equal_int32(64, (bytes[6] & 240) as int);
+        test.assert_equal_int32(128, (bytes[8] & 192) as int);
+    };
+
+    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+        let failure = test.assert_err<uuids.Uuid>(uuids.parse(text));
+        match (failure) {
+            error.Error.Parse { kind: actual, offset: at, message: _ } => {
+                test.assert_equal_string(kind.to_string(), actual.to_string());
+                test.assert_equal_int32(offset, at);
+            },
+            _ => {
+                test.fail("expected a parse error for " + text);
+            },
+        }
+    };
+
+    let parsed = func(string text) -> uuids.Uuid {
+        return test.assert_ok<uuids.Uuid>(uuids.parse(text));
+    };
+
+    export let test_random_reference = func() -> void {
+        check_random(0, "b4f275cb-365f-4c99-aa45-5649781f6ebf", 455274369, "e0e63349-9d84-4f1a-ac2d-2d26f194a56a", 3475444033);
+        check_random(1, "c510c70f-6daf-42b3-aa4c-364796553b85", 3779767827, "14452a08-5697-4892-a7a3-66c27b1c2e64", 2365494234);
+        check_random(42, "16c72e0c-2e0b-4815-be3a-116d86d90461", 971929970, "a199e439-3253-47ae-a160-b30347adb8ec", 3678991663);
+        check_random(18446744073709551615, "08ad7e2a-d520-458f-ad80-a1ca18a076c4", 3747693321, "9e4660d2-c031-4e81-af3c-5f067e8d65bf", 4116920012);
+    };
+
+    export let test_parse_cases = func() -> void {
+        let lower = parsed("123e4567-e89b-12d3-a456-426614174000");
+        let upper = parsed("123E4567-E89B-12D3-A456-426614174000");
+        let mixed = parsed("123e4567-E89b-12D3-a456-426614174000");
+        test.assert(lower.equals(upper) && upper.equals(mixed));
+        test.assert_equal_string("123e4567-e89b-12d3-a456-426614174000", upper.to_string());
+        test.assert(upper.hash_code() == 454223564);
+        test.assert_equal_string("00000000-0000-0000-0000-000000000000", parsed("00000000-0000-0000-0000-000000000000").to_string());
+        test.assert_equal_string("ffffffff-ffff-ffff-ffff-ffffffffffff", parsed("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF").to_string());
+        let bytes = lower.to_bytes();
+        test.assert_equal_int32(18, bytes[0] as int);
+        test.assert_equal_int32(0, bytes[15] as int);
+        test.assert_equal_int32(102, bytes[11] as int);
+    };
+
+    export let test_parse_errors = func() -> void {
+        check_error("", error.ParseErrorKind.Empty, 0);
+        check_error("123e4567", error.ParseErrorKind.UnexpectedEnd, 8);
+        check_error("123e4567-e89b-12d3-a456-42661417400", error.ParseErrorKind.UnexpectedEnd, 35);
+        check_error("123e4567-e89b-12d3-a456-4266141740000", error.ParseErrorKind.InvalidCharacter, 36);
+        check_error("123e4567e89b-12d3-a456-426614174000", error.ParseErrorKind.InvalidCharacter, 8);
+        check_error("123e4567-e89b-12d3-a456_426614174000", error.ParseErrorKind.InvalidCharacter, 23);
+        check_error("g23e4567-e89b-12d3-a456-426614174000", error.ParseErrorKind.InvalidCharacter, 0);
+        check_error("123e4567-e89b-12d3-a456-42661417400G", error.ParseErrorKind.InvalidCharacter, 35);
+        check_error("{123e4567-e89b-12d3-a456-426614174000}", error.ParseErrorKind.InvalidCharacter, 0);
+        check_error("123e4567-e89b-12d3-a456-426614174000 ", error.ParseErrorKind.InvalidCharacter, 36);
+        let failure = test.assert_err<uuids.Uuid>(uuids.parse("123e4567+e89b-12d3-a456-426614174000"));
+        test.assert_equal_string("parse error at 8: expected '-'", error.message(failure));
+    };
+
+    export let test_order_and_equality = func() -> void {
+        let low = parsed("00000000-0000-0000-0000-000000000001");
+        let high_first = parsed("80000000-0000-0000-0000-000000000000");
+        let high_last = parsed("00000000-0000-0000-8000-000000000000");
+        test.assert(low.compare_to(high_first) == ordering.Ordering.Less);
+        test.assert(high_first.compare_to(low) == ordering.Ordering.Greater);
+        test.assert(low.compare_to(high_last) == ordering.Ordering.Less);
+        test.assert(high_last.compare_to(high_first) == ordering.Ordering.Less);
+        test.assert(low.compare_to(parsed("00000000-0000-0000-0000-000000000001")) == ordering.Ordering.Equal);
+        test.assert(!low.equals(high_first) && !low.equals(nil));
+        let r = randoms.seeded(8);
+        let previous = uuids.random(r);
+        for (let i = 0; i < 50; i = i + 1) {
+            let next = uuids.random(r);
+            test.assert(!next.equals(previous));
+            test.assert(next.compare_to(previous) != ordering.Ordering.Equal);
+            test.assert(next.compare_to(previous) == ordering.reverse(previous.compare_to(next)));
+            previous = next;
+        }
+    };
+);

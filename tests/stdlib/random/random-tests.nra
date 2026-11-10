@@ -1,0 +1,173 @@
+let randoms = import:Std.Random.Random;
+let test = import:Std.Test;
+
+let RandomTests = module (
+    // Expected values come from a Python implementation of SplitMix64 and
+    // xoshiro256** with each member's algorithm from Stdlib.md 12.2.
+    let check_uint64 = func(uint64 seed, uint64[] expected) -> void {
+        let r = randoms.seeded(seed);
+        for (let value in expected) {
+            test.assert_equal_uint64(value, r.next_uint64());
+        }
+    };
+
+    let check_small = func(uint64 seed, uint32[] words, bool[] bits) -> void {
+        let r = randoms.seeded(seed);
+        for (let value in words) {
+            test.assert_equal_uint64(value as uint64, r.next_uint32() as uint64);
+        }
+        for (let bit in bits) {
+            test.assert_equal_bool(bit, r.next_bool());
+        }
+    };
+
+    let check_below = func(uint64 seed, int[] expected) -> void {
+        let bounds: int[] = [1, 2, 3, 7, 10, 100, 1000, 2147483647, 1073741824, 1073741825];
+        let r = randoms.seeded(seed);
+        for (let i = 0; i < 10; i = i + 1) {
+            test.assert_equal_int32(expected[i], r.next_int_below(bounds[i]));
+        }
+    };
+
+    let check_between = func(uint64 seed, int[] expected) -> void {
+        let lows: int[] = [-5, -2147483648, 0, -2147483648, 100, 2147483646];
+        let highs: int[] = [5, 2147483647, 1, -2147483647, 1000, 2147483647];
+        let r = randoms.seeded(seed);
+        for (let i = 0; i < 6; i = i + 1) {
+            test.assert_equal_int32(expected[i], r.next_int_between(lows[i], highs[i]));
+        }
+    };
+
+    let check_float = func(uint64 seed, float64[] expected) -> void {
+        let r = randoms.seeded(seed);
+        for (let value in expected) {
+            test.assert_equal_float64(value, r.next_float64());
+        }
+    };
+
+    // fill_bytes(0), (5), (8), and (13) in turn.
+    let check_fill = func(uint64 seed, uint8[] expected) -> void {
+        let r = randoms.seeded(seed);
+        let bytes: uint8[list] = [];
+        let counts: int[] = [0, 5, 8, 13];
+        for (let count in counts) {
+            let part = r.fill_bytes(count);
+            test.assert_equal_int32(count, part.length);
+            for (let b in part) {
+                bytes.append(b);
+            }
+        }
+        for (let i = 0; i < 26; i = i + 1) {
+            test.assert_equal_int32(expected[i] as int, bytes[i] as int);
+        }
+    };
+
+    // Shuffles 0 through 9, then a one-element list (no draw), then
+    // chooses four times from five names.
+    let check_shuffle = func(uint64 seed, int[] expected, string[] chosen) -> void {
+        let r = randoms.seeded(seed);
+        let items: int[list] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        r.shuffle<int>(items);
+        for (let i = 0; i < 10; i = i + 1) {
+            test.assert_equal_int32(expected[i], items[i]);
+        }
+        let one: int[list] = [7];
+        let version = one.version;
+        r.shuffle<int>(one);
+        test.assert_equal_int32(7, one[0]);
+        test.assert(one.version == version);
+        let names: string[list] = ["a", "b", "c", "d", "e"];
+        for (let name in chosen) {
+            test.assert_equal_string(name, r.choose<string>(names));
+        }
+    };
+
+    export let test_reference_sequences = func() -> void {
+        check_uint64(0, [11091344671253066420, 13793997310169335082, 1900383378846508768, 7684712102626143532, 13521403990117723737, 18442103541295991498]);
+        check_small(0, [2582404918, 3211665272, 442467485, 1789236465], [true, true, false, true, true, true, false, false]);
+        check_below(0, [0, 0, 1, 1, 5, 11, 858, 490903871, 288758773, 458164133]);
+        check_between(0, [1, 1064181624, 0, -2147483648, 430, 2147483646]);
+        check_float(0, [0.6012629994179048, 0.7477740925472398, 0.10301998939503632, 0.4165890778296456, 0.7329967790569901]);
+        check_fill(0, [180, 242, 117, 203, 54, 42, 69, 86, 73, 120, 31, 110, 191, 224, 230, 51, 73, 157, 132, 95, 26, 44, 45, 45, 38, 241]);
+        check_shuffle(0, [0, 9, 7, 3, 4, 2, 1, 5, 8, 6], ["a", "e", "e", "d"]);
+        check_uint64(1, [12966619160104079557, 9600361134598540522, 10590380919521690900, 7218738570589545383, 12860671823995680371, 2648436617965840162]);
+        check_small(1, [3019026285, 2235258262, 2465765206, 1680743547], [true, false, false, false, true, true, true, true]);
+        check_below(1, [0, 0, 2, 3, 2, 18, 239, 1637174732, 503166090, 222092172]);
+        check_between(1, [1, 318281558, 0, -2147483648, 886, 2147483646]);
+        check_float(1, [0.7029218331588505, 0.5204366199388569, 0.5741057000197225, 0.39132860204190445, 0.6971784165599615]);
+        check_fill(1, [197, 16, 199, 15, 109, 234, 76, 54, 71, 150, 85, 59, 133, 20, 69, 42, 8, 86, 151, 248, 146, 167, 163, 102, 194, 123]);
+        check_shuffle(1, [7, 1, 0, 5, 4, 8, 2, 3, 9, 6], ["b", "e", "d", "b"]);
+        check_uint64(42, [1546998764402558742, 6990951692964543102, 12544586762248559009, 17057574109182124193, 18295552978065317476, 14199186830065750584]);
+        check_small(42, [360188718, 1627707782, 2920764210, 3971525959], [true, true, true, true, true, true, true, false]);
+        check_below(42, [0, 0, 2, 1, 5, 67, 626, 357982559, 783629108, 906882107]);
+        check_between(42, [1, 773280562, 0, -2147483648, 405, 2147483646]);
+        check_float(42, [0.08386297105988216, 0.3789802506626686, 0.6800434110281394, 0.9246929453253876, 0.9918039142821028]);
+        check_fill(42, [22, 199, 46, 12, 46, 126, 58, 17, 109, 134, 217, 4, 97, 161, 153, 228, 57, 50, 83, 23, 174, 161, 96, 179, 3, 71]);
+        check_shuffle(42, [9, 4, 0, 8, 3, 5, 1, 7, 2, 6], ["b", "d", "a", "e"]);
+        check_uint64(18446744073709551615, [10328197420357168392, 14156678507024973869, 9357971779955476126, 13791585006304312367, 10463432026814718762, 13498236496097551653]);
+        check_small(18446744073709551615, [2404720853, 3296108568, 2178822592, 3211103614], [true, true, false, true, true, true, false, false]);
+        check_below(18446744073709551615, [0, 0, 0, 6, 3, 21, 399, 543639259, 490815894, 188430997]);
+        check_between(18446744073709551615, [0, 1148624920, 0, -2147483648, 759, 2147483646]);
+        check_float(18446744073709551615, [0.5598927040505212, 0.7674350796247662, 0.5072966666942884, 0.7476433212926822, 0.5672237867563461]);
+        check_fill(18446744073709551615, [8, 173, 126, 42, 213, 45, 128, 161, 202, 24, 160, 118, 196, 158, 70, 96, 210, 192, 49, 222, 129, 47, 60, 95, 6, 126]);
+        check_shuffle(18446744073709551615, [7, 4, 2, 1, 3, 9, 6, 0, 8, 5], ["e", "b", "e", "e"]);
+        check_uint64(123456789, [15127205273500847298, 16265768176396019016, 1514321867679316104, 9853693475100939714, 16001046604883718113, 8931005260488469461]);
+        check_small(123456789, [3522076940, 3787169274, 352580535, 2294241794], [true, false, false, true, false, false, false, false]);
+        check_below(123456789, [0, 0, 2, 4, 7, 10, 576, 834160299, 204584846, 273253647]);
+        check_between(123456789, [2, 146758146, 0, -2147483648, 462, 2147483646]);
+        check_float(123456789, [0.8200474410581898, 0.8817690596997072, 0.08209155293901105, 0.5341697936355339, 0.8674184745528365]);
+        check_fill(123456789, [194, 12, 111, 131, 12, 72, 37, 240, 8, 250, 157, 187, 225, 136, 184, 161, 38, 183, 243, 3, 21, 194, 213, 249, 44, 2]);
+        check_shuffle(123456789, [9, 1, 5, 3, 0, 6, 8, 4, 2, 7], ["b", "b", "e", "e"]);
+    };
+
+    export let test_empty_shuffle = func() -> void {
+        let r = randoms.seeded(3);
+        let empty: string[list] = [];
+        r.shuffle<string>(empty);
+        test.assert_equal_int32(0, empty.length);
+        // An empty shuffle draws nothing.
+        test.assert_equal_uint64(randoms.seeded(3).next_uint64(), r.next_uint64());
+    };
+
+    // Distribution sanity over a fixed seed: every residue appears, the
+    // floats stay in [0, 1), and the counts are near uniform.
+    export let test_distribution = func() -> void {
+        let r = randoms.seeded(2024);
+        let counts: int[list] = [0, 0, 0, 0, 0, 0, 0];
+        let low = 1.0;
+        let high = 0.0;
+        for (let i = 0; i < 7000; i = i + 1) {
+            let k = r.next_int_below(7);
+            counts[k] = counts[k] + 1;
+            let f = r.next_float64();
+            test.assert(f >= 0.0 && f < 1.0);
+            if (f < low) {
+                low = f;
+            }
+            if (f > high) {
+                high = f;
+            }
+            let b = r.next_int_between(-3, 4);
+            test.assert(b >= -3 && b < 4);
+        }
+        for (let count in counts) {
+            test.assert(count > 850 && count < 1150);
+        }
+        test.assert(low < 0.001 && high > 0.999);
+    };
+
+    // Distinct seeds give distinct streams; the same seed repeats.
+    export let test_determinism = func() -> void {
+        let a = randoms.seeded(99);
+        let b = randoms.seeded(99);
+        let c = randoms.seeded(100);
+        let same = true;
+        let differs = false;
+        for (let i = 0; i < 50; i = i + 1) {
+            let x = a.next_uint64();
+            same = same && x == b.next_uint64();
+            differs = differs || x != c.next_uint64();
+        }
+        test.assert(same && differs);
+    };
+);

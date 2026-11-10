@@ -1,0 +1,44 @@
+let randoms = import:Std.Random.Random;
+let test = import:Std.Test;
+
+// next_gaussian against a Python model of the same polar method. Python's
+// math.log and math.sqrt come from the C library, not the fdlibm port in
+// Std.Math, so the values are compared within 1e-14; the uint64 drawn after
+// six values must match exactly, which checks every rejection and the
+// cached second value.
+let GaussianTests = module (
+    let check_gaussian = func(uint64 seed, float64[] expected, uint64 after) -> void {
+        let r = randoms.seeded(seed);
+        let again = randoms.seeded(seed);
+        for (let value in expected) {
+            let g = r.next_gaussian();
+            test.assert_float_near(value, g, 0.00000000000001);
+            test.assert_equal_float64(g, again.next_gaussian());
+        }
+        test.assert_equal_uint64(after, r.next_uint64());
+    };
+
+    export let test_reference_values = func() -> void {
+        check_gaussian(0, [0.5981026483626094, 1.4634599192204392, -0.8950525532379914, -0.1880627660388742, -2.415606685712082, 1.1072094167289706], 15781505947799885617);
+        check_gaussian(1, [1.884396104787977, 0.18978089448693036, 1.302090250702661, -1.9094343319583578, 0.43832091511541, -0.7923272422638171], 1310552918490157286);
+        check_gaussian(42, [-0.7262191382447857, -0.21119691823195985, 0.2216227015035933, 0.5227716877560146, 0.46417731016247366, 0.7409788916865562], 14044878350692344958);
+        check_gaussian(18446744073709551615, [0.33891515568206826, 1.513336274972966, 0.04935886182127198, 1.6752022517644154, 0.4756069443760676, 1.6395619885679755], 6831296623176769502);
+    };
+
+    // The mean and variance of 4,000 values from a fixed seed are near 0
+    // and 1.
+    export let test_moments = func() -> void {
+        let r = randoms.seeded(31);
+        let sum = 0.0;
+        let squares = 0.0;
+        for (let i = 0; i < 4000; i = i + 1) {
+            let g = r.next_gaussian();
+            sum = sum + g;
+            squares = squares + g * g;
+        }
+        let mean = sum / 4000.0;
+        test.assert(mean > -0.06 && mean < 0.06);
+        let variance = squares / 4000.0 - mean * mean;
+        test.assert(variance > 0.93 && variance < 1.07);
+    };
+);

@@ -1,0 +1,109 @@
+let clock = import:Std.Time.Clock;
+let result = import:Std.Core.Result;
+
+// Leveled logging to a sink function (Stdlib.md section 14.1). There is no
+// global registry: a logger is passed to the code that uses it. Without a
+// clock records carry no timestamp, so output is deterministic by default.
+export let Logger = module (
+    // In order; levels compare by ordinal. Off disables a logger and is
+    // never a record's level.
+    export let LogLevel = enum (Trace, Debug, Info, Warn, Error, Off);
+
+    export let Logger = class (
+        let logger_name: string;
+        let sink: func(string) -> void;
+        let threshold: LogLevel;
+        // nil for a logger without timestamps.
+        let source: clock.Clock = nil;
+
+        export let init = func(string name, func(string) -> void target, LogLevel level, clock.Clock time_source) -> void {
+            logger_name = name;
+            sink = target;
+            threshold = level;
+            source = time_source;
+        };
+
+        // True when a record at `level` would reach the sink: the level is
+        // not Off and is at least the logger's level.
+        export let is_enabled = func(LogLevel level) -> bool {
+            return level != LogLevel.Off && (level as int) >= (threshold as int);
+        };
+
+        export let set_level = func(LogLevel level) -> void {
+            threshold = level;
+        };
+
+        // Sends one record when the level is enabled: with a clock, the
+        // instant's text (or - when the clock fails) and a space; then the
+        // level in uppercase, a space, the name, ": ", and the message.
+        export let log = func(LogLevel level, string message) -> void {
+            if (is_enabled(level)) {
+                emit(level, message);
+            }
+        };
+
+        // Calls `make` only when the level is enabled.
+        export let log_lazy = func(LogLevel level, func() -> string make) -> void {
+            if (is_enabled(level)) {
+                emit(level, make());
+            }
+        };
+
+        export let trace = func(string message) -> void {
+            log(LogLevel.Trace, message);
+        };
+
+        export let debug = func(string message) -> void {
+            log(LogLevel.Debug, message);
+        };
+
+        export let info = func(string message) -> void {
+            log(LogLevel.Info, message);
+        };
+
+        export let warn = func(string message) -> void {
+            log(LogLevel.Warn, message);
+        };
+
+        export let error = func(string message) -> void {
+            log(LogLevel.Error, message);
+        };
+
+        let emit = func(LogLevel level, string message) -> void {
+            let line = level_name(level) + " " + logger_name + ": " + message;
+            if (source != nil) {
+                line = timestamp(source) + " " + line;
+            }
+            let write = sink;
+            write(line);
+        };
+    );
+
+    // A logger without timestamps.
+    export let create = func(string name, func(string) -> void sink, LogLevel level) -> Logger {
+        return new Logger(name, sink, level, nil);
+    };
+
+    // A logger whose records start with the clock's instant.
+    export let create_timed = func(string name, func(string) -> void sink, LogLevel level, clock.Clock source) -> Logger {
+        return new Logger(name, sink, level, source);
+    };
+
+    let timestamp = func(clock.Clock source) -> string {
+        return match (source.now()) {
+            result.Result.Ok(moment) => moment.to_string(),
+            result.Result.Err(_) => "-",
+        };
+    };
+
+    let level_name = func(LogLevel level) -> string {
+        return match (level) {
+            LogLevel.Trace => "TRACE",
+            LogLevel.Debug => "DEBUG",
+            LogLevel.Info => "INFO",
+            LogLevel.Warn => "WARN",
+            LogLevel.Error => "ERROR",
+            LogLevel.Off => "OFF",
+        };
+    };
+);

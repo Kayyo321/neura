@@ -1,0 +1,223 @@
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let ordering = import:Std.Core.Ordering;
+let randoms = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+let DurationTests = module (
+    let nanos = func(duration.Duration d) -> int64 {
+        return d.to_nanos();
+    };
+
+    // The ISO text and the float64 seconds of a nanosecond count, computed
+    // with Python as float(count) / 1e9: the count rounded to float64, then
+    // divided. Up to 2^53 the conversion is exact, so the result is the
+    // correctly rounded quotient.
+    let check_text = func(string text, int64 count, float64 seconds) -> void {
+        let d = duration.of_nanos(count);
+        test.assert_equal_string(text, d.to_string());
+        test.assert_equal_int64(count, nanos(test.assert_ok<duration.Duration>(duration.parse(text))));
+        test.assert_equal_float64(seconds, d.to_seconds_float64());
+    };
+
+    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+        let failure = test.assert_err<duration.Duration>(duration.parse(text));
+        match (failure) {
+            error.Error.Parse { kind: actual, offset: at, message: _ } => {
+                test.assert_equal_string(kind.to_string(), actual.to_string());
+                test.assert_equal_int32(offset, at);
+            },
+            _ => {
+                test.fail("expected a parse error for " + text);
+            },
+        }
+    };
+
+    let parsed = func(string text) -> int64 {
+        return nanos(test.assert_ok<duration.Duration>(duration.parse(text)));
+    };
+
+    export let test_factories = func() -> void {
+        test.assert_equal_int64(7, nanos(duration.of_nanos(7)));
+        test.assert_equal_int64(-7000, nanos(duration.of_micros(-7)));
+        test.assert_equal_int64(7000000, nanos(duration.of_millis(7)));
+        test.assert_equal_int64(7000000000, nanos(duration.of_seconds(7)));
+        test.assert_equal_int64(-420000000000, nanos(duration.of_minutes(-7)));
+        test.assert_equal_int64(25200000000000, nanos(duration.of_hours(7)));
+        test.assert_equal_int64(604800000000000, nanos(duration.of_days(7)));
+        test.assert_equal_int64(0, nanos(duration.Zero));
+        test.assert(duration.Zero.is_zero());
+        // The largest whole counts that fit.
+        test.assert_equal_int64(9223372036854775000, nanos(duration.of_micros(9223372036854775)));
+        test.assert_equal_int64(9223372036000000000, nanos(duration.of_seconds(9223372036)));
+        test.assert_equal_int64(-9223286400000000000, nanos(duration.of_days(-106751)));
+    };
+
+    export let test_arithmetic = func() -> void {
+        let a = duration.of_seconds(90);
+        let b = duration.of_millis(-250);
+        test.assert_equal_int64(89750000000, nanos(a.plus(b)));
+        test.assert_equal_int64(90250000000, nanos(a.minus(b)));
+        test.assert_equal_int64(-270000000000, nanos(a.multiplied_by(-3)));
+        test.assert_equal_int64(0, nanos(a.multiplied_by(0)));
+        // Division truncates toward zero.
+        test.assert_equal_int64(-83333333, nanos(b.divided_by(3)));
+        test.assert_equal_int64(83333333, nanos(b.divided_by(-3)));
+        test.assert_equal_int64(250000000, nanos(b.negated()));
+        test.assert_equal_int64(250000000, nanos(b.abs()));
+        test.assert_equal_int64(90000000000, nanos(a.abs()));
+        test.assert_equal_int64(-9223372036854775807, nanos(duration.of_nanos(9223372036854775807).negated()));
+        test.assert(!a.is_zero() && !a.is_negative());
+        test.assert(b.is_negative() && !duration.Zero.is_negative());
+        let low = duration.of_nanos(-9223372036854775807 - 1);
+        test.assert_equal_int64(-9223372036854775807 - 1, nanos(low.divided_by(1)));
+        test.assert_equal_int64(-1, nanos(low.plus(duration.of_nanos(9223372036854775807))));
+    };
+
+    export let test_conversions_truncate = func() -> void {
+        let d = duration.of_nanos(-3999999999);
+        test.assert_equal_int64(-3999999999, d.to_nanos());
+        test.assert_equal_int64(-3999999, d.to_micros());
+        test.assert_equal_int64(-3999, d.to_millis());
+        test.assert_equal_int64(-3, d.to_seconds());
+        let e = duration.of_nanos(3999999999);
+        test.assert_equal_int64(3999999, e.to_micros());
+        test.assert_equal_int64(3999, e.to_millis());
+        test.assert_equal_int64(3, e.to_seconds());
+        test.assert_equal_float64(-3.999999999, d.to_seconds_float64());
+        test.assert_equal_float64(0.0, duration.Zero.to_seconds_float64());
+    };
+
+    export let test_text_vectors = func() -> void {
+        check_text("PT0S", 0, 0.0);
+        check_text("PT0.000000001S", 1, 1e-09);
+        check_text("-PT0.000000001S", -1, -1e-09);
+        check_text("PT0.999999999S", 999999999, 0.999999999);
+        check_text("PT1S", 1000000000, 1.0);
+        check_text("PT59.999999999S", 59999999999, 59.999999999);
+        check_text("PT1M", 60000000000, 60.0);
+        check_text("PT1H", 3600000000000, 3600.0);
+        check_text("-PT1H0.000000001S", -3600000000001, -3600.000000001);
+        check_text("PT2562047H47M16.854775807S", 9223372036854775807, 9223372036.854776);
+        check_text("-PT2562047H47M16.854775808S", -9223372036854775807 - 1, -9223372036.854776);
+        check_text("PT48H0.0000015S", 172800000001500, 172800.0000015);
+        check_text("PT1H30M0.5S", 5400500000000, 5400.5);
+        check_text("-PT9.211136665S", -9211136665, -9.211136665);
+        check_text("PT0.693652797S", 693652797, 0.693652797);
+        check_text("-PT3.046020983S", -3046020983, -3.046020983);
+        check_text("PT0.411668545S", 411668545, 0.411668545);
+        check_text("-PT2H41M55.748948545S", -9715748948545, -9715.748948545);
+        check_text("PT1H46M29.038367489S", 6389038367489, 6389.038367489);
+        check_text("-PT1H50M41.864372377S", -6641864372377, -6641.864372377);
+        check_text("PT2H2M28.253800059S", 7348253800059, 7348.253800059);
+        check_text("PT952H48M8.774987969S", 3430088774987969, 3430088.774987969);
+        check_text("PT409H30M24.867518806S", 1474224867518806, 1474224.867518806);
+        check_text("-PT1162H2M31.906821691S", -4183351906821691, -4183351.906821691);
+        check_text("PT1463H5M2.795337092S", 5267102795337092, 5267102.795337092);
+        check_text("-PT1600506H6M40.146685953S", -5761822000146685953, -5761822000.146686);
+        check_text("-PT1264329H34M12.16039569S", -4551586452160395690, -4551586452.160396);
+        check_text("PT1770615H41M48.950851954S", 6374216508950851954, 6374216508.950851);
+        check_text("-PT1040679H55M32.042210185S", -3746447732042210185, -3746447732.04221);
+    };
+
+    export let test_text_forms = func() -> void {
+        test.assert_equal_string("PT1H30M", duration.of_minutes(90).to_string());
+        test.assert_equal_string("PT0.5S", duration.of_millis(500).to_string());
+        test.assert_equal_string("-PT0.5S", duration.of_millis(-500).to_string());
+        test.assert_equal_string("PT48H", duration.of_days(2).to_string());
+        test.assert_equal_string("PT1H1S", duration.of_seconds(3601).to_string());
+        test.assert_equal_string("PT1M0.01S", duration.of_millis(60010).to_string());
+        test.assert_equal_string("PT0.00001S", duration.of_micros(10).to_string());
+    };
+
+    export let test_parse_accepts = func() -> void {
+        test.assert_equal_int64(172800000000000, parsed("P2D"));
+        test.assert_equal_int64(90000000000000, parsed("P1DT1H"));
+        test.assert_equal_int64(1000000000, parsed("+PT1S"));
+        test.assert_equal_int64(0, parsed("-PT0S"));
+        test.assert_equal_int64(0, parsed("P0D"));
+        test.assert_equal_int64(100000000, parsed("PT0.1S"));
+        test.assert_equal_int64(123456789, parsed("PT0.123456789S"));
+        test.assert_equal_int64(3600000000000, parsed("PT01H"));
+        test.assert_equal_int64(-3723000000000, parsed("-PT1H2M3S"));
+        test.assert_equal_int64(3723000000000, parsed("PT1H2M3S"));
+        test.assert_equal_int64(120000000000, parsed("PT2M"));
+        test.assert_equal_int64(5400000000000, parsed("PT90M"));
+        test.assert_equal_int64(3600000000000, parsed("PT3600S"));
+        test.assert_equal_int64(86401000000000, parsed("P1DT1S"));
+        // The largest and smallest counts, through days.
+        test.assert_equal_int64(9223372036854775807, parsed("P106751DT23H47M16.854775807S"));
+        test.assert_equal_int64(-9223372036854775807 - 1, parsed("-P106751DT23H47M16.854775808S"));
+    };
+
+    export let test_parse_errors = func() -> void {
+        check_error("", error.ParseErrorKind.Empty, 0);
+        check_error("P", error.ParseErrorKind.UnexpectedEnd, 1);
+        check_error("PT", error.ParseErrorKind.UnexpectedEnd, 2);
+        check_error("-", error.ParseErrorKind.UnexpectedEnd, 1);
+        check_error("P1DT", error.ParseErrorKind.UnexpectedEnd, 4);
+        check_error("PT1", error.ParseErrorKind.UnexpectedEnd, 3);
+        check_error("PT1.", error.ParseErrorKind.UnexpectedEnd, 4);
+        check_error("PT1.5", error.ParseErrorKind.UnexpectedEnd, 5);
+        check_error("PT1H2", error.ParseErrorKind.UnexpectedEnd, 5);
+        check_error("X", error.ParseErrorKind.InvalidCharacter, 0);
+        check_error("pt1s", error.ParseErrorKind.InvalidCharacter, 0);
+        check_error("PT1s", error.ParseErrorKind.InvalidCharacter, 3);
+        check_error("P1H", error.ParseErrorKind.InvalidCharacter, 2);
+        check_error("PX", error.ParseErrorKind.InvalidCharacter, 1);
+        check_error("PTS", error.ParseErrorKind.InvalidCharacter, 2);
+        check_error("PT1M1H", error.ParseErrorKind.InvalidCharacter, 5);
+        check_error("PT1H1H", error.ParseErrorKind.InvalidCharacter, 5);
+        check_error("PT1S1S", error.ParseErrorKind.InvalidCharacter, 4);
+        check_error("PT1.5H", error.ParseErrorKind.InvalidCharacter, 5);
+        check_error("PT.5S", error.ParseErrorKind.InvalidCharacter, 2);
+        check_error("PT0.1234567891S", error.ParseErrorKind.InvalidCharacter, 13);
+        check_error("PT1S ", error.ParseErrorKind.InvalidCharacter, 4);
+        check_error(" PT1S", error.ParseErrorKind.InvalidCharacter, 0);
+        check_error("--PT1S", error.ParseErrorKind.InvalidCharacter, 1);
+        check_error("PT2562047H47M16.854775808S", error.ParseErrorKind.OutOfRange, 13);
+        check_error("PT2562048H", error.ParseErrorKind.OutOfRange, 2);
+        check_error("-PT2562048H", error.ParseErrorKind.OutOfRange, 3);
+        check_error("P106752D", error.ParseErrorKind.OutOfRange, 1);
+        check_error("P1DT99999999999999999999999S", error.ParseErrorKind.OutOfRange, 4);
+        check_error("PT9223372036.854775808S", error.ParseErrorKind.OutOfRange, 2);
+        let failure = test.assert_err<duration.Duration>(duration.parse("PT1H2X"));
+        test.assert_equal_string("parse error at 5: expected 'M', 'S', or '.'", error.message(failure));
+    };
+
+    // to_string always parses back to the same duration.
+    export let test_round_trip = func() -> void {
+        let r = randoms.seeded(77);
+        for (let i = 0; i < 400; i = i + 1) {
+            let bits = r.next_uint64() >> (r.next_int_below(64) as uint64);
+            let count = (bits >> 1) as int64;
+            if (r.next_bool()) {
+                count = -count;
+            }
+            let d = duration.of_nanos(count);
+            let back = test.assert_ok<duration.Duration>(duration.parse(d.to_string()));
+            test.assert(back.equals(d));
+        }
+    };
+
+    export let test_order_and_equality = func() -> void {
+        let a = duration.of_millis(1);
+        let b = duration.of_micros(1000);
+        let c = duration.of_nanos(-1);
+        test.assert(a.equals(b) && b.equals(a) && !a.equals(c));
+        test.assert(a != b);
+        let marker: class = new Marker();
+        test.assert(!a.equals(marker) && !a.equals(nil));
+        test.assert(a.compare_to(b) == ordering.Ordering.Equal);
+        test.assert(c.compare_to(a) == ordering.Ordering.Less);
+        test.assert(a.compare_to(c) == ordering.Ordering.Greater);
+        test.assert(a.hash_code() == b.hash_code());
+        test.assert(a.hash_code() == hashing.combine(17, hashing.of_int64(1000000)));
+        // 31 * 17 + (low ^ high of -1) = 527 + 0 wraps nothing.
+        test.assert(c.hash_code() == 527);
+    };
+
+    let Marker = class ();
+);

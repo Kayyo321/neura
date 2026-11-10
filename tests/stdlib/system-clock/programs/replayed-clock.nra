@@ -1,0 +1,24 @@
+// run-options: --replay @AREA_DIR@/programs/replayed-clock.trace
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let system_clock = import:Std.Time.SystemClock;
+let instant = import:Std.Time.Instant;
+let unit = import:Std.Core.Unit;
+
+// Clock readings answered from a trace: the wall time, the monotonic time
+// across a sleep, and a sleep's requested nanoseconds. The wall reading was
+// edited by hand to a fixed instant.
+export let ReplayedClock = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let source = system_clock.create();
+        console.print_line(result.expect<instant.Instant>(source.now(), "now").to_string());
+        let before = result.expect<duration.Duration>(source.monotonic(), "monotonic");
+        result.expect<unit.Unit>(source.sleep(duration.of_millis(25)), "sleep");
+        result.expect<unit.Unit>(source.sleep(duration.of_millis(-3)), "sleep");
+        let after = result.expect<duration.Duration>(source.monotonic(), "monotonic");
+        console.print_line(after.minus(before).to_string());
+        return program.ExitCode.Ok;
+    };
+);

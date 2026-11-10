@@ -1,0 +1,36 @@
+// test-options: --allow-clock
+let clock = import:Std.Time.Clock;
+let duration = import:Std.Time.Duration;
+let instant = import:Std.Time.Instant;
+let system_clock = import:Std.Time.SystemClock;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// SystemClock against the host's real clocks.
+let SystemClockTests = module (
+    export let test_now_reads_the_wall_clock = func() -> void {
+        let now = test.assert_ok<instant.Instant>(system_clock.create().now());
+        // After 2020-01-01 and before 2200-01-01.
+        test.assert(now.epoch_seconds() > 1577836800);
+        test.assert(now.epoch_seconds() < 7258118400);
+        test.assert(now.nanos() >= 0 && now.nanos() < 1000000000);
+    };
+
+    export let test_monotonic_covers_a_sleep = func() -> void {
+        let source = system_clock.create();
+        let before = test.assert_ok<duration.Duration>(source.monotonic());
+        test.assert_ok<unit.Unit>(source.sleep(duration.of_millis(2)));
+        let after = test.assert_ok<duration.Duration>(source.monotonic());
+        test.assert(after.minus(before).to_nanos() >= 2000000);
+        test.assert_ok<unit.Unit>(source.sleep(duration.Zero));
+        test.assert_ok<unit.Unit>(source.sleep(duration.of_millis(-5)));
+    };
+
+    export let test_is_a_clock = func() -> void {
+        let source: clock.Clock = system_clock.create();
+        let first = test.assert_ok<instant.Instant>(source.now());
+        test.assert_ok<unit.Unit>(source.sleep(duration.of_millis(1)));
+        let second = test.assert_ok<instant.Instant>(source.now());
+        test.assert(!second.duration_since(first).is_negative());
+    };
+);

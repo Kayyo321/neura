@@ -1,0 +1,76 @@
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let ordering = import:Std.Core.Ordering;
+let test = import:Std.Test;
+let zone_offset = import:Std.Time.ZoneOffset;
+
+let ZoneOffsetTests = module (
+    let check_error = func(string text, error.ParseErrorKind kind, int offset) -> void {
+        let failure = test.assert_err<zone_offset.ZoneOffset>(zone_offset.parse(text));
+        match (failure) {
+            error.Error.Parse { kind: actual, offset: at, message: _ } => {
+                test.assert_equal_string(kind.to_string(), actual.to_string());
+                test.assert_equal_int32(offset, at);
+            },
+            _ => {
+                test.fail("expected a parse error for " + text);
+            },
+        }
+    };
+
+    let seconds_of = func(string text) -> int {
+        return test.assert_ok<zone_offset.ZoneOffset>(zone_offset.parse(text)).total_seconds();
+    };
+
+    export let test_factories_and_text = func() -> void {
+        test.assert_equal_int32(0, zone_offset.Utc.total_seconds());
+        test.assert_equal_string("Z", zone_offset.Utc.to_string());
+        test.assert_equal_string("+05:30", zone_offset.of_hours_minutes(5, 30).to_string());
+        test.assert_equal_string("-05:30", zone_offset.of_hours_minutes(-5, -30).to_string());
+        test.assert_equal_string("-00:45", zone_offset.of_hours_minutes(0, -45).to_string());
+        test.assert_equal_string("+18:00", zone_offset.of_hours_minutes(18, 0).to_string());
+        test.assert_equal_string("-18:00", zone_offset.of_hours_minutes(-18, 0).to_string());
+        test.assert_equal_string("Z", zone_offset.of_hours_minutes(0, 0).to_string());
+        test.assert_equal_int32(-64800, zone_offset.of_hours_minutes(-18, 0).total_seconds());
+        test.assert_equal_int32(19800, zone_offset.of_hours_minutes(5, 30).total_seconds());
+        test.assert_equal_int32(-2700, zone_offset.of_hours_minutes(0, -45).total_seconds());
+    };
+
+    export let test_parse = func() -> void {
+        test.assert_equal_int32(0, seconds_of("Z"));
+        test.assert_equal_int32(0, seconds_of("+00:00"));
+        test.assert_equal_int32(0, seconds_of("-00:00"));
+        test.assert_equal_int32(-34200, seconds_of("-09:30"));
+        test.assert_equal_int32(64800, seconds_of("+18:00"));
+        test.assert_equal_string("Z", test.assert_ok<zone_offset.ZoneOffset>(zone_offset.parse("-00:00")).to_string());
+        for (let h = -18; h <= 18; h = h + 1) {
+            let offset = zone_offset.of_hours_minutes(h, 0);
+            test.assert(test.assert_ok<zone_offset.ZoneOffset>(zone_offset.parse(offset.to_string())).equals(offset));
+        }
+        check_error("", error.ParseErrorKind.Empty, 0);
+        check_error("+", error.ParseErrorKind.UnexpectedEnd, 1);
+        check_error("+05", error.ParseErrorKind.UnexpectedEnd, 3);
+        check_error("+05:3", error.ParseErrorKind.UnexpectedEnd, 5);
+        check_error("z", error.ParseErrorKind.InvalidCharacter, 0);
+        check_error("05:30", error.ParseErrorKind.InvalidCharacter, 0);
+        check_error("+0530", error.ParseErrorKind.InvalidCharacter, 3);
+        check_error("Z ", error.ParseErrorKind.InvalidCharacter, 1);
+        check_error("+05:30:00", error.ParseErrorKind.InvalidCharacter, 6);
+        check_error("+19:00", error.ParseErrorKind.OutOfRange, 1);
+        check_error("+05:60", error.ParseErrorKind.OutOfRange, 4);
+        check_error("+18:01", error.ParseErrorKind.OutOfRange, 0);
+        let failure = test.assert_err<zone_offset.ZoneOffset>(zone_offset.parse("+18:01"));
+        test.assert_equal_string("parse error at 0: zone offset out of range", error.message(failure));
+    };
+
+    export let test_order_and_equality = func() -> void {
+        let a = zone_offset.of_hours_minutes(1, 0);
+        let b = test.assert_ok<zone_offset.ZoneOffset>(zone_offset.parse("+01:00"));
+        test.assert(a.equals(b) && a != b && a.hash_code() == b.hash_code() && !a.equals(nil));
+        test.assert(a.hash_code() == hashing.combine(17, 3600));
+        test.assert(a.compare_to(b) == ordering.Ordering.Equal);
+        test.assert(a.compare_to(zone_offset.Utc) == ordering.Ordering.Greater);
+        test.assert(zone_offset.of_hours_minutes(-1, 0).compare_to(zone_offset.Utc) == ordering.Ordering.Less);
+        test.assert(!a.equals(zone_offset.Utc));
+    };
+);

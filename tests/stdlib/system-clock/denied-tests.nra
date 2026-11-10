@@ -1,0 +1,20 @@
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let instant = import:Std.Time.Instant;
+let system_clock = import:Std.Time.SystemClock;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Without --allow-clock every member fails with CapabilityDenied.
+let SystemClockDeniedTests = module (
+    export let test_every_member_is_denied = func() -> void {
+        let source = system_clock.create();
+        let now = test.assert_err<instant.Instant>(source.now());
+        test.assert_equal_string("CapabilityDenied: clock read failed", error.message(now));
+        let elapsed = test.assert_err<duration.Duration>(source.monotonic());
+        test.assert_equal_string("CapabilityDenied: clock read failed", error.message(elapsed));
+        let slept = test.assert_err<unit.Unit>(source.sleep(duration.of_millis(1)));
+        test.assert_equal_string("CapabilityDenied: sleep failed", error.message(slept));
+        test.assert_err<unit.Unit>(source.sleep(duration.Zero));
+    };
+);

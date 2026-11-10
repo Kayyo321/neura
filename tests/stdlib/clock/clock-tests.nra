@@ -1,0 +1,133 @@
+let clock = import:Std.Time.Clock;
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let result = import:Std.Core.Result;
+let stopwatch = import:Std.Time.Stopwatch;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+let ClockTests = module (
+    // A clock whose readings fail until `working` is set.
+    let FlakyClock = class implements clock.Clock (
+        export let working: bool = false;
+        export let reading: int64 = 0;
+
+        export let now = func() -> result.Result<instant.Instant> {
+            if (!working) {
+                return result.Result<instant.Instant>.Err(failure());
+            }
+            return result.Result<instant.Instant>.Ok(instant.Epoch);
+        };
+
+        export let monotonic = func() -> result.Result<duration.Duration> {
+            if (!working) {
+                return result.Result<duration.Duration>.Err(failure());
+            }
+            return result.Result<duration.Duration>.Ok(duration.of_nanos(reading));
+        };
+
+        export let sleep = func(duration.Duration span) -> result.Result<unit.Unit> {
+            return result.Result<unit.Unit>.Err(failure());
+        };
+    );
+
+    let failure = func() -> error.Error {
+        return error.Error.Io { kind: error.IoErrorKind.CapabilityDenied, message: "clock denied", path: "" };
+    };
+
+    let now_of = func(clock.Clock source) -> instant.Instant {
+        return test.assert_ok<instant.Instant>(source.now());
+    };
+
+    let monotonic_of = func(clock.Clock source) -> int64 {
+        return test.assert_ok<duration.Duration>(source.monotonic()).to_nanos();
+    };
+
+    let elapsed_of = func(stopwatch.Stopwatch watch) -> int64 {
+        return test.assert_ok<duration.Duration>(watch.elapsed()).to_nanos();
+    };
+
+    export let test_fixed_clock = func() -> void {
+        let start = instant.of_epoch_seconds(1700000000, 5);
+        let fixed = fixed_clock.of(start);
+        let source: clock.Clock = fixed;
+        test.assert(now_of(source).equals(start));
+        test.assert(now_of(source).equals(start));
+        test.assert_equal_int64(0, monotonic_of(source));
+        fixed.advance(duration.of_seconds(2));
+        test.assert(now_of(source).equals(start.plus(duration.of_seconds(2))));
+        test.assert_equal_int64(2000000000, monotonic_of(source));
+        test.assert_ok<unit.Unit>(source.sleep(duration.of_millis(500)));
+        test.assert_equal_int64(2500000000, monotonic_of(source));
+        test.assert(now_of(source).equals(start.plus(duration.of_millis(2500))));
+        // A zero or negative sleep returns at once and changes nothing.
+        test.assert_ok<unit.Unit>(source.sleep(duration.of_millis(-500)));
+        test.assert_ok<unit.Unit>(source.sleep(duration.Zero));
+        test.assert_equal_int64(2500000000, monotonic_of(source));
+        // set moves the instant, even backwards, but not the monotonic
+        // reading.
+        fixed.set(instant.Epoch);
+        test.assert(now_of(source).equals(instant.Epoch));
+        test.assert_equal_int64(2500000000, monotonic_of(source));
+        fixed.advance(duration.Zero);
+        test.assert(now_of(source).equals(instant.Epoch));
+    };
+
+    export let test_stopwatch = func() -> void {
+        let fixed = fixed_clock.of(instant.Epoch);
+        let watch = stopwatch.create(fixed);
+        test.assert(!watch.is_running());
+        test.assert_equal_int64(0, elapsed_of(watch));
+        test.assert_ok<unit.Unit>(watch.start());
+        test.assert(watch.is_running());
+        fixed.advance(duration.of_millis(300));
+        test.assert_equal_int64(300000000, elapsed_of(watch));
+        test.assert_ok<unit.Unit>(watch.stop());
+        test.assert(!watch.is_running());
+        fixed.advance(duration.of_seconds(10));
+        test.assert_equal_int64(300000000, elapsed_of(watch));
+        // A second run adds to the first.
+        test.assert_ok<unit.Unit>(watch.start());
+        fixed.advance(duration.of_millis(200));
+        test.assert_equal_int64(500000000, elapsed_of(watch));
+        test.assert_ok<unit.Unit>(watch.stop());
+        test.assert_equal_int64(500000000, elapsed_of(watch));
+        // Setting the wall instant does not disturb it.
+        fixed.set(instant.of_epoch_seconds(-100, 0));
+        test.assert_equal_int64(500000000, elapsed_of(watch));
+        watch.reset();
+        test.assert(!watch.is_running());
+        test.assert_equal_int64(0, elapsed_of(watch));
+        test.assert_ok<unit.Unit>(watch.start());
+        fixed.advance(duration.of_nanos(7));
+        watch.reset();
+        test.assert(!watch.is_running());
+        test.assert_equal_int64(0, elapsed_of(watch));
+        test.assert_ok<unit.Unit>(watch.start());
+        test.assert(watch.is_running());
+    };
+
+    export let test_stopwatch_clock_failures = func() -> void {
+        let flaky = new FlakyClock();
+        let watch = stopwatch.create(flaky);
+        let failed_start = test.assert_err<unit.Unit>(watch.start());
+        test.assert_equal_string("CapabilityDenied: clock denied", error.message(failed_start));
+        test.assert(!watch.is_running());
+        // A stopped stopwatch does not read the clock.
+        test.assert_equal_int64(0, elapsed_of(watch));
+        flaky.working = true;
+        flaky.reading = 1000;
+        test.assert_ok<unit.Unit>(watch.start());
+        flaky.working = false;
+        test.assert_err<duration.Duration>(watch.elapsed());
+        test.assert_err<unit.Unit>(watch.stop());
+        test.assert(watch.is_running());
+        flaky.working = true;
+        flaky.reading = 1500;
+        test.assert_equal_int64(500, elapsed_of(watch));
+        test.assert_ok<unit.Unit>(watch.stop());
+        test.assert_equal_int64(500, elapsed_of(watch));
+    };
+);

@@ -1,0 +1,18 @@
+let duration = import:Std.Time.Duration;
+let instant = import:Std.Time.Instant;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+
+// A source of time (Stdlib.md section 12.1). Library code that needs time
+// takes a Clock, so tests can pass a FixedClock; SystemClock reads the host.
+export let Clock = module (
+    export let Clock = interface (
+        // The current point on the UTC time line.
+        let now = func() -> result.Result<instant.Instant>;
+        // Elapsed time from an arbitrary fixed origin; never decreases.
+        let monotonic = func() -> result.Result<duration.Duration>;
+        // Waits for the duration; a zero or negative duration returns at
+        // once.
+        let sleep = func(duration.Duration span) -> result.Result<unit.Unit>;
+    );
+);

@@ -1,0 +1,409 @@
+let error = import:Std.Core.Error;
+let int64s = import:Std.Core.Int64;
+
+// Shared calendar arithmetic, text, and parsing for Std.Time (Stdlib.md
+// section 12.1). Dates use the proleptic Gregorian calendar; day counts are
+// days since 1970-01-01. Library files only.
+//
+// Cost note: an int64 division by a constant compiles to a circuit of about
+// 6,000 neurons and an int32 one to about 1,200. Each conversion therefore
+// splits off whole 400-year cycles with one call to the shared Int64
+// floor_div or floor_mod, whose circuits exist once per image, and does the
+// arithmetic within a cycle in int32, with shifts for division by 4.
+export let Calendar = module (
+    export const MinYear: int64 = -999999;
+    export const MaxYear: int64 = 999999;
+    // to_epoch_day of -999999-01-01 and of 999999-12-31.
+    export const MinEpochDay: int64 = -365961662;
+    export const MaxEpochDay: int64 = 364522971;
+    export const NanosPerSecond: int64 = 1000000000;
+    export const NanosPerMinute: int64 = 60000000000;
+    export const NanosPerHour: int64 = 3600000000000;
+    export const NanosPerDay: int64 = 86400000000000;
+    export const SecondsPerDay: int64 = 86400;
+    export const MaxOffsetSeconds: int = 64800;
+
+    export let floor_div = func(int64 a, int64 b) -> int64 {
+        return int64s.floor_div(a, b);
+    };
+
+    export let floor_mod = func(int64 a, int64 b) -> int64 {
+        return int64s.floor_mod(a, b);
+    };
+
+    export let is_leap = func(int64 year) -> bool {
+        // The rule repeats every 400 years, and 4 and 100 divide 400.
+        let in_cycle = floor_mod(year, 400) as int;
+        return (in_cycle & 3) == 0 && (in_cycle % 100 != 0 || in_cycle == 0);
+    };
+
+    export let month_length = func(int64 year, int month) -> int {
+        if (month == 2) {
+            if (is_leap(year)) {
+                return 29;
+            }
+            return 28;
+        }
+        if (month == 4 || month == 6 || month == 9 || month == 11) {
+            return 30;
+        }
+        return 31;
+    };
+
+    // Days since 1970-01-01. The year is shifted to start in March, so the
+    // leap day ends it; the shifted year splits into a 400-year cycle of
+    // 146,097 days and a year of the cycle, with floor division so that
+    // negative years work.
+    export let epoch_day_of = func(int64 year, int month, int day) -> int64 {
+        let shifted = year;
+        let march_month = month - 3;
+        if (month <= 2) {
+            shifted = year - 1;
+            march_month = month + 9;
+        }
+        let cycle = floor_div(shifted, 400);
+        // Within the cycle: year 0 through 399, day 0 through 146,096.
+        let year_of_cycle = (shifted - cycle * 400) as int;
+        let day_of_year = (153 * march_month + 2) / 5 + day - 1;
+        let day_of_cycle = year_of_cycle * 365 + (year_of_cycle >> 2) - year_of_cycle / 100 + day_of_year;
+        return cycle * 146097 + (day_of_cycle as int64) - 719468;
+    };
+
+    // The inverse of epoch_day_of: [year, month, day].
+    export let civil_of = func(int64 epoch_day) -> [int64, int, int] {
+        let shifted_day = epoch_day + 719468;
+        let cycle = floor_div(shifted_day, 146097);
+        // Within the cycle: day 0 through 146,096, year 0 through 399.
+        let day_of_cycle = (shifted_day - cycle * 146097) as int;
+        let year_of_cycle = (day_of_cycle - day_of_cycle / 1460 + day_of_cycle / 36524 - day_of_cycle / 146096) / 365;
+        let day_of_year = day_of_cycle - (365 * year_of_cycle + (year_of_cycle >> 2) - year_of_cycle / 100);
+        let march_month = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * march_month + 2) / 5 + 1;
+        let month = march_month + 3;
+        if (march_month >= 10) {
+            month = march_month - 9;
+        }
+        let year = (year_of_cycle as int64) + cycle * 400;
+        if (month <= 2) {
+            year = year + 1;
+        }
+        return [year, month, day];
+    };
+
+    // Decimal digits of a non-negative value, left-padded with zeros.
+    export let padded = func(int64 value, int width) -> string {
+        let text = value.to_string();
+        let count = text.byte_length;
+        while (count < width) {
+            text = "0" + text;
+            count = count + 1;
+        }
+        return text;
+    };
+
+    // Four digits for 0000 through 9999; otherwise a sign and at least four
+    // digits.
+    export let year_text = func(int64 year) -> string {
+        if (year < 0) {
+            return "-" + padded(-year, 4);
+        }
+        if (year > 9999) {
+            return "+" + year.to_string();
+        }
+        return padded(year, 4);
+    };
+
+    export let date_text = func(int64 year, int month, int day) -> string {
+        return year_text(year) + "-" + padded(month as int64, 2) + "-" + padded(day as int64, 2);
+    };
+
+    // Empty for zero; otherwise a point and the shortest of 3, 6, or 9
+    // digits that is exact.
+    export let fraction_text = func(int nanos) -> string {
+        if (nanos == 0) {
+            return "";
+        }
+        if (nanos % 1000000 == 0) {
+            return "." + padded((nanos / 1000000) as int64, 3);
+        }
+        if (nanos % 1000 == 0) {
+            return "." + padded((nanos / 1000) as int64, 6);
+        }
+        return "." + padded(nanos as int64, 9);
+    };
+
+    // HH:MM:SS and the fraction of fraction_text.
+    export let time_text = func(int64 nano_of_day) -> string {
+        let whole = floor_div(nano_of_day, NanosPerSecond);
+        let nanos = (nano_of_day - whole * NanosPerSecond) as int;
+        let seconds = whole as int;
+        return padded((seconds / 3600) as int64, 2) + ":" + padded((seconds / 60 % 60) as int64, 2) + ":" +
+            padded((seconds % 60) as int64, 2) + fraction_text(nanos);
+    };
+
+    // Z for zero; otherwise a sign and HH:MM. Offsets are whole minutes.
+    export let offset_text = func(int total_seconds) -> string {
+        if (total_seconds == 0) {
+            return "Z";
+        }
+        let sign = "+";
+        let magnitude = total_seconds as int64;
+        if (total_seconds < 0) {
+            sign = "-";
+            magnitude = -magnitude;
+        }
+        return sign + padded(magnitude / 3600, 2) + ":" + padded(magnitude / 60 % 60, 2);
+    };
+
+    // A cursor over text for the ISO parsers. The first failure is kept and
+    // later reads do nothing, so a parser reads straight through and checks
+    // ok() at the end. Offsets are byte offsets (Stdlib.md section 6.3).
+    export let Scanner = class (
+        let source: string;
+        let cursor: int = 0;
+        let failed: bool = false;
+        let failure_kind: error.ParseErrorKind = error.ParseErrorKind.Empty;
+        let failure_offset: int = 0;
+        let failure_message: string = "";
+
+        export let init = func(string text) -> void {
+            source = text;
+            if (text.byte_length == 0) {
+                fail(error.ParseErrorKind.Empty, 0, "empty input");
+            }
+        };
+
+        export let ok = func() -> bool {
+            return !failed;
+        };
+
+        export let position = func() -> int {
+            return cursor;
+        };
+
+        export let at_end = func() -> bool {
+            return cursor >= source.byte_length;
+        };
+
+        // The byte at the cursor, or -1 at the end or after a failure.
+        export let peek = func() -> int {
+            if (failed || cursor >= source.byte_length) {
+                return -1;
+            }
+            return source.byte_at(cursor) as int;
+        };
+
+        export let peek_digit = func() -> bool {
+            let b = peek();
+            return b >= 48 && b <= 57;
+        };
+
+        // Keeps the first failure only.
+        export let fail = func(error.ParseErrorKind kind, int offset, string message) -> void {
+            if (!failed) {
+                failed = true;
+                failure_kind = kind;
+                failure_offset = offset;
+                failure_message = message;
+            }
+        };
+
+        // The byte at the cursor does not fit: UnexpectedEnd at the text's
+        // length at the end, otherwise InvalidCharacter at the cursor.
+        export let unexpected = func(string expected) -> void {
+            if (cursor >= source.byte_length) {
+                fail(error.ParseErrorKind.UnexpectedEnd, source.byte_length, "unexpected end of input, expected " + expected);
+            } else {
+                fail(error.ParseErrorKind.InvalidCharacter, cursor, "expected " + expected);
+            }
+        };
+
+        export let out_of_range = func(int offset, string message) -> void {
+            fail(error.ParseErrorKind.OutOfRange, offset, message);
+        };
+
+        // Consumes the byte when it is `b`.
+        export let accept = func(int b) -> bool {
+            if (peek() == b) {
+                cursor = cursor + 1;
+                return true;
+            }
+            return false;
+        };
+
+        export let expect = func(int b, string expected) -> void {
+            if (!accept(b)) {
+                unexpected(expected);
+            }
+        };
+
+        // Exactly `count` decimal digits.
+        export let fixed_digits = func(int count) -> int64 {
+            let value: int64 = 0;
+            for (let i = 0; i < count; i = i + 1) {
+                if (!peek_digit()) {
+                    unexpected("digit");
+                    return 0;
+                }
+                value = value * 10 + ((peek() - 48) as int64);
+                cursor = cursor + 1;
+            }
+            return value;
+        };
+
+        // One or more digits as [value, digit count]. A value of 10^18 or
+        // more stops growing (it stays at least 10^18), so callers can
+        // report OutOfRange without overflow.
+        export let digits = func() -> [uint64, int] {
+            let value: uint64 = 0;
+            let count = 0;
+            while (peek_digit()) {
+                if (value < 1000000000000000000) {
+                    value = value * 10 + ((peek() - 48) as uint64);
+                }
+                count = count + 1;
+                cursor = cursor + 1;
+            }
+            if (count == 0) {
+                unexpected("digit");
+            }
+            return [value, count];
+        };
+
+        // After a point: one through nine digits, scaled to nanoseconds.
+        export let fraction = func() -> int {
+            let value = 0;
+            let count = 0;
+            while (count < 9 && peek_digit()) {
+                value = value * 10 + (peek() - 48);
+                count = count + 1;
+                cursor = cursor + 1;
+            }
+            if (count == 0) {
+                unexpected("digit");
+                return 0;
+            }
+            while (count < 9) {
+                value = value * 10;
+                count = count + 1;
+            }
+            return value;
+        };
+
+        // Any byte left over is an InvalidCharacter.
+        export let finish = func() -> void {
+            if (!failed && cursor < source.byte_length) {
+                fail(error.ParseErrorKind.InvalidCharacter, cursor, "unexpected character");
+            }
+        };
+
+        export let failure = func() -> error.Error {
+            return error.Error.Parse { kind: failure_kind, offset: failure_offset, message: failure_message };
+        };
+    );
+
+    // A year: exactly four digits, or a sign and at least four digits;
+    // -999999 through 999999.
+    export let read_year = func(Scanner scan) -> int64 {
+        let start = scan.position();
+        let negative = false;
+        let signed = false;
+        if (scan.accept(43)) {
+            signed = true;
+        } else if (scan.accept(45)) {
+            signed = true;
+            negative = true;
+        }
+        if (!signed) {
+            return scan.fixed_digits(4);
+        }
+        let [value, count] = scan.digits();
+        if (!scan.ok()) {
+            return 0;
+        }
+        if (count < 4) {
+            scan.unexpected("digit");
+            return 0;
+        }
+        if (value > 999999) {
+            scan.out_of_range(start, "year out of range");
+            return 0;
+        }
+        if (negative) {
+            return -(value as int64);
+        }
+        return value as int64;
+    };
+
+    // Two digits from `low` through `high`; OutOfRange at the field.
+    export let read_field = func(Scanner scan, int64 low, int64 high, string name) -> int {
+        let start = scan.position();
+        let value = scan.fixed_digits(2);
+        if (scan.ok() && (value < low || value > high)) {
+            scan.out_of_range(start, name + " out of range");
+        }
+        return value as int;
+    };
+
+    // YYYY-MM-DD as [year, month, day].
+    export let read_date = func(Scanner scan) -> [int64, int, int] {
+        let year = read_year(scan);
+        scan.expect(45, "'-'");
+        let month = read_field(scan, 1, 12, "month");
+        scan.expect(45, "'-'");
+        let start = scan.position();
+        let day = scan.fixed_digits(2) as int;
+        if (scan.ok() && (day < 1 || day > month_length(year, month))) {
+            scan.out_of_range(start, "day out of range");
+        }
+        return [year, month, day];
+    };
+
+    // HH:MM:SS with an optional fraction of one through nine digits, as
+    // nanoseconds of the day.
+    export let read_time = func(Scanner scan) -> int64 {
+        let hour = read_field(scan, 0, 23, "hour");
+        scan.expect(58, "':'");
+        let minute = read_field(scan, 0, 59, "minute");
+        scan.expect(58, "':'");
+        let second = read_field(scan, 0, 59, "second");
+        let nanos = 0;
+        if (scan.accept(46)) {
+            nanos = scan.fraction();
+        }
+        if (!scan.ok()) {
+            return 0;
+        }
+        return ((hour * 3600 + minute * 60 + second) as int64) * NanosPerSecond + (nanos as int64);
+    };
+
+    // Z, or a sign and HH:MM no further than 18:00 from zero, as seconds.
+    export let read_offset = func(Scanner scan) -> int {
+        if (scan.accept(90)) {
+            return 0;
+        }
+        let start = scan.position();
+        let negative = false;
+        if (scan.accept(45)) {
+            negative = true;
+        } else if (!scan.accept(43)) {
+            scan.unexpected("'Z', '+', or '-'");
+            return 0;
+        }
+        let hours = read_field(scan, 0, 18, "offset hour");
+        scan.expect(58, "':'");
+        let minutes = read_field(scan, 0, 59, "offset minute");
+        if (!scan.ok()) {
+            return 0;
+        }
+        let total = hours * 3600 + minutes * 60;
+        if (total > MaxOffsetSeconds) {
+            scan.out_of_range(start, "zone offset out of range");
+            return 0;
+        }
+        if (negative) {
+            return -total;
+        }
+        return total;
+    };
+);

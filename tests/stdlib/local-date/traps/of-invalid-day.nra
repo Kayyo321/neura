@@ -1,0 +1,12 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: invalid date
+let console = import:Std.Io.Console;
+let local_date = import:Std.Time.LocalDate;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        console.print_line(local_date.of(2023, 2, 29).to_string());
+        return program.ExitCode.Ok;
+    };
+);

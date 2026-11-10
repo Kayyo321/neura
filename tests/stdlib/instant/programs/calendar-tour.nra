@@ -1,0 +1,33 @@
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let local_date = import:Std.Time.LocalDate;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let stopwatch = import:Std.Time.Stopwatch;
+let unit = import:Std.Core.Unit;
+let zone_offset = import:Std.Time.ZoneOffset;
+
+// A program over the time types; its image also round-trips through the
+// assembler.
+export let CalendarTour = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let start = result.expect<instant.Instant>(instant.parse("2024-02-28T22:30:00-01:30"), "start");
+        console.print_line(start.to_string());
+        let clock = fixed_clock.of(start);
+        let watch = stopwatch.create(clock);
+        result.expect<unit.Unit>(watch.start(), "start watch");
+        clock.advance(duration.of_minutes(150));
+        let now = result.expect<instant.Instant>(clock.now(), "now");
+        let local = now.to_local(zone_offset.of_hours_minutes(9, 0));
+        console.print_line(local.to_string() + " " + local.date().day_of_week().to_string());
+        console.print_line(result.expect<duration.Duration>(watch.elapsed(), "elapsed").to_string());
+        let date = local_date.of(2024, 1, 31);
+        for (let i = 1; i <= 3; i = i + 1) {
+            console.print_line(date.plus_months(i as int64).to_string());
+        }
+        console.print_line(local_date.of(-44, 3, 15).to_string() + " " + local_date.of(-44, 3, 15).to_epoch_day().to_string());
+        return program.ExitCode.Ok;
+    };
+);

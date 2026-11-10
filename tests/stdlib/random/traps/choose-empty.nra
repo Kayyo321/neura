@@ -1,0 +1,15 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): no such element
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let randoms = import:Std.Random.Random;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let r = randoms.seeded(1);
+        console.print_line("before");
+        let empty: string[list] = [];
+        console.print_line(r.choose<string>(empty));
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,18 @@
+neura-trace 1
+# Written by hand: a wall reading of 2026-11-09T19:30:15.250Z and monotonic
+# readings 25,000,001 nanoseconds apart.
+request neura.clock.wall 1 []
+ok [1794252615, 250000000]
+request neura.console.write_line 1 ["2026-11-09T19:30:15.250Z"]
+ok 0
+request neura.clock.monotonic 1 []
+ok 81234000000
+request neura.clock.sleep 1 [25000000]
+ok 0
+request neura.clock.sleep 1 [0]
+ok 0
+request neura.clock.monotonic 1 []
+ok 81259000001
+request neura.console.write_line 1 ["PT0.025000001S"]
+ok 0
+outcome completed 0

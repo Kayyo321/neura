@@ -1,0 +1,25 @@
+// The days of the week in ISO order (Stdlib.md section 12.1). The ordinal
+// (`as int`) is 0 for Monday through 6 for Sunday; epoch day 0,
+// 1970-01-01, is a Thursday.
+export let DayOfWeek = module (
+    export let DayOfWeek = enum (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday);
+
+    // The day `days` after `day`; negative counts go back.
+    export let plus = func(DayOfWeek day, int64 days) -> DayOfWeek {
+        let index = ((day as int64) + days % 7 + 7) % 7;
+        return of_ordinal(index as int);
+    };
+
+    // 0 for Monday through 6 for Sunday; anything else traps with
+    // "invalid argument: day of week".
+    export let of_ordinal = func(int ordinal) -> DayOfWeek {
+        if (ordinal < 0 || ordinal > 6) {
+            trap_with_message("invalid argument: day of week");
+        }
+        let days: DayOfWeek[] = [
+            DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday,
+            DayOfWeek.Saturday, DayOfWeek.Sunday
+        ];
+        return days[ordinal];
+    };
+);
