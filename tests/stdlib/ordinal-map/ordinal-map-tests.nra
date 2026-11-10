@@ -1,0 +1,195 @@
+let cell = import:Std.Core.Cell;
+let map = import:Std.Collections.Map;
+let mutable_map = import:Std.Collections.MutableMap;
+let optional = import:Std.Core.Optional;
+let ordinal_map = import:Std.Collections.OrdinalMap;
+let test = import:Std.Test;
+
+let OrdinalMapTests = module (
+    let Light = enum (Red, Yellow, Green);
+
+    export let test_basic_members = func() -> void {
+        let items = ordinal_map.create<string>(5);
+        test.assert(items.is_empty());
+        items.set(3, "c");
+        items.set(0, "a");
+        items.set(4, "d");
+        test.assert_equal_int32(3, items.size());
+        test.assert(items.contains_key(0));
+        test.assert(!items.contains_key(1));
+        test.assert_equal_string("a", items.require(0));
+        test.assert_equal_string("c", test.assert_some<string>(items.get(3)));
+        test.assert_none<string>(items.get(2));
+        test.assert_equal_string("?", items.get_or(2, "?"));
+        test.assert_equal_string("d", items.get_or(4, "?"));
+        test.assert_equal_string("{0: a, 3: c, 4: d}", items.to_string());
+        items.set(3, "C");
+        test.assert_equal_string("C", items.require(3));
+        test.assert(items.delete(0));
+        test.assert(!items.delete(0));
+        test.assert_equal_string("[3, 4]", items.keys().to_string());
+        test.assert_equal_string("[C, d]", items.values().to_string());
+        test.assert_equal_string("[[3, C], [4, d]]", items.entries().to_string());
+        test.assert(items.contains_value("d"));
+        test.assert(!items.contains_value("a"));
+        items.clear();
+        test.assert(items.is_empty());
+        test.assert_equal_string("{}", items.to_string());
+        test.assert(!items.contains_key(3));
+        items.set(3, "again");
+        test.assert_equal_string("{3: again}", items.to_string());
+        test.assert(ordinal_map.create<int>(0).is_empty());
+    };
+
+    // A map keyed by a fieldless enum's ordinal.
+    export let test_enum_keys = func() -> void {
+        let items = ordinal_map.create<int>(3);
+        items.set(Light.Green as int, 2);
+        items.set(Light.Red as int, 0);
+        test.assert_equal_int32(2, items.require(Light.Green as int));
+        test.assert(!items.contains_key(Light.Yellow as int));
+    };
+
+    export let test_put_and_remove = func() -> void {
+        let items = ordinal_map.create<int>(4);
+        test.assert_none<int>(items.put(1, 10));
+        test.assert_equal_int32(10, test.assert_some<int>(items.put(1, 11)));
+        test.assert_equal_int32(11, test.assert_some<int>(items.remove(1)));
+        test.assert_none<int>(items.remove(1));
+        let other = ordinal_map.create<int>(4);
+        other.set(2, 20);
+        other.set(0, 5);
+        items.set(2, 1);
+        items.put_all(other);
+        test.assert_equal_string("{0: 5, 2: 20}", items.to_string());
+    };
+
+    // Deleting moves the last dense entry into the freed place; key order is
+    // unaffected.
+    export let test_swap_removal = func() -> void {
+        let items = ordinal_map.create<int>(10);
+        let keys: int[list] = [7, 2, 9, 0, 5];
+        for (let key in keys) {
+            items.set(key, key * 10);
+        }
+        test.assert(items.delete(2));
+        test.assert(items.delete(5));
+        test.assert_equal_string("{0: 0, 7: 70, 9: 90}", items.to_string());
+        items.set(2, 1);
+        test.assert(items.delete(7));
+        test.assert_equal_string("{0: 0, 2: 1, 9: 90}", items.to_string());
+        test.assert_equal_int32(90, items.require(9));
+    };
+
+    export let test_callbacks = func() -> void {
+        let items = ordinal_map.create<int>(6);
+        let calls = cell.of<int>(0);
+        let make = func() -> int {
+            calls.value = calls.value + 1;
+            return 7;
+        };
+        test.assert_equal_int32(7, items.get_or_put(1, make));
+        test.assert_equal_int32(7, items.get_or_put(1, make));
+        test.assert_equal_int32(1, calls.value);
+        let add = func(int a, int b) -> int {
+            return a + b;
+        };
+        test.assert_equal_int32(3, items.merge(2, 3, add));
+        test.assert_equal_int32(8, items.merge(2, 5, add));
+        let doubled = items.compute(2, func(int key, optional.Optional<int> current) -> optional.Optional<int> {
+            return optional.Optional<int>.Some(optional.value_or<int>(current, 0) * 2);
+        });
+        test.assert_equal_int32(16, test.assert_some<int>(doubled));
+        let dropped = items.compute(2, func(int key, optional.Optional<int> current) -> optional.Optional<int> {
+            return optional.Optional<int>.None;
+        });
+        test.assert_none<int>(dropped);
+        test.assert(!items.contains_key(2));
+        let absent = items.compute(3, func(int key, optional.Optional<int> current) -> optional.Optional<int> {
+            test.assert_none<int>(current);
+            return optional.Optional<int>.None;
+        });
+        test.assert_none<int>(absent);
+        items.set(4, 40);
+        items.set(5, 50);
+        let seen: [int, int][list] = [];
+        items.for_each(func(int key, int value) -> void {
+            seen.append([key, value]);
+        });
+        test.assert_equal_string("[[1, 7], [4, 40], [5, 50]]", seen.to_string());
+        test.assert_equal_int32(2, items.remove_if(func(int key, int value) -> bool {
+            return key > 3;
+        }));
+        test.assert_equal_string("{1: 7}", items.to_string());
+    };
+
+    export let test_iteration = func() -> void {
+        let items = ordinal_map.create<string>(8);
+        items.set(6, "x");
+        items.set(1, "y");
+        let walk = items.iterator();
+        test.assert(walk.has_next());
+        test.assert(walk.has_next());
+        let first = walk.next();
+        test.assert_equal_int32(1, first[0]);
+        test.assert_equal_string("y", first[1]);
+        test.assert_equal_int32(6, walk.next()[0]);
+        test.assert(!walk.has_next());
+        let keys: int[list] = [];
+        for (let entry in items) {
+            keys.append(entry[0]);
+            // Replacing the value of an existing key is not structural.
+            items.set(entry[0], "z");
+        }
+        test.assert_equal_string("[1, 6]", keys.to_string());
+        test.assert_equal_string("{1: z, 6: z}", items.to_string());
+        // An entries() copy iterates independently of later changes.
+        for (let entry in items.entries()) {
+            items.delete(entry[0]);
+        }
+        test.assert(items.is_empty());
+        test.assert(!items.iterator().has_next());
+    };
+
+    export let test_equality_hash_and_text = func() -> void {
+        let a = ordinal_map.create<string>(4);
+        let b = ordinal_map.create<string>(9);
+        a.set(1, "p");
+        a.set(3, "q");
+        b.set(3, "q");
+        b.set(1, "p");
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        b.set(8, "r");
+        test.assert(!a.equals(b));
+        test.assert(!b.equals(a));
+        b.delete(8);
+        b.set(1, "other");
+        test.assert(!a.equals(b));
+        test.assert(!a.equals(ordinal_map.create<int>(4)));
+        test.assert(!a.equals(nil));
+        let expected: uint32 = (1 ^ "p".hash_code()) + (3 ^ "q".hash_code());
+        test.assert_equal_int64(expected as int64, a.hash_code() as int64);
+        test.assert_equal_int64(0, ordinal_map.create<int>(2).hash_code() as int64);
+        let objects = ordinal_map.create<class>(3);
+        objects.set(2, objects);
+        objects.set(0, nil);
+        objects.set(1, a);
+        test.assert_equal_string("{0: nil, 1: {1: p, 3: q}, 2: (this collection)}", objects.to_string());
+    };
+
+    export let test_interfaces = func() -> void {
+        let items: mutable_map.MutableMap<int, int> = ordinal_map.create<int>(3);
+        items.set(2, 4);
+        test.assert_none<int>(items.put(0, 1));
+        let view: map.Map<int, int> = items;
+        test.assert_equal_int32(2, view.size());
+        test.assert(!view.is_empty());
+        test.assert_equal_int32(4, view.require(2));
+        let total = 0;
+        for (let entry in view) {
+            total = total + entry[0] + entry[1];
+        }
+        test.assert_equal_int32(7, total);
+    };
+);

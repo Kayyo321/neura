@@ -1,0 +1,12 @@
+// status: 70
+// stderr: index out of bounds
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items: int[list] = [1];
+        lists.insert_at<int>(items, 2, 0);
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,9 @@
+let iterators = import:Std.Collections.Iterator;
+
+// A source of iterators. For-each over an Iterable calls iterator() once and
+// then has_next() and next() for each element.
+export let Iterable = module (
+    export let Iterable = interface<T> (
+        let iterator = func() -> iterators.Iterator<T>;
+    );
+);

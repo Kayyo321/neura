@@ -1,0 +1,17 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let console = import:Std.Io.Console;
+let ordinal_map = import:Std.Collections.OrdinalMap;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = ordinal_map.create<int>(3);
+        items.set(0, 5);
+        items.set(1, 6);
+        items.for_each(func(int key, int value) -> void {
+            items.clear();
+        });
+        return program.ExitCode.Ok;
+    };
+);

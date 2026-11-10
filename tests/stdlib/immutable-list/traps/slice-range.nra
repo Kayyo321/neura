@@ -1,0 +1,12 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: range
+let console = import:Std.Io.Console;
+let immutable_list = import:Std.Collections.ImmutableList;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let part = immutable_list.of<int>([1]).slice(0, 2);
+        return program.ExitCode.Ok;
+    };
+);

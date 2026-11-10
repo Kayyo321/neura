@@ -1,0 +1,369 @@
+let cell = import:Std.Core.Cell;
+let hash_map = import:Std.Collections.HashMap;
+let map_interface = import:Std.Collections.Map;
+let mutable_map = import:Std.Collections.MutableMap;
+let optional = import:Std.Core.Optional;
+let test = import:Std.Test;
+
+let HashMapTests = module (
+    // A key class with value equality: equal when the codes are equal.
+    let Code = class (
+        export let code: int;
+        export let init = func(int value) -> void {
+            code = value;
+        };
+        export let.override equals = func(class other) -> bool {
+            return other is Code && (other as Code).code == code;
+        };
+        export let.override hash_code = func() -> uint32 {
+            return (code % 4) as uint32;
+        };
+        export let.override to_string = func() -> string {
+            return "#" + code.to_string();
+        };
+    );
+
+    let sample = func() -> hash_map.HashMap<string, int> {
+        let map = hash_map.create<string, int>();
+        map.set("one", 1);
+        map.set("two", 2);
+        map.set("three", 3);
+        return map;
+    };
+
+    let text = func(hash_map.HashMap<string, int> map) -> string {
+        return map.to_string();
+    };
+
+    export let test_empty = func() -> void {
+        let map = hash_map.create<int, string>();
+        test.assert_equal_int32(0, map.size());
+        test.assert(map.is_empty());
+        test.assert(!map.contains_key(1));
+        test.assert_none<string>(map.get(1));
+        test.assert_equal_string("x", map.get_or(1, "x"));
+        test.assert_equal_string("{}", map.to_string());
+        test.assert_equal_int32(0, map.keys().length);
+        test.assert(!map.iterator().has_next());
+        map.validate();
+    };
+
+    export let test_set_get_and_insertion_order = func() -> void {
+        let map = sample();
+        test.assert_equal_int32(3, map.size());
+        test.assert(!map.is_empty());
+        test.assert_equal_int32(2, map.require("two"));
+        test.assert_equal_int32(2, test.assert_some<int>(map.get("two")));
+        test.assert_equal_int32(3, map.get_or("three", 0));
+        test.assert_equal_string("{one: 1, two: 2, three: 3}", text(map));
+        // Overwriting keeps the position.
+        map.set("one", 10);
+        test.assert_equal_string("{one: 10, two: 2, three: 3}", text(map));
+        // A key removed and added again goes to the end.
+        test.assert(map.delete("one"));
+        test.assert(!map.delete("one"));
+        map.set("one", 11);
+        test.assert_equal_string("{two: 2, three: 3, one: 11}", text(map));
+        map.validate();
+    };
+
+    export let test_put_and_remove_return_previous = func() -> void {
+        let map = sample();
+        test.assert_none<int>(map.put("four", 4));
+        test.assert_equal_int32(4, test.assert_some<int>(map.put("four", 40)));
+        test.assert_equal_int32(40, test.assert_some<int>(map.remove("four")));
+        test.assert_none<int>(map.remove("four"));
+        test.assert_equal_int32(3, map.size());
+    };
+
+    export let test_keys_values_entries_are_copies = func() -> void {
+        let map = sample();
+        let keys = map.keys();
+        let values = map.values();
+        let entries = map.entries();
+        test.assert_equal_string("[one, two, three]", keys.to_string());
+        test.assert_equal_string("[1, 2, 3]", values.to_string());
+        test.assert_equal_string("[[one, 1], [two, 2], [three, 3]]", entries.to_string());
+        keys.append("four");
+        map.set("five", 5);
+        test.assert_equal_int32(4, keys.length);
+        test.assert_equal_int32(3, values.length);
+        test.assert_equal_int32(4, map.size());
+    };
+
+    export let test_iterator_and_for_each = func() -> void {
+        let map = sample();
+        map.delete("two");
+        let items = map.iterator();
+        test.assert(items.has_next());
+        test.assert(items.has_next());
+        test.assert_equal_string("[one, 1]", items.next().to_string());
+        test.assert_equal_string("[three, 3]", items.next().to_string());
+        test.assert(!items.has_next());
+        let seen = cell.of<string>("");
+        map.for_each(func(string key, int value) -> void {
+            seen.value = seen.value + key + "=" + value.to_string() + ";";
+        });
+        test.assert_equal_string("one=1;three=3;", seen.value);
+        let total = 0;
+        for (let entry in map) {
+            total = total + entry[1];
+        }
+        test.assert_equal_int32(4, total);
+    };
+
+    // Replacing the value of an existing key is not structural, so an
+    // iterator and for_each continue.
+    export let test_value_replacement_is_not_structural = func() -> void {
+        let map = sample();
+        let items = map.iterator();
+        map.set("two", 20);
+        items.next();
+        test.assert_equal_string("[two, 20]", items.next().to_string());
+        map.for_each(func(string key, int value) -> void {
+            map.set(key, value + 1);
+        });
+        test.assert_equal_string("{one: 2, two: 21, three: 4}", text(map));
+    };
+
+    export let test_put_all = func() -> void {
+        let map = sample();
+        let other = hash_map.create<string, int>();
+        other.set("three", 30);
+        other.set("zero", 0);
+        map.put_all(other);
+        test.assert_equal_string("{one: 1, two: 2, three: 30, zero: 0}", text(map));
+        map.put_all(map);
+        test.assert_equal_int32(4, map.size());
+    };
+
+    export let test_remove_if = func() -> void {
+        let map = hash_map.create<int, int>();
+        let i = 0;
+        while (i < 40) {
+            map.set(i, i * i);
+            i = i + 1;
+        }
+        let calls = cell.of<int>(0);
+        let removed = map.remove_if(func(int key, int value) -> bool {
+            calls.value = calls.value + 1;
+            return key % 4 != 1;
+        });
+        test.assert_equal_int32(40, calls.value);
+        test.assert_equal_int32(30, removed);
+        test.assert_equal_string("[1, 5, 9, 13, 17, 21, 25, 29, 33, 37]", map.keys().to_string());
+        map.validate();
+        test.assert_equal_int32(0, map.remove_if(func(int key, int value) -> bool {
+            return false;
+        }));
+        test.assert_equal_int32(10, map.remove_if(func(int key, int value) -> bool {
+            return true;
+        }));
+        test.assert(map.is_empty());
+        map.validate();
+    };
+
+    export let test_get_or_put = func() -> void {
+        let map = sample();
+        let calls = cell.of<int>(0);
+        let make = func() -> int {
+            calls.value = calls.value + 1;
+            return 9;
+        };
+        test.assert_equal_int32(1, map.get_or_put("one", make));
+        test.assert_equal_int32(0, calls.value);
+        test.assert_equal_int32(9, map.get_or_put("nine", make));
+        test.assert_equal_int32(1, calls.value);
+        test.assert_equal_string("{one: 1, two: 2, three: 3, nine: 9}", text(map));
+    };
+
+    export let test_merge = func() -> void {
+        let map = sample();
+        let plus = func(int a, int b) -> int {
+            return a * 10 + b;
+        };
+        test.assert_equal_int32(15, map.merge("one", 5, plus));
+        test.assert_equal_int32(7, map.merge("seven", 7, plus));
+        test.assert_equal_string("{one: 15, two: 2, three: 3, seven: 7}", text(map));
+    };
+
+    export let test_compute = func() -> void {
+        let map = sample();
+        let double = func(string key, optional.Optional<int> current) -> optional.Optional<int> {
+            return match (current) {
+                optional.Optional.None => optional.Optional<int>.Some(key.byte_length),
+                optional.Optional.Some(value) => optional.Optional<int>.Some(value * 2),
+            };
+        };
+        let erase = func(string key, optional.Optional<int> current) -> optional.Optional<int> {
+            return optional.Optional<int>.None;
+        };
+        test.assert_equal_int32(4, test.assert_some<int>(map.compute("two", double)));
+        test.assert_equal_int32(4, test.assert_some<int>(map.compute("four", double)));
+        test.assert_none<int>(map.compute("one", erase));
+        test.assert_none<int>(map.compute("absent", erase));
+        test.assert_equal_string("{two: 4, three: 3, four: 4}", text(map));
+    };
+
+    export let test_contains_value = func() -> void {
+        let map = sample();
+        test.assert(map.contains_value(2));
+        test.assert(!map.contains_value(5));
+        map.delete("two");
+        test.assert(!map.contains_value(2));
+    };
+
+    export let test_clear_and_trim = func() -> void {
+        let map = hash_map.with_capacity<int, int>(100);
+        let i = 0;
+        while (i < 100) {
+            map.set(i, i);
+            i = i + 1;
+        }
+        while (i > 3) {
+            i = i - 1;
+            map.delete(i);
+        }
+        map.trim();
+        map.validate();
+        test.assert_equal_string("{0: 0, 1: 1, 2: 2}", map.to_string());
+        map.clear();
+        test.assert(map.is_empty());
+        map.validate();
+        map.set(5, 5);
+        test.assert_equal_string("{5: 5}", map.to_string());
+        map.validate();
+    };
+
+    export let test_equals_and_hash = func() -> void {
+        let a = sample();
+        let b = hash_map.create<string, int>();
+        b.set("three", 3);
+        b.set("one", 1);
+        b.set("two", 2);
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+        // The wrapping sum of key hash exclusive-or value hash.
+        let expected = ((("one".hash_code() ^ 1) as uint64) + (("two".hash_code() ^ 2) as uint64)
+            + (("three".hash_code() ^ 3) as uint64)) & 4294967295;
+        test.assert_equal_uint64(expected, a.hash_code() as uint64);
+        b.set("two", 22);
+        test.assert(!a.equals(b));
+        b.set("two", 2);
+        b.set("four", 4);
+        test.assert(!a.equals(b));
+        let other_class: class = hash_map.create<string, string>();
+        test.assert(!a.equals(other_class));
+        test.assert(!a.equals(nil));
+        test.assert_equal_uint64(0, hash_map.create<int, int>().hash_code() as uint64);
+    };
+
+    // Keys with overridden equals and hash_code: distinct objects with equal
+    // codes are the same key; the hash places codes 1, 5, and 9 together.
+    export let test_class_keys_with_value_equality = func() -> void {
+        let map = hash_map.create<Code, string>();
+        map.set(new Code(1), "a");
+        map.set(new Code(5), "b");
+        map.set(new Code(9), "c");
+        map.set(new Code(5), "B");
+        test.assert_equal_int32(3, map.size());
+        test.assert_equal_string("B", map.require(new Code(5)));
+        test.assert(map.delete(new Code(1)));
+        test.assert(!map.contains_key(new Code(1)));
+        test.assert_equal_string("{#5: B, #9: c}", map.to_string());
+        map.validate();
+    };
+
+    // A nil class key hashes to 0 and equals only nil.
+    export let test_nil_key = func() -> void {
+        let map = hash_map.create<Code, int>();
+        let absent: Code = nil;
+        map.set(absent, 1);
+        map.set(new Code(0), 2);
+        test.assert_equal_int32(2, map.size());
+        test.assert_equal_int32(1, map.require(nil));
+        test.assert_equal_string("{nil: 1, #0: 2}", map.to_string());
+        test.assert(map.delete(nil));
+        test.assert(!map.contains_key(nil));
+        map.validate();
+    };
+
+    // with_keys stores the caller's functions: keys equal ignoring case.
+    export let test_with_keys = func() -> void {
+        let lower = func(string s) -> string {
+            let bytes: uint8[list] = [];
+            let i = 0;
+            while (i < s.byte_length) {
+                let b = s.byte_at(i);
+                if (b >= 65 && b <= 90) {
+                    b = b + 32;
+                }
+                bytes.append(b);
+                i = i + 1;
+            }
+            let [valid, text] = string.from_utf8(bytes);
+            return text;
+        };
+        let map = hash_map.with_keys<string, int>(func(string key) -> uint32 {
+            return lower(key).hash_code();
+        }, func(string a, string b) -> bool {
+            return lower(a) == lower(b);
+        });
+        map.set("Alpha", 1);
+        map.set("ALPHA", 2);
+        map.set("beta", 3);
+        test.assert_equal_string("{Alpha: 2, beta: 3}", map.to_string());
+        test.assert(map.contains_key("BETA"));
+        let copy = hash_map.with_keys_and_capacity<string, int>(func(string key) -> uint32 {
+            return lower(key).hash_code();
+        }, func(string a, string b) -> bool {
+            return lower(a) == lower(b);
+        }, 2);
+        copy.put_all(map);
+        test.assert(copy.equals(map));
+    };
+
+    // A map that holds itself as a value prints "(this collection)".
+    export let test_self_text = func() -> void {
+        let map = hash_map.create<string, class>();
+        map.set("me", map);
+        map.set("none", nil);
+        test.assert_equal_string("{me: (this collection), none: nil}", map.to_string());
+    };
+
+    // Through the read-only and mutable interfaces.
+    export let test_interfaces = func() -> void {
+        let map = sample();
+        let view: map_interface.Map<string, int> = map;
+        test.assert_equal_int32(3, view.size());
+        test.assert(!view.is_empty());
+        let mutable: mutable_map.MutableMap<string, int> = map;
+        mutable.set("four", 4);
+        test.assert_equal_int32(4, view.size());
+    };
+
+    // Many insertions and removals keep the table valid through growth and
+    // both compaction rules.
+    export let test_growth_and_compaction = func() -> void {
+        let map = hash_map.create<int, int>();
+        let i = 0;
+        while (i < 1000) {
+            map.set(i, i);
+            i = i + 1;
+        }
+        map.validate();
+        i = 0;
+        while (i < 990) {
+            map.delete(i);
+            i = i + 1;
+        }
+        map.validate();
+        test.assert_equal_string("[990, 991, 992, 993, 994, 995, 996, 997, 998, 999]", map.keys().to_string());
+        i = 0;
+        while (i < 1000) {
+            test.assert_equal_bool(i >= 990, map.contains_key(i));
+            i = i + 1;
+        }
+    };
+);

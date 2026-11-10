@@ -1,0 +1,16 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let hash_map = import:Std.Collections.HashMap;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let map = hash_map.create<string, int>();
+        map.set("a", 1);
+        map.set("b", 2);
+        for (let entry in map) {
+            map.delete("a");
+        }
+        return program.ExitCode.Ok;
+    };
+);

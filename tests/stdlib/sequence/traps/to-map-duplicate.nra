@@ -1,0 +1,15 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: duplicate key
+let program = import:Std.Program;
+let sequence = import:Std.Collections.Sequence;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        sequence.range(0, 5).to_map<int, int>(func(int v) -> int {
+            return v % 3;
+        }, func(int v) -> int {
+            return v;
+        });
+        return program.ExitCode.Ok;
+    };
+);

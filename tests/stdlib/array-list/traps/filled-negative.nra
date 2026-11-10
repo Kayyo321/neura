@@ -1,0 +1,12 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: negative count
+let array_list = import:Std.Collections.ArrayList;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = array_list.filled<int>(-1, 0);
+        return program.ExitCode.Ok;
+    };
+);

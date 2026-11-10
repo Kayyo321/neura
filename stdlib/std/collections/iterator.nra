@@ -1,0 +1,9 @@
+// The iteration protocol (Stdlib.md section 5.4). `has_next` has no effect
+// and can be repeated; `next` returns the next element and advances, and
+// traps with "no such element" after the last one. An iterator is used once.
+export let Iterator = module (
+    export let Iterator = interface<T> (
+        let has_next = func() -> bool;
+        let next = func() -> T;
+    );
+);

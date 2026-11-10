@@ -1,0 +1,20 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let console = import:Std.Io.Console;
+let ordering = import:Std.Core.Ordering;
+let priority_queue = import:Std.Collections.PriorityQueue;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let holder: priority_queue.PriorityQueue<int>[list] = [];
+        let items = priority_queue.create<int>(func(int a, int b) -> ordering.Ordering {
+            holder[0].clear();
+            return ordering.Ordering.Less;
+        });
+        holder.append(items);
+        items.enqueue(1);
+        items.enqueue(2);
+        return program.ExitCode.Ok;
+    };
+);

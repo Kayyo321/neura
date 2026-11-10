@@ -1,0 +1,128 @@
+let cell = import:Std.Core.Cell;
+let hash_set = import:Std.Collections.HashSet;
+let immutable_set = import:Std.Collections.ImmutableSet;
+let int32 = import:Std.Core.Int32;
+let random = import:Std.Random.Random;
+let set_interface = import:Std.Collections.Set;
+let sets = import:Std.Collections.Sets;
+let test = import:Std.Test;
+let tree_set = import:Std.Collections.TreeSet;
+
+let ImmutableSetTests = module (
+    export let test_members = func() -> void {
+        let empty = immutable_set.of<string>([]);
+        test.assert(empty.is_empty());
+        test.assert_equal_string("{}", empty.to_string());
+        let set = immutable_set.of<string>(["b", "a", "b", "c"]);
+        test.assert_equal_int32(3, set.size());
+        test.assert(!set.is_empty());
+        test.assert(set.contains("a"));
+        test.assert(!set.contains("d"));
+        test.assert(set.contains_all(["c", "b"]));
+        test.assert(!set.contains_all(["c", "d"]));
+        test.assert_equal_string("{b, a, c}", set.to_string());
+        test.assert_equal_string("[b, a, c]", set.to_list().to_string());
+        let items = set.iterator();
+        test.assert_equal_string("b", items.next());
+        test.assert_equal_string("a", items.next());
+        test.assert_equal_string("c", items.next());
+        test.assert(!items.has_next());
+        let seen = cell.of<string>("");
+        set.for_each(func(string s) -> void {
+            seen.value = seen.value + s;
+        });
+        test.assert_equal_string("bac", seen.value);
+        let joined = "";
+        for (let s in set) {
+            joined = joined + s;
+        }
+        test.assert_equal_string("bac", joined);
+    };
+
+    // The set copies its contents: later changes to the source list or to
+    // a returned list do not reach it.
+    export let test_copies_at_construction = func() -> void {
+        let source: int[list] = [1, 2];
+        let set = immutable_set.of<int>(source);
+        source.append(3);
+        source[0] = 9;
+        let listed = set.to_list();
+        listed.append(4);
+        test.assert_equal_string("{1, 2}", set.to_string());
+    };
+
+    export let test_equals_and_hash = func() -> void {
+        let a = immutable_set.of<int>([1, 2, 3]);
+        let b = immutable_set.of<int>([3, 2, 1, 1]);
+        test.assert(a.equals(b));
+        test.assert_equal_uint64(6, a.hash_code() as uint64);
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+        test.assert(!a.equals(immutable_set.of<int>([1, 2])));
+        test.assert(!a.equals(immutable_set.of<int>([1, 2, 4])));
+        let other: class = hash_set.create<int>();
+        test.assert(!a.equals(other));
+        test.assert(!a.equals(nil));
+    };
+
+    // Sets.same_elements compares sets of different classes through the
+    // read-only interface.
+    export let test_same_elements = func() -> void {
+        let hashed = hash_set.create<int>();
+        hashed.add_all([3, 1, 2]);
+        let sorted = tree_set.create<int>(int32.compare);
+        sorted.add_all([2, 3, 1]);
+        let fixed = immutable_set.of<int>([1, 2, 3]);
+        test.assert(sets.same_elements<int>(hashed, sorted));
+        test.assert(sets.same_elements<int>(sorted, fixed));
+        test.assert(sets.same_elements<int>(fixed, hashed));
+        test.assert(sets.same_elements<int>(immutable_set.of<int>([]), hash_set.create<int>()));
+        sorted.add(4);
+        test.assert(!sets.same_elements<int>(hashed, sorted));
+        hashed.add(5);
+        test.assert(!sets.same_elements<int>(hashed, sorted));
+        test.assert(!sets.same_elements<int>(sorted, hashed));
+        let view: set_interface.Set<int> = fixed;
+        test.assert_equal_int32(3, view.size());
+    };
+
+    // Seeded check against a deduplicated model: 50 random sources and
+    // 10,000 membership queries.
+    export let test_model = func() -> void {
+        let generator = random.seeded(61);
+        let round = 0;
+        while (round < 50) {
+            let source: int[list] = [];
+            let model: int[list] = [];
+            let length = generator.next_int_below(60);
+            while (source.length < length) {
+                let value = generator.next_int_below(80);
+                source.append(value);
+                let known = false;
+                for (let m in model) {
+                    if (m == value) {
+                        known = true;
+                    }
+                }
+                if (!known) {
+                    model.append(value);
+                }
+            }
+            let set = immutable_set.of<int>(source);
+            test.assert_equal_string(model.to_string(), set.to_list().to_string());
+            test.assert_equal_int32(model.length, set.size());
+            let query = 0;
+            while (query < 200) {
+                let value = generator.next_int_below(80);
+                let expected = false;
+                for (let m in model) {
+                    if (m == value) {
+                        expected = true;
+                    }
+                }
+                test.assert_equal_bool(expected, set.contains(value));
+                query = query + 1;
+            }
+            round = round + 1;
+        }
+    };
+);

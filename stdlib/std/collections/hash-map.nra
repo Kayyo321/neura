@@ -1,0 +1,552 @@
+let hash_core = import:Std.Collections.Internal.HashCore;
+let iterators = import:Std.Collections.Iterator;
+let mutable_map = import:Std.Collections.MutableMap;
+let optional = import:Std.Core.Optional;
+let text_depth = import:Std.Collections.Internal.TextDepth;
+
+// An insertion-ordered hash map (Stdlib.md section 9.6). It owns a HashCore,
+// a dense key list, and a dense value list indexed by entry number. Its two
+// key operations are stored function values: `create` fills them with the
+// universal hash_code and equals members, `with_keys` with the caller's.
+//
+// Setting the value of an existing key keeps its position and is not a
+// structural change. A key removed and added again goes to the end. A
+// removed key and value stay reachable until the next compaction, never
+// more than max(size, 7) of them. Iterators and callbacks fail fast with
+// "collection modified during iteration".
+export let HashMap = module (
+    let Seal = enum (Token);
+
+    export let HashMap = class<K, V> implements mutable_map.MutableMap<K, V> (
+        // Never replaced, so iterators can read its modification count.
+        let core: hash_core.HashCore;
+        let stored_keys: K[list] = [];
+        let stored_values: V[list] = [];
+        let hash_of: func(K) -> uint32;
+        let same: func(K, K) -> bool;
+        let printing_depth: int = 0;
+
+        export let init = func(Seal seal, hash_core.HashCore table, func(K) -> uint32 hash, func(K, K) -> bool equal) -> void {
+            core = table;
+            hash_of = hash;
+            same = equal;
+        };
+
+        export let size = func() -> int {
+            return core.count;
+        };
+
+        export let is_empty = func() -> bool {
+            return core.count == 0;
+        };
+
+        // Replaces every list with a new one of the initial table size.
+        export let clear = func() -> void {
+            core.reset();
+            stored_keys = [];
+            stored_values = [];
+        };
+
+        export let contains_key = func(K key) -> bool {
+            return find(key, spread(hash_of(key))) >= 0;
+        };
+
+        export let get = func(K key) -> optional.Optional<V> {
+            let slot = find(key, spread(hash_of(key)));
+            if (slot < 0) {
+                return optional.Optional<V>.None;
+            }
+            return optional.Optional<V>.Some(stored_values[core.index[slot]]);
+        };
+
+        export let get_or = func(K key, V fallback) -> V {
+            let slot = find(key, spread(hash_of(key)));
+            if (slot < 0) {
+                return fallback;
+            }
+            return stored_values[core.index[slot]];
+        };
+
+        // Traps with "no such element" when the key is absent.
+        export let require = func(K key) -> V {
+            let slot = find(key, spread(hash_of(key)));
+            if (slot < 0) {
+                trap_with_message("no such element");
+            }
+            return stored_values[core.index[slot]];
+        };
+
+        export let set = func(K key, V value) -> void {
+            let hash = spread(hash_of(key));
+            let slot = find(key, hash);
+            if (slot >= 0) {
+                stored_values[core.index[slot]] = value;
+                return;
+            }
+            insert(key, value, hash, -slot - 1);
+        };
+
+        // The previous value.
+        export let put = func(K key, V value) -> optional.Optional<V> {
+            let hash = spread(hash_of(key));
+            let slot = find(key, hash);
+            if (slot >= 0) {
+                let entry = core.index[slot];
+                let previous = stored_values[entry];
+                stored_values[entry] = value;
+                return optional.Optional<V>.Some(previous);
+            }
+            insert(key, value, hash, -slot - 1);
+            return optional.Optional<V>.None;
+        };
+
+        // Removes the key; returns whether it was present.
+        export let delete = func(K key) -> bool {
+            let slot = find(key, spread(hash_of(key)));
+            if (slot < 0) {
+                return false;
+            }
+            release(slot);
+            return true;
+        };
+
+        // The removed value.
+        export let remove = func(K key) -> optional.Optional<V> {
+            let slot = find(key, spread(hash_of(key)));
+            if (slot < 0) {
+                return optional.Optional<V>.None;
+            }
+            let value = stored_values[core.index[slot]];
+            release(slot);
+            return optional.Optional<V>.Some(value);
+        };
+
+        export let keys = func() -> K[list] {
+            let result: K[list] = [];
+            let live = core.live;
+            let length = live.length;
+            let entry = 0;
+            while (entry < length) {
+                if (live[entry]) {
+                    result.append(stored_keys[entry]);
+                }
+                entry = entry + 1;
+            }
+            return result;
+        };
+
+        export let values = func() -> V[list] {
+            let result: V[list] = [];
+            let live = core.live;
+            let length = live.length;
+            let entry = 0;
+            while (entry < length) {
+                if (live[entry]) {
+                    result.append(stored_values[entry]);
+                }
+                entry = entry + 1;
+            }
+            return result;
+        };
+
+        export let entries = func() -> [K, V][list] {
+            let result: [K, V][list] = [];
+            let live = core.live;
+            let length = live.length;
+            let entry = 0;
+            while (entry < length) {
+                if (live[entry]) {
+                    let item: [K, V] = [stored_keys[entry], stored_values[entry]];
+                    result.append(item);
+                }
+                entry = entry + 1;
+            }
+            return result;
+        };
+
+        // Yields [K, V] in insertion order.
+        export let iterator = func() -> iterators.Iterator<[K, V]> {
+            return new HashMapIterator<K, V>(core, stored_keys, stored_values);
+        };
+
+        // Sets each entry of `other` in its iteration order.
+        export let put_all = func(HashMap<K, V> other) -> void {
+            let items = other.entries();
+            let count = items.length;
+            let i = 0;
+            while (i < count) {
+                let [key, value] = items[i];
+                set(key, value);
+                i = i + 1;
+            }
+        };
+
+        // In insertion order. The action must not change the map
+        // structurally.
+        export let for_each = func(func(K, V) -> void action) -> void {
+            let expected = core.modifications;
+            let entry = 0;
+            while (entry < core.live.length) {
+                if (core.live[entry]) {
+                    action(stored_keys[entry], stored_values[entry]);
+                    if (core.modifications != expected) {
+                        trap_with_message("collection modified during iteration");
+                    }
+                }
+                entry = entry + 1;
+            }
+        };
+
+        // Calls `drop` once per entry in order, then removes the entries it
+        // chose. Returns how many were removed.
+        export let remove_if = func(func(K, V) -> bool drop) -> int {
+            let expected = core.modifications;
+            let chosen: int[list] = [];
+            let length = core.live.length;
+            let entry = 0;
+            while (entry < length) {
+                if (core.live[entry]) {
+                    let removing = drop(stored_keys[entry], stored_values[entry]);
+                    if (core.modifications != expected) {
+                        trap_with_message("collection modified during iteration");
+                    }
+                    if (removing) {
+                        chosen.append(entry);
+                    }
+                }
+                entry = entry + 1;
+            }
+            // From the highest entry down, so that trailing removals never
+            // renumber an entry still to be released.
+            let i = chosen.length - 1;
+            while (i >= 0) {
+                shorten(core.release(core.slot_of(chosen[i])));
+                i = i - 1;
+            }
+            if (core.needs_compaction()) {
+                compact(core.table_size());
+            }
+            return chosen.length;
+        };
+
+        // The existing value, or the result of `make`, stored. `make` must
+        // not change the map structurally.
+        export let get_or_put = func(K key, func() -> V make) -> V {
+            let hash = spread(hash_of(key));
+            let slot = find(key, hash);
+            if (slot >= 0) {
+                return stored_values[core.index[slot]];
+            }
+            let expected = core.modifications;
+            let value = make();
+            if (core.modifications != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            insert(key, value, hash, -slot - 1);
+            return value;
+        };
+
+        // Stores `value` when the key is absent, otherwise combine(old,
+        // value). Returns the stored value.
+        export let merge = func(K key, V value, func(V, V) -> V combine) -> V {
+            let hash = spread(hash_of(key));
+            let slot = find(key, hash);
+            if (slot < 0) {
+                insert(key, value, hash, -slot - 1);
+                return value;
+            }
+            let entry = core.index[slot];
+            let expected = core.modifications;
+            let combined = combine(stored_values[entry], value);
+            if (core.modifications != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            stored_values[entry] = combined;
+            return combined;
+        };
+
+        // Stores a Some result of `f`, or removes the key for None. Returns
+        // the result.
+        export let compute = func(K key, func(K, optional.Optional<V>) -> optional.Optional<V> f) -> optional.Optional<V> {
+            let hash = spread(hash_of(key));
+            let slot = find(key, hash);
+            let current = optional.Optional<V>.None;
+            if (slot >= 0) {
+                current = optional.Optional<V>.Some(stored_values[core.index[slot]]);
+            }
+            let expected = core.modifications;
+            let outcome = f(key, current);
+            if (core.modifications != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            match (outcome) {
+                optional.Optional.Some(value) => {
+                    if (slot >= 0) {
+                        stored_values[core.index[slot]] = value;
+                    } else {
+                        insert(key, value, hash, -slot - 1);
+                    }
+                },
+                optional.Optional.None => {
+                    if (slot >= 0) {
+                        release(slot);
+                    }
+                },
+            }
+            return outcome;
+        };
+
+        // By the values' equals, with `value` as the receiver.
+        export let contains_value = func(V value) -> bool {
+            let live = core.live;
+            let length = live.length;
+            let entry = 0;
+            while (entry < length) {
+                if (live[entry] && value.equals(stored_values[entry])) {
+                    return true;
+                }
+                entry = entry + 1;
+            }
+            return false;
+        };
+
+        // Compacts at the smallest table whose entry capacity holds size().
+        export let trim = func() -> void {
+            compact(hash_core.table_size_for(core.count));
+        };
+
+        // Traps with "invalid state: ..." on a broken table invariant or when
+        // a live key's hash differs from its cached hash.
+        export let validate = func() -> void {
+            core.validate();
+            let length = core.hashes.length;
+            if (stored_keys.length != length || stored_values.length != length) {
+                trap_with_message("invalid state: hash table owner lists");
+            }
+            let entry = 0;
+            while (entry < length) {
+                if (core.live[entry] && spread(hash_of(stored_keys[entry])) != core.hashes[entry]) {
+                    trap_with_message("invalid state: hash table cached hash");
+                }
+                entry = entry + 1;
+            }
+        };
+
+        // Another HashMap with the same size in which, for each of its
+        // entries, this map holds an equal value for the key.
+        export let.override equals = func(class other) -> bool {
+            if (!(other is HashMap<K, V>)) {
+                return false;
+            }
+            let that = other as HashMap<K, V>;
+            if (that.size() != core.count) {
+                return false;
+            }
+            let items = that.entries();
+            let count = items.length;
+            let i = 0;
+            while (i < count) {
+                let [key, value] = items[i];
+                let slot = find(key, spread(hash_of(key)));
+                if (slot < 0 || !stored_values[core.index[slot]].equals(value)) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return true;
+        };
+
+        // The wrapping sum over entries of the key hash exclusive-or the
+        // value hash.
+        export let.override hash_code = func() -> uint32 {
+            let total: uint64 = 0;
+            let live = core.live;
+            let length = live.length;
+            let entry = 0;
+            while (entry < length) {
+                if (live[entry]) {
+                    let mixed = hash_of(stored_keys[entry]) ^ stored_values[entry].hash_code();
+                    total = (total + (mixed as uint64)) & 4294967295;
+                }
+                entry = entry + 1;
+            }
+            return total as uint32;
+        };
+
+        // `{k: v, k2: v2}` in iteration order; the map itself as a direct key
+        // or value prints "(this collection)".
+        export let.override to_string = func() -> string {
+            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+                return "(this collection)";
+            }
+            let saved = printing_depth;
+            printing_depth = text_depth.enter();
+            let parts: string[list] = [];
+            let live = core.live;
+            let entry = 0;
+            while (entry < live.length) {
+                if (live[entry]) {
+                    parts.append(stored_keys[entry].to_string() + ": " + stored_values[entry].to_string());
+                }
+                entry = entry + 1;
+            }
+            text_depth.leave();
+            printing_depth = saved;
+            return braced(parts);
+        };
+
+        // The slot holding the key when present; otherwise -1 minus the slot
+        // a new entry takes (the first Tombstone passed, else the Empty slot
+        // that ended the search).
+        let find = func(K key, uint32 hash) -> int {
+            let slots = core.index;
+            let cached = core.hashes;
+            let mask = core.mask;
+            let slot = (hash & (mask as uint32)) as int;
+            let free = -1;
+            while (true) {
+                let entry = slots[slot];
+                if (entry == -1) {
+                    if (free < 0) {
+                        free = slot;
+                    }
+                    return -free - 1;
+                }
+                if (entry == -2) {
+                    if (free < 0) {
+                        free = slot;
+                    }
+                } else if (cached[entry] == hash && same(key, stored_keys[entry])) {
+                    return slot;
+                }
+                slot = (slot + 1) & mask;
+            }
+            return -1;
+        };
+
+        let insert = func(K key, V value, uint32 hash, int slot) -> void {
+            let target = slot;
+            if (core.is_full()) {
+                compact(core.grown_size());
+                target = core.free_slot(hash);
+            }
+            core.claim(target, hash);
+            stored_keys.append(key);
+            stored_values.append(value);
+        };
+
+        let release = func(int slot) -> void {
+            shorten(core.release(slot));
+            if (core.needs_compaction()) {
+                compact(core.table_size());
+            }
+        };
+
+        // Drops owner entries above `length` after the core removed trailing
+        // dead entries.
+        let shorten = func(int length) -> void {
+            while (stored_keys.length > length) {
+                let last = stored_keys.length - 1;
+                stored_keys.remove_at(last);
+                stored_values.remove_at(last);
+            }
+        };
+
+        let compact = func(int table_size) -> void {
+            let order = core.live_entries();
+            stored_keys = reordered<K>(stored_keys, order);
+            stored_values = reordered<V>(stored_values, order);
+            core.rebuild(order, table_size);
+        };
+    );
+
+    // Compares the core's modification count before every step.
+    let HashMapIterator = class<K, V> implements iterators.Iterator<[K, V]> (
+        let core: hash_core.HashCore;
+        let source_keys: K[list];
+        let source_values: V[list];
+        let expected: uint64;
+        let position: int = 0;
+
+        export let init = func(hash_core.HashCore table, K[list] keys, V[list] values) -> void {
+            core = table;
+            source_keys = keys;
+            source_values = values;
+            expected = table.modifications;
+        };
+
+        export let has_next = func() -> bool {
+            if (core.modifications != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            let live = core.live;
+            while (position < live.length && !live[position]) {
+                position = position + 1;
+            }
+            return position < live.length;
+        };
+
+        export let next = func() -> [K, V] {
+            if (!has_next()) {
+                trap_with_message("no such element");
+            }
+            let item: [K, V] = [source_keys[position], source_values[position]];
+            position = position + 1;
+            return item;
+        };
+    );
+
+    // Keys compared with equals and hashed with hash_code.
+    export let create = func<K, V>() -> HashMap<K, V> {
+        return with_keys_and_capacity<K, V>(universal_hash<K>(), universal_same<K>(), 0);
+    };
+
+    // A table sized for `capacity` entries. Traps with "invalid argument:
+    // capacity" for a negative capacity or one above 2^29.
+    export let with_capacity = func<K, V>(int capacity) -> HashMap<K, V> {
+        return with_keys_and_capacity<K, V>(universal_hash<K>(), universal_same<K>(), capacity);
+    };
+
+    // Keys hashed and compared with the given functions. Equal keys must
+    // have equal hashes.
+    export let with_keys = func<K, V>(func(K) -> uint32 hash, func(K, K) -> bool same) -> HashMap<K, V> {
+        return with_keys_and_capacity<K, V>(hash, same, 0);
+    };
+
+    export let with_keys_and_capacity = func<K, V>(func(K) -> uint32 hash, func(K, K) -> bool same, int capacity) -> HashMap<K, V> {
+        return new HashMap<K, V>(Seal.Token, hash_core.with_capacity(capacity), hash, same);
+    };
+
+    let universal_hash = func<K>() -> func(K) -> uint32 {
+        return func(K key) -> uint32 {
+            return key.hash_code();
+        };
+    };
+
+    let universal_same = func<K>() -> func(K, K) -> bool {
+        return func(K a, K b) -> bool {
+            return a.equals(b);
+        };
+    };
+
+    let spread = func(uint32 hash) -> uint32 {
+        return hash ^ (hash >> 16);
+    };
+
+    let reordered = func<T>(T[list] old, int[list] order) -> T[list] {
+        let result: T[list] = [];
+        let count = order.length;
+        let i = 0;
+        while (i < count) {
+            result.append(old[order[i]]);
+            i = i + 1;
+        }
+        return result;
+    };
+
+    // `[a, b]` text of the parts with braces in place of the brackets.
+    let braced = func(string[list] parts) -> string {
+        let text = parts.to_string();
+        return "{" + text.slice(1, text.byte_length - 1) + "}";
+    };
+);

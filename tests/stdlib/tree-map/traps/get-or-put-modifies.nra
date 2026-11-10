@@ -1,0 +1,18 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let int32 = import:Std.Core.Int32;
+let program = import:Std.Program;
+let tree_map = import:Std.Collections.TreeMap;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let map = tree_map.create<int, int>(int32.compare);
+        map.set(2, 2);
+        map.set(1, 1);
+        map.get_or_put(3, func() -> int {
+            map.set(3, 9);
+            return 3;
+        });
+        return program.ExitCode.Ok;
+    };
+);

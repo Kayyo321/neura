@@ -1,0 +1,11 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: capacity
+let hash_set = import:Std.Collections.HashSet;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let set = hash_set.with_capacity<int>(-1);
+        return program.ExitCode.Ok;
+    };
+);

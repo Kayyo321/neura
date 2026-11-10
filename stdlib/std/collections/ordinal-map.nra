@@ -1,0 +1,428 @@
+let cell = import:Std.Core.Cell;
+let iterators = import:Std.Collections.Iterator;
+let mutable_map = import:Std.Collections.MutableMap;
+let optional = import:Std.Core.Optional;
+let text_depth = import:Std.Collections.Internal.TextDepth;
+
+// A map from the integers 0 through n - 1 to values, with n fixed at
+// construction (Stdlib.md section 9.9). `position[key]` is the key's place
+// in the dense key and value lists, or -1. Deleting moves the last dense
+// entry into the freed place and removes the last slot, so nothing removed
+// stays reachable. Every operation is constant time; iteration is in key
+// order. A key outside 0 through n - 1 is a bounds trap from the position
+// list.
+export let OrdinalMap = module (
+    export let OrdinalMap = class<V> implements mutable_map.MutableMap<int, V> (
+        let position: int[list];
+        let dense_keys: int[list] = [];
+        let dense_values: V[list] = [];
+        // Advanced after each structural change; shared with iterators.
+        let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
+        let printing_depth: int = 0;
+
+        // An empty map for the keys 0 through `limit` - 1. Traps with
+        // "invalid argument: negative size".
+        export let init = func(int limit) -> void {
+            if (limit < 0) {
+                trap_with_message("invalid argument: negative size");
+            }
+            let slots: int[list] = [];
+            let i = 0;
+            while (i < limit) {
+                slots.append(-1);
+                i = i + 1;
+            }
+            position = slots;
+        };
+
+        let changed = func() -> void {
+            modifications.value = modifications.value + 1;
+        };
+
+        let check = func(uint64 expected) -> void {
+            if (modifications.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+        };
+
+        // Appends a new entry for an absent key.
+        let insert = func(int key, V value) -> void {
+            position[key] = dense_keys.length;
+            dense_keys.append(key);
+            dense_values.append(value);
+            changed();
+        };
+
+        // Removes the entry at dense place `slot`, moving the last entry into
+        // it.
+        let release = func(int slot) -> void {
+            let last = dense_keys.length - 1;
+            position[dense_keys[slot]] = -1;
+            if (slot != last) {
+                let moved = dense_keys[last];
+                dense_keys[slot] = moved;
+                dense_values[slot] = dense_values[last];
+                position[moved] = slot;
+            }
+            dense_keys.remove_at(last);
+            dense_values.remove_at(last);
+            changed();
+        };
+
+        export let size = func() -> int {
+            return dense_keys.length;
+        };
+
+        export let is_empty = func() -> bool {
+            return dense_keys.length == 0;
+        };
+
+        export let clear = func() -> void {
+            for (let key in dense_keys) {
+                position[key] = -1;
+            }
+            let no_keys: int[list] = [];
+            let no_values: V[list] = [];
+            dense_keys = no_keys;
+            dense_values = no_values;
+            changed();
+        };
+
+        export let contains_key = func(int key) -> bool {
+            return position[key] >= 0;
+        };
+
+        export let get = func(int key) -> optional.Optional<V> {
+            let slot = position[key];
+            if (slot < 0) {
+                return optional.Optional<V>.None;
+            }
+            return optional.Optional<V>.Some(dense_values[slot]);
+        };
+
+        export let get_or = func(int key, V fallback) -> V {
+            let slot = position[key];
+            if (slot < 0) {
+                return fallback;
+            }
+            return dense_values[slot];
+        };
+
+        // Traps with "no such element" when the key is absent.
+        export let require = func(int key) -> V {
+            let slot = position[key];
+            if (slot < 0) {
+                trap_with_message("no such element");
+            }
+            return dense_values[slot];
+        };
+
+        // Associates the value, replacing any previous one. Replacing is not
+        // structural.
+        export let set = func(int key, V value) -> void {
+            let slot = position[key];
+            if (slot >= 0) {
+                dense_values[slot] = value;
+                return;
+            }
+            insert(key, value);
+        };
+
+        // Removes the key; returns whether it was present.
+        export let delete = func(int key) -> bool {
+            let slot = position[key];
+            if (slot < 0) {
+                return false;
+            }
+            release(slot);
+            return true;
+        };
+
+        // The previous value.
+        export let put = func(int key, V value) -> optional.Optional<V> {
+            let slot = position[key];
+            if (slot >= 0) {
+                let previous = dense_values[slot];
+                dense_values[slot] = value;
+                return optional.Optional<V>.Some(previous);
+            }
+            insert(key, value);
+            return optional.Optional<V>.None;
+        };
+
+        export let remove = func(int key) -> optional.Optional<V> {
+            let slot = position[key];
+            if (slot < 0) {
+                return optional.Optional<V>.None;
+            }
+            let previous = dense_values[slot];
+            release(slot);
+            return optional.Optional<V>.Some(previous);
+        };
+
+        // The keys in ascending order.
+        export let keys = func() -> int[list] {
+            let result: int[list] = [];
+            let limit = position.length;
+            let key = 0;
+            while (key < limit) {
+                if (position[key] >= 0) {
+                    result.append(key);
+                }
+                key = key + 1;
+            }
+            return result;
+        };
+
+        // The values in key order.
+        export let values = func() -> V[list] {
+            let result: V[list] = [];
+            let limit = position.length;
+            let key = 0;
+            while (key < limit) {
+                let slot = position[key];
+                if (slot >= 0) {
+                    result.append(dense_values[slot]);
+                }
+                key = key + 1;
+            }
+            return result;
+        };
+
+        export let entries = func() -> [int, V][list] {
+            let result: [int, V][list] = [];
+            let limit = position.length;
+            let key = 0;
+            while (key < limit) {
+                let slot = position[key];
+                if (slot >= 0) {
+                    result.append([key, dense_values[slot]]);
+                }
+                key = key + 1;
+            }
+            return result;
+        };
+
+        // [key, value] entries in key order; fail-fast.
+        export let iterator = func() -> iterators.Iterator<[int, V]> {
+            return new OrdinalMapIterator<V>(position, dense_values, modifications);
+        };
+
+        // Sets every entry of the other map, in its key order. A key at or
+        // beyond this map's size is a bounds trap.
+        export let put_all = func(OrdinalMap<V> other) -> void {
+            for (let entry in other.entries()) {
+                set(entry[0], entry[1]);
+            }
+        };
+
+        // By equals, with `value` as the receiver.
+        export let contains_value = func(V value) -> bool {
+            for (let element in dense_values) {
+                if (value.equals(element)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // In key order. The action must not change the map structurally.
+        export let for_each = func(func(int, V) -> void action) -> void {
+            let expected = modifications.value;
+            let limit = position.length;
+            let key = 0;
+            while (key < limit) {
+                let slot = position[key];
+                if (slot >= 0) {
+                    action(key, dense_values[slot]);
+                    check(expected);
+                }
+                key = key + 1;
+            }
+        };
+
+        // Calls `drop` once per entry in key order and removes the matches.
+        // Returns how many were removed.
+        export let remove_if = func(func(int, V) -> bool drop) -> int {
+            let expected = modifications.value;
+            let removed = 0;
+            let limit = position.length;
+            let key = 0;
+            while (key < limit) {
+                let slot = position[key];
+                if (slot >= 0) {
+                    let matched = drop(key, dense_values[slot]);
+                    check(expected);
+                    if (matched) {
+                        release(slot);
+                        removed = removed + 1;
+                        expected = modifications.value;
+                    }
+                }
+                key = key + 1;
+            }
+            return removed;
+        };
+
+        // The existing value, or the result of `make`, stored. `make` must not
+        // change the map.
+        export let get_or_put = func(int key, func() -> V make) -> V {
+            let slot = position[key];
+            if (slot >= 0) {
+                return dense_values[slot];
+            }
+            let expected = modifications.value;
+            let value = make();
+            check(expected);
+            insert(key, value);
+            return value;
+        };
+
+        // Stores `value` when the key is absent, otherwise the combination of
+        // the old and the new value; returns what was stored.
+        export let merge = func(int key, V value, func(V, V) -> V combine) -> V {
+            let slot = position[key];
+            if (slot < 0) {
+                insert(key, value);
+                return value;
+            }
+            let expected = modifications.value;
+            let combined = combine(dense_values[slot], value);
+            check(expected);
+            dense_values[slot] = combined;
+            return combined;
+        };
+
+        // Stores a Some result and removes the key for None; returns the
+        // result.
+        export let compute = func(int key, func(int, optional.Optional<V>) -> optional.Optional<V> f) -> optional.Optional<V> {
+            let expected = modifications.value;
+            let result = f(key, get(key));
+            check(expected);
+            match (result) {
+                optional.Optional.Some(value) => {
+                    set(key, value);
+                },
+                optional.Optional.None => {
+                    delete(key);
+                },
+            }
+            return result;
+        };
+
+        // Another OrdinalMap with the same value type and size that holds an
+        // equal value for each of this map's keys.
+        export let.override equals = func(class other) -> bool {
+            if (!(other is OrdinalMap<V>)) {
+                return false;
+            }
+            let that = other as OrdinalMap<V>;
+            if (that.size() != dense_keys.length) {
+                return false;
+            }
+            for (let entry in that.entries()) {
+                let key = entry[0];
+                if (key >= position.length) {
+                    return false;
+                }
+                let slot = position[key];
+                if (slot < 0 || !dense_values[slot].equals(entry[1])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // The wrapping sum over entries of the key's hash exclusive-or the
+        // value's hash.
+        export let.override hash_code = func() -> uint32 {
+            let sum: uint64 = 0;
+            let count = dense_keys.length;
+            let i = 0;
+            while (i < count) {
+                let entry_hash = dense_keys[i].hash_code() ^ dense_values[i].hash_code();
+                sum = (sum + (entry_hash as uint64)) & 4294967295;
+                i = i + 1;
+            }
+            return sum as uint32;
+        };
+
+        // `{k: v, k2: v2}` in key order; the map itself as a direct value
+        // prints "(this collection)".
+        export let.override to_string = func() -> string {
+            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+                return "(this collection)";
+            }
+            let saved = printing_depth;
+            printing_depth = text_depth.enter();
+            let text = "{";
+            let first = true;
+            let limit = position.length;
+            let key = 0;
+            while (key < limit) {
+                let slot = position[key];
+                if (slot >= 0) {
+                    if (!first) {
+                        text = text + ", ";
+                    }
+                    text = text + key.to_string() + ": " + dense_values[slot].to_string();
+                    first = false;
+                }
+                key = key + 1;
+            }
+            text_depth.leave();
+            printing_depth = saved;
+            return text + "}";
+        };
+    );
+
+    // Scans the position list in key order, comparing the map's
+    // modification count before every step.
+    let OrdinalMapIterator = class<V> implements iterators.Iterator<[int, V]> (
+        let position: int[list];
+        let dense_values: V[list];
+        let modifications: cell.Cell<uint64>;
+        let expected: uint64;
+        let key: int = 0;
+
+        export let init = func(int[list] slots, V[list] values, cell.Cell<uint64> counter) -> void {
+            position = slots;
+            dense_values = values;
+            modifications = counter;
+            expected = counter.value;
+            skip_absent();
+        };
+
+        let skip_absent = func() -> void {
+            while (key < position.length && position[key] < 0) {
+                key = key + 1;
+            }
+        };
+
+        export let has_next = func() -> bool {
+            if (modifications.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            return key < position.length;
+        };
+
+        export let next = func() -> [int, V] {
+            if (modifications.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            if (key >= position.length) {
+                trap_with_message("no such element");
+            }
+            let entry: [int, V] = [key, dense_values[position[key]]];
+            key = key + 1;
+            skip_absent();
+            return entry;
+        };
+    );
+
+    // An empty map for the keys 0 through `size` - 1. Traps with "invalid
+    // argument: negative size".
+    export let create = func<V>(int size) -> OrdinalMap<V> {
+        return new OrdinalMap<V>(size);
+    };
+);

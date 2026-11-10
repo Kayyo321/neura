@@ -1,0 +1,438 @@
+let iterators = import:Std.Collections.Iterator;
+let mutable_list = import:Std.Collections.MutableList;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let sequences = import:Std.Collections.Sequence;
+let sorting = import:Std.Collections.Sorting;
+let text_depth = import:Std.Collections.Internal.TextDepth;
+
+// A growable list over one built-in list (Stdlib.md section 9.3). The
+// backing list's structural version is the modification count, so
+// iterators also detect changes made through `items()` or a wrapped alias.
+export let ArrayList = module (
+    export let ArrayList = class<T> implements mutable_list.MutableList<T> (
+        // Replaced never: wrap and items share this list for the wrapper's
+        // lifetime.
+        let storage: T[list];
+        let printing_depth: int = 0;
+
+        // Adopts `values` without copying, as `wrap` does.
+        export let init = func(T[list] values) -> void {
+            storage = values;
+        };
+
+        // The live backing list. A built-in for-each over it traps with
+        // reason 5 on a structural change.
+        export let items = func() -> T[list] {
+            return storage;
+        };
+
+        export let size = func() -> int {
+            return storage.length;
+        };
+
+        export let is_empty = func() -> bool {
+            return storage.length == 0;
+        };
+
+        // A bounds trap for an index outside 0 through size() - 1.
+        export let get = func(int index) -> T {
+            return storage[index];
+        };
+
+        // Not structural.
+        export let set = func(int index, T value) -> void {
+            storage[index] = value;
+        };
+
+        export let first = func() -> T {
+            if (storage.length == 0) {
+                trap_with_message("no such element");
+            }
+            return storage[0];
+        };
+
+        export let last = func() -> T {
+            if (storage.length == 0) {
+                trap_with_message("no such element");
+            }
+            return storage[storage.length - 1];
+        };
+
+        export let first_or_none = func() -> optional.Optional<T> {
+            if (storage.length == 0) {
+                return optional.Optional<T>.None;
+            }
+            return optional.Optional<T>.Some(storage[0]);
+        };
+
+        export let last_or_none = func() -> optional.Optional<T> {
+            if (storage.length == 0) {
+                return optional.Optional<T>.None;
+            }
+            return optional.Optional<T>.Some(storage[storage.length - 1]);
+        };
+
+        // Appends; always true.
+        export let add = func(T value) -> bool {
+            storage.append(value);
+            return true;
+        };
+
+        // Inserts before `index`; an index equal to the size appends.
+        export let add_at = func(int index, T value) -> void {
+            let count = storage.length;
+            if (index == count) {
+                storage.append(value);
+                return;
+            }
+            // The read makes any other bad index a bounds trap before the
+            // list changes.
+            let displaced = storage[index];
+            storage.append(storage[count - 1]);
+            let k = count - 1;
+            while (k > index) {
+                storage[k] = storage[k - 1];
+                k = k - 1;
+            }
+            storage[index] = value;
+        };
+
+        // Appends each element in order. Reads by position up to the starting
+        // length, so adding the list's own items() doubles it.
+        export let add_all = func(T[list] values) -> void {
+            let count = values.length;
+            let i = 0;
+            while (i < count) {
+                storage.append(values[i]);
+                i = i + 1;
+            }
+        };
+
+        export let remove_at = func(int index) -> T {
+            let value = storage[index];
+            storage.remove_at(index);
+            return value;
+        };
+
+        export let remove_first = func() -> T {
+            if (storage.length == 0) {
+                trap_with_message("no such element");
+            }
+            let value = storage[0];
+            storage.remove_at(0);
+            return value;
+        };
+
+        export let remove_last = func() -> T {
+            let count = storage.length;
+            if (count == 0) {
+                trap_with_message("no such element");
+            }
+            let value = storage[count - 1];
+            storage.remove_at(count - 1);
+            return value;
+        };
+
+        // Not structural.
+        export let swap = func(int i, int j) -> void {
+            let value = storage[i];
+            storage[i] = storage[j];
+            storage[j] = value;
+        };
+
+        // Not structural.
+        export let reverse = func() -> void {
+            let i = 0;
+            let j = storage.length - 1;
+            while (i < j) {
+                let value = storage[i];
+                storage[i] = storage[j];
+                storage[j] = value;
+                i = i + 1;
+                j = j - 1;
+            }
+        };
+
+        // Not structural.
+        export let fill = func(T value) -> void {
+            let count = storage.length;
+            let i = 0;
+            while (i < count) {
+                storage[i] = value;
+                i = i + 1;
+            }
+        };
+
+        // Removes elements from the end of the backing list until `size`
+        // remain. Traps with "invalid argument: negative size" or "invalid
+        // argument: size above current size".
+        export let truncate = func(int size) -> void {
+            if (size < 0) {
+                trap_with_message("invalid argument: negative size");
+            }
+            if (size > storage.length) {
+                trap_with_message("invalid argument: size above current size");
+            }
+            while (storage.length > size) {
+                storage.remove_at(storage.length - 1);
+            }
+        };
+
+        // Removes every element from the end of the same backing list.
+        export let clear = func() -> void {
+            while (storage.length > 0) {
+                storage.remove_at(storage.length - 1);
+            }
+        };
+
+        // A new ArrayList with the elements from `start` inclusive to `end`
+        // exclusive. Traps with "invalid argument: range" unless
+        // 0 <= start <= end <= size().
+        export let slice = func(int start, int end) -> ArrayList<T> {
+            if (start < 0 || start > end || end > storage.length) {
+                trap_with_message("invalid argument: range");
+            }
+            let result: T[list] = [];
+            let i = start;
+            while (i < end) {
+                result.append(storage[i]);
+                i = i + 1;
+            }
+            return new ArrayList<T>(result);
+        };
+
+        // A new built-in list in order.
+        export let to_list = func() -> T[list] {
+            let result: T[list] = [];
+            let count = storage.length;
+            let i = 0;
+            while (i < count) {
+                result.append(storage[i]);
+                i = i + 1;
+            }
+            return result;
+        };
+
+        // A fail-fast iterator over the backing list.
+        export let iterator = func() -> iterators.Iterator<T> {
+            return new ArrayListIterator<T>(storage);
+        };
+
+        // A lazy pipeline over this list's fail-fast iterator (Stdlib.md
+        // section 9.12): a structural change while it runs traps.
+        export let sequence = func() -> sequences.Sequence<T> {
+            return sequences.from_iterator<T>(iterator());
+        };
+
+        // In order. The action must not change the list structurally.
+        export let for_each = func(func(T) -> void action) -> void {
+            let version = storage.version;
+            let i = 0;
+            while (i < storage.length) {
+                action(storage[i]);
+                if (storage.version != version) {
+                    trap_with_message("collection modified during iteration");
+                }
+                i = i + 1;
+            }
+        };
+
+        // Calls `drop` once per element in order, compacts the kept elements
+        // by indexed writes, then removes the tail from the end. Returns how
+        // many were removed.
+        export let remove_if = func(func(T) -> bool drop) -> int {
+            return remove_matching(drop, true);
+        };
+
+        export let retain_if = func(func(T) -> bool keep) -> int {
+            return remove_matching(keep, false);
+        };
+
+        let remove_matching = func(func(T) -> bool test, bool remove_when) -> int {
+            let version = storage.version;
+            let count = storage.length;
+            let kept = 0;
+            let i = 0;
+            while (i < count) {
+                let value = storage[i];
+                let matched = test(value);
+                if (storage.version != version) {
+                    trap_with_message("collection modified during iteration");
+                }
+                if (matched != remove_when) {
+                    if (kept != i) {
+                        storage[kept] = value;
+                    }
+                    kept = kept + 1;
+                }
+                i = i + 1;
+            }
+            while (storage.length > kept) {
+                storage.remove_at(storage.length - 1);
+            }
+            return count - kept;
+        };
+
+        // The first index whose element passes, or -1.
+        export let index_where = func(func(T) -> bool test) -> int {
+            let version = storage.version;
+            let i = 0;
+            while (i < storage.length) {
+                let matched = test(storage[i]);
+                if (storage.version != version) {
+                    trap_with_message("collection modified during iteration");
+                }
+                if (matched) {
+                    return i;
+                }
+                i = i + 1;
+            }
+            return -1;
+        };
+
+        // Stable; Sorting.sort on the backing list.
+        export let sort = func(func(T, T) -> ordering.Ordering c) -> void {
+            sorting.sort<T>(storage, c);
+        };
+
+        // Sorting.binary_search on the backing list, which must be sorted by c.
+        export let binary_search = func(T value, func(T, T) -> ordering.Ordering c) -> int {
+            return sorting.binary_search<T>(storage, value, c);
+        };
+
+        // By equals, with `value` as the receiver.
+        export let contains = func(T value) -> bool {
+            return index_of(value) >= 0;
+        };
+
+        export let index_of = func(T value) -> int {
+            let count = storage.length;
+            let i = 0;
+            while (i < count) {
+                if (value.equals(storage[i])) {
+                    return i;
+                }
+                i = i + 1;
+            }
+            return -1;
+        };
+
+        export let last_index_of = func(T value) -> int {
+            let i = storage.length - 1;
+            while (i >= 0) {
+                if (value.equals(storage[i])) {
+                    return i;
+                }
+                i = i - 1;
+            }
+            return -1;
+        };
+
+        // Removes the first element equal to `value`.
+        export let remove = func(T value) -> bool {
+            let index = index_of(value);
+            if (index < 0) {
+                return false;
+            }
+            storage.remove_at(index);
+            return true;
+        };
+
+        // Another ArrayList with the same element type, size, and equal
+        // elements at each index.
+        export let.override equals = func(class other) -> bool {
+            if (!(other is ArrayList<T>)) {
+                return false;
+            }
+            return storage.equals((other as ArrayList<T>).items());
+        };
+
+        // The list formula of section 5.2.
+        export let.override hash_code = func() -> uint32 {
+            return storage.hash_code();
+        };
+
+        // `[a, b, c]`; the list itself as a direct element prints
+        // "(this collection)".
+        export let.override to_string = func() -> string {
+            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+                return "(this collection)";
+            }
+            let saved = printing_depth;
+            printing_depth = text_depth.enter();
+            let text = storage.to_string();
+            text_depth.leave();
+            printing_depth = saved;
+            return text;
+        };
+    );
+
+    // Compares the backing list's version before every step.
+    let ArrayListIterator = class<T> implements iterators.Iterator<T> (
+        let source: T[list];
+        let expected: uint64;
+        let position: int = 0;
+
+        export let init = func(T[list] values) -> void {
+            source = values;
+            expected = values.version;
+        };
+
+        export let has_next = func() -> bool {
+            if (source.version != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            return position < source.length;
+        };
+
+        export let next = func() -> T {
+            if (source.version != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            if (position >= source.length) {
+                trap_with_message("no such element");
+            }
+            let value = source[position];
+            position = position + 1;
+            return value;
+        };
+    );
+
+    export let create = func<T>() -> ArrayList<T> {
+        let values: T[list] = [];
+        return new ArrayList<T>(values);
+    };
+
+    // Copies `items`.
+    export let of = func<T>(T[list] items) -> ArrayList<T> {
+        let values: T[list] = [];
+        let count = items.length;
+        let i = 0;
+        while (i < count) {
+            values.append(items[i]);
+            i = i + 1;
+        }
+        return new ArrayList<T>(values);
+    };
+
+    // `count` copies of `value`. Traps with "invalid argument: negative count".
+    export let filled = func<T>(int count, T value) -> ArrayList<T> {
+        if (count < 0) {
+            trap_with_message("invalid argument: negative count");
+        }
+        let values: T[list] = [];
+        let i = 0;
+        while (i < count) {
+            values.append(value);
+            i = i + 1;
+        }
+        return new ArrayList<T>(values);
+    };
+
+    // Adopts `items` without copying; the list and the wrapper share
+    // storage.
+    export let wrap = func<T>(T[list] items) -> ArrayList<T> {
+        return new ArrayList<T>(items);
+    };
+);

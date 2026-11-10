@@ -1,0 +1,16 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let int_map = import:Std.Collections.IntMap;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let map = int_map.create<int>();
+        map.set(1, 1);
+        map.set(2, 2);
+        let items = map.iterator();
+        map.clear();
+        items.has_next();
+        return program.ExitCode.Ok;
+    };
+);

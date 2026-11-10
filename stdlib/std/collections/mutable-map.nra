@@ -1,0 +1,22 @@
+let map = import:Std.Collections.Map;
+let optional = import:Std.Core.Optional;
+
+// A map that can change. Replacing the value of an existing key is not a
+// structural change. A callback passed to a member must not modify the map.
+export let MutableMap = module (
+    export let MutableMap = interface<K, V>:map.Map<K, V> (
+        // Associates the value, replacing any previous one.
+        let set = func(K key, V value) -> void;
+        // Removes the key; returns whether it was present.
+        let delete = func(K key) -> bool;
+        let clear = func() -> void;
+        // The previous value.
+        let put = func(K key, V value) -> optional.Optional<V>;
+        let remove = func(K key) -> optional.Optional<V>;
+        let remove_if = func(func(K, V) -> bool drop) -> int;
+        let get_or_put = func(K key, func() -> V make) -> V;
+        let merge = func(K key, V value, func(V, V) -> V combine) -> V;
+        // Stores a Some result and removes the key for None.
+        let compute = func(K key, func(K, optional.Optional<V>) -> optional.Optional<V> f) -> optional.Optional<V>;
+    );
+);

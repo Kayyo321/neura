@@ -1,0 +1,786 @@
+let array_list = import:Std.Collections.ArrayList;
+let cell = import:Std.Core.Cell;
+let hash_map = import:Std.Collections.HashMap;
+let hash_set = import:Std.Collections.HashSet;
+let iterable = import:Std.Collections.Iterable;
+let iterators = import:Std.Collections.Iterator;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let sorting = import:Std.Collections.Sorting;
+
+// Lazy, single-use pipelines (Stdlib.md section 9.12). A sequence is two
+// function values, `has_next` and `next`, with the iterator protocol's
+// contract; each operation is a closure over the previous pair. State that
+// an operation keeps (a count, a buffered element, a position) lives in a
+// captured Cell or list, because closures capture locals by value.
+//
+// Evaluation is pull-based and sequential: nothing runs until a terminal
+// operation, and each element passes through the whole pipeline before the
+// next is requested. Every operation, including iterator(), marks the
+// sequence used; a second operation on it traps with "invalid state:
+// sequence already used". `next` after the end traps with "no such
+// element". Equality and hashing are by identity; the text is "Sequence".
+export let Sequence = module (
+    export let Sequence = class<T> implements iterable.Iterable<T> (
+        let has_next: func() -> bool;
+        let next: func() -> T;
+        let consumed: bool = false;
+
+        // A sequence over a has_next and next pair with the iterator
+        // protocol's contract.
+        export let init = func(func() -> bool more, func() -> T pull) -> void {
+            has_next = more;
+            next = pull;
+        };
+
+        // Uses the sequence up and returns an iterator over its elements, so
+        // that for-each can visit a sequence once.
+        export let iterator = func() -> iterators.Iterator<T> {
+            begin();
+            return new SequenceIterator<T>(has_next, next);
+        };
+
+        export let map = func<U>(func(T) -> U f) -> Sequence<U> {
+            begin();
+            let pull = next;
+            return new Sequence<U>(has_next, func() -> U {
+                return f(pull());
+            });
+        };
+
+        // The elements that pass `keep`.
+        export let filter = func(func(T) -> bool keep) -> Sequence<T> {
+            begin();
+            let more = has_next;
+            let pull = next;
+            let buffer: T[list] = [];
+            return buffered<T>(buffer, func() -> bool {
+                while (more()) {
+                    let value = pull();
+                    if (keep(value)) {
+                        buffer.append(value);
+                        return true;
+                    }
+                }
+                return false;
+            });
+        };
+
+        // The elements of each list `f` returns, in order.
+        export let flat_map = func<U>(func(T) -> U[list] f) -> Sequence<U> {
+            begin();
+            let more = has_next;
+            let pull = next;
+            let buffer: U[list] = [];
+            return buffered<U>(buffer, func() -> bool {
+                while (more()) {
+                    let items = f(pull());
+                    let count = items.length;
+                    if (count > 0) {
+                        let i = 0;
+                        while (i < count) {
+                            buffer.append(items[i]);
+                            i = i + 1;
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            });
+        };
+
+        // At most the first `n` elements; stops pulling after the n-th.
+        // Traps with "invalid argument: negative count" for a negative `n`.
+        export let take = func(int n) -> Sequence<T> {
+            begin();
+            if (n < 0) {
+                trap_with_message("invalid argument: negative count");
+            }
+            let more = has_next;
+            let pull = next;
+            let remaining = cell.of<int>(n);
+            return new Sequence<T>(func() -> bool {
+                return remaining.value > 0 && more();
+            }, func() -> T {
+                if (remaining.value <= 0) {
+                    trap_with_message("no such element");
+                }
+                remaining.value = remaining.value - 1;
+                return pull();
+            });
+        };
+
+        // All but the first `n` elements. Traps with "invalid argument:
+        // negative count" for a negative `n`.
+        export let skip = func(int n) -> Sequence<T> {
+            begin();
+            if (n < 0) {
+                trap_with_message("invalid argument: negative count");
+            }
+            let more = has_next;
+            let pull = next;
+            let skipped = cell.of<bool>(false);
+            let ready = func() -> bool {
+                if (!skipped.value) {
+                    skipped.value = true;
+                    let i = 0;
+                    while (i < n && more()) {
+                        pull();
+                        i = i + 1;
+                    }
+                }
+                return more();
+            };
+            return new Sequence<T>(ready, func() -> T {
+                if (!ready()) {
+                    trap_with_message("no such element");
+                }
+                return pull();
+            });
+        };
+
+        // The leading elements that pass `test`; ends at the first that
+        // fails.
+        export let take_while = func(func(T) -> bool test) -> Sequence<T> {
+            begin();
+            let more = has_next;
+            let pull = next;
+            let done = cell.of<bool>(false);
+            let buffer: T[list] = [];
+            return buffered<T>(buffer, func() -> bool {
+                if (done.value) {
+                    return false;
+                }
+                if (more()) {
+                    let value = pull();
+                    if (test(value)) {
+                        buffer.append(value);
+                        return true;
+                    }
+                }
+                done.value = true;
+                return false;
+            });
+        };
+
+        // The elements from the first that fails `test` on.
+        export let skip_while = func(func(T) -> bool test) -> Sequence<T> {
+            begin();
+            let more = has_next;
+            let pull = next;
+            let started = cell.of<bool>(false);
+            let buffer: T[list] = [];
+            return buffered<T>(buffer, func() -> bool {
+                if (!started.value) {
+                    started.value = true;
+                    while (more()) {
+                        let value = pull();
+                        if (!test(value)) {
+                            buffer.append(value);
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                if (more()) {
+                    buffer.append(pull());
+                    return true;
+                }
+                return false;
+            });
+        };
+
+        // Each element with its position from 0.
+        export let enumerate = func() -> Sequence<[int, T]> {
+            begin();
+            let pull = next;
+            let position = cell.of<int>(0);
+            return new Sequence<[int, T]>(has_next, func() -> [int, T] {
+                let value = pull();
+                let item: [int, T] = [position.value, value];
+                position.value = position.value + 1;
+                return item;
+            });
+        };
+
+        // Pairs of elements of this and `other`; ends with the shorter.
+        // Uses `other` up as well.
+        export let zip = func<U>(Sequence<U> other) -> Sequence<[T, U]> {
+            begin();
+            let more = has_next;
+            let pull = next;
+            let other_more = other.take_has_next();
+            let other_pull = other.take_next();
+            return new Sequence<[T, U]>(func() -> bool {
+                return more() && other_more();
+            }, func() -> [T, U] {
+                let first = pull();
+                let item: [T, U] = [first, other_pull()];
+                return item;
+            });
+        };
+
+        // This sequence's elements, then those of `other`. Uses `other` up
+        // as well.
+        export let chain = func(Sequence<T> other) -> Sequence<T> {
+            begin();
+            let more = has_next;
+            let pull = next;
+            let other_more = other.take_has_next();
+            let other_pull = other.take_next();
+            return new Sequence<T>(func() -> bool {
+                return more() || other_more();
+            }, func() -> T {
+                if (more()) {
+                    return pull();
+                }
+                return other_pull();
+            });
+        };
+
+        // Calls `action` with each element as it passes.
+        export let peek = func(func(T) -> void action) -> Sequence<T> {
+            begin();
+            let pull = next;
+            return new Sequence<T>(has_next, func() -> T {
+                let value = pull();
+                action(value);
+                return value;
+            });
+        };
+
+        // Consecutive new lists of `n` elements; the last may be shorter.
+        // Traps with "invalid argument: chunk size" when `n` is below 1.
+        export let chunked = func(int n) -> Sequence<T[list]> {
+            begin();
+            if (n < 1) {
+                trap_with_message("invalid argument: chunk size");
+            }
+            let more = has_next;
+            let pull = next;
+            let buffer: T[list][list] = [];
+            return buffered<T[list]>(buffer, func() -> bool {
+                if (!more()) {
+                    return false;
+                }
+                let chunk: T[list] = [];
+                while (chunk.length < n && more()) {
+                    chunk.append(pull());
+                }
+                buffer.append(chunk);
+                return true;
+            });
+        };
+
+        // Every run of `n` consecutive elements, each a new list, advancing
+        // by one; none when there are fewer than `n`. Traps with "invalid
+        // argument: window size" when `n` is below 1.
+        export let windowed = func(int n) -> Sequence<T[list]> {
+            begin();
+            if (n < 1) {
+                trap_with_message("invalid argument: window size");
+            }
+            let more = has_next;
+            let pull = next;
+            let window: T[list] = [];
+            let buffer: T[list][list] = [];
+            return buffered<T[list]>(buffer, func() -> bool {
+                if (window.length == n) {
+                    if (!more()) {
+                        return false;
+                    }
+                    window.remove_at(0);
+                    window.append(pull());
+                } else {
+                    while (window.length < n) {
+                        if (!more()) {
+                            return false;
+                        }
+                        window.append(pull());
+                    }
+                }
+                let copy: T[list] = [];
+                let i = 0;
+                while (i < n) {
+                    copy.append(window[i]);
+                    i = i + 1;
+                }
+                buffer.append(copy);
+                return true;
+            });
+        };
+
+        // The whole input, stably sorted by `c` when first pulled.
+        export let sorted = func(func(T, T) -> ordering.Ordering c) -> Sequence<T> {
+            begin();
+            let more = has_next;
+            let pull = next;
+            let loaded = cell.of<bool>(false);
+            let buffer: T[list] = [];
+            return buffered<T>(buffer, func() -> bool {
+                if (loaded.value) {
+                    return false;
+                }
+                loaded.value = true;
+                while (more()) {
+                    buffer.append(pull());
+                }
+                sorting.sort<T>(buffer, c);
+                return buffer.length > 0;
+            });
+        };
+
+        // The whole input in reverse order, buffered when first pulled.
+        export let reversed = func() -> Sequence<T> {
+            begin();
+            let more = has_next;
+            let pull = next;
+            let loaded = cell.of<bool>(false);
+            let buffer: T[list] = [];
+            return buffered<T>(buffer, func() -> bool {
+                if (loaded.value) {
+                    return false;
+                }
+                loaded.value = true;
+                while (more()) {
+                    buffer.append(pull());
+                }
+                let i = 0;
+                let j = buffer.length - 1;
+                while (i < j) {
+                    let value = buffer[i];
+                    buffer[i] = buffer[j];
+                    buffer[j] = value;
+                    i = i + 1;
+                    j = j - 1;
+                }
+                return buffer.length > 0;
+            });
+        };
+
+        // The first of each group of elements equal by equals and hash_code.
+        export let distinct = func() -> Sequence<T> {
+            begin();
+            let more = has_next;
+            let pull = next;
+            let seen = hash_set.create<T>();
+            let buffer: T[list] = [];
+            return buffered<T>(buffer, func() -> bool {
+                while (more()) {
+                    let value = pull();
+                    if (seen.add(value)) {
+                        buffer.append(value);
+                        return true;
+                    }
+                }
+                return false;
+            });
+        };
+
+        // A new built-in list of the elements.
+        export let to_list = func() -> T[list] {
+            begin();
+            let result: T[list] = [];
+            while (has_next()) {
+                result.append(next());
+            }
+            return result;
+        };
+
+        export let to_array_list = func() -> array_list.ArrayList<T> {
+            return array_list.wrap<T>(to_list());
+        };
+
+        // The elements that pass `test`, then those that fail it.
+        export let partition = func(func(T) -> bool test) -> [array_list.ArrayList<T>, array_list.ArrayList<T>] {
+            begin();
+            let passed: T[list] = [];
+            let failed: T[list] = [];
+            while (has_next()) {
+                let value = next();
+                if (test(value)) {
+                    passed.append(value);
+                } else {
+                    failed.append(value);
+                }
+            }
+            let result: [array_list.ArrayList<T>, array_list.ArrayList<T>] = [array_list.wrap<T>(passed), array_list.wrap<T>(failed)];
+            return result;
+        };
+
+        // Left to right.
+        export let fold = func<A>(A initial, func(A, T) -> A f) -> A {
+            begin();
+            let accumulator = initial;
+            while (has_next()) {
+                accumulator = f(accumulator, next());
+            }
+            return accumulator;
+        };
+
+        // Traps (reason 1) beyond the int range.
+        export let count = func() -> int {
+            begin();
+            let total = 0;
+            while (has_next()) {
+                next();
+                total = total + 1;
+            }
+            return total;
+        };
+
+        export let for_each = func(func(T) -> void action) -> void {
+            begin();
+            while (has_next()) {
+                action(next());
+            }
+        };
+
+        // Stops at the first element that passes.
+        export let any = func(func(T) -> bool test) -> bool {
+            begin();
+            while (has_next()) {
+                if (test(next())) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // Stops at the first element that fails.
+        export let all = func(func(T) -> bool test) -> bool {
+            begin();
+            while (has_next()) {
+                if (!test(next())) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // Stops at the first element that passes.
+        export let none = func(func(T) -> bool test) -> bool {
+            begin();
+            while (has_next()) {
+                if (test(next())) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // f(f(first, second), third) and so on; None when empty.
+        export let reduce = func(func(T, T) -> T f) -> optional.Optional<T> {
+            begin();
+            if (!has_next()) {
+                return optional.Optional<T>.None;
+            }
+            let accumulator = next();
+            while (has_next()) {
+                accumulator = f(accumulator, next());
+            }
+            return optional.Optional<T>.Some(accumulator);
+        };
+
+        // Pulls at most one element.
+        export let first = func() -> optional.Optional<T> {
+            begin();
+            if (!has_next()) {
+                return optional.Optional<T>.None;
+            }
+            return optional.Optional<T>.Some(next());
+        };
+
+        export let last = func() -> optional.Optional<T> {
+            begin();
+            if (!has_next()) {
+                return optional.Optional<T>.None;
+            }
+            let value = next();
+            while (has_next()) {
+                value = next();
+            }
+            return optional.Optional<T>.Some(value);
+        };
+
+        // The first element that passes `test`.
+        export let find = func(func(T) -> bool test) -> optional.Optional<T> {
+            begin();
+            while (has_next()) {
+                let value = next();
+                if (test(value)) {
+                    return optional.Optional<T>.Some(value);
+                }
+            }
+            return optional.Optional<T>.None;
+        };
+
+        // The first of several least elements.
+        export let min = func(func(T, T) -> ordering.Ordering c) -> optional.Optional<T> {
+            return extreme(c, ordering.Ordering.Less);
+        };
+
+        // The first of several greatest elements.
+        export let max = func(func(T, T) -> ordering.Ordering c) -> optional.Optional<T> {
+            return extreme(c, ordering.Ordering.Greater);
+        };
+
+        // A HashSet of the elements in first-occurrence order, by equals and
+        // hash_code.
+        export let to_set = func() -> hash_set.HashSet<T> {
+            begin();
+            let result = hash_set.create<T>();
+            while (has_next()) {
+                result.add(next());
+            }
+            return result;
+        };
+
+        // A HashMap from key(element) to value(element), by the keys' equals
+        // and hash_code. Traps with "invalid argument: duplicate key" when two
+        // elements give equal keys.
+        export let to_map = func<K, V>(func(T) -> K key, func(T) -> V value) -> hash_map.HashMap<K, V> {
+            begin();
+            let result = hash_map.create<K, V>();
+            while (has_next()) {
+                let element = next();
+                let item_key = key(element);
+                if (result.contains_key(item_key)) {
+                    trap_with_message("invalid argument: duplicate key");
+                }
+                result.set(item_key, value(element));
+            }
+            return result;
+        };
+
+        // The elements grouped by key(element), groups in first-seen key
+        // order and each group in sequence order.
+        export let group_by = func<K>(func(T) -> K key) -> hash_map.HashMap<K, array_list.ArrayList<T>> {
+            begin();
+            let groups = hash_map.create<K, array_list.ArrayList<T>>();
+            let make = func() -> array_list.ArrayList<T> {
+                return array_list.create<T>();
+            };
+            while (has_next()) {
+                let element = next();
+                groups.get_or_put(key(element), make).add(element);
+            }
+            return groups;
+        };
+
+        export let.override to_string = func() -> string {
+            return "Sequence";
+        };
+
+        // Marks the sequence used and returns its has_next function, for an
+        // operation of another sequence that consumes this one.
+        let take_has_next = func() -> func() -> bool {
+            begin();
+            return has_next;
+        };
+
+        // The next function of a sequence take_has_next already used up.
+        let take_next = func() -> func() -> T {
+            return next;
+        };
+
+        let begin = func() -> void {
+            if (consumed) {
+                trap_with_message("invalid state: sequence already used");
+            }
+            consumed = true;
+        };
+
+        let extreme = func(func(T, T) -> ordering.Ordering c, ordering.Ordering wanted) -> optional.Optional<T> {
+            begin();
+            if (!has_next()) {
+                return optional.Optional<T>.None;
+            }
+            let best = next();
+            while (has_next()) {
+                let value = next();
+                if (c(value, best) == wanted) {
+                    best = value;
+                }
+            }
+            return optional.Optional<T>.Some(best);
+        };
+    );
+
+    let SequenceIterator = class<T> implements iterators.Iterator<T> (
+        let more: func() -> bool;
+        let pull: func() -> T;
+
+        export let init = func(func() -> bool has_more, func() -> T take) -> void {
+            more = has_more;
+            pull = take;
+        };
+
+        export let has_next = func() -> bool {
+            return more();
+        };
+
+        export let next = func() -> T {
+            if (!more()) {
+                trap_with_message("no such element");
+            }
+            return pull();
+        };
+    );
+
+    // A sequence whose elements come from `buffer`, which `refill` appends
+    // to when it is used up. `refill` returns false at the end and true only
+    // after appending at least one element.
+    let buffered = func<U>(U[list] buffer, func() -> bool refill) -> Sequence<U> {
+        let position = cell.of<int>(0);
+        let more = func() -> bool {
+            if (position.value < buffer.length) {
+                return true;
+            }
+            while (buffer.length > 0) {
+                buffer.remove_at(buffer.length - 1);
+            }
+            position.value = 0;
+            return refill();
+        };
+        return new Sequence<U>(more, func() -> U {
+            if (!more()) {
+                trap_with_message("no such element");
+            }
+            let value = buffer[position.value];
+            position.value = position.value + 1;
+            return value;
+        });
+    };
+
+    // The list's elements in order. It fails fast with "collection modified
+    // during iteration" when the list changes structurally, as the built-in
+    // for-each does.
+    export let from_list = func<T>(T[list] items) -> Sequence<T> {
+        let position = cell.of<int>(0);
+        let version = items.version;
+        let more = func() -> bool {
+            if (items.version != version) {
+                trap_with_message("collection modified during iteration");
+            }
+            return position.value < items.length;
+        };
+        return new Sequence<T>(more, func() -> T {
+            if (!more()) {
+                trap_with_message("no such element");
+            }
+            let value = items[position.value];
+            position.value = position.value + 1;
+            return value;
+        });
+    };
+
+    // The remaining elements of an iterator, which keeps its own
+    // modification checks.
+    export let from_iterator = func<T>(iterators.Iterator<T> items) -> Sequence<T> {
+        return new Sequence<T>(func() -> bool {
+            return items.has_next();
+        }, func() -> T {
+            return items.next();
+        });
+    };
+
+    export let empty = func<T>() -> Sequence<T> {
+        return new Sequence<T>(func() -> bool {
+            return false;
+        }, func() -> T {
+            trap_with_message("no such element");
+        });
+    };
+
+    // An infinite sequence of make(), make(), ...
+    export let generate = func<T>(func() -> T make) -> Sequence<T> {
+        return new Sequence<T>(func() -> bool {
+            return true;
+        }, make);
+    };
+
+    // The infinite sequence seed, step(seed), step(step(seed)), ...; `step`
+    // runs only when the next element is pulled.
+    export let iterate = func<T>(T seed, func(T) -> T step) -> Sequence<T> {
+        let state = cell.of<T>(seed);
+        let started = cell.of<bool>(false);
+        return new Sequence<T>(func() -> bool {
+            return true;
+        }, func() -> T {
+            if (started.value) {
+                state.value = step(state.value);
+            } else {
+                started.value = true;
+            }
+            return state.value;
+        });
+    };
+
+    // The ints from `start` inclusive to `end` exclusive, ascending; empty
+    // when `end` is not above `start`.
+    export let range = func(int start, int end) -> Sequence<int> {
+        let position = cell.of<int>(start);
+        let more = func() -> bool {
+            return position.value < end;
+        };
+        return new Sequence<int>(more, func() -> int {
+            if (!more()) {
+                trap_with_message("no such element");
+            }
+            let value = position.value;
+            position.value = value + 1;
+            return value;
+        });
+    };
+
+    // The strings with `separator` between consecutive ones.
+    export let join = func(Sequence<string> s, string separator) -> string {
+        let items = s.iterator();
+        let text = "";
+        let first = true;
+        while (items.has_next()) {
+            if (first) {
+                first = false;
+            } else {
+                text = text + separator;
+            }
+            text = text + items.next();
+        }
+        return text;
+    };
+
+    // Checked: an overflow traps (reason 1).
+    export let sum_int32 = func(Sequence<int> s) -> int {
+        let items = s.iterator();
+        let total = 0;
+        while (items.has_next()) {
+            total = total + items.next();
+        }
+        return total;
+    };
+
+    // Checked: an overflow traps (reason 1).
+    export let sum_int64 = func(Sequence<int64> s) -> int64 {
+        let items = s.iterator();
+        let total: int64 = 0;
+        while (items.has_next()) {
+            total = total + items.next();
+        }
+        return total;
+    };
+
+    // Left-to-right addition starting from the first element; 0.0 when
+    // empty.
+    export let sum_float64 = func(Sequence<float64> s) -> float64 {
+        let items = s.iterator();
+        if (!items.has_next()) {
+            return 0.0;
+        }
+        let total = items.next();
+        while (items.has_next()) {
+            total = total + items.next();
+        }
+        return total;
+    };
+);

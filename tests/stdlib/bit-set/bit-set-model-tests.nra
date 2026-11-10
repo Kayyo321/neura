@@ -1,0 +1,201 @@
+let bit_set = import:Std.Collections.BitSet;
+let model_random = import:ModelRandom;
+let test = import:Std.Test;
+
+// Drives a BitSet and a trivially correct model (a bool per value from 0 to
+// Limit - 1) with the same seeded operations, comparing size, members,
+// iteration order, and results after every operation.
+let BitSetModelTests = module (
+    const Limit: int = 100;
+
+    let empty_model = func() -> bool[list] {
+        let result: bool[list] = [];
+        let i = 0;
+        while (i < Limit) {
+            result.append(false);
+            i = i + 1;
+        }
+        return result;
+    };
+
+    let members = func(bool[list] model) -> int[list] {
+        let result: int[list] = [];
+        let i = 0;
+        while (i < Limit) {
+            if (model[i]) {
+                result.append(i);
+            }
+            i = i + 1;
+        }
+        return result;
+    };
+
+    let check = func(bit_set.BitSet actual, bool[list] model) -> void {
+        let expected = members(model);
+        test.assert_equal_int32(expected.length, actual.size());
+        test.assert_equal_bool(expected.length == 0, actual.is_empty());
+        let walk = actual.iterator();
+        let i = 0;
+        while (walk.has_next()) {
+            test.assert_equal_int32(expected[i], walk.next());
+            i = i + 1;
+        }
+        test.assert_equal_int32(expected.length, i);
+    };
+
+    // A random set with its model.
+    let random_pair = func(model_random.Generator random) -> [bit_set.BitSet, bool[list]] {
+        let model = empty_model();
+        let result = bit_set.create();
+        let count = random.below(25);
+        let i = 0;
+        while (i < count) {
+            let value = random.below(Limit);
+            model[value] = true;
+            result.add(value);
+            i = i + 1;
+        }
+        return [result, model];
+    };
+
+    let run = func(uint64 seed, int operations) -> void {
+        let random = model_random.seeded(seed);
+        let actual = bit_set.create();
+        let model = empty_model();
+        let step = 0;
+        while (step < operations) {
+            let choice = random.below(100);
+            let value = random.below(Limit);
+            if (choice < 25) {
+                test.assert_equal_bool(!model[value], actual.add(value));
+                model[value] = true;
+            } else if (choice < 40) {
+                test.assert_equal_bool(model[value], actual.remove(value));
+                model[value] = false;
+            } else if (choice < 48) {
+                actual.flip(value);
+                model[value] = !model[value];
+            } else if (choice < 58) {
+                test.assert_equal_bool(model[value], actual.contains(value));
+            } else if (choice < 64) {
+                let expected = -1;
+                let i = Limit - 1;
+                while (i >= value) {
+                    if (model[i]) {
+                        expected = i;
+                    }
+                    i = i - 1;
+                }
+                test.assert_equal_int32(expected, actual.next_set(value));
+            } else if (choice < 65) {
+                actual.clear();
+                model = empty_model();
+            } else if (choice < 68) {
+                let extra: int[list] = [value, (value * 7) % Limit];
+                actual.add_all(extra);
+                model[value] = true;
+                model[(value * 7) % Limit] = true;
+            } else if (choice < 72) {
+                let divisor = value % 5 + 2;
+                let remove = choice < 70;
+                let removed = 0;
+                if (remove) {
+                    removed = actual.remove_if(func(int element) -> bool {
+                        return element % divisor == 0;
+                    });
+                } else {
+                    removed = actual.retain_if(func(int element) -> bool {
+                        return element % divisor == 0;
+                    });
+                }
+                let expected = 0;
+                let i = 0;
+                while (i < Limit) {
+                    if (model[i] && (i % divisor == 0) == remove) {
+                        model[i] = false;
+                        expected = expected + 1;
+                    }
+                    i = i + 1;
+                }
+                test.assert_equal_int32(expected, removed);
+            } else if (choice < 86) {
+                let [other, other_model] = random_pair(random);
+                let subset = true;
+                let disjoint = true;
+                let i = 0;
+                while (i < Limit) {
+                    if (model[i] && !other_model[i]) {
+                        subset = false;
+                    }
+                    if (model[i] && other_model[i]) {
+                        disjoint = false;
+                    }
+                    i = i + 1;
+                }
+                test.assert_equal_bool(subset, actual.is_subset_of(other));
+                test.assert_equal_bool(disjoint, actual.is_disjoint_from(other));
+                let kind = choice % 4;
+                let next = empty_model();
+                i = 0;
+                while (i < Limit) {
+                    if (kind == 0) {
+                        next[i] = model[i] || other_model[i];
+                    } else if (kind == 1) {
+                        next[i] = model[i] && other_model[i];
+                    } else if (kind == 2) {
+                        next[i] = model[i] && !other_model[i];
+                    } else {
+                        next[i] = model[i] != other_model[i];
+                    }
+                    i = i + 1;
+                }
+                let made = bit_set.create();
+                if (kind == 0) {
+                    made = actual.union(other);
+                    actual.union_with(other);
+                } else if (kind == 1) {
+                    made = actual.intersection(other);
+                    actual.intersect_with(other);
+                } else if (kind == 2) {
+                    made = actual.difference(other);
+                    actual.subtract(other);
+                } else {
+                    actual.symmetric_difference_with(other);
+                    made = bit_set.of(members(next));
+                }
+                model = next;
+                check(made, model);
+                test.assert(made.equals(actual));
+            } else if (choice < 92) {
+                let expected = members(model);
+                test.assert(actual.to_list().equals(expected));
+                test.assert(actual.equals(bit_set.of(expected)));
+                let sum: uint32 = 0;
+                for (let element in expected) {
+                    sum = sum + (element as uint32);
+                }
+                test.assert_equal_int64(sum as int64, actual.hash_code() as int64);
+            } else if (choice < 96) {
+                let expected = members(model);
+                let text = expected.to_string();
+                test.assert_equal_string("{" + text.slice(1, text.byte_length - 1) + "}", actual.to_string());
+            } else {
+                let seen: int[list] = [];
+                actual.for_each(func(int element) -> void {
+                    seen.append(element);
+                });
+                test.assert(seen.equals(members(model)));
+            }
+            check(actual, model);
+            step = step + 1;
+        }
+    };
+
+    export let test_model_seed_1 = func() -> void {
+        run(1, 5000);
+    };
+
+    export let test_model_seed_2 = func() -> void {
+        run(271828, 5000);
+    };
+);

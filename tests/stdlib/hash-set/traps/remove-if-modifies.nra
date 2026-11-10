@@ -1,0 +1,17 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let hash_set = import:Std.Collections.HashSet;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let set = hash_set.create<string>();
+        set.add("a");
+        set.add("b");
+        set.remove_if(func(string value) -> bool {
+            set.remove("b");
+            return false;
+        });
+        return program.ExitCode.Ok;
+    };
+);

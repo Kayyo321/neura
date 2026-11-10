@@ -1,0 +1,16 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let console = import:Std.Io.Console;
+let linked_list = import:Std.Collections.LinkedList;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = linked_list.of<int>([1, 2]);
+        let found = items.index_where(func(int value) -> bool {
+            items.remove_last();
+            return false;
+        });
+        return program.ExitCode.Ok;
+    };
+);

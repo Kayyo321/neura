@@ -1,0 +1,137 @@
+let cell = import:Std.Core.Cell;
+let int_map = import:Std.Collections.IntMap;
+let mutable_map = import:Std.Collections.MutableMap;
+let optional = import:Std.Core.Optional;
+let test = import:Std.Test;
+
+let IntMapTests = module (
+    let sample = func() -> int_map.IntMap<string> {
+        let map = int_map.create<string>();
+        map.set(3, "c");
+        map.set(-1, "m");
+        map.set(7, "g");
+        return map;
+    };
+
+    export let test_basic_members = func() -> void {
+        let map = int_map.create<string>();
+        test.assert(map.is_empty());
+        test.assert_equal_string("{}", map.to_string());
+        map = sample();
+        test.assert_equal_int32(3, map.size());
+        test.assert(!map.is_empty());
+        test.assert(map.contains_key(-1));
+        test.assert(!map.contains_key(1));
+        test.assert_equal_string("m", map.require(-1));
+        test.assert_equal_string("g", test.assert_some<string>(map.get(7)));
+        test.assert_none<string>(map.get(8));
+        test.assert_equal_string("?", map.get_or(8, "?"));
+        test.assert_equal_string("{3: c, -1: m, 7: g}", map.to_string());
+        test.assert_equal_string("[3, -1, 7]", map.keys().to_string());
+        test.assert_equal_string("[c, m, g]", map.values().to_string());
+        test.assert_equal_string("[[3, c], [-1, m], [7, g]]", map.entries().to_string());
+        map.set(3, "C");
+        test.assert_equal_string("{3: C, -1: m, 7: g}", map.to_string());
+        test.assert(map.delete(3));
+        test.assert(!map.delete(3));
+        map.set(3, "c");
+        test.assert_equal_string("{-1: m, 7: g, 3: c}", map.to_string());
+        test.assert_none<string>(map.put(4, "d"));
+        test.assert_equal_string("d", test.assert_some<string>(map.put(4, "D")));
+        test.assert_equal_string("D", test.assert_some<string>(map.remove(4)));
+        test.assert_none<string>(map.remove(4));
+        test.assert(map.contains_value("g"));
+        test.assert(!map.contains_value("D"));
+        map.validate();
+        map.clear();
+        test.assert(map.is_empty());
+        map.validate();
+    };
+
+    export let test_iteration_and_callbacks = func() -> void {
+        let map = sample();
+        let items = map.iterator();
+        test.assert_equal_string("[3, c]", items.next().to_string());
+        test.assert_equal_string("[-1, m]", items.next().to_string());
+        test.assert_equal_string("[7, g]", items.next().to_string());
+        test.assert(!items.has_next());
+        let seen = cell.of<string>("");
+        map.for_each(func(int key, string value) -> void {
+            seen.value = seen.value + key.to_string() + value;
+        });
+        test.assert_equal_string("3c-1m7g", seen.value);
+        let keys = 0;
+        for (let entry in map) {
+            keys = keys + entry[0];
+        }
+        test.assert_equal_int32(9, keys);
+        test.assert_equal_int32(1, map.remove_if(func(int key, string value) -> bool {
+            return key < 0;
+        }));
+        test.assert_equal_string("{3: c, 7: g}", map.to_string());
+        test.assert_equal_string("c", map.get_or_put(3, func() -> string {
+            return "never";
+        }));
+        test.assert_equal_string("new", map.get_or_put(9, func() -> string {
+            return "new";
+        }));
+        let join = func(string a, string b) -> string {
+            return a + b;
+        };
+        test.assert_equal_string("cx", map.merge(3, "x", join));
+        test.assert_equal_string("y", map.merge(10, "y", join));
+        let upper = func(int key, optional.Optional<string> current) -> optional.Optional<string> {
+            return match (current) {
+                optional.Optional.None => optional.Optional<string>.None,
+                optional.Optional.Some(text) => optional.Optional<string>.Some(text + "!"),
+            };
+        };
+        test.assert_equal_string("g!", test.assert_some<string>(map.compute(7, upper)));
+        test.assert_none<string>(map.compute(11, upper));
+        test.assert_equal_string("{3: cx, 7: g!, 9: new, 10: y}", map.to_string());
+    };
+
+    export let test_put_all_equality_hash = func() -> void {
+        let a = sample();
+        let b = int_map.with_capacity<string>(3);
+        b.set(7, "g");
+        b.put_all(a);
+        test.assert_equal_string("{7: g, 3: c, -1: m}", b.to_string());
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+        // Int32.hash of -1 is the pattern 4294967295.
+        let expected = (((3 as uint32) ^ "c".hash_code()) as uint64) + ((4294967295 ^ ("m".hash_code() as uint64)))
+            + (((7 as uint32) ^ "g".hash_code()) as uint64);
+        test.assert_equal_uint64(expected & 4294967295, a.hash_code() as uint64);
+        b.set(7, "h");
+        test.assert(!a.equals(b));
+        let other: class = int_map.create<int>();
+        test.assert(!int_map.create<string>().equals(other));
+        test.assert(int_map.create<string>().equals(int_map.create<string>()));
+    };
+
+    export let test_extreme_keys_and_trim = func() -> void {
+        let map = int_map.create<int>();
+        map.set(2147483647, 1);
+        map.set(-2147483648, 2);
+        map.set(0, 3);
+        let i = 1;
+        while (i < 200) {
+            map.set(i * 65536, i);
+            i = i + 1;
+        }
+        map.remove_if(func(int key, int value) -> bool {
+            return key > 0 && key < 2147483647;
+        });
+        map.trim();
+        map.validate();
+        test.assert_equal_string("{2147483647: 1, -2147483648: 2, 0: 3}", map.to_string());
+    };
+
+    export let test_interface = func() -> void {
+        let map: mutable_map.MutableMap<int, string> = sample();
+        map.set(1, "a");
+        test.assert_equal_int32(4, map.size());
+    };
+);

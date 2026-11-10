@@ -1,0 +1,34 @@
+let iterable = import:Std.Collections.Iterable;
+
+// The read-only view shared by every collection (Stdlib.md section 9.10).
+// A function that only reads takes this interface; no member simulates
+// immutability by trapping.
+export let Collection = module (
+    export let Collection = interface<T>:iterable.Iterable<T> (
+        let size = func() -> int;
+        let contains = func(T value) -> bool;
+        // A new built-in list of the elements in iteration order.
+        let to_list = func() -> T[list];
+
+        let is_empty = func() -> bool {
+            return size() == 0;
+        };
+
+        let contains_all = func(T[list] items) -> bool {
+            for (let item in items) {
+                if (!contains(item)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // Calls `action` with each element in iteration order.
+        let for_each = func(func(T) -> void action) -> void {
+            let items = iterator();
+            while (items.has_next()) {
+                action(items.next());
+            }
+        };
+    );
+);

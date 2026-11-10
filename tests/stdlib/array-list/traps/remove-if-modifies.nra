@@ -1,0 +1,16 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let array_list = import:Std.Collections.ArrayList;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = array_list.of<int>([1, 2]);
+        let removed = items.remove_if(func(int value) -> bool {
+            items.add(value);
+            return false;
+        });
+        return program.ExitCode.Ok;
+    };
+);

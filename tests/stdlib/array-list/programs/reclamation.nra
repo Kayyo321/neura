@@ -1,0 +1,45 @@
+// run-options: --max-heap-cells 20000
+let array_list = import:Std.Collections.ArrayList;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// Adds and removes 2,000 elements of 100 cells each, by every kind of
+// removal. If removed elements stayed reachable the loop would need about
+// 200,000 cells, far above the limit.
+export let Main = module:program.Entry (
+    let block = func(int seed) -> int[list] {
+        let values: int[list] = [];
+        let i = 0;
+        while (i < 100) {
+            values.append(seed + i);
+            i = i + 1;
+        }
+        return values;
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = array_list.create<int[list]>();
+        let total: int64 = 0;
+        let round = 0;
+        while (round < 400) {
+            items.add(block(round));
+            items.add(block(round + 1));
+            items.add_at(1, block(round + 2));
+            items.add(block(round + 3));
+            items.add(block(round + 4));
+            total = total + (items.remove_first()[0] as int64);
+            total = total + (items.remove_last()[0] as int64);
+            total = total + (items.remove_at(1)[0] as int64);
+            if (round % 2 == 0) {
+                items.truncate(0);
+            } else {
+                let removed = items.remove_if(func(int[list] values) -> bool {
+                    return true;
+                });
+            }
+            round = round + 1;
+        }
+        console.print_line(items.size().to_string() + " " + total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,162 @@
+let array_deque = import:Std.Collections.ArrayDeque;
+let cell = import:Std.Core.Cell;
+let collection = import:Std.Collections.Collection;
+let deque = import:Std.Collections.Deque;
+let queue = import:Std.Collections.Queue;
+let test = import:Std.Test;
+
+let ArrayDequeTests = module (
+    let Marker = class ();
+
+    export let test_ends = func() -> void {
+        let items = array_deque.create<int>();
+        test.assert(items.is_empty());
+        items.add_last(2);
+        items.add_first(1);
+        items.add_last(3);
+        items.add_first(0);
+        test.assert_equal_string("[0, 1, 2, 3]", items.to_string());
+        test.assert_equal_int32(4, items.size());
+        test.assert_equal_int32(0, items.first());
+        test.assert_equal_int32(3, items.last());
+        test.assert_equal_int32(0, items.remove_first());
+        test.assert_equal_int32(3, items.remove_last());
+        test.assert_equal_string("[1, 2]", items.to_string());
+        items.validate();
+    };
+
+    // Removing from an empty end moves half of the other end across.
+    export let test_rebalancing = func() -> void {
+        let items = array_deque.of<int>([1, 2, 3, 4, 5, 6, 7]);
+        test.assert_equal_int32(1, items.remove_first());
+        items.validate();
+        test.assert_equal_string("[2, 3, 4, 5, 6, 7]", items.to_string());
+        test.assert_equal_int32(7, items.remove_last());
+        test.assert_equal_int32(6, items.remove_last());
+        test.assert_equal_int32(5, items.remove_last());
+        test.assert_equal_int32(4, items.remove_last());
+        items.validate();
+        test.assert_equal_string("[2, 3]", items.to_string());
+        let mirror = array_deque.create<int>();
+        let i = 1;
+        while (i <= 7) {
+            mirror.add_first(i);
+            i = i + 1;
+        }
+        test.assert_equal_int32(1, mirror.remove_last());
+        test.assert_equal_int32(7, mirror.remove_first());
+        test.assert_equal_int32(2, mirror.remove_last());
+        test.assert_equal_string("[6, 5, 4, 3]", mirror.to_string());
+        let single = array_deque.create<int>();
+        single.add_first(9);
+        test.assert_equal_int32(9, single.remove_last());
+        single.add_last(8);
+        test.assert_equal_int32(8, single.remove_first());
+        test.assert(single.is_empty());
+        single.validate();
+    };
+
+    export let test_queue_members = func() -> void {
+        let items = array_deque.create<string>();
+        items.enqueue("a");
+        items.enqueue("b");
+        test.assert_equal_string("a", test.assert_some<string>(items.peek()));
+        test.assert_equal_string("a", items.dequeue());
+        test.assert_equal_string("b", test.assert_some<string>(items.try_dequeue()));
+        test.assert_none<string>(items.try_dequeue());
+        test.assert_none<string>(items.peek());
+    };
+
+    export let test_indexing_and_search = func() -> void {
+        let items = array_deque.of<int>([3, 4]);
+        items.add_first(2);
+        items.add_first(1);
+        let i = 0;
+        while (i < 4) {
+            test.assert_equal_int32(i + 1, items.get(i));
+            i = i + 1;
+        }
+        test.assert(items.contains(1));
+        test.assert(items.contains(4));
+        test.assert(!items.contains(5));
+        test.assert(items.contains_all([1, 4]));
+        test.assert_equal_string("[1, 2, 3, 4]", items.to_list().to_string());
+    };
+
+    export let test_clear = func() -> void {
+        let items = array_deque.of<int>([1, 2]);
+        items.add_first(0);
+        items.clear();
+        test.assert(items.is_empty());
+        test.assert_equal_string("[]", items.to_string());
+        items.add_last(5);
+        test.assert_equal_int32(5, items.first());
+        items.validate();
+    };
+
+    export let test_iteration = func() -> void {
+        let items = array_deque.of<int>([2, 3]);
+        items.add_first(1);
+        let walk = items.iterator();
+        test.assert(walk.has_next());
+        test.assert(walk.has_next());
+        test.assert_equal_int32(1, walk.next());
+        test.assert_equal_int32(2, walk.next());
+        test.assert_equal_int32(3, walk.next());
+        test.assert(!walk.has_next());
+        let seen: int[list] = [];
+        for (let value in items) {
+            seen.append(value);
+        }
+        items.for_each(func(int value) -> void {
+            seen.append(value);
+        });
+        test.assert_equal_string("[1, 2, 3, 1, 2, 3]", seen.to_string());
+        // A to_list copy iterates independently of later changes.
+        for (let value in items.to_list()) {
+            items.add_last(value);
+            items.remove_first();
+        }
+        test.assert_equal_string("[1, 2, 3]", items.to_string());
+    };
+
+    // Equality and hashing are by identity; the text lists the elements.
+    export let test_identity_and_text = func() -> void {
+        let a = array_deque.of<int>([1, 2]);
+        let b = array_deque.of<int>([1, 2]);
+        test.assert(a.equals(a));
+        test.assert(!a.equals(b));
+        let as_class: class = a;
+        test.assert(as_class.hash_code() == as_class.hash_code());
+        test.assert_equal_string("[1, 2]", a.to_string());
+        let objects = array_deque.create<class>();
+        objects.add_last(objects);
+        objects.add_first(nil);
+        objects.add_last(a);
+        test.assert_equal_string("[nil, (this collection), [1, 2]]", objects.to_string());
+        let marker = new Marker();
+        objects.add_last(marker);
+        test.assert(objects.contains(marker));
+        test.assert(!objects.contains(new Marker()));
+        test.assert(objects.contains(nil));
+    };
+
+    export let test_interfaces = func() -> void {
+        let items: deque.Deque<int> = array_deque.create<int>();
+        items.add_first(2);
+        items.add_last(3);
+        items.enqueue(4);
+        let view: queue.Queue<int> = items;
+        test.assert_equal_int32(2, view.dequeue());
+        let all: collection.Collection<int> = items;
+        test.assert_equal_int32(2, all.size());
+        test.assert(!all.is_empty());
+        let total = cell.of<int>(0);
+        all.for_each(func(int value) -> void {
+            total.value = total.value + value;
+        });
+        test.assert_equal_int32(7, total.value);
+        view.clear();
+        test.assert(all.is_empty());
+    };
+);

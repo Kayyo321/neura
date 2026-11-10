@@ -1,0 +1,56 @@
+// run-options: --max-heap-cells 20000
+let console = import:Std.Io.Console;
+let ordering = import:Std.Core.Ordering;
+let priority_queue = import:Std.Collections.PriorityQueue;
+let program = import:Std.Program;
+
+// Enqueues and dequeues 2,000 elements of 100 cells each. If dequeued
+// elements stayed reachable the loop would need about 200,000 cells, far
+// above the limit.
+export let Main = module:program.Entry (
+    let block = func(int seed) -> int[list] {
+        let values: int[list] = [];
+        let i = 0;
+        while (i < 100) {
+            values.append(seed + i);
+            i = i + 1;
+        }
+        return values;
+    };
+
+    let by_first = func(int[list] a, int[list] b) -> ordering.Ordering {
+        if (a[0] < b[0]) {
+            return ordering.Ordering.Less;
+        }
+        if (a[0] > b[0]) {
+            return ordering.Ordering.Greater;
+        }
+        return ordering.Ordering.Equal;
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = priority_queue.create<int[list]>(by_first);
+        let total: int64 = 0;
+        let round = 0;
+        while (round < 400) {
+            items.enqueue(block(round * 3 % 7));
+            items.enqueue(block(round % 5));
+            items.enqueue(block(round % 11));
+            items.enqueue(block(round % 2));
+            items.enqueue(block(round % 3));
+            total = total + (items.dequeue()[0] as int64);
+            total = total + (items.dequeue()[0] as int64);
+            total = total + (items.dequeue()[0] as int64);
+            if (round % 2 == 0) {
+                for (let values in items.drain_sorted()) {
+                    total = total + (values[0] as int64);
+                }
+            } else {
+                items.clear();
+            }
+            round = round + 1;
+        }
+        console.print_line(items.size().to_string() + " " + total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

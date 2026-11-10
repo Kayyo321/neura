@@ -1,0 +1,56 @@
+// run-options: --max-heap-cells 26000
+let console = import:Std.Io.Console;
+let hash_set = import:Std.Collections.HashSet;
+let program = import:Std.Program;
+
+// A hash set never holds more than max(size, 7) removed elements (Stdlib.md
+// section 9.6). The set keeps 8 elements in a table sized for 1,000; each
+// round adds an element holding 2,000 values and removes the previous one
+// from the middle of the order. The documented bound allows 8 removed
+// elements; the run then needs about 24,500 cells, and one more retained
+// element would need about 26,600.
+export let Main = module:program.Entry (
+    let Blob = class (
+        export let data: int[list] = [];
+        export let init = func(int seed, int size) -> void {
+            let i = 0;
+            while (i < size) {
+                data.append(seed + i);
+                i = i + 1;
+            }
+        };
+    );
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let set = hash_set.with_capacity<Blob>(1000);
+        let i = 0;
+        while (i < 7) {
+            set.add(new Blob(i, 1));
+            i = i + 1;
+        }
+        let total: int64 = 0;
+        let previous: Blob = nil;
+        let round = 0;
+        while (round < 300) {
+            let current = new Blob(round, 2000);
+            set.add(current);
+            if (previous != nil) {
+                total = total + (previous.data[1] as int64);
+                if (round % 2 == 0) {
+                    set.remove(previous);
+                } else {
+                    let target = previous;
+                    set.remove_if(func(Blob item) -> bool {
+                        return item == target;
+                    });
+                }
+            }
+            previous = current;
+            round = round + 1;
+        }
+        previous = nil;
+        set.validate();
+        console.print_line(set.size().to_string() + " " + total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,50 @@
+// run-options: --max-heap-cells 7500
+let console = import:Std.Io.Console;
+let hash_set = import:Std.Collections.HashSet;
+let program = import:Std.Program;
+
+// Releasing the last entry removes it and the dead entries before it, so a
+// set used as a stack retains no removed element (Stdlib.md section 9.6).
+// Each round adds an element holding 2,000 values and removes it again, by
+// remove or retain_if. The run needs about 7,000 cells; keeping even one
+// removed element would need about 9,000.
+export let Main = module:program.Entry (
+    let Blob = class (
+        export let data: int[list] = [];
+        export let init = func(int seed, int size) -> void {
+            let i = 0;
+            while (i < size) {
+                data.append(seed + i);
+                i = i + 1;
+            }
+        };
+    );
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let set = hash_set.with_capacity<Blob>(1000);
+        let i = 0;
+        while (i < 7) {
+            set.add(new Blob(i, 1));
+            i = i + 1;
+        }
+        let total: int64 = 0;
+        let round = 0;
+        while (round < 300) {
+            let current = new Blob(round, 2000);
+            set.add(current);
+            total = total + (current.data[3] as int64);
+            if (round % 2 == 0) {
+                set.remove(current);
+            } else {
+                set.retain_if(func(Blob item) -> bool {
+                    return item.data.length == 1;
+                });
+            }
+            current = nil;
+            round = round + 1;
+        }
+        set.validate();
+        console.print_line(set.size().to_string() + " " + total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

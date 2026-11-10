@@ -1,0 +1,269 @@
+let cell = import:Std.Core.Cell;
+let model_random = import:ModelRandom;
+let ordering = import:Std.Core.Ordering;
+let sorting = import:Std.Collections.Sorting;
+let test = import:Std.Test;
+
+let SortingTests = module (
+    let compare = func(int a, int b) -> ordering.Ordering {
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        if (a > b) {
+            return ordering.Ordering.Greater;
+        }
+        return ordering.Ordering.Equal;
+    };
+
+    // Orders [key, position] pairs by key only.
+    let by_key = func([int, int] a, [int, int] b) -> ordering.Ordering {
+        return compare(a[0], b[0]);
+    };
+
+    // A comparator that counts its calls.
+    let counting = func(cell.Cell<int> calls) -> func(int, int) -> ordering.Ordering {
+        return func(int a, int b) -> ordering.Ordering {
+            calls.value = calls.value + 1;
+            return compare(a, b);
+        };
+    };
+
+    // Insertion sort by adjacent exchanges: the trivially correct reference.
+    let reference = func(int[list] items) -> int[list] {
+        let result: int[list] = [];
+        for (let value in items) {
+            result.append(value);
+        }
+        let i = 1;
+        while (i < result.length) {
+            let j = i;
+            while (j > 0 && result[j - 1] > result[j]) {
+                let value = result[j];
+                result[j] = result[j - 1];
+                result[j - 1] = value;
+                j = j - 1;
+            }
+            i = i + 1;
+        }
+        return result;
+    };
+
+    let random_list = func(model_random.Generator random, int count, int limit) -> int[list] {
+        let result: int[list] = [];
+        let i = 0;
+        while (i < count) {
+            result.append(random.below(limit) - limit / 2);
+            i = i + 1;
+        }
+        return result;
+    };
+
+    // The smallest k with 2^k >= n.
+    let ceiling_log2 = func(int n) -> int {
+        let k = 0;
+        let power = 1;
+        while (power < n) {
+            power = power * 2;
+            k = k + 1;
+        }
+        return k;
+    };
+
+    export let test_small_and_boundary_lengths = func() -> void {
+        let random = model_random.seeded(7);
+        let lengths: int[list] = [0, 1, 2, 3, 15, 16, 17, 31, 32, 33, 47, 48, 49, 64, 65, 100, 257];
+        for (let length in lengths) {
+            let items = random_list(random, length, 50);
+            let expected = reference(items);
+            sorting.sort<int>(items, compare);
+            test.assert(expected.equals(items));
+        }
+    };
+
+    // A seeded 1,000-element sort against the reference.
+    export let test_seeded_thousand = func() -> void {
+        let random = model_random.seeded(1000);
+        let items = random_list(random, 1000, 2000000);
+        let expected = reference(items);
+        let version = items.version;
+        let calls = cell.of<int>(0);
+        sorting.sort<int>(items, counting(calls));
+        test.assert(expected.equals(items));
+        // Element writes only: the structural version is unchanged.
+        test.assert_equal_uint64(version, items.version);
+        test.assert(calls.value <= 1000 * ceiling_log2(1000));
+    };
+
+    export let test_stability = func() -> void {
+        let random = model_random.seeded(3);
+        let items: [int, int][list] = [];
+        let i = 0;
+        while (i < 1000) {
+            items.append([random.below(10), i]);
+            i = i + 1;
+        }
+        sorting.sort<[int, int]>(items, by_key);
+        i = 1;
+        while (i < 1000) {
+            let before = items[i - 1];
+            let after = items[i];
+            test.assert(before[0] <= after[0]);
+            if (before[0] == after[0]) {
+                test.assert(before[1] < after[1]);
+            }
+            i = i + 1;
+        }
+    };
+
+    // Every comparator-call count stays within n * ceil(log2 n).
+    export let test_comparator_call_bound = func() -> void {
+        let random = model_random.seeded(11);
+        let lengths: int[list] = [2, 5, 16, 17, 100, 333, 512, 1000];
+        for (let length in lengths) {
+            let calls = cell.of<int>(0);
+            let items = random_list(random, length, 1000000);
+            sorting.sort<int>(items, counting(calls));
+            test.assert(calls.value <= length * ceiling_log2(length));
+        }
+        let none = cell.of<int>(0);
+        let single: int[list] = [4];
+        sorting.sort<int>(single, counting(none));
+        test.assert_equal_int32(0, none.value);
+    };
+
+    // Presorted input copies merged pairs without comparing elements.
+    export let test_presorted_input = func() -> void {
+        let items: int[list] = [];
+        let i = 0;
+        while (i < 1000) {
+            items.append(i);
+            i = i + 1;
+        }
+        let calls = cell.of<int>(0);
+        sorting.sort<int>(items, counting(calls));
+        i = 0;
+        while (i < 1000) {
+            test.assert_equal_int32(i, items[i]);
+            i = i + 1;
+        }
+        // 63 blocks of 15 insertions (at most 4 calls each) and one call per
+        // merged pair.
+        test.assert(calls.value <= 63 * 15 * 4 + 63);
+        let descending: int[list] = [];
+        i = 1000;
+        while (i > 0) {
+            descending.append(i);
+            i = i - 1;
+        }
+        sorting.sort<int>(descending, compare);
+        i = 0;
+        while (i < 1000) {
+            test.assert_equal_int32(i + 1, descending[i]);
+            i = i + 1;
+        }
+    };
+
+    export let test_sort_range = func() -> void {
+        let random = model_random.seeded(5);
+        let items = random_list(random, 100, 1000);
+        let original: int[list] = [];
+        for (let value in items) {
+            original.append(value);
+        }
+        sorting.sort_range<int>(items, 10, 90, compare);
+        let i = 0;
+        while (i < 100) {
+            if (i < 10 || i >= 90) {
+                test.assert_equal_int32(original[i], items[i]);
+            }
+            if (i > 10 && i < 90) {
+                test.assert(items[i - 1] <= items[i]);
+            }
+            i = i + 1;
+        }
+        let part: int[list] = [];
+        i = 10;
+        while (i < 90) {
+            part.append(original[i]);
+            i = i + 1;
+        }
+        let expected = reference(part);
+        i = 0;
+        while (i < 80) {
+            test.assert_equal_int32(expected[i], items[10 + i]);
+            i = i + 1;
+        }
+        let small: int[list] = [3, 2, 1];
+        sorting.sort_range<int>(small, 1, 1, compare);
+        sorting.sort_range<int>(small, 3, 3, compare);
+        test.assert_equal_string("[3, 2, 1]", small.to_string());
+        sorting.sort_range<int>(small, 1, 3, compare);
+        test.assert_equal_string("[3, 1, 2]", small.to_string());
+    };
+
+    export let test_other_element_types = func() -> void {
+        let words: string[list] = ["pear", "apple", "fig", "apple", "banana"];
+        sorting.sort<string>(words, func(string a, string b) -> ordering.Ordering {
+            if (a == b) {
+                return ordering.Ordering.Equal;
+            }
+            let i = 0;
+            while (i < a.byte_length && i < b.byte_length) {
+                if (a.byte_at(i) != b.byte_at(i)) {
+                    if (a.byte_at(i) < b.byte_at(i)) {
+                        return ordering.Ordering.Less;
+                    }
+                    return ordering.Ordering.Greater;
+                }
+                i = i + 1;
+            }
+            if (a.byte_length < b.byte_length) {
+                return ordering.Ordering.Less;
+            }
+            return ordering.Ordering.Greater;
+        });
+        test.assert_equal_string("[apple, apple, banana, fig, pear]", words.to_string());
+        let reversed: int[list] = [1, 3, 2];
+        sorting.sort<int>(reversed, func(int a, int b) -> ordering.Ordering {
+            return ordering.reverse(compare(a, b));
+        });
+        test.assert_equal_string("[3, 2, 1]", reversed.to_string());
+    };
+
+    export let test_binary_search = func() -> void {
+        let items: int[list] = [1, 3, 3, 3, 5, 7];
+        test.assert_equal_int32(1, sorting.binary_search<int>(items, 3, compare));
+        test.assert_equal_int32(0, sorting.binary_search<int>(items, 1, compare));
+        test.assert_equal_int32(4, sorting.binary_search<int>(items, 5, compare));
+        test.assert_equal_int32(5, sorting.binary_search<int>(items, 7, compare));
+        test.assert_equal_int32(-1, sorting.binary_search<int>(items, 0, compare));
+        test.assert_equal_int32(-2, sorting.binary_search<int>(items, 2, compare));
+        test.assert_equal_int32(-6, sorting.binary_search<int>(items, 6, compare));
+        test.assert_equal_int32(-7, sorting.binary_search<int>(items, 9, compare));
+        let empty: int[list] = [];
+        test.assert_equal_int32(-1, sorting.binary_search<int>(empty, 9, compare));
+        let same: int[list] = [4, 4, 4, 4, 4, 4, 4, 4, 4];
+        test.assert_equal_int32(0, sorting.binary_search<int>(same, 4, compare));
+        test.assert_equal_int32(-10, sorting.binary_search<int>(same, 5, compare));
+    };
+
+    // Every probe agrees with a linear scan over a sorted random list.
+    export let test_binary_search_against_scan = func() -> void {
+        let random = model_random.seeded(17);
+        let items = random_list(random, 300, 200);
+        sorting.sort<int>(items, compare);
+        let probe = -110;
+        while (probe <= 110) {
+            let i = 0;
+            while (i < items.length && items[i] < probe) {
+                i = i + 1;
+            }
+            let expected = -i - 1;
+            if (i < items.length && items[i] == probe) {
+                expected = i;
+            }
+            test.assert_equal_int32(expected, sorting.binary_search<int>(items, probe, compare));
+            probe = probe + 1;
+        }
+    };
+);

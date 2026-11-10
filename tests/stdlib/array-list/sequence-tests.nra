@@ -1,0 +1,31 @@
+let array_list = import:Std.Collections.ArrayList;
+let linked_list = import:Std.Collections.LinkedList;
+let test = import:Std.Test;
+
+// The list contract's sequence() member: a lazy pipeline over the list's
+// iterator, in list order.
+let SequenceTests = module (
+    export let test_array_list_sequence = func() -> void {
+        let items = array_list.of<int>([1, 2, 3, 4, 5]);
+        let evens = items.sequence().filter(func(int v) -> bool { return v % 2 == 0; })
+            .map<string>(func(int v) -> string { return v.to_string(); }).to_list();
+        test.assert_equal<string[list]>(["2", "4"], evens);
+        test.assert_equal_int32(5, items.sequence().count());
+        test.assert_equal_int32(0, array_list.create<int>().sequence().count());
+    };
+
+    export let test_linked_list_sequence = func() -> void {
+        let items = linked_list.of<string>(["a", "b", "c"]);
+        let joined = items.sequence().fold<string>("", func(string text, string item) -> string {
+            return text + item;
+        });
+        test.assert_equal_string("abc", joined);
+    };
+
+    export let test_sequence_is_lazy = func() -> void {
+        let items = array_list.of<int>([1, 2, 3]);
+        let pipeline = items.sequence();
+        items.set(0, 10);
+        test.assert_equal<int[list]>([10, 2, 3], pipeline.to_list());
+    };
+);

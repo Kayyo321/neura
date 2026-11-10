@@ -1,0 +1,172 @@
+let cell = import:Std.Core.Cell;
+let collection = import:Std.Collections.Collection;
+let ordering = import:Std.Core.Ordering;
+let priority_queue = import:Std.Collections.PriorityQueue;
+let queue = import:Std.Collections.Queue;
+let test = import:Std.Test;
+
+let PriorityQueueTests = module (
+    let compare = func(int a, int b) -> ordering.Ordering {
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        if (a > b) {
+            return ordering.Ordering.Greater;
+        }
+        return ordering.Ordering.Equal;
+    };
+
+    // [key, id] pairs ordered by key only.
+    let by_key = func([int, int] a, [int, int] b) -> ordering.Ordering {
+        return compare(a[0], b[0]);
+    };
+
+    let ids = func([int, int][list] pairs) -> string {
+        let result: int[list] = [];
+        for (let pair in pairs) {
+            result.append(pair[1]);
+        }
+        return result.to_string();
+    };
+
+    let tagged = func() -> [int, int][list] {
+        let items: [int, int][list] = [];
+        let i = 0;
+        while (i < 24) {
+            items.append([(i * 7) % 4, i]);
+            i = i + 1;
+        }
+        return items;
+    };
+
+    export let test_least_first = func() -> void {
+        let items = priority_queue.create<int>(compare);
+        test.assert(items.is_empty());
+        items.enqueue(5);
+        items.enqueue(1);
+        items.enqueue(4);
+        items.enqueue(1);
+        items.enqueue(9);
+        items.validate();
+        test.assert_equal_int32(5, items.size());
+        test.assert_equal_int32(1, test.assert_some<int>(items.peek()));
+        test.assert_equal_int32(1, items.dequeue());
+        test.assert_equal_int32(1, test.assert_some<int>(items.try_dequeue()));
+        test.assert_equal_string("[4, 5, 9]", items.drain_sorted().to_string());
+        test.assert(items.is_empty());
+        test.assert_none<int>(items.peek());
+        test.assert_none<int>(items.try_dequeue());
+        let reversed = priority_queue.create<int>(func(int a, int b) -> ordering.Ordering {
+            return ordering.reverse(compare(a, b));
+        });
+        reversed.enqueue(1);
+        reversed.enqueue(3);
+        reversed.enqueue(2);
+        test.assert_equal_string("[3, 2, 1]", reversed.drain_sorted().to_string());
+    };
+
+    // The sift rules fix which of several equal elements leaves first. The
+    // expected orders come from an independent implementation of the rules
+    // of Stdlib.md section 9.8.
+    export let test_tie_order_from_list = func() -> void {
+        let items = priority_queue.from_list<[int, int]>(tagged(), by_key);
+        items.validate();
+        test.assert_equal_string("[0, 16, 12, 8, 4, 11, 6, 3, 18, 20, 10, 23, 5, 13, 14, 15, 7, 17, 1, 19, 9, 21, 22, 2]",
+                                 ids(items.to_list()));
+        test.assert_equal_string("[0, 16, 8, 4, 20, 12, 3, 15, 7, 19, 11, 23, 2, 18, 22, 10, 14, 6, 1, 13, 21, 5, 17, 9]",
+                                 ids(items.drain_sorted()));
+    };
+
+    export let test_tie_order_enqueue = func() -> void {
+        let items = priority_queue.create<[int, int]>(by_key);
+        for (let pair in tagged()) {
+            items.enqueue(pair);
+        }
+        test.assert_equal_string("[0, 4, 12, 8, 20, 11, 6, 16, 7, 3, 10, 23, 2, 13, 14, 1, 15, 17, 18, 9, 19, 21, 22, 5]",
+                                 ids(items.to_list()));
+        let first: [int, int][list] = [];
+        let i = 0;
+        while (i < 5) {
+            first.append(items.dequeue());
+            i = i + 1;
+        }
+        test.assert_equal_string("[0, 4, 8, 16, 20]", ids(first));
+        i = 24;
+        while (i < 29) {
+            items.enqueue([i % 3, i]);
+            i = i + 1;
+        }
+        items.validate();
+        test.assert_equal_string("[12, 24, 27, 7, 3, 19, 25, 15, 11, 23, 28, 10, 22, 18, 26, 14, 2, 6, 13, 21, 5, 1, 17, 9]",
+                                 ids(items.drain_sorted()));
+    };
+
+    // from_list copies its input.
+    export let test_from_list_copies = func() -> void {
+        let source: int[list] = [3, 1, 2];
+        let items = priority_queue.from_list<int>(source, compare);
+        source.append(0);
+        source[0] = 7;
+        test.assert_equal_int32(3, items.size());
+        test.assert_equal_string("[1, 2, 3]", items.drain_sorted().to_string());
+        test.assert_equal_int32(4, source.length);
+        let empty: int[list] = [];
+        test.assert(priority_queue.from_list<int>(empty, compare).is_empty());
+    };
+
+    export let test_iteration_and_search = func() -> void {
+        let items = priority_queue.from_list<int>([5, 3, 8, 1], compare);
+        let order = items.to_list();
+        let walk = items.iterator();
+        test.assert(walk.has_next());
+        test.assert(walk.has_next());
+        let seen: int[list] = [];
+        while (walk.has_next()) {
+            seen.append(walk.next());
+        }
+        test.assert(seen.equals(order));
+        let again: int[list] = [];
+        for (let value in items) {
+            again.append(value);
+        }
+        items.for_each(func(int value) -> void {
+            again.append(value);
+        });
+        test.assert_equal_int32(8, again.length);
+        test.assert_equal_string(order.to_string(), items.to_string());
+        test.assert(items.contains(8));
+        test.assert(!items.contains(2));
+        test.assert(items.contains_all([1, 5]));
+        // A to_list copy iterates independently of later changes.
+        for (let value in items.to_list()) {
+            items.enqueue(value);
+        }
+        test.assert_equal_int32(8, items.size());
+        items.clear();
+        test.assert(items.is_empty());
+        test.assert_equal_string("[]", items.to_string());
+    };
+
+    // Equality and hashing are by identity.
+    export let test_identity_and_text = func() -> void {
+        let a = priority_queue.from_list<int>([1], compare);
+        let b = priority_queue.from_list<int>([1], compare);
+        test.assert(a.equals(a));
+        test.assert(!a.equals(b));
+        test.assert_equal_string("[1]", a.to_string());
+    };
+
+    export let test_interfaces = func() -> void {
+        let items: queue.Queue<int> = priority_queue.create<int>(compare);
+        items.enqueue(3);
+        items.enqueue(2);
+        test.assert_equal_int32(2, items.dequeue());
+        let all: collection.Collection<int> = items;
+        test.assert_equal_int32(1, all.size());
+        let total = cell.of<int>(0);
+        all.for_each(func(int value) -> void {
+            total.value = total.value + value;
+        });
+        test.assert_equal_int32(3, total.value);
+    };
+);

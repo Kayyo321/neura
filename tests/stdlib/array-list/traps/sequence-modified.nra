@@ -1,0 +1,18 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let array_list = import:Std.Collections.ArrayList;
+let program = import:Std.Program;
+
+// A structural change while a sequence over the list runs traps.
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = array_list.of<int>([1, 2, 3]);
+        let total = items.sequence().fold<int>(0, func(int sum, int item) -> int {
+            if (item == 2) {
+                items.add(4);
+            }
+            return sum + item;
+        });
+        return program.ExitCode.Ok;
+    };
+);

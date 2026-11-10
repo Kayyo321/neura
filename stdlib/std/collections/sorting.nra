@@ -1,0 +1,206 @@
+let ordering = import:Std.Core.Ordering;
+
+// Stable sorting and binary search over built-in lists (Stdlib.md section
+// 9.11). A comparator must define a total order. It must not change the
+// list structurally: the list's version is compared after every call and a
+// change traps with "collection modified during iteration".
+export let Sorting = module (
+    // Runs of this length are sorted by binary insertion before merging.
+    const BlockSize: int = 16;
+
+    // Sorts items[start, end) in place with binary insertion. Each element
+    // goes after the last element of the sorted prefix that is not Greater
+    // than it, which keeps equal elements in their original order.
+    let insertion_sort = func<T>(T[list] items, int start, int end, func(T, T) -> ordering.Ordering c,
+                                 uint64 version) -> void {
+        let i = start + 1;
+        while (i < end) {
+            let value = items[i];
+            let low = start;
+            let high = i;
+            while (low < high) {
+                let middle = low + (high - low) / 2;
+                let order = c(items[middle], value);
+                if (items.version != version) {
+                    trap_with_message("collection modified during iteration");
+                }
+                if (order == ordering.Ordering.Greater) {
+                    high = middle;
+                } else {
+                    low = middle + 1;
+                }
+            }
+            let k = i;
+            while (k > low) {
+                items[k] = items[k - 1];
+                k = k - 1;
+            }
+            items[low] = value;
+            i = i + 1;
+        }
+    };
+
+    // Merges every adjacent pair of runs of `width` elements from
+    // source[source_start, source_start + count) into the same positions of
+    // destination, which starts at destination_start.
+    let merge_pass = func<T>(T[list] source, int source_start, T[list] destination, int destination_start,
+                             int count, int width, func(T, T) -> ordering.Ordering c, T[list] items,
+                             uint64 version) -> void {
+        let left = 0;
+        while (left < count) {
+            let middle = left + width;
+            if (middle > count) {
+                middle = count;
+            }
+            let right_end = middle + width;
+            if (right_end > count) {
+                right_end = count;
+            }
+            let copy_only = middle == right_end;
+            if (!copy_only) {
+                // A pair that is already in order is copied without merging.
+                let order = c(source[source_start + middle - 1], source[source_start + middle]);
+                if (items.version != version) {
+                    trap_with_message("collection modified during iteration");
+                }
+                copy_only = order != ordering.Ordering.Greater;
+            }
+            if (copy_only) {
+                let k = left;
+                while (k < right_end) {
+                    destination[destination_start + k] = source[source_start + k];
+                    k = k + 1;
+                }
+            } else {
+                let i = left;
+                let j = middle;
+                let k = left;
+                while (i < middle && j < right_end) {
+                    let right_value = source[source_start + j];
+                    let left_value = source[source_start + i];
+                    let order = c(right_value, left_value);
+                    if (items.version != version) {
+                        trap_with_message("collection modified during iteration");
+                    }
+                    // Take from the right run only when it is strictly less.
+                    if (order == ordering.Ordering.Less) {
+                        destination[destination_start + k] = right_value;
+                        j = j + 1;
+                    } else {
+                        destination[destination_start + k] = left_value;
+                        i = i + 1;
+                    }
+                    k = k + 1;
+                }
+                while (i < middle) {
+                    destination[destination_start + k] = source[source_start + i];
+                    i = i + 1;
+                    k = k + 1;
+                }
+                while (j < right_end) {
+                    destination[destination_start + k] = source[source_start + j];
+                    j = j + 1;
+                    k = k + 1;
+                }
+            }
+            left = right_end;
+        }
+    };
+
+    // Merges the sorted blocks of items[start, end) bottom-up. The buffer
+    // lives only in this helper's frame, so it is unreachable once the
+    // helper returns (section 5.5).
+    let merge_blocks = func<T>(T[list] items, int start, int end, func(T, T) -> ordering.Ordering c,
+                               uint64 version) -> void {
+        let count = end - start;
+        // The buffer holds references the list already holds, so it keeps
+        // nothing extra alive and needs no "empty" element.
+        let buffer: T[list] = [];
+        let i = start;
+        while (i < end) {
+            buffer.append(items[i]);
+            i = i + 1;
+        }
+        let in_buffer = false;
+        let width = BlockSize;
+        while (width < count) {
+            if (in_buffer) {
+                merge_pass<T>(buffer, 0, items, start, count, width, c, items, version);
+            } else {
+                merge_pass<T>(items, start, buffer, 0, count, width, c, items, version);
+            }
+            in_buffer = !in_buffer;
+            if (width > count / 2) {
+                width = count;
+            } else {
+                width = width * 2;
+            }
+        }
+        if (in_buffer) {
+            // Element writes do not change the list's structural version.
+            let k = 0;
+            while (k < count) {
+                items[start + k] = buffer[k];
+                k = k + 1;
+            }
+        }
+    };
+
+    // Sorts items[start, end) stably. Traps with "invalid argument: range"
+    // unless 0 <= start <= end <= items.length.
+    export let sort_range = func<T>(T[list] items, int start, int end, func(T, T) -> ordering.Ordering c) -> void {
+        if (start < 0 || start > end || end > items.length) {
+            trap_with_message("invalid argument: range");
+        }
+        let version = items.version;
+        let block = start;
+        while (block < end) {
+            let block_end = end;
+            if (end - block > BlockSize) {
+                block_end = block + BlockSize;
+            }
+            insertion_sort<T>(items, block, block_end, c, version);
+            block = block_end;
+        }
+        if (end - start > BlockSize) {
+            merge_blocks<T>(items, start, end, c, version);
+        }
+    };
+
+    // Sorts the whole list stably with at most about n log2 n comparator
+    // calls.
+    export let sort = func<T>(T[list] items, func(T, T) -> ordering.Ordering c) -> void {
+        sort_range<T>(items, 0, items.length, c);
+    };
+
+    // `items` must be sorted by `c`. Returns the lowest index whose element is
+    // not Less than `value` when that element compares Equal, and otherwise
+    // -(insertion point) - 1.
+    export let binary_search = func<T>(T[list] items, T value, func(T, T) -> ordering.Ordering c) -> int {
+        let version = items.version;
+        let low = 0;
+        let high = items.length;
+        while (low < high) {
+            let middle = low + (high - low) / 2;
+            let order = c(items[middle], value);
+            if (items.version != version) {
+                trap_with_message("collection modified during iteration");
+            }
+            if (order == ordering.Ordering.Less) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        if (low < items.length) {
+            let order = c(items[low], value);
+            if (items.version != version) {
+                trap_with_message("collection modified during iteration");
+            }
+            if (order == ordering.Ordering.Equal) {
+                return low;
+            }
+        }
+        return -low - 1;
+    };
+);

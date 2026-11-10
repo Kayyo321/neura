@@ -1,0 +1,241 @@
+let model_random = import:ModelRandom;
+let optional = import:Std.Core.Optional;
+let ordinal_map = import:Std.Collections.OrdinalMap;
+let test = import:Std.Test;
+
+// Drives an OrdinalMap and a trivially correct model (a presence flag and a
+// value per key) with the same seeded operations, comparing size, entries,
+// iteration order, and results after every operation.
+let OrdinalMapModelTests = module (
+    const Limit: int = 48;
+
+    let Model = class (
+        export let present: bool[list] = [];
+        export let values: int[list] = [];
+
+        export let init = func() -> void {
+            let i = 0;
+            while (i < Limit) {
+                present.append(false);
+                values.append(0);
+                i = i + 1;
+            }
+        };
+
+        export let size = func() -> int {
+            let total = 0;
+            for (let flag in present) {
+                if (flag) {
+                    total = total + 1;
+                }
+            }
+            return total;
+        };
+
+        export let entries = func() -> [int, int][list] {
+            let result: [int, int][list] = [];
+            let key = 0;
+            while (key < Limit) {
+                if (present[key]) {
+                    result.append([key, values[key]]);
+                }
+                key = key + 1;
+            }
+            return result;
+        };
+    );
+
+    let check = func(ordinal_map.OrdinalMap<int> actual, Model model) -> void {
+        let walk = actual.iterator();
+        let count = 0;
+        let key = 0;
+        while (key < Limit) {
+            if (model.present[key]) {
+                test.assert(walk.has_next());
+                let entry = walk.next();
+                test.assert_equal_int32(key, entry[0]);
+                test.assert_equal_int32(model.values[key], entry[1]);
+                count = count + 1;
+            }
+            key = key + 1;
+        }
+        test.assert(!walk.has_next());
+        test.assert_equal_int32(count, actual.size());
+        test.assert_equal_bool(count == 0, actual.is_empty());
+    };
+
+    let some_or = func(optional.Optional<int> o, int fallback) -> int {
+        return optional.value_or<int>(o, fallback);
+    };
+
+    let run = func(uint64 seed, int operations) -> void {
+        let random = model_random.seeded(seed);
+        let actual = ordinal_map.create<int>(Limit);
+        let model = new Model();
+        let step = 0;
+        while (step < operations) {
+            let choice = random.below(100);
+            let key = random.below(Limit);
+            let value = random.below(20);
+            let had = model.present[key];
+            let old = model.values[key];
+            if (choice < 20) {
+                actual.set(key, value);
+                model.present[key] = true;
+                model.values[key] = value;
+            } else if (choice < 28) {
+                let previous = actual.put(key, value);
+                test.assert_equal_bool(had, optional.is_some<int>(previous));
+                if (had) {
+                    test.assert_equal_int32(old, some_or(previous, -1));
+                }
+                model.present[key] = true;
+                model.values[key] = value;
+            } else if (choice < 40) {
+                test.assert_equal_bool(had, actual.delete(key));
+                model.present[key] = false;
+            } else if (choice < 46) {
+                let previous = actual.remove(key);
+                test.assert_equal_bool(had, optional.is_some<int>(previous));
+                if (had) {
+                    test.assert_equal_int32(old, some_or(previous, -1));
+                }
+                model.present[key] = false;
+            } else if (choice < 54) {
+                test.assert_equal_bool(had, actual.contains_key(key));
+                test.assert_equal_bool(had, optional.is_some<int>(actual.get(key)));
+                if (had) {
+                    test.assert_equal_int32(old, actual.require(key));
+                    test.assert_equal_int32(old, actual.get_or(key, -1));
+                } else {
+                    test.assert_equal_int32(-1, actual.get_or(key, -1));
+                }
+            } else if (choice < 58) {
+                let expected = false;
+                for (let entry in model.entries()) {
+                    if (entry[1] == value) {
+                        expected = true;
+                    }
+                }
+                test.assert_equal_bool(expected, actual.contains_value(value));
+            } else if (choice < 63) {
+                let made = actual.get_or_put(key, func() -> int {
+                    return value + 100;
+                });
+                if (!had) {
+                    model.present[key] = true;
+                    model.values[key] = value + 100;
+                }
+                test.assert_equal_int32(model.values[key], made);
+            } else if (choice < 68) {
+                let merged = actual.merge(key, value, func(int a, int b) -> int {
+                    return a + b;
+                });
+                if (had) {
+                    model.values[key] = old + value;
+                } else {
+                    model.present[key] = true;
+                    model.values[key] = value;
+                }
+                test.assert_equal_int32(model.values[key], merged);
+            } else if (choice < 74) {
+                let drop = value % 3 == 0;
+                let result = actual.compute(key, func(int k, optional.Optional<int> current) -> optional.Optional<int> {
+                    if (drop) {
+                        return optional.Optional<int>.None;
+                    }
+                    return optional.Optional<int>.Some(optional.value_or<int>(current, 0) + k);
+                });
+                if (drop) {
+                    model.present[key] = false;
+                    test.assert_none<int>(result);
+                } else {
+                    let stored = key;
+                    if (had) {
+                        stored = old + key;
+                    }
+                    model.present[key] = true;
+                    model.values[key] = stored;
+                    test.assert_equal_int32(stored, some_or(result, -1));
+                }
+            } else if (choice < 77) {
+                let divisor = value % 4 + 2;
+                let removed = actual.remove_if(func(int k, int v) -> bool {
+                    return (k + v) % divisor == 0;
+                });
+                let expected = 0;
+                let k = 0;
+                while (k < Limit) {
+                    if (model.present[k] && (k + model.values[k]) % divisor == 0) {
+                        model.present[k] = false;
+                        expected = expected + 1;
+                    }
+                    k = k + 1;
+                }
+                test.assert_equal_int32(expected, removed);
+            } else if (choice < 78) {
+                actual.clear();
+                model = new Model();
+            } else if (choice < 82) {
+                let other = ordinal_map.create<int>(Limit);
+                let count = random.below(6);
+                let i = 0;
+                while (i < count) {
+                    let k = random.below(Limit);
+                    let v = random.below(20);
+                    other.set(k, v);
+                    model.present[k] = true;
+                    model.values[k] = v;
+                    i = i + 1;
+                }
+                actual.put_all(other);
+            } else if (choice < 88) {
+                let expected = model.entries();
+                let keys: int[list] = [];
+                let values: int[list] = [];
+                let copy = ordinal_map.create<int>(Limit);
+                let sum: uint64 = 0;
+                for (let entry in expected) {
+                    keys.append(entry[0]);
+                    values.append(entry[1]);
+                    copy.set(entry[0], entry[1]);
+                    let entry_hash = (entry[0] as uint32) ^ (entry[1] as uint32);
+                    sum = (sum + (entry_hash as uint64)) & 4294967295;
+                }
+                test.assert(actual.keys().equals(keys));
+                test.assert(actual.values().equals(values));
+                test.assert(actual.entries().equals(expected));
+                test.assert(actual.equals(copy));
+                test.assert(copy.equals(actual));
+                test.assert_equal_int64(sum as int64, actual.hash_code() as int64);
+            } else if (choice < 94) {
+                let text = "{";
+                let first = true;
+                for (let entry in model.entries()) {
+                    if (!first) {
+                        text = text + ", ";
+                    }
+                    text = text + entry[0].to_string() + ": " + entry[1].to_string();
+                    first = false;
+                }
+                test.assert_equal_string(text + "}", actual.to_string());
+            } else {
+                let seen: [int, int][list] = [];
+                actual.for_each(func(int k, int v) -> void {
+                    seen.append([k, v]);
+                });
+                test.assert(seen.equals(model.entries()));
+            }
+            check(actual, model);
+            step = step + 1;
+        }
+    };
+
+    export let test_model_seed_1 = func() -> void {
+        run(1, 5000);
+    };
+
+    export let test_model_seed_2 = func() -> void {
+        run(161803, 5000);
+    };
+);

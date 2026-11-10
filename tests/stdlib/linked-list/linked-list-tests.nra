@@ -1,0 +1,298 @@
+let array_list = import:Std.Collections.ArrayList;
+let cell = import:Std.Core.Cell;
+let collection = import:Std.Collections.Collection;
+let deque = import:Std.Collections.Deque;
+let linked_list = import:Std.Collections.LinkedList;
+let lists = import:Std.Collections.Lists;
+let mutable_list = import:Std.Collections.MutableList;
+let ordering = import:Std.Core.Ordering;
+let test = import:Std.Test;
+
+let LinkedListTests = module (
+    let Tagged = class (
+        export let key: int;
+        export let order: int;
+
+        export let init = func(int k, int o) -> void {
+            key = k;
+            order = o;
+        };
+    );
+
+    let compare = func(int a, int b) -> ordering.Ordering {
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        if (a > b) {
+            return ordering.Ordering.Greater;
+        }
+        return ordering.Ordering.Equal;
+    };
+
+    let numbers = func() -> linked_list.LinkedList<int> {
+        return linked_list.of<int>([3, 1, 4, 1, 5]);
+    };
+
+    let text = func(linked_list.LinkedList<int> items) -> string {
+        items.validate();
+        return items.to_string();
+    };
+
+    export let test_factories = func() -> void {
+        let empty = linked_list.create<int>();
+        test.assert(empty.is_empty());
+        test.assert_equal_int32(0, empty.size());
+        empty.validate();
+        let source: int[list] = [1, 2];
+        let copied = linked_list.of<int>(source);
+        source.append(3);
+        test.assert_equal_string("[1, 2]", text(copied));
+        test.assert_equal_string("[]", text(new linked_list.LinkedList<int>()));
+    };
+
+    // Positions in both halves walk from the nearer end.
+    export let test_positional_access = func() -> void {
+        let items = linked_list.create<int>();
+        let i = 0;
+        while (i < 9) {
+            items.add(i * 10);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < 9) {
+            test.assert_equal_int32(i * 10, items.get(i));
+            items.set(i, i);
+            i = i + 1;
+        }
+        test.assert_equal_string("[0, 1, 2, 3, 4, 5, 6, 7, 8]", text(items));
+        test.assert_equal_int32(0, items.first());
+        test.assert_equal_int32(8, items.last());
+        test.assert_equal_int32(0, test.assert_some<int>(items.first_or_none()));
+        test.assert_equal_int32(8, test.assert_some<int>(items.last_or_none()));
+        test.assert_none<int>(linked_list.create<int>().first_or_none());
+        test.assert_none<int>(linked_list.create<int>().last_or_none());
+    };
+
+    export let test_insertion = func() -> void {
+        let items = linked_list.create<int>();
+        items.add_at(0, 2);
+        items.add_at(0, 0);
+        items.add_at(1, 1);
+        items.add_at(3, 4);
+        items.add_at(3, 3);
+        test.assert_equal_string("[0, 1, 2, 3, 4]", text(items));
+        items.add_first(-1);
+        items.add_last(5);
+        test.assert(items.add(6));
+        test.assert_equal_string("[-1, 0, 1, 2, 3, 4, 5, 6]", text(items));
+        items.add_all([7, 8]);
+        test.assert_equal_int32(10, items.size());
+        let own = linked_list.of<int>([1, 2]);
+        own.add_all(own.to_list());
+        test.assert_equal_string("[1, 2, 1, 2]", text(own));
+    };
+
+    export let test_removal = func() -> void {
+        let items = numbers();
+        test.assert_equal_int32(4, items.remove_at(2));
+        test.assert_equal_string("[3, 1, 1, 5]", text(items));
+        test.assert_equal_int32(3, items.remove_first());
+        test.assert_equal_int32(5, items.remove_last());
+        test.assert_equal_string("[1, 1]", text(items));
+        test.assert(items.remove(1));
+        test.assert(!items.remove(7));
+        test.assert_equal_int32(1, items.remove_at(0));
+        test.assert(items.is_empty());
+        test.assert_equal_string("[]", text(items));
+        let ends = linked_list.of<int>([1, 2, 3]);
+        test.assert_equal_int32(3, ends.remove_at(2));
+        test.assert_equal_int32(1, ends.remove_at(0));
+        test.assert_equal_string("[2]", text(ends));
+    };
+
+    export let test_queue_members = func() -> void {
+        let items = linked_list.create<string>();
+        items.enqueue("a");
+        items.enqueue("b");
+        test.assert_equal_string("a", test.assert_some<string>(items.peek()));
+        test.assert_equal_string("a", items.dequeue());
+        test.assert_equal_string("b", test.assert_some<string>(items.try_dequeue()));
+        test.assert_none<string>(items.try_dequeue());
+        test.assert_none<string>(items.peek());
+    };
+
+    export let test_swap_reverse_fill = func() -> void {
+        let items = numbers();
+        items.swap(0, 4);
+        test.assert_equal_string("[5, 1, 4, 1, 3]", text(items));
+        items.reverse();
+        test.assert_equal_string("[3, 1, 4, 1, 5]", text(items));
+        let even = linked_list.of<int>([1, 2, 3, 4]);
+        even.reverse();
+        test.assert_equal_string("[4, 3, 2, 1]", text(even));
+        let empty = linked_list.create<int>();
+        empty.reverse();
+        items.fill(0);
+        test.assert_equal_string("[0, 0, 0, 0, 0]", text(items));
+    };
+
+    export let test_truncate_clear_slice = func() -> void {
+        let items = numbers();
+        items.truncate(5);
+        items.truncate(2);
+        test.assert_equal_string("[3, 1]", text(items));
+        items.truncate(0);
+        test.assert(items.is_empty());
+        let other = numbers();
+        let middle = other.slice(1, 4);
+        test.assert_equal_string("[1, 4, 1]", text(middle));
+        middle.set(0, 9);
+        test.assert_equal_int32(1, other.get(1));
+        test.assert(other.slice(5, 5).is_empty());
+        test.assert(other.slice(0, 5).equals(other));
+        other.clear();
+        test.assert_equal_string("[]", text(other));
+        other.add(1);
+        test.assert_equal_string("[1]", text(other));
+    };
+
+    export let test_iteration = func() -> void {
+        let items = linked_list.of<int>([1, 2]);
+        let walk = items.iterator();
+        test.assert(walk.has_next());
+        test.assert(walk.has_next());
+        test.assert_equal_int32(1, walk.next());
+        test.assert_equal_int32(2, walk.next());
+        test.assert(!walk.has_next());
+        let seen: int[list] = [];
+        for (let value in items) {
+            seen.append(value);
+            // Replacing values is not structural.
+            items.set(0, value);
+        }
+        items.for_each(func(int value) -> void {
+            seen.append(value);
+        });
+        test.assert_equal_string("[1, 2, 2, 2]", seen.to_string());
+        // A to_list copy iterates independently of later changes.
+        for (let value in items.to_list()) {
+            items.add_first(value);
+            items.remove_last();
+        }
+        test.assert_equal_string("[2, 2]", text(items));
+    };
+
+    export let test_callbacks = func() -> void {
+        let items = numbers();
+        let seen: int[list] = [];
+        test.assert_equal_int32(2, items.remove_if(func(int value) -> bool {
+            seen.append(value);
+            return value == 1;
+        }));
+        test.assert_equal_string("[3, 1, 4, 1, 5]", seen.to_string());
+        test.assert_equal_string("[3, 4, 5]", text(items));
+        test.assert_equal_int32(1, items.retain_if(func(int value) -> bool {
+            return value > 3;
+        }));
+        test.assert_equal_string("[4, 5]", text(items));
+        let calls = cell.of<int>(0);
+        test.assert_equal_int32(1, items.index_where(func(int value) -> bool {
+            calls.value = calls.value + 1;
+            return value == 5;
+        }));
+        test.assert_equal_int32(2, calls.value);
+        test.assert_equal_int32(-1, items.index_where(func(int value) -> bool {
+            return false;
+        }));
+        test.assert_equal_int32(2, items.retain_if(func(int value) -> bool {
+            return false;
+        }));
+        test.assert_equal_string("[]", text(items));
+    };
+
+    export let test_sort_and_search = func() -> void {
+        let items = linked_list.create<Tagged>();
+        let i = 0;
+        while (i < 40) {
+            items.add(new Tagged((i * 7) % 5, i));
+            i = i + 1;
+        }
+        let walk_before = items.iterator();
+        items.sort(func(Tagged a, Tagged b) -> ordering.Ordering {
+            return compare(a.key, b.key);
+        });
+        // Sorting rewrites values only, so an earlier iterator stays valid.
+        test.assert(walk_before.has_next());
+        i = 1;
+        while (i < 40) {
+            let before = items.get(i - 1);
+            let after = items.get(i);
+            test.assert(before.key <= after.key);
+            if (before.key == after.key) {
+                test.assert(before.order < after.order);
+            }
+            i = i + 1;
+        }
+        let sorted = linked_list.of<int>([1, 3, 3, 3, 5, 7]);
+        test.assert_equal_int32(1, sorted.binary_search(3, compare));
+        test.assert_equal_int32(-5, sorted.binary_search(4, compare));
+        test.assert_equal_int32(-7, sorted.binary_search(8, compare));
+    };
+
+    export let test_search_by_equals = func() -> void {
+        let items = numbers();
+        test.assert(items.contains(4));
+        test.assert(!items.contains(2));
+        test.assert_equal_int32(1, items.index_of(1));
+        test.assert_equal_int32(3, items.last_index_of(1));
+        test.assert_equal_int32(-1, items.index_of(9));
+        test.assert_equal_int32(-1, items.last_index_of(9));
+        test.assert(items.contains_all([1, 5]));
+        let objects = linked_list.of<class>([nil, new Tagged(0, 0)]);
+        test.assert_equal_int32(0, objects.index_of(nil));
+        test.assert(!objects.contains(new Tagged(0, 0)));
+    };
+
+    export let test_equality_hash_and_text = func() -> void {
+        let a = linked_list.of<int>([1, 2]);
+        let b = linked_list.of<int>([1, 2]);
+        test.assert(a.equals(b));
+        test.assert(!a.equals(linked_list.of<int>([1, 2, 3])));
+        test.assert(!a.equals(linked_list.of<int>([2, 1])));
+        test.assert(!a.equals(linked_list.of<int64>([1, 2])));
+        test.assert(!a.equals(nil));
+        let other = array_list.of<int>([1, 2]);
+        test.assert(!a.equals(other));
+        test.assert(lists.same_elements<int>(a, other));
+        test.assert(lists.same_elements<int>(other, a));
+        test.assert_equal_int32(994, a.hash_code() as int);
+        test.assert_equal_int32(1, linked_list.create<int>().hash_code() as int);
+        test.assert_equal_int64(other.hash_code() as int64, a.hash_code() as int64);
+        let strings = linked_list.of<string>(["a", "b"]);
+        test.assert_equal_string("[a, b]", strings.to_string());
+        test.assert_equal_int64(["a", "b"].hash_code() as int64, strings.hash_code() as int64);
+        let objects = linked_list.create<class>();
+        objects.add(objects);
+        objects.add(a);
+        test.assert_equal_string("[(this collection), [1, 2]]", objects.to_string());
+    };
+
+    export let test_interfaces = func() -> void {
+        let items: mutable_list.MutableList<int> = numbers();
+        test.assert(items.add(9));
+        items.sort(compare);
+        test.assert_equal_string("[1, 1, 3, 4, 5, 9]", items.to_list().to_string());
+        let ends: deque.Deque<int> = linked_list.of<int>([2]);
+        ends.add_first(1);
+        ends.add_last(3);
+        test.assert_equal_int32(1, ends.first());
+        test.assert_equal_int32(3, ends.remove_last());
+        let view: collection.Collection<int> = ends;
+        let total = 0;
+        for (let value in view) {
+            total = total + value;
+        }
+        test.assert_equal_int32(3, total);
+        test.assert(view.contains_all([1, 2]));
+    };
+);

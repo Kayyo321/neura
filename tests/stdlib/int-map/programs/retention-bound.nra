@@ -1,0 +1,51 @@
+// run-options: --max-heap-cells 26000
+let console = import:Std.Io.Console;
+let int_map = import:Std.Collections.IntMap;
+let program = import:Std.Program;
+
+// A removed value stays reachable only until the next compaction, and a hash
+// map never holds more than max(size, 7) removed entries (Stdlib.md section
+// 9.6). The map keeps 8 live entries in a table sized for 1,000, and each
+// round adds a 2,000-element value and removes the previous one from the
+// middle of the entry order. The documented bound allows 8 dead values;
+// with the live one, the one being built, and the 2,048-slot index the run
+// needs about 24,500 cells. One more retained value would need about 26,600,
+// and waiting for a table-full compaction would retain hundreds.
+export let Main = module:program.Entry (
+    let block = func(int seed) -> int[list] {
+        let values: int[list] = [];
+        let i = 0;
+        while (i < 2000) {
+            values.append(seed + i);
+            i = i + 1;
+        }
+        return values;
+    };
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let map = int_map.with_capacity<int[list]>(1000);
+        let i = 0;
+        while (i < 7) {
+            let small: int[list] = [i];
+            map.set(-1 - i, small);
+            i = i + 1;
+        }
+        let total: int64 = 0;
+        let round = 0;
+        while (round < 300) {
+            map.set(round, block(round));
+            if (round > 0) {
+                if (round % 2 == 0) {
+                    total = total + (map.require(round - 1)[1] as int64);
+                    map.delete(round - 1);
+                } else {
+                    let removed = map.remove(round - 1);
+                }
+            }
+            round = round + 1;
+        }
+        map.validate();
+        console.print_line(map.size().to_string() + " " + total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

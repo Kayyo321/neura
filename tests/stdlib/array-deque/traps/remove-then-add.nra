@@ -1,0 +1,16 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let array_deque = import:Std.Collections.ArrayDeque;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = array_deque.of<int>([1, 2]);
+        let walk = items.iterator();
+        console.print_line(walk.next().to_string());
+        items.add_last(items.remove_last());
+        console.print_line(walk.has_next().to_string());
+        return program.ExitCode.Ok;
+    };
+);

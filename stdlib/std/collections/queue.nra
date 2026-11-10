@@ -1,0 +1,15 @@
+let collection = import:Std.Collections.Collection;
+let optional = import:Std.Core.Optional;
+
+// First-in, first-out access (ArrayDeque, LinkedList), or least-first for
+// PriorityQueue.
+export let Queue = module (
+    export let Queue = interface<T>:collection.Collection<T> (
+        let enqueue = func(T value) -> void;
+        // Traps with "no such element" when empty.
+        let dequeue = func() -> T;
+        let peek = func() -> optional.Optional<T>;
+        let try_dequeue = func() -> optional.Optional<T>;
+        let clear = func() -> void;
+    );
+);

@@ -1,0 +1,175 @@
+let hash_map = import:Std.Collections.HashMap;
+let hash_set = import:Std.Collections.HashSet;
+let test = import:Std.Test;
+
+// The shared hash core (Stdlib.md section 9.6), exercised through its
+// owners, since only library source may import Std.Collections.Internal.
+// validate() checks the core's invariants after each step: index slots and
+// entries agree, at least half of the index is Empty, the last entry is
+// live, and no more than max(size, 7) removed entries remain.
+let HashCoreTests = module (
+    let ints = func(int start, int end) -> int[list] {
+        let result: int[list] = [];
+        let i = start;
+        while (i < end) {
+            result.append(i);
+            i = i + 1;
+        }
+        return result;
+    };
+
+    // Rule 1 with more than half of E live: the table doubles.
+    export let test_growth = func() -> void {
+        let set = hash_set.create<int>();
+        let i = 0;
+        while (i < 600) {
+            test.assert(set.add(i * 7));
+            set.validate();
+            i = i + 1;
+        }
+        test.assert_equal_int32(600, set.size());
+        i = 0;
+        while (i < 4200) {
+            test.assert_equal_bool(i % 7 == 0, set.contains(i));
+            i = i + 1;
+        }
+    };
+
+    // Rule 1 with at most half of E live: compaction at the same size keeps
+    // the order and drops the dead entries.
+    export let test_compaction_without_growth = func() -> void {
+        let set = hash_set.create<int>();
+        set.add_all([10, 11, 12, 13]);
+        test.assert(set.remove(11));
+        test.assert(set.remove(12));
+        set.validate();
+        test.assert(set.add(14));
+        set.validate();
+        test.assert(set.add(15));
+        set.validate();
+        test.assert_equal_string("{10, 13, 14, 15}", set.to_string());
+    };
+
+    // Rule 2: releases never leave more dead entries than max(size, 7).
+    export let test_release_compaction = func() -> void {
+        let set = hash_set.create<int>();
+        set.add_all(ints(0, 64));
+        let i = 0;
+        while (i < 63) {
+            test.assert(set.remove(i));
+            set.validate();
+            i = i + 1;
+        }
+        test.assert_equal_string("{63}", set.to_string());
+        set.add_all(ints(0, 3));
+        test.assert_equal_string("{63, 0, 1, 2}", set.to_string());
+        set.validate();
+    };
+
+    // Releasing the last entry removes trailing dead entries.
+    export let test_trailing_release = func() -> void {
+        let map = hash_map.create<int, string>();
+        let i = 0;
+        while (i < 20) {
+            map.set(i, i.to_string());
+            i = i + 1;
+        }
+        map.delete(5);
+        map.delete(6);
+        map.validate();
+        i = 19;
+        while (i >= 0) {
+            map.delete(i);
+            map.validate();
+            i = i - 1;
+        }
+        test.assert(map.is_empty());
+        map.set(3, "three");
+        test.assert_equal_string("{3: three}", map.to_string());
+    };
+
+    // Adding and releasing the last entry leaves tombstones behind; the
+    // index still keeps half its slots Empty, so absent lookups end.
+    export let test_tombstones_from_trailing_release = func() -> void {
+        let set = hash_set.create<int>();
+        set.add_all([-1, -2]);
+        let i = 0;
+        while (i < 2000) {
+            test.assert(set.add(i));
+            test.assert(set.remove(i));
+            test.assert(!set.contains(i + 1));
+            set.validate();
+            i = i + 1;
+        }
+        test.assert_equal_string("{-1, -2}", set.to_string());
+    };
+
+    // remove_if releases every chosen entry, then compacts once.
+    export let test_bulk_release = func() -> void {
+        let set = hash_set.create<int>();
+        set.add_all(ints(0, 200));
+        test.assert_equal_int32(195, set.remove_if(func(int v) -> bool {
+            return v % 40 != 7;
+        }));
+        set.validate();
+        test.assert_equal_string("{7, 47, 87, 127, 167}", set.to_string());
+        test.assert_equal_int32(5, set.retain_if(func(int v) -> bool {
+            return false;
+        }));
+        set.validate();
+        test.assert(set.is_empty());
+    };
+
+    // trim compacts at the smallest table that holds the live entries, and
+    // the table keeps working afterwards.
+    export let test_trim = func() -> void {
+        let set = hash_set.with_capacity<int>(500);
+        set.trim();
+        set.validate();
+        set.add_all(ints(0, 100));
+        set.trim();
+        set.validate();
+        set.remove_if(func(int v) -> bool {
+            return v < 97;
+        });
+        set.trim();
+        set.validate();
+        test.assert_equal_string("{97, 98, 99}", set.to_string());
+        set.add_all(ints(0, 50));
+        set.validate();
+        test.assert_equal_int32(53, set.size());
+    };
+
+    // with_capacity sizes the table for the given entries; the bounds are
+    // 0 and 2^29 (the traps are separate programs).
+    export let test_with_capacity = func() -> void {
+        let n = 0;
+        while (n < 40) {
+            let set = hash_set.with_capacity<int>(n);
+            set.validate();
+            set.add_all(ints(0, n));
+            set.validate();
+            test.assert_equal_int32(n, set.size());
+            n = n + 1;
+        }
+    };
+
+    // clear empties the table at its initial size.
+    export let test_clear = func() -> void {
+        let map = hash_map.with_capacity<int, int>(20);
+        map.set(1, 1);
+        map.clear();
+        map.validate();
+        let i = 0;
+        while (i < 100) {
+            map.set(i, i);
+            i = i + 1;
+        }
+        map.clear();
+        map.validate();
+        test.assert(map.is_empty());
+        map.set(7, 7);
+        map.validate();
+        test.assert_equal_string("{7: 7}", map.to_string());
+    };
+);

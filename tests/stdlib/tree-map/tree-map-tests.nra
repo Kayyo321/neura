@@ -1,0 +1,255 @@
+let cell = import:Std.Core.Cell;
+let int32 = import:Std.Core.Int32;
+let mutable_map = import:Std.Collections.MutableMap;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let sorted_map = import:Std.Collections.SortedMap;
+let test = import:Std.Test;
+let tree_map = import:Std.Collections.TreeMap;
+
+let TreeMapTests = module (
+    let sample = func() -> tree_map.TreeMap<int, string> {
+        let map = tree_map.create<int, string>(int32.compare);
+        map.set(20, "t");
+        map.set(5, "f");
+        map.set(30, "h");
+        map.set(10, "e");
+        return map;
+    };
+
+    let key_text = func(optional.Optional<int> key) -> string {
+        return optional.to_string<int>(key);
+    };
+
+    let entry_text = func(optional.Optional<[int, string]> entry) -> string {
+        return match (entry) {
+            optional.Optional.None => "None",
+            optional.Optional.Some(item) => item.to_string(),
+        };
+    };
+
+    export let test_empty = func() -> void {
+        let map = tree_map.create<int, int>(int32.compare);
+        test.assert(map.is_empty());
+        test.assert_equal_int32(0, map.size());
+        test.assert_equal_string("{}", map.to_string());
+        test.assert_none<int>(map.get(1));
+        test.assert_none<int>(map.floor(1));
+        test.assert(optional.is_none<[int, int]>(map.ceiling_entry(1)));
+        test.assert_equal_int32(0, map.range(0, 10).length);
+        test.assert_equal_int32(0, map.descending().length);
+        test.assert(!map.iterator().has_next());
+        test.assert(!map.key_iterator().has_next());
+        map.validate();
+    };
+
+    export let test_map_members_in_key_order = func() -> void {
+        let map = sample();
+        test.assert_equal_int32(4, map.size());
+        test.assert_equal_string("{5: f, 10: e, 20: t, 30: h}", map.to_string());
+        test.assert_equal_string("[5, 10, 20, 30]", map.keys().to_string());
+        test.assert_equal_string("[f, e, t, h]", map.values().to_string());
+        test.assert_equal_string("[[5, f], [10, e], [20, t], [30, h]]", map.entries().to_string());
+        test.assert(map.contains_key(10));
+        test.assert(!map.contains_key(11));
+        test.assert_equal_string("t", map.require(20));
+        test.assert_equal_string("t", test.assert_some<string>(map.get(20)));
+        test.assert_equal_string("-", map.get_or(21, "-"));
+        test.assert_none<string>(map.put(1, "o"));
+        test.assert_equal_string("o", test.assert_some<string>(map.put(1, "O")));
+        test.assert(map.delete(1));
+        test.assert(!map.delete(1));
+        test.assert_equal_string("e", test.assert_some<string>(map.remove(10)));
+        test.assert_none<string>(map.remove(10));
+        test.assert(map.contains_value("h"));
+        test.assert(!map.contains_value("e"));
+        map.validate();
+        map.clear();
+        test.assert(map.is_empty());
+        map.validate();
+    };
+
+    export let test_sorted_members = func() -> void {
+        let map = sample();
+        test.assert_equal_string("[5, f]", map.first().to_string());
+        test.assert_equal_string("[30, h]", map.last().to_string());
+        test.assert_equal_string("[[10, e], [20, t]]", map.range(10, 30).to_string());
+        test.assert_equal_string("[[5, f], [10, e], [20, t], [30, h]]", map.range(-100, 100).to_string());
+        test.assert_equal_string("[]", map.range(11, 20).to_string());
+        test.assert_equal_string("[]", map.range(30, 10).to_string());
+        test.assert_equal_string("[[30, h], [20, t], [10, e], [5, f]]", map.descending().to_string());
+        test.assert_equal_string("Some(10)", key_text(map.floor(10)));
+        test.assert_equal_string("Some(10)", key_text(map.floor(19)));
+        test.assert_equal_string("None", key_text(map.floor(4)));
+        test.assert_equal_string("Some(10)", key_text(map.ceiling(10)));
+        test.assert_equal_string("Some(20)", key_text(map.ceiling(11)));
+        test.assert_equal_string("None", key_text(map.ceiling(31)));
+        test.assert_equal_string("Some(5)", key_text(map.lower(10)));
+        test.assert_equal_string("None", key_text(map.lower(5)));
+        test.assert_equal_string("Some(20)", key_text(map.higher(10)));
+        test.assert_equal_string("None", key_text(map.higher(30)));
+        test.assert_equal_string("[10, e]", entry_text(map.floor_entry(12)));
+        test.assert_equal_string("[20, t]", entry_text(map.ceiling_entry(12)));
+        test.assert_equal_string("[5, f]", entry_text(map.lower_entry(10)));
+        test.assert_equal_string("[30, h]", entry_text(map.higher_entry(20)));
+        test.assert_equal_string("None", entry_text(map.higher_entry(30)));
+        test.assert_equal_string("None", entry_text(map.lower_entry(5)));
+        test.assert_equal_string("None", entry_text(map.floor_entry(0)));
+        test.assert_equal_string("None", entry_text(map.ceiling_entry(31)));
+        test.assert_equal_string("[5, f]", map.remove_first().to_string());
+        test.assert_equal_string("[30, h]", map.remove_last().to_string());
+        test.assert_equal_string("{10: e, 20: t}", map.to_string());
+        test.assert_equal_string("[10, 20]", map.key_range(0, 25).to_string());
+        test.assert_equal_string("[20, 10]", map.descending_keys().to_string());
+        map.validate();
+    };
+
+    export let test_iterators_and_callbacks = func() -> void {
+        let map = sample();
+        let items = map.iterator();
+        test.assert(items.has_next());
+        test.assert_equal_string("[5, f]", items.next().to_string());
+        let keys = map.key_iterator();
+        test.assert_equal_int32(5, keys.next());
+        test.assert_equal_int32(10, keys.next());
+        map.set(30, "H");
+        test.assert_equal_int32(20, keys.next());
+        test.assert_equal_int32(30, keys.next());
+        test.assert(!keys.has_next());
+        test.assert_equal_string("[10, e]", items.next().to_string());
+        let text = cell.of<string>("");
+        map.for_each(func(int key, string value) -> void {
+            text.value = text.value + value;
+            map.set(key, value + value);
+        });
+        test.assert_equal_string("fetH", text.value);
+        let total = 0;
+        for (let entry in map) {
+            total = total + entry[0];
+        }
+        test.assert_equal_int32(65, total);
+        let calls = cell.of<int>(0);
+        test.assert_equal_int32(2, map.remove_if(func(int key, string value) -> bool {
+            calls.value = calls.value + 1;
+            return key % 10 == 0 && key < 30;
+        }));
+        test.assert_equal_int32(4, calls.value);
+        test.assert_equal_string("{5: ff, 30: HH}", map.to_string());
+        map.validate();
+    };
+
+    export let test_get_or_put_merge_compute = func() -> void {
+        let map = sample();
+        test.assert_equal_string("f", map.get_or_put(5, func() -> string {
+            return "never";
+        }));
+        test.assert_equal_string("n", map.get_or_put(7, func() -> string {
+            return "n";
+        }));
+        let join = func(string a, string b) -> string {
+            return a + b;
+        };
+        test.assert_equal_string("fx", map.merge(5, "x", join));
+        test.assert_equal_string("y", map.merge(8, "y", join));
+        let bump = func(int key, optional.Optional<string> current) -> optional.Optional<string> {
+            return match (current) {
+                optional.Optional.None => optional.Optional<string>.Some(key.to_string()),
+                optional.Optional.Some(text) => optional.Optional<string>.None,
+            };
+        };
+        test.assert_equal_string("9", test.assert_some<string>(map.compute(9, bump)));
+        test.assert_none<string>(map.compute(20, bump));
+        test.assert_equal_string("{5: fx, 7: n, 8: y, 9: 9, 10: e, 30: h}", map.to_string());
+        map.validate();
+    };
+
+    // Keys the comparator calls Equal are the same key: the first key
+    // stays, and setting replaces only the value.
+    export let test_comparator_defines_sameness = func() -> void {
+        let map = tree_map.create<string, int>(func(string a, string b) -> ordering.Ordering {
+            return int32.compare(a.byte_length, b.byte_length);
+        });
+        map.set("aa", 1);
+        map.set("b", 2);
+        map.set("cc", 3);
+        test.assert_equal_string("{b: 2, aa: 3}", map.to_string());
+        test.assert_equal_int32(3, map.require("zz"));
+        test.assert(map.delete("q"));
+        test.assert_equal_string("{aa: 3}", map.to_string());
+    };
+
+    export let test_put_all_equality_hash = func() -> void {
+        let a = sample();
+        let b = tree_map.create<int, string>(int32.compare);
+        b.set(30, "h");
+        b.put_all(a);
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        let expected = (((5 as uint32) ^ "f".hash_code()) as uint64) + (((10 as uint32) ^ "e".hash_code()) as uint64)
+            + (((20 as uint32) ^ "t".hash_code()) as uint64) + (((30 as uint32) ^ "h".hash_code()) as uint64);
+        test.assert_equal_uint64(expected & 4294967295, a.hash_code() as uint64);
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+        b.set(30, "x");
+        test.assert(!a.equals(b));
+        b.delete(30);
+        test.assert(!a.equals(b));
+        let other: class = tree_map.create<int, int>(int32.compare);
+        test.assert(!a.equals(other));
+        test.assert(!a.equals(nil));
+    };
+
+    export let test_self_text = func() -> void {
+        let map = tree_map.create<int, class>(int32.compare);
+        map.set(1, map);
+        map.set(2, nil);
+        test.assert_equal_string("{1: (this collection), 2: nil}", map.to_string());
+    };
+
+    // Ascending, descending, and alternating insertions and removals that
+    // take nodes with two children exercise every rotation.
+    export let test_rotations = func() -> void {
+        let map = tree_map.create<int, int>(int32.compare);
+        let i = 0;
+        while (i < 200) {
+            map.set(i, i);
+            map.validate();
+            i = i + 1;
+        }
+        i = 400;
+        while (i > 200) {
+            map.set(i, i);
+            i = i - 1;
+        }
+        map.validate();
+        i = 0;
+        while (i < 400) {
+            map.set(1000 + (i * 37) % 400, i);
+            i = i + 1;
+        }
+        map.validate();
+        test.assert_equal_int32(800, map.size());
+        let removed = 0;
+        i = 0;
+        while (i < 1400) {
+            if (map.delete((i * 53) % 1400)) {
+                removed = removed + 1;
+            }
+            if (i % 50 == 0) {
+                map.validate();
+            }
+            i = i + 1;
+        }
+        map.validate();
+        test.assert_equal_int32(800, removed);
+        test.assert(map.is_empty());
+    };
+
+    export let test_interfaces = func() -> void {
+        let sorted: sorted_map.SortedMap<int, string> = sample();
+        test.assert_equal_string("[5, f]", sorted.first().to_string());
+        test.assert_equal_string("Some(20)", key_text(sorted.higher(10)));
+        let mutable: mutable_map.MutableMap<int, string> = sample();
+        mutable.set(1, "a");
+        test.assert_equal_int32(5, mutable.size());
+    };
+);

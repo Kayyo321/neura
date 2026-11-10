@@ -1,0 +1,146 @@
+let list = import:Std.Collections.List;
+
+// Helpers for built-in lists (Stdlib.md section 9.11) and the comparison of
+// list collections of different classes (section 9.10). An index outside a
+// list is the language's bounds trap.
+export let Lists = module (
+    // A new list with the same elements.
+    export let copy = func<T>(T[list] items) -> T[list] {
+        let result: T[list] = [];
+        let count = items.length;
+        let i = 0;
+        while (i < count) {
+            result.append(items[i]);
+            i = i + 1;
+        }
+        return result;
+    };
+
+    // A new list with the elements of `a` followed by those of `b`.
+    export let concat = func<T>(T[list] a, T[list] b) -> T[list] {
+        let result = copy<T>(a);
+        let count = b.length;
+        let i = 0;
+        while (i < count) {
+            result.append(b[i]);
+            i = i + 1;
+        }
+        return result;
+    };
+
+    // Reverses the list in place. Not structural.
+    export let reverse = func<T>(T[list] items) -> void {
+        let i = 0;
+        let j = items.length - 1;
+        while (i < j) {
+            let value = items[i];
+            items[i] = items[j];
+            items[j] = value;
+            i = i + 1;
+            j = j - 1;
+        }
+    };
+
+    // Exchanges two elements. Not structural.
+    export let swap = func<T>(T[list] items, int i, int j) -> void {
+        let value = items[i];
+        items[i] = items[j];
+        items[j] = value;
+    };
+
+    // Replaces every element with `value`. Not structural.
+    export let fill = func<T>(T[list] items, T value) -> void {
+        let count = items.length;
+        let i = 0;
+        while (i < count) {
+            items[i] = value;
+            i = i + 1;
+        }
+    };
+
+    // Inserts `value` before position `index`; an index equal to the length
+    // appends. Appends the last element again and shifts the suffix right by
+    // indexed writes.
+    export let insert_at = func<T>(T[list] items, int index, T value) -> void {
+        let count = items.length;
+        if (index == count) {
+            items.append(value);
+            return;
+        }
+        // The read makes any other bad index a bounds trap before the list
+        // changes.
+        let displaced = items[index];
+        items.append(items[count - 1]);
+        let k = count - 1;
+        while (k > index) {
+            items[k] = items[k - 1];
+            k = k - 1;
+        }
+        items[index] = value;
+    };
+
+    // Removes elements from the end until `length` remain. Traps with
+    // "invalid argument: negative size" or "invalid argument: size above
+    // current size".
+    export let truncate = func<T>(T[list] items, int length) -> void {
+        if (length < 0) {
+            trap_with_message("invalid argument: negative size");
+        }
+        if (length > items.length) {
+            trap_with_message("invalid argument: size above current size");
+        }
+        while (items.length > length) {
+            items.remove_at(items.length - 1);
+        }
+    };
+
+    // Removes every element from the end of the same list.
+    export let clear = func<T>(T[list] items) -> void {
+        while (items.length > 0) {
+            items.remove_at(items.length - 1);
+        }
+    };
+
+    // A new list of `count` copies of `value`. Traps with "invalid argument:
+    // negative count".
+    export let filled = func<T>(int count, T value) -> T[list] {
+        if (count < 0) {
+            trap_with_message("invalid argument: negative count");
+        }
+        let result: T[list] = [];
+        let i = 0;
+        while (i < count) {
+            result.append(value);
+            i = i + 1;
+        }
+        return result;
+    };
+
+    // A new list with the array's elements.
+    export let from_array = func<T>(T[] items) -> T[list] {
+        let result: T[list] = [];
+        let count = items.length;
+        let i = 0;
+        while (i < count) {
+            result.append(items[i]);
+            i = i + 1;
+        }
+        return result;
+    };
+
+    // Whether two lists of any classes have the same size and equal elements
+    // at each position, by equals with the element of `a` first.
+    export let same_elements = func<T>(list.List<T> a, list.List<T> b) -> bool {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        let left = a.iterator();
+        let right = b.iterator();
+        while (left.has_next() && right.has_next()) {
+            if (!left.next().equals(right.next())) {
+                return false;
+            }
+        }
+        return !left.has_next() && !right.has_next();
+    };
+);

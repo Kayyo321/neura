@@ -1,0 +1,149 @@
+let bit_set = import:Std.Collections.BitSet;
+let cell = import:Std.Core.Cell;
+let collection = import:Std.Collections.Collection;
+let mutable_set = import:Std.Collections.MutableSet;
+let test = import:Std.Test;
+
+let BitSetTests = module (
+    export let test_members_across_words = func() -> void {
+        let items = bit_set.create();
+        test.assert(items.is_empty());
+        let values: int[list] = [0, 31, 32, 63, 64, 1000, 5];
+        for (let value in values) {
+            test.assert(items.add(value));
+        }
+        test.assert(!items.add(31));
+        test.assert_equal_int32(7, items.size());
+        test.assert(items.contains(1000));
+        test.assert(!items.contains(999));
+        test.assert(!items.contains(5000));
+        test.assert_equal_string("[0, 5, 31, 32, 63, 64, 1000]", items.to_list().to_string());
+        test.assert_equal_string("{0, 5, 31, 32, 63, 64, 1000}", items.to_string());
+        test.assert(items.remove(31));
+        test.assert(!items.remove(31));
+        test.assert(!items.remove(5000));
+        test.assert_equal_int32(6, items.size());
+        test.assert_equal_string("{}", bit_set.create().to_string());
+    };
+
+    export let test_flip_and_next_set = func() -> void {
+        let items = bit_set.of([3, 40]);
+        items.flip(3);
+        items.flip(95);
+        test.assert_equal_string("{40, 95}", items.to_string());
+        test.assert_equal_int32(2, items.size());
+        test.assert_equal_int32(40, items.next_set(0));
+        test.assert_equal_int32(40, items.next_set(40));
+        test.assert_equal_int32(95, items.next_set(41));
+        test.assert_equal_int32(95, items.next_set(64));
+        test.assert_equal_int32(-1, items.next_set(96));
+        test.assert_equal_int32(-1, items.next_set(100000));
+        test.assert_equal_int32(-1, bit_set.create().next_set(0));
+    };
+
+    export let test_set_algebra = func() -> void {
+        let a = bit_set.of([1, 2, 3, 64]);
+        let b = bit_set.of([3, 4, 200]);
+        test.assert_equal_string("{1, 2, 3, 4, 64, 200}", a.union(b).to_string());
+        test.assert_equal_string("{3}", a.intersection(b).to_string());
+        test.assert_equal_string("{1, 2, 64}", a.difference(b).to_string());
+        test.assert_equal_string("{4, 200}", b.difference(a).to_string());
+        test.assert_equal_string("{1, 2, 3, 64}", a.to_string());
+        test.assert(!a.is_subset_of(b));
+        test.assert(bit_set.of([3]).is_subset_of(b));
+        test.assert(bit_set.create().is_subset_of(b));
+        test.assert(!a.is_disjoint_from(b));
+        test.assert(bit_set.of([5, 300]).is_disjoint_from(a));
+        let c = bit_set.of([1, 2, 3, 64]);
+        c.symmetric_difference_with(b);
+        test.assert_equal_string("{1, 2, 4, 64, 200}", c.to_string());
+        test.assert_equal_int32(5, c.size());
+        c.intersect_with(bit_set.of([2, 4]));
+        test.assert_equal_string("{2, 4}", c.to_string());
+        c.union_with(bit_set.of([0]));
+        c.subtract(bit_set.of([4, 9]));
+        test.assert_equal_string("{0, 2}", c.to_string());
+        test.assert_equal_int32(2, c.size());
+    };
+
+    // Equality ignores trailing zero words.
+    export let test_equality_hash_and_text = func() -> void {
+        let a = bit_set.of([1, 2]);
+        let b = bit_set.of([2, 1, 500]);
+        test.assert(!a.equals(b));
+        b.remove(500);
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert(!a.equals(bit_set.of([1])));
+        test.assert(!a.equals(nil));
+        test.assert(!a.equals(cell.of<int>(1)));
+        test.assert_equal_int64(3, a.hash_code() as int64);
+        test.assert_equal_int64(3, b.hash_code() as int64);
+        test.assert_equal_int64(0, bit_set.create().hash_code() as int64);
+        let as_class: class = a;
+        test.assert_equal_string("{1, 2}", as_class.to_string());
+    };
+
+    export let test_clear_and_iteration = func() -> void {
+        let items = bit_set.of([7, 70, 700]);
+        let walk = items.iterator();
+        test.assert(walk.has_next());
+        test.assert(walk.has_next());
+        test.assert_equal_int32(7, walk.next());
+        test.assert_equal_int32(70, walk.next());
+        test.assert_equal_int32(700, walk.next());
+        test.assert(!walk.has_next());
+        let seen: int[list] = [];
+        for (let value in items) {
+            seen.append(value);
+        }
+        items.for_each(func(int value) -> void {
+            seen.append(value);
+        });
+        test.assert_equal_string("[7, 70, 700, 7, 70, 700]", seen.to_string());
+        // A to_list copy iterates independently of later changes.
+        for (let value in items.to_list()) {
+            items.remove(value);
+            items.add(value + 1);
+        }
+        test.assert_equal_string("{8, 71, 701}", items.to_string());
+        items.clear();
+        test.assert(items.is_empty());
+        test.assert_equal_int32(-1, items.next_set(0));
+        items.add(3);
+        test.assert_equal_string("{3}", items.to_string());
+    };
+
+    export let test_callbacks = func() -> void {
+        let items = bit_set.of([1, 2, 3, 4, 5, 6]);
+        let seen: int[list] = [];
+        test.assert_equal_int32(3, items.remove_if(func(int value) -> bool {
+            seen.append(value);
+            return value % 2 == 0;
+        }));
+        test.assert_equal_string("[1, 2, 3, 4, 5, 6]", seen.to_string());
+        test.assert_equal_string("{1, 3, 5}", items.to_string());
+        test.assert_equal_int32(2, items.retain_if(func(int value) -> bool {
+            return value == 3;
+        }));
+        test.assert_equal_string("{3}", items.to_string());
+    };
+
+    export let test_interfaces = func() -> void {
+        let items: mutable_set.MutableSet<int> = bit_set.create();
+        test.assert(items.add(4));
+        test.assert(!items.add(4));
+        items.add_all([1, 9]);
+        test.assert(items.contains_all([1, 4, 9]));
+        test.assert(items.remove(9));
+        let view: collection.Collection<int> = items;
+        test.assert_equal_int32(2, view.size());
+        let total = cell.of<int>(0);
+        view.for_each(func(int value) -> void {
+            total.value = total.value + value;
+        });
+        test.assert_equal_int32(5, total.value);
+        items.clear();
+        test.assert(view.is_empty());
+    };
+);

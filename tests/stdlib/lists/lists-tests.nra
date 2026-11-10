@@ -1,0 +1,94 @@
+let array_list = import:Std.Collections.ArrayList;
+let lists = import:Std.Collections.Lists;
+let test = import:Std.Test;
+
+let ListsTests = module (
+    export let test_copy_and_concat = func() -> void {
+        let source: int[list] = [1, 2];
+        let copy = lists.copy<int>(source);
+        source.append(3);
+        test.assert_equal_string("[1, 2]", copy.to_string());
+        let empty: int[list] = [];
+        test.assert_equal_string("[]", lists.copy<int>(empty).to_string());
+        let joined = lists.concat<int>(copy, source);
+        test.assert_equal_string("[1, 2, 1, 2, 3]", joined.to_string());
+        joined[0] = 9;
+        test.assert_equal_int32(1, copy[0]);
+        test.assert_equal_string("[1, 2]", lists.concat<int>(empty, copy).to_string());
+        test.assert_equal_string("[1, 2, 1, 2]", lists.concat<int>(copy, copy).to_string());
+    };
+
+    // reverse, swap, and fill write elements only.
+    export let test_in_place_rewrites = func() -> void {
+        let items: int[list] = [1, 2, 3, 4, 5];
+        let version = items.version;
+        lists.reverse<int>(items);
+        test.assert_equal_string("[5, 4, 3, 2, 1]", items.to_string());
+        let even: string[list] = ["a", "b"];
+        lists.reverse<string>(even);
+        test.assert_equal_string("[b, a]", even.to_string());
+        let empty: int[list] = [];
+        lists.reverse<int>(empty);
+        lists.swap<int>(items, 0, 4);
+        test.assert_equal_string("[1, 4, 3, 2, 5]", items.to_string());
+        lists.swap<int>(items, 2, 2);
+        test.assert_equal_string("[1, 4, 3, 2, 5]", items.to_string());
+        lists.fill<int>(items, 7);
+        test.assert_equal_string("[7, 7, 7, 7, 7]", items.to_string());
+        test.assert_equal_uint64(version, items.version);
+    };
+
+    export let test_insert_at = func() -> void {
+        let items: int[list] = [];
+        lists.insert_at<int>(items, 0, 2);
+        lists.insert_at<int>(items, 0, 0);
+        lists.insert_at<int>(items, 1, 1);
+        lists.insert_at<int>(items, 3, 3);
+        test.assert_equal_string("[0, 1, 2, 3]", items.to_string());
+        let version = items.version;
+        lists.insert_at<int>(items, 2, 9);
+        test.assert_equal_string("[0, 1, 9, 2, 3]", items.to_string());
+        test.assert_equal_uint64(version + 1, items.version);
+    };
+
+    // truncate and clear shorten the same list from its end.
+    export let test_truncate_and_clear = func() -> void {
+        let items: int[list] = [1, 2, 3, 4];
+        let alias = items;
+        let version = items.version;
+        lists.truncate<int>(items, 4);
+        test.assert_equal_uint64(version, items.version);
+        lists.truncate<int>(items, 1);
+        test.assert_equal_string("[1]", alias.to_string());
+        test.assert_equal_uint64(version + 3, alias.version);
+        lists.clear<int>(items);
+        test.assert_equal_int32(0, alias.length);
+        lists.clear<int>(items);
+        lists.truncate<int>(items, 0);
+        test.assert_equal_int32(0, items.length);
+    };
+
+    export let test_filled_and_from_array = func() -> void {
+        test.assert_equal_string("[x, x, x]", lists.filled<string>(3, "x").to_string());
+        test.assert_equal_int32(0, lists.filled<int>(0, 1).length);
+        let array: int[] = [4, 5, 6];
+        let items = lists.from_array<int>(array);
+        items.append(7);
+        test.assert_equal_string("[4, 5, 6, 7]", items.to_string());
+        test.assert_equal_int32(3, array.length);
+    };
+
+    // Compares lists through the read-only interface.
+    export let test_same_elements = func() -> void {
+        let a = array_list.of<int>([1, 2, 3]);
+        let b = array_list.of<int>([1, 2, 3]);
+        test.assert(lists.same_elements<int>(a, b));
+        test.assert(lists.same_elements<int>(a, a));
+        test.assert(!lists.same_elements<int>(a, array_list.of<int>([1, 2])));
+        test.assert(!lists.same_elements<int>(a, array_list.of<int>([1, 2, 4])));
+        test.assert(lists.same_elements<int>(array_list.create<int>(), array_list.create<int>()));
+        let nan = float64.from_bits(9221120237041090561);
+        test.assert(lists.same_elements<float64>(array_list.of<float64>([nan]), array_list.of<float64>([nan])));
+        test.assert(!lists.same_elements<float64>(array_list.of<float64>([0.0]), array_list.of<float64>([-0.0])));
+    };
+);

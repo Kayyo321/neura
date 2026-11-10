@@ -1,0 +1,13 @@
+// status: 70
+// stderr: index out of bounds
+let console = import:Std.Io.Console;
+let ordinal_map = import:Std.Collections.OrdinalMap;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = ordinal_map.create<int>(3);
+        items.set(3, 1);
+        return program.ExitCode.Ok;
+    };
+);

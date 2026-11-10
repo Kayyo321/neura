@@ -1,0 +1,440 @@
+let cell = import:Std.Core.Cell;
+let iterators = import:Std.Collections.Iterator;
+let mutable_set = import:Std.Collections.MutableSet;
+
+// A set of non-negative int values over a built-in list of uint32 words
+// (Stdlib.md section 9.9): bit i is in word i / 32 at position i % 32. Every
+// operation is a mask, a shift by 0 through 31, or a comparison on uint32;
+// nothing wraps. Iteration is ascending. A negative element traps with
+// "invalid argument: negative element".
+export let BitSet = module (
+    const AllBits: uint32 = 4294967295;
+
+    // The number of set bits, by the parallel sum; the final multiply runs in
+    // uint64 so that nothing wraps.
+    let population = func(uint32 word) -> int {
+        let x = word - ((word >> 1) & 1431655765);
+        x = (x & 858993459) + ((x >> 2) & 858993459);
+        x = (x + (x >> 4)) & 252645135;
+        return ((((x as uint64) * 16843009) >> 24) & 255) as int;
+    };
+
+    // The position of the lowest set bit of a non-zero word.
+    let lowest_bit = func(uint32 word) -> int {
+        let lowest = word & (~word + 1);
+        return population(lowest - 1);
+    };
+
+    let bit = func(int value) -> uint32 {
+        let one: uint32 = 1;
+        return one << (value % 32);
+    };
+
+    let check_element = func(int value) -> void {
+        if (value < 0) {
+            trap_with_message("invalid argument: negative element");
+        }
+    };
+
+    // The least member at or after `from`, or -1.
+    let next_in = func(uint32[list] words, int from) -> int {
+        let index = from / 32;
+        if (index >= words.length) {
+            return -1;
+        }
+        let word = words[index] & (AllBits << (from % 32));
+        while (word == 0) {
+            index = index + 1;
+            if (index >= words.length) {
+                return -1;
+            }
+            word = words[index];
+        }
+        return index * 32 + lowest_bit(word);
+    };
+
+    export let BitSet = class implements mutable_set.MutableSet<int> (
+        let words: uint32[list] = [];
+        let count: int = 0;
+        // Advanced after each structural change; shared with iterators.
+        let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
+
+        let changed = func() -> void {
+            modifications.value = modifications.value + 1;
+        };
+
+        let recount = func() -> void {
+            let total = 0;
+            for (let word in words) {
+                total = total + population(word);
+            }
+            count = total;
+        };
+
+        // The word at `index`, zero beyond the last word.
+        let word_at = func(int index) -> uint32 {
+            if (index < words.length) {
+                return words[index];
+            }
+            return 0;
+        };
+
+        let grow_to = func(int length) -> void {
+            while (words.length < length) {
+                words.append(0);
+            }
+        };
+
+        export let size = func() -> int {
+            return count;
+        };
+
+        export let is_empty = func() -> bool {
+            return count == 0;
+        };
+
+        export let contains = func(int value) -> bool {
+            check_element(value);
+            let index = value / 32;
+            if (index >= words.length) {
+                return false;
+            }
+            return (words[index] & bit(value)) != 0;
+        };
+
+        // Adds the value; false when it was already present. Appends zero
+        // words as needed.
+        export let add = func(int value) -> bool {
+            check_element(value);
+            let index = value / 32;
+            let mask = bit(value);
+            if (index < words.length && (words[index] & mask) != 0) {
+                return false;
+            }
+            grow_to(index + 1);
+            words[index] = words[index] | mask;
+            count = count + 1;
+            changed();
+            return true;
+        };
+
+        export let add_all = func(int[list] items) -> void {
+            let total = items.length;
+            let i = 0;
+            while (i < total) {
+                add(items[i]);
+                i = i + 1;
+            }
+        };
+
+        // Removes the value; false when it was absent.
+        export let remove = func(int value) -> bool {
+            check_element(value);
+            let index = value / 32;
+            let mask = bit(value);
+            if (index >= words.length || (words[index] & mask) == 0) {
+                return false;
+            }
+            words[index] = words[index] & ~mask;
+            count = count - 1;
+            changed();
+            return true;
+        };
+
+        // Adds the value when absent and removes it when present.
+        export let flip = func(int value) -> void {
+            check_element(value);
+            let index = value / 32;
+            let mask = bit(value);
+            grow_to(index + 1);
+            if ((words[index] & mask) != 0) {
+                count = count - 1;
+            } else {
+                count = count + 1;
+            }
+            words[index] = words[index] ^ mask;
+            changed();
+        };
+
+        export let clear = func() -> void {
+            let empty: uint32[list] = [];
+            words = empty;
+            count = 0;
+            changed();
+        };
+
+        // The least member at or after `from`, or -1.
+        export let next_set = func(int from) -> int {
+            check_element(from);
+            return next_in(words, from);
+        };
+
+        // A new built-in list of the members in ascending order.
+        export let to_list = func() -> int[list] {
+            let result: int[list] = [];
+            let value = next_in(words, 0);
+            while (value >= 0) {
+                result.append(value);
+                if (value == 2147483647) {
+                    break;
+                }
+                value = next_in(words, value + 1);
+            }
+            return result;
+        };
+
+        // Ascending; fail-fast.
+        export let iterator = func() -> iterators.Iterator<int> {
+            return new BitSetIterator(words, modifications);
+        };
+
+        // Ascending. The action must not change the set structurally.
+        export let for_each = func(func(int) -> void action) -> void {
+            let expected = modifications.value;
+            for (let value in to_list()) {
+                action(value);
+                if (modifications.value != expected) {
+                    trap_with_message("collection modified during iteration");
+                }
+            }
+        };
+
+        // Calls `drop` once per member in ascending order and removes the
+        // matches. Returns how many were removed.
+        export let remove_if = func(func(int) -> bool drop) -> int {
+            return remove_matching(drop, true);
+        };
+
+        export let retain_if = func(func(int) -> bool keep) -> int {
+            return remove_matching(keep, false);
+        };
+
+        let remove_matching = func(func(int) -> bool test, bool remove_when) -> int {
+            let expected = modifications.value;
+            let removed = 0;
+            for (let value in to_list()) {
+                let matched = test(value);
+                if (modifications.value != expected) {
+                    trap_with_message("collection modified during iteration");
+                }
+                if (matched == remove_when) {
+                    remove(value);
+                    removed = removed + 1;
+                    expected = modifications.value;
+                }
+            }
+            return removed;
+        };
+
+        export let is_subset_of = func(BitSet other) -> bool {
+            let i = 0;
+            while (i < words.length) {
+                if ((words[i] & ~other.word_at(i)) != 0) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return true;
+        };
+
+        export let is_disjoint_from = func(BitSet other) -> bool {
+            let i = 0;
+            while (i < words.length) {
+                if ((words[i] & other.word_at(i)) != 0) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return true;
+        };
+
+        // In place: adds the other's members.
+        export let union_with = func(BitSet other) -> void {
+            let length = other.words.length;
+            let before = count;
+            grow_to(length);
+            let i = 0;
+            while (i < length) {
+                words[i] = words[i] | other.words[i];
+                i = i + 1;
+            }
+            recount();
+            if (count != before) {
+                changed();
+            }
+        };
+
+        // In place: keeps only members the other also has.
+        export let intersect_with = func(BitSet other) -> void {
+            let before = count;
+            let i = 0;
+            while (i < words.length) {
+                words[i] = words[i] & other.word_at(i);
+                i = i + 1;
+            }
+            recount();
+            if (count != before) {
+                changed();
+            }
+        };
+
+        // In place: removes the other's members.
+        export let subtract = func(BitSet other) -> void {
+            let before = count;
+            let i = 0;
+            while (i < words.length) {
+                words[i] = words[i] & ~other.word_at(i);
+                i = i + 1;
+            }
+            recount();
+            if (count != before) {
+                changed();
+            }
+        };
+
+        // In place: keeps the members in exactly one of the two sets.
+        export let symmetric_difference_with = func(BitSet other) -> void {
+            let length = other.words.length;
+            grow_to(length);
+            let different = false;
+            let i = 0;
+            while (i < length) {
+                if (other.words[i] != 0) {
+                    words[i] = words[i] ^ other.words[i];
+                    different = true;
+                }
+                i = i + 1;
+            }
+            recount();
+            if (different) {
+                changed();
+            }
+        };
+
+        let copy = func() -> BitSet {
+            let result = new BitSet();
+            for (let word in words) {
+                result.words.append(word);
+            }
+            result.count = count;
+            return result;
+        };
+
+        // A new set of the members of either set.
+        export let union = func(BitSet other) -> BitSet {
+            let result = copy();
+            result.union_with(other);
+            return result;
+        };
+
+        // A new set of the members of both sets.
+        export let intersection = func(BitSet other) -> BitSet {
+            let result = copy();
+            result.intersect_with(other);
+            return result;
+        };
+
+        // A new set of this set's members that the other lacks.
+        export let difference = func(BitSet other) -> BitSet {
+            let result = copy();
+            result.subtract(other);
+            return result;
+        };
+
+        // Another BitSet with the same members; trailing zero words do not
+        // matter.
+        export let.override equals = func(class other) -> bool {
+            if (!(other is BitSet)) {
+                return false;
+            }
+            let that = other as BitSet;
+            if (that.count != count) {
+                return false;
+            }
+            let length = words.length;
+            if (that.words.length > length) {
+                length = that.words.length;
+            }
+            let i = 0;
+            while (i < length) {
+                if (word_at(i) != that.word_at(i)) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return true;
+        };
+
+        // The wrapping sum of the members' hashes (each member's own value).
+        export let.override hash_code = func() -> uint32 {
+            let sum: uint64 = 0;
+            for (let value in to_list()) {
+                sum = (sum + (value as uint64)) & 4294967295;
+            }
+            return sum as uint32;
+        };
+
+        // `{a, b, c}` in ascending order.
+        export let.override to_string = func() -> string {
+            let text = "{";
+            let first = true;
+            for (let value in to_list()) {
+                if (!first) {
+                    text = text + ", ";
+                }
+                text = text + value.to_string();
+                first = false;
+            }
+            return text + "}";
+        };
+    );
+
+    // Ascending, comparing the set's modification count before every step.
+    let BitSetIterator = class implements iterators.Iterator<int> (
+        let words: uint32[list];
+        let modifications: cell.Cell<uint64>;
+        let expected: uint64;
+        let upcoming: int;
+
+        export let init = func(uint32[list] source, cell.Cell<uint64> counter) -> void {
+            words = source;
+            modifications = counter;
+            expected = counter.value;
+            upcoming = next_in(source, 0);
+        };
+
+        export let has_next = func() -> bool {
+            if (modifications.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            return upcoming >= 0;
+        };
+
+        export let next = func() -> int {
+            if (modifications.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            let value = upcoming;
+            if (value < 0) {
+                trap_with_message("no such element");
+            }
+            if (value == 2147483647) {
+                upcoming = -1;
+            } else {
+                upcoming = next_in(words, value + 1);
+            }
+            return value;
+        };
+    );
+
+    export let create = func() -> BitSet {
+        return new BitSet();
+    };
+
+    // A set of the values in `items`.
+    export let of = func(int[list] items) -> BitSet {
+        let result = new BitSet();
+        result.add_all(items);
+        return result;
+    };
+);

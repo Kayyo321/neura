@@ -1,0 +1,129 @@
+let cell = import:Std.Core.Cell;
+let mutable_map = import:Std.Collections.MutableMap;
+let optional = import:Std.Core.Optional;
+let string_map = import:Std.Collections.StringMap;
+let test = import:Std.Test;
+
+let StringMapTests = module (
+    let sample = func() -> string_map.StringMap<int> {
+        let map = string_map.create<int>();
+        map.set("b", 2);
+        map.set("", 0);
+        map.set("日本", 8);
+        return map;
+    };
+
+    export let test_basic_members = func() -> void {
+        let map = string_map.create<int>();
+        test.assert(map.is_empty());
+        test.assert_equal_string("{}", map.to_string());
+        map = sample();
+        test.assert_equal_int32(3, map.size());
+        test.assert(map.contains_key(""));
+        test.assert(!map.contains_key("a"));
+        test.assert_equal_int32(8, map.require("日本"));
+        test.assert_equal_int32(0, test.assert_some<int>(map.get("")));
+        test.assert_none<int>(map.get("B"));
+        test.assert_equal_int32(-1, map.get_or("B", -1));
+        test.assert_equal_string("{b: 2, : 0, 日本: 8}", map.to_string());
+        test.assert_equal_string("[b, , 日本]", map.keys().to_string());
+        test.assert_equal_string("[2, 0, 8]", map.values().to_string());
+        test.assert_equal_string("[[b, 2], [, 0], [日本, 8]]", map.entries().to_string());
+        map.set("b", 20);
+        test.assert_equal_string("{b: 20, : 0, 日本: 8}", map.to_string());
+        test.assert(map.delete("b"));
+        test.assert(!map.delete("b"));
+        map.set("b", 2);
+        test.assert_equal_string("{: 0, 日本: 8, b: 2}", map.to_string());
+        test.assert_none<int>(map.put("c", 3));
+        test.assert_equal_int32(3, test.assert_some<int>(map.put("c", 30)));
+        test.assert_equal_int32(30, test.assert_some<int>(map.remove("c")));
+        test.assert_none<int>(map.remove("c"));
+        test.assert(map.contains_value(8));
+        test.assert(!map.contains_value(30));
+        map.validate();
+        map.clear();
+        test.assert(map.is_empty());
+        map.validate();
+    };
+
+    export let test_iteration_and_callbacks = func() -> void {
+        let map = sample();
+        let items = map.iterator();
+        test.assert_equal_string("[b, 2]", items.next().to_string());
+        test.assert_equal_string("[, 0]", items.next().to_string());
+        test.assert_equal_string("[日本, 8]", items.next().to_string());
+        test.assert(!items.has_next());
+        let seen = cell.of<string>("");
+        map.for_each(func(string key, int value) -> void {
+            seen.value = seen.value + "<" + key + value.to_string() + ">";
+        });
+        test.assert_equal_string("<b2><0><日本8>", seen.value);
+        let total = 0;
+        for (let entry in map) {
+            total = total + entry[1];
+        }
+        test.assert_equal_int32(10, total);
+        test.assert_equal_int32(1, map.remove_if(func(string key, int value) -> bool {
+            return key.byte_length == 0;
+        }));
+        test.assert_equal_int32(2, map.get_or_put("b", func() -> int {
+            return 99;
+        }));
+        test.assert_equal_int32(5, map.get_or_put("e", func() -> int {
+            return 5;
+        }));
+        let plus = func(int a, int b) -> int {
+            return a + b;
+        };
+        test.assert_equal_int32(12, map.merge("b", 10, plus));
+        test.assert_equal_int32(1, map.merge("f", 1, plus));
+        let erase_odd = func(string key, optional.Optional<int> current) -> optional.Optional<int> {
+            return match (current) {
+                optional.Optional.None => optional.Optional<int>.Some(0),
+                optional.Optional.Some(v) => erase_if_odd(v),
+            };
+        };
+        test.assert_none<int>(map.compute("e", erase_odd));
+        test.assert_equal_int32(0, test.assert_some<int>(map.compute("g", erase_odd)));
+        test.assert_equal_string("{b: 12, 日本: 8, f: 1, g: 0}", map.to_string());
+    };
+
+    let erase_if_odd = func(int v) -> optional.Optional<int> {
+        if (v % 2 == 1) {
+            return optional.Optional<int>.None;
+        }
+        return optional.Optional<int>.Some(v);
+    };
+
+    export let test_put_all_equality_hash = func() -> void {
+        let a = sample();
+        let b = string_map.with_capacity<int>(0);
+        b.put_all(a);
+        test.assert(a.equals(b));
+        let expected = ((("b".hash_code() ^ 2) as uint64) + (("".hash_code() ^ 0) as uint64)
+            + (("日本".hash_code() ^ 8) as uint64)) & 4294967295;
+        test.assert_equal_uint64(expected, a.hash_code() as uint64);
+        b.delete("");
+        test.assert(!a.equals(b));
+        let other: class = string_map.create<string>();
+        test.assert(!string_map.create<int>().equals(other));
+        let many = string_map.create<int>();
+        let i = 0;
+        while (i < 300) {
+            many.set("key" + i.to_string(), i);
+            i = i + 1;
+        }
+        many.remove_if(func(string key, int value) -> bool {
+            return value % 100 != 0;
+        });
+        many.trim();
+        many.validate();
+        test.assert_equal_string("{key0: 0, key100: 100, key200: 200}", many.to_string());
+    };
+
+    export let test_interface = func() -> void {
+        let map: mutable_map.MutableMap<string, int> = sample();
+        test.assert_equal_int32(2, map.require("b"));
+    };
+);

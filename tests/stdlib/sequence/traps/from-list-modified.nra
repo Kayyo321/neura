@@ -1,0 +1,15 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let program = import:Std.Program;
+let sequence = import:Std.Collections.Sequence;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let values: int[list] = [1, 2, 3];
+        let items = sequence.from_list<int>(values).iterator();
+        items.next();
+        values.append(4);
+        items.next();
+        return program.ExitCode.Ok;
+    };
+);

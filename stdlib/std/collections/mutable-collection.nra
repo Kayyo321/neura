@@ -1,0 +1,22 @@
+let collection = import:Std.Collections.Collection;
+
+// Structural changes common to lists and sets. `add` returns false only
+// when a set already holds the value; lists always return true.
+export let MutableCollection = module (
+    export let MutableCollection = interface<T>:collection.Collection<T> (
+        let add = func(T value) -> bool;
+        // Removes the first element equal to `value`; returns whether one was.
+        let remove = func(T value) -> bool;
+        let clear = func() -> void;
+        // The callback runs once per element, in order. Returns how many
+        // elements were removed.
+        let remove_if = func(func(T) -> bool drop) -> int;
+        let retain_if = func(func(T) -> bool keep) -> int;
+
+        let add_all = func(T[list] items) -> void {
+            for (let item in items) {
+                add(item);
+            }
+        };
+    );
+);

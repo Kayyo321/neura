@@ -1,0 +1,37 @@
+let int32 = import:Std.Core.Int32;
+let map_model = import:MapModel;
+let ordering = import:Std.Core.Ordering;
+let tree_map = import:Std.Collections.TreeMap;
+
+// Seeded model-based tests (Stdlib.md section 17): 10,000 operations
+// against an association list kept in ascending key order, calling
+// validate() (AVL balance, heights, order, parent links) after every
+// operation.
+let TreeMapModelTests = module (
+    let identity = func(int id) -> int {
+        return id;
+    };
+
+    let nothing = func() -> void {};
+
+    export let test_model = func() -> void {
+        let map = tree_map.create<int, int>(int32.compare);
+        map_model.run<int>(map, identity, map.validate, nothing, true, 41, 10000, 24, 160);
+    };
+
+    // Keys mapped to strings whose comparator orders them like the ids.
+    export let test_model_string_keys = func() -> void {
+        let map = tree_map.create<string, int>(func(string a, string b) -> ordering.Ordering {
+            return int32.compare(a.byte_length, b.byte_length);
+        });
+        let keys: string[list] = [];
+        let text = "";
+        while (keys.length < 60) {
+            keys.append(text);
+            text = text + "x";
+        }
+        map_model.run<string>(map, func(int id) -> string {
+            return keys[id];
+        }, map.validate, nothing, true, 42, 3000, 16, 60);
+    };
+);

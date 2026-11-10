@@ -1,0 +1,880 @@
+let cell = import:Std.Core.Cell;
+let iterators = import:Std.Collections.Iterator;
+let mutable_map = import:Std.Collections.MutableMap;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let sorted_map = import:Std.Collections.SortedMap;
+let text_depth = import:Std.Collections.Internal.TextDepth;
+
+// A sorted map: an AVL tree ordered by the comparator given at construction
+// (Stdlib.md section 9.7). Two keys are the same key when the comparator
+// returns Equal; equals is never consulted. Lookups call the comparator with
+// the probe key first.
+//
+// Nodes are separately allocated; missing child and parent links are nil,
+// and nothing reads or writes a field on nil. A removed node becomes
+// unreachable at once. Iteration is ascending, by in-order successor through
+// `right` and `parent`, with no stack. Setting the value of an existing key
+// is not a structural change. Iterators and callbacks fail fast with
+// "collection modified during iteration".
+export let TreeMap = module (
+    let Seal = enum (Token);
+
+    let Node = class<K, V> (
+        export let key: K;
+        export let value: V;
+        export let left: Node<K, V> = nil;
+        export let right: Node<K, V> = nil;
+        export let parent: Node<K, V> = nil;
+        // A leaf has height 1.
+        export let height: int = 1;
+
+        export let init = func(K item_key, V item_value, Node<K, V> above) -> void {
+            key = item_key;
+            value = item_value;
+            parent = above;
+        };
+    );
+
+    export let TreeMap = class<K, V> implements mutable_map.MutableMap<K, V>, sorted_map.SortedMap<K, V> (
+        let root: Node<K, V> = nil;
+        let count: int = 0;
+        let compare: func(K, K) -> ordering.Ordering;
+        // The modification count, shared with iterators.
+        let changes: cell.Cell<uint64>;
+        let printing_depth: int = 0;
+
+        export let init = func(Seal seal, func(K, K) -> ordering.Ordering comparator) -> void {
+            compare = comparator;
+            changes = cell.of<uint64>(0);
+        };
+
+        export let size = func() -> int {
+            return count;
+        };
+
+        export let is_empty = func() -> bool {
+            return count == 0;
+        };
+
+        export let clear = func() -> void {
+            root = nil;
+            count = 0;
+            changes.value = changes.value + 1;
+        };
+
+        export let contains_key = func(K key) -> bool {
+            return find_node(key) != nil;
+        };
+
+        export let get = func(K key) -> optional.Optional<V> {
+            let node = find_node(key);
+            if (node == nil) {
+                return optional.Optional<V>.None;
+            }
+            return optional.Optional<V>.Some(node.value);
+        };
+
+        export let get_or = func(K key, V fallback) -> V {
+            let node = find_node(key);
+            if (node == nil) {
+                return fallback;
+            }
+            return node.value;
+        };
+
+        // Traps with "no such element" when the key is absent.
+        export let require = func(K key) -> V {
+            let node = find_node(key);
+            if (node == nil) {
+                trap_with_message("no such element");
+            }
+            return node.value;
+        };
+
+        export let set = func(K key, V value) -> void {
+            let existing = insert(key, value);
+            if (existing != nil) {
+                existing.value = value;
+            }
+        };
+
+        // The previous value.
+        export let put = func(K key, V value) -> optional.Optional<V> {
+            let existing = insert(key, value);
+            if (existing == nil) {
+                return optional.Optional<V>.None;
+            }
+            let previous = existing.value;
+            existing.value = value;
+            return optional.Optional<V>.Some(previous);
+        };
+
+        export let delete = func(K key) -> bool {
+            let node = find_node(key);
+            if (node == nil) {
+                return false;
+            }
+            unlink(node);
+            return true;
+        };
+
+        // The removed value.
+        export let remove = func(K key) -> optional.Optional<V> {
+            let node = find_node(key);
+            if (node == nil) {
+                return optional.Optional<V>.None;
+            }
+            let value = node.value;
+            unlink(node);
+            return optional.Optional<V>.Some(value);
+        };
+
+        // Ascending.
+        export let keys = func() -> K[list] {
+            let result: K[list] = [];
+            let node = leftmost(root);
+            while (node != nil) {
+                result.append(node.key);
+                node = successor(node);
+            }
+            return result;
+        };
+
+        export let values = func() -> V[list] {
+            let result: V[list] = [];
+            let node = leftmost(root);
+            while (node != nil) {
+                result.append(node.value);
+                node = successor(node);
+            }
+            return result;
+        };
+
+        export let entries = func() -> [K, V][list] {
+            let result: [K, V][list] = [];
+            let node = leftmost(root);
+            while (node != nil) {
+                let item: [K, V] = [node.key, node.value];
+                result.append(item);
+                node = successor(node);
+            }
+            return result;
+        };
+
+        // Yields [K, V] in ascending key order.
+        export let iterator = func() -> iterators.Iterator<[K, V]> {
+            return new TreeMapIterator<K, V>(leftmost(root), changes);
+        };
+
+        // Yields the keys in ascending order.
+        export let key_iterator = func() -> iterators.Iterator<K> {
+            return new TreeKeyIterator<K, V>(leftmost(root), changes);
+        };
+
+        // Sets each entry of `other` in its ascending order.
+        export let put_all = func(TreeMap<K, V> other) -> void {
+            let items = other.entries();
+            let total = items.length;
+            let i = 0;
+            while (i < total) {
+                let [key, value] = items[i];
+                set(key, value);
+                i = i + 1;
+            }
+        };
+
+        // In ascending order. The action must not change the map
+        // structurally.
+        export let for_each = func(func(K, V) -> void action) -> void {
+            let expected = changes.value;
+            let node = leftmost(root);
+            while (node != nil) {
+                action(node.key, node.value);
+                if (changes.value != expected) {
+                    trap_with_message("collection modified during iteration");
+                }
+                node = successor(node);
+            }
+        };
+
+        // Calls `drop` once per entry in ascending order, then removes the
+        // entries it chose. Returns how many were removed.
+        export let remove_if = func(func(K, V) -> bool drop) -> int {
+            let expected = changes.value;
+            let chosen: K[list] = [];
+            let node = leftmost(root);
+            while (node != nil) {
+                let removing = drop(node.key, node.value);
+                if (changes.value != expected) {
+                    trap_with_message("collection modified during iteration");
+                }
+                if (removing) {
+                    chosen.append(node.key);
+                }
+                node = successor(node);
+            }
+            let total = chosen.length;
+            let i = 0;
+            while (i < total) {
+                unlink(find_node(chosen[i]));
+                i = i + 1;
+            }
+            return total;
+        };
+
+        // The existing value, or the result of `make`, stored. `make` must
+        // not change the map structurally.
+        export let get_or_put = func(K key, func() -> V make) -> V {
+            let node = find_node(key);
+            if (node != nil) {
+                return node.value;
+            }
+            let expected = changes.value;
+            let value = make();
+            if (changes.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            insert(key, value);
+            return value;
+        };
+
+        // Stores `value` when the key is absent, otherwise combine(old,
+        // value). Returns the stored value.
+        export let merge = func(K key, V value, func(V, V) -> V combine) -> V {
+            let node = find_node(key);
+            if (node == nil) {
+                insert(key, value);
+                return value;
+            }
+            let expected = changes.value;
+            let combined = combine(node.value, value);
+            if (changes.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            node.value = combined;
+            return combined;
+        };
+
+        // Stores a Some result of `f`, or removes the key for None. Returns
+        // the result.
+        export let compute = func(K key, func(K, optional.Optional<V>) -> optional.Optional<V> f) -> optional.Optional<V> {
+            let node = find_node(key);
+            let current = optional.Optional<V>.None;
+            if (node != nil) {
+                current = optional.Optional<V>.Some(node.value);
+            }
+            let expected = changes.value;
+            let outcome = f(key, current);
+            if (changes.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            match (outcome) {
+                optional.Optional.Some(value) => {
+                    if (node != nil) {
+                        node.value = value;
+                    } else {
+                        insert(key, value);
+                    }
+                },
+                optional.Optional.None => {
+                    if (node != nil) {
+                        unlink(node);
+                    }
+                },
+            }
+            return outcome;
+        };
+
+        // By the values' equals, with `value` as the receiver.
+        export let contains_value = func(V value) -> bool {
+            let node = leftmost(root);
+            while (node != nil) {
+                if (value.equals(node.value)) {
+                    return true;
+                }
+                node = successor(node);
+            }
+            return false;
+        };
+
+        // The entry with the least key. Traps with "no such element" when
+        // empty.
+        export let first = func() -> [K, V] {
+            if (root == nil) {
+                trap_with_message("no such element");
+            }
+            let node = leftmost(root);
+            let item: [K, V] = [node.key, node.value];
+            return item;
+        };
+
+        // The entry with the greatest key. Traps with "no such element" when
+        // empty.
+        export let last = func() -> [K, V] {
+            if (root == nil) {
+                trap_with_message("no such element");
+            }
+            let node = rightmost(root);
+            let item: [K, V] = [node.key, node.value];
+            return item;
+        };
+
+        // Removes and returns the entry with the least key. Traps with "no
+        // such element" when empty.
+        export let remove_first = func() -> [K, V] {
+            if (root == nil) {
+                trap_with_message("no such element");
+            }
+            let node = leftmost(root);
+            let item: [K, V] = [node.key, node.value];
+            unlink(node);
+            return item;
+        };
+
+        // Removes and returns the entry with the greatest key. Traps with "no
+        // such element" when empty.
+        export let remove_last = func() -> [K, V] {
+            if (root == nil) {
+                trap_with_message("no such element");
+            }
+            let node = rightmost(root);
+            let item: [K, V] = [node.key, node.value];
+            unlink(node);
+            return item;
+        };
+
+        // Entries with keys from `from` inclusive to `to` exclusive,
+        // ascending. Empty when `to` is not above `from`.
+        export let range = func(K from, K to) -> [K, V][list] {
+            let result: [K, V][list] = [];
+            let node = ceiling_node(from, true);
+            while (node != nil && compare(to, node.key) == ordering.Ordering.Greater) {
+                let item: [K, V] = [node.key, node.value];
+                result.append(item);
+                node = successor(node);
+            }
+            return result;
+        };
+
+        // The keys of range(from, to).
+        export let key_range = func(K from, K to) -> K[list] {
+            let result: K[list] = [];
+            let node = ceiling_node(from, true);
+            while (node != nil && compare(to, node.key) == ordering.Ordering.Greater) {
+                result.append(node.key);
+                node = successor(node);
+            }
+            return result;
+        };
+
+        // Entries in descending key order.
+        export let descending = func() -> [K, V][list] {
+            let result: [K, V][list] = [];
+            let node = rightmost(root);
+            while (node != nil) {
+                let item: [K, V] = [node.key, node.value];
+                result.append(item);
+                node = predecessor(node);
+            }
+            return result;
+        };
+
+        // Keys in descending order.
+        export let descending_keys = func() -> K[list] {
+            let result: K[list] = [];
+            let node = rightmost(root);
+            while (node != nil) {
+                result.append(node.key);
+                node = predecessor(node);
+            }
+            return result;
+        };
+
+        // The greatest key at most `key`.
+        export let floor = func(K key) -> optional.Optional<K> {
+            return key_of(floor_node(key, true));
+        };
+
+        // The least key at least `key`.
+        export let ceiling = func(K key) -> optional.Optional<K> {
+            return key_of(ceiling_node(key, true));
+        };
+
+        // The greatest key below `key`.
+        export let lower = func(K key) -> optional.Optional<K> {
+            return key_of(floor_node(key, false));
+        };
+
+        // The least key above `key`.
+        export let higher = func(K key) -> optional.Optional<K> {
+            return key_of(ceiling_node(key, false));
+        };
+
+        export let floor_entry = func(K key) -> optional.Optional<[K, V]> {
+            return entry_of(floor_node(key, true));
+        };
+
+        export let ceiling_entry = func(K key) -> optional.Optional<[K, V]> {
+            return entry_of(ceiling_node(key, true));
+        };
+
+        export let lower_entry = func(K key) -> optional.Optional<[K, V]> {
+            return entry_of(floor_node(key, false));
+        };
+
+        export let higher_entry = func(K key) -> optional.Optional<[K, V]> {
+            return entry_of(ceiling_node(key, false));
+        };
+
+        // Traps with "invalid state: tree ..." on a broken invariant: AVL
+        // balance, stored heights, ascending key order, reciprocal parent
+        // links, a nil parent at the root, and the count.
+        export let validate = func() -> void {
+            if (root != nil && root.parent != nil) {
+                trap_with_message("invalid state: tree root parent");
+            }
+            let visited = 0;
+            let previous: Node<K, V> = nil;
+            let node = leftmost(root);
+            while (node != nil) {
+                visited = visited + 1;
+                if (visited > count) {
+                    trap_with_message("invalid state: tree count");
+                }
+                let left_height = height_of(node.left);
+                let right_height = height_of(node.right);
+                if (node.height != larger(left_height, right_height) + 1) {
+                    trap_with_message("invalid state: tree height");
+                }
+                if (left_height > right_height + 1 || right_height > left_height + 1) {
+                    trap_with_message("invalid state: tree balance");
+                }
+                if (node.left != nil && node.left.parent != node) {
+                    trap_with_message("invalid state: tree parent link");
+                }
+                if (node.right != nil && node.right.parent != node) {
+                    trap_with_message("invalid state: tree parent link");
+                }
+                let above = node.parent;
+                if (above == nil) {
+                    if (node != root) {
+                        trap_with_message("invalid state: tree parent link");
+                    }
+                } else if (above.left != node && above.right != node) {
+                    trap_with_message("invalid state: tree parent link");
+                }
+                if (previous != nil && compare(previous.key, node.key) != ordering.Ordering.Less) {
+                    trap_with_message("invalid state: tree order");
+                }
+                previous = node;
+                node = successor(node);
+            }
+            if (visited != count) {
+                trap_with_message("invalid state: tree count");
+            }
+        };
+
+        // Another TreeMap of the same size in which, for each of its entries,
+        // this map holds an equal value for the key.
+        export let.override equals = func(class other) -> bool {
+            if (!(other is TreeMap<K, V>)) {
+                return false;
+            }
+            let that = other as TreeMap<K, V>;
+            if (that.size() != count) {
+                return false;
+            }
+            let items = that.entries();
+            let total = items.length;
+            let i = 0;
+            while (i < total) {
+                let [key, value] = items[i];
+                let node = find_node(key);
+                if (node == nil || !node.value.equals(value)) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return true;
+        };
+
+        // The wrapping sum over entries of the key hash exclusive-or the
+        // value hash.
+        export let.override hash_code = func() -> uint32 {
+            let total: uint64 = 0;
+            let node = leftmost(root);
+            while (node != nil) {
+                let mixed = node.key.hash_code() ^ node.value.hash_code();
+                total = (total + (mixed as uint64)) & 4294967295;
+                node = successor(node);
+            }
+            return total as uint32;
+        };
+
+        // `{k: v, k2: v2}` in ascending order; the map itself as a direct
+        // key or value prints "(this collection)".
+        export let.override to_string = func() -> string {
+            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+                return "(this collection)";
+            }
+            let saved = printing_depth;
+            printing_depth = text_depth.enter();
+            let parts: string[list] = [];
+            let node = leftmost(root);
+            while (node != nil) {
+                parts.append(node.key.to_string() + ": " + node.value.to_string());
+                node = successor(node);
+            }
+            text_depth.leave();
+            printing_depth = saved;
+            let text = parts.to_string();
+            return "{" + text.slice(1, text.byte_length - 1) + "}";
+        };
+
+        let find_node = func(K key) -> Node<K, V> {
+            let node = root;
+            while (node != nil) {
+                let order = compare(key, node.key);
+                if (order == ordering.Ordering.Less) {
+                    node = node.left;
+                } else if (order == ordering.Ordering.Greater) {
+                    node = node.right;
+                } else {
+                    return node;
+                }
+            }
+            return nil;
+        };
+
+        // Returns the node that already holds the key, unchanged, or nil
+        // after attaching a new node and rebalancing.
+        let insert = func(K key, V value) -> Node<K, V> {
+            if (root == nil) {
+                root = new Node<K, V>(key, value, nil);
+                count = 1;
+                changes.value = changes.value + 1;
+                return nil;
+            }
+            let node = root;
+            while (true) {
+                let order = compare(key, node.key);
+                if (order == ordering.Ordering.Less) {
+                    if (node.left == nil) {
+                        node.left = new Node<K, V>(key, value, node);
+                        break;
+                    }
+                    node = node.left;
+                } else if (order == ordering.Ordering.Greater) {
+                    if (node.right == nil) {
+                        node.right = new Node<K, V>(key, value, node);
+                        break;
+                    }
+                    node = node.right;
+                } else {
+                    return node;
+                }
+            }
+            count = count + 1;
+            changes.value = changes.value + 1;
+            rebalance_from(node);
+            return nil;
+        };
+
+        // Removes a node. A node with two children takes the key and value
+        // of its in-order successor, which is unlinked instead.
+        let unlink = func(Node<K, V> node) -> void {
+            let target = node;
+            if (node.left != nil && node.right != nil) {
+                target = leftmost(node.right);
+                node.key = target.key;
+                node.value = target.value;
+            }
+            let child = target.left;
+            if (child == nil) {
+                child = target.right;
+            }
+            let above = target.parent;
+            if (child != nil) {
+                child.parent = above;
+            }
+            replace_child(above, target, child);
+            target.left = nil;
+            target.right = nil;
+            target.parent = nil;
+            count = count - 1;
+            changes.value = changes.value + 1;
+            rebalance_from(above);
+        };
+
+        // Walks up from `start`, recomputing heights and rotating where the
+        // children's heights differ by 2, until a subtree's height is
+        // unchanged.
+        let rebalance_from = func(Node<K, V> start) -> void {
+            let node = start;
+            while (node != nil) {
+                let previous = node.height;
+                let left_height = height_of(node.left);
+                let right_height = height_of(node.right);
+                let top = node;
+                if (left_height > right_height + 1) {
+                    let child = node.left;
+                    if (height_of(child.left) < height_of(child.right)) {
+                        rotate_left(child);
+                    }
+                    top = rotate_right(node);
+                } else if (right_height > left_height + 1) {
+                    let child = node.right;
+                    if (height_of(child.right) < height_of(child.left)) {
+                        rotate_right(child);
+                    }
+                    top = rotate_left(node);
+                } else {
+                    node.height = larger(left_height, right_height) + 1;
+                }
+                if (top.height == previous) {
+                    return;
+                }
+                node = top.parent;
+            }
+        };
+
+        // Lifts the right child of `node` above it; returns the new subtree
+        // top.
+        let rotate_left = func(Node<K, V> node) -> Node<K, V> {
+            let lifted = node.right;
+            let inner = lifted.left;
+            node.right = inner;
+            if (inner != nil) {
+                inner.parent = node;
+            }
+            let above = node.parent;
+            lifted.parent = above;
+            replace_child(above, node, lifted);
+            lifted.left = node;
+            node.parent = lifted;
+            node.height = larger(height_of(node.left), height_of(inner)) + 1;
+            lifted.height = larger(node.height, height_of(lifted.right)) + 1;
+            return lifted;
+        };
+
+        // Lifts the left child of `node` above it; returns the new subtree
+        // top.
+        let rotate_right = func(Node<K, V> node) -> Node<K, V> {
+            let lifted = node.left;
+            let inner = lifted.right;
+            node.left = inner;
+            if (inner != nil) {
+                inner.parent = node;
+            }
+            let above = node.parent;
+            lifted.parent = above;
+            replace_child(above, node, lifted);
+            lifted.right = node;
+            node.parent = lifted;
+            node.height = larger(height_of(inner), height_of(node.right)) + 1;
+            lifted.height = larger(height_of(lifted.left), node.height) + 1;
+            return lifted;
+        };
+
+        // Points the link that held `old` at `replacement`: the parent's
+        // child link, or root when there is no parent.
+        let replace_child = func(Node<K, V> above, Node<K, V> old, Node<K, V> replacement) -> void {
+            if (above == nil) {
+                root = replacement;
+            } else if (above.left == old) {
+                above.left = replacement;
+            } else {
+                above.right = replacement;
+            }
+        };
+
+        // The node with the greatest key at most (or below) `key`.
+        let floor_node = func(K key, bool inclusive) -> Node<K, V> {
+            let best: Node<K, V> = nil;
+            let node = root;
+            while (node != nil) {
+                let order = compare(key, node.key);
+                if (order == ordering.Ordering.Equal && inclusive) {
+                    return node;
+                }
+                if (order == ordering.Ordering.Greater) {
+                    best = node;
+                    node = node.right;
+                } else {
+                    node = node.left;
+                }
+            }
+            return best;
+        };
+
+        // The node with the least key at least (or above) `key`.
+        let ceiling_node = func(K key, bool inclusive) -> Node<K, V> {
+            let best: Node<K, V> = nil;
+            let node = root;
+            while (node != nil) {
+                let order = compare(key, node.key);
+                if (order == ordering.Ordering.Equal && inclusive) {
+                    return node;
+                }
+                if (order == ordering.Ordering.Less) {
+                    best = node;
+                    node = node.left;
+                } else {
+                    node = node.right;
+                }
+            }
+            return best;
+        };
+
+        let key_of = func(Node<K, V> node) -> optional.Optional<K> {
+            if (node == nil) {
+                return optional.Optional<K>.None;
+            }
+            return optional.Optional<K>.Some(node.key);
+        };
+
+        let entry_of = func(Node<K, V> node) -> optional.Optional<[K, V]> {
+            if (node == nil) {
+                return optional.Optional<[K, V]>.None;
+            }
+            let item: [K, V] = [node.key, node.value];
+            return optional.Optional<[K, V]>.Some(item);
+        };
+
+        let height_of = func(Node<K, V> node) -> int {
+            if (node == nil) {
+                return 0;
+            }
+            return node.height;
+        };
+
+        let leftmost = func(Node<K, V> start) -> Node<K, V> {
+            return leftmost_node<K, V>(start);
+        };
+
+        let rightmost = func(Node<K, V> start) -> Node<K, V> {
+            if (start == nil) {
+                return nil;
+            }
+            let node = start;
+            while (node.right != nil) {
+                node = node.right;
+            }
+            return node;
+        };
+
+        let successor = func(Node<K, V> node) -> Node<K, V> {
+            return successor_node<K, V>(node);
+        };
+
+        // The in-order predecessor, through `left` and `parent`.
+        let predecessor = func(Node<K, V> node) -> Node<K, V> {
+            if (node.left != nil) {
+                return rightmost(node.left);
+            }
+            let child = node;
+            let above = node.parent;
+            while (above != nil && above.left == child) {
+                child = above;
+                above = above.parent;
+            }
+            return above;
+        };
+    );
+
+    // Compares the modification count before every step.
+    let TreeMapIterator = class<K, V> implements iterators.Iterator<[K, V]> (
+        let upcoming: Node<K, V>;
+        let changes: cell.Cell<uint64>;
+        let expected: uint64;
+
+        export let init = func(Node<K, V> start, cell.Cell<uint64> counter) -> void {
+            upcoming = start;
+            changes = counter;
+            expected = counter.value;
+        };
+
+        export let has_next = func() -> bool {
+            if (changes.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            return upcoming != nil;
+        };
+
+        export let next = func() -> [K, V] {
+            if (!has_next()) {
+                trap_with_message("no such element");
+            }
+            let node = upcoming;
+            upcoming = successor_node<K, V>(node);
+            let item: [K, V] = [node.key, node.value];
+            return item;
+        };
+    );
+
+    let TreeKeyIterator = class<K, V> implements iterators.Iterator<K> (
+        let upcoming: Node<K, V>;
+        let changes: cell.Cell<uint64>;
+        let expected: uint64;
+
+        export let init = func(Node<K, V> start, cell.Cell<uint64> counter) -> void {
+            upcoming = start;
+            changes = counter;
+            expected = counter.value;
+        };
+
+        export let has_next = func() -> bool {
+            if (changes.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            return upcoming != nil;
+        };
+
+        export let next = func() -> K {
+            if (!has_next()) {
+                trap_with_message("no such element");
+            }
+            let node = upcoming;
+            upcoming = successor_node<K, V>(node);
+            return node.key;
+        };
+    );
+
+    // An empty map ordered by `comparator`, which must define a total order.
+    export let create = func<K, V>(func(K, K) -> ordering.Ordering comparator) -> TreeMap<K, V> {
+        return new TreeMap<K, V>(Seal.Token, comparator);
+    };
+
+    let leftmost_node = func<K, V>(Node<K, V> start) -> Node<K, V> {
+        if (start == nil) {
+            return nil;
+        }
+        let node = start;
+        while (node.left != nil) {
+            node = node.left;
+        }
+        return node;
+    };
+
+    // The in-order successor, through `right` and `parent`.
+    let successor_node = func<K, V>(Node<K, V> node) -> Node<K, V> {
+        if (node.right != nil) {
+            return leftmost_node<K, V>(node.right);
+        }
+        let child = node;
+        let above = node.parent;
+        while (above != nil && above.right == child) {
+            child = above;
+            above = above.parent;
+        }
+        return above;
+    };
+
+    let larger = func(int a, int b) -> int {
+        if (a > b) {
+            return a;
+        }
+        return b;
+    };
+);

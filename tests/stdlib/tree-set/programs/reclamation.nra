@@ -1,0 +1,66 @@
+// run-options: --max-heap-cells 6000
+let console = import:Std.Io.Console;
+let ordering = import:Std.Core.Ordering;
+let program = import:Std.Program;
+let tree_set = import:Std.Collections.TreeSet;
+
+// A removed element's node becomes unreachable at once (Stdlib.md section
+// 9.7). The set keeps 8 elements; each round adds an element holding 2,000
+// values and removes the previous one by remove, remove_last, or retain_if.
+// The run needs about 4,500 cells; if removed elements stayed reachable,
+// 300 rounds would need about 600,000.
+export let Main = module:program.Entry (
+    let Blob = class (
+        export let rank: int;
+        export let data: int[list] = [];
+        export let init = func(int order, int size) -> void {
+            rank = order;
+            let i = 0;
+            while (i < size) {
+                data.append(order + i);
+                i = i + 1;
+            }
+        };
+    );
+
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let set = tree_set.create<Blob>(func(Blob a, Blob b) -> ordering.Ordering {
+            if (a.rank < b.rank) {
+                return ordering.Ordering.Less;
+            }
+            if (a.rank > b.rank) {
+                return ordering.Ordering.Greater;
+            }
+            return ordering.Ordering.Equal;
+        });
+        let i = 0;
+        while (i < 7) {
+            set.add(new Blob(-1 - i, 1));
+            i = i + 1;
+        }
+        let total: int64 = 0;
+        let round = 0;
+        while (round < 300) {
+            set.add(new Blob(round, 2000));
+            if (round > 0) {
+                let previous = round - 1;
+                if (round % 3 == 0) {
+                    set.remove(new Blob(previous, 0));
+                } else if (round % 3 == 1) {
+                    set.add(new Blob(round + 1000, 0));
+                    set.remove_last();
+                    set.remove(new Blob(previous, 0));
+                } else {
+                    set.retain_if(func(Blob item) -> bool {
+                        return item.rank != previous;
+                    });
+                }
+            }
+            total = total + (set.last().data[1] as int64);
+            round = round + 1;
+        }
+        set.validate();
+        console.print_line(set.size().to_string() + " " + total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

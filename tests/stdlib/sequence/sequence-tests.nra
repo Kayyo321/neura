@@ -1,0 +1,275 @@
+let array_list = import:Std.Collections.ArrayList;
+let cell = import:Std.Core.Cell;
+let int32 = import:Std.Core.Int32;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let sequence = import:Std.Collections.Sequence;
+let test = import:Std.Test;
+let tree_map = import:Std.Collections.TreeMap;
+
+let SequenceTests = module (
+    let list = func(int[list] items) -> sequence.Sequence<int> {
+        return sequence.from_list<int>(items);
+    };
+
+    let even = func(int v) -> bool {
+        return v % 2 == 0;
+    };
+
+    let text = func(optional.Optional<int> o) -> string {
+        return optional.to_string<int>(o);
+    };
+
+    export let test_sources = func() -> void {
+        test.assert_equal_string("[1, 2, 3]", list([1, 2, 3]).to_list().to_string());
+        test.assert_equal_string("[]", sequence.empty<int>().to_list().to_string());
+        test.assert_equal_string("[3, 4, 5]", sequence.range(3, 6).to_list().to_string());
+        test.assert_equal_string("[]", sequence.range(6, 3).to_list().to_string());
+        test.assert_equal_string("[-2, -1]", sequence.range(-2, 0).to_list().to_string());
+        let counter = cell.of<int>(0);
+        let generated = sequence.generate<int>(func() -> int {
+            counter.value = counter.value + 1;
+            return counter.value * 10;
+        }).take(3).to_list();
+        test.assert_equal_string("[10, 20, 30]", generated.to_string());
+        test.assert_equal_int32(3, counter.value);
+        // iterate calls step only when the next element is pulled.
+        let steps = cell.of<int>(0);
+        let powers = sequence.iterate<int>(1, func(int v) -> int {
+            steps.value = steps.value + 1;
+            return v * 3;
+        }).take(4).to_list();
+        test.assert_equal_string("[1, 3, 9, 27]", powers.to_string());
+        test.assert_equal_int32(3, steps.value);
+        let items = array_list.of<string>(["x", "y"]);
+        test.assert_equal_string("[x, y]", sequence.from_iterator<string>(items.iterator()).to_list().to_string());
+    };
+
+    export let test_map_filter_flat_map = func() -> void {
+        let squares = list([1, 2, 3, 4]).map<int>(func(int v) -> int {
+            return v * v;
+        }).to_list();
+        test.assert_equal_string("[1, 4, 9, 16]", squares.to_string());
+        test.assert_equal_string("[2, 4, 6]", sequence.range(1, 7).filter(even).to_list().to_string());
+        test.assert_equal_string("[]", list([1, 3]).filter(even).to_list().to_string());
+        let spread = list([0, 2, 1]).flat_map<string>(func(int v) -> string[list] {
+            let result: string[list] = [];
+            let i = 0;
+            while (i < v) {
+                result.append(v.to_string());
+                i = i + 1;
+            }
+            return result;
+        }).to_list();
+        test.assert_equal_string("[2, 2, 1]", spread.to_string());
+    };
+
+    export let test_take_skip = func() -> void {
+        test.assert_equal_string("[0, 1]", sequence.range(0, 10).take(2).to_list().to_string());
+        test.assert_equal_string("[]", sequence.range(0, 10).take(0).to_list().to_string());
+        test.assert_equal_string("[0, 1, 2]", sequence.range(0, 3).take(5).to_list().to_string());
+        test.assert_equal_string("[8, 9]", sequence.range(0, 10).skip(8).to_list().to_string());
+        test.assert_equal_string("[]", sequence.range(0, 3).skip(5).to_list().to_string());
+        test.assert_equal_string("[0, 1]", sequence.range(0, 2).skip(0).to_list().to_string());
+        // take stops pulling after the n-th element.
+        let pulled = cell.of<int>(0);
+        let firsts = sequence.range(0, 100).peek(func(int v) -> void {
+            pulled.value = pulled.value + 1;
+        }).take(3).to_list();
+        test.assert_equal_string("[0, 1, 2]", firsts.to_string());
+        test.assert_equal_int32(3, pulled.value);
+        let small = func(int v) -> bool {
+            return v < 3;
+        };
+        test.assert_equal_string("[0, 1, 2]", list([0, 1, 2, 5, 1]).take_while(small).to_list().to_string());
+        test.assert_equal_string("[5, 1]", list([0, 1, 2, 5, 1]).skip_while(small).to_list().to_string());
+        test.assert_equal_string("[]", list([0, 1]).skip_while(small).to_list().to_string());
+        test.assert_equal_string("[7, 1]", list([7, 1]).skip_while(small).to_list().to_string());
+        test.assert_equal_string("[]", list([7, 1]).take_while(small).to_list().to_string());
+    };
+
+    export let test_enumerate_zip_chain = func() -> void {
+        let numbered = sequence.from_list<string>(["a", "b"]).enumerate().to_list();
+        test.assert_equal_string("[[0, a], [1, b]]", numbered.to_string());
+        let pairs = sequence.range(0, 5).zip<string>(sequence.from_list<string>(["x", "y"])).to_list();
+        test.assert_equal_string("[[0, x], [1, y]]", pairs.to_string());
+        let shorter = sequence.range(0, 1).zip<string>(sequence.from_list<string>(["x", "y"])).to_list();
+        test.assert_equal_string("[[0, x]]", shorter.to_string());
+        test.assert_equal_string("[1, 2, 3]", list([1]).chain(list([2, 3])).to_list().to_string());
+        test.assert_equal_string("[2]", sequence.empty<int>().chain(list([2])).to_list().to_string());
+    };
+
+    export let test_chunked_windowed = func() -> void {
+        test.assert_equal_string("[[1, 2], [3, 4], [5]]", sequence.range(1, 6).chunked(2).to_list().to_string());
+        test.assert_equal_string("[[1, 2, 3]]", sequence.range(1, 4).chunked(5).to_list().to_string());
+        test.assert_equal_string("[]", sequence.empty<int>().chunked(1).to_list().to_string());
+        test.assert_equal_string("[[1, 2], [2, 3], [3, 4]]", sequence.range(1, 5).windowed(2).to_list().to_string());
+        test.assert_equal_string("[]", sequence.range(1, 3).windowed(3).to_list().to_string());
+        test.assert_equal_string("[[1], [2]]", sequence.range(1, 3).windowed(1).to_list().to_string());
+        // Each window is a new list.
+        let windows = sequence.range(0, 3).windowed(2).to_list();
+        windows[0][0] = 99;
+        test.assert_equal_string("[[99, 1], [1, 2]]", windows.to_string());
+    };
+
+    export let test_sorted_reversed_distinct = func() -> void {
+        test.assert_equal_string("[1, 2, 3, 5]", list([3, 5, 1, 2]).sorted(int32.compare).to_list().to_string());
+        // Stable: equal keys keep their order.
+        let pairs = sequence.from_list<[int, string]>([[2, "a"], [1, "b"], [2, "c"], [1, "d"]]).sorted(
+            func([int, string] x, [int, string] y) -> ordering.Ordering {
+                return int32.compare(x[0], y[0]);
+            }).to_list();
+        test.assert_equal_string("[[1, b], [1, d], [2, a], [2, c]]", pairs.to_string());
+        test.assert_equal_string("[3, 2, 1]", list([1, 2, 3]).reversed().to_list().to_string());
+        test.assert_equal_string("[]", sequence.empty<int>().reversed().to_list().to_string());
+        test.assert_equal_string("[]", sequence.empty<int>().sorted(int32.compare).to_list().to_string());
+        test.assert_equal_string("[1, 2, 3]", list([1, 2, 1, 3, 2]).distinct().to_list().to_string());
+        let words = sequence.from_list<string>(["b", "a", "b"]).distinct().to_list();
+        test.assert_equal_string("[b, a]", words.to_string());
+    };
+
+    // Nothing runs until a terminal operation, and each element passes
+    // through the whole pipeline before the next is requested.
+    export let test_lazy_pull_order = func() -> void {
+        let log = cell.of<string>("");
+        let pipeline = sequence.range(0, 3).peek(func(int v) -> void {
+            log.value = log.value + "a" + v.to_string();
+        }).map<int>(func(int v) -> int {
+            log.value = log.value + "m" + v.to_string();
+            return v * 10;
+        }).peek(func(int v) -> void {
+            log.value = log.value + "b" + v.to_string();
+        });
+        test.assert_equal_string("", log.value);
+        pipeline.for_each(func(int v) -> void {
+            log.value = log.value + ";";
+        });
+        test.assert_equal_string("a0m0b0;a1m1b10;a2m2b20;", log.value);
+    };
+
+    export let test_terminals = func() -> void {
+        let lists = sequence.range(0, 3).to_array_list();
+        test.assert_equal_string("[0, 1, 2]", lists.to_string());
+        let parts = sequence.range(0, 7).partition(even);
+        test.assert_equal_string("[0, 2, 4, 6]", parts[0].to_string());
+        test.assert_equal_string("[1, 3, 5]", parts[1].to_string());
+        let text = list([1, 2, 3]).fold<string>("x", func(string acc, int v) -> string {
+            return acc + v.to_string();
+        });
+        test.assert_equal_string("x123", text);
+        test.assert_equal_int32(4, sequence.range(0, 4).count());
+        test.assert_equal_int32(0, sequence.empty<int>().count());
+        let total = cell.of<int>(0);
+        list([4, 5]).for_each(func(int v) -> void {
+            total.value = total.value + v;
+        });
+        test.assert_equal_int32(9, total.value);
+        let visits = 0;
+        for (let v in sequence.range(0, 4)) {
+            visits = visits + v;
+        }
+        test.assert_equal_int32(6, visits);
+    };
+
+    // any, all, and none stop at the first deciding element.
+    export let test_any_all_none = func() -> void {
+        let pulled = cell.of<int>(0);
+        let counted = func(int[list] items) -> sequence.Sequence<int> {
+            return sequence.from_list<int>(items).peek(func(int v) -> void {
+                pulled.value = pulled.value + 1;
+            });
+        };
+        test.assert(counted([1, 2, 3, 4]).any(even));
+        test.assert_equal_int32(2, pulled.value);
+        test.assert(!counted([1, 3]).any(even));
+        pulled.value = 0;
+        test.assert(!counted([2, 3, 4]).all(even));
+        test.assert_equal_int32(2, pulled.value);
+        test.assert(counted([2, 4]).all(even));
+        test.assert(sequence.empty<int>().all(even));
+        pulled.value = 0;
+        test.assert(!counted([1, 2, 3]).none(even));
+        test.assert_equal_int32(2, pulled.value);
+        test.assert(counted([1, 3]).none(even));
+        test.assert(sequence.empty<int>().none(even));
+        test.assert(!sequence.empty<int>().any(even));
+    };
+
+    export let test_optional_terminals = func() -> void {
+        let plus = func(int a, int b) -> int {
+            return a * 10 + b;
+        };
+        test.assert_equal_string("Some(123)", text(list([1, 2, 3]).reduce(plus)));
+        test.assert_equal_string("Some(7)", text(list([7]).reduce(plus)));
+        test.assert_equal_string("None", text(sequence.empty<int>().reduce(plus)));
+        test.assert_equal_string("Some(4)", text(list([4, 5]).first()));
+        test.assert_equal_string("None", text(sequence.empty<int>().first()));
+        test.assert_equal_string("Some(5)", text(list([4, 5]).last()));
+        test.assert_equal_string("None", text(sequence.empty<int>().last()));
+        test.assert_equal_string("Some(4)", text(list([3, 4, 6]).find(even)));
+        test.assert_equal_string("None", text(list([3, 5]).find(even)));
+        test.assert_equal_string("Some(1)", text(list([3, 1, 4, 1]).min(int32.compare)));
+        test.assert_equal_string("Some(4)", text(list([3, 1, 4, 1]).max(int32.compare)));
+        test.assert_equal_string("None", text(sequence.empty<int>().max(int32.compare)));
+        // The first of several equal extremes.
+        let by_first = func([int, string] x, [int, string] y) -> ordering.Ordering {
+            return int32.compare(x[0], y[0]);
+        };
+        let items: [int, string][list] = [[2, "a"], [1, "b"], [2, "c"], [1, "d"]];
+        let low = test.assert_some<[int, string]>(sequence.from_list<[int, string]>(items).min(by_first));
+        let high = test.assert_some<[int, string]>(sequence.from_list<[int, string]>(items).max(by_first));
+        test.assert_equal_string("[1, b]", low.to_string());
+        test.assert_equal_string("[2, a]", high.to_string());
+    };
+
+    export let test_collections = func() -> void {
+        let set = list([3, 1, 3, 2]).to_set();
+        test.assert_equal_string("{3, 1, 2}", set.to_string());
+        let map = sequence.from_list<string>(["one", "three"]).to_map<string, int>(func(string s) -> string {
+            return s;
+        }, func(string s) -> int {
+            return s.byte_length;
+        });
+        test.assert_equal_string("{one: 3, three: 5}", map.to_string());
+        let groups = sequence.from_list<string>(["bb", "a", "cc", "d", "eee"]).group_by<int>(func(string s) -> int {
+            return s.byte_length;
+        });
+        test.assert_equal_string("{2: [bb, cc], 1: [a, d], 3: [eee]}", groups.to_string());
+        test.assert_equal_int32(2, groups.require(1).size());
+    };
+
+    export let test_module_functions = func() -> void {
+        test.assert_equal_string("a, b, c", sequence.join(sequence.from_list<string>(["a", "b", "c"]), ", "));
+        test.assert_equal_string("", sequence.join(sequence.empty<string>(), ", "));
+        test.assert_equal_string("x", sequence.join(sequence.from_list<string>(["x"]), "-"));
+        test.assert_equal_int32(5050, sequence.sum_int32(sequence.range(1, 101)));
+        test.assert_equal_int32(0, sequence.sum_int32(sequence.empty<int>()));
+        let big: int64[list] = [9000000000, 1, -2];
+        test.assert_equal_int64(8999999999, sequence.sum_int64(sequence.from_list<int64>(big)));
+        let floats: float64[list] = [0.1, 0.2, 0.3];
+        // Left to right: (0.1 + 0.2) + 0.3.
+        test.assert_equal_float64((0.1 + 0.2) + 0.3, sequence.sum_float64(sequence.from_list<float64>(floats)));
+        let negative_zero: float64[list] = [-0.0];
+        test.assert_equal_float64(-0.0, sequence.sum_float64(sequence.from_list<float64>(negative_zero)));
+        test.assert_equal_float64(0.0, sequence.sum_float64(sequence.empty<float64>()));
+    };
+
+    // A collection iterator keeps its fail-fast check inside a pipeline.
+    export let test_collection_source = func() -> void {
+        let map = tree_map.create<int, string>(int32.compare);
+        map.set(2, "b");
+        map.set(1, "a");
+        let keys = sequence.from_iterator<int>(map.key_iterator()).map<int>(func(int k) -> int {
+            return k * 100;
+        }).to_list();
+        test.assert_equal_string("[100, 200]", keys.to_string());
+    };
+
+    export let test_identity_and_text = func() -> void {
+        let s = sequence.range(0, 2);
+        let t = sequence.range(0, 2);
+        test.assert_equal_string("Sequence", s.to_string());
+        test.assert(s.equals(s));
+        test.assert(!s.equals(t));
+    };
+);

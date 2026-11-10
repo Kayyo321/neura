@@ -1,0 +1,25 @@
+// Nesting depth of collection text conversions, shared by every collection
+// so that a collection can recognize itself as a direct element
+// (Stdlib.md section 5.2: "(this collection)"). A collection records the
+// depth it entered at; when its to_string is called again at that same
+// depth, no other collection's text started in between, so the call came
+// from its own element loop. Deeper cycles still recurse until the
+// frame-limit fault. A trap ends the run, so a depth that is never left
+// cannot be observed.
+export let TextDepth = module (
+    let depth: int = 0;
+
+    export let current = func() -> int {
+        return depth;
+    };
+
+    // Starts a collection's text and returns the depth it runs at.
+    export let enter = func() -> int {
+        depth = depth + 1;
+        return depth;
+    };
+
+    export let leave = func() -> void {
+        depth = depth - 1;
+    };
+);

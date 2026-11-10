@@ -1,0 +1,13 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): no such element
+let immutable_map = import:Std.Collections.ImmutableMap;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let entries: [string, int][list] = [["a", 1], ["b", 2]];
+        let map = immutable_map.of<string, int>(entries);
+        map.require("c");
+        return program.ExitCode.Ok;
+    };
+);

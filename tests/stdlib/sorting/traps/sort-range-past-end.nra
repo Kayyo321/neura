@@ -1,0 +1,19 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: range
+let ordering = import:Std.Core.Ordering;
+let program = import:Std.Program;
+let sorting = import:Std.Collections.Sorting;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let compare = func(int a, int b) -> ordering.Ordering {
+            if (a < b) {
+                return ordering.Ordering.Less;
+            }
+            return ordering.Ordering.Greater;
+        };
+        let items: int[list] = [3, 2, 1];
+        sorting.sort_range<int>(items, 0, 4, compare);
+        return program.ExitCode.Ok;
+    };
+);

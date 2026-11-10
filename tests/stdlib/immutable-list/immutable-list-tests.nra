@@ -1,0 +1,177 @@
+let array_list = import:Std.Collections.ArrayList;
+let cell = import:Std.Core.Cell;
+let immutable_list = import:Std.Collections.ImmutableList;
+let list = import:Std.Collections.List;
+let lists = import:Std.Collections.Lists;
+let model_random = import:ModelRandom;
+let ordering = import:Std.Core.Ordering;
+let test = import:Std.Test;
+
+let ImmutableListTests = module (
+    let compare = func(int a, int b) -> ordering.Ordering {
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        if (a > b) {
+            return ordering.Ordering.Greater;
+        }
+        return ordering.Ordering.Equal;
+    };
+
+    export let test_copies_at_construction = func() -> void {
+        let source: int[list] = [3, 1, 4];
+        let items = immutable_list.of<int>(source);
+        source.append(1);
+        source[0] = 9;
+        test.assert_equal_string("[3, 1, 4]", items.to_string());
+        let copy = items.to_list();
+        copy.append(5);
+        test.assert_equal_int32(3, items.size());
+        let direct = new immutable_list.ImmutableList<int>(source);
+        source.append(2);
+        test.assert_equal_int32(4, direct.size());
+    };
+
+    export let test_reads = func() -> void {
+        let items = immutable_list.of<int>([3, 1, 4, 1, 5]);
+        test.assert_equal_int32(5, items.size());
+        test.assert(!items.is_empty());
+        test.assert(immutable_list.of<int>([]).is_empty());
+        test.assert_equal_int32(4, items.get(2));
+        test.assert_equal_int32(3, items.first());
+        test.assert_equal_int32(5, items.last());
+        test.assert_equal_int32(3, test.assert_some<int>(items.first_or_none()));
+        test.assert_equal_int32(5, test.assert_some<int>(items.last_or_none()));
+        let empty = immutable_list.of<int>([]);
+        test.assert_none<int>(empty.first_or_none());
+        test.assert_none<int>(empty.last_or_none());
+        test.assert(items.contains(4));
+        test.assert(!items.contains(2));
+        test.assert_equal_int32(1, items.index_of(1));
+        test.assert_equal_int32(3, items.last_index_of(1));
+        test.assert_equal_int32(-1, items.index_of(7));
+        test.assert_equal_int32(-1, items.last_index_of(7));
+        test.assert_equal_int32(2, items.index_where(func(int value) -> bool {
+            return value > 3;
+        }));
+        test.assert_equal_int32(-1, items.index_where(func(int value) -> bool {
+            return value > 5;
+        }));
+        test.assert(items.contains_all([1, 5]));
+        test.assert(!items.contains_all([2]));
+    };
+
+    export let test_iteration = func() -> void {
+        let items = immutable_list.of<int>([3, 1, 4]);
+        let walk = items.iterator();
+        test.assert(walk.has_next());
+        test.assert(walk.has_next());
+        test.assert_equal_int32(3, walk.next());
+        test.assert_equal_int32(1, walk.next());
+        test.assert_equal_int32(4, walk.next());
+        test.assert(!walk.has_next());
+        let seen: int[list] = [];
+        for (let value in items) {
+            seen.append(value);
+        }
+        items.for_each(func(int value) -> void {
+            seen.append(value);
+        });
+        test.assert_equal_string("[3, 1, 4, 3, 1, 4]", seen.to_string());
+    };
+
+    export let test_slice_and_search = func() -> void {
+        let items = immutable_list.of<int>([1, 3, 3, 5]);
+        test.assert_equal_string("[3, 3]", items.slice(1, 3).to_string());
+        test.assert(items.slice(2, 2).is_empty());
+        test.assert(items.slice(0, 4).equals(items));
+        test.assert_equal_int32(1, items.binary_search(3, compare));
+        test.assert_equal_int32(-4, items.binary_search(4, compare));
+        test.assert_equal_int32(-5, items.binary_search(9, compare));
+    };
+
+    export let test_equality_hash_and_text = func() -> void {
+        let a = immutable_list.of<int>([1, 2]);
+        let b = immutable_list.of<int>([1, 2]);
+        test.assert(a.equals(b));
+        test.assert(!a.equals(immutable_list.of<int>([1])));
+        test.assert(!a.equals(immutable_list.of<int>([2, 1])));
+        test.assert(!a.equals(immutable_list.of<int64>([1, 2])));
+        test.assert(!a.equals(nil));
+        // Same elements, different class.
+        let other = array_list.of<int>([1, 2]);
+        test.assert(!a.equals(other));
+        test.assert(lists.same_elements<int>(a, other));
+        test.assert_equal_int32(994, a.hash_code() as int);
+        test.assert_equal_int32(1, immutable_list.of<int>([]).hash_code() as int);
+        test.assert_equal_string("[1, 2]", a.to_string());
+        test.assert_equal_string("[]", immutable_list.of<string>([]).to_string());
+        let objects = immutable_list.of<class>([nil, a]);
+        test.assert_equal_string("[nil, [1, 2]]", objects.to_string());
+        test.assert_equal_int32(1, objects.index_of(b));
+    };
+
+    // Seeded queries against the source list (10,000 operations).
+    export let test_model = func() -> void {
+        let random = model_random.seeded(99);
+        let round = 0;
+        while (round < 100) {
+            let model: int[list] = [];
+            let count = random.below(40);
+            let i = 0;
+            while (i < count) {
+                model.append(random.below(12));
+                i = i + 1;
+            }
+            let items = immutable_list.of<int>(model);
+            let view: list.List<int> = items;
+            test.assert_equal_int32(count, view.size());
+            let operation = 0;
+            while (operation < 100) {
+                let value = random.below(12);
+                let choice = random.below(5);
+                if (choice == 0 && count > 0) {
+                    let index = random.below(count);
+                    test.assert_equal_int32(model[index], view.get(index));
+                } else if (choice == 1) {
+                    let expected = -1;
+                    let j = count - 1;
+                    while (j >= 0) {
+                        if (model[j] == value) {
+                            expected = j;
+                        }
+                        j = j - 1;
+                    }
+                    test.assert_equal_int32(expected, view.index_of(value));
+                    test.assert_equal_bool(expected >= 0, view.contains(value));
+                } else if (choice == 2) {
+                    let expected = -1;
+                    let j = 0;
+                    while (j < count) {
+                        if (model[j] == value) {
+                            expected = j;
+                        }
+                        j = j + 1;
+                    }
+                    test.assert_equal_int32(expected, view.last_index_of(value));
+                } else if (choice == 3) {
+                    let start = random.below(count + 1);
+                    let end = start + random.below(count - start + 1);
+                    let part = items.slice(start, end);
+                    let j = start;
+                    while (j < end) {
+                        test.assert_equal_int32(model[j], part.get(j - start));
+                        j = j + 1;
+                    }
+                    test.assert_equal_int32(end - start, part.size());
+                } else {
+                    test.assert(view.to_list().equals(model));
+                    test.assert_equal_string(model.to_string(), items.to_string());
+                    test.assert_equal_int64(model.hash_code() as int64, items.hash_code() as int64);
+                }
+                operation = operation + 1;
+            }
+            round = round + 1;
+        }
+    };
+);

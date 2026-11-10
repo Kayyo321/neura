@@ -1,0 +1,13 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): no such element
+let int32 = import:Std.Core.Int32;
+let program = import:Std.Program;
+let tree_set = import:Std.Collections.TreeSet;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let set = tree_set.create<int>(int32.compare);
+        set.last();
+        return program.ExitCode.Ok;
+    };
+);

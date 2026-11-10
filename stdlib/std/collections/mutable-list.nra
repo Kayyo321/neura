@@ -1,0 +1,23 @@
+let list = import:Std.Collections.List;
+let mutable_collection = import:Std.Collections.MutableCollection;
+let ordering = import:Std.Core.Ordering;
+
+// A list that can change. `set` and `swap` are not structural changes.
+export let MutableList = module (
+    export let MutableList = interface<T>:list.List<T>, mutable_collection.MutableCollection<T> (
+        let set = func(int index, T value) -> void;
+        // Accepts an index equal to the size.
+        let add_at = func(int index, T value) -> void;
+        let remove_at = func(int index) -> T;
+        // Trap with "no such element" when empty.
+        let remove_first = func() -> T;
+        let remove_last = func() -> T;
+        let swap = func(int i, int j) -> void;
+        let reverse = func() -> void;
+        let fill = func(T value) -> void;
+        // Traps for a size above the current size.
+        let truncate = func(int size) -> void;
+        // Stable, by the comparator.
+        let sort = func(func(T, T) -> ordering.Ordering c) -> void;
+    );
+);

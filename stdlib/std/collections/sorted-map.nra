@@ -1,0 +1,24 @@
+let map = import:Std.Collections.Map;
+let optional = import:Std.Core.Optional;
+
+// A map ordered by its key comparator (TreeMap). first, last, range, and
+// descending give entries; floor, ceiling, lower, and higher give keys and
+// their _entry forms give entries.
+export let SortedMap = module (
+    export let SortedMap = interface<K, V>:map.Map<K, V> (
+        // Trap with "no such element" when empty.
+        let first = func() -> [K, V];
+        let last = func() -> [K, V];
+        // Entries with keys from `from` inclusive to `to` exclusive.
+        let range = func(K from, K to) -> [K, V][list];
+        let descending = func() -> [K, V][list];
+        let floor = func(K key) -> optional.Optional<K>;
+        let ceiling = func(K key) -> optional.Optional<K>;
+        let lower = func(K key) -> optional.Optional<K>;
+        let higher = func(K key) -> optional.Optional<K>;
+        let floor_entry = func(K key) -> optional.Optional<[K, V]>;
+        let ceiling_entry = func(K key) -> optional.Optional<[K, V]>;
+        let lower_entry = func(K key) -> optional.Optional<[K, V]>;
+        let higher_entry = func(K key) -> optional.Optional<[K, V]>;
+    );
+);

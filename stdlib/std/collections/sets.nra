@@ -1,0 +1,20 @@
+let set = import:Std.Collections.Set;
+
+// Comparisons of sets of different classes through the read-only interface
+// (Stdlib.md section 9.10).
+export let Sets = module (
+    // Whether the sets have the same size and `a` contains each element of
+    // `b`, by `a`'s own membership test.
+    export let same_elements = func<T>(set.Set<T> a, set.Set<T> b) -> bool {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        let items = b.iterator();
+        while (items.has_next()) {
+            if (!a.contains(items.next())) {
+                return false;
+            }
+        }
+        return true;
+    };
+);

@@ -1,0 +1,13 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): invalid argument: negative element
+let bit_set = import:Std.Collections.BitSet;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = bit_set.create();
+        items.flip(-2);
+        return program.ExitCode.Ok;
+    };
+);

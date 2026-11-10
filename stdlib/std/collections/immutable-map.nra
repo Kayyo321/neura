@@ -1,0 +1,129 @@
+let hash_map = import:Std.Collections.HashMap;
+let iterators = import:Std.Collections.Iterator;
+let map = import:Std.Collections.Map;
+let optional = import:Std.Core.Optional;
+
+// A map that copies its contents at construction and implements only the
+// read-only Map interface (Stdlib.md section 9.10). Keys are compared with
+// equals and hashed with hash_code; iteration is in the order of `of`.
+// Nothing can change it after construction.
+export let ImmutableMap = module (
+    let Seal = enum (Token);
+
+    export let ImmutableMap = class<K, V> implements map.Map<K, V> (
+        let associations: hash_map.HashMap<K, V>;
+
+        export let init = func(Seal seal, hash_map.HashMap<K, V> contents) -> void {
+            associations = contents;
+        };
+
+        export let size = func() -> int {
+            return associations.size();
+        };
+
+        export let is_empty = func() -> bool {
+            return associations.size() == 0;
+        };
+
+        export let contains_key = func(K key) -> bool {
+            return associations.contains_key(key);
+        };
+
+        export let get = func(K key) -> optional.Optional<V> {
+            return associations.get(key);
+        };
+
+        export let get_or = func(K key, V fallback) -> V {
+            return associations.get_or(key, fallback);
+        };
+
+        // Traps with "no such element" when the key is absent.
+        export let require = func(K key) -> V {
+            return associations.require(key);
+        };
+
+        export let keys = func() -> K[list] {
+            return associations.keys();
+        };
+
+        export let values = func() -> V[list] {
+            return associations.values();
+        };
+
+        export let entries = func() -> [K, V][list] {
+            return associations.entries();
+        };
+
+        export let contains_value = func(V value) -> bool {
+            return associations.contains_value(value);
+        };
+
+        export let for_each = func(func(K, V) -> void action) -> void {
+            associations.for_each(action);
+        };
+
+        // Yields [K, V] in the order of `of`.
+        export let iterator = func() -> iterators.Iterator<[K, V]> {
+            return associations.iterator();
+        };
+
+        // Another ImmutableMap of the same size in which, for each of its
+        // entries, this map holds an equal value for the key.
+        export let.override equals = func(class other) -> bool {
+            if (!(other is ImmutableMap<K, V>)) {
+                return false;
+            }
+            let that = other as ImmutableMap<K, V>;
+            if (that.size() != associations.size()) {
+                return false;
+            }
+            let items = that.entries();
+            let count = items.length;
+            let i = 0;
+            while (i < count) {
+                let [key, value] = items[i];
+                match (associations.get(key)) {
+                    optional.Optional.Some(held) => {
+                        if (!held.equals(value)) {
+                            return false;
+                        }
+                    },
+                    optional.Optional.None => {
+                        return false;
+                    },
+                }
+                i = i + 1;
+            }
+            return true;
+        };
+
+        // The wrapping sum over entries of the key hash exclusive-or the
+        // value hash.
+        export let.override hash_code = func() -> uint32 {
+            return associations.hash_code();
+        };
+
+        // `{k: v, k2: v2}` in iteration order. The entries exist before the
+        // map, so it can never contain itself.
+        export let.override to_string = func() -> string {
+            return associations.to_string();
+        };
+    );
+
+    // Copies `entries`. Traps with "invalid argument: duplicate key" when two
+    // entries have equal keys.
+    export let of = func<K, V>([K, V][list] entries) -> ImmutableMap<K, V> {
+        let contents = hash_map.with_capacity<K, V>(entries.length);
+        let count = entries.length;
+        let i = 0;
+        while (i < count) {
+            let [key, value] = entries[i];
+            if (contents.contains_key(key)) {
+                trap_with_message("invalid argument: duplicate key");
+            }
+            contents.set(key, value);
+            i = i + 1;
+        }
+        return new ImmutableMap<K, V>(Seal.Token, contents);
+    };
+);

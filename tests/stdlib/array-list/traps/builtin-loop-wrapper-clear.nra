@@ -1,0 +1,17 @@
+// status: 70
+// stderr: collection modified during iteration \(trap reason 5\)
+let array_list = import:Std.Collections.ArrayList;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let backing: int[list] = [1, 2, 3];
+        let items = array_list.wrap<int>(backing);
+        for (let value in backing) {
+            console.print_line(value.to_string());
+            items.clear();
+        }
+        return program.ExitCode.Ok;
+    };
+);

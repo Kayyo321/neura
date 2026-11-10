@@ -1,0 +1,292 @@
+let array_list = import:Std.Collections.ArrayList;
+let model_random = import:ModelRandom;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let test = import:Std.Test;
+
+// Drives an ArrayList and a plain built-in list with the same seeded
+// operations and compares sizes, contents, iteration order, and results
+// after every operation (Stdlib.md section 17).
+let ArrayListModelTests = module (
+    let compare = func(int a, int b) -> ordering.Ordering {
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        if (a > b) {
+            return ordering.Ordering.Greater;
+        }
+        return ordering.Ordering.Equal;
+    };
+
+    let check = func(array_list.ArrayList<int> actual, int[list] model) -> void {
+        test.assert_equal_int32(model.length, actual.size());
+        let walk = actual.iterator();
+        let i = 0;
+        while (walk.has_next()) {
+            test.assert_equal_int32(model[i], walk.next());
+            i = i + 1;
+        }
+        test.assert_equal_int32(model.length, i);
+    };
+
+    let inserted = func(int[list] model, int index, int value) -> int[list] {
+        let result: int[list] = [];
+        let i = 0;
+        while (i < model.length) {
+            if (i == index) {
+                result.append(value);
+            }
+            result.append(model[i]);
+            i = i + 1;
+        }
+        if (index == model.length) {
+            result.append(value);
+        }
+        return result;
+    };
+
+    let without = func(int[list] model, int index) -> int[list] {
+        let result: int[list] = [];
+        let i = 0;
+        while (i < model.length) {
+            if (i != index) {
+                result.append(model[i]);
+            }
+            i = i + 1;
+        }
+        return result;
+    };
+
+    let first_index = func(int[list] model, int value) -> int {
+        let i = 0;
+        while (i < model.length) {
+            if (model[i] == value) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    };
+
+    let last_index = func(int[list] model, int value) -> int {
+        let i = model.length - 1;
+        while (i >= 0) {
+            if (model[i] == value) {
+                return i;
+            }
+            i = i - 1;
+        }
+        return -1;
+    };
+
+    let sorted = func(int[list] model) -> int[list] {
+        let result: int[list] = [];
+        for (let value in model) {
+            result.append(value);
+        }
+        let i = 1;
+        while (i < result.length) {
+            let j = i;
+            while (j > 0 && result[j - 1] > result[j]) {
+                let value = result[j];
+                result[j] = result[j - 1];
+                result[j - 1] = value;
+                j = j - 1;
+            }
+            i = i + 1;
+        }
+        return result;
+    };
+
+    let search = func(int[list] model, int value) -> int {
+        let i = 0;
+        while (i < model.length && model[i] < value) {
+            i = i + 1;
+        }
+        if (i < model.length && model[i] == value) {
+            return i;
+        }
+        return -i - 1;
+    };
+
+    let run = func(uint64 seed, int operations) -> void {
+        let random = model_random.seeded(seed);
+        let actual = array_list.create<int>();
+        let model: int[list] = [];
+        let step = 0;
+        while (step < operations) {
+            let choice = random.below(100);
+            let value = random.below(16);
+            let size = model.length;
+            if (size > 48 && choice < 30) {
+                choice = 30;
+            }
+            if (choice < 15) {
+                test.assert(actual.add(value));
+                model.append(value);
+            } else if (choice < 25) {
+                let index = random.below(size + 1);
+                actual.add_at(index, value);
+                model = inserted(model, index, value);
+            } else if (choice < 35) {
+                if (size > 0) {
+                    let index = random.below(size);
+                    test.assert_equal_int32(model[index], actual.remove_at(index));
+                    model = without(model, index);
+                }
+            } else if (choice < 38) {
+                if (size > 0) {
+                    test.assert_equal_int32(model[0], actual.remove_first());
+                    model = without(model, 0);
+                }
+            } else if (choice < 41) {
+                if (size > 0) {
+                    test.assert_equal_int32(model[size - 1], actual.remove_last());
+                    model = without(model, size - 1);
+                }
+            } else if (choice < 47) {
+                if (size > 0) {
+                    let index = random.below(size);
+                    actual.set(index, value);
+                    model[index] = value;
+                }
+            } else if (choice < 52) {
+                if (size > 0) {
+                    let index = random.below(size);
+                    test.assert_equal_int32(model[index], actual.get(index));
+                }
+            } else if (choice < 57) {
+                let index = first_index(model, value);
+                test.assert_equal_bool(index >= 0, actual.remove(value));
+                if (index >= 0) {
+                    model = without(model, index);
+                }
+            } else if (choice < 62) {
+                test.assert_equal_int32(first_index(model, value), actual.index_of(value));
+                test.assert_equal_int32(last_index(model, value), actual.last_index_of(value));
+                test.assert_equal_bool(first_index(model, value) >= 0, actual.contains(value));
+            } else if (choice < 65) {
+                if (size > 0) {
+                    let i = random.below(size);
+                    let j = random.below(size);
+                    actual.swap(i, j);
+                    let held = model[i];
+                    model[i] = model[j];
+                    model[j] = held;
+                }
+            } else if (choice < 67) {
+                actual.reverse();
+                let reversed: int[list] = [];
+                let i = size - 1;
+                while (i >= 0) {
+                    reversed.append(model[i]);
+                    i = i - 1;
+                }
+                model = reversed;
+            } else if (choice < 68) {
+                actual.fill(value);
+                let i = 0;
+                while (i < size) {
+                    model[i] = value;
+                    i = i + 1;
+                }
+            } else if (choice < 70) {
+                let keep = random.below(size + 1);
+                actual.truncate(keep);
+                let shorter: int[list] = [];
+                let i = 0;
+                while (i < keep) {
+                    shorter.append(model[i]);
+                    i = i + 1;
+                }
+                model = shorter;
+            } else if (choice < 71) {
+                actual.clear();
+                let empty: int[list] = [];
+                model = empty;
+            } else if (choice < 75) {
+                let divisor = value % 5 + 2;
+                let remove = choice < 73;
+                let kept: int[list] = [];
+                for (let element in model) {
+                    if ((element % divisor == 0) != remove) {
+                        kept.append(element);
+                    }
+                }
+                let removed = 0;
+                if (remove) {
+                    removed = actual.remove_if(func(int element) -> bool {
+                        return element % divisor == 0;
+                    });
+                } else {
+                    removed = actual.retain_if(func(int element) -> bool {
+                        return element % divisor == 0;
+                    });
+                }
+                test.assert_equal_int32(size - kept.length, removed);
+                model = kept;
+            } else if (choice < 77) {
+                let expected = -1;
+                let i = 0;
+                while (i < size && expected < 0) {
+                    if (model[i] > value) {
+                        expected = i;
+                    }
+                    i = i + 1;
+                }
+                test.assert_equal_int32(expected, actual.index_where(func(int element) -> bool {
+                    return element > value;
+                }));
+            } else if (choice < 79) {
+                actual.sort(compare);
+                model = sorted(model);
+                test.assert_equal_int32(search(model, value), actual.binary_search(value, compare));
+            } else if (choice < 82) {
+                if (size > 0) {
+                    test.assert_equal_int32(model[0], actual.first());
+                    test.assert_equal_int32(model[size - 1], actual.last());
+                    test.assert_equal_int32(model[0], test.assert_some<int>(actual.first_or_none()));
+                    test.assert_equal_int32(model[size - 1], test.assert_some<int>(actual.last_or_none()));
+                } else {
+                    test.assert_none<int>(actual.first_or_none());
+                    test.assert_none<int>(actual.last_or_none());
+                    test.assert(actual.is_empty());
+                }
+            } else if (choice < 85) {
+                let start = random.below(size + 1);
+                let end = start + random.below(size - start + 1);
+                let part = actual.slice(start, end);
+                test.assert_equal_int32(end - start, part.size());
+                let i = start;
+                while (i < end) {
+                    test.assert_equal_int32(model[i], part.get(i - start));
+                    i = i + 1;
+                }
+            } else if (choice < 88) {
+                test.assert(actual.to_list().equals(model));
+                test.assert(actual.equals(array_list.of<int>(model)));
+                test.assert_equal_int64(model.hash_code() as int64, actual.hash_code() as int64);
+            } else if (choice < 91) {
+                let extra: int[list] = [value, value + 1];
+                actual.add_all(extra);
+                model.append(value);
+                model.append(value + 1);
+            } else if (choice < 94) {
+                test.assert_equal_string(model.to_string(), actual.to_string());
+            } else {
+                test.assert(actual.add(value));
+                model.append(value);
+            }
+            check(actual, model);
+            step = step + 1;
+        }
+    };
+
+    export let test_model_seed_1 = func() -> void {
+        run(1, 5000);
+    };
+
+    export let test_model_seed_2 = func() -> void {
+        run(20261109, 5000);
+    };
+);

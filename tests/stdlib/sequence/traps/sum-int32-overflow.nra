@@ -1,0 +1,12 @@
+// status: 70
+// stderr: source arithmetic failure \(trap reason 1\) in function [0-9]+ block [0-9]+ at std/collections/sequence[.]nra
+let program = import:Std.Program;
+let sequence = import:Std.Collections.Sequence;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let values: int[list] = [2147483647, 1];
+        sequence.sum_int32(sequence.from_list<int>(values));
+        return program.ExitCode.Ok;
+    };
+);

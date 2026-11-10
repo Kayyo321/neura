@@ -1,0 +1,15 @@
+// status: 70
+// stderr: explicit program failure \(trap reason 3\): collection modified during iteration
+let bit_set = import:Std.Collections.BitSet;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let items = bit_set.of([1, 2]);
+        items.for_each(func(int value) -> void {
+            items.flip(value + 1);
+        });
+        return program.ExitCode.Ok;
+    };
+);

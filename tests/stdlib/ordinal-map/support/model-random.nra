@@ -1,0 +1,33 @@
+// A seeded xorshift64 generator for model-based tests (Marsaglia 2003:
+// shifts 13, 7, 17). It uses only shifts and exclusive-or, so nothing
+// overflows. Std.Random replaces it once that module is available.
+export let ModelRandom = module (
+    export let Generator = class (
+        let state: uint64;
+
+        export let init = func(uint64 seed) -> void {
+            state = seed;
+            if (state == 0) {
+                state = 88172645463325252;
+            }
+        };
+
+        export let next_uint64 = func() -> uint64 {
+            let x = state;
+            x = x ^ (x << 13);
+            x = x ^ (x >> 7);
+            x = x ^ (x << 17);
+            state = x;
+            return x;
+        };
+
+        // A value from 0 through bound - 1 for a positive bound.
+        export let below = func(int bound) -> int {
+            return (next_uint64() % (bound as uint64)) as int;
+        };
+    );
+
+    export let seeded = func(uint64 seed) -> Generator {
+        return new Generator(seed);
+    };
+);

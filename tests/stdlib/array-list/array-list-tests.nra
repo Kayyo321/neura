@@ -1,0 +1,382 @@
+let array_list = import:Std.Collections.ArrayList;
+let cell = import:Std.Core.Cell;
+let collection = import:Std.Collections.Collection;
+let mutable_list = import:Std.Collections.MutableList;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let test = import:Std.Test;
+
+let ArrayListTests = module (
+    let Tagged = class (
+        export let key: int;
+        export let order: int;
+
+        export let init = func(int k, int o) -> void {
+            key = k;
+            order = o;
+        };
+    );
+
+    let compare = func(int a, int b) -> ordering.Ordering {
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        if (a > b) {
+            return ordering.Ordering.Greater;
+        }
+        return ordering.Ordering.Equal;
+    };
+
+    let numbers = func() -> array_list.ArrayList<int> {
+        return array_list.of<int>([3, 1, 4, 1, 5]);
+    };
+
+    let text = func(array_list.ArrayList<int> items) -> string {
+        return items.to_string();
+    };
+
+    export let test_factories = func() -> void {
+        let empty = array_list.create<int>();
+        test.assert_equal_int32(0, empty.size());
+        test.assert(empty.is_empty());
+
+        let source: int[list] = [1, 2];
+        let copied = array_list.of<int>(source);
+        source.append(3);
+        test.assert_equal_string("[1, 2]", text(copied));
+
+        test.assert_equal_string("[7, 7, 7]", text(array_list.filled<int>(3, 7)));
+        test.assert_equal_string("[]", text(array_list.filled<int>(0, 7)));
+
+        let shared: int[list] = [1];
+        let wrapped = array_list.wrap<int>(shared);
+        shared.append(2);
+        wrapped.add(3);
+        test.assert_equal_string("[1, 2, 3]", text(wrapped));
+        test.assert_equal_string("[1, 2, 3]", shared.to_string());
+        wrapped.items().append(4);
+        test.assert_equal_int32(4, shared.length);
+    };
+
+    export let test_access = func() -> void {
+        let items = numbers();
+        test.assert_equal_int32(5, items.size());
+        test.assert(!items.is_empty());
+        test.assert_equal_int32(4, items.get(2));
+        items.set(2, 9);
+        test.assert_equal_int32(9, items.get(2));
+        test.assert_equal_int32(3, items.first());
+        test.assert_equal_int32(5, items.last());
+        test.assert_equal_int32(3, test.assert_some<int>(items.first_or_none()));
+        test.assert_equal_int32(5, test.assert_some<int>(items.last_or_none()));
+        let empty = array_list.create<int>();
+        test.assert_none<int>(empty.first_or_none());
+        test.assert_none<int>(empty.last_or_none());
+    };
+
+    export let test_add_at = func() -> void {
+        let items = array_list.create<int>();
+        items.add_at(0, 2);
+        items.add_at(0, 0);
+        items.add_at(1, 1);
+        items.add_at(3, 3);
+        test.assert_equal_string("[0, 1, 2, 3]", text(items));
+        test.assert(items.add(4));
+        test.assert_equal_string("[0, 1, 2, 3, 4]", text(items));
+    };
+
+    export let test_add_all = func() -> void {
+        let items = array_list.of<int>([1, 2]);
+        items.add_all([3, 4]);
+        test.assert_equal_string("[1, 2, 3, 4]", text(items));
+        items.add_all(items.items());
+        test.assert_equal_string("[1, 2, 3, 4, 1, 2, 3, 4]", text(items));
+        let empty: int[list] = [];
+        items.add_all(empty);
+        test.assert_equal_int32(8, items.size());
+    };
+
+    export let test_removal = func() -> void {
+        let items = numbers();
+        test.assert_equal_int32(4, items.remove_at(2));
+        test.assert_equal_string("[3, 1, 1, 5]", text(items));
+        test.assert_equal_int32(3, items.remove_first());
+        test.assert_equal_int32(5, items.remove_last());
+        test.assert_equal_string("[1, 1]", text(items));
+        test.assert(items.remove(1));
+        test.assert_equal_string("[1]", text(items));
+        test.assert(!items.remove(7));
+        test.assert(items.remove(1));
+        test.assert(items.is_empty());
+    };
+
+    export let test_swap_reverse_fill = func() -> void {
+        let items = numbers();
+        items.swap(0, 4);
+        test.assert_equal_string("[5, 1, 4, 1, 3]", text(items));
+        items.reverse();
+        test.assert_equal_string("[3, 1, 4, 1, 5]", text(items));
+        let even = array_list.of<int>([1, 2, 3, 4]);
+        even.reverse();
+        test.assert_equal_string("[4, 3, 2, 1]", text(even));
+        let empty = array_list.create<int>();
+        empty.reverse();
+        test.assert(empty.is_empty());
+        items.fill(0);
+        test.assert_equal_string("[0, 0, 0, 0, 0]", text(items));
+    };
+
+    export let test_truncate_and_clear = func() -> void {
+        let items = numbers();
+        items.truncate(5);
+        test.assert_equal_int32(5, items.size());
+        items.truncate(2);
+        test.assert_equal_string("[3, 1]", text(items));
+        items.truncate(0);
+        test.assert(items.is_empty());
+        let other = numbers();
+        other.clear();
+        test.assert(other.is_empty());
+        other.clear();
+        test.assert(other.is_empty());
+    };
+
+    // clear and truncate shorten the same backing list the wrapper adopted.
+    export let test_clear_and_truncate_through_wrapped_list = func() -> void {
+        let backing: int[list] = [1, 2, 3, 4];
+        let wrapped = array_list.wrap<int>(backing);
+        let version = backing.version;
+        wrapped.truncate(2);
+        test.assert_equal_int32(2, backing.length);
+        test.assert_equal_uint64(version + 2, backing.version);
+        wrapped.clear();
+        test.assert_equal_int32(0, backing.length);
+        test.assert_equal_uint64(version + 4, backing.version);
+        backing.append(9);
+        test.assert_equal_string("[9]", text(wrapped));
+    };
+
+    export let test_slice = func() -> void {
+        let items = numbers();
+        let middle = items.slice(1, 3);
+        test.assert_equal_string("[1, 4]", text(middle));
+        middle.set(0, 8);
+        test.assert_equal_int32(1, items.get(1));
+        test.assert(items.slice(2, 2).is_empty());
+        test.assert(items.slice(0, 5).equals(items));
+        test.assert(items.slice(5, 5).is_empty());
+    };
+
+    // A to_list copy iterates independently of later changes.
+    export let test_to_list_copy = func() -> void {
+        let items = numbers();
+        let copy = items.to_list();
+        let total = 0;
+        for (let value in copy) {
+            items.add(value);
+            total = total + value;
+        }
+        test.assert_equal_int32(14, total);
+        test.assert_equal_int32(10, items.size());
+        test.assert_equal_string("[3, 1, 4, 1, 5]", copy.to_string());
+    };
+
+    export let test_iterator = func() -> void {
+        let items = array_list.of<int>([1, 2]);
+        let walk = items.iterator();
+        test.assert(walk.has_next());
+        test.assert(walk.has_next());
+        test.assert_equal_int32(1, walk.next());
+        test.assert_equal_int32(2, walk.next());
+        test.assert(!walk.has_next());
+        test.assert(!walk.has_next());
+        let seen: int[list] = [];
+        for (let value in items) {
+            seen.append(value);
+        }
+        test.assert_equal_string("[1, 2]", seen.to_string());
+    };
+
+    // Replacing elements by index is not structural.
+    export let test_set_keeps_iterators_valid = func() -> void {
+        let items = numbers();
+        let version = items.items().version;
+        let walk = items.iterator();
+        let total = 0;
+        while (walk.has_next()) {
+            let value = walk.next();
+            items.set(0, value);
+            items.swap(1, 2);
+            total = total + value;
+        }
+        items.reverse();
+        items.fill(2);
+        items.sort(compare);
+        test.assert_equal_int32(17, total);
+        test.assert_equal_uint64(version, items.items().version);
+        let alias = items.items();
+        for (let value in items) {
+            alias[0] = value;
+        }
+        test.assert_equal_uint64(version, alias.version);
+    };
+
+    export let test_for_each_order = func() -> void {
+        let seen: int[list] = [];
+        numbers().for_each(func(int value) -> void {
+            seen.append(value);
+        });
+        test.assert_equal_string("[3, 1, 4, 1, 5]", seen.to_string());
+    };
+
+    export let test_remove_if_and_retain_if = func() -> void {
+        let items = numbers();
+        let seen: int[list] = [];
+        let removed = items.remove_if(func(int value) -> bool {
+            seen.append(value);
+            return value == 1;
+        });
+        test.assert_equal_int32(2, removed);
+        test.assert_equal_string("[3, 4, 5]", text(items));
+        test.assert_equal_string("[3, 1, 4, 1, 5]", seen.to_string());
+        let dropped = items.retain_if(func(int value) -> bool {
+            return value > 3;
+        });
+        test.assert_equal_int32(1, dropped);
+        test.assert_equal_string("[4, 5]", text(items));
+        test.assert_equal_int32(0, items.remove_if(func(int value) -> bool {
+            return false;
+        }));
+        test.assert_equal_int32(2, items.retain_if(func(int value) -> bool {
+            return false;
+        }));
+        test.assert(items.is_empty());
+    };
+
+    export let test_index_where = func() -> void {
+        let items = numbers();
+        let calls = cell.of<int>(0);
+        let found = items.index_where(func(int value) -> bool {
+            calls.value = calls.value + 1;
+            return value > 3;
+        });
+        test.assert_equal_int32(2, found);
+        test.assert_equal_int32(3, calls.value);
+        test.assert_equal_int32(-1, items.index_where(func(int value) -> bool {
+            return value > 9;
+        }));
+    };
+
+    export let test_sort_is_stable = func() -> void {
+        let items = array_list.create<Tagged>();
+        let i = 0;
+        while (i < 40) {
+            items.add(new Tagged((i * 7) % 5, i));
+            i = i + 1;
+        }
+        items.sort(func(Tagged a, Tagged b) -> ordering.Ordering {
+            return compare(a.key, b.key);
+        });
+        i = 1;
+        while (i < 40) {
+            let before = items.get(i - 1);
+            let after = items.get(i);
+            test.assert(before.key <= after.key);
+            if (before.key == after.key) {
+                test.assert(before.order < after.order);
+            }
+            i = i + 1;
+        }
+    };
+
+    export let test_binary_search = func() -> void {
+        let items = array_list.of<int>([1, 3, 3, 3, 5, 7]);
+        test.assert_equal_int32(1, items.binary_search(3, compare));
+        test.assert_equal_int32(0, items.binary_search(1, compare));
+        test.assert_equal_int32(5, items.binary_search(7, compare));
+        test.assert_equal_int32(-1, items.binary_search(0, compare));
+        test.assert_equal_int32(-5, items.binary_search(4, compare));
+        test.assert_equal_int32(-7, items.binary_search(8, compare));
+        test.assert_equal_int32(-1, array_list.create<int>().binary_search(1, compare));
+    };
+
+    export let test_search_by_equals = func() -> void {
+        let items = numbers();
+        test.assert(items.contains(4));
+        test.assert(!items.contains(2));
+        test.assert_equal_int32(1, items.index_of(1));
+        test.assert_equal_int32(3, items.last_index_of(1));
+        test.assert_equal_int32(-1, items.index_of(9));
+        test.assert_equal_int32(-1, items.last_index_of(9));
+        test.assert(items.contains_all([1, 5]));
+        test.assert(!items.contains_all([1, 2]));
+
+        let nan = float64.from_bits(9221120237041090561);
+        let floats = array_list.of<float64>([0.0, nan]);
+        test.assert_equal_int32(1, floats.index_of(float64.from_bits(9218868437227405313)));
+        test.assert_equal_int32(-1, floats.index_of(-0.0));
+
+        let marker: class = new Tagged(1, 0);
+        let objects = array_list.of<class>([nil, marker]);
+        test.assert_equal_int32(0, objects.index_of(nil));
+        test.assert_equal_int32(1, objects.index_of(marker));
+        test.assert(!objects.contains(new Tagged(1, 0)));
+    };
+
+    export let test_equality_hash_and_text = func() -> void {
+        let a = array_list.of<int>([1, 2]);
+        let b = array_list.of<int>([1, 2]);
+        test.assert(a.equals(b));
+        test.assert(a != b);
+        test.assert_equal_int32(994, a.hash_code() as int);
+        test.assert_equal_int32(994, b.hash_code() as int);
+        test.assert(!a.equals(array_list.of<int>([1, 2, 3])));
+        test.assert(!a.equals(array_list.of<int>([2, 1])));
+        test.assert(!a.equals(array_list.of<int64>([1, 2])));
+        test.assert(!a.equals(nil));
+        test.assert(!a.equals(new Tagged(1, 0)));
+        test.assert_equal_int32(1, array_list.create<int>().hash_code() as int);
+        test.assert_equal_string("[]", array_list.create<int>().to_string());
+        test.assert_equal_string("[a, b]", array_list.of<string>(["a", "b"]).to_string());
+        test.assert_equal_string("[0.5, -0.0]", array_list.of<float64>([0.5, -0.0]).to_string());
+        let as_class: class = a;
+        test.assert_equal_string("[1, 2]", as_class.to_string());
+        test.assert(as_class.equals(b));
+    };
+
+    export let test_self_containment_text = func() -> void {
+        let outer = array_list.create<class>();
+        let inner = array_list.of<int>([1]);
+        outer.add(outer);
+        outer.add(inner);
+        outer.add(nil);
+        test.assert_equal_string("[(this collection), [1], nil]", outer.to_string());
+        let holder = array_list.create<class>();
+        holder.add(outer);
+        test.assert_equal_string("[[(this collection), [1], nil]]", holder.to_string());
+        test.assert_equal_string("[(this collection), [1], nil]", outer.to_string());
+    };
+
+    // The interfaces dispatch to the class and supply the defaults.
+    export let test_interfaces = func() -> void {
+        let items: mutable_list.MutableList<int> = numbers();
+        test.assert(items.add(9));
+        items.add_all([2]);
+        items.sort(compare);
+        test.assert_equal_string("[1, 1, 2, 3, 4, 5, 9]", items.to_list().to_string());
+        test.assert(items.contains_all([9, 2]));
+        test.assert_equal_int32(1, items.remove_first());
+        let view: collection.Collection<int> = items;
+        let total = 0;
+        for (let value in view) {
+            total = total + value;
+        }
+        test.assert_equal_int32(24, total);
+        test.assert(!view.is_empty());
+        let sum = cell.of<int>(0);
+        view.for_each(func(int value) -> void {
+            sum.value = sum.value + value;
+        });
+        test.assert_equal_int32(24, sum.value);
+    };
+);

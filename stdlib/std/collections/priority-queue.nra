@@ -1,0 +1,263 @@
+let cell = import:Std.Core.Cell;
+let iterators = import:Std.Collections.Iterator;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let queue = import:Std.Collections.Queue;
+let text_depth = import:Std.Collections.Internal.TextDepth;
+
+// A binary min-heap following the queue contract (Stdlib.md section 9.8):
+// `dequeue` returns a least element under the comparator given at
+// construction. Equal elements do not leave in first-in, first-out order.
+// The comparator must not change the queue; the modification count is
+// compared after each call. Equality and hashing are by identity.
+export let PriorityQueue = module (
+    export let PriorityQueue = class<T> implements queue.Queue<T> (
+        // Heap order: the children of index i are at 2i + 1 and 2i + 2.
+        let heap: T[list];
+        let comparator: func(T, T) -> ordering.Ordering;
+        // Advanced after each structural change; shared with iterators.
+        let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
+        let printing_depth: int = 0;
+
+        // Copies `items` and heapifies them: sifts down each index from
+        // size / 2 - 1 to 0.
+        export let init = func(T[list] items, func(T, T) -> ordering.Ordering c) -> void {
+            comparator = c;
+            let values: T[list] = [];
+            let count = items.length;
+            let i = 0;
+            while (i < count) {
+                values.append(items[i]);
+                i = i + 1;
+            }
+            heap = values;
+            let expected = modifications.value;
+            let index = count / 2 - 1;
+            while (index >= 0) {
+                sift_down(index, heap[index], expected);
+                index = index - 1;
+            }
+        };
+
+        let less = func(T a, T b, uint64 expected) -> bool {
+            let order = comparator(a, b);
+            if (modifications.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            return order == ordering.Ordering.Less;
+        };
+
+        // While the item is not at the root and is Less than its parent,
+        // moves the parent down.
+        let sift_up = func(int start, T item, uint64 expected) -> void {
+            let index = start;
+            while (index > 0) {
+                let parent = (index - 1) / 2;
+                let above = heap[parent];
+                if (!less(item, above, expected)) {
+                    break;
+                }
+                heap[index] = above;
+                index = parent;
+            }
+            heap[index] = item;
+        };
+
+        // Picks the left child, or the right child when it exists and is
+        // Less than the left; moves that child up while it is Less than the
+        // item.
+        let sift_down = func(int start, T item, uint64 expected) -> void {
+            let count = heap.length;
+            let index = start;
+            while (true) {
+                let child = 2 * index + 1;
+                if (child >= count) {
+                    break;
+                }
+                let right = child + 1;
+                if (right < count && less(heap[right], heap[child], expected)) {
+                    child = right;
+                }
+                let below = heap[child];
+                if (!less(below, item, expected)) {
+                    break;
+                }
+                heap[index] = below;
+                index = child;
+            }
+            heap[index] = item;
+        };
+
+        export let size = func() -> int {
+            return heap.length;
+        };
+
+        export let is_empty = func() -> bool {
+            return heap.length == 0;
+        };
+
+        export let enqueue = func(T value) -> void {
+            let expected = modifications.value;
+            heap.append(value);
+            sift_up(heap.length - 1, value, expected);
+            modifications.value = expected + 1;
+        };
+
+        // Removes and returns a least element. Traps with "no such element"
+        // when empty.
+        export let dequeue = func() -> T {
+            let count = heap.length;
+            if (count == 0) {
+                trap_with_message("no such element");
+            }
+            let expected = modifications.value;
+            let root = heap[0];
+            let moved = heap[count - 1];
+            heap.remove_at(count - 1);
+            if (count > 1) {
+                sift_down(0, moved, expected);
+            }
+            modifications.value = expected + 1;
+            return root;
+        };
+
+        // A least element, or None when empty.
+        export let peek = func() -> optional.Optional<T> {
+            if (heap.length == 0) {
+                return optional.Optional<T>.None;
+            }
+            return optional.Optional<T>.Some(heap[0]);
+        };
+
+        export let try_dequeue = func() -> optional.Optional<T> {
+            if (heap.length == 0) {
+                return optional.Optional<T>.None;
+            }
+            return optional.Optional<T>.Some(dequeue());
+        };
+
+        export let clear = func() -> void {
+            let empty: T[list] = [];
+            heap = empty;
+            modifications.value = modifications.value + 1;
+        };
+
+        // Dequeues everything into a new built-in list, least first.
+        export let drain_sorted = func() -> T[list] {
+            let result: T[list] = [];
+            while (heap.length > 0) {
+                result.append(dequeue());
+            }
+            return result;
+        };
+
+        // By equals, with `value` as the receiver.
+        export let contains = func(T value) -> bool {
+            for (let element in heap) {
+                if (value.equals(element)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // A new built-in list in heap order, which is not sorted.
+        export let to_list = func() -> T[list] {
+            let result: T[list] = [];
+            for (let element in heap) {
+                result.append(element);
+            }
+            return result;
+        };
+
+        // Heap order; fail-fast.
+        export let iterator = func() -> iterators.Iterator<T> {
+            return new PriorityQueueIterator<T>(heap, modifications);
+        };
+
+        // Heap order. The action must not change the queue structurally.
+        export let for_each = func(func(T) -> void action) -> void {
+            let expected = modifications.value;
+            let i = 0;
+            while (i < heap.length) {
+                action(heap[i]);
+                if (modifications.value != expected) {
+                    trap_with_message("collection modified during iteration");
+                }
+                i = i + 1;
+            }
+        };
+
+        // Traps with "invalid state: heap order" when an element is Less
+        // than its parent.
+        export let validate = func() -> void {
+            let expected = modifications.value;
+            let i = 1;
+            while (i < heap.length) {
+                if (less(heap[i], heap[(i - 1) / 2], expected)) {
+                    trap_with_message("invalid state: heap order");
+                }
+                i = i + 1;
+            }
+        };
+
+        // `[a, b, c]` in heap order; the queue itself as a direct element
+        // prints "(this collection)".
+        export let.override to_string = func() -> string {
+            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+                return "(this collection)";
+            }
+            let saved = printing_depth;
+            printing_depth = text_depth.enter();
+            let text = heap.to_string();
+            text_depth.leave();
+            printing_depth = saved;
+            return text;
+        };
+    );
+
+    // Walks the heap list in index order, comparing the queue's
+    // modification count before every step.
+    let PriorityQueueIterator = class<T> implements iterators.Iterator<T> (
+        let source: T[list];
+        let modifications: cell.Cell<uint64>;
+        let expected: uint64;
+        let position: int = 0;
+
+        export let init = func(T[list] values, cell.Cell<uint64> counter) -> void {
+            source = values;
+            modifications = counter;
+            expected = counter.value;
+        };
+
+        export let has_next = func() -> bool {
+            if (modifications.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            return position < source.length;
+        };
+
+        export let next = func() -> T {
+            if (modifications.value != expected) {
+                trap_with_message("collection modified during iteration");
+            }
+            if (position >= source.length) {
+                trap_with_message("no such element");
+            }
+            let value = source[position];
+            position = position + 1;
+            return value;
+        };
+    );
+
+    // An empty queue ordered by `c`.
+    export let create = func<T>(func(T, T) -> ordering.Ordering c) -> PriorityQueue<T> {
+        let empty: T[list] = [];
+        return new PriorityQueue<T>(empty, c);
+    };
+
+    // A queue of a copy of `items`, heapified in linear time.
+    export let from_list = func<T>(T[list] items, func(T, T) -> ordering.Ordering c) -> PriorityQueue<T> {
+        return new PriorityQueue<T>(items, c);
+    };
+);

@@ -1,0 +1,155 @@
+let cell = import:Std.Core.Cell;
+let int32 = import:Std.Core.Int32;
+let mutable_set = import:Std.Collections.MutableSet;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let sorted_set = import:Std.Collections.SortedSet;
+let test = import:Std.Test;
+let tree_set = import:Std.Collections.TreeSet;
+
+let TreeSetTests = module (
+    let of = func(int[list] items) -> tree_set.TreeSet<int> {
+        let set = tree_set.create<int>(int32.compare);
+        set.add_all(items);
+        return set;
+    };
+
+    let text = func(optional.Optional<int> value) -> string {
+        return optional.to_string<int>(value);
+    };
+
+    export let test_empty = func() -> void {
+        let set = tree_set.create<string>(func(string a, string b) -> ordering.Ordering {
+            if (a == b) {
+                return ordering.Ordering.Equal;
+            }
+            if (a.byte_length < b.byte_length) {
+                return ordering.Ordering.Less;
+            }
+            return ordering.Ordering.Greater;
+        });
+        test.assert(set.is_empty());
+        test.assert_equal_int32(0, set.size());
+        test.assert(!set.contains("a"));
+        test.assert(!set.remove("a"));
+        test.assert_equal_string("{}", set.to_string());
+        test.assert_none<string>(set.floor("a"));
+        test.assert(!set.iterator().has_next());
+        set.validate();
+    };
+
+    export let test_set_members_ascending = func() -> void {
+        let set = tree_set.create<int>(int32.compare);
+        test.assert(set.add(5));
+        test.assert(set.add(1));
+        test.assert(set.add(3));
+        test.assert(!set.add(3));
+        test.assert_equal_int32(3, set.size());
+        test.assert(set.contains(1));
+        test.assert(!set.contains(2));
+        test.assert_equal_string("{1, 3, 5}", set.to_string());
+        test.assert_equal_string("[1, 3, 5]", set.to_list().to_string());
+        test.assert(set.remove(3));
+        test.assert(!set.remove(3));
+        set.add_all([9, 7, 1]);
+        test.assert_equal_string("{1, 5, 7, 9}", set.to_string());
+        test.assert(set.contains_all([1, 9]));
+        set.validate();
+        set.clear();
+        test.assert(set.is_empty());
+    };
+
+    export let test_sorted_members = func() -> void {
+        let set = of([40, 10, 30, 20]);
+        test.assert_equal_int32(10, set.first());
+        test.assert_equal_int32(40, set.last());
+        test.assert_equal_string("[20, 30]", set.range(15, 40).to_string());
+        test.assert_equal_string("[]", set.range(40, 10).to_string());
+        test.assert_equal_string("[40, 30, 20, 10]", set.descending().to_string());
+        test.assert_equal_string("Some(20)", text(set.floor(20)));
+        test.assert_equal_string("Some(20)", text(set.floor(25)));
+        test.assert_equal_string("None", text(set.floor(5)));
+        test.assert_equal_string("Some(30)", text(set.ceiling(25)));
+        test.assert_equal_string("None", text(set.ceiling(41)));
+        test.assert_equal_string("Some(10)", text(set.lower(20)));
+        test.assert_equal_string("None", text(set.lower(10)));
+        test.assert_equal_string("Some(30)", text(set.higher(20)));
+        test.assert_equal_string("None", text(set.higher(40)));
+        test.assert_equal_int32(10, set.remove_first());
+        test.assert_equal_int32(40, set.remove_last());
+        test.assert_equal_string("{20, 30}", set.to_string());
+        set.validate();
+    };
+
+    export let test_iteration_and_callbacks = func() -> void {
+        let set = of([3, 1, 2, 6, 5, 4]);
+        let items = set.iterator();
+        test.assert_equal_int32(1, items.next());
+        test.assert_equal_int32(2, items.next());
+        let seen = cell.of<int>(0);
+        set.for_each(func(int v) -> void {
+            seen.value = seen.value * 10 + v;
+        });
+        test.assert_equal_int32(123456, seen.value);
+        let total = 0;
+        for (let v in set) {
+            total = total + v;
+        }
+        test.assert_equal_int32(21, total);
+        test.assert_equal_int32(3, set.remove_if(func(int v) -> bool {
+            return v % 2 == 0;
+        }));
+        test.assert_equal_int32(1, set.retain_if(func(int v) -> bool {
+            return v > 1;
+        }));
+        test.assert_equal_string("{3, 5}", set.to_string());
+        set.validate();
+    };
+
+    export let test_algebra = func() -> void {
+        let a = of([1, 2, 3, 4]);
+        let b = of([8, 6, 4, 2]);
+        test.assert_equal_string("{1, 2, 3, 4, 6, 8}", a.union(b).to_string());
+        test.assert_equal_string("{2, 4}", a.intersection(b).to_string());
+        test.assert_equal_string("{1, 3}", a.difference(b).to_string());
+        test.assert(of([2, 4]).is_subset_of(a));
+        test.assert(!a.is_subset_of(b));
+        test.assert(of([5, 7]).is_disjoint_from(b));
+        test.assert(!a.is_disjoint_from(b));
+        a.union(b).validate();
+    };
+
+    export let test_equals_and_hash = func() -> void {
+        let a = of([3, 1, 2]);
+        let b = of([1, 2, 3]);
+        test.assert(a.equals(b));
+        test.assert_equal_uint64(6, a.hash_code() as uint64);
+        b.add(4);
+        test.assert(!a.equals(b));
+        let other: class = tree_set.create<string>(func(string x, string y) -> ordering.Ordering {
+            return ordering.Ordering.Equal;
+        });
+        test.assert(!a.equals(other));
+        test.assert(!a.equals(nil));
+    };
+
+    // Elements the comparator calls Equal are the same element.
+    export let test_comparator_defines_sameness = func() -> void {
+        let set = tree_set.create<int>(func(int a, int b) -> ordering.Ordering {
+            return int32.compare(a / 10, b / 10);
+        });
+        test.assert(set.add(15));
+        test.assert(!set.add(11));
+        test.assert(set.add(21));
+        test.assert(set.contains(19));
+        test.assert_equal_string("{15, 21}", set.to_string());
+    };
+
+    export let test_interfaces = func() -> void {
+        let sorted: sorted_set.SortedSet<int> = of([2, 1]);
+        test.assert_equal_int32(1, sorted.first());
+        let mutable: mutable_set.MutableSet<int> = of([2, 1]);
+        test.assert(mutable.add(3));
+        test.assert_equal_int32(3, mutable.size());
+    };
+);
