@@ -1,0 +1,31 @@
+name: Documentation problem
+description: A page in docs/ or the wiki is wrong, unclear, incomplete, or disagrees with what Neura does.
+labels: [documentation]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page and section
+      description: The file path or wiki page, and the heading.
+      placeholder: docs/lang/Numbers.md, "Integer arithmetic"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong
+      description: Quote the text. If it disagrees with the implementation, show the program and the output that contradict it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What it should say
+      description: The correction, or the question the page leaves unanswered.
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Neura commit
+      description: The commit you read or tested against, when the problem is a disagreement with the implementation.
