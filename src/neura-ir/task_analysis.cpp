@@ -383,15 +383,49 @@ std::optional<TaskAnalysis::Unsafe> TaskAnalysis::chain(const std::map<SymbolId,
 }
 
 void TaskAnalysis::check() const {
+    // The first use of each kind, for decision C15 below.
     const IrNode* first_spawn = nullptr;
+    const IrNode* first_operation = nullptr;
+    SymbolId first_operation_owner = no_symbol;
+    // For a function type that is not transferable, the capture that makes it
+    // so: under the union rule the reason is a closure somewhere else in the
+    // program, which the type alone does not show.
+    const auto capture_note = [&](const IrType& type) -> std::string {
+        if (type.kind != TypeKind::Object || !valid(type.symbol)) return {};
+        std::vector<SymbolId> layouts;
+        if (signature_layout(type.symbol)) {
+            if (const auto found = derived_.find(type.symbol); found != derived_.end()) layouts = found->second;
+        } else if (capture_layout(type.symbol)) {
+            layouts.push_back(type.symbol);
+        }
+        for (const auto layout : layouts) {
+            for (const auto field : all_fields(layout)) {
+                if (transferable(symbol(field).type)) continue;
+                return ": a function value of this type captures a value of type " + display(symbol(field).type) +
+                       " at " + location(symbol(field).span);
+            }
+        }
+        return {};
+    };
+    // A check that fails inside a library helper is reported where the
+    // user's code calls into the library, and says where the task starts.
+    const auto started_by_library = [&](SymbolId owner, const Span& span) -> std::string {
+        return library_code(owner) ? " (the library starts the task at " + location(span) + ")" : std::string();
+    };
     for (const auto& body : program_.bodies) {
         each_node(body.instructions, [&](const IrNode& node) {
+            if ((node.op == IrOp::TaskScope || (node.op == IrOp::SchedulerCall && node.text != "transfer.check")) &&
+                !first_operation) {
+                first_operation = &node;
+                first_operation_owner = body.owner;
+            }
             if (node.op == IrOp::SchedulerCall) {
                 // What a channel carries is given to another task (5.1).
                 const auto require = [&](const IrType& type, const char* role) {
                     if (transferable(type)) return;
                     throw Diagnostic(user_site(body.owner, node.span),
-                                     "a value of type " + display(type) + " is not transferable, so it cannot be " + role);
+                                     "a value of type " + display(type) + " is not transferable, so it cannot be " + role +
+                                     capture_note(type));
                 };
                 if (node.text == "transfer.check" && node.operands.size() == 1) {
                     require(node.operands.front().type, "used where a transferable value is required");
@@ -447,9 +481,10 @@ void TaskAnalysis::check() const {
             // arguments, each at the span of the expression it came from.
             for (const auto field : all_fields(layout)) {
                 if (!transferable(symbol(field).type)) {
-                    throw Diagnostic(symbol(field).span,
+                    throw Diagnostic(user_site(body.owner, symbol(field).span),
                                      "a value of type " + display(symbol(field).type) +
-                                     " is not transferable, so it cannot be given to a spawned task");
+                                     " is not transferable, so it cannot be given to a spawned task" +
+                                     capture_note(symbol(field).type) + started_by_library(body.owner, node.span));
                 }
             }
             SymbolId invoke = no_symbol;
@@ -465,20 +500,28 @@ void TaskAnalysis::check() const {
                     text += "it reaches '" + symbol(callee).name + "' (called at " + location(span) + "), and ";
                 }
                 text += "that code " + reason->operation + " at " + location(reason->span);
-                throw Diagnostic(node.span, text);
+                throw Diagnostic(user_site(body.owner, node.span), text + started_by_library(body.owner, node.span));
             }
         });
     }
-    if (!first_spawn) return;
-    // C15: the first concurrent image profile has no native bindings.
+    if (!first_spawn && !first_operation) return;
+    // C15: the first concurrent image profile has no native bindings. The
+    // loader refuses any image with a scheduler operation beside them, so a
+    // program that only opens a scope or a channel is held to the same rule
+    // here, where the reason can be given.
     bool native = program_.native_library.has_value() || !program_.native_units.empty();
     for (const auto& item : program_.symbols) {
         native = native || (item.host_binding && item.host_binding->name.starts_with("neura.ffi."));
     }
-    if (native) {
+    if (native && first_spawn) {
         throw Diagnostic(first_spawn->span,
                          "a program that spawns a task cannot use Std.DynamicForeign or import:c(...): "
                          "tasks and native calls cannot share an image yet");
+    }
+    if (native) {
+        throw Diagnostic(user_site(first_operation_owner, first_operation->span),
+                         "a program that uses a scope, a channel, or another scheduler operation cannot use "
+                         "Std.DynamicForeign or import:c(...): tasks and native calls cannot share an image yet");
     }
 }
 

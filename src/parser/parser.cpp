@@ -542,7 +542,16 @@ private:
             }
             expect("}");
         } else {
+            // `scope (a, b) {` and `scope () {` are not scope statements, so
+            // they read as a call followed by a block. Say what a scope
+            // takes instead of asking for a semicolon.
+            const bool scope_call = at_contextual("scope") && next_is(1, "(");
+            const auto parenthesis = scope_call ? tokens_[cursor_ + 1].span : Span{};
             result = simple_statement();
+            if (scope_call && at("{") && result.kind == Statement::Kind::Expression &&
+                result.expressions.front().kind == Expr::Kind::Call) {
+                throw Diagnostic(parenthesis, "a scope statement names one scope or none: scope (name) { } or scope { }");
+            }
             expect(";");
         }
         result.span = span_from(start);

@@ -512,6 +512,19 @@ private:
         result.text = node.text;
         result.symbol = node.symbol;
         result.poll = node.poll;
+        // `scope (name)` introduces the local that carries the scope's
+        // identity, and its body reads it. The instance gets its own copy
+        // before the body is rewritten, as an Initialize gives one to a
+        // declared local.
+        if (node.op == IrOp::TaskScope && node.symbol != no_symbol && context.original != no_symbol &&
+            context.symbols && program_.symbols[node.symbol].kind == SymbolKind::Local &&
+            program_.symbols[node.symbol].owner == context.original && !context.symbols->contains(node.symbol)) {
+            IrSymbol local = program_.symbols[node.symbol];
+            local.owner = context.owner;
+            local.type = type(local.type, context, local.span);
+            const auto copy = add(std::move(local));
+            (*context.symbols)[node.symbol] = copy;
+        }
         result.operands = region(node.operands, context);
         result.body = region(node.body, context);
         result.alternative = region(node.alternative, context);

@@ -79,50 +79,6 @@ function(check_accepted name declarations body expected)
     endif()
 endfunction()
 
-# A rejection whose diagnostic is reported inside a library file, because the
-# compiler checks the spawn there. `origin` is that file's name as printed.
-function(check_library_rejection name declarations body origin message_pattern)
-    write_program("${name}" "${declarations}" "${body}")
-    execute_process(
-        COMMAND "${NEURA}" check "${name}.nra"
-        WORKING_DIRECTORY "${TEST_DIR}"
-        RESULT_VARIABLE status
-        OUTPUT_VARIABLE stdout
-        ERROR_VARIABLE stderr
-    )
-    if(NOT status MATCHES "^[1-9][0-9]*$")
-        message(FATAL_ERROR "Expected ${name} to be rejected, got status ${status}\n${stdout}\n${stderr}")
-    endif()
-    if(NOT stderr MATCHES "${origin}:[0-9]+:[0-9]+: error: ${message_pattern}")
-        message(FATAL_ERROR "${name}: expected a diagnostic in ${origin} matching '${message_pattern}'\n${stderr}")
-    endif()
-endfunction()
-
-# A defect of the compiler that this suite pins. The program must be accepted
-# (or must be reported differently) according to the specification; today
-# `neura <command>` fails it with `message_pattern`. The check passes while
-# that is still so, and fails as soon as it stops, so that whoever fixes the
-# defect moves the case to check_accepted or check_rejection. The minimal
-# reproduction is kept in tests/concurrency/defects/.
-function(check_known_defect name declarations body command message_pattern)
-    write_program("${name}" "${declarations}" "${body}")
-    set(output)
-    if(command STREQUAL "build")
-        set(output -o "${name}.nvr")
-    endif()
-    execute_process(
-        COMMAND "${NEURA}" ${command} "${name}.nra" ${output}
-        WORKING_DIRECTORY "${TEST_DIR}"
-        RESULT_VARIABLE status
-        OUTPUT_VARIABLE stdout
-        ERROR_VARIABLE stderr
-    )
-    if(NOT status MATCHES "^[1-9][0-9]*$" OR NOT stderr MATCHES "${message_pattern}")
-        message(FATAL_ERROR "${name}: the known compiler defect no longer reproduces (status ${status}). "
-                            "Move the case to check_accepted or check_rejection.\n${stdout}\n${stderr}")
-    endif()
-endfunction()
-
 set(work "let work = func(x: int) -> int => x + 1;\n")
 
 # ---------------------------------------------------------------------------
@@ -429,6 +385,15 @@ let work = func(x: int) -> int => x + 1;
             let task = spawn work(1);
         }
 ]=] "8:24" "a program that spawns a task cannot use Std.DynamicForeign or import:c")
+
+# The same rule without a spawn: the loader refuses any image that has a scheduler operation beside native
+# bindings, so the compiler says so first.
+check_rejection(native_library_with_a_channel "
+let foreign = import:Std.DynamicForeign.Linker;
+let channels = import:Std.Concurrent.Channel;
+" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+]=] "8:42" "a program that uses a scope, a channel, or another scheduler operation cannot use Std.DynamicForeign or import:c")
 
 # `check --task-safety` reports each function of the linked program.
 file(WRITE "${TEST_DIR}/report.nra" "${prelude}let counter: int = 0;
@@ -828,23 +793,22 @@ check_rejection(scope_name_is_constant "" [=[
         }
 ]=] "6:13" "cannot assign to const 'group'")
 
-# FIXME(compiler): `scope (a, b) { }` and `scope () { }` are not scope statements (4.4 recognizes one identifier),
-# so they parse as call statements and the user sees only "expected ';'" at the brace. The input is rejected, not a
-# crash, but the diagnostic does not say that a scope takes exactly one name.
+# `scope (a, b) { }` and `scope () { }` are not scope statements (4.4 recognizes one identifier). The parser
+# says what a scope takes, at the parenthesis.
 check_rejection(scope_with_two_names "" [=[
         scope (first, second) {
         }
-]=] "5:31" "expected ';'")
+]=] "5:15" "a scope statement names one scope or none: scope \\(name\\) { } or scope { }")
 
 check_rejection(scope_with_no_name "" [=[
         scope () {
         }
-]=] "5:18" "expected ';'")
+]=] "5:15" "a scope statement names one scope or none")
 
 # ---------------------------------------------------------------------------
-# Library helpers that spawn. The compiler checks the spawn inside the helper, so a diagnostic about the
-# caller's function is reported in the library file; the first one names the caller's function and the binding
-# it reaches in the message, the second names neither.
+# Library helpers that spawn. The compiler checks the spawn inside the helper and reports it where the user's
+# code calls the helper, with the call chain or the capture that breaks the rule and the library line that
+# starts the task.
 set(groups_import "let groups = import:Std.Concurrent.WorkerGroup;\nlet tasks = import:Std.Concurrent.Tasks;\nlet result = import:Std.Core.Result;\n")
 
 check_rejection(group_of_class_jobs "${box_class}${groups_import}\
@@ -853,62 +817,59 @@ let handle = func(job: Box) -> void { };
         groups.with_workers<Box>(1, 1, handle, func(group: groups.WorkerGroup<Box>) -> void { });
 ]=] "13:9" "a value of type Box is not transferable, so it cannot be a channel's element type")
 
-check_library_rejection(group_work_writes_a_global "${groups_import}\
+check_rejection(group_work_writes_a_global "${groups_import}\
 let total: int = 0;
 let add = func(job: int) -> void { total = total + job; };
 " [=[
         groups.with_workers<int>(1, 1, add, func(group: groups.WorkerGroup<int>) -> void { });
-]=] "std/concurrent/worker-group.nra"
-    "the spawned call is not task-safe: it reaches 'run_worker<int32>' \\(called at worker-group.nra:[0-9]+:[0-9]+\\), and it reaches 'add' \\(called at group_work_writes_a_global.nra:10:40\\), and that code uses the reassignable binding 'total' at group_work_writes_a_global.nra:7:36")
+]=] "10:9"
+    "the spawned call is not task-safe: it reaches 'run_worker<int32>' \\(called at worker-group.nra:[0-9]+:[0-9]+\\), and it reaches 'add' \\(called at group_work_writes_a_global.nra:10:40\\), and that code uses the reassignable binding 'total' at group_work_writes_a_global.nra:7:36 \\(the library starts the task at worker-group.nra:[0-9]+:[0-9]+\\)")
 
-# FIXME(compiler): when the helper's function value captures an object, the diagnostic is reported at the
-# helper's spawn and names neither the caller's function nor its capture.
-check_library_rejection(group_work_captures_an_object "${box_class}${groups_import}" [=[
+# When the helper's function value captures an object, the message names the capture.
+check_rejection(group_work_captures_an_object "${box_class}${groups_import}" [=[
         let box = new Box(1);
         let add = func(job: int) -> void { box.value = box.value + job; };
         groups.with_workers<int>(1, 1, add, func(group: groups.WorkerGroup<int>) -> void { });
-]=] "std/concurrent/worker-group.nra"
-    "a value of type func\\(int32\\) -> void is not transferable, so it cannot be given to a spawned task")
+]=] "14:9"
+    "a value of type func\\(int32\\) -> void is not transferable, so it cannot be given to a spawned task: a function value of this type captures a value of type Box at group_work_captures_an_object.nra:[0-9]+:[0-9]+ \\(the library starts the task at worker-group.nra:[0-9]+:[0-9]+\\)")
 
-check_library_rejection(tasks_all_call_writes_a_global "${groups_import}\
+check_rejection(tasks_all_call_writes_a_global "${groups_import}\
 let total: int = 0;
 let add = func -> int { total = total + 1; return total; };
 " [=[
         let calls: (func() -> int)[list] = [add];
         tasks.all<int>(calls);
-]=] "std/concurrent/tasks.nra"
-    "the spawned call is not task-safe: it reaches 'add' \\(called at tasks_all_call_writes_a_global.nra:10:45\\), and that code uses the reassignable binding 'total' at tasks_all_call_writes_a_global.nra:7:25")
+]=] "11:9"
+    "the spawned call is not task-safe: it reaches 'add' \\(called at tasks_all_call_writes_a_global.nra:10:45\\), and that code uses the reassignable binding 'total' at tasks_all_call_writes_a_global.nra:7:25 \\(the library starts the task at tasks.nra:[0-9]+:[0-9]+\\)")
 
-check_library_rejection(tasks_all_ok_call_captures_an_object "${box_class}${groups_import}" [=[
+check_rejection(tasks_all_ok_call_captures_an_object "${box_class}${groups_import}" [=[
         let box = new Box(1);
         let calls: (func() -> result.Result<int>)[list] = [func() -> result.Result<int> => result.Result<int>.Ok(box.value)];
         tasks.all_ok<int>(calls);
-]=] "std/concurrent/tasks.nra"
-    "a value of type func\\(\\) -> Result<Erased> is not transferable, so it cannot be given to a spawned task")
+]=] "14:9"
+    "a value of type func\\(\\) -> Result<int32> is not transferable, so it cannot be given to a spawned task: a function value of this type captures a value of type Box at tasks_all_ok_call_captures_an_object.nra:[0-9]+:[0-9]+ \\(the library starts the task at tasks.nra:[0-9]+:[0-9]+\\)")
 
 # ---------------------------------------------------------------------------
-# Known compiler defects (minimal reproductions in tests/concurrency/defects/). Each is pinned as it is today.
+# Forms that an earlier compiler refused.
 
-# FIXME(compiler): a send arm is rejected unless Sender.send was lowered earlier in the program, because the
-# select lowering reads the member's parameters before resolving it (see select_send_arm above, which passes
-# once a plain send comes first).
-check_known_defect(select_send_arm_alone "${channels_import}" [=[
+# A send arm needs no earlier plain send to resolve Sender.send.
+check_accepted(select_send_arm_alone "${channels_import}" [=[
         let [sender, receiver, closer] = channels.open<int>(1);
         select {
             let outcome = sender.send(7) => { console.print_line("send " + outcome.to_string()); },
         }
-]=] check "select_send_arm_alone.nra:8:27: error: send takes the value to send")
+]=] "send Sent\n")
 
-# FIXME(compiler): `scope (name)` in a function with type parameters (or in a method of a generic class) fails
-# NeuraIR verification: the hidden local that carries the scope's identity is not initialized in the
-# specialization.
-check_known_defect(named_scope_in_a_generic_function "let run = func<T>(value: T) -> int {
+# `scope (name)` in a function with type parameters: each instance has its own scope identity.
+check_accepted(named_scope_in_a_generic_function "let run = func<T>(value: T) -> int {
     scope (group) {
+        group.cancel();
         return 5;
     }
 };
 " [=[
         console.print_line(run<int>(1).to_string());
-]=] build "NeuraIR verification failed before optimization: load of local [^\n]* '[$]scope' is not preceded by its initialization")
+        console.print_line(run<string>("a").to_string());
+]=] "5\n5\n")
 
 message(STATUS "concurrency frontend conformance passed")

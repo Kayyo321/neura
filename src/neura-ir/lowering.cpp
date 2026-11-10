@@ -3009,10 +3009,11 @@ IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
         auto handle = save_temporary(value(handle_call, context), result.body, context, "$handle" + index);
         if (kind == select_send) {
             // Type the value as the member's parameter, as the call would.
+            // A member has no parameters until it is resolved.
             const auto member = value_member(lowered.receiver_type, "send", true);
+            if (member != no_symbol) resolve(member);
             if (member == no_symbol || symbol(member).parameters.size() != 1)
                 throw Diagnostic(operation.span, "send takes the value to send");
-            resolve(member);
             const auto parameter = substitute(symbol(symbol(member).parameters.front()).type,
                                               receiver_arguments(lowered.receiver_type, symbol(member).owner));
             auto sent = save_temporary(value(operation.operands[1], context, &parameter, true), result.body, context,
