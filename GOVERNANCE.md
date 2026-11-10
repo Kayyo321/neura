@@ -7,7 +7,7 @@ This page states who decides what in the Neura repository, how a change reaches 
 | Role | Who | May |
 | --- | --- | --- |
 | Contributor | Anyone | Open issues and pull requests, review, and comment. |
-| Maintainer | [@Kayyo321](https://github.com/Kayyo321) | Everything a contributor may, and: triage issues, approve and merge pull requests, change repository settings, publish releases and security advisories, and enforce the [code of conduct](CODE_OF_CONDUCT.md). |
+| Maintainer | [@Kayyo321](https://github.com/Kayyo321) | Everything a contributor may, and: triage issues, approve and merge pull requests, change repository settings, publish releases, and enforce the [code of conduct](CODE_OF_CONDUCT.md). |
 
 A maintainer holds the GitHub `admin` role on the repository. No other account has write access. [`.github/CODEOWNERS`](.github/CODEOWNERS) names the maintainers whose review a change needs.
 
@@ -35,7 +35,7 @@ Disagreement is settled by the maintainers. With one maintainer, that person's d
 
 ## Issue triage
 
-A maintainer labels each new issue with its kind (`bug`, `enhancement`, `documentation`, or `question`) and closes it with a reason when it is a duplicate, cannot be reproduced from the report, or is declined. An issue that describes a vulnerability is closed without discussing its details in public, and its author is pointed to the [security policy](SECURITY.md).
+A maintainer labels each new issue with its kind (`bug`, `enhancement`, `documentation`, or `question`) and closes it with a reason when it is a duplicate, cannot be reproduced from the report, or is declined. Security reports are public issues and are triaged before other issues: a maintainer confirms or declines each one against the scope in the [security policy](SECURITY.md).
 
 ## Releases
 

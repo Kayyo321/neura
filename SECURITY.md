@@ -6,7 +6,7 @@ Neura has no published release. Security fixes are made on the `main` branch. On
 
 ## Report a vulnerability
 
-Report a suspected vulnerability privately through [GitHub's vulnerability reporting form](https://github.com/Kayyo321/neura/security/advisories/new) for this repository. Do not open a public issue, pull request, or discussion for it.
+Neura handles security reports in the open. Report a suspected vulnerability by opening a [security report](https://github.com/Kayyo321/neura/issues/new?template=security-report.yml) in the issue tracker. The report, the discussion, and the fix are public from the start. The project has no private reporting channel.
 
 Include what a maintainer needs to reproduce the problem:
 
@@ -15,7 +15,9 @@ Include what a maintainer needs to reproduce the problem:
 - The exact command line, including every `--allow-*` and `--max-*` option.
 - What happened, what you expected, and what an attacker gains.
 
-A maintainer replies in the private advisory, where the report, the fix, and the disclosure date are worked out with you. The advisory is published after a fix is on `main`. It credits you unless you ask otherwise.
+Leave out anything that is not yours to publish: credentials, personal data, and the contents of other people's systems. Reduce the input to one that shows the problem without them.
+
+A maintainer replies in the issue and labels it once the problem is confirmed or declined against the scope below. The fix is a pull request linked to the issue, and its [changelog](CHANGELOG.md) entry goes under **Security** and credits you unless you ask otherwise.
 
 ## What counts as a vulnerability
 
@@ -33,5 +35,5 @@ These are outside the policy, and are ordinary bug reports when they are defects
 - Anything native code does after `--allow-native` is granted. [Native code runs outside Neura's guarantees](docs/lang/ForeignInterop.md#safety-and-determinism): it can read and write the runner's memory and end the process.
 - What a program does with a capability it was granted, such as deleting files under `--allow-fs`.
 - A program that runs until it reaches a configured limit, or a compilation that is slow for a large input.
-- A crash, a wrong result, or a rejected valid program with no memory-safety or capability consequence. Report these as [bugs](https://github.com/Kayyo321/neura/issues/new/choose).
+- A crash, a wrong result, or a rejected valid program with no memory-safety or capability consequence. Report these with the [bug report](https://github.com/Kayyo321/neura/issues/new?template=bug-report.yml) form.
 - Vulnerabilities in the system libclang, libffi, or the C++ toolchain. Report those to their projects; report here if Neura's use of them is at fault.

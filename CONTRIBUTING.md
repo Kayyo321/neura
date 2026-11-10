@@ -2,7 +2,7 @@
 
 Read the [project design](docs/Project.md) for the compiler and circuit model, the [language overview](docs/lang/Overview.md) for source-level behavior, and the [coding style guide](docs/style/CodingStyle.md) when writing `.nra` files. Check [language design decisions](docs/lang/Status.md) before treating a proposed feature or illustrative example as a conformance requirement. Follow the [repository rules](README.md#rules-for-agents) when using a coding agent.
 
-Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md). Report a vulnerability privately, as the [security policy](SECURITY.md) describes, and never in an issue or pull request. [Governance](GOVERNANCE.md) states who reviews and merges changes and who publishes releases.
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md). Report a vulnerability with the public security report form, as the [security policy](SECURITY.md) describes. [Governance](GOVERNANCE.md) states who reviews and merges changes and who publishes releases.
 
 ## Set up a checkout
 
