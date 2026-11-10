@@ -1,0 +1,25 @@
+// sizes: 10240 20480
+// scaling: 2.1
+// Hashes n bytes with Sha256.of and checks the digest length.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let sha256 = import:Std.Digest.Sha256;
+
+export let Sha256Benchmark = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let bytes: uint8[list] = [];
+        for (let i = 0; i < n; i = i + 1) {
+            bytes.append((i % 251) as uint8);
+        }
+        let digest = sha256.of(bytes);
+        if (digest.length != 32) {
+            console.print_line("wrong digest");
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

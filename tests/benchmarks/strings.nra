@@ -1,0 +1,32 @@
+// sizes: 10000 20000
+// scaling: 2.2
+// Builds a text of about n bytes, then splits, joins, replaces, and searches it.
+let builders = import:Std.Core.StringBuilder;
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+export let StringsBenchmark = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let text = builders.create();
+        let count = 0;
+        while (text.byte_length() < n) {
+            text.append("word").append_int(count as int64).append(",");
+            count = count + 1;
+        }
+        let source = text.to_string();
+        let parts = strings.split(source, ",");
+        let joined = strings.join(parts, ";");
+        let replaced = strings.replace(joined, ";", ", ");
+        let found = strings.index_of(replaced, "word" + (count - 1).to_string());
+        if (parts.length != count + 1 || found < 0) {
+            console.print_line("wrong result");
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,29 @@
+// sizes: 1000 2000
+// scaling: 2.4
+// Sorts n pseudo-random int32 values with Sorting.sort and Int32.compare.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let sorting = import:Std.Collections.Sorting;
+
+export let SortBenchmark = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let items: int32[list] = [];
+        let seed: uint64 = 12345;
+        for (let i = 0; i < n; i = i + 1) {
+            seed = (seed * 1103515245 + 12345) & 2147483647;
+            items.append((seed % 1000000) as int32);
+        }
+        sorting.sort<int32>(items, int32s.compare);
+        for (let i = 1; i < items.length; i = i + 1) {
+            if (items[i - 1] > items[i]) {
+                console.print_line("not sorted");
+                return program.ExitCode.Failure;
+            }
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

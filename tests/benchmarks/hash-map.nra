@@ -1,0 +1,38 @@
+// sizes: 1000 2000
+// scaling: 2.4
+// Steps per element stay between about 220 and 290 from 500 to 8,000 entries;
+// they vary with how full the table is between doublings, which is why the
+// bound is above 2.
+// Inserts n int32 keys into a HashMap created with the universal key members,
+// looks each up, overwrites half, and deletes a quarter.
+let console = import:Std.Io.Console;
+let hash_map = import:Std.Collections.HashMap;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let HashMapBenchmark = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let map = hash_map.create<int32, int64>();
+        for (let i = 0; i < n; i = i + 1) {
+            map.set(i * 7919, i as int64);
+        }
+        let total: int64 = 0;
+        for (let i = 0; i < n; i = i + 1) {
+            total = total + map.get_or(i * 7919, -1);
+        }
+        for (let i = 0; i < n; i = i + 2) {
+            map.set(i * 7919, 0);
+        }
+        for (let i = 0; i < n; i = i + 4) {
+            map.delete(i * 7919);
+        }
+        if (total != (n as int64) * ((n as int64) - 1) / 2 || map.size() != n - (n + 3) / 4) {
+            console.print_line("wrong result");
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

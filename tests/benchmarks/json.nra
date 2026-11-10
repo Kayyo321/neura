@@ -1,0 +1,39 @@
+// sizes: 100 200
+// scaling: 2.2
+// Builds a JSON document of n records (about 100 bytes each), writes it,
+// parses the text back, and writes it again.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let json = import:Std.Encoding.Json;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let JsonBenchmark = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let records: json.JsonValue[list] = [];
+        for (let i = 0; i < n; i = i + 1) {
+            let members: [string, json.JsonValue][list] = [];
+            members.append(["id", json.number_of_int64(i as int64)]);
+            members.append(["name", json.JsonValue.Text("record \"" + i.to_string() + "\"")]);
+            members.append(["active", json.JsonValue.Boolean(i % 2 == 0)]);
+            members.append(["tags", json.JsonValue.Array([json.JsonValue.Text("a"), json.JsonValue.Null])]);
+            records.append(json.JsonValue.Object(members));
+        }
+        let text = json.write(json.JsonValue.Array(records));
+        match (json.parse(text)) {
+            result.Result.Ok(value) => {
+                if (json.write(value) != text) {
+                    console.print_line("round trip differs");
+                    return program.ExitCode.Failure;
+                }
+            },
+            result.Result.Err(_) => {
+                console.print_line("parse failed");
+                return program.ExitCode.Failure;
+            },
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

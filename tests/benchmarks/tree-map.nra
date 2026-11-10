@@ -1,0 +1,39 @@
+// sizes: 1000 2000
+// scaling: 2.4
+// Inserts n pseudo-random int32 keys into a TreeMap, looks each up, and
+// deletes half.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let tree_map = import:Std.Collections.TreeMap;
+
+export let TreeMapBenchmark = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let map = tree_map.create<int32, int32>(int32s.compare);
+        let seed: uint64 = 7;
+        let keys: int32[list] = [];
+        for (let i = 0; i < n; i = i + 1) {
+            seed = (seed * 1103515245 + 12345) & 2147483647;
+            let key = (seed % 100000000) as int32;
+            keys.append(key);
+            map.set(key, i);
+        }
+        let found = 0;
+        for (let key in keys) {
+            if (map.contains_key(key)) {
+                found = found + 1;
+            }
+        }
+        for (let i = 0; i < keys.length; i = i + 2) {
+            map.delete(keys[i]);
+        }
+        if (found != n) {
+            console.print_line("wrong result");
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

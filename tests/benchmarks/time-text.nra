@@ -1,0 +1,48 @@
+// sizes: 100 200
+// scaling: 2.1
+// Formats n instants and dates as ISO-8601 text and parses each back.
+let console = import:Std.Io.Console;
+let instant = import:Std.Time.Instant;
+let int32s = import:Std.Core.Int32;
+let local_date = import:Std.Time.LocalDate;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let TimeTextBenchmark = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let seconds: int64 = -62000000000;
+        for (let i = 0; i < n; i = i + 1) {
+            let moment = instant.of_epoch_seconds(seconds, i * 1000);
+            let text = moment.to_string();
+            match (instant.parse(text)) {
+                result.Result.Ok(back) => {
+                    if (!back.equals(moment)) {
+                        console.print_line("instant round trip differs");
+                        return program.ExitCode.Failure;
+                    }
+                },
+                result.Result.Err(_) => {
+                    console.print_line("instant parse failed");
+                    return program.ExitCode.Failure;
+                },
+            }
+            let date = local_date.of_epoch_day(seconds / 86400);
+            match (local_date.parse(date.to_string())) {
+                result.Result.Ok(back) => {
+                    if (!back.equals(date)) {
+                        console.print_line("date round trip differs");
+                        return program.ExitCode.Failure;
+                    }
+                },
+                result.Result.Err(_) => {
+                    console.print_line("date parse failed");
+                    return program.ExitCode.Failure;
+                },
+            }
+            seconds = seconds + 1234567891;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

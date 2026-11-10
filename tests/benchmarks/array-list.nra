@@ -1,0 +1,35 @@
+// sizes: 1000 2000
+// scaling: 2.2
+// Appends n elements to an ArrayList, reads each, then removes them from the
+// end, and iterates once through the wrapper's iterator.
+let array_list = import:Std.Collections.ArrayList;
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let ArrayListBenchmark = module:program.Entry (
+    export let.override main = func(string[] args) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let items = array_list.create<int64>();
+        for (let i = 0; i < n; i = i + 1) {
+            items.add(i as int64);
+        }
+        let total: int64 = 0;
+        for (let i = 0; i < n; i = i + 1) {
+            total = total + items.get(i);
+        }
+        for (let value in items) {
+            total = total - value;
+        }
+        while (!items.is_empty()) {
+            total = total + items.remove_last();
+        }
+        if (total != (n as int64) * ((n as int64) - 1) / 2) {
+            console.print_line("wrong total");
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);
