@@ -7,11 +7,14 @@
 
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <limits>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace neura::nvm {
@@ -36,6 +39,9 @@ std::string_view describe(TrapKind kind) {
     case TrapKind::FrameLimit: return "frame depth limit exceeded";
     case TrapKind::HeapLimit: return "heap limit exceeded";
     case TrapKind::HandleLimit: return "handle space exhausted";
+    case TrapKind::TaskLimit: return "task limit exceeded";
+    case TrapKind::InvalidTaskOperation: return "invalid task operation";
+    case TrapKind::Deadlock: return "deadlock";
     }
     return "trap";
 }
@@ -57,7 +63,8 @@ int exit_status(const Trap& trap) {
         case 5: return abort;
         default: return illegal_instruction;
         }
-    case TrapKind::InvalidCast: return abort;
+    case TrapKind::InvalidCast:
+    case TrapKind::Deadlock: return abort;
     case TrapKind::UninitializedSlot:
     case TrapKind::UninitializedField:
     case TrapKind::UninitializedGlobal:
@@ -70,9 +77,11 @@ int exit_status(const Trap& trap) {
     case TrapKind::InvalidSelector:
     case TrapKind::ReferenceType:
     case TrapKind::InvalidText:
-    case TrapKind::InvalidCompletion: return illegal_instruction;
+    case TrapKind::InvalidCompletion:
+    case TrapKind::InvalidTaskOperation: return illegal_instruction;
     case TrapKind::HeapLimit:
-    case TrapKind::HandleLimit: return out_of_memory;
+    case TrapKind::HandleLimit:
+    case TrapKind::TaskLimit: return out_of_memory;
     case TrapKind::StepLimit: return cpu_time_exceeded;
     }
     return illegal_instruction;
@@ -96,6 +105,7 @@ std::string_view reason_text(std::uint32_t reason) {
 } // namespace
 
 std::string describe(const Trap& trap, const nvr::Image& image, bool include_indices) {
+    if (trap.kind == TrapKind::Deadlock) return "deadlock: " + trap.detail;
     std::string text = trap.kind == TrapKind::Program
         ? std::string(reason_text(trap.reason)) + " (trap reason " + std::to_string(trap.reason) + ")"
         : std::string(describe(trap.kind));
@@ -241,6 +251,7 @@ public:
           std::optional<std::uint32_t> entry = {})
         : image_(image), types_(image), limits_(limits), entry_(entry) {
         check_device();
+        check_task_settings();
         if (entry_) validate_entry_arguments(image, *entry_, arguments);
         else validate_utf8_arguments(arguments);
         arguments_.assign(arguments.begin(), arguments.end());
@@ -249,11 +260,19 @@ public:
     State(const nvr::Image& image, std::uint32_t function, std::span<const std::uint64_t> arguments, RunLimits limits)
         : image_(image), types_(image), limits_(limits), start_function_(function) {
         check_device();
+        check_task_settings();
         validate_call_arguments(image, function, arguments);
         start_arguments_.assign(arguments.begin(), arguments.end());
     }
 
     ~State() { stop_tracking_heap(); }
+
+    // A concurrent image needs a positive quantum; reject it before any run state exists.
+    void check_task_settings() const {
+        if (image_.transferable_layouts && limits_.task_quantum == 0) {
+            throw std::invalid_argument("task quantum must be positive");
+        }
+    }
 
     void initialize(FleetHeapCells& heap) {
         if (started_) return;
@@ -421,6 +440,7 @@ public:
     std::uint64_t live_heap_cells() const { return live_cells_; }
     std::uint64_t peak_heap_cells() const { return peak_cells_; }
     const std::vector<std::uint64_t>& function_steps() const { return function_steps_; }
+    std::string dump_tasks() const;
 
 private:
     friend class Execution;
@@ -451,6 +471,38 @@ private:
         std::uint32_t return_block = 0;
         // The first frame of a callback: its return ends invoke_callback.
         bool boundary = false;
+    };
+
+    enum class TaskState { Running, Runnable, Joining, LeavingScope, Finished };
+
+    struct TaskScope {
+        std::size_t frame_depth;
+        std::size_t live_children = 0;
+        std::vector<std::uint64_t> children;
+    };
+
+    struct Task {
+        std::uint64_t parent = 0;
+        std::size_t parent_scope = 0;
+        std::uint32_t spawn_function = nvr::absent;
+        std::uint32_t spawn_block = nvr::absent;
+        std::uint32_t result_type = nvr::absent;
+        std::uint64_t result = 0;
+        TaskState state = TaskState::Running;
+        std::vector<Frame> frames;
+        std::vector<TaskScope> scopes;
+        std::uint64_t waiting_for = 0;
+        std::uint32_t join_slot = nvr::absent;
+        bool close_on_wake = false;
+    };
+
+    struct Scheduler {
+        std::map<std::uint64_t, Task> tasks;
+        std::deque<std::uint64_t> runnable;
+        std::uint64_t current = 0;
+        std::uint64_t next_id = 1;
+        std::uint64_t live = 1;
+        std::uint64_t polls = 0;
     };
 
     struct Pending {
@@ -489,6 +541,17 @@ private:
         trap.kind = kind;
         trap.reason = reason;
         trap.detail = std::move(detail);
+        if (scheduler_ && kind != TrapKind::Deadlock) {
+            if (!trap.detail.empty()) trap.detail += " ";
+            trap.detail += "(task " + std::to_string(scheduler_->current);
+            for (auto id = scheduler_->current; id != 0;) {
+                const auto& task = scheduler_->tasks.at(id);
+                trap.detail += " spawned at " + task_location(task.spawn_function, task.spawn_block) +
+                               " by task " + std::to_string(task.parent);
+                id = task.parent;
+            }
+            trap.detail += ")";
+        }
         if (!frames_.empty()) {
             trap.function = frames_.back().function;
             trap.block = frames_.back().block;
@@ -560,6 +623,15 @@ private:
         }
     }
 
+    void mark_frames(const std::vector<Frame>& frames) {
+        for (const auto& frame : frames) {
+            const auto& slots = image_.functions[frame.function].frame_types;
+            for (const auto slot : trace_plan(frame_traces_, frame.function, slots)) {
+                if (frame.initialized[slot]) mark(frame.slots[slot]);
+            }
+        }
+    }
+
     void collect(std::span<const std::uint64_t> temporary_roots, const HeapEntry* allocation) {
         for (std::size_t i = 0; i < const_values_.size(); ++i) {
             if (nvr::is_reference(type(image_.constants[i].type).kind)) {
@@ -571,10 +643,13 @@ private:
                 mark(globals_[i]);
             }
         }
-        for (const auto& frame : frames_) {
-            const auto& slots = image_.functions[frame.function].frame_types;
-            for (const auto slot : trace_plan(frame_traces_, frame.function, slots)) {
-                if (frame.initialized[slot]) mark(frame.slots[slot]);
+        mark_frames(frames_);
+        if (scheduler_) {
+            for (const auto& [id, task] : scheduler_->tasks) {
+                mark_frames(task.frames);
+                if (task.state == TaskState::Finished && nvr::is_reference(type(task.result_type).kind)) {
+                    mark(task.result);
+                }
             }
         }
         for (const auto handle : temporary_roots) {
@@ -687,6 +762,11 @@ private:
 
     void start() {
         started_ = true;
+        if (image_.transferable_layouts) {
+            if (limits_.max_tasks == 0) fault(TrapKind::TaskLimit, "starting the root task");
+            scheduler_ = std::make_unique<Scheduler>();
+            scheduler_->tasks.try_emplace(0);
+        }
         const_values_.resize(image_.constants.size());
         for (std::size_t i = 0; i < image_.constants.size(); ++i) {
             const auto& constant = image_.constants[i];
@@ -740,11 +820,8 @@ private:
         }
     }
 
-    void push_frame(std::uint32_t function, const std::vector<std::uint64_t>& arguments,
-                    std::uint32_t return_slot, std::uint32_t return_block) {
-        if (frames_.size() >= limits_.max_frames) {
-            fault(TrapKind::FrameLimit, "calling function " + std::to_string(function));
-        }
+    Frame make_frame(std::uint32_t function, std::span<const std::uint64_t> arguments,
+                     std::uint32_t return_slot, std::uint32_t return_block) const {
         const auto& callee = image_.functions[function];
         Frame frame;
         frame.function = function;
@@ -756,7 +833,232 @@ private:
         }
         frame.return_slot = return_slot;
         frame.return_block = return_block;
-        frames_.push_back(std::move(frame));
+        return frame;
+    }
+
+    std::uint64_t frame_cells(std::uint32_t function) const {
+        return 1 + image_.functions[function].frame_types.size();
+    }
+
+    std::vector<std::uint64_t> argument_roots(std::uint32_t function,
+                                             std::span<const std::uint64_t> arguments) const {
+        std::vector<std::uint64_t> roots;
+        const auto& types = image_.functions[function].frame_types;
+        for (std::size_t i = 0; i < arguments.size(); ++i) {
+            if (nvr::is_reference(type(types[i]).kind)) roots.push_back(arguments[i]);
+        }
+        return roots;
+    }
+
+    void push_frame(std::uint32_t function, const std::vector<std::uint64_t>& arguments,
+                    std::uint32_t return_slot, std::uint32_t return_block) {
+        if (frames_.size() >= limits_.max_frames) {
+            fault(TrapKind::FrameLimit, "calling function " + std::to_string(function));
+        }
+        if (scheduler_) ensure_heap_cells(frame_cells(function), "task frame of ", argument_roots(function, arguments));
+        frames_.push_back(make_frame(function, arguments, return_slot, return_block));
+        if (scheduler_) add_live_cells(frame_cells(function));
+    }
+
+    Task& current_task() { return scheduler_->tasks.at(scheduler_->current); }
+
+    std::string task_location(std::uint32_t function, std::uint32_t block) const {
+        if (image_.source_map) {
+            const auto& locations = *image_.source_map;
+            const auto found = std::lower_bound(locations.begin(), locations.end(), std::pair{function, block},
+                [](const auto& location, const auto& key) { return std::pair{location.function, location.block} < key; });
+            if (found != locations.end() && found->function == function && found->block == block) {
+                return found->path + ':' + std::to_string(found->line) + ':' + std::to_string(found->column);
+            }
+        }
+        return "function " + std::to_string(function) + " block " + std::to_string(block);
+    }
+
+    void close_scope(Task& task) {
+        const auto& scope = task.scopes.back();
+        for (const auto child : scope.children) scheduler_->tasks.erase(child);
+        remove_live_cells(1 + scope.children.size());
+        task.scopes.pop_back();
+    }
+
+    void schedule_next() {
+        if (scheduler_->runnable.empty()) {
+            fault(TrapKind::Deadlock, "all tasks are parked\n" + dump_tasks());
+        }
+        scheduler_->current = scheduler_->runnable.front();
+        scheduler_->runnable.pop_front();
+        scheduler_->polls = 0;
+        auto& task = current_task();
+        task.state = TaskState::Running;
+        frames_ = std::move(task.frames);
+        if (task.close_on_wake) {
+            task.close_on_wake = false;
+            close_scope(task);
+        }
+    }
+
+    void park(TaskState state) {
+        auto& task = current_task();
+        task.state = state;
+        task.frames = std::move(frames_);
+        if (state == TaskState::Runnable) scheduler_->runnable.push_back(scheduler_->current);
+        schedule_next();
+    }
+
+    void poll() {
+        if (++scheduler_->polls >= limits_.task_quantum) {
+            if (scheduler_->runnable.empty()) scheduler_->polls = 0;
+            else park(TaskState::Runnable);
+        }
+    }
+
+    void check_transfer(std::uint32_t function, std::span<const std::uint64_t> arguments) {
+        const auto& types = image_.functions[function].frame_types;
+        std::vector<std::pair<std::uint64_t, std::uint32_t>> references;
+        std::unordered_set<std::uint64_t> visited;
+        for (std::size_t i = 0; i < arguments.size(); ++i) {
+            if (nvr::is_reference(type(types[i]).kind)) references.emplace_back(arguments[i], types[i]);
+        }
+        while (!references.empty()) {
+            const auto [handle, expected] = references.back();
+            references.pop_back();
+            if (handle == 0 && type(expected).kind == nvr::TypeKind::Object) continue;
+            const auto& value = typed_entry(handle, expected);
+            if (value.kind != EntryKind::Object || !visited.insert(handle).second) continue;
+            const auto& layouts = *image_.transferable_layouts;
+            if (!std::ranges::binary_search(layouts, value.type)) {
+                fault(TrapKind::InvalidTaskOperation, "transferred handle has an unmarked layout");
+            }
+            const auto& fields = image_.layouts[value.type].fields;
+            for (std::size_t field = 0; field < fields.size(); ++field) {
+                // An unset field is not transferred data; reading it later traps as usual.
+                if (value.initialized[field] && nvr::is_reference(type(fields[field]).kind)) references.emplace_back(value.cells[field], fields[field]);
+            }
+        }
+    }
+
+    Task& child_task(std::uint64_t id) {
+        const auto found = scheduler_->tasks.find(id);
+        if (id == 0 || found == scheduler_->tasks.end() || found->second.parent != scheduler_->current) {
+            fault(TrapKind::InvalidTaskOperation, "task handle is outside its owning scope");
+        }
+        return found->second;
+    }
+
+    void check_scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments,
+                              const std::vector<std::pair<std::uint32_t, std::uint64_t>>& assignments) {
+        using Op = nvr::SchedulerOp;
+        const auto& task = current_task();
+        if ((exit.scheduler == Op::Spawn || exit.scheduler == Op::ScopeExit) &&
+            (task.scopes.empty() || task.scopes.back().frame_depth != frames_.size())) {
+            fault(TrapKind::InvalidTaskOperation, "no enclosing scope in the current function");
+        }
+        if (exit.scheduler == Op::Join || exit.scheduler == Op::IsFinished) {
+            const auto& child = child_task(arguments.front());
+            if (exit.scheduler == Op::Join) {
+                const auto& function = image_.functions[frames_.back().function];
+                const bool returns_void = type(child.result_type).kind == nvr::TypeKind::Void;
+                if ((exit.result_slot == nvr::absent) != returns_void ||
+                    (!returns_void && !types_.assignable(child.result_type, function.frame_types[exit.result_slot]))) {
+                    fault(TrapKind::InvalidTaskOperation, "join result does not match the task");
+                }
+            }
+        }
+        if (exit.scheduler == Op::Spawn || exit.scheduler == Op::ScopeEnter) {
+            std::vector<std::uint64_t> roots;
+            std::uint64_t cells = 1;
+            if (exit.scheduler == Op::Spawn) {
+                if (scheduler_->live >= limits_.max_tasks || scheduler_->next_id == std::numeric_limits<std::uint64_t>::max()) {
+                    fault(TrapKind::TaskLimit, "spawning another task");
+                }
+                if (limits_.max_frames == 0) fault(TrapKind::FrameLimit, "starting a task frame");
+                check_transfer(exit.target, arguments);
+                roots = argument_roots(exit.target, arguments);
+                cells += frame_cells(exit.target);
+            }
+            const auto& types = image_.functions[frames_.back().function].frame_types;
+            for (const auto& [slot, value] : assignments) {
+                if (nvr::is_reference(type(types[slot]).kind)) roots.push_back(value);
+            }
+            ensure_heap_cells(cells, "task allocation of ", roots);
+        }
+    }
+
+    static void write_result(Frame& frame, std::uint32_t slot, std::uint64_t value) {
+        if (slot != nvr::absent) {
+            frame.slots[slot] = value;
+            frame.initialized[slot] = 1;
+        }
+    }
+
+    void scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments) {
+        auto& task = current_task();
+        auto& frame = frames_.back();
+        const auto block = frame.block;
+        frame.block = exit.resume;
+        switch (exit.scheduler) {
+        case nvr::SchedulerOp::ScopeEnter:
+            task.scopes.push_back({frames_.size(), 0, {}});
+            add_live_cells(1);
+            break;
+        case nvr::SchedulerOp::ScopeExit:
+            if (task.scopes.back().live_children == 0) close_scope(task);
+            else park(TaskState::LeavingScope);
+            break;
+        case nvr::SchedulerOp::Spawn: {
+            const auto id = scheduler_->next_id++;
+            auto& child = scheduler_->tasks.try_emplace(id).first->second;
+            child.parent = scheduler_->current;
+            child.parent_scope = task.scopes.size() - 1;
+            child.spawn_function = frame.function;
+            child.spawn_block = block;
+            child.result_type = image_.functions[exit.target].result_type;
+            child.frames.push_back(make_frame(exit.target, arguments, nvr::absent, 0));
+            child.state = TaskState::Runnable;
+            ++task.scopes.back().live_children;
+            task.scopes.back().children.push_back(id);
+            ++scheduler_->live;
+            scheduler_->runnable.push_back(id);
+            add_live_cells(1 + frame_cells(exit.target));
+            write_result(frame, exit.result_slot, id);
+            break;
+        }
+        case nvr::SchedulerOp::Join: {
+            const auto& child = child_task(arguments.front());
+            if (child.state == TaskState::Finished) {
+                write_result(frame, exit.result_slot, child.result);
+            } else {
+                task.waiting_for = arguments.front();
+                task.join_slot = exit.result_slot;
+                park(TaskState::Joining);
+            }
+            break;
+        }
+        case nvr::SchedulerOp::IsFinished:
+            write_result(frame, exit.result_slot, child_task(arguments.front()).state == TaskState::Finished);
+            break;
+        }
+    }
+
+    void finish_task(std::uint64_t result) {
+        auto& child = current_task();
+        child.result = result;
+        child.state = TaskState::Finished;
+        --scheduler_->live;
+        auto& parent = scheduler_->tasks.at(child.parent);
+        auto& scope = parent.scopes[child.parent_scope];
+        --scope.live_children;
+        if (parent.state == TaskState::Joining && parent.waiting_for == scheduler_->current) {
+            write_result(parent.frames.back(), parent.join_slot, result);
+            parent.state = TaskState::Runnable;
+            scheduler_->runnable.push_back(child.parent);
+        } else if (parent.state == TaskState::LeavingScope && child.parent_scope + 1 == parent.scopes.size() &&
+                   scope.live_children == 0) {
+            parent.close_on_wake = true;
+            parent.state = TaskState::Runnable;
+            scheduler_->runnable.push_back(child.parent);
+        }
+        schedule_next();
     }
 
     void require_initialized(const Frame& frame, std::uint32_t slot) const {
@@ -938,6 +1240,7 @@ private:
         for (const auto& argument : exit.arguments) {
             arguments.push_back(read(argument, frame));
         }
+        if (exit.kind == nvr::ExitKind::Scheduler) check_scheduler_exit(exit, arguments, assignments);
         for (const auto& [slot, value] : assignments) {
             frame.slots[slot] = value;
             frame.initialized[slot] = 1;
@@ -946,17 +1249,37 @@ private:
         switch (exit.kind) {
         case nvr::ExitKind::Continue:
             frame.block = exit.resume;
+            if (exit.poll) poll();
             return std::nullopt;
         case nvr::ExitKind::Call:
             push_frame(exit.target, arguments, exit.result_slot, exit.resume);
+            if (exit.poll) poll();
             return std::nullopt;
         case nvr::ExitKind::Return: {
             const auto result = arguments.empty() ? 0 : arguments.front();
+            const auto function = frame.function;
             const auto return_slot = frame.return_slot;
             const auto return_block = frame.return_block;
             const auto boundary = frame.boundary;
+            if (scheduler_) {
+                const auto& scopes = current_task().scopes;
+                if (!scopes.empty() && scopes.back().frame_depth == frames_.size()) {
+                    fault(TrapKind::InvalidTaskOperation, "return leaves an open scope");
+                }
+                remove_live_cells(frame_cells(frame.function));
+            }
             frames_.pop_back();
+            if (scheduler_ && frames_.empty() && scheduler_->current != 0) {
+                finish_task(result);
+                return std::nullopt;
+            }
             if (frames_.empty() || boundary) {
+                if (scheduler_ && frames_.empty()) {
+                    auto& root = current_task();
+                    root.result_type = image_.functions[function].result_type;
+                    root.result = result;
+                    root.state = TaskState::Finished;
+                }
                 Event event;
                 event.kind = Event::Kind::Completed;
                 event.status = static_cast<std::int32_t>(static_cast<std::uint32_t>(result & mask(32)));
@@ -998,6 +1321,9 @@ private:
         case nvr::ExitKind::MessageTrap:
             fault(TrapKind::Program, typed_entry(arguments.front(), exit.arguments.front().type).bytes,
                   static_cast<std::uint32_t>(nvr::TrapReason::ProgramFailure));
+        case nvr::ExitKind::Scheduler:
+            scheduler_exit(exit, arguments);
+            return std::nullopt;
         }
         return std::nullopt;
     }
@@ -1357,6 +1683,7 @@ private:
     std::vector<std::uint64_t> globals_;
     std::vector<std::uint8_t> global_initialized_;
     std::vector<Frame> frames_;
+    std::unique_ptr<Scheduler> scheduler_;
     const nvr::Block* active_block_ = nullptr;
     std::vector<std::int64_t> inputs_;
     std::vector<std::int64_t> outputs_;
@@ -1366,6 +1693,35 @@ private:
     std::uint64_t sequence_ = 0;
     std::uint64_t steps_ = 0;
 };
+
+std::string Execution::State::dump_tasks() const {
+    if (!scheduler_) return {};
+    std::string result;
+    for (const auto& [id, task] : scheduler_->tasks) {
+        result += "task " + std::to_string(id);
+        if (id == 0) result += " root";
+        else result += " spawned at " + task_location(task.spawn_function, task.spawn_block) +
+                       " by task " + std::to_string(task.parent);
+        switch (task.state) {
+        case TaskState::Running:
+            if (pending_) result += " parked: host request " + std::to_string(sequence_ - 1);
+            else result += " running";
+            break;
+        case TaskState::Runnable: result += " runnable"; break;
+        case TaskState::Joining: result += " parked: join task " + std::to_string(task.waiting_for); break;
+        case TaskState::LeavingScope:
+            result += " parked: scope exit, waiting for " + std::to_string(task.scopes.back().live_children) + " tasks";
+            break;
+        case TaskState::Finished: result += " finished"; break;
+        }
+        result += '\n';
+        const auto& stack = task.state == TaskState::Running ? frames_ : task.frames;
+        for (auto frame = stack.rbegin(); frame != stack.rend(); ++frame) {
+            result += "    " + task_location(frame->function, frame->block) + '\n';
+        }
+    }
+    return result;
+}
 
 Execution::Execution(const nvr::Image& image, std::span<const std::string> arguments, RunLimits limits)
     : state_(std::make_unique<State>(image, arguments, limits)) {}
@@ -1449,6 +1805,7 @@ Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::
 }
 
 Event Execution::advance() { return state_->advance(); }
+std::string Execution::dump_tasks() const { return state_->dump_tasks(); }
 
 std::optional<Event> Execution::begin_step(GraphStep& step) { return state_->begin_step(step); }
 

@@ -21,10 +21,12 @@ This release carries the language below from source through NeuraIR, optimizatio
 
 ## Outside this release
 
+The following runtime/artifact slice is present without a source-language feature: NVR 1.5 scheduler exits, poll markers, and `TRNS` validation; the NVM can execute manually assembled scope, spawn, join, completion-query, and poll operations. `--max-tasks`, `--task-quantum`, and `Execution::dump_tasks()` are available. The compiler does not emit task operations, and source-level transferability/task-safety checks and concurrent record/replay are not implemented. See [Concurrency](Concurrency.md) for phase details.
+
 | Area | Status |
 | --- | --- |
 | Standard library extensions | `Std.Concurrent`, time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](Stdlib.md#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
-| Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](ResourcesConcurrency.md)). [Concurrency](Concurrency.md) plans scoped tasks, channels, cancellation, and their tooling; none of it is implemented. |
+| Concurrency language feature | Partial runtime/artifact implementation only: NVR 1.5 scheduler exits, `TRNS` validation, manual-image task execution, task limits, and task snapshots exist. `scope`, `spawn`, and `join` are not accepted by the compiler; no transferability/task-safety analysis or task-capable standard library exists. Concurrent record/replay, channels, cancellation, deadlines, overlapping I/O, service tooling, and multicore features remain unimplemented. See the [phase table](Concurrency.md#16-phases-and-release-gates). |
 | Foreign interop | Interop with Java and other managed runtimes. Native code runs only on Linux x86-64 in this release's tests; other platforms build the same provider but are unverified. |
 | Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](ProjectStructure.md)). |
 
@@ -56,6 +58,7 @@ These remain open. The compiler rejects or does not offer the affected construct
 - A negative index traps with reason 2; a list modified during for-each traps with reason 5.
 - The entry point is the unique override of `Std.Program.Entry.main`. `Ok` is status 0, `Failure` 1, and `Status(n)` is `n` for 0 through 255; any other `n` traps. The named variants from `SeriousFailure` (2) to `FileSizeExceeded` (153) have fixed statuses ([Modules](Modules.md#program-entry)). The built-in `SysIo` and `Test` modules are retired, and importing either is an error that names its replacement.
 - An instance field without an initializer starts uninitialized, and reading it before a store faults. Static fields follow the preparation and first-use rules in [Static initialization](Types.md#static-initialization). Construction and `destroy` follow the order in [Object lifecycle](ObjectLifecycle.md).
+- In an NVR 1.5 image with a `TRNS` table, live frames of every task count toward `--max-heap-cells` (one cell per frame plus one per slot), as do task records and open scopes; `--max-frames` bounds each task's depth. This settles the frame-storage decision for the runtime only, because it adds a bound rather than leaving task frames unbounded ([Concurrency, section 10.3](Concurrency.md#103-limits)). Images without tasks keep their accounting.
 - `Console.print_line` traps with reason 3 when the write fails, and a failed `Std.Test` assertion is a message trap with reason 3.
 
 ## Examples

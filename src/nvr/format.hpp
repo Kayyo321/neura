@@ -12,7 +12,7 @@
 
 namespace neura::nvr {
 
-// Encodes `image` as NVR 1.0 bytes. The encoding is a pure function of the
+// Encodes `image` as NVR 1.x bytes. The encoding is a pure function of the
 // model: sections appear in ascending tag order and nothing depends on time,
 // addresses, or the host. Throws std::invalid_argument when a count or index
 // cannot be represented, for example a table that would need the reserved
@@ -63,6 +63,9 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits = {});
 // True when `bytes` is well-formed UTF-8 without overlong forms, surrogates,
 // or code points above U+10FFFF.
 bool valid_utf8(std::string_view bytes);
+
+// Static transferability in an image with validated types and TRNS marking.
+bool is_transferable(const Image& image, std::uint32_t type);
 
 // Structural type identity and the subtype relation of an image whose type
 // and layout tables have been validated.

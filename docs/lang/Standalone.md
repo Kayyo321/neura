@@ -188,6 +188,9 @@ An operator sometimes needs to bound or record a deployed program without rebuil
 | Option | Effect |
 | --- | --- |
 | `--max-steps N`, `--max-frames N`, `--max-heap-cells N` | The run uses the smaller of this value and the policy's. A limit can be lowered, never raised. |
+| `--max-tasks N` | Lowers the run's live-task bound; accepted for compatibility with NVR 1.5 task images. |
+| `--task-quantum N` | Sets the polls per scheduler turn for NVR 1.5 task images. |
+| `--no-gpu`, `--gpu=off` | Accepted as requests for the launcher's CPU execution mode. The launcher has no GPU backend. |
 | `--stats`, `--profile` | As for `neura run`, on standard error. |
 | `--record <file>` | Writes the run's host trace ([NVM](../runtime/NVM.md#determinism-limits-and-observability)). |
 | `--replay <file>` | Answers every host request from the trace. No service runs, so the policy's capabilities are not used. |
@@ -198,6 +201,8 @@ An operator sometimes needs to bound or record a deployed program without rebuil
 - A trace recorded this way replays under `neura run --replay` with the extracted image, and a trace recorded by `neura run` replays in the executable, because both run the same image on the same NVM.
 
 When the [concurrency plan](Concurrency.md#143-command-line) and the [GPU plan](GpuExecution.md#14-command-line) are implemented, their run options are accepted here on the same rule: settings that restrict or observe are allowed, and the launcher handles `SIGQUIT` task dumps as `neura run` does.
+
+Implementation status: the launcher accepts `--max-tasks`, which can only lower the run's live-task bound, and `--task-quantum`, the scheduling setting that [Concurrency, section 14.3](Concurrency.md#143-command-line) says a native executable takes through this variable. Both apply to NVR 1.5 images with a `TRNS` table. `--no-gpu` and `--gpu=off` are accepted because they request the CPU evaluation the launcher always uses; `--gpu=auto` and `--gpu=always` are rejected, since launchers stay CPU-only. Task-dump selection, trace events, virtual time, and the `SIGQUIT` task dump are not implemented yet. The policy record of section 5 has no field for a task limit, and this plan's layout is fixed, so `build --native` does not accept `--max-tasks` and an executable always starts from the default bound; a sealed executable therefore keeps the default. Baking task limits needs a container revision.
 
 ### 6.5 Native libraries
 
@@ -240,7 +245,7 @@ The phase 1 Release build on Linux x86-64 with GCC 14.2.0 produced a stripped de
 
 ```text
 native executable: hello
-launcher: neura <version>, x86_64-linux-gnu, default, runs NVR up to 1.4
+launcher: neura <version>, x86_64-linux-gnu, default, runs NVR up to 1.5
 capabilities: console, process exit, files (/var/lib/hello), network
 limits: steps 100000000, frames 10000, heap cells 67108864
 run options: accepted

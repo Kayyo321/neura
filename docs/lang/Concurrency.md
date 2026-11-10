@@ -1,6 +1,6 @@
 # Concurrency: design and implementation plan
 
-This page is a plan. Nothing in it is implemented: the compiler does not recognize `scope`, `spawn`, or `select`, and `Std.Concurrent` is a reserved name with no modules. [Resources and concurrency](ResourcesConcurrency.md) and [Status](Status.md) keep describing this release, in which concurrency is deferred. This plan specifies the language forms, static rules, library, runtime contract, artifact changes, and tooling that end that deferral, and the order in which to build them.
+This page specifies the planned concurrency language and runtime. The compiler still does not recognize `scope`, `spawn`, or `select`, and `Std.Concurrent` has no modules. A partial NVR 1.5 artifact/runtime slice is implemented: scheduler exits, poll markers, transferable-layout metadata and validation, manual-image task execution, task limits, and `Execution::dump_tasks()`. The compiler, source-level transferability and task-safety analyses, concurrent record/replay, and all production-I/O and service features remain unimplemented. The phase table records what is delivered and what remains.
 
 ## 1. How to read this plan
 
@@ -396,6 +396,10 @@ Existing limits keep their meaning for the run as a whole: steps and heap cells 
 
 Phase 1 confirms the defaults against the memory a parked task actually costs and reports the measurement.
 
+**Frame storage (decided for phase 1, runtime).** In an image that carries a `TRNS` table, every live frame of every task counts toward `--max-heap-cells`: one cell for the frame and one for each of its slots, checked before the frame is pushed and released when it returns. Each task record and each open scope also count one cell; a task's record is released when the scope that owns it closes. `--max-frames` still bounds each task's own depth. The reason is the conservative rule for open decisions: without a run-wide bound, up to `--max-tasks` times `--max-frames` frames could be live, so the runtime adds a bound instead of leaving one out, and it reuses an existing limit instead of adding an option this plan does not name. Images without a `TRNS` table keep their existing accounting, so their limits, traps, and `peak_heap_cells` statistics do not change. Fleet admission counts these cells as part of a member's live heap.
+
+**Measured default.** The fixture `tests/backend/task-chain.nvra` is a chain in which every task opens a scope, spawns one child, and parks at the scope exit until `--max-tasks` ends the run. On Linux x86-64 with a Release build, the peak resident memory of `neura run --max-tasks N` (median of three runs, read from `getrusage` of the child process, including the trap diagnostic that ends the run) was 11.4 MiB at N = 1 and 38.5 MiB at N = 65,536: about 27 MiB more for 65,535 parked tasks, an average of 0.43 KB each and about 0.55 KB each between 16,384 and 65,536 tasks. The proposed defaults are kept.
+
 ### 10.4 Host I/O
 
 Today the reference executor waits for each host call before it resumes. With tasks, a provider may declare a service **overlapping**: the calling task parks, other tasks run, and the completion is delivered later.
@@ -454,7 +458,7 @@ This is the same shape as a [fleet](GpuExecution.md#10-batched-running), many in
 | IRtoNeuronConversion | Task bodies become ordinary blocks. Each scheduler operation becomes a typed exit. A poll rides on the exit that takes the back edge or makes the call, so it adds no block. Diagnoses a target that cannot hold the image's task tables. | Exits whose arguments and results are typed like state operations |
 | Output | A new NVR minor version with the scheduler-operation exit and a required table marking transferable layouts. | An image a compatible runtime executes without source |
 
-**Artifact.** [NVR](../runtime/NVR.md) gains minor version 5. The writer still emits the lowest version an image needs, so programs without tasks keep their bytes. The loader checks that the transferable marking is closed (every field of a marked layout is itself transferable) and that every spawn and send names marked types, before any host import is invoked. The NVM checks a handle's layout when it is transferred. An image that contains a scheduler operation and also a `neura.ffi.*` import, a `CALB` table, or a `NATV` section is malformed (C15). The `.nir` format gains a minor version for the new operations.
+**Artifact and implementation status.** [NVR](../runtime/NVR.md) 1.5 is implemented for scheduler exits, poll bits, and the `TRNS` transferable-layout table. The writer emits the lowest version required, preserving older images. The loader validates sorted/closed transfer marks, scheduler exit shape, and rejects 1.5 task images containing `neura.ffi.*`, `CALB`, or `NATV`. The NVM executes manually assembled task images, checks transferred object layouts, supports the task limit and quantum, and exposes task snapshots. The compiler does not yet emit scheduler operations or transferable markings, and does not implement scope-bound, transferability, or task-safety source checks. The `.nir` format has not yet been revised for task operations. Concurrent record/replay is absent; `nvm::record` rejects task images because the trace format cannot represent scheduling decisions. A native executable accepts `--max-tasks` and `--task-quantum` only through `NEURA_RUN_OPTIONS`: the fixed container policy of [Standalone](Standalone.md#5-the-container) cannot carry baked task limits yet, so the baked-limits half of section 14.3 is not met. These runtime changes do not complete phase 1.
 
 **Inspection.** `disassemble` prints scheduler operations as it prints state operations, with no source map needed. `decompile` labels them as decoded from the tables and reconstructs scopes from entry and exit pairs; where it cannot pair them it shows the operations and says so. Behavior comparison of a recovered image uses replay of a concurrent trace, which is an observed match under that trace, not a proof ([Decompiler](../Decompiler.md#evidence)).
 
@@ -529,6 +533,8 @@ A phase does not start until the gate of the one before it is met and reported w
 | **3. Service tooling** | `WorkerGroup`, the `Tasks` helpers, virtual time, schedule exploration, profiling, and trace events | A service fixture sheds overload through a bounded queue, times out a dependency, drains on shutdown, and reproduces a failing interleaving from a saved trace. |
 | **4. Multicore and shared state** | `parallel_map`, then `AtomicInt64`, `Semaphore`, and `Guarded<T>`, then concurrent collections as needed | One worker and several agree on values, trap order, and limits. Throughput, tail latency, peak memory, and cancellation latency are published for named workloads, with the machine and baseline. |
 
+**Current implementation status (phase 1 incomplete).** The NVR/NVM runtime/artifact slice described in section 13 is implemented, with focused runtime and format tests now present. The compiler still does not accept or emit the phase 1 language constructs, and the source-level transfer and effect checks (sections 4.3, 5.1, 5.2), the audit of `Std` modules for task safety, poll insertion and its optimizer evidence, and the `.nir` revision are absent. The runtime checks of section 13 (loader marking and spawn argument checks, the scheduler's layout check at a spawn) exist but do not replace them. Of section 14, only `Execution::dump_tasks()` exists, as a flat list of tasks with their states and stacks rather than the tree of section 14.1; `--task-dump`, the `SIGQUIT` dump, trace events, task profiling, and the task peaks in `--stats` are absent. The deadlock exit of section 10.5 is implemented but no phase 1 operation can reach it, because a task waits only for its own children, so it is untested. Concurrent record/replay is absent. Therefore phase 1's gate above is not met; phase 2 and later phases have not started. The test results for this in-progress slice are reported with the implementation handoff, not inferred from the presence of tests.
+
 The first public concurrency release is phases 1 through 3, and its acceptance test is one small network service taken all the way through **fan-out, backpressure, deadline, graceful shutdown, and replay**. Phase 4 uses the isolated executor to establish what multicore Neura delivers before general-purpose threads are considered.
 
 ## 17. Documentation to update with the implementation
@@ -548,7 +554,7 @@ The first public concurrency release is phases 1 through 3, and its acceptance t
 
 ## 18. Open decisions
 
-These need a decision before the phase named. None is settled by this page.
+These need a decision before the phase named. Only the frame-storage row has been settled, for the runtime, in section 10.3; the others are open.
 
 | Area | Open | Before |
 | --- | --- | --- |
@@ -556,7 +562,7 @@ These need a decision before the phase named. None is settled by this page.
 | Immutable classes | A class whose fields are all constant and transferable could be transferable. It needs definite field initialization and a rule for `destroy` on a shared object ([Lifecycle](Status.md#open-language-decisions)). | 2 |
 | Scope in initialization | Whether top-level statements and initializers may contain a `scope`, given that globals are still being initialized. Proposed: no. | 1 |
 | Effect summary precision | The union rule for dynamic calls may reject too much real code. Measure on the standard library before fixing it. | 1 |
-| Frame storage | Whether live frames across all tasks need their own run-wide limit or count toward heap cells. | 1 |
+| Frame storage | Whether live frames across all tasks need their own run-wide limit or count toward heap cells. Decided for the runtime: they count toward heap cells in images with a `TRNS` table (section 10.3). | 1 |
 | Blocking file I/O | When file services become overlapping, and whether a long synchronous file call needs a watchdog. | 3 |
 | Native interop | A concurrency contract for native calls, upcalls, and callbacks, lifting C15. | After 4 |
 | General parallel scheduler | Running tasks on several cores. It needs the ownership and aliasing rules that are open today. | After 4 |

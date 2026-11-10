@@ -3,6 +3,8 @@
 #include "nvr/names.hpp"
 
 #include <algorithm>
+#include <array>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -11,6 +13,9 @@ namespace neura::decompiler {
 namespace {
 
 using nvr::absent;
+
+using ScopeLocation = std::pair<std::uint32_t, std::size_t>;
+using ScopePairs = std::map<const nvr::Exit*, ScopeLocation>;
 
 std::string type_name(const nvr::Image& image, std::uint32_t index) {
     if (index >= image.types.size()) {
@@ -136,7 +141,7 @@ public:
     }
 
     std::string exit(std::uint32_t function, const nvr::Exit& exit, const LiftedBlock& lifted,
-                     const std::vector<std::string>& inputs) const {
+                     const std::vector<std::string>& inputs, const ScopePairs& scopes) const {
         std::string assignments;
         for (const auto& assignment : exit.assignments) {
             assignments += (assignments.empty() ? "" : ", ") + slot(function, assignment.slot) + " := " +
@@ -149,11 +154,12 @@ public:
             return slot_index == absent ? std::string() : slot(function, slot_index) + " := ";
         };
         const auto& args = exit.arguments;
+        const std::string poll = exit.poll ? "poll [decoded]; " : "";
         switch (exit.kind) {
         case nvr::ExitKind::Continue:
-            return with("goto b" + std::to_string(exit.resume));
+            return with(poll + "goto b" + std::to_string(exit.resume));
         case nvr::ExitKind::Call:
-            return with(result(exit.result_slot) + "call " + function_name(exit.target) + "(" +
+            return with(poll + result(exit.result_slot) + "call " + function_name(exit.target) + "(" +
                         values(function, args, lifted, inputs) + "); goto b" + std::to_string(exit.resume));
         case nvr::ExitKind::Return:
             return with(args.empty() ? "return" : "return " + value(function, args[0], lifted, inputs));
@@ -161,6 +167,31 @@ public:
             return with("trap " + std::to_string(exit.reason) + " (" + reason_name(exit.reason) + ")");
         case nvr::ExitKind::MessageTrap:
             return with(std::string("trap 3 (") + reason_name(3) + ") " + value(function, args.at(0), lifted, inputs));
+        case nvr::ExitKind::Scheduler: {
+            std::string operation;
+            switch (exit.scheduler) {
+            case nvr::SchedulerOp::ScopeEnter: operation = "scope-enter"; break;
+            case nvr::SchedulerOp::ScopeExit: operation = "scope-exit"; break;
+            case nvr::SchedulerOp::Spawn:
+                operation = "spawn " + function_name(exit.target) + "(" + values(function, args, lifted, inputs) + ")";
+                break;
+            case nvr::SchedulerOp::Join: operation = "join(" + values(function, args, lifted, inputs) + ")"; break;
+            case nvr::SchedulerOp::IsFinished:
+                operation = "is-finished(" + values(function, args, lifted, inputs) + ")";
+                break;
+            }
+            operation += " [decoded]";
+            if (exit.scheduler == nvr::SchedulerOp::ScopeEnter || exit.scheduler == nvr::SchedulerOp::ScopeExit) {
+                if (const auto pair = scopes.find(&exit); pair != scopes.end()) {
+                    const auto [block, position] = pair->second;
+                    operation += " [reconstructed: scope b" + std::to_string(block) + ".e" +
+                                 std::to_string(position) + "]";
+                } else {
+                    operation += " [scope pair unresolved]";
+                }
+            }
+            return with(result(exit.result_slot) + operation + "; goto b" + std::to_string(exit.resume));
+        }
         case nvr::ExitKind::Host: {
             const auto& import = image_.imports.at(exit.target);
             return with(result(exit.result_slot) + "host " + quoted(import.name) + " v" +
@@ -242,18 +273,68 @@ private:
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::string> locations_;
 };
 
+std::array<std::uint32_t, 2> successors(const nvr::Exit& exit) {
+    switch (exit.kind) {
+    case nvr::ExitKind::Continue:
+    case nvr::ExitKind::Call:
+    case nvr::ExitKind::State:
+    case nvr::ExitKind::Scheduler: return {exit.resume, absent};
+    case nvr::ExitKind::Host: return {exit.resume, exit.error_resume};
+    default: return {absent, absent};
+    }
+}
+
 std::vector<std::uint32_t> successors(const nvr::Block& block) {
     std::vector<std::uint32_t> result;
     for (const auto& exit : block.exits) {
-        switch (exit.kind) {
-        case nvr::ExitKind::Continue:
-        case nvr::ExitKind::Call:
-        case nvr::ExitKind::State: result.push_back(exit.resume); break;
-        case nvr::ExitKind::Host:
-            result.push_back(exit.resume);
-            result.push_back(exit.error_resume);
-            break;
-        default: break;
+        for (const auto next : successors(exit)) {
+            if (next != absent) result.push_back(next);
+        }
+    }
+    return result;
+}
+
+// Pair markers only if the incoming paths to each reachable block agree
+// on the full stack of scope entries in this function.
+ScopePairs pair_scopes(const nvr::Function& function) {
+    constexpr auto unvisited = std::numeric_limits<std::size_t>::max();
+    struct ScopeFrame {
+        std::size_t parent = 0;
+        ScopeLocation entry{};
+    };
+    std::vector<ScopeFrame> stack(1);
+    std::vector<std::size_t> incoming(function.blocks.size(), unvisited);
+    incoming[0] = 0;
+    std::vector<std::uint32_t> pending{0};
+    ScopePairs result;
+    for (std::size_t cursor = 0; cursor < pending.size(); ++cursor) {
+        const auto b = pending[cursor];
+        const auto& block = function.blocks[b];
+        for (std::size_t e = 0; e < block.exits.size(); ++e) {
+            const auto& exit = block.exits[e];
+            auto scope = incoming[b];
+            if (exit.kind == nvr::ExitKind::Scheduler && exit.scheduler == nvr::SchedulerOp::ScopeEnter) {
+                stack.push_back({scope, {b, e}});
+                scope = stack.size() - 1;
+            } else if (exit.kind == nvr::ExitKind::Scheduler && exit.scheduler == nvr::SchedulerOp::ScopeExit) {
+                if (scope == 0) return {};
+                const auto& frame = stack[scope];
+                const auto [enter_block, enter_exit] = frame.entry;
+                result[&function.blocks[enter_block].exits[enter_exit]] = frame.entry;
+                result[&exit] = frame.entry;
+                scope = frame.parent;
+            } else if (exit.kind == nvr::ExitKind::Return && scope != 0) {
+                return {};
+            }
+            for (const auto next : successors(exit)) {
+                if (next == absent) continue;
+                if (incoming[next] == unvisited) {
+                    incoming[next] = scope;
+                    pending.push_back(next);
+                } else if (incoming[next] != scope) {
+                    return {};
+                }
+            }
         }
     }
     return result;
@@ -379,6 +460,11 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
             << " bytes  [opaque: native code is not lifted]\n";
         for (const auto& symbol : library.symbols) out << "  native symbol " << quoted(symbol) << "\n";
     }
+    if (image.transferable_layouts) {
+        out << "transferable layouts [decoded]";
+        for (const auto layout : *image.transferable_layouts) out << " L" << layout;
+        out << "\n";
+    }
     for (std::uint32_t i = 0; i < image.layouts.size(); ++i) {
         const auto& layout = image.layouts[i];
         out << "layout L" << i;
@@ -422,6 +508,7 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
         }
         out << "\n";
         const auto headers = loops(function);
+        const auto scopes = image.transferable_layouts ? pair_scopes(function) : ScopePairs{};
         for (std::uint32_t b = 0; b < function.blocks.size(); ++b) {
             const auto& block = function.blocks[b];
             const auto& lifted = result.blocks[f][b];
@@ -466,9 +553,9 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
                     for (std::size_t i = 0; i < layouts.size(); ++i) {
                         out << (i == 0 ? "" : ", ") << "L" << layouts[i];
                     }
-                    out << "}: " << printer.exit(f, block.exits[exit], lifted, inputs) << "\n";
+                    out << "}: " << printer.exit(f, block.exits[exit], lifted, inputs, scopes) << "\n";
                 }
-                out << "    otherwise: " << printer.exit(f, block.exits.back(), lifted, inputs) << "\n";
+                out << "    otherwise: " << printer.exit(f, block.exits.back(), lifted, inputs, scopes) << "\n";
                 continue;
             }
             if (lifted.condition && lifted.exit_when_true) {
@@ -480,8 +567,8 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
                 }
                 const auto taken = *lifted.exit_when_true;
                 out << "    if " << render(image, *lifted.condition, inputs) << " then "
-                    << printer.exit(f, *normal[taken], lifted, inputs) << "\n    else "
-                    << printer.exit(f, *normal[1 - taken], lifted, inputs) << "\n";
+                    << printer.exit(f, *normal[taken], lifted, inputs, scopes) << "\n    else "
+                    << printer.exit(f, *normal[1 - taken], lifted, inputs, scopes) << "\n";
                 continue;
             }
             for (std::size_t e = 0; e < block.exits.size(); ++e) {
@@ -491,7 +578,7 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
                 } else {
                     out << "    ";
                 }
-                out << printer.exit(f, exit, lifted, inputs) << "\n";
+                out << printer.exit(f, exit, lifted, inputs, scopes) << "\n";
             }
         }
     }

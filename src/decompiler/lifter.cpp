@@ -1245,6 +1245,12 @@ LiftedBlock lift_block(const nvr::Image& image, std::uint32_t function_index, st
         lifted.evidence = Evidence::None;
         return lifted;
     }
+    if (std::ranges::any_of(block.exits, [](const nvr::Exit& exit) {
+            return exit.poll || exit.kind == nvr::ExitKind::Scheduler;
+        })) {
+        lifted.evidence = Evidence::Circuit;
+        return lifted;
+    }
     if (lift_dispatch(image, block, lifted)) {
         return lifted;
     }

@@ -81,7 +81,7 @@ if(SUITE STREQUAL "build")
         build_error("${flag} cannot be applied to an image that is already built" --native "${flag}" hello.nvr)
     endforeach()
     configure_file("${TEST_DIR}/hello.nvr" "${TEST_DIR}/newer.nvr" COPYONLY)
-    string(ASCII 5 newer_minor)
+    string(ASCII 6 newer_minor)
     file(WRITE "${TEST_DIR}/minor" "${newer_minor}")
     execute_process(COMMAND dd of=newer.nvr bs=1 seek=6 conv=notrunc
                     INPUT_FILE "${TEST_DIR}/minor" WORKING_DIRECTORY "${TEST_DIR}" RESULT_VARIABLE patched
@@ -89,7 +89,26 @@ if(SUITE STREQUAL "build")
     if(NOT patched STREQUAL "0")
         message(FATAL_ERROR "could not write the newer image version fixture")
     endif()
-    build_error("--native: the image is NVR 1.5; this launcher runs up to 1.4" --native newer.nvr)
+    build_error("--native: the image is NVR 1.6; this launcher runs up to 1.5" --native newer.nvr)
+    success("${NEURA}" assemble "${tests}/scoped-tasks.nvra" -o tasks.nvr)
+    success("${NEURA}" build --native tasks.nvr -o tasks)
+    success("${NEURA}" inspect tasks -o extracted-tasks.nvr)
+    equal_files("${TEST_DIR}/tasks.nvr" "${TEST_DIR}/extracted-tasks.nvr")
+    invoke(tasks_default "${TEST_DIR}/tasks")
+    invoke(tasks_quantum "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--task-quantum 1 --no-gpu --gpu=off"
+        "${TEST_DIR}/tasks")
+    invoke(tasks_limit "${CMAKE_COMMAND}" -E env "NEURA_RUN_OPTIONS=--max-tasks 1" "${TEST_DIR}/tasks")
+    if(NOT tasks_default_status STREQUAL "0" OR NOT tasks_default_stdout STREQUAL "root\nchild\n" OR
+       NOT tasks_default_stderr STREQUAL "" OR
+       NOT tasks_quantum_status STREQUAL "0" OR NOT tasks_quantum_stdout STREQUAL "child\nroot\n" OR
+       NOT tasks_quantum_stderr STREQUAL "" OR
+       NOT tasks_limit_status STREQUAL "137" OR NOT tasks_limit_stdout STREQUAL "" OR
+       NOT tasks_limit_stderr MATCHES "trap: task limit exceeded")
+        message(FATAL_ERROR "unexpected scheduler launcher result\n"
+            "default: ${tasks_default_status}\n${tasks_default_stdout}${tasks_default_stderr}\n"
+            "quantum: ${tasks_quantum_status}\n${tasks_quantum_stdout}${tasks_quantum_stderr}\n"
+            "limit: ${tasks_limit_status}\n${tasks_limit_stdout}${tasks_limit_stderr}")
+    endif()
     success(truncate -s 4294967296 "${TEST_DIR}/oversize.nvr")
     build_error("native executable: image must be smaller than 4 GiB" --native oversize.nvr)
     file(REMOVE "${TEST_DIR}/oversize.nvr")
@@ -121,7 +140,7 @@ if(SUITE STREQUAL "build")
     equal_files("${TEST_DIR}/source" "${TEST_DIR}/again")
     invoke(inspect "${NEURA}" inspect source -o extracted.nvr)
     if(NOT inspect_status STREQUAL "0" OR NOT inspect_stderr STREQUAL "" OR
-       NOT inspect_stdout MATCHES "^native executable: source\nlauncher: neura development, [^,]+, default, runs NVR up to 1[.]4\ncapabilities: console, process exit\nlimits: steps 100000000, frames 10000, heap cells 67108864\nrun options: accepted\nimage: ${image_size} bytes, NVR 1[.]2, [0-9]+ graphs, source map present, native library absent\n$")
+       NOT inspect_stdout MATCHES "^native executable: source\nlauncher: neura development, [^,]+, default, runs NVR up to 1[.]5\ncapabilities: console, process exit\nlimits: steps 100000000, frames 10000, heap cells 67108864\nrun options: accepted\nimage: ${image_size} bytes, NVR 1[.]2, [0-9]+ graphs, source map present, native library absent\n$")
         message(FATAL_ERROR "unexpected inspect output\n${inspect_stdout}${inspect_stderr}")
     endif()
     equal_files("${TEST_DIR}/hello.nvr" "${TEST_DIR}/extracted.nvr")

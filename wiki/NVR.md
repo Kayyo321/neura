@@ -16,26 +16,26 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 
 | Field | Type | Value |
 | --- | --- | --- |
-| `CALB` | Callback records (1.4); present only when the image has callbacks | Yes, when present |
 | Magic | 4 bytes | ASCII `NEUR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0 or 1 |
+| Minor | u16 | 0 through 5 |
 | Graph profile | u32 | 1 for checked integer identity and ReLU graphs |
 | Section count | u32 | Number of directory records |
 | File size | u64 | Total size in bytes, including the header and directory |
 
 The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four printable ASCII characters and compare bytewise. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
 
-### Versions 1.0 through 1.4
+### Versions 1.0 through 1.5
 
-Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. The graph profile remains 1.
+Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. Minor version 5 adds scheduler exits, polls, and the `TRNS` transferable-layout table. The graph profile remains 1.
 
 - A writer emits the lowest minor version whose features the image uses. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
-- The loader accepts major version 1 with minor versions 0 through 4. A feature newer than the version declared by the image makes the image malformed.
+- The loader accepts major version 1 with minor versions 0 through 5. A feature newer than the version declared by the image makes the image malformed.
 - An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
 | --- | --- | --- |
+| `CALB` | Callback records (1.4); present only when the image has callbacks | Yes, when present |
 | `CONS` | Constant records | Yes |
 | `FUNC` | Function, frame, block, and exit records | Yes |
 | `GLOB` | Global slot declarations | Yes |
@@ -46,9 +46,10 @@ Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-versi
 | `NATV` | The embedded native library (1.4); present only when the image has C imports | Yes, when present |
 | `NAME` | Source names for tools (provenance; not interpreted by the loader) | Optional |
 | `SMAP` | Source locations for function blocks | Optional |
+| `TRNS` | Transferable layout indices (1.5) | Yes, for a scheduler exit or poll |
 | `TYPE` | Type records | Yes |
 
-Every section except `META` stores a vector of records. A required table with zero entries still carries a zero count. Readers must consume every byte in each recognized section.
+The listed sections other than `META` and `NATV` store vectors. A required table with zero entries still carries a zero count. Readers must consume every byte in each recognized section.
 
 ## Types, constants, and storage
 
@@ -97,8 +98,27 @@ An exit begins with `kind:u8, assignments:vector<Assignment>`. An assignment is 
 | Host call | 4 | `import:u32, arguments:vector<Value>, success_slot:u32 optional, success_block:u32, error_slot:u32 optional, error_block:u32` |
 | Trap | 5 | `reason:u32` |
 | Message trap (1.2) | 6 | `arguments:vector<Value>`, exactly one text value, implicit reason 3 |
+| Scheduler operation (1.5) | 7 | `operation:u8, target:u32, arguments:vector<Value>, result_slot:u32 optional, resume_block:u32` |
 
 Resume blocks belong to the current function. For every exit that produces a result (a call, a state operation, and both continuations of a host call), a void result requires an absent slot, and a nonvoid result requires a slot to which the result is assignable. Return values and arguments must be assignable to their declared types. A trap exit has no assignments. Reason codes 1 through 4 designate source arithmetic failure, source bounds failure, explicit program failure, and invalid dispatch. Reason 5 (1.1) designates a list modified during for-each. Other codes require a format revision. Loader and runtime faults have separate diagnostics.
+
+## Scheduler operations (1.5)
+
+Bit 7 of the exit tag marks a poll on a Continue or Call exit, giving tag bytes 128 and 129 with the usual record fields. Other exits reject that bit. The concurrency plan has lowering place these polls on loop back edges and calls; the current compiler emits none. A poll does not add a block.
+
+| Code | Operation | Target | Arguments | Result |
+| --- | --- | --- | --- | --- |
+| 0 | Scope enter | Zero | None | Void |
+| 1 | Scope exit | Zero | None | Void |
+| 2 | Spawn | Function index | Transferable values matching the target parameters | Unsigned 64-bit task ID |
+| 3 | Join | Zero | Unsigned 64-bit task ID | The child's result; void for a void child |
+| 4 | Is finished | Zero | Unsigned 64-bit task ID | Boolean |
+
+The loader checks operand and slot types and validates the resume block. A join's slot is in range when present, but the child's result type is not known until run time, so the scheduler applies the rule every other exit applies statically: the slot is absent exactly when the child's result type is void, and otherwise present and assignable from it. A mismatch is an invalid task operation. The scheduler also checks task IDs against live scope ownership. The unsigned 64-bit representation does not give task IDs a distinct static NVR type.
+
+The required `TRNS` section stores a `vector<u32>` of strictly ascending layout indices. It may be empty. Marked layouts have transferable fields and a marked parent if they have a parent. Booleans, integers, floating-point types, text, and bytes transfer. Object types transfer only when their layout is marked, and arrays and lists do not transfer. At a spawn, the scheduler checks the actual layout of every object reachable from a transferred argument through written fields: each must be marked, or the spawn is an invalid task operation. A field that has not been written is skipped; reading it later traps as an uninitialized field, as it would without tasks. An image with a typed `TRNS` section, scheduler exit, or poll cannot carry `CALB`, `NATV`, or `neura.ffi.*` imports. An optional raw `TRNS` tag in a pre-1.5 image stays opaque.
+
+Assembly uses `exit scheduler` followed by `scope-enter`, `scope-exit`, `spawn`, `join`, or `is-finished`, then the fields in record order. A poll appears after `exit continue` or `exit call`. The table appears as `transferable-layouts [ ... ]`. Decompilation labels these records as decoded. It pairs scope entries and exits when the incoming control-flow paths agree on the live scope stack and displays unresolved operations otherwise. Graphs with scheduler exits or polls can be shown as lanes without claiming lifted scheduling behavior.
 
 ## State operations
 

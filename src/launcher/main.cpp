@@ -70,6 +70,12 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy) {
                 std::min<std::uint64_t>(options.limits.max_frames, limit(flag)));
         } else if (flag == "--max-heap-cells") {
             options.limits.max_heap_cells = std::min(options.limits.max_heap_cells, limit(flag));
+        } else if (flag == "--max-tasks") {
+            options.limits.max_tasks = std::min(options.limits.max_tasks, limit(flag));
+        } else if (flag == "--task-quantum") {
+            options.limits.task_quantum = limit(flag);
+        } else if (flag == "--no-gpu" || flag == "--gpu=off") {
+            // Both options request the CPU mode this launcher already uses.
         } else if (flag == "--stats") {
             options.stats = true;
         } else if (flag == "--profile") {

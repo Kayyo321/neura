@@ -98,6 +98,8 @@ void usage(std::ostream& out) {
            "  --gpu-software           also accept software Vulkan implementations\n"
            "  --gpu-verify             check every GPU evaluation against the CPU\n"
            "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
+           "  --max-tasks N            bound the number of live tasks in a concurrent image\n"
+           "  --task-quantum N         polls per turn for a concurrent image\n"
            "\n"
            "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
            "  --c-include <dir>        search a directory for C headers\n"
@@ -365,6 +367,11 @@ Options read_options(int argc, char** argv) {
             options.output = fs::path(next());
         } else if (options.command == Command::Run && arg == "--profile") {
             options.limits.profile = true;
+        } else if (arg == "--max-tasks" || arg == "--task-quantum") {
+            if (!runs) throw std::runtime_error(std::string(arg) + " applies only to run and test");
+            const auto value = parse_limit(arg, next());
+            if (arg == "--max-tasks") options.limits.max_tasks = value;
+            else options.limits.task_quantum = value;
         } else if (runs && arg == "--stats") {
             options.stats = true;
         } else if (compiles && arg == "--c-include") {

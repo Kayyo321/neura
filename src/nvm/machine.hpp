@@ -35,6 +35,8 @@ struct RunLimits {
     // Evaluates graphs for this run, or nullptr for the reference evaluator.
     // The device must have been created for the image the run executes.
     GraphDevice* graph_device = nullptr;
+    std::uint64_t max_tasks = 65'536;
+    std::uint64_t task_quantum = 1'024;
 };
 
 enum class TrapKind {
@@ -59,6 +61,9 @@ enum class TrapKind {
     FrameLimit,
     HeapLimit,
     HandleLimit,
+    TaskLimit,
+    InvalidTaskOperation,
+    Deadlock,
 };
 
 struct Trap {
@@ -135,6 +140,8 @@ public:
     // exit. A host request suspends the run until complete() supplies its
     // response. Advancing a finished run returns its final event again.
     Event advance();
+    // Snapshot of scheduler state between block steps. Empty for a serial image.
+    std::string dump_tasks() const;
 
     struct GraphStep {
         std::uint32_t graph = 0;

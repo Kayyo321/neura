@@ -299,6 +299,7 @@ if(BUILD_TESTING)
     add_executable(neura_backend_tests
         tests/backend/assembler.cpp
         tests/backend/circuit_tests.cpp
+        tests/backend/concurrency_tests.cpp
         tests/backend/conversion_tests.cpp
     tests/backend/decompiler_tests.cpp
         tests/backend/fleet_tests.cpp
@@ -355,7 +356,7 @@ if(BUILD_TESTING)
         set_tests_properties(gpu-device gpu-cli PROPERTIES SKIP_RETURN_CODE 77 LABELS gpu TIMEOUT 1800)
     endif()
 
-    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement)
+    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement concurrency)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()

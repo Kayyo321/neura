@@ -17,7 +17,7 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 4;
+inline constexpr std::uint16_t minor_version = 5;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -104,8 +104,16 @@ struct Assignment {
 enum class ExitKind : std::uint8_t {
     Continue = 0, Call = 1, Return = 2, State = 3, Host = 4, Trap = 5,
     // NVR 1.2. Program failure with one text argument.
-    MessageTrap = 6
+    MessageTrap = 6,
+    // NVR 1.5.
+    Scheduler = 7
 };
+
+inline constexpr std::uint8_t scheduler_poll_bit = 0x80;
+
+enum class SchedulerOp : std::uint8_t { ScopeEnter = 0, ScopeExit = 1, Spawn = 2, Join = 3, IsFinished = 4 };
+
+inline constexpr std::uint8_t scheduler_op_count = 5;
 
 enum class StateOp : std::uint8_t {
     AllocateObject = 0, ReadTag = 1, ReadField = 2, WriteField = 3, FreeObject = 4,
@@ -132,18 +140,20 @@ enum class TrapReason : std::uint32_t {
 // default values; the writer emits only the fields listed for the kind.
 struct Exit {
     ExitKind kind = ExitKind::Continue;
+    bool poll = false;
     std::vector<Assignment> assignments;
-    // Call: function index. Host: import index.
+    SchedulerOp scheduler = SchedulerOp::ScopeEnter;
+    // Call and Spawn: function index. Host: import index.
     std::uint32_t target = 0;
     // State operation code and immediate.
     StateOp operation = StateOp::AllocateObject;
     std::uint32_t immediate = 0;
-    // Call, State, and Host arguments. Return holds its value here: one value
+    // Call, State, Host, and Scheduler arguments. Return holds its value here: one value
     // for a nonvoid function and none otherwise. MessageTrap has one text.
     std::vector<Value> arguments;
-    // Call and State result slot, Host success slot.
+    // Call, State, and Scheduler result slot, Host success slot.
     std::uint32_t result_slot = absent;
-    // Continue, Call, and State resume block, Host success block.
+    // Continue, Call, State, and Scheduler resume block, Host success block.
     std::uint32_t resume = 0;
     // Host error slot and block.
     std::uint32_t error_slot = absent;
@@ -238,6 +248,8 @@ struct Image {
     // NVR 1.4: the CALB and NATV sections, present only when used.
     std::vector<Callback> callbacks;
     std::optional<NativeLibrary> native_library;
+    // NVR 1.5. Required TRNS table for scheduler exits and polls.
+    std::optional<std::vector<std::uint32_t>> transferable_layouts;
     // The optional SMAP section. Absent when the image carries no source map.
     std::optional<std::vector<SourceLocation>> source_map;
     // Unknown optional sections in ascending tag order.

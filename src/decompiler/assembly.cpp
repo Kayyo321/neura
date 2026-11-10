@@ -17,8 +17,11 @@ using nvr::absent;
 
 constexpr std::array<std::string_view, 11> type_kinds{"void", "bool", "unsigned", "signed", "text", "bytes",
                                                        "object", "array", "list", "float", "bfloat"};
-constexpr std::array<std::string_view, 7> exit_kinds{
-    "continue", "call", "return", "state", "host", "trap", "message-trap",
+constexpr std::array<std::string_view, 8> exit_kinds{
+    "continue", "call", "return", "state", "host", "trap", "message-trap", "scheduler",
+};
+constexpr std::array<std::string_view, nvr::scheduler_op_count> scheduler_ops{
+    "scope-enter", "scope-exit", "spawn", "join", "is-finished",
 };
 constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "allocate-object", "read-tag",         "read-field",    "write-field",    "free-object",
@@ -404,6 +407,7 @@ std::string disassemble(const nvr::Image& image) {
                 << " inputs " << values(block.inputs) << "\n";
             for (const auto& exit : block.exits) {
                 out << "    exit " << exit_kinds.at(static_cast<std::size_t>(exit.kind));
+                if (exit.poll) out << " poll";
                 switch (exit.kind) {
                 case nvr::ExitKind::Continue:
                     out << " resume " << exit.resume;
@@ -431,6 +435,11 @@ std::string disassemble(const nvr::Image& image) {
                 case nvr::ExitKind::MessageTrap:
                     out << " arguments " << values(exit.arguments);
                     break;
+                case nvr::ExitKind::Scheduler:
+                    out << " " << scheduler_ops.at(static_cast<std::size_t>(exit.scheduler))
+                        << " target " << exit.target << " arguments " << values(exit.arguments) << " result "
+                        << index_or_absent(exit.result_slot) << " resume " << exit.resume;
+                    break;
                 }
                 out << " assign "
                     << list(exit.assignments, [](const nvr::Assignment& assignment) {
@@ -454,6 +463,9 @@ std::string disassemble(const nvr::Image& image) {
         for (const auto& symbol : library.symbols) {
             out << "native-symbol " << quoted(symbol) << "\n";
         }
+    }
+    if (image.transferable_layouts) {
+        out << "\ntransferable-layouts " << indices(*image.transferable_layouts) << "\n";
     }
     if (image.source_map) {
         out << "\nsource-map\n";
@@ -640,6 +652,16 @@ nvr::Image assemble(std::string_view text) {
             }
             nvr::Exit exit;
             exit.kind = static_cast<nvr::ExitKind>(in.choice(exit_kinds, "exit kind"));
+            if (in.peek("poll")) {
+                if (exit.kind != nvr::ExitKind::Continue && exit.kind != nvr::ExitKind::Call) {
+                    in.error("the poll flag is valid only on continue and call exits");
+                }
+                in.keyword("poll");
+                exit.poll = true;
+            }
+            if (image.minor_version < 5 && (exit.poll || exit.kind == nvr::ExitKind::Scheduler)) {
+                in.error("scheduler exits and polls require NVR 1.5");
+            }
             const auto arguments = [&] {
                 in.keyword("arguments");
                 exit.arguments = in.list([&] { return in.value(); });
@@ -692,6 +714,14 @@ nvr::Image assemble(std::string_view text) {
             case nvr::ExitKind::MessageTrap:
                 arguments();
                 break;
+            case nvr::ExitKind::Scheduler:
+                exit.scheduler = static_cast<nvr::SchedulerOp>(in.choice(scheduler_ops, "scheduler operation"));
+                in.keyword("target");
+                exit.target = in.index("scheduler target");
+                arguments();
+                result();
+                resume();
+                break;
             }
             exit.assignments = assignments(in);
             image.functions.back().blocks.back().exits.push_back(std::move(exit));
@@ -717,6 +747,10 @@ nvr::Image assemble(std::string_view text) {
                 in.error("a native symbol before 'native-library'");
             }
             image.native_library->symbols.push_back(in.string("native symbol"));
+        } else if (record == "transferable-layouts") {
+            if (image.minor_version < 5) in.error("transferable layouts require NVR 1.5");
+            if (image.transferable_layouts) in.error("a second transferable layout list");
+            image.transferable_layouts = in.indices("transferable layout");
         } else if (record == "source-map") {
             if (image.source_map) {
                 in.error("a second source map");

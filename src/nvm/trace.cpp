@@ -2,6 +2,8 @@
 
 #include "trace_file.hpp"
 
+#include <stdexcept>
+
 namespace neura::nvm {
 namespace {
 
@@ -169,6 +171,7 @@ private:
 
 Trace record(const nvr::Image& image, const Bindings& bindings, std::span<const std::string> arguments,
              RunLimits limits) {
+    if (image.transferable_layouts) throw std::invalid_argument("recording tasks requires a concurrent trace version");
     Execution execution(image, arguments, limits);
     Recorder recorder(execution, bindings);
     recorder.set_image(image);
@@ -190,6 +193,7 @@ Trace record(const nvr::Image& image, const Bindings& bindings, std::span<const 
 
 Replay replay(const nvr::Image& image, const Trace& expected, std::span<const std::string> arguments,
               RunLimits limits, const std::function<void(const TraceEntry&)>& answered) {
+    if (image.transferable_layouts) throw std::invalid_argument("replaying tasks requires a concurrent trace version");
     Execution execution(image, arguments, limits);
     Replayer replayer(image, execution, answered);
     Replay result;
