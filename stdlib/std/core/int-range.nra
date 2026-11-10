@@ -10,7 +10,7 @@ export let IntRange = module (
         let limit: int;
         let increment: int;
 
-        export let init = func(start_value: int, end_value: int, step_value: int) -> void {
+        export let init = func(start_value: int, end_value: int, step_value: int) {
             if (step_value == 0) {
                 trap_with_message("invalid argument: zero step");
             }
@@ -45,9 +45,7 @@ export let IntRange = module (
 
         // The number of values. Computed in int64; a range with more than
         // Int32.Max values traps (reason 1) in the conversion to int.
-        export let size = func() -> int {
-            return count() as int;
-        };
+        export let size = func -> int => count() as int;
 
         export let is_empty = func -> bool => (increment > 0) ? first >= limit : first <= limit;
 
@@ -70,7 +68,7 @@ export let IntRange = module (
         };
 
         // A new built-in list of the values in order.
-        export let to_list = func() -> int[list] {
+        export let to_list = func -> int[list] {
             let values: int[list] = [];
             let current = first as int64;
             let stop = limit as int64;
@@ -90,7 +88,7 @@ export let IntRange = module (
         };
 
         // The exact number of values as an int64.
-        let count = func() -> int64 {
+        let count = func -> int64 {
             if (is_empty()) {
                 return 0;
             }
@@ -105,12 +103,9 @@ export let IntRange = module (
     );
 
     // The values from `start` up to, but not including, `end`.
-    export let of = func(start: int, end: int) -> IntRange {
-        return new IntRange(start, end, 1);
-    };
+    export let of = func(start: int, end: int) -> IntRange => new IntRange(start, end, 1);
 
     // A zero step traps with "invalid argument: zero step".
-    export let stepped = func(start: int, end: int, step: int) -> IntRange {
-        return new IntRange(start, end, step);
-    };
+    export let stepped = func(start: int, end: int, step: int) -> IntRange =>
+        new IntRange(start, end, step);
 );

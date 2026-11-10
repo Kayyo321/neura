@@ -4,12 +4,10 @@ export let Cell = module (
     export let Cell = class<T> (
         export let value: T;
 
-        export let init = func(initial: T) -> void {
+        export let init = func(initial: T) {
             value = initial;
         };
     );
 
-    export let of = func<T>(value: T) -> Cell<T> {
-        return new Cell<T>(value);
-    };
+    export let of = func<T>(value: T) -> Cell<T> => new Cell<T>(value);
 );

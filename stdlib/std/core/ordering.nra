@@ -14,26 +14,14 @@ export let Ordering = module (
     };
 
     // `first` unless it is Equal, for comparing by several keys.
-    export let then = func(first: Ordering, second: Ordering) -> Ordering {
-        if (first == Ordering.Equal) {
-            return second;
-        }
-        return first;
-    };
+    export let then = func(first: Ordering, second: Ordering) -> Ordering =>
+        first == Ordering.Equal ? second : first;
 
-    export let is_less = func(o: Ordering) -> bool {
-        return o == Ordering.Less;
-    };
+    export let is_less = func(o: Ordering) -> bool => o == Ordering.Less;
 
-    export let is_at_most = func(o: Ordering) -> bool {
-        return o != Ordering.Greater;
-    };
+    export let is_at_most = func(o: Ordering) -> bool => o != Ordering.Greater;
 
-    export let is_greater = func(o: Ordering) -> bool {
-        return o == Ordering.Greater;
-    };
+    export let is_greater = func(o: Ordering) -> bool => o == Ordering.Greater;
 
-    export let is_at_least = func(o: Ordering) -> bool {
-        return o != Ordering.Less;
-    };
+    export let is_at_least = func(o: Ordering) -> bool => o != Ordering.Less;
 );

@@ -1,30 +1,30 @@
-let ordering = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Ordering;
 
 // Comparator combinators (Stdlib.md section 5.3). A comparator is a native
 // function value of type (T, T) -> Ordering that defines a total order.
 export let Comparators = module (
     // The opposite order of `c`.
-    export let reversed = func<T>(c: func(T, T) -> ordering.Ordering) -> func(T, T) -> ordering.Ordering {
-        return func(a: T, b: T) -> ordering.Ordering {
-            return ordering.reverse(c(a, b));
+    export let reversed = func<T>(c: func(T, T) -> Ordering) -> func(T, T) -> Ordering {
+        return func(a: T, b: T) -> Ordering {
+            return reverse(c(a, b));
         };
     };
 
     // Orders values by the keys that `key` extracts, compared with `c`.
     // `key` runs once per operand on each comparison.
-    export let by_key = func<T, K>(key: func(T) -> K, c: func(K, K) -> ordering.Ordering)
-        -> func(T, T) -> ordering.Ordering {
-        return func(a: T, b: T) -> ordering.Ordering {
+    export let by_key = func<T, K>(key: func(T) -> K, c: func(K, K) -> Ordering)
+        -> func(T, T) -> Ordering {
+        return func(a: T, b: T) -> Ordering {
             return c(key(a), key(b));
         };
     };
 
     // `first`, and `second` only where `first` finds the values equal.
-    export let then = func<T>(first: func(T, T) -> ordering.Ordering, second: func(T, T) -> ordering.Ordering)
-        -> func(T, T) -> ordering.Ordering {
-        return func(a: T, b: T) -> ordering.Ordering {
+    export let then = func<T>(first: func(T, T) -> Ordering, second: func(T, T) -> Ordering)
+        -> func(T, T) -> Ordering {
+        return func(a: T, b: T) -> Ordering {
             let order = first(a, b);
-            if (order != ordering.Ordering.Equal) {
+            if (order != Ordering.Equal) {
                 return order;
             }
             return second(a, b);

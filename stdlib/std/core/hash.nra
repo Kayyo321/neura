@@ -8,25 +8,15 @@ export let Hash = module (
     };
 
     // Mixes the high half into the low half before a table masks the hash.
-    export let spread = func(hash: uint32) -> uint32 {
-        return hash ^ (hash >> 16);
-    };
+    export let spread = func(hash: uint32) -> uint32 => hash ^ (hash >> 16);
 
     // 1231 for true and 1237 for false.
-    export let of_bool = func(value: bool) -> uint32 {
-        if (value) {
-            return 1231;
-        }
-        return 1237;
-    };
+    export let of_bool = func(value: bool) -> uint32 => value ? 1231 : 1237;
 
     // The low 32 bits exclusive-or the high 32 bits of the two's complement
     // pattern.
-    export let of_int64 = func(value: int64) -> uint32 {
-        return value.hash_code();
-    };
+    export let of_int64 = func(value: int64) -> uint32 => value.hash_code();
 
-    export let of_uint64 = func(value: uint64) -> uint32 {
-        return ((value & 4294967295) ^ (value >> 32)) as uint32;
-    };
+    export let of_uint64 = func(value: uint64) -> uint32 =>
+        ((value & 4294967295) ^ (value >> 32)) as uint32;
 );

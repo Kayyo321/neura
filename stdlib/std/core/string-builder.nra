@@ -1,4 +1,4 @@
-let cell = import:Std.Core.Cell;
+let.promote cell = import:Std.Core.Cell;
 
 // Accumulates UTF-8 text (Stdlib.md section 8.2). The layout is one built-in
 // uint8 list that always holds valid UTF-8: every append adds whole
@@ -13,16 +13,16 @@ export let StringBuilder = module (
 
     export let StringBuilder = class (
         let bytes: uint8[list] = [];
-        let link: cell.Cell<StringBuilder>;
+        let link: Cell<StringBuilder>;
 
-        export let init = func(seal: Seal, owner: cell.Cell<StringBuilder>) -> void {
+        export let init = func(seal: Seal, owner: Cell<StringBuilder>) {
             link = owner;
         };
 
         // Appends the bytes of `s` and returns this builder.
         export let append = func(s: string) -> StringBuilder {
             let count = s.byte_length;
-            for (let i = 0; i < count; i = i + 1) {
+            for (let i = 0; i < count; i++) {
                 bytes.append(s.byte_at(i));
             }
             return link.value;
@@ -67,7 +67,7 @@ export let StringBuilder = module (
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
             }
-            for (let i = 0; i < count; i = i + 1) {
+            for (let i = 0; i < count; i++) {
                 append(s);
             }
             return link.value;
@@ -75,17 +75,11 @@ export let StringBuilder = module (
 
         // The scalar appends use the built-in decimal and float text
         // (Stdlib.md sections 5.2 and 7.5).
-        export let append_int = func(v: int64) -> StringBuilder {
-            return append(v.to_string());
-        };
+        export let append_int = func(v: int64) -> StringBuilder => append(v.to_string());
 
-        export let append_uint = func(v: uint64) -> StringBuilder {
-            return append(v.to_string());
-        };
+        export let append_uint = func(v: uint64) -> StringBuilder => append(v.to_string());
 
-        export let append_float = func(v: float64) -> StringBuilder {
-            return append(v.to_string());
-        };
+        export let append_float = func(v: float64) -> StringBuilder => append(v.to_string());
 
         export let append_bool = func(v: bool) -> StringBuilder {
             if (v) {
@@ -95,21 +89,15 @@ export let StringBuilder = module (
         };
 
         // Appends `value.to_string()`.
-        export let append_value = func<T>(value: T) -> StringBuilder {
-            return append(value.to_string());
-        };
+        export let append_value = func<T>(value: T) -> StringBuilder => append(value.to_string());
 
-        export let byte_length = func() -> int {
-            return bytes.length;
-        };
+        export let byte_length = func -> int => bytes.length;
 
-        export let is_empty = func() -> bool {
-            return bytes.length == 0;
-        };
+        export let is_empty = func -> bool => bytes.length == 0;
 
         // Keeps the first `new_length` bytes. The length must be between 0
         // and the current byte length and fall on a character boundary.
-        export let truncate = func(new_length: int) -> void {
+        export let truncate = func(new_length: int) {
             let length = bytes.length;
             if (new_length < 0 || new_length > length) {
                 trap_with_message("invalid argument: byte length out of range");
@@ -124,12 +112,12 @@ export let StringBuilder = module (
                 bytes = copy_prefix(new_length);
                 return;
             }
-            for (let last = length - 1; last >= new_length; last = last - 1) {
+            for (let last = length - 1; last >= new_length; last--) {
                 bytes.remove_at(last);
             }
         };
 
-        export let clear = func() -> void {
+        export let clear = func {
             bytes = [];
         };
 
@@ -145,7 +133,7 @@ export let StringBuilder = module (
         export let.override hash_code = func -> uint32 => bytes.hash_code();
 
         // The accumulated text. The builder stays usable.
-        export let.override to_string = func() -> string {
+        export let.override to_string = func -> string {
             let [valid, text] = string.from_utf8(bytes);
             if (!valid) {
                 trap_with_message("invalid state: string builder holds invalid UTF-8");
@@ -155,7 +143,7 @@ export let StringBuilder = module (
 
         let copy_prefix = func(count: int) -> uint8[list] {
             let kept: uint8[list] = [];
-            for (let i = 0; i < count; i = i + 1) {
+            for (let i = 0; i < count; i++) {
                 kept.append(bytes[i]);
             }
             return kept;
@@ -163,7 +151,7 @@ export let StringBuilder = module (
     );
 
     // A new, empty builder.
-    export let create = func() -> StringBuilder {
+    export let create = func -> StringBuilder {
         let owner = cell.of<StringBuilder>(nil);
         let builder = new StringBuilder(Seal.Token, owner);
         owner.value = builder;

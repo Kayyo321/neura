@@ -1,9 +1,9 @@
-let ordering = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Ordering;
 
 // Natural order for value classes such as BigInteger, Duration, and Path.
 // Sorted collections never require it: they always take a comparator.
 export let Comparable = module (
     export let Comparable = interface<T> (
-        let compare_to = func(other: T) -> ordering.Ordering;
+        let compare_to = func(other: T) -> Ordering;
     );
 );

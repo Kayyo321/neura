@@ -1,7 +1,7 @@
 // The library's single trap entry point (Stdlib.md section 5.1). A trap ends
 // the run with reason 3 and the message; nothing can observe or recover it.
 export let Failure = module (
-    export let trap = func(message: string) -> void {
+    export let trap = func(message: string) {
         trap_with_message(message);
     };
 );
