@@ -416,4 +416,14 @@ if(UNIX)
     must("hello" run hello.nvr)
 endif()
 
+# A deadline stops a task that never parks and is the only one that can run.
+# A step limit bounds the run in case the deadline is never seen.
+foreach(quantum IN ITEMS 1 1024)
+    must("busy-deadline" build "${SOURCE_DIR}/tests/concurrency/busy-deadline.nra" -o busy-deadline.nvr)
+    neura(busy run --max-steps 2000000000 --task-quantum ${quantum} busy-deadline.nvr)
+    if(NOT busy_status STREQUAL "0" OR NOT busy_stdout STREQUAL "busy task stopped: true\n" OR NOT busy_stderr STREQUAL "")
+        message(FATAL_ERROR "busy-deadline, quantum ${quantum}: status ${busy_status}\n${busy_stdout}\n${busy_stderr}")
+    endif()
+endforeach()
+
 message(STATUS "concurrency programs: ${fixture_count} fixtures, ${compared} quantum comparisons")

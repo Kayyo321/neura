@@ -24,8 +24,15 @@ std::vector<fs::path> sorted_sources(const fs::path& directory) {
 
 std::vector<ConcurrencyFixture> concurrency_fixtures(const Environment& environment) {
     std::vector<ConcurrencyFixture> fixtures;
-    for (const auto& file : sorted_sources(environment.source_dir / "tests" / "concurrency" / "programs")) {
-        fixtures.push_back({"programs/" + file.stem().string(), file, true});
+    // The reference evaluator models the phase 1 operations: scopes, spawn,
+    // join, and is_finished. The programs that use channels, select,
+    // cancellation, timers, or the Std.Concurrent helpers are compared
+    // between optimized and unoptimized builds on the NVM instead
+    // (tests/concurrency/programs.cmake).
+    for (const char* name : {"child-exit", "child-trap", "detached", "fan-out", "task-limit", "values"}) {
+        const auto file = environment.source_dir / "tests" / "concurrency" / "programs" / (std::string(name) + ".nra");
+        check(fs::is_regular_file(file), std::string("missing concurrency fixture ") + name);
+        fixtures.push_back({std::string("programs/") + name, fs::canonical(file), true});
     }
     for (const auto& file : sorted_sources(environment.fixtures() / "concurrency")) {
         fixtures.push_back({"ir/" + file.stem().string(), file, false});

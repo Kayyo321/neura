@@ -65,7 +65,7 @@ function(run_all name)
     endif()
 
     # No capability at all: the replay answers every request from the trace.
-    must("${name}" run --replay "${name}.trace" "${name}.nvr")
+    must("${name}" run --deny-all --replay "${name}.trace" "${name}.nvr")
     if(NOT must_stdout STREQUAL expected OR NOT must_stderr STREQUAL "")
         message(FATAL_ERROR "${name}: the replay printed\n${must_stdout}\nexpected\n${expected}\nstandard error: ${must_stderr}")
     endif()
@@ -92,9 +92,9 @@ if(NOT trace MATCHES "\nrequest neura[.]net[.]accept 2 \\[[0-9]+\\] task [0-9]+ 
 endif()
 
 # The same program without the capability fails loudly: nothing is served.
-neura(denied run echo.nvr)
+neura(denied run --deny-net echo.nvr)
 if(NOT denied_stdout MATCHES "heard: <no port>" OR denied_stdout MATCHES "hello from client")
-    message(FATAL_ERROR "echo: the run without --allow-net should serve nothing\n${denied_stdout}")
+    message(FATAL_ERROR "echo: the run with --deny-net should serve nothing\n${denied_stdout}")
 endif()
 
 # A trace that records other bytes than the replayed program writes diverges,

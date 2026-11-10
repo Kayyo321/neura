@@ -1364,7 +1364,12 @@ private:
     void poll() {
         serve_dump_request();
         if (++scheduler_->polls >= limits_.task_quantum) {
-            if (scheduler_->runnable.empty()) scheduler_->polls = 0;
+            // A task that is alone keeps running, unless a deadline, a timer,
+            // or a host request is outstanding: then the turn ends so that
+            // the driver can read the clock and deliver completions. Without
+            // that, a deadline could never stop a task that does not park.
+            const bool external = !scheduler_->deadlines.empty() || !scheduler_->requests.empty();
+            if (scheduler_->runnable.empty() && !external) scheduler_->polls = 0;
             else park(TaskState::Runnable);
         }
     }
