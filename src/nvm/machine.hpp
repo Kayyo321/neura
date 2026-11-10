@@ -408,6 +408,10 @@ public:
     virtual std::int64_t now() = 0;
     // Returns once the clock reads at least `deadline`.
     virtual void wait_until(std::int64_t deadline) = 0;
+    // Whether time passes only when wait_until moves it (virtual time, which
+    // never blocks). A driver then checks descriptors without blocking and
+    // moves the clock to the earliest deadline instead of sleeping.
+    virtual bool virtual_time() const { return false; }
 };
 
 // The host's steady clock; wait_until sleeps.
@@ -417,9 +421,13 @@ public:
     void wait_until(std::int64_t deadline) override;
 };
 
-// Runs `image` to completion, issuing each host request to its bound service
-// and waiting for the response before continuing. Timers and deadlines of an
-// image with tasks follow `clock`, or the steady clock when it is null.
+// Runs `image` to completion, issuing each host request to its bound service.
+// A service answers at once, except that in an image with tasks a service
+// that overlaps (HostService::overlapping) is started without blocking, and
+// the other tasks run until it can complete (src/nvm/driver.hpp). Timers and
+// deadlines of an image with tasks follow `clock`, or the steady clock when
+// it is null. An image without tasks is served exactly as before: every
+// request is answered before the run continues.
 RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const std::string> arguments,
               RunLimits limits = {}, TaskClock* clock = nullptr);
 

@@ -23,6 +23,7 @@ neura_target_defaults(neura_nvr)
 # The Neura Virtual Machine. It depends only on the image format, so a
 # runtime-only distribution needs no compiler code.
 set(neura_nvm_sources
+    src/nvm/driver.cpp
     src/nvm/ffi_provider.cpp
     src/nvm/fleet.cpp
     src/nvm/fs_provider.cpp
@@ -280,6 +281,14 @@ if(BUILD_TESTING)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-programs-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/programs.cmake"
     )
+    # Overlapping host I/O on the loopback interface and the real clock, with
+    # concurrent record and replay (Concurrency.md sections 10.4 and 11).
+    add_test(NAME concurrency-io COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-io-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/io.cmake"
+    )
 
     add_test(NAME concurrency-parallel COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
@@ -326,6 +335,7 @@ if(BUILD_TESTING)
         tests/backend/assembler.cpp
         tests/backend/circuit_tests.cpp
         tests/backend/concurrency_evidence_tests.cpp
+        tests/backend/concurrency_io_tests.cpp
         tests/backend/concurrency_tests.cpp
         tests/backend/conversion_tests.cpp
     tests/backend/decompiler_tests.cpp

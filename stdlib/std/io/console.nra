@@ -13,6 +13,13 @@ let.promote _ = import:Std.Core.Variadic;
 /// Output is unbuffered: each write is one host request (repeated only to finish a partial write), so output
 /// order is program order and nothing is lost when a run ends by trap. Input is read in chunks of up to 4,096
 /// bytes; read_line and the input() source share the bytes read ahead.
+///
+/// Overlap and cancellation (Concurrency.md section 10.4). Writes never overlap: each completes before the next
+/// task runs, so output order is the order the tasks ran. A read from standard input overlaps in a program with
+/// tasks: the calling task waits and the others run. It uses version 2 of its host service, so cancelling the
+/// task's scope while it waits makes `read_line` and the input source fail with an Io error of kind Cancelled,
+/// unless input arrived first. A cancelled read consumed no input, and `read_line` keeps the partial line it had
+/// for the next call. Input that is not a descriptor (a fixed string in a test runner) completes at once.
 /// @see [Std.Io.Console](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-Console)
 export let Console = module (
     /// @brief The host outcome for a line write.
@@ -25,8 +32,9 @@ export let Console = module (
     let write_line = func(text: string) -> WriteOutcome host("neura.console.write_line", 1);
     /// @brief Writes bytes to the specified console stream and receives a possibly partial count.
     let write_stream = func(stream: int, data: uint8[list]) -> CountOutcome host("neura.console.write", 1);
-    /// @brief Requests up to the specified byte count from console input.
-    let read_stream = func(max: int) -> BytesOutcome host("neura.console.read", 1);
+    /// @brief Requests up to the specified byte count from console input. Overlapping and cancellable
+    /// (version 2).
+    let read_stream = func(max: int) -> BytesOutcome host("neura.console.read", 2);
 
     /// @brief Input read ahead of the caller: pending[pending_start] onwards.
     let pending: uint8[list] = [];

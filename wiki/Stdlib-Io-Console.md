@@ -18,53 +18,53 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Console** · [`export let try_vformat = func(pattern: string, args: Argument[]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L37)
+- **Console** · [`export let try_vformat = func(pattern: string, args: Argument[]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L45)
   Explicit argument arrays support forwarding and runtime-built packs.
-- **Console** · [`export let vformat = func(pattern: string, args: Argument[]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L41)
+- **Console** · [`export let vformat = func(pattern: string, args: Argument[]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L49)
   Formats a prebuilt argument array into text. Invalid formats trap.
-- **Console** · [`export let try_format = func(pattern: string, args: ...) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L45)
+- **Console** · [`export let try_format = func(pattern: string, args: ...) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L53)
   Formats variadic arguments into text or returns a parse error.
-- **Console** · [`export let format = func(pattern: string, args: ...) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L49)
+- **Console** · [`export let format = func(pattern: string, args: ...) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L57)
   Formats variadic arguments into text. Invalid formats trap.
-- **Console** · [`export let Formatter = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L52)
+- **Console** · [`export let Formatter = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L60)
   Exposes text formatting through a static method.
-- **Console.Formatter** · [`export static let format = func(pattern: string, args: ...) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L54)
+- **Console.Formatter** · [`export static let format = func(pattern: string, args: ...) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L62)
   Formats variadic arguments into text with the console grammar. Invalid formats trap.
-- **Console** · [`export let print_line = func(s: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L58)
+- **Console** · [`export let print_line = func(s: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L66)
   Writes the text and one LF. A failed write traps with "console write failed".
-- **Console** · [`export let try_print_line = func(s: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L68)
+- **Console** · [`export let try_print_line = func(s: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L76)
   The same write, returning its failure. The service's error code 1 maps to Other.
-- **Console** · [`export let print = func(pattern: string, args: ...)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L75)
+- **Console** · [`export let print = func(pattern: string, args: ...)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L83)
   Formatted output to stdout and stderr, with or without a final LF. Formats the arguments and writes to stdout. A formatting or write error traps.
-- **Console** · [`export let try_print = func(pattern: string, args: ...) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L79)
+- **Console** · [`export let try_print = func(pattern: string, args: ...) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L87)
   Formats the arguments and writes to stdout, returning a formatting or write error.
-- **Console** · [`export let println = func(pattern: string, args: ...)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L83)
+- **Console** · [`export let println = func(pattern: string, args: ...)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L91)
   Formats the arguments and writes to stdout with one LF. Errors trap.
-- **Console** · [`export let try_println = func(pattern: string, args: ...) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L87)
+- **Console** · [`export let try_println = func(pattern: string, args: ...) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L95)
   Formats the arguments and writes to stdout with one LF, returning any error.
-- **Console** · [`export let eprint = func(pattern: string, args: ...)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L91)
+- **Console** · [`export let eprint = func(pattern: string, args: ...)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L99)
   Formats the arguments and writes to stderr. Errors trap.
-- **Console** · [`export let try_eprint = func(pattern: string, args: ...) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L95)
+- **Console** · [`export let try_eprint = func(pattern: string, args: ...) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L103)
   Formats the arguments and writes to stderr, returning any error.
-- **Console** · [`export let eprintln = func(pattern: string, args: ...)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L99)
+- **Console** · [`export let eprintln = func(pattern: string, args: ...)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L107)
   Formats the arguments and writes to stderr with one LF. Errors trap.
-- **Console** · [`export let try_eprintln = func(pattern: string, args: ...) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L103)
+- **Console** · [`export let try_eprintln = func(pattern: string, args: ...) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L111)
   Formats the arguments and writes to stderr with one LF, returning any error.
-- **Console** · [`export let write = func(s: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L107)
+- **Console** · [`export let write = func(s: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L115)
   Writes raw text to stdout without interpreting format fields or adding a newline.
-- **Console** · [`export let try_write = func(s: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L110)
+- **Console** · [`export let try_write = func(s: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L118)
   Writes raw UTF-8 bytes to stdout and returns any write error.
-- **Console** · [`export let error_line = func(s: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L123)
+- **Console** · [`export let error_line = func(s: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L131)
   Writes the text and one LF to the error stream. A failed write traps with "console write failed".
-- **Console** · [`export let try_error_line = func(s: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L126)
+- **Console** · [`export let try_error_line = func(s: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L134)
   Writes raw text and one LF to stderr, returning any write error.
-- **Console** · [`export let read_line = func -> result.Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L132)
+- **Console** · [`export let read_line = func -> result.Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L140)
   The next line of input without its LF or a CR before it; None at the end of input. A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
-- **Console** · [`export let output = func -> func(uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L167)
+- **Console** · [`export let output = func -> func(uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L175)
   The output stream as a byte sink.
-- **Console** · [`export let error = func -> func(uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L171)
+- **Console** · [`export let error = func -> func(uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L179)
   The error stream as a byte sink.
-- **Console** · [`export let input = func -> func(int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L175)
+- **Console** · [`export let input = func -> func(int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L183)
   Console input as a byte source. It first returns input that read_line read ahead.
 <!-- END SOURCE API -->
 

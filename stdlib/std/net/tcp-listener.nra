@@ -8,6 +8,12 @@ let.promote _ = import:Std.Core.Unit;
 
 /// @brief A listening TCP socket (Stdlib.md section 11.4). Needs the net capability. After close, accept fails
 /// with Closed.
+///
+/// Overlap and cancellation (Concurrency.md section 10.4). In a program with tasks, `accept` overlaps: the
+/// calling task waits for a connection and the other tasks run. It uses version 2 of its host service, so
+/// cancelling the task's scope while it waits ends it with an Io error of kind Cancelled, unless a connection
+/// arrived first, in which case `accept` returns that stream. A cancelled `accept` takes no connection from the
+/// queue. `bind` and `close` do not wait and are not cancellable. Without tasks `accept` waits as before.
 /// @see [Std.Net.TcpListener](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-TcpListener)
 export let TcpListener = module (
     /// @brief Represents a host success with an identifier or position, or an unsigned host error code.
@@ -20,8 +26,8 @@ export let TcpListener = module (
     let listen_socket = func(host: string, port: int) -> IdOutcome host("neura.net.listen", 1);
     /// @brief Queries the provider for the actual bound port.
     let socket_port = func(socket: int64) -> PortOutcome host("neura.net.local_port", 1);
-    /// @brief Waits for the provider to accept a connection.
-    let accept_socket = func(listener: int64) -> IdOutcome host("neura.net.accept", 1);
+    /// @brief Waits for the provider to accept a connection. Overlapping and cancellable (version 2).
+    let accept_socket = func(listener: int64) -> IdOutcome host("neura.net.accept", 2);
     /// @brief Requests that the provider release the socket handle.
     let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
@@ -40,7 +46,7 @@ export let TcpListener = module (
             port = bound_port;
         };
 
-        /// @brief Waits for the next connection.
+        /// @brief Waits for the next connection. Fails with Cancelled when the task's scope is cancelled first.
         export let accept = func -> Result<TcpStream> {
             if (!open_now) {
                 return Result<TcpStream>.Err(bytes.closed("listener", handle.address));

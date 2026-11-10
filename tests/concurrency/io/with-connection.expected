@@ -1,0 +1,7 @@
+ok: Ok 7
+ok: peer saw the close
+err: the body failed
+err: peer saw the close
+cancelled: Cancelled
+cancelled: peer saw the close
+open error: ConnectionRefused

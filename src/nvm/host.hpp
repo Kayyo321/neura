@@ -4,12 +4,15 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace neura::nvm {
@@ -68,6 +71,10 @@ struct HostRequest {
     // Set by the runner for the duration of the request; null when callbacks
     // are unavailable.
     CallbackContext* callbacks = nullptr;
+    // The task clock's reading, in nanoseconds, when an overlapping request
+    // is started (HostService::begin); zero otherwise. A service computes
+    // the deadline of a timeout from it.
+    std::int64_t now = 0;
 };
 
 struct HostCompletion {
@@ -82,11 +89,57 @@ struct HostCompletion {
     static HostCompletion terminate(std::int32_t status) { return {true, {}, status}; }
 };
 
+// An overlapping request that has not finished (docs/lang/Concurrency.md
+// section 10.4). The driver keeps it until it can supply the completion; it
+// never blocks on it and starts no thread for it. Everything the operation
+// holds, such as a descriptor it owns, is released when the object is
+// destroyed, whether or not it finished.
+struct PendingOperation {
+    static constexpr std::int64_t no_deadline = std::numeric_limits<std::int64_t>::max();
+
+    // The operation can proceed when this descriptor is readable or writable
+    // (POSIX poll). -1: it waits for no descriptor.
+    int descriptor = -1;
+    bool readable = false;
+    bool writable = false;
+    // Optional: the descriptor the operation waits for now, when it changes
+    // while the operation is pending (a connect that moves to its next
+    // address). Replaces `descriptor` when set.
+    std::function<int()> current_descriptor{};
+    // The operation can also proceed when the task clock reads this many
+    // nanoseconds.
+    std::int64_t deadline = no_deadline;
+    // Tries to finish without blocking: the completion, or nothing when it
+    // must wait longer. The driver calls it when the descriptor is ready,
+    // at every check when there is no descriptor, and after a cancel
+    // request with cancelled set. A cancellable operation answers a call
+    // with cancelled set with its completion if it finished first and with
+    // host_error::cancelled otherwise; it is never asked again.
+    std::function<std::optional<HostCompletion>(bool cancelled)> attempt;
+    // The completion when the deadline passes before the operation finishes.
+    // Required when there is a deadline.
+    std::function<HostCompletion()> expire{};
+};
+
 class HostService {
 public:
     virtual ~HostService() = default;
     virtual const HostSignature& signature() const = 0;
     virtual HostCompletion invoke(const HostRequest& request) = 0;
+
+    // Whether the service overlaps: in an image with tasks, a request does
+    // not hold up the other tasks. Then begin() is used instead of invoke().
+    virtual bool overlapping() const { return false; }
+    // Whether an overlapping request can be cancelled: begin()'s operation
+    // honors attempt(true). Only meaningful when overlapping.
+    virtual bool cancellable() const { return false; }
+    // Starts an overlapping request without blocking. Returns its completion
+    // when it finished at once (a capability error, an argument error, data
+    // already there), or how to wait for it. The default completes by
+    // invoking the service.
+    virtual std::variant<HostCompletion, PendingOperation> begin(const HostRequest& request) {
+        return invoke(request);
+    }
 };
 
 // The services a runner offers, keyed by name and interface version.

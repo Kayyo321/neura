@@ -32,8 +32,26 @@ namespace neura::nvm {
 // starting with `#` and blank lines are ignored. The writer emits one space
 // between fields, `, ` between list elements, and LF line ends, so the same
 // trace always produces the same bytes.
-// Version 2 adds callbacks; a reader accepts 1 and 2.
-inline constexpr int trace_file_version = 2;
+// Version 2 adds callbacks. Version 3 is written only for an image with
+// tasks (docs/runtime/NVM.md, "Traces of images with tasks"):
+//
+//   neura-trace 3
+//   settings quantum <n> max-tasks <n> max-queued-messages <n> max-pending-requests <n>
+//   request <import> <version> <arguments> task <id> tick <n> [overlapping | cancellable]
+//   ok <value> | error <value> | exit <status> | abandoned
+//   ...
+//   deliver <tick> <request> [cancelled]
+//   clock <tick> <nanoseconds>
+//   outcome ...
+//
+// A request is numbered by its position among the request lines, from
+// zero. Its tick is the number of scheduling decisions made when it was
+// issued. `abandoned` replaces the completion of an overlapping request that the
+// run ended without delivering. The deliver and clock lines follow the last
+// request, in the order they happened. A reader accepts 1, 2, and 3.
+inline constexpr int trace_callbacks_version = 2;
+inline constexpr int trace_tasks_version = 3;
+inline constexpr int trace_file_version = trace_tasks_version;
 
 class TraceFormatError : public std::runtime_error {
 public:

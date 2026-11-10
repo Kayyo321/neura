@@ -5,11 +5,13 @@ let hashing = import:Std.Core.Hash;
 /// @see [Std.Core.Error](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Error)
 export let Error = module (
     /// @brief Host error codes 1 through 14 map to the first fourteen kinds in order. The library produces
-    /// Closed and InvalidData itself.
+    /// Closed and InvalidData itself. Host error code 15 maps to Cancelled, the answer of a cancellable host
+    /// request (a read, write, accept, connect, or sleep in a task whose scope was cancelled) that was cancelled
+    /// before it finished. Cancelled comes last so that the kinds before it keep their order.
     export let IoErrorKind = enum (
         NotFound, PermissionDenied, AlreadyExists, InvalidInput, Interrupted, UnexpectedEnd, NotADirectory,
         IsADirectory, DirectoryNotEmpty, ConnectionRefused, ConnectionReset, TimedOut, Unsupported,
-        CapabilityDenied, Closed, InvalidData, Other
+        CapabilityDenied, Closed, InvalidData, Other, Cancelled
     );
 
     /// @brief Classifies malformed text, premature endings, and out-of-range values.

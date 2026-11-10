@@ -17,20 +17,22 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **TcpStream** · [`export let TcpStream = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L33)
+- **TcpStream** · [`export let TcpStream = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L46)
   Owns a connected TCP socket with an independently configured read timeout.
-- **TcpStream.TcpStream** · [`export let init = func(opened: socket.Handle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L42)
+- **TcpStream.TcpStream** · [`export let init = func(opened: socket.Handle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L55)
   Use connect or TcpListener.accept; the handle comes from the library.
-- **TcpStream.TcpStream** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L48)
+- **TcpStream.TcpStream** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L61)
   Up to `max` bytes; an empty list once the peer has closed its side. Waits at most the read timeout, then fails with TimedOut. A maximum below 1 traps.
-- **TcpStream.TcpStream** · [`export let write = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L60)
-  Writes every byte, repeating partial host writes.
-- **TcpStream.TcpStream** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L86)
+- **TcpStream.TcpStream** · [`export let write = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L75)
+  Writes every byte, repeating partial host writes. When the task's scope is cancelled while the write waits, it fails with Cancelled and the message "stream write cancelled after N bytes", where N is the number of bytes already sent.
+- **TcpStream.TcpStream** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L107)
   The longest a read waits; zero waits without limit. A negative timeout traps with "invalid argument: negative timeout".
-- **TcpStream.TcpStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L92)
+- **TcpStream.TcpStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L113)
   Releases the connection. Closing again does nothing and returns Ok; the stream is closed even when the host reports an error.
-- **TcpStream** · [`export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L109)
+- **TcpStream** · [`export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L130)
   Connects to `host` (a name or an address) and `port`, waiting at most `timeout` (zero waits without limit). A port outside 0 through 65,535 traps with "invalid argument: port"; a negative timeout traps with "invalid argument: negative timeout".
+- **TcpStream** · [`export let with_connection = func<T>(host: string, port: int, body: func(TcpStream) -> Result<T>) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L152)
+  Connects to `host` and `port` without a time limit, runs `body` with the stream, and closes the stream exactly once however the body ends (Concurrency.md section 7, "Resources"). - If the connection fails, the open error is returned and `body` is not called. - `body` runs in a scope the helper owns, so every task started in that scope has finished before the stream is closed. - The stream is closed after the body returns a value, after it returns an error, and after it returns because its scope was cancelled. - A body `Ok` whose close fails returns the close error. A body `Err` whose close fails returns a `Context` error whose cause is the body's error and whose message names the close error's message. A trap in the body ends the run without closing; the runner then closes every socket the run left open.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
