@@ -1,7 +1,10 @@
 #include "integer_folding.hpp"
 
+#include "analysis.hpp"
+
 #include <charconv>
 #include <limits>
+#include <utility>
 
 namespace neura::optimization {
 namespace {
@@ -202,6 +205,127 @@ std::string spelling(const IntegerConstant& value) {
         : std::to_chars(buffer, buffer + sizeof buffer, value.unsigned_value);
     (void)error; // 24 bytes hold any 64-bit decimal value and its sign.
     return std::string(buffer, end);
+}
+
+namespace {
+
+IrNode literal_for(const IrNode& original, IrOp op, std::string text) {
+    return {op, original.type, original.span, no_symbol, std::move(text), {}, {}, {}, {}};
+}
+
+IrNode boolean_for(const IrNode& original, bool value) {
+    return literal_for(original, IrOp::Boolean, value ? "true" : "false");
+}
+
+std::optional<IntegerOperation> arithmetic(std::string_view op) {
+    if (op == "+") return IntegerOperation::Add;
+    if (op == "-") return IntegerOperation::Subtract;
+    if (op == "*") return IntegerOperation::Multiply;
+    if (op == "/") return IntegerOperation::Divide;
+    if (op == "%") return IntegerOperation::Remainder;
+    return {};
+}
+
+std::optional<bool> compare_with(std::string_view op, int order) {
+    if (op == "==") return order == 0;
+    if (op == "!=") return order != 0;
+    if (op == "<") return order < 0;
+    if (op == "<=") return order <= 0;
+    if (op == ">") return order > 0;
+    if (op == ">=") return order >= 0;
+    return {};
+}
+
+bool fold_unary(IrNode& node) {
+    if (node.operands.size() != 1) {
+        return false;
+    }
+    const auto& operand = node.operands.front();
+    if (node.text == "!") {
+        if (const auto value = boolean_literal(operand)) {
+            node = boolean_for(node, !*value);
+            return true;
+        }
+    } else if (node.text == "-") {
+        const auto value = integer_constant(operand);
+        const auto result = value ? negate(*value) : std::nullopt;
+        if (result) {
+            node = literal_for(node, IrOp::Integer, spelling(*result));
+            return true;
+        }
+    } else if (node.text == "~") {
+        if (const auto value = integer_constant(operand)) {
+            node = literal_for(node, IrOp::Integer, spelling(complement(*value)));
+            return true;
+        }
+    }
+    return false;
+}
+
+bool fold_binary(IrNode& node) {
+    if (node.operands.size() != 2 ||
+        (!is_shift(node.text) && node.operands[0].type != node.operands[1].type)) {
+        return false;
+    }
+    const auto& op = node.text;
+    const auto left_bool = boolean_literal(node.operands[0]);
+    const auto right_bool = boolean_literal(node.operands[1]);
+    if (left_bool && right_bool) {
+        if (op != "==" && op != "!=") {
+            return false;
+        }
+        node = boolean_for(node, (*left_bool == *right_bool) == (op == "=="));
+        return true;
+    }
+    const auto left = integer_constant(node.operands[0]);
+    const auto right = integer_constant(node.operands[1]);
+    if (!left || !right) {
+        return false;
+    }
+    if (is_bitwise_binary(op)) {
+        const auto result = fold_bits(op, *left, *right);
+        if (!result) {
+            return false;
+        }
+        node = literal_for(node, IrOp::Integer, spelling(*result));
+        return true;
+    }
+    if (const auto operation = arithmetic(op)) {
+        const auto result = fold(*operation, *left, *right);
+        if (!result) {
+            return false;
+        }
+        node = literal_for(node, IrOp::Integer, spelling(*result));
+        return true;
+    }
+    if (const auto result = compare_with(op, compare(*left, *right))) {
+        node = boolean_for(node, *result);
+        return true;
+    }
+    return false;
+}
+
+bool fold_convert(IrNode& node) {
+    if (node.operands.size() != 1) {
+        return false;
+    }
+    const auto value = integer_constant(node.operands.front());
+    const auto target = specified_integer_format(node.type);
+    const auto result = value && target ? convert(*value, *target) : std::nullopt;
+    if (!result) {
+        return false;
+    }
+    node = literal_for(node, IrOp::Integer, spelling(*result));
+    return true;
+}
+
+} // namespace
+
+bool fold_scalar_literals(IrNode& node) {
+    if (node.op == IrOp::Unary) return fold_unary(node);
+    if (node.op == IrOp::Binary) return fold_binary(node);
+    if (node.op == IrOp::Convert) return fold_convert(node);
+    return false;
 }
 
 } // namespace neura::optimization

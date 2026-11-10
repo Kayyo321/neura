@@ -48,4 +48,8 @@ int compare(const IntegerConstant& left, const IntegerConstant& right);
 // Canonical decimal spelling, as accepted by parse_integer_literal.
 std::string spelling(const IntegerConstant& value);
 
+// Folds one Boolean or integer operation on literal operands when it is total.
+// This is also used to recognize source-level static constant expressions.
+bool fold_scalar_literals(IrNode& node);
+
 } // namespace neura::optimization
