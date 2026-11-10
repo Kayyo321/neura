@@ -100,7 +100,12 @@ if(example_count EQUAL 0)
 endif()
 message(STATUS "Emitting ${example_count} examples with and without optimization")
 
-check_both_modes("all examples" ${examples})
+# A program that spawns a task cannot also use a native library (decision C15
+# of docs/lang/Concurrency.md), so the combined program leaves the concurrency
+# examples out. Each one is still emitted on its own below.
+set(combined ${examples})
+list(FILTER combined EXCLUDE REGEX "/examples/concurrency/")
+check_both_modes("all examples" ${combined})
 set(roots -I "${SOURCE_DIR}/examples/guide" -I "${SOURCE_DIR}/examples/modules/multi-file")
 foreach(example IN LISTS examples)
     file(RELATIVE_PATH name "${SOURCE_DIR}" "${example}")
