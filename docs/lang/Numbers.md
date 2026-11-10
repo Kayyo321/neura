@@ -74,6 +74,10 @@ Comparisons follow IEEE 754. A NaN operand is unordered: `==`, `<`, `<=`, `>`, a
 
 Float arithmetic is not reassociated or contracted: `a * b + c` rounds the product and then the sum.
 
+### Bit reinterpretation
+
+`value.to_bits()` returns the float's raw encoding as a same-width unsigned integer. Call `float16.from_bits`, `bfloat16.from_bits`, `float32.from_bits`, or `float64.from_bits` with the corresponding unsigned integer to reinterpret it in the other direction. Both directions preserve every bit, including NaN payloads and signed zero. `float` is interchangeable with `float32`.
+
 ## Conversions
 
 `expression as Type` converts a numeric value explicitly. It binds tighter than `*` and looser than unary operators, so `-x as int64` converts `-x` and `a * b as int64` converts only `b`. Converting a value to its own type returns it.

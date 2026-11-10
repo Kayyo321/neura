@@ -10,14 +10,14 @@ This document defines the official coding style and naming conventions for Neura
 
 | Category | Convention | Examples |
 | :--- | :--- | :--- |
-| **Modules** | `PascalCase` | `SysIo`, `HelloWorld`, `ConsoleLogger` |
+| **Modules** | `PascalCase` | `Console`, `HelloWorld`, `ConsoleLogger` |
 | **Classes** | `PascalCase` | `LogEntry`, `HttpRequest`, `UserSession` |
 | **Enums & Variants** | `PascalCase` | `ExitCode.Ok`, `HttpMethod.Get`, `Status.NotFound` |
 | **Constants** | `PascalCase` | `const Thousand = 1000;`, `const MaxRetries = 5;` |
 | **Functions & Methods** | `snake_case` | `main`, `log_entry`, `format_message`, `calculate_sum` |
 | **Variables (Local & Member)** | `snake_case` | `default_level`, `show_timestamp`, `entry_count` |
 | **Function Parameters** | `snake_case` | `message`, `user_id`, `max_buffer_size` |
-| **Import Aliases** | `snake_case` / short | `io`, `sys`, `net_client` |
+| **Import Aliases** | `snake_case` / short | `console`, `program`, `net_client` |
 | **Source Files** | `kebab-case.nra` | `hello-world.nra`, `module-interface.nra` |
 
 ---
@@ -53,7 +53,7 @@ export let NetworkBuffer = class (
 Both enum type names and their variants must use `PascalCase`:
 ```neura
 // Enum type and variant access
-return Entry.ExitCode.Ok;
+return program.ExitCode.Ok;
 ```
 
 #### Constants (`PascalCase`)
@@ -73,8 +73,8 @@ export let log_entry = func(LogEntry entry) -> void {
     log(entry.format());
 }
 
-export let.override main = func(string[] args) -> Entry.ExitCode {
-    return Entry.ExitCode.Ok;
+export let.override main = func(string[] args) -> program.ExitCode {
+    return program.ExitCode.Ok;
 }
 ```
 
@@ -94,6 +94,13 @@ export let Config = class (
 // Local variables
 let user_entry = new Logger.LogEntry();
 let is_active = true;
+```
+
+#### Import Aliases (`snake_case`)
+An import alias shares its file's scope with the members the file declares. Choose an alias that no member of the file uses, such as `hashing` for `Std.Core.Hash` in a module that exports its own `hash` function:
+```neura
+let hashing = import:Std.Core.Hash;
+let optional = import:Std.Core.Optional;
 ```
 
 #### Function Parameters (`snake_case`)
@@ -132,23 +139,23 @@ export let format_log = func(string log_message, int log_level) -> string {
 - Use parentheses for module and class definitions, with the opening parenthesis on the same line and the closing parenthesis on a new line. Function bodies use braces in K&R / 1TBS style.
 - Module and class definitions end with `);`:
   ```neura
-  let HelloWorld = module:io.Entry (
+  let HelloWorld = module:program.Entry (
       // ...
   );
   ```
 - Terminate statements, variable bindings, and function signatures with a semicolon `;`:
   ```neura
   export let log = func(string message) -> void;
-  io.println(prefix + " -> " + message);
+  console.print_line(prefix + " -> " + message);
   ```
 
 ### Comments
 - Use `//` for single-line comments.
 - Place comments above the relevant code or inline with a single space after code:
   ```neura
-  let HelloWorld = module:io.Entry ( // Inherits from SysIo.Entry
+  let HelloWorld = module:program.Entry ( // Inherits from Std.Program.Entry
       // Implementation of entrypoint
-      export let.override main = func(string[] args) -> Entry.ExitCode {
+      export let.override main = func(string[] args) -> program.ExitCode {
           // ...
       }
   );
@@ -161,7 +168,8 @@ export let format_log = func(string log_message, int log_level) -> string {
 Here is a complete example demonstrating the coding style conventions:
 
 ```neura
-let io = import:SysIo;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
 
 // Constants: PascalCase
 const DefaultPort = "8080";
@@ -190,18 +198,18 @@ let ServiceMonitor = module (
     export let ping_service = func(string target_host, int timeout_seconds) -> void;
 
     export let run_health_check = func(ServiceConfig config) -> void {
-        io.println("Running check for: " + config.get_connection_info());
+        console.print_line("Running check for: " + config.get_connection_info());
     }
 );
 
 // Module inheritance: PascalCase
-let App = module:io.Entry (
+let App = module:program.Entry (
     // Main entrypoint: snake_case
-    export let.override main = func(string[] args) -> Entry.ExitCode {
+    export let.override main = func(string[] args) -> program.ExitCode {
         let monitor_config = new ServiceMonitor.ServiceConfig();
         ServiceMonitor.run_health_check(monitor_config);
 
-        return Entry.ExitCode.Ok;
+        return program.ExitCode.Ok;
     }
 );
 ```
@@ -218,5 +226,5 @@ let App = module:io.Entry (
 | `export let log_message = func(...)` | `export let logMessage = func(...)` | Functions use `snake_case`. |
 | `let default_level: string = "INFO";` | `let DefaultLevel: string = "INFO";` | Variables use `snake_case`. |
 | `func(string target_host)` | `func(string targetHost)` | Parameters use `snake_case`. |
-| `Entry.ExitCode.Ok` | `Entry.exit_code.ok` | Enums and variants use `PascalCase`. |
+| `program.ExitCode.Ok` | `program.exit_code.ok` | Enums and variants use `PascalCase`. |
 

@@ -17,9 +17,9 @@ multi-file/                  # source root
 
 `main.nra` imports `Acme.Greetings`; that module in turn imports `Acme.Greetings.Punctuation`. The directories express the namespace and are required by this mapping, but do not themselves declare modules. A module file and a directory may share a name, so a module can have children. Files do not need to import their parents, and importing a parent does not automatically import its children.
 
-The imported file's named module is the value returned by the import. Only its `export` members are accessible to the importer. Imports are explicit in each file; an alias in one file is not available in another. The example prints `Hello, Neura!` when run with an implementation supporting this convention and `SysIo`.
+The imported file's named module is the value returned by the import. Only its `export` members are accessible to the importer. Imports are explicit in each file; an alias in one file is not available in another. The example prints `Hello, Neura!`.
 
-See [the complete example](../../examples/modules/multi-file/main.nra). `SysIo` is an existing built-in module used by the examples; its resolution is separate from the project-local mapping above.
+See [the complete example](../../examples/modules/multi-file/main.nra). Its `Std.Io.Console` and `Std.Program` imports resolve in the installed standard library, separately from the project-local mapping above ([Modules](Modules.md#standard-library-imports)).
 
 ## Packages and open questions
 

@@ -23,12 +23,17 @@ The built-in types are listed below. [Numbers](Numbers.md) specifies the numeric
 | `float16`, `float32`, `float64` | IEEE 754 binary16, binary32, and binary64 floating point. |
 | `float` | Another name for `float32`. |
 | `bfloat16` | Brain floating point (BF16): binary32's 8-bit exponent with a 7-bit fraction. |
-| `string` | Text. Its encoding and indexing rules remain to be specified. |
+| `string` | Immutable UTF-8 text with bytewise equality and byte-indexed primitives. |
+| `class` | An umbrella reference type for every class instance. |
 | `void` | No return value. |
 
 Low-precision formats such as FP8 and packed integer formats are not part of the language. Every numeric operation is computed by neuron circuits, so no type depends on hardware support.
 
 Arrays and lists are built-in collection types, written `string[]` and `string[list]` respectively. Arrays have a fixed length; lists can grow and shrink. Suffixes can be combined for nested collections. See [Arrays and lists](Collections.md) for their syntax and safety rules.
+
+### Text primitives
+
+String equality compares UTF-8 bytes. `text.byte_length` returns the byte count as `int` and `text.byte_at(index)` returns a checked `uint8`. `text.slice(start, end)` accepts a half-open range with endpoints on UTF-8 character boundaries. `string.from_utf8(bytes)` copies a `uint8[]` or `uint8[list]` and returns `[bool, string]`. Invalid input returns `[false, ""]`. Valid empty input returns `[true, ""]`.
 
 ## Tuples
 
@@ -103,7 +108,27 @@ let NamedEntry = class:LogEntry (
 );
 ```
 
-The derived class extends the base class's interface. A derived instance can be passed where its base type is expected; an overridden method dispatches to the implementation for the actual instance. Declare an override with `let.override` or `const.override`. See `examples/types/classes.nra` for an example of polymorphism. The precise rules for constructors, visibility, and initialization in inherited classes remain to be specified. See [Polymorphism](Polymorphism.md) for dynamic dispatch and proposed abstract methods and generics, and [Object lifecycle](ObjectLifecycle.md) for proposed construction and cleanup rules.
+The derived class extends the base class's interface. A derived instance can be passed where its base type is expected, and an overridden method dispatches to the implementation for the actual instance. Declare an override with `let.override` or `const.override`. See [Polymorphism](Polymorphism.md) for interfaces and generics and [Object lifecycle](ObjectLifecycle.md) for construction and cleanup.
+
+### Umbrella class and nil
+
+`class` is a type in annotation, parameter, result, and type argument positions. Every class instance can be stored in it. An interface reference can also be passed as `class`. The runtime keeps the concrete identity and dispatches methods to the instance's implementation.
+
+```neura
+let entry: class = new LogEntry();
+let missing: LogEntry = nil;
+
+if (entry is LogEntry) {
+    let exact = entry as LogEntry;
+    exact.message = "ready";
+}
+```
+
+- `nil` is an explicit absent reference for class and interface types, including type parameters bounded by them. With no contextual type, it has type `class`. A field without an initializer is still uninitialized. Use `= nil` to initialize it to absence.
+- `==` and `!=` compare references by identity. Two nil references compare equal. Use `is` to test a live reference against a class or interface. A nil reference gives false. A checked reference cast with `as` preserves nil and traps for an incompatible instance.
+- Reading or writing a field, invoking an instance method, or explicitly destroying a nil reference traps. It has no heap allocation and tracing skips it.
+- `class` supplies `equals(class other) -> bool`, `hash_code() -> uint32`, and `to_string() -> string`. A class can override those signatures. The defaults use identity and a qualified class name with an identity number, such as `Acme.Shapes.Circle#3`. The runtime assigns that number at first use by default hashing or formatting. An equality override must agree with its hash and return false for nil.
+- The built-in value members of scalars, tuples, arrays, and lists use value semantics. Generic and aggregate value operations treat nil as a distinct value with hash zero and text `nil`. A direct method call on a nil class reference follows the receiver trap rule.
 
 ## Enums
 
@@ -120,7 +145,15 @@ let next = func(Light current) -> Light {
 };
 ```
 
-An enum can annotate bindings, fields, parameters, results, collection elements, and type arguments. Its variant names are visible wherever the enum is visible. Each enum declares at least one variant, and names are unique. An entirely fieldless enum supports `==` and `!=`. The checked conversion `variant as T` converts one of its values to its zero-based declaration ordinal in integer type `T`. The built-in `SysIo.Entry.ExitCode.Ok` is the entry function's status 0.
+An enum can annotate bindings, fields, parameters, results, collection elements, and type arguments. Its variant names are visible wherever the enum is visible. Each enum declares at least one variant, and names are unique. An entirely fieldless enum supports `==` and `!=`. The checked conversion `variant as T` converts one of its values to its zero-based declaration ordinal in integer type `T`. `Std.Program.ExitCode.Ok` is the entry function's status 0.
+
+Generic enums declare parameters after `enum`. Qualify a value constructor with an explicit instance, such as `Optional<int>.Some(4)` or `Optional<int>.None`. Patterns such as `Optional.Some(value)` get their payload types from the subject. A type overlay for a concrete instance can also qualify constructors and patterns.
+
+```neura
+let Optional = enum<T> (None, Some(T));
+let IntOptional = Optional<int>;
+let value: IntOptional = IntOptional.Some(4);
+```
 
 An enum can mix unit variants, positional payloads, and named payloads. A
 constructor evaluates its fields in written order, even when named arguments

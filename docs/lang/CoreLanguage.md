@@ -47,15 +47,15 @@ let add_two = make_adder(2);
 let result = add_two(40);
 ```
 
-Functions with the same concrete parameter and result types have the same function type. A function value can be assigned, passed as an argument, returned, and stored in a field or collection. Parenthesize the function type before a collection suffix to write an array of functions, such as `(func(int) -> int)[]`. A named non-generic function used as a value is callable through the same interface. Reading a class method as a value binds its receiver and keeps normal virtual dispatch.
+Functions with the same parameter and result types have the same function type. A function value can be assigned, passed as an argument, returned, and stored in a field or collection. Parenthesize the function type before a collection suffix to write an array of functions, such as `(func(int) -> int)[]`. A named non-generic function used as a value is callable through the same interface. Reading a class or interface method as a value binds its receiver and keeps normal virtual dispatch.
 
 A lambda captures the values of enclosing parameters and local bindings it uses when it is created. A captured binding cannot be reassigned within the lambda. Capturing an object or collection keeps a reference to the same instance, so updates to its contents are visible. A lambda in a class method can use its enclosing receiver, and a nested lambda can capture values available to its enclosing lambda. Module and file globals are read when the body runs. Closures may outlive the scope that created them.
 
-Function-value signatures and captured types must be concrete. Use a direct call with explicit type arguments for a generic function. Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
+Signatures, captures, and local types in a closure can mention the type parameters of the enclosing function, class, or method. The compiler specializes the function type and capture layout with that declaration. Call a generic function with explicit type arguments. Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
 
 ## Loops
 
-Neura has three loop statements: `while`, the three-part `for`, and `for`-each over arrays and lists.
+Neura has three loop statements. The `for`-each form accepts an array, list, or an implementation of `Iterable<T>`.
 
 ```neura
 for (let i: int32 = 0; i < limit; i = i + 1) {
@@ -63,7 +63,7 @@ for (let i: int32 = 0; i < limit; i = i + 1) {
 }
 
 for (let name in names) {
-    io.println(name);
+    console.print_line(name);
 }
 ```
 
@@ -77,6 +77,8 @@ for (let name in names) {
 - For a list, the loop captures the list's *structural version* when it starts. Every successful `append` or `remove_at` on the list, through any alias, changes the version. Before each advance, including the one that would end the loop, the loop compares the current version with the captured one. If they differ, the run traps at the `for` statement with trap reason 5 ("collection modified during iteration"). A removal followed by an append therefore traps even though the length is unchanged. Arrays cannot change length, so a for-each over an array needs no check.
 
 Both loops lower to NeuraIR's existing loop and branch operations ([Backend](../Backend.md#loops)).
+
+For an `Iterable<T>`, the loop evaluates its source once and calls `iterator()` once. It calls the iterator's `has_next()` before each advance, and calls `next()` to get each element. A `continue` returns to `has_next()`. A `break` or `return` leaves without another call. A library iterator enforces its collection's modification rules in these methods.
 
 ## Expressions
 

@@ -28,6 +28,8 @@ An array's length is fixed when it is created, including when that length is det
 
 A list can grow or shrink through its built-in operations. Both collections expose their current element count as `length`, of type `int` (`int32`). `append(value)` adds an element to a list, and `remove_at(index)` removes the element at an index and shifts subsequent elements left. These operations are not available on arrays.
 
+A list's read-only `version` is a `uint64`. It starts at zero and advances modulo 2^64 on every successful append or removal. Element assignment leaves it alone. Wrappers can save it when they create an iterator and compare it before advancing, including after a structural change made through another reference to the same list.
+
 ## Indexing and safety
 
 Indexing is zero-based. Reading or writing `collection[index]` is valid only when the index is an integer in the range `0 <= index < collection.length`. Every access is bounds checked; an invalid index, including a negative index, causes a bounds error and terminates the current operation before any out-of-bounds memory is accessed. `remove_at` has the same index requirement. An implementation may eliminate a check only when it can prove that doing so preserves this behavior. Nested indexing checks each level independently.
