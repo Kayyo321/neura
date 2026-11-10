@@ -51,6 +51,23 @@ std::string_view op_name(IrOp op) {
     case IrOp::ComparisonChain: return "comparison_chain";
     case IrOp::ScopedValue: return "scoped_value";
     case IrOp::SelectValue: return "select_value";
+    case IrOp::TextLength: return "text_length";
+    case IrOp::TextByteAt: return "text_byte_at";
+    case IrOp::TextSlice: return "text_slice";
+    case IrOp::TextFromUtf8: return "text_from_utf8";
+    case IrOp::TextEqual: return "text_equal";
+    case IrOp::ReinterpretFloat: return "reinterpret_float";
+    case IrOp::TrapMessage: return "trap_message";
+    case IrOp::Nil: return "nil";
+    case IrOp::ClassHash: return "class_hash";
+    case IrOp::ClassText: return "class_text";
+    case IrOp::ClassIs: return "class_is";
+    case IrOp::ClassCast: return "class_cast";
+    case IrOp::ValueEquals: return "value_equals";
+    case IrOp::ValueHash: return "value_hash";
+    case IrOp::ValueText: return "value_text";
+    case IrOp::MakeClosure: return "make_closure";
+    case IrOp::CallClosure: return "call_closure";
     }
     return "<invalid>";
 }
@@ -120,12 +137,17 @@ void fail(std::string_view message, std::source_location where) {
                   std::to_string(where.line()) + ": " + std::string(message));
 }
 
+fs::path& library_root() {
+    static fs::path root;
+    return root;
+}
+
 IrProgram lower_files(std::vector<fs::path> files, std::vector<fs::path> roots) {
     for (auto& file : files) {
         file = fs::canonical(file);
         roots.push_back(file.parent_path());
     }
-    return lower(read_sources(files, roots));
+    return lower(read_sources(files, roots, library_root()));
 }
 
 IrProgram lower_fixture(const Environment& environment, std::string_view file_name) {

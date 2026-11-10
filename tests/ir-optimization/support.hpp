@@ -65,8 +65,13 @@ void check_equal(const Actual& actual, const Expected& expected, std::string_vie
     }
 }
 
+// The trusted standard library root (<source-dir>/stdlib) that test
+// programs resolve Std imports from. main() sets it from the source directory.
+fs::path& library_root();
+
 // Lowers files through the same source loader as the CLI. Each file's
-// directory is added to the import roots, as the CLI does.
+// directory is added to the import roots, as the CLI does, and Std imports
+// resolve in library_root().
 IrProgram lower_files(std::vector<fs::path> files, std::vector<fs::path> roots = {});
 IrProgram lower_fixture(const Environment& environment, std::string_view file_name);
 std::vector<fs::path> fixture_files(const Environment& environment);

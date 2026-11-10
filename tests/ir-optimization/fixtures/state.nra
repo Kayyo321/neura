@@ -1,5 +1,5 @@
 // Module state, discarded expressions, and effects.
-let test = import:Test;
+let test = import:Std.Test;
 
 let State = module (
     export let counter: int32 = 2 + 3;

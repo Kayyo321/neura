@@ -46,8 +46,8 @@ endfunction()
 # Emits `ARGN` twice with and twice without optimization. Each mode must be
 # reproducible. Optimization must not change the symbol table; the default
 # listing is also specialized, which appends generic instances and retypes
-# uses of generic types, so programs with generics are checked for instances
-# instead.
+# uses of generic types. It also replaces structural closures with concrete
+# receiver layouts. Check for the corresponding output in those programs.
 function(check_both_modes label)
     run_success(optimized emit-ir ${ARGN})
     run_success(optimized_again emit-ir ${ARGN})
@@ -64,11 +64,26 @@ function(check_both_modes label)
     endif()
     symbol_section(optimized_symbols "${optimized}")
     symbol_section(unoptimized_symbols "${unoptimized}")
-    if(unoptimized_symbols MATCHES " generics=\\[")
+    # Generic declarations of the program itself, as opposed to those of
+    # imported standard library modules, which a program may leave unused.
+    string(REGEX MATCHALL "[^\n]* generics=\\[[^\n]*" generic_lines "${unoptimized_symbols}")
+    set(own_generics FALSE)
+    foreach(line IN LISTS generic_lines)
+        if(NOT line MATCHES "/stdlib/std/")
+            set(own_generics TRUE)
+        endif()
+    endforeach()
+    if(own_generics)
         if(NOT optimized_symbols MATCHES "\"[A-Za-z_][A-Za-z0-9_]*<[^\"]+>\"")
             message(FATAL_ERROR "${label}: specialization added no instances")
         endif()
-    elseif(NOT optimized_symbols STREQUAL unoptimized_symbols)
+    elseif(unoptimized MATCHES "make_closure")
+        if(NOT optimized_symbols MATCHES "class \"[$]signature[0-9]+" OR optimized MATCHES "make_closure")
+            message(FATAL_ERROR "${label}: specialization left a structural closure")
+        endif()
+    elseif(NOT optimized_symbols STREQUAL unoptimized_symbols AND NOT unoptimized_symbols MATCHES " generics=\\[")
+        # Without generic declarations, only specialization could change
+        # the symbol table, and it has nothing to do.
         message(FATAL_ERROR "${label}: optimization changed the symbol table")
     endif()
 endfunction()

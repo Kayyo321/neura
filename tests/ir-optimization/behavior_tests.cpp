@@ -3,6 +3,7 @@
 // oracle that uses plain C++ arithmetic. These tests make no claims about IR
 // structure; see structure_tests.cpp for those.
 #include "evaluator.hpp"
+#include "neura-ir/host_binding.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "support.hpp"
 
@@ -114,6 +115,13 @@ Tally compare_programs(const IrProgram& original, const IrProgram& optimized, co
         if (function.kind != SymbolKind::Function) {
             continue;
         }
+        // Standard library functions are exercised by the library's own
+        // tests, and the built-in members of the root `class` belong to no
+        // file; this differential covers the listed program files.
+        if (const auto file = source_file(original, body.owner);
+            file == no_symbol || !original.symbols[file].library_path.empty()) {
+            continue;
+        }
         std::vector<std::vector<Value>> domains;
         std::size_t inputs = 1;
         for (const bool exhaustive : {true, false}) {
@@ -209,13 +217,15 @@ NEURA_TEST(behavior, examples_match_unoptimized) {
         differential({file}, roots, fs::relative(file, environment.examples()).generic_string());
     }
 
-    // The evaluator must actually execute the example with effects.
+    // The evaluator must actually execute the example, including its calls
+    // into the Std.Test assertions, which return without an effect when
+    // they hold.
     const auto program = lower_files(files);
     Evaluator evaluator(program);
     evaluator.initialize();
     const auto outcome = evaluator.call(find_symbol(program, "MathTests.test_sum_to"), {});
     check(outcome.status == Status::Returned, "MathTests.test_sum_to: " + describe(outcome));
-    check_equal(outcome.effects.size(), std::size_t{2}, "assertions recorded by MathTests.test_sum_to");
+    check_equal(outcome.effects.size(), std::size_t{0}, "effects of MathTests.test_sum_to");
 }
 
 // Folds `left op right` for literal operands and compares the folder, the
@@ -371,7 +381,13 @@ NEURA_TEST(behavior, hand_derived_expectations) {
         optimize(program);
         Evaluator evaluator(program);
         evaluator.initialize();
-        const auto actual = evaluator.call(find_symbol(program, function), arguments);
+        auto actual = evaluator.call(find_symbol(program, function), arguments);
+        // Only the fixture's own module state is part of these expectations,
+        // not the globals of standard library modules it imports.
+        std::erase_if(actual.globals, [&](const auto& entry) {
+            const auto file = source_file(program, entry.first);
+            return file != no_symbol && !program.symbols[file].library_path.empty();
+        });
         const auto diff = difference(expected, actual);
         check(diff.empty(), std::string(function) + "(" + join(arguments) + ") " + diff + "\n  expected: " +
                                 describe(expected) + "\n  actual:   " + describe(actual));
@@ -382,7 +398,14 @@ NEURA_TEST(behavior, hand_derived_expectations) {
         outcome.effects = std::move(effects);
         return outcome;
     };
-    const auto assertion = [](bool value) { return Effect{"Test.assert", {bool_value(value)}}; };
+    // ShortCircuit.observe writes "true" or "false" to the console.
+    const auto assertion = [](bool value) {
+        Value text;
+        text.kind = Value::Kind::String;
+        text.type = {TypeKind::String, "string", no_symbol, {}};
+        text.text = value ? "true" : "false";
+        return Effect{"Console.write_line", {text}};
+    };
     const IrType int8{TypeKind::Integer, "int8", no_symbol, {}};
 
     // The effectful left operand still runs even though the result is known.

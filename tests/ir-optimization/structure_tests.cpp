@@ -166,7 +166,7 @@ NEURA_TEST(structure, removes_only_pure_discards) {
                       {"State", "(initialize counter (binary + (integer 2) (integer 3)))"},
                       {"State.discards",
                        "(discard (virtual_call bump (receiver State) (integer 1))) "
-                       "(discard (external_call assert (boolean true))) "
+                       "(discard (virtual_call assert (reference test) (boolean true))) "
                        "(discard (binary + (load value) (integer 1))) (return (load value))"},
                       {"State.failing_discard", "(discard (binary / (load value) (integer 0))) (return (load value))"},
                       {"State.reset_then_read",
@@ -280,12 +280,24 @@ NEURA_TEST(structure, optimization_is_deterministic_and_preserves_symbols) {
 
 // The examples contain no constant expressions or literal conditions. If one
 // gains them, update this expectation to the intended optimized form.
+// The examples' own code is already in the form the optimizer leaves alone.
+// Standard library bodies that the examples import are not part of this
+// check.
 NEURA_TEST(structure, examples_are_unchanged) {
     const auto original = lower_files(example_files(environment));
     auto optimized = original;
-    const auto report = optimize(optimized);
-    check_equal(report.total_rewrites(), std::size_t{0}, "rewrites applied to the examples");
-    check(printed(original) == printed(optimized), "optimized examples differ from unoptimized examples");
+    optimize(optimized);
+    const auto examples = environment.examples().generic_string() + "/";
+    check_equal(optimized.bodies.size(), original.bodies.size(), "body count");
+    std::size_t compared = 0;
+    for (std::size_t i = 0; i < original.bodies.size(); ++i) {
+        const auto& body = original.bodies[i];
+        if (!original.symbols[body.owner].span.file.starts_with(examples)) continue;
+        ++compared;
+        check(shape(original, body.instructions) == shape(optimized, optimized.bodies[i].instructions),
+              "the optimizer rewrote " + qualified_name(original, body.owner));
+    }
+    check(compared > 0, "no example bodies were compared");
 }
 
 } // namespace neura::testing

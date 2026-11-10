@@ -14,6 +14,7 @@ int main(int argc, char** argv) {
     }
     const std::string suite = argv[1];
     const Environment environment{fs::canonical(argv[2])};
+    library_root() = environment.source_dir / "stdlib";
     std::size_t run = 0;
     std::size_t failed = 0;
     for (const auto& test : registry()) {

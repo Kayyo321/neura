@@ -17,6 +17,8 @@ namespace neura::testing {
 //
 // Modeled: bool; integer literals, arithmetic, comparisons, remainders,
 // unary minus, and checked conversions on int8..int64 and uint8..uint64;
+// enum values with payloads (construction, tags, and projections) and the
+// scoped and selected value regions that matches lower to; message traps;
 // float16, bfloat16, float32, and float64 arithmetic, comparisons, negation,
 // and conversions, through float_reference.hpp (literals go through strtod
 // or strtof, so a 16-bit literal is rounded twice);
@@ -27,7 +29,8 @@ namespace neura::testing {
 // construction in the documented order, fields, and destruction; arrays and
 // lists with lengths, indexing, append, remove_at, and structural versions;
 // and external calls, which are recorded as effects whose response is
-// `void`.
+// `void`, or for a standard library host binding, the success variant `Ok`
+// when it carries no payload.
 //
 // Stops with Status::Trapped at a program trap, with the NVR reason code the
 // backend must use: 1 for arithmetic (overflow, a zero divisor, MIN / -1,
@@ -54,6 +57,8 @@ struct Value {
     SymbolId symbol = no_symbol;
     // Heap entry of an object, array, or list.
     std::size_t handle = 0;
+    // The payload fields of a Variant of an enum with payloads.
+    std::vector<Value> payload{};
 
     bool operator==(const Value&) const = default;
 };

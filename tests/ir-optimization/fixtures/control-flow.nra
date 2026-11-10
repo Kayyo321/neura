@@ -1,5 +1,5 @@
 // Branches, loops, loop control, and unreachable statements.
-let test = import:Test;
+let test = import:Std.Test;
 
 let ControlFlow = module (
     export let select_then = func(int32 value) -> int32 {

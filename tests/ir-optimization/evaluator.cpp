@@ -1,13 +1,18 @@
 #include "evaluator.hpp"
 
+#include "neura-ir/host_binding.hpp"
+#include "neura-ir/nominal.hpp"
+
 #include "float_reference.hpp"
 #include "support.hpp"
 
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 
 #include <algorithm>
+#include <stdexcept>
 #include <limits>
 #include <sstream>
 #include <utility>
@@ -140,14 +145,18 @@ struct Frame {
 } // namespace
 
 struct HeapEntry {
-    enum class Kind { Object, Array, List };
+    enum class Kind { Object, Array, List, Tuple };
     Kind kind = Kind::Object;
     // Runtime class of an object.
     SymbolId cls = no_symbol;
     std::map<SymbolId, Value> fields;
+    // Elements of an array, a list, or a tuple.
     std::vector<Value> elements;
     std::uint64_t version = 0;
     bool freed = false;
+    // Class identity number, assigned at the first default hash or text
+    // request (Types.md, Umbrella class and nil); zero until then.
+    std::uint64_t identity = 0;
 };
 
 struct Heap {
@@ -183,7 +192,17 @@ std::string describe(const Value& value) {
         return std::string(buffer) + ":" + value.type.name;
     }
     case Value::Kind::String: return '"' + value.text + '"';
-    case Value::Kind::Variant: return "variant %" + std::to_string(value.symbol);
+    case Value::Kind::Variant: {
+        auto text = "variant %" + std::to_string(value.symbol);
+        if (!value.payload.empty()) {
+            text += "(";
+            for (std::size_t i = 0; i < value.payload.size(); ++i) {
+                text += (i == 0 ? "" : ", ") + describe(value.payload[i]);
+            }
+            text += ")";
+        }
+        return text;
+    }
     case Value::Kind::Module: return "module %" + std::to_string(value.symbol);
     case Value::Kind::Reference: return "ref#" + std::to_string(value.handle);
     }
@@ -294,10 +313,23 @@ private:
     std::map<SymbolId, std::vector<const IrNode*>> field_initializers_;
     std::map<SymbolId, std::vector<SymbolId>> functions_by_owner_;
     std::vector<Effect> effects_;
+    static constexpr std::size_t nil_handle = std::numeric_limits<std::size_t>::max();
+    U64 identities_ = 0;
+    mutable std::map<std::pair<SymbolId, std::string>, SymbolId> members_;
     std::size_t spent_ = 0;
     std::size_t depth_ = 0;
 
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols.at(id); }
+
+    // A variant's tag: its position among its enum's variants.
+    std::size_t variant_position(SymbolId variant) const {
+        const auto owner = symbol(variant).owner;
+        std::size_t position = 0;
+        for (SymbolId id = 0; id < variant; ++id) {
+            if (symbol(id).kind == SymbolKind::Variant && symbol(id).owner == owner) ++position;
+        }
+        return position;
+    }
 
     template <typename Run>
     Outcome guarded(Run run) {
@@ -459,6 +491,8 @@ private:
             return Flow::Next;
         case IrOp::Fail:
             trap(node, 5, "collection modified during iteration");
+        case IrOp::TrapMessage:
+            trap(node, 3, evaluate(node.operands.at(0), frame).text);
         case IrOp::Destroy: {
             const auto target = evaluate(node.operands.at(0), frame);
             const auto cls = object(target, node).cls;
@@ -596,18 +630,23 @@ private:
         }
         case IrOp::Allocate: {
             auto values = arguments(node, 0, frame);
-            heap_.entries.push_back({HeapEntry::Kind::Object, node.type.symbol, {}, {}, 0, false});
+            // The allocated class owns the constructor the node names; a
+            // specialized closure is typed by its function signature but is
+            // an instance of its own closure class.
+            const auto cls = node.symbol != no_symbol && symbol(node.symbol).kind == SymbolKind::Function
+                ? symbol(node.symbol).owner : node.type.symbol;
+            heap_.entries.push_back({HeapEntry::Kind::Object, cls, {}, {}, 0, false, 0});
             Value result;
             result.kind = Value::Kind::Reference;
             result.type = node.type;
             result.handle = heap_.entries.size() - 1;
-            construct(node.type.symbol, result, values, node.span);
+            construct(cls, result, values, node.span);
             return result;
         }
         case IrOp::Collection: {
             auto values = arguments(node, 0, frame);
             const auto kind = node.type.kind == TypeKind::List ? HeapEntry::Kind::List : HeapEntry::Kind::Array;
-            heap_.entries.push_back({kind, no_symbol, {}, std::move(values), 0, false});
+            heap_.entries.push_back({kind, no_symbol, {}, std::move(values), 0, false, 0});
             Value result;
             result.kind = Value::Kind::Reference;
             result.type = node.type;
@@ -688,10 +727,180 @@ private:
         case IrOp::ExternalCall: {
             auto values = arguments(node, 0, frame);
             effects_.push_back({qualified_name(program_, node.symbol), std::move(values)});
-            if (symbol(node.symbol).type.kind != TypeKind::Void) {
+            const auto& result = symbol(node.symbol).type;
+            if (result.kind == TypeKind::Void) {
+                return Value{};
+            }
+            // A host binding answers with its success variant. Only a
+            // payload-free Ok can be modeled without a provider.
+            const auto variants = host_variants(program_, result);
+            if (!variants || !symbol(variants->success).payload_types.empty()) {
                 unsupported(node, "external call with a result");
             }
-            return Value{};
+            Value ok;
+            ok.kind = Value::Kind::Variant;
+            ok.type = result;
+            ok.symbol = variants->success;
+            return ok;
+        }
+        case IrOp::EnumConstruct: {
+            Value result;
+            result.kind = Value::Kind::Variant;
+            result.type = node.type;
+            result.symbol = node.symbol;
+            result.payload = arguments(node, 0, frame);
+            return result;
+        }
+        case IrOp::EnumTag: {
+            const auto value = evaluate(node.operands.at(0), frame);
+            if (value.kind != Value::Kind::Variant) {
+                unsupported(node, "enum tag of a value that is not a variant");
+            }
+            return integer_value(node.type, false, variant_position(value.symbol));
+        }
+        case IrOp::EnumProject: {
+            const auto value = evaluate(node.operands.at(0), frame);
+            const auto index = static_cast<std::size_t>(std::stoul(node.text));
+            if (value.kind != Value::Kind::Variant || index >= value.payload.size()) {
+                unsupported(node, "projection of a missing variant field");
+            }
+            return value.payload[index];
+        }
+        case IrOp::ScopedValue: {
+            for (std::size_t i = 0; i + 1 < node.body.size(); ++i) {
+                run_statement(node.body[i], frame);
+            }
+            return evaluate(node.body.back(), frame);
+        }
+        case IrOp::SelectValue:
+            return evaluate(condition(node.operands.at(0), frame) ? node.body.at(0) : node.alternative.at(0), frame);
+        case IrOp::TrapMessage:
+            trap(node, 3, evaluate(node.operands.at(0), frame).text);
+        case IrOp::Nil: {
+            Value result;
+            result.kind = Value::Kind::Reference;
+            result.type = node.type;
+            result.handle = nil_handle;
+            return result;
+        }
+        case IrOp::Tuple: {
+            auto values = arguments(node, 0, frame);
+            heap_.entries.push_back({HeapEntry::Kind::Tuple, no_symbol, {}, std::move(values), 0, false, 0});
+            Value result;
+            result.kind = Value::Kind::Reference;
+            result.type = node.type;
+            result.handle = heap_.entries.size() - 1;
+            return result;
+        }
+        case IrOp::Project: {
+            const auto tuple = evaluate(node.operands.at(0), frame);
+            const auto& item = entry(tuple, node);
+            const auto index = static_cast<std::size_t>(std::stoul(node.text));
+            if (item.kind != HeapEntry::Kind::Tuple || index >= item.elements.size()) {
+                unsupported(node, "projection of a value that is not a tuple");
+            }
+            return item.elements[index];
+        }
+        case IrOp::TextLength: {
+            const auto text = evaluate(node.operands.at(0), frame);
+            return integer_value(node.type, false, text.text.size());
+        }
+        case IrOp::TextByteAt: {
+            const auto text = evaluate(node.operands.at(0), frame);
+            const auto index = evaluate(node.operands.at(1), frame);
+            if (index.negative) trap(node, 2, "negative index");
+            if (index.magnitude >= text.text.size()) fault(node, "index out of bounds");
+            return integer_value(node.type, false, static_cast<unsigned char>(text.text[index.magnitude]));
+        }
+        case IrOp::TextSlice: {
+            const auto text = evaluate(node.operands.at(0), frame);
+            const auto start = evaluate(node.operands.at(1), frame);
+            const auto end = evaluate(node.operands.at(2), frame);
+            if (start.negative || end.negative) trap(node, 2, "negative index");
+            const auto& bytes = text.text;
+            if (start.magnitude > end.magnitude || end.magnitude > bytes.size()) fault(node, "text range out of bounds");
+            const auto boundary = [&](U64 offset) {
+                return offset == bytes.size() || (static_cast<unsigned char>(bytes[offset]) & 0xc0U) != 0x80U;
+            };
+            if (!boundary(start.magnitude) || !boundary(end.magnitude)) {
+                fault(node, "text slice endpoints must be on UTF-8 boundaries");
+            }
+            Value result = text;
+            result.text = bytes.substr(start.magnitude, end.magnitude - start.magnitude);
+            return result;
+        }
+        case IrOp::TextEqual: {
+            const auto left = evaluate(node.operands.at(0), frame);
+            const auto right = evaluate(node.operands.at(1), frame);
+            // The node's text is the source operator, == or !=.
+            return bool_value((left.text == right.text) == (node.text != "!="));
+        }
+        case IrOp::TextFromUtf8: {
+            const auto source = evaluate(node.operands.at(0), frame);
+            const auto& item = collection_entry(source, node);
+            std::string bytes;
+            for (const auto& element : item.elements) bytes.push_back(static_cast<char>(element.magnitude));
+            const bool valid = valid_utf8(bytes);
+            Value text;
+            text.kind = Value::Kind::String;
+            text.type = node.type.arguments.at(1);
+            text.text = valid ? bytes : std::string();
+            heap_.entries.push_back({HeapEntry::Kind::Tuple, no_symbol, {}, {bool_value(valid), text}, 0, false, 0});
+            Value result;
+            result.kind = Value::Kind::Reference;
+            result.type = node.type;
+            result.handle = heap_.entries.size() - 1;
+            return result;
+        }
+        case IrOp::ReinterpretFloat: {
+            auto value = evaluate(node.operands.at(0), frame);
+            value.kind = node.type.kind == TypeKind::Float ? Value::Kind::Float : Value::Kind::Integer;
+            value.type = node.type;
+            value.negative = false;
+            return value;
+        }
+        case IrOp::ClassIs: {
+            const auto value = evaluate(node.operands.at(0), frame);
+            if (value.handle == nil_handle) return bool_value(false);
+            return bool_value(instance_of(object(value, node).cls, node.type_arguments.at(0)));
+        }
+        case IrOp::ClassCast: {
+            auto value = evaluate(node.operands.at(0), frame);
+            if (value.handle != nil_handle && !instance_of(object(value, node).cls, node.type)) {
+                fault(node, "invalid class cast");
+            }
+            value.type = node.type;
+            return value;
+        }
+        case IrOp::ClassHash: {
+            const auto value = evaluate(node.operands.at(0), frame);
+            return integer_value(node.type, false, (identity(value, node) * U64{2654435761}) & 0xffffffffU);
+        }
+        case IrOp::ClassText: {
+            const auto value = evaluate(node.operands.at(0), frame);
+            const auto number = identity(value, node);
+            Value result;
+            result.kind = Value::Kind::String;
+            result.type = node.type;
+            result.text = qualified_class(object(value, node).cls) + "#" + std::to_string(number);
+            return result;
+        }
+        case IrOp::ValueEquals: {
+            const auto left = evaluate(node.operands.at(0), frame);
+            const auto right = evaluate(node.operands.at(1), frame);
+            return bool_value(value_equals(left, right, node.operands.at(0).type, node));
+        }
+        case IrOp::ValueHash: {
+            const auto value = evaluate(node.operands.at(0), frame);
+            return integer_value(node.type, false, value_hash(value, node.operands.at(0).type, node));
+        }
+        case IrOp::ValueText: {
+            const auto value = evaluate(node.operands.at(0), frame);
+            Value result;
+            result.kind = Value::Kind::String;
+            result.type = node.type;
+            result.text = value_text(value, node.operands.at(0).type, node);
+            return result;
         }
         case IrOp::Float: {
             const auto format = float_of(node.type, node);
@@ -826,6 +1035,9 @@ private:
     }
 
     HeapEntry& entry(const Value& value, const IrNode& node) {
+        if (value.kind == Value::Kind::Reference && value.handle == nil_handle) {
+            fault(node, "nil class reference");
+        }
         if (value.kind != Value::Kind::Reference || value.handle >= heap_.entries.size()) {
             unsupported(node, "a reference operand that is not a reference");
         }
@@ -868,14 +1080,19 @@ private:
     }
 
     SymbolId own_member(SymbolId owner, std::string_view name) const {
+        const auto key = std::make_pair(owner, std::string(name));
+        if (const auto found = members_.find(key); found != members_.end()) return found->second;
+        SymbolId result = no_symbol;
         for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
             const auto& item = symbol(id);
             if (item.owner == owner && item.name == name &&
                 (item.kind == SymbolKind::Function || item.kind == SymbolKind::Field)) {
-                return id;
+                result = id;
+                break;
             }
         }
-        return no_symbol;
+        members_.emplace(key, result);
+        return result;
     }
 
     // The method with `method`'s name that the runtime class or its nearest
@@ -887,7 +1104,282 @@ private:
                 return found;
             }
         }
-        unsupported(node, "no implementation of " + symbol(method).name);
+        // An interface default body, the most specific first: the class and
+        // its bases come before the interfaces they implement.
+        for (const auto& view : nominal_views(program_, symbol(cls).type)) {
+            if (view.symbol >= program_.symbols.size() || symbol(view.symbol).kind != SymbolKind::Interface) continue;
+            const auto found = own_member(view.symbol, symbol(method).name);
+            if (found != no_symbol && symbol(found).kind == SymbolKind::Function && symbol(found).has_body) {
+                return found;
+            }
+        }
+        unsupported(node, "no implementation of " + symbol(method).name + " in " + symbol(cls).name);
+    }
+
+    static bool valid_utf8(const std::string& bytes) {
+        std::size_t i = 0;
+        while (i < bytes.size()) {
+            const auto b0 = static_cast<unsigned char>(bytes[i]);
+            std::size_t length = 0;
+            std::uint32_t scalar = 0;
+            if (b0 < 0x80U) { ++i; continue; }
+            if ((b0 & 0xe0U) == 0xc0U) { length = 2; scalar = b0 & 0x1fU; }
+            else if ((b0 & 0xf0U) == 0xe0U) { length = 3; scalar = b0 & 0x0fU; }
+            else if ((b0 & 0xf8U) == 0xf0U) { length = 4; scalar = b0 & 0x07U; }
+            else return false;
+            if (i + length > bytes.size()) return false;
+            for (std::size_t k = 1; k < length; ++k) {
+                const auto b = static_cast<unsigned char>(bytes[i + k]);
+                if ((b & 0xc0U) != 0x80U) return false;
+                scalar = (scalar << 6) | (b & 0x3fU);
+            }
+            const std::uint32_t minimum = length == 2 ? 0x80U : length == 3 ? 0x800U : 0x10000U;
+            if (scalar < minimum || scalar > 0x10ffffU || (scalar >= 0xd800U && scalar <= 0xdfffU)) return false;
+            i += length;
+        }
+        return true;
+    }
+
+    // Whether an object of runtime class `cls` is an instance of `target`.
+    bool instance_of(SymbolId cls, const IrType& target) const {
+        if (target.kind == TypeKind::Object && target.symbol == root_class()) return true;
+        return nominal_assignable(program_, symbol(cls).type, target);
+    }
+
+    SymbolId root_class() const {
+        for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+            if (symbol(id).kind == SymbolKind::Class && symbol(id).name == "$class") return id;
+        }
+        return no_symbol;
+    }
+
+    // The class name qualified by its modules, without the file.
+    std::string qualified_class(SymbolId cls) const {
+        std::string name = symbol(cls).name;
+        for (auto owner = symbol(cls).owner; owner != no_symbol && symbol(owner).kind != SymbolKind::File;
+             owner = symbol(owner).owner) {
+            name = symbol(owner).name + "." + name;
+        }
+        return name;
+    }
+
+    U64 identity(const Value& value, const IrNode& node) {
+        auto& item = object(value, node);
+        if (item.identity == 0) item.identity = ++identities_;
+        return item.identity;
+    }
+
+    // Calls the root class member `name` (equals, hash_code, or to_string) on
+    // a live object, with dynamic dispatch.
+    Value class_member(const Value& receiver, std::string_view name, std::vector<Value> arguments,
+                       const IrNode& node) {
+        const auto method = own_member(root_class(), name);
+        if (method == no_symbol) unsupported(node, "no root class member " + std::string(name));
+        const auto cls = object(receiver, node).cls;
+        return invoke(implementation(cls, method, node), no_symbol, arguments, node.span, receiver);
+    }
+
+    static bool class_type(const IrType& type) {
+        return type.kind == TypeKind::Object;
+    }
+
+    // Value member contracts (Stdlib.md section 5.2), written from the
+    // specification rather than from the converter's circuits.
+    bool value_equals(const Value& a, const Value& b, const IrType& type, const IrNode& node) {
+        switch (type.kind) {
+        case TypeKind::Bool: return a.boolean == b.boolean;
+        case TypeKind::Integer: return a.negative == b.negative && a.magnitude == b.magnitude;
+        case TypeKind::Float: {
+            const auto format = float_of(type, node);
+            return a.magnitude == b.magnitude || (floats::is_nan(a.magnitude, format) && floats::is_nan(b.magnitude, format));
+        }
+        case TypeKind::String: return a.text == b.text;
+        case TypeKind::Enum:
+            if (a.kind != Value::Kind::Variant || !a.payload.empty() || !b.payload.empty())
+                unsupported(node, "value equality of an enum with payloads");
+            return a.symbol == b.symbol;
+        case TypeKind::Tuple:
+        case TypeKind::Array:
+        case TypeKind::List: {
+            const auto& left = entry(a, node).elements;
+            const auto& right = entry(b, node).elements;
+            if (left.size() != right.size()) return false;
+            for (std::size_t i = 0; i < left.size(); ++i) {
+                const auto& element = type.kind == TypeKind::Tuple ? type.arguments.at(i) : type.arguments.at(0);
+                if (!value_equals(left[i], right[i], element, node)) return false;
+            }
+            return true;
+        }
+        case TypeKind::Object: {
+            if (a.handle == nil_handle || b.handle == nil_handle) return a.handle == b.handle;
+            auto other = b;
+            other.type = IrType{TypeKind::Object, "$class", root_class(), {}};
+            return class_member(a, "equals", {other}, node).boolean;
+        }
+        default:
+            unsupported(node, "value equality of " + type.name);
+        }
+    }
+
+    U64 value_hash(const Value& value, const IrType& type, const IrNode& node) {
+        constexpr U64 low = 0xffffffffU;
+        switch (type.kind) {
+        case TypeKind::Bool: return value.boolean ? 1231 : 1237;
+        case TypeKind::Integer: {
+            const auto pattern = value.negative ? (~value.magnitude + 1) : value.magnitude;
+            const auto format = format_of(type);
+            if (format && format->bits == 64) return (pattern & low) ^ (pattern >> 32);
+            return pattern & low;
+        }
+        case TypeKind::Float: {
+            const auto format = float_of(type, node);
+            auto bits = value.magnitude;
+            const auto width = 1 + format.exponent_bits + format.fraction_bits;
+            if (floats::is_nan(bits, format)) {
+                bits = (((U64{1} << format.exponent_bits) - 1) << format.fraction_bits) |
+                       (U64{1} << (format.fraction_bits - 1));
+            }
+            if (width == 64) return (bits & low) ^ (bits >> 32);
+            return bits & low;
+        }
+        case TypeKind::String: {
+            U64 hash = 0;
+            for (const auto byte : value.text) hash = (hash * 31 + static_cast<unsigned char>(byte)) & low;
+            return hash;
+        }
+        case TypeKind::Enum:
+            if (value.kind != Value::Kind::Variant || !value.payload.empty())
+                unsupported(node, "value hash of an enum with payloads");
+            return variant_position(value.symbol);
+        case TypeKind::Tuple:
+        case TypeKind::Array:
+        case TypeKind::List: {
+            U64 hash = 1;
+            const auto& elements = entry(value, node).elements;
+            for (std::size_t i = 0; i < elements.size(); ++i) {
+                const auto& element = type.kind == TypeKind::Tuple ? type.arguments.at(i) : type.arguments.at(0);
+                hash = (hash * 31 + value_hash(elements[i], element, node)) & low;
+            }
+            return hash;
+        }
+        case TypeKind::Object:
+            if (value.handle == nil_handle) return 0;
+            return class_member(value, "hash_code", {}, node).magnitude;
+        default:
+            unsupported(node, "value hash of " + type.name);
+        }
+    }
+
+    std::string value_text(const Value& value, const IrType& type, const IrNode& node) {
+        switch (type.kind) {
+        case TypeKind::Bool: return value.boolean ? "true" : "false";
+        case TypeKind::Integer: return (value.negative ? "-" : "") + std::to_string(value.magnitude);
+        case TypeKind::Float: return float_text(value.magnitude, float_of(type, node));
+        case TypeKind::String: return value.text;
+        case TypeKind::Enum:
+            if (value.kind != Value::Kind::Variant || !value.payload.empty())
+                unsupported(node, "value text of an enum with payloads");
+            return symbol(value.symbol).name;
+        case TypeKind::Tuple:
+        case TypeKind::Array:
+        case TypeKind::List: {
+            std::string text = "[";
+            const auto& elements = entry(value, node).elements;
+            for (std::size_t i = 0; i < elements.size(); ++i) {
+                const auto& element = type.kind == TypeKind::Tuple ? type.arguments.at(i) : type.arguments.at(0);
+                text += (i == 0 ? "" : ", ") + value_text(elements[i], element, node);
+            }
+            return text + "]";
+        }
+        case TypeKind::Object:
+            if (value.handle == nil_handle) return "nil";
+            return class_member(value, "to_string", {}, node).text;
+        default:
+            unsupported(node, "value text of " + type.name);
+        }
+    }
+
+    // Shortest decimal text that reads back as the same value (Stdlib.md
+    // section 7.5), from the C++ library's shortest round-trip conversion
+    // for binary32 and binary64 and a search over printf precisions for the
+    // 16-bit formats.
+    static std::string float_text(U64 bits, floats::Format format) {
+        const auto width = 1 + format.exponent_bits + format.fraction_bits;
+        const bool negative = ((bits >> (width - 1)) & 1U) != 0;
+        const auto magnitude = bits & ((U64{1} << (width - 1)) - 1);
+        const std::string sign = negative ? "-" : "";
+        if (floats::is_nan(bits, format)) return "NaN";
+        const auto infinity = ((U64{1} << format.exponent_bits) - 1) << format.fraction_bits;
+        if (magnitude == infinity) return sign + "Infinity";
+        if (magnitude == 0) return sign + "0.0";
+        char buffer[64];
+        std::string scientific;
+        if (width == 64) {
+            double value = 0;
+            std::memcpy(&value, &magnitude, sizeof value);
+            const auto end = std::to_chars(buffer, buffer + sizeof buffer, value, std::chars_format::scientific).ptr;
+            scientific.assign(buffer, end);
+        } else if (width == 32 && format.fraction_bits == 23) {
+            const auto narrow = static_cast<std::uint32_t>(magnitude);
+            float value = 0;
+            std::memcpy(&value, &narrow, sizeof value);
+            const auto end = std::to_chars(buffer, buffer + sizeof buffer, value, std::chars_format::scientific).ptr;
+            scientific.assign(buffer, end);
+        } else {
+            // For each digit count, the correctly rounded decimal and its two
+            // neighbors are the candidates; the shortest that reads back
+            // wins, the closest of those, then the one with an even last
+            // digit.
+            const double value = floats::decode(magnitude, format);
+            for (int precision = 0; precision < 17 && scientific.empty(); ++precision) {
+                std::snprintf(buffer, sizeof buffer, "%.*e", precision, value);
+                const std::string rounded = buffer;
+                const auto mark = rounded.find('e');
+                std::string mantissa = rounded.substr(0, mark);
+                mantissa.erase(std::remove(mantissa.begin(), mantissa.end(), '.'), mantissa.end());
+                const auto exponent = std::stoi(rounded.substr(mark + 1)) - precision;
+                const auto center = std::stoull(mantissa);
+                long double best_distance = -1;
+                std::uint64_t best = 0;
+                for (const auto candidate : {center - 1, center, center + 1}) {
+                    if (candidate == 0 || (candidate == center - 1 && center == 0)) continue;
+                    std::snprintf(buffer, sizeof buffer, "%llue%d", static_cast<unsigned long long>(candidate), exponent);
+                    if (floats::encode(std::strtod(buffer, nullptr), format) != magnitude) continue;
+                    const auto distance = std::fabs(std::strtold(buffer, nullptr) - static_cast<long double>(value));
+                    // Two adjacent candidates tie exactly when the value is
+                    // their midpoint, (2c - 1) * 5 * 10^(exponent - 1).
+                    bool tie = false;
+                    if (best_distance >= 0 && best + 1 == candidate) {
+                        std::snprintf(buffer, sizeof buffer, "%llue%d",
+                                      static_cast<unsigned long long>((2 * candidate - 1) * 5), exponent - 1);
+                        tie = std::strtod(buffer, nullptr) == value;
+                    }
+                    if (best_distance < 0 || (tie ? candidate % 2 == 0 : distance < best_distance)) {
+                        best_distance = distance;
+                        best = candidate;
+                    }
+                }
+                if (best_distance >= 0) {
+                    auto digits = std::to_string(best);
+                    const auto leading = exponent + static_cast<int>(digits.size()) - 1;
+                    scientific = digits.substr(0, 1) + (digits.size() > 1 ? "." + digits.substr(1) : "") + "e" +
+                                 std::to_string(leading);
+                }
+            }
+        }
+        const auto e = scientific.find('e');
+        std::string digits = scientific.substr(0, e);
+        digits.erase(std::remove(digits.begin(), digits.end(), '.'), digits.end());
+        const int exponent = std::stoi(scientific.substr(e + 1));
+        while (digits.size() > 1 && digits.back() == '0') digits.pop_back();
+        if (exponent < -4 || exponent >= 16) {
+            return sign + digits.substr(0, 1) + "." + (digits.size() == 1 ? "0" : digits.substr(1)) + "e" +
+                   std::to_string(exponent);
+        }
+        if (exponent < 0) return sign + "0." + std::string(static_cast<std::size_t>(-exponent - 1), '0') + digits;
+        const auto split = static_cast<std::size_t>(exponent + 1);
+        if (split >= digits.size()) return sign + digits + std::string(split - digits.size(), '0') + ".0";
+        return sign + digits.substr(0, split) + "." + digits.substr(split);
     }
 
     SymbolId owner_class(const Frame& frame) const {
@@ -903,6 +1395,8 @@ private:
         }
         ++depth_;
         const auto init = own_member(cls, "init");
+        const auto base = symbol(cls).base;
+        const bool has_base_initializer = base != no_symbol && symbol(base).name != "$class";
         Frame frame;
         frame.self = self;
         frame.function = init;
@@ -913,7 +1407,7 @@ private:
             }
             const auto& body = bodies_.at(init)->instructions;
             std::size_t start = 0;
-            if (symbol(cls).base != no_symbol && !body.empty()) {
+            if (has_base_initializer && !body.empty()) {
                 run_statement(body.front(), frame);
                 start = 1;
             }
@@ -924,8 +1418,8 @@ private:
                 }
             }
         } else {
-            if (symbol(cls).base != no_symbol) {
-                construct(symbol(cls).base, self, {}, site);
+            if (has_base_initializer) {
+                construct(base, self, {}, site);
             }
             initialize_fields(cls, self);
         }
@@ -957,6 +1451,13 @@ private:
 
     Value binary(const IrNode& node, const Value& left, const Value& right) {
         const auto& op = node.text;
+        if (left.kind == Value::Kind::Reference && right.kind == Value::Kind::Reference && (op == "==" || op == "!=")) {
+            // Class references compare by identity; two nils are equal.
+            return bool_value((left.handle == right.handle) == (op == "=="));
+        }
+        if (left.kind == Value::Kind::String && right.kind == Value::Kind::String && (op == "==" || op == "!=")) {
+            return bool_value((left.text == right.text) == (op == "=="));
+        }
         if (left.kind == Value::Kind::Bool && right.kind == Value::Kind::Bool && (op == "==" || op == "!=")) {
             return bool_value((left.boolean == right.boolean) == (op == "=="));
         }
@@ -1055,6 +1556,7 @@ std::vector<Outcome> Evaluator::initialize() {
                (node.op == IrOp::Reference && symbols.at(node.symbol).kind == SymbolKind::Variant);
     };
     std::vector<SymbolId> files;
+    std::vector<SymbolId> order_storage;
     std::map<SymbolId, std::vector<SymbolId>> imports;
     for (SymbolId id = 0; id < symbols.size(); ++id) {
         if (symbols[id].kind == SymbolKind::File) {
@@ -1066,25 +1568,48 @@ std::vector<Outcome> Evaluator::initialize() {
             }
         }
     }
-    std::vector<SymbolId> order;
+    // Files that import each other (a cycle, possibly through other files)
+    // start together once every file the cycle imports from outside it has
+    // run; within the cycle they keep program order.
+    const auto reaches = [&](SymbolId from, SymbolId to) {
+        std::vector<SymbolId> stack{from};
+        std::vector<SymbolId> seen;
+        while (!stack.empty()) {
+            const auto current = stack.back();
+            stack.pop_back();
+            for (const auto next : imports[current]) {
+                if (next == to) return true;
+                if (std::find(seen.begin(), seen.end(), next) == seen.end()) {
+                    seen.push_back(next);
+                    stack.push_back(next);
+                }
+            }
+        }
+        return false;
+    };
+    const auto together = [&](SymbolId a, SymbolId b) { return a == b || (reaches(a, b) && reaches(b, a)); };
+    const auto done = [&](SymbolId file) { return std::find(order_storage.begin(), order_storage.end(), file) != order_storage.end(); };
+    auto& order = order_storage;
     while (order.size() < files.size()) {
-        SymbolId chosen = no_symbol;
+        const auto before = order.size();
         for (const auto file : files) {
-            const bool done = std::find(order.begin(), order.end(), file) != order.end();
-            const bool ready = std::all_of(imports[file].begin(), imports[file].end(), [&](SymbolId dependency) {
-                return std::find(order.begin(), order.end(), dependency) != order.end();
+            if (done(file)) continue;
+            std::vector<SymbolId> cycle;
+            for (const auto member : files) {
+                if (!done(member) && together(file, member)) cycle.push_back(member);
+            }
+            const bool ready = std::all_of(cycle.begin(), cycle.end(), [&](SymbolId member) {
+                return std::all_of(imports[member].begin(), imports[member].end(),
+                                   [&](SymbolId dependency) { return done(dependency) || together(file, dependency); });
             });
-            if (!done && ready) {
-                chosen = file;
+            if (ready) {
+                order.insert(order.end(), cycle.begin(), cycle.end());
                 break;
             }
         }
-        for (const auto file : files) {
-            if (chosen == no_symbol && std::find(order.begin(), order.end(), file) == order.end()) {
-                chosen = file;
-            }
+        if (order.size() == before) {
+            throw std::logic_error("no file is ready to initialize");
         }
-        order.push_back(chosen);
     }
 
     Machine machine(program_, limits_, {}, {});

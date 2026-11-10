@@ -1,10 +1,15 @@
 // Short-circuit operations with literal, pure, effectful, and failing operands.
-let test = import:Test;
+let console = import:Std.Io.Console;
 
 let ShortCircuit = module (
-    // Requests an external effect, then returns its argument.
+    // Requests an external effect, a console write of the argument's
+    // text, then returns the argument.
     export let observe = func(bool value) -> bool {
-        test.assert(value);
+        if (value) {
+            console.print_line("true");
+        } else {
+            console.print_line("false");
+        }
         return value;
     };
 
