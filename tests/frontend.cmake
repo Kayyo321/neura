@@ -328,3 +328,25 @@ let f = func(x: float32, n: int32) -> float32 {
 
 check_rejection(nil-scalar "let number: int = nil;" "2:19" "nil requires a class reference type")
 check_rejection(construct-umbrella "let value = new class();" "2:13" "class is an umbrella type and cannot be constructed")
+
+check_rejection(read-discard "let _ = 3; let read = _;" "2:23" "unknown name '_'")
+check_rejection(missing-discard-value "let _: int;" "2:1" "requires a value initializer")
+check_rejection(invalid-promotion "let.promote x = 3;" "2:1" "let[.]promote requires")
+check_rejection(named-wildcard "let.promote time = import:Std.Time.*;" "2:20" "wildcard imports require")
+check_rejection(ambiguous-promoted-name [=[
+let.promote _ = import:Std.Time.*;
+let parse_time = parse;
+]=] "3:18" "ambiguous promoted name 'parse'")
+check_rejection(static-receiver [=[
+let Record = class (
+    let value = 1;
+    export static let read = func -> int => value;
+);
+]=] "4:45" "instance member 'value' requires a receiver")
+check_rejection(static-type-parameter [=[
+let Record = class<T> (
+    export static let read = func(value: T) -> T => value;
+);
+]=] "3:[1-9][0-9]*" "static member cannot use an enclosing class type parameter")
+check_rejection(singleton-new "let one = singleton (); let another = new one();" "2:39" "singleton cannot be constructed")
+check_rejection(singleton-destroy "let one = singleton (); destroy one;" "2:33" "singleton cannot be destroyed")

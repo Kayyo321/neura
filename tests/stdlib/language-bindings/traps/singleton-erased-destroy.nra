@@ -1,0 +1,14 @@
+// stderr: a singleton cannot be destroyed
+let program = import:Std.Program;
+
+let service = singleton (
+    let value = 1;
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let erased: class = service;
+        destroy erased;
+        return program.ExitCode.Ok;
+    }
+);

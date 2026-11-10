@@ -175,6 +175,11 @@ private:
     void check_symbols() {
         for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
             const auto& entry = symbol(id);
+            if (is_static_scope(entry) &&
+                (!valid(entry.owner) || !class_or_interface(symbol(entry.owner).kind) ||
+                 entry.type.kind != TypeKind::Module || entry.type.symbol != id || !entry.generics.empty())) {
+                report(entry.span, "a static scope must be a non-generic module owned by a class or interface");
+            }
             for (const auto& [label, reference] : {std::pair{"owner", entry.owner},
                                                   std::pair{"base", entry.base},
                                                   std::pair{"overrides", entry.overrides}}) {
@@ -895,6 +900,12 @@ private:
         }
         if (node.operands.size() > 1) {
             report(node.span, "load has more than one receiver");
+        }
+        if (target.kind == SymbolKind::Global && !node.operands.empty() &&
+            node.operands.front().type.kind != TypeKind::Module &&
+            (!valid(target.owner) || !is_static_scope(symbol(target.owner)) ||
+             !class_reference(node.operands.front().type))) {
+            report(node.span, "only a static field can have a class reference qualifier");
         }
         if (target.kind == SymbolKind::Local && (target.owner != context.owner || !visible(node.symbol))) {
             report(node.span, "load of local " + name(node.symbol) +

@@ -22,6 +22,31 @@ console.print_line("Hello");
 
 An import alias shares the file's scope with the members the file declares, so choose an alias that no member of the file uses.
 
+Use `let.promote` in a file or module to make an imported module's exports
+available by their unqualified names. A named import also keeps its alias.
+Use `_` to omit the alias.
+
+```neura
+let.promote clock = import:Std.Time.Clock;
+let.promote _ = import:Std.Time.Duration;
+
+let zero: Duration = Zero;
+let current_clock: Clock = nil;
+```
+
+`let.promote _ = import:Std.Time.*;` promotes exports from the immediate
+modules in the `Std.Time` directory. Wildcard imports do not recurse into
+subdirectories, and cannot import internal standard library modules from
+project source. Declarations and local bindings take precedence over
+promoted names. Referring to a name provided by multiple promoted modules in
+the same scope is an error. A promoted export remains qualified in its
+defining module and is not automatically re-exported.
+
+`let _ = import:ModuleName;` records the initialization dependency without
+bringing any names into scope. For an ordinary value, `let _ = expression;`
+evaluates the expression once and discards the result. This works for local,
+file, and module bindings. Each occurrence has no name to read or redeclare.
+
 For project-local modules, the proposed qualified-name and file layout convention is described in [Project structure](ProjectStructure.md). The [multi-file example](../../examples/modules/multi-file/main.nra) shows a project module importing another project module.
 
 ### Standard library imports
@@ -104,7 +129,9 @@ A program's files, modules, and top-level statements initialize before the entry
 
 1. Every module or file global whose initializer is written as a literal (a number, a string, `true`, `false`, `nil`, or a fieldless enum variant) holds its value when the image loads. A number may have a leading `-`.
 2. Each file runs after every file it imports. Files that do not depend on each other run in the order the compiler received them. Files that import each other, directly or through other files, form a cycle: the cycle starts once every file it imports from outside the cycle has run, and its files then run in the order the compiler received them.
-3. Within a file, top-level statements and the remaining initializers of the file's globals and of its modules' members run in source order, by their position in the file.
+3. Within a file, top-level statements and the remaining initializers of the
+   file's globals, module members, class static fields, and singleton
+   instances run in source order, by their position in the file.
 
 Then `main` runs. The same initialization runs before each test under `neura test`.
 

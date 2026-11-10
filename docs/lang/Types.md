@@ -1,6 +1,7 @@
 # Types
 
-Types describe values used in declarations, parameters, and return values. A declaration places the type after the name; function parameters place it before the name.
+Types describe values used in declarations, parameters, and return values.
+Bindings and function parameters put the type after the name.
 
 ```neura
 let count: int32 = 1;
@@ -110,6 +111,69 @@ let NamedEntry = class:LogEntry (
 
 The derived class extends the base class's interface. A derived instance can be passed where its base type is expected, and an overridden method dispatches to the implementation for the actual instance. Declare an override with `let.override` or `const.override`. See [Polymorphism](Polymorphism.md) for interfaces and generics and [Object lifecycle](ObjectLifecycle.md) for construction and cleanup.
 
+### Static members
+
+Add `static` before `let` or `const` in a class or interface. Static fields
+belong to the declaring type. Static functions and nested types do not need
+an enclosing instance.
+
+```neura
+let Limits = class (
+    export static const Max = 100;
+    export static let calls: int;
+
+    export static let record = func -> int => ++calls;
+
+    export static let Label = class (
+        export let text = "limits";
+    );
+);
+
+let first = Limits.record();
+let label = new Limits.Label();
+```
+
+Access a static member through the class or interface name, or by its
+unqualified name in scope. An instance expression can also qualify a
+static field or a class's static function. The expression is evaluated once
+and its result is discarded, even when the result is `nil`. A derived class
+inherits exported static members. It can hide a static field with another
+field, or hide a static function with another static function that has the
+same parameter types and a compatible result type. A static function does
+not implement an interface's instance requirement. An interface's static
+fields are constants, and its static functions belong only to that interface.
+
+A static function needs a body. It may use the surrounding class's static
+members, and needs an explicit instance to access instance members. A
+generic class shares its static members across all type arguments, so they
+cannot use the enclosing class's type parameters. Uninitialized mutable
+numeric and Boolean static fields start at zero and false respectively.
+Uninitialized mutable class and interface references start at `nil`.
+Other static fields and all static constants require an initializer.
+[Program initialization](Modules.md#initialization) determines when
+initializers run.
+
+### Singletons
+
+A `singleton` declares a class with one instance. A singleton binding
+names that instance in expressions and its type in annotations. The program
+initializes the instance before entry, and every alias refers to the same
+state.
+
+```neura
+export let counter = singleton (
+    let index = 0;
+
+    export let next = func -> int => index++;
+);
+```
+
+Singletons can be declared at file scope, in modules, or as static class
+members. A singleton may implement interfaces. It cannot be subclassed,
+constructed with `new`, or destroyed. See
+[Object lifecycle](ObjectLifecycle.md#singleton-lifecycle) for its
+initialization rules.
+
 ### Umbrella class and nil
 
 `class` is a type in annotation, parameter, result, and type argument positions. Every class instance can be stored in it. An interface reference can also be passed as `class`. The runtime keeps the concrete identity and dispatches methods to the instance's implementation.
@@ -127,7 +191,7 @@ if (entry is LogEntry) {
 - `nil` is an explicit absent reference for class and interface types, including type parameters bounded by them. With no contextual type, it has type `class`. A field without an initializer is still uninitialized. Use `= nil` to initialize it to absence.
 - `==` and `!=` compare references by identity. Two nil references compare equal. Use `is` to test a live reference against a class or interface. A nil reference gives false. A checked reference cast with `as` preserves nil and traps for an incompatible instance.
 - Reading or writing a field, invoking an instance method, or explicitly destroying a nil reference traps. It has no heap allocation and tracing skips it.
-- `class` supplies `equals(class other) -> bool`, `hash_code() -> uint32`, and `to_string() -> string`. A class can override those signatures. The defaults use identity and a qualified class name with an identity number, such as `Acme.Shapes.Circle#3`. The runtime assigns that number at first use by default hashing or formatting. An equality override must agree with its hash and return false for nil.
+- `class` supplies `equals(other: class) -> bool`, `hash_code() -> uint32`, and `to_string() -> string`. A class can override those signatures. The defaults use identity and a qualified class name with an identity number, such as `Acme.Shapes.Circle#3`. The runtime assigns that number at first use by default hashing or formatting. An equality override must agree with its hash and return false for nil.
 - The built-in value members of scalars, tuples, arrays, and lists use value semantics. Generic and aggregate value operations treat nil as a distinct value with hash zero and text `nil`. A direct method call on a nil class reference follows the receiver trap rule.
 
 ## Enums

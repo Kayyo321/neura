@@ -604,6 +604,7 @@ int run_tests(const Options& options) {
             !item.name.starts_with("test_") || !item.parameters.empty() || !item.generics.empty() ||
             item.type.kind != neura::TypeKind::Void || item.owner == neura::no_symbol ||
             program.symbols[item.owner].kind != neura::SymbolKind::Module ||
+            neura::is_static_scope(program.symbols[item.owner]) ||
             !program.symbols[item.owner].generics.empty()) {
             continue;
         }

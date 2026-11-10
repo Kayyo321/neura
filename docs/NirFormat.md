@@ -17,7 +17,7 @@ All minor versions use the conventions of [NVR](runtime/NVR.md#encoding-and-comp
 | Symbols | vector<Symbol> | The symbol table in symbol-index order |
 | Bodies | vector<Body> | Bodies in program order |
 
-A file starts with these fields and ends after the last body. The reader accepts versions 1.0 through 1.4. The writer emits the earliest version that can encode the program. Version 1.1 adds loop latches and operation tags 31–33. Version 1.2 adds tuple types, enum payloads, aggregate and selection operations, comparison chains, and bitwise spellings on existing unary and binary nodes. Version 1.3 adds structural function types, generic enum applications, interfaces and intersection bounds, library and host bindings, nil references and class operations, universal value members, and text, float bit access, and message-trap operations. Version 1.4 adds statements before a scoped value's result. The reader rejects features newer than the file's declared version.
+A file starts with these fields and ends after the last body. The reader accepts versions 1.0 through 1.4. The writer emits the earliest version that can encode the program. Version 1.1 adds loop latches and operation tags 31–33. Version 1.2 adds tuple types, enum payloads, aggregate and selection operations, comparison chains, and bitwise spellings on existing unary and binary nodes. Version 1.3 adds structural function types, generic enum applications, interfaces and intersection bounds, library and host bindings, nil references and class operations, universal value members, and text, float bit access, and message-trap operations. Version 1.4 adds class static scopes and qualified static field access, and statements before a scoped value's result. The reader rejects features newer than the file's declared version.
 
 ### Records
 
@@ -34,6 +34,13 @@ Symbol flags are bit 0 exported, bit 1 constant, bit 2 external, and bit 3 has a
 - Host binding: service name as `text`, then version as `u32`.
 - Library file identity: nonempty library-relative path as `text`.
 - Interfaces and additional bounds: two `vector<Type>` fields, in that order. The first holds implemented or extended interface applications. The second holds the bounds after the first `bound` field. At least one vector is nonempty.
+
+The synthetic `$static` module is a class or interface's static scope.
+It owns shared global fields, receiver-free functions, and nested type
+declarations independently of the enclosing class's generic parameters.
+A static field load or store may carry an object qualifier as an operand
+of its `load` node. The qualifier evaluates before the field access and
+the value is discarded.
 
 The tags follow the declaration order of the enumerations in [`src/neura-ir/ir.hpp`](../src/neura-ir/ir.hpp):
 

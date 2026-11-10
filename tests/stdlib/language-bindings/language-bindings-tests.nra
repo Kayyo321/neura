@@ -1,0 +1,122 @@
+let.promote checks = import:Std.Test;
+let.promote _ = import:Std.Time.*;
+let.promote _ = import:Startup.*;
+
+let effects = 0;
+let record = func -> int => ++effects;
+
+let _ = record();
+let _ = record();
+
+let counter = singleton (
+    let value = initial_value();
+
+    export let next = func -> int => value++;
+);
+
+let Base = class (
+    export static const Max = 100;
+    export static let total: int;
+    export static let selected = func -> int => 1;
+    export static let note = func(number: int) {
+        total = number;
+    }
+
+    export static let Nested = class (
+        export let value = 4;
+    );
+
+    export let value = 0;
+    export let add = func {
+        value++;
+        total++;
+    }
+);
+
+let Derived = class:Base (
+    export static let selected = func -> int => 2;
+);
+
+let Limits = interface (
+    static let Min = -1;
+    static let lower_bound = func -> int => Min;
+);
+
+let Bounded = class:Base implements Limits (
+    export let Max = 50;
+);
+
+let Generic = class<T> (
+    export static let value = 3;
+    export let item: T;
+);
+
+let as_nil = func -> Base {
+    let _ = record();
+    return nil;
+};
+
+let BindingTests = module (
+    export let test_discard = func {
+        assert_equal_int32(2, effects);
+        let _ = record();
+        let _ = record();
+        assert_equal_int32(4, effects);
+    }
+
+    export let test_promoted_exports = func {
+        let clock: Clock = nil;
+        let span: Duration = Zero;
+        assert(clock == nil);
+        assert_equal_int64(0, span.to_nanos());
+        checks.assert_equal_int32(10, initial_value());
+    }
+
+    export let test_singleton_state = func {
+        let alias: counter = counter;
+        assert(alias == counter);
+        assert_equal_int32(10, counter.next());
+        assert_equal_int32(11, alias.next());
+    }
+
+    export let test_shared_static_state = func {
+        let first = new Base();
+        let second = new Derived();
+        first.add();
+        second.add();
+        assert_equal_int32(1, first.value);
+        assert_equal_int32(1, second.value);
+        assert_equal_int32(2, Base.total);
+        assert_equal_int32(2, Derived.total);
+        Derived.total = 12;
+        assert_equal_int32(12, Base.total);
+        assert_equal_int32(100, Derived.Max);
+        assert_equal_int32(1, Base.selected());
+        assert_equal_int32(2, Derived.selected());
+        assert_equal_int32(4, (new Derived.Nested()).value);
+        assert_equal_int32(3, Generic.value);
+        let generic_int = new Generic<int>();
+        let generic_string = new Generic<string>();
+        generic_int.value = 6;
+        assert_equal_int32(6, generic_string.value);
+        let bounded = new Bounded();
+        assert_equal_int32(50, bounded.Max);
+        assert_equal_int32(100, (bounded as Base).Max);
+        assert_equal_int32(-1, Bounded.Min);
+        assert_equal_int32(-1, Limits.lower_bound());
+    }
+
+    export let test_static_qualifier = func {
+        as_nil().total = record();
+        assert_equal_int32(4, Base.total);
+        as_nil().total += record();
+        assert_equal_int32(10, as_nil().total++);
+        assert_equal_int32(1, as_nil().selected());
+        let bound = as_nil().selected;
+        assert_equal_int32(1, bound());
+        assert_equal_int32(9, effects);
+        as_nil().note(record());
+        assert_equal_int32(11, Base.total);
+        assert_equal_int32(11, effects);
+    }
+);

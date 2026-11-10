@@ -149,7 +149,7 @@ private:
     Operand to_index(const Operand& index, const IrType& type, const Span& span);
     Operand receiver_value(const IrNode& node);
     SymbolId module_of(const IrNode& receiver) const;
-    SymbolId resolve_global(const IrNode& node) const;
+    SymbolId resolve_global(const IrNode& node);
     IntegerFormat integer_format(const IrType& type, const Span& span) const;
 
     // Function bodies.
@@ -1197,7 +1197,7 @@ std::string Converter::qualified(SymbolId id) const {
     std::string name = symbol(id).name;
     for (auto owner = symbol(id).owner; owner != no_symbol && symbol(owner).kind != SymbolKind::File;
          owner = symbol(owner).owner) {
-        name = symbol(owner).name + "." + name;
+        if (!is_static_scope(symbol(owner))) name = symbol(owner).name + "." + name;
     }
     return name;
 }
@@ -1987,11 +1987,15 @@ SymbolId FunctionCompiler::module_of(const IrNode& receiver) const {
     throw Diagnostic(receiver.span, "unsupported module receiver");
 }
 
-SymbolId FunctionCompiler::resolve_global(const IrNode& node) const {
+SymbolId FunctionCompiler::resolve_global(const IrNode& node) {
     if (node.operands.empty()) {
         return node.symbol;
     }
-    return c_.resolve_member(module_of(node.operands.front()), node.symbol);
+    const auto& qualifier = node.operands.front();
+    if (qualifier.type.kind == TypeKind::Module)
+        return c_.resolve_member(module_of(qualifier), node.symbol);
+    expression(qualifier);
+    return node.symbol;
 }
 
 Operand FunctionCompiler::unary(const IrNode& node) {

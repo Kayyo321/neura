@@ -1,10 +1,10 @@
 let console = import:Std.Io.Console;
 let program = import:Std.Program;
-let greetings = import:Acme.Greetings;
+let.promote _ = import:Acme.Greetings;
 
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        console.print_line(greetings.message("Neura"));
+        console.print_line(message("Neura"));
         return program.ExitCode.Ok;
     }
 );

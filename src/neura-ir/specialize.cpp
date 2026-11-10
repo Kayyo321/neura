@@ -178,6 +178,9 @@ private:
             if (!item.generics.empty() || item.kind == SymbolKind::TypeParameter) {
                 return true;
             }
+            // Class static members are shared across all instances and
+            // cannot refer to the containing class's type parameters.
+            if (is_static_scope(item)) return false;
         }
         return false;
     }

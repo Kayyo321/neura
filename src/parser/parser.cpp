@@ -64,10 +64,14 @@ private:
         return span;
     }
 
-    std::string qualified_name() {
+    std::string qualified_name(bool wildcard = false) {
         std::string name = identifier().text;
         while (match(".")) {
             name += '.';
+            if (wildcard && match("*")) {
+                name += '*';
+                break;
+            }
             name += identifier().text;
         }
         return name;
@@ -185,7 +189,7 @@ private:
         return true;
     }
 
-    bool at_declaration() const { return at("export") || at("let") || at("const"); }
+    bool at_declaration() const { return at("export") || at("static") || at("let") || at("const"); }
 
     Declaration declaration(bool member) {
         const auto start = cursor_;
@@ -193,13 +197,18 @@ private:
         Declaration result{};
         result.kind = Declaration::Kind::Binding;
         result.exported = match("export");
+        result.static_member = match("static");
         result.constant = match("const");
         if (!result.constant) {
             expect("let");
         }
         if (match(".")) {
-            expect("override");
-            result.override_member = true;
+            if (!result.constant && match("promote")) {
+                result.promote_import = true;
+            } else {
+                expect("override");
+                result.override_member = true;
+            }
         }
         result.name = identifier().text;
         if (match(":")) {
@@ -286,12 +295,13 @@ private:
                     throw Diagnostic(current().span, "an enum needs at least one variant");
                 }
                 expect(")");
-            } else if (at("module") || at("class") || at("interface")) {
+            } else if (at("module") || at("class") || at("interface") || at("singleton")) {
                 definition_has_no_annotation(result);
                 const auto kind = advance().text;
-                result.kind = kind == "class" ? Declaration::Kind::Class
+                result.singleton = kind == "singleton";
+                result.kind = kind == "class" || result.singleton ? Declaration::Kind::Class
                             : kind == "interface" ? Declaration::Kind::Interface : Declaration::Kind::Module;
-                if (result.kind != Declaration::Kind::Module) {
+                if (result.kind != Declaration::Kind::Module && !result.singleton) {
                     result.generics = generic_parameters();
                 }
                 if (result.kind == Declaration::Kind::Interface) {
@@ -300,7 +310,7 @@ private:
                             result.interfaces.push_back(type());
                         } while (match(","));
                     }
-                } else if (match(":")) {
+                } else if (!result.singleton && match(":")) {
                     result.base = type();
                 }
                 if (result.kind == Declaration::Kind::Class && match("implements")) {
@@ -802,7 +812,7 @@ private:
         }
         if (match("import")) {
             expect(":");
-            auto name = qualified_name();
+            auto name = qualified_name(true);
             return make_expression(Expr::Kind::Import, span_from(start), std::move(name));
         }
 

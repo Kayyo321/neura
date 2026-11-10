@@ -5,6 +5,7 @@
 
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -113,6 +114,47 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
     return candidates.empty() ? fs::path{} : *candidates.begin();
 }
 
+std::vector<fs::path> find_wildcard_modules(const Expr& import, const std::vector<fs::path>& roots,
+                                           const fs::path& library, bool from_library) {
+    const auto prefix = import.text.substr(0, import.text.size() - 2);
+    const auto standard = std_namespace(prefix);
+    auto relative = module_path(prefix);
+    relative.replace_extension();
+    std::map<fs::path, fs::path> candidates;
+    auto search = [&](const fs::path& root) {
+        const auto directory = root / relative;
+        if (!fs::is_directory(directory)) return;
+        for (const auto& item : fs::directory_iterator(directory)) {
+            const auto filename = item.path().filename();
+            if (filename.extension() != ".nra" || !item.is_regular_file()) continue;
+            const auto actual = fs::canonical(item.path());
+            const auto trusted_path = library_path(actual, library);
+            if (standard) {
+                if (trusted_path != (relative / filename).generic_string() ||
+                    (!from_library && filename == "internal.nra")) continue;
+            } else if (!trusted_path.empty()) {
+                continue;
+            }
+            const auto [previous, added] = candidates.emplace(filename, actual);
+            if (!added && previous->second != actual)
+                throw Diagnostic(import.span, "ambiguous wildcard import '" + import.text + "'");
+        }
+    };
+    if (standard) {
+        if (internal_module(prefix) && !from_library)
+            throw Diagnostic(import.span, "cannot import internal standard library module '" + prefix + "'");
+        if (!library.empty()) search(library);
+    } else {
+        search(fs::path(import.span.file).parent_path());
+        for (const auto& root : roots) search(root);
+    }
+    std::vector<fs::path> modules;
+    for (const auto& [filename, actual] : candidates) modules.push_back(actual);
+    if (modules.empty())
+        throw Diagnostic(import.span, "cannot resolve wildcard import '" + import.text + "'");
+    return modules;
+}
+
 } // namespace
 
 std::vector<ParsedFile> read_sources(const std::vector<fs::path>& files,
@@ -149,6 +191,13 @@ std::vector<ParsedFile> read_sources(const std::vector<fs::path>& files,
             if (!seen_imports.insert(import->text).second) {
                 continue;
             }
+            if (import->text.ends_with(".*")) {
+                for (auto& dependency : find_wildcard_modules(*import, roots, trusted, !syntax.library_path.empty())) {
+                    syntax.imports.push_back({import->text, dependency.generic_string()});
+                    pending.push_back(std::move(dependency));
+                }
+                continue;
+            }
             auto dependency = find_module(*import, roots, trusted, !syntax.library_path.empty());
             if (!dependency.empty()) {
                 syntax.imports.push_back({import->text, dependency.generic_string()});
@@ -156,6 +205,21 @@ std::vector<ParsedFile> read_sources(const std::vector<fs::path>& files,
             }
         }
         parsed.push_back(std::move(syntax));
+    }
+    std::map<std::string_view, const ParsedFile*, std::less<>> by_path;
+    for (const auto& source : parsed) by_path.emplace(source.file, &source);
+    for (auto& source : parsed) {
+        for (auto& import : source.imports) {
+            if (!import.name.ends_with(".*")) continue;
+            const auto filename = fs::path(import.file).filename();
+            for (const auto& statement : by_path.at(import.file)->statements) {
+                const auto& decl = statement.declaration;
+                if (decl && decl->kind == Declaration::Kind::Module && module_path(decl->name) == filename) {
+                    import.target_module = decl->name;
+                    break;
+                }
+            }
+        }
     }
     return parsed;
 }

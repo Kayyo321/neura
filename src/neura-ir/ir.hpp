@@ -72,6 +72,13 @@ struct IrSymbol {
     std::vector<IrType> additional_bounds{};
 };
 
+// Class-owned namespace for class-level storage and receiver-free functions.
+inline constexpr const char* static_scope_name = "$static";
+
+inline bool is_static_scope(const IrSymbol& symbol) {
+    return symbol.kind == SymbolKind::Module && symbol.name == static_scope_name;
+}
+
 enum class IrOp {
     Initialize, Store, Load, Reference, Receiver, Field, Index, Collection,
     Integer, Float, String, Boolean, Unary, Binary, ShortCircuit,
@@ -81,7 +88,7 @@ enum class IrOp {
     Convert, CollectionVersion, Fail,
     // NeuraIR 1.2. Projections use a zero-based decimal index in text.
     Tuple, Project, EnumConstruct, EnumTag, EnumProject, ComparisonChain,
-    // ScopedValue has local initializers followed by a result expression in
+    // ScopedValue has local statements followed by a result expression in
     // body. SelectValue evaluates one result region based on its operand.
     ScopedValue, SelectValue,
     // NeuraIR 1.3. Specialization gives structural function values concrete

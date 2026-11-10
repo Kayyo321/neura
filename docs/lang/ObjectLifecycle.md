@@ -10,7 +10,7 @@ A class may declare an `init` function. `new` allocates an instance and passes i
 let Message = class (
     export let text: string;
 
-    export let init = func(initial_text: string) -> void {
+    export let init = func(initial_text: string) {
         text = initial_text;
     }
 );
@@ -29,6 +29,16 @@ A class may declare a zero-argument `deinit` function returning `void`. The prop
 Destruction invalidates the object for every alias. The VM traps if an operation subsequently dereferences the invalid handle. The example uses `destroy` only after the last use of its object. Static ownership checks, cleanup on errors, destructor visibility, and the behavior of failing cleanup remain open. Calling overridable methods during cleanup is likewise unspecified.
 
 The VM automatically reclaims unreachable heap storage, including cyclic object graphs. Reclamation can occur at allocation and list growth. It does not run `deinit`, and leaving a source scope does not schedule cleanup. Use explicit `destroy` for cleanup with program-visible effects. [Garbage collection in NVM](../runtime/NVM.md#garbage-collection) describes which references retain an object and how reclamation interacts with runtime limits.
+
+## Singleton lifecycle
+
+A [singleton](Types.md#singletons) runs its field initializers and optional
+zero-argument `init` at its declaration's place in program initialization.
+The instance remains reachable for the life of the program. Singletons
+cannot declare `deinit`. Attempting to destroy a reference known to be a
+singleton is a compile-time error. When its type has been erased to
+`class` or to an interface, an attempted destruction traps before
+invalidating the reference.
 
 ## Generic and polymorphic values
 

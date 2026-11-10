@@ -1,0 +1,7 @@
+let compute = func -> int => 10;
+
+export let Values = module (
+    let initial = compute();
+
+    export let initial_value = func -> int => initial;
+);

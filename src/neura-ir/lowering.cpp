@@ -87,6 +87,15 @@ IrNode node(IrOp op, const Span& span, IrType type = void_type) {
     return {op, std::move(type), span, no_symbol, {}, {}, {}, {}, {}};
 }
 
+IrNode discard_before(IrNode qualifier, IrNode result) {
+    auto region = node(IrOp::ScopedValue, result.span, result.type);
+    auto discard = node(IrOp::Discard, qualifier.span);
+    discard.operands.push_back(std::move(qualifier));
+    region.body.push_back(std::move(discard));
+    region.body.push_back(std::move(result));
+    return region;
+}
+
 IrType substitute(IrType type, const Substitution& replacements) {
     if (type.kind == TypeKind::TypeParameter) {
         if (auto it = replacements.find(type.symbol); it != replacements.end()) return it->second;
@@ -140,6 +149,9 @@ private:
         Resolution resolution = Resolution::Resolved;
         std::optional<IrNode> initializer;
         const Statement* destructure = nullptr;
+        std::vector<SymbolId> promoted_modules{};
+        SymbolId static_scope = no_symbol;
+        SymbolId singleton_instance = no_symbol;
     };
     struct GlobalDestructure {
         std::vector<SymbolId> bindings;
@@ -158,9 +170,13 @@ private:
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols[id]; }
     SymbolId add(SymbolKind kind, std::string name, const Span& span, SymbolId owner = no_symbol);
     SymbolId declare(const Declaration& decl, SymbolId owner, SymbolKind kind);
+    bool static_member(SymbolId id) const;
+    SymbolId static_scope(SymbolId owner);
     SymbolId root_class();
     bool class_reference(const IrType& type) const;
     SymbolId resolve_import(const Expr& expr);
+    SymbolId resolve_import_target(const ResolvedImport& import, const Span& span) const;
+    void prepare_promotions(const Declaration& decl, SymbolId owner);
     void resolve(SymbolId id);
     void resolve_binding(SymbolId id, const Declaration& decl);
     void resolve_generics(SymbolId id, const Declaration& decl, Context& context);
@@ -173,7 +189,8 @@ private:
     SymbolId own_member(SymbolId owner, std::string_view name) const;
     SymbolId member(SymbolId owner, std::string_view name, bool exported) const;
     SymbolId value_member(const IrType& receiver, std::string_view name, bool exported) const;
-    SymbolId find(std::string_view name, const Context& context);
+    SymbolId find(std::string_view name, const Context& context, const Span& span,
+                  SymbolId* promoted_receiver = nullptr);
     SymbolId qualified(const std::string& name, const Span& span, const Context& context, bool nominal_type = false);
     bool inside(SymbolId scope, SymbolId owner) const;
     IrType type(const TypeSyntax& syntax, const Context& context);
@@ -184,6 +201,7 @@ private:
     IrNode closure_value(const IrType& type, ClosureEnvironment& environment, const Span& span);
     IrNode lambda(const Declaration& declaration, Context& context);
     IrNode bind_function(IrNode callee, Context& context);
+    std::optional<IrNode> static_qualifier(IrNode& callee);
     IrNode closure_field(SymbolId field, const Span& span);
     IrNode capture(ClosureEnvironment& environment, SymbolId key, IrNode input, const Span& span);
     IrNode receiver(SymbolId id, const Span& span, Context& context);
@@ -219,6 +237,7 @@ private:
                           Context& context, std::string name, bool constant = true);
     IrNode capture_place(const Expr& expr, std::vector<IrNode>& instructions, Context& context);
     IrNode statement(const Statement& stmt, Context& context);
+    IrNode discard_binding(const Declaration& decl, Context& context);
     void append_statement(std::vector<IrNode>& instructions, const Statement& stmt, Context& context);
     void destructure(std::vector<IrNode>& instructions, const Statement& stmt, Context& context,
                      const std::vector<SymbolId>* globals = nullptr);
@@ -246,6 +265,13 @@ SymbolId Lowering::add(SymbolKind kind, std::string name, const Span& span, Symb
 }
 
 SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind kind) {
+    if (decl.name == "_" && kind != SymbolKind::Variant) {
+        if (decl.kind != DeclKind::Binding || decl.exported || decl.override_member ||
+            decl.static_member || !decl.initializer ||
+            (symbol(owner).kind != SymbolKind::File && symbol(owner).kind != SymbolKind::Module))
+            throw Diagnostic(decl.span, "'_' requires a value initializer and does not declare a member");
+        return no_symbol;
+    }
     switch (decl.kind) {
     case DeclKind::Module: kind = SymbolKind::Module; break;
     case DeclKind::Class: kind = SymbolKind::Class; break;
@@ -254,19 +280,50 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     case DeclKind::Enum: kind = SymbolKind::Enum; break;
     case DeclKind::Binding: break;
     }
+    const auto lexical = owner;
+    if (decl.static_member) {
+        if (!class_or_interface(symbol(owner).kind) || decl.override_member || decl.promote_import ||
+            decl.kind == DeclKind::Module || decl.name == "init" || decl.name == "deinit")
+            throw Diagnostic(decl.span, "static requires a non-override class or interface member");
+        owner = static_scope(owner);
+        if (kind == SymbolKind::Field) kind = SymbolKind::Global;
+    }
     auto id = add(kind, decl.name, decl.span, owner);
-    if (!entries_[owner].names.emplace(decl.name, id).second)
+    if (!entries_[lexical].names.emplace(decl.name, id).second)
         throw Diagnostic(decl.span, "duplicate declaration of '" + decl.name + "'");
     entries_[id].declaration = &decl;
     entries_[id].resolution = Resolution::Pending;
-    symbol(id).constant = decl.constant;
-    symbol(id).exported = decl.exported || symbol(owner).kind == SymbolKind::Interface;
+    symbol(id).constant = decl.constant ||
+        (decl.static_member && kind == SymbolKind::Global && symbol(lexical).kind == SymbolKind::Interface);
+    symbol(id).exported = decl.exported || symbol(lexical).kind == SymbolKind::Interface;
     symbol(id).has_body = decl.has_body;
+    if (kind == SymbolKind::Module)
+        symbol(id).type = {TypeKind::Module, decl.name, id, {}};
+    if (decl.singleton) {
+        if (symbol(owner).kind != SymbolKind::File && symbol(owner).kind != SymbolKind::Module)
+            throw Diagnostic(decl.span, "a singleton must be a file, module, or static class member");
+        const auto instance = add(SymbolKind::Global, decl.name, decl.span, owner);
+        entries_[id].singleton_instance = instance;
+        symbol(instance).constant = true;
+    }
     auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field
                      : kind == SymbolKind::Enum ? SymbolKind::Variant
                                                 : SymbolKind::Global;
     for (const auto& child : decl.members) declare(child, id, member_kind);
     return id;
+}
+
+bool Lowering::static_member(SymbolId id) const {
+    const auto* decl = entries_[id].declaration;
+    return decl && decl->static_member;
+}
+
+SymbolId Lowering::static_scope(SymbolId owner) {
+    if (entries_[owner].static_scope != no_symbol) return entries_[owner].static_scope;
+    const auto scope = add(SymbolKind::Module, static_scope_name, symbol(owner).span, owner);
+    symbol(scope).type = {TypeKind::Module, static_scope_name, scope, {}};
+    entries_[owner].static_scope = scope;
+    return scope;
 }
 
 SymbolId Lowering::root_class() {
@@ -310,6 +367,8 @@ bool Lowering::class_reference(const IrType& type) const {
 }
 
 SymbolId Lowering::resolve_import(const Expr& expr) {
+    if (expr.text.ends_with(".*"))
+        throw Diagnostic(expr.span, "wildcard imports require 'let.promote _'");
     auto source = std::ranges::find(*files_, expr.span.file, &ParsedFile::file);
     if (source == files_->end()) throw Diagnostic(expr.span, "cannot locate importing file");
     auto import = std::ranges::find(source->imports, expr.text, &ResolvedImport::name);
@@ -324,16 +383,54 @@ SymbolId Lowering::resolve_import(const Expr& expr) {
                                         "use Std.Test");
         throw Diagnostic(expr.span, "cannot resolve import '" + expr.text + "'");
     }
-    auto target_file = std::ranges::find(*files_, import->file, &ParsedFile::file);
-    if (target_file == files_->end())
-        throw Diagnostic(expr.span, "cannot load source file for import '" + expr.text + "'");
-    auto index = static_cast<std::size_t>(target_file - files_->begin());
-    auto name = expr.text.substr(expr.text.find_last_of('.') + 1);
-    auto result = own_member(file_ids_[index], name);
-    if (result == no_symbol || symbol(result).kind != SymbolKind::Module)
-        throw Diagnostic(expr.span, "imported file must declare module '" + name + "'");
+    auto result = resolve_import_target(*import, expr.span);
     resolve(result);
     return result;
+}
+
+SymbolId Lowering::resolve_import_target(const ResolvedImport& import, const Span& span) const {
+    auto target_file = std::ranges::find(*files_, import.file, &ParsedFile::file);
+    if (target_file == files_->end())
+        throw Diagnostic(span, "cannot load source file for import '" + import.name + "'");
+    auto index = static_cast<std::size_t>(target_file - files_->begin());
+    auto name = import.name.ends_with(".*") ? import.target_module
+        : import.name.substr(import.name.find_last_of('.') + 1);
+    if (name.empty())
+        throw Diagnostic(span, "imported file '" + import.file + "' must declare a module matching its name");
+    auto result = own_member(file_ids_[index], name);
+    if (result == no_symbol || symbol(result).kind != SymbolKind::Module)
+        throw Diagnostic(span, "imported file must declare module '" + name + "'");
+    return result;
+}
+
+void Lowering::prepare_promotions(const Declaration& decl, SymbolId owner) {
+    if (decl.promote_import || (decl.name == "_" && decl.initializer && decl.initializer->kind == ExprKind::Import)) {
+        if (symbol(owner).kind != SymbolKind::Module && symbol(owner).kind != SymbolKind::File)
+            throw Diagnostic(decl.span, "promoted and discarded imports require a file or module binding");
+        if (decl.type || decl.exported || !decl.initializer || decl.initializer->kind != ExprKind::Import)
+            throw Diagnostic(decl.span, "let.promote requires an unannotated import alias");
+        const auto& expr = *decl.initializer;
+        if (expr.text.ends_with(".*") && (!decl.promote_import || decl.name != "_"))
+            throw Diagnostic(expr.span, "wildcard imports require 'let.promote _'");
+        const auto source = std::ranges::find(*files_, expr.span.file, &ParsedFile::file);
+        if (source == files_->end()) throw Diagnostic(expr.span, "cannot locate importing file");
+        bool found = false;
+        for (const auto& import : source->imports) {
+            if (import.name != expr.text) continue;
+            found = true;
+            const auto target = resolve_import_target(import, expr.span);
+            if (decl.promote_import) entries_[owner].promoted_modules.push_back(target);
+            if (decl.name == "_") {
+                const auto dependency = add(SymbolKind::Import, "$import", decl.span, owner);
+                symbol(dependency).type = symbol(target).type;
+            }
+        }
+        if (!found) throw Diagnostic(expr.span, "cannot resolve import '" + expr.text + "'");
+    }
+    if (!decl.members.empty()) {
+        const auto id = own_member(owner, decl.name);
+        for (const auto& child : decl.members) prepare_promotions(child, id);
+    }
 }
 
 SymbolId Lowering::own_member(SymbolId owner, std::string_view name) const {
@@ -359,24 +456,53 @@ SymbolId Lowering::value_member(const IrType& receiver, std::string_view name, b
     }
     for (const auto& view : views) {
         if (view.kind == TypeKind::Object && symbol(view.symbol).kind == SymbolKind::Interface) {
-            if (const auto id = own_member(view.symbol, name); id != no_symbol) return id;
+            const auto id = own_member(view.symbol, name);
+            if (id != no_symbol && !(static_member(id) && symbol(id).kind == SymbolKind::Function))
+                return id;
         }
     }
     return no_symbol;
 }
 
-SymbolId Lowering::find(std::string_view name, const Context& context) {
+SymbolId Lowering::find(std::string_view name, const Context& context, const Span& span,
+                        SymbolId* promoted_receiver) {
     for (auto it = context.scopes.rbegin(); it != context.scopes.rend(); ++it) {
         if (auto local = it->find(name); local != it->end()) return local->second;
     }
-    if (context.closure) return find(name, context.closure->enclosing);
+    if (context.closure) return find(name, context.closure->enclosing, span, promoted_receiver);
+    bool static_context = false;
     for (auto scope = context.owner; scope != no_symbol; scope = symbol(scope).owner) {
-        if (auto id = member(scope, name, false); id != no_symbol) return id;
+        static_context |= is_static_scope(symbol(scope));
+        if (auto id = member(scope, name, false); id != no_symbol) {
+            if (static_context && symbol(id).kind == SymbolKind::TypeParameter && class_or_interface(symbol(scope).kind))
+                throw Diagnostic(span, "static member cannot use an enclosing class type parameter");
+            return id;
+        }
         if (class_or_interface(symbol(scope).kind)) {
             if (auto id = value_member(symbol(scope).type, name, true); id != no_symbol) return id;
         }
         for (auto base = symbol(scope).base; base != no_symbol; base = symbol(base).base) {
             if (symbol(base).name == name) return base;
+        }
+    }
+    for (auto scope = context.owner; scope != no_symbol; scope = symbol(scope).owner) {
+        SymbolId result = no_symbol;
+        SymbolId source = no_symbol;
+        // Resolving a module can grow the symbol table and invalidate the entries.
+        const auto promoted = entries_[scope].promoted_modules;
+        for (auto module : promoted) {
+            if (entries_[module].resolution == Resolution::Pending && entries_[module].declaration->base)
+                resolve(module);
+            const auto candidate = member(module, name, true);
+            if (candidate == no_symbol || module == source) continue;
+            if (result != no_symbol)
+                throw Diagnostic(span, "ambiguous promoted name '" + std::string(name) + "'");
+            result = candidate;
+            source = module;
+        }
+        if (result != no_symbol) {
+            if (promoted_receiver) *promoted_receiver = source;
+            return result;
         }
     }
     return no_symbol;
@@ -391,7 +517,7 @@ bool Lowering::inside(SymbolId scope, SymbolId owner) const {
 
 SymbolId Lowering::qualified(const std::string& name, const Span& span, const Context& context, bool nominal_type) {
     const auto parts = components(name);
-    auto id = find(parts.front(), context);
+    auto id = find(parts.front(), context, span);
     if (id == no_symbol) throw Diagnostic(span, "unknown name '" + parts.front() + "'");
     for (std::size_t i = 1; i < parts.size(); ++i) {
         resolve(id);
@@ -551,6 +677,7 @@ SymbolId Lowering::closure_layout(const Span& span, SymbolId scope) {
     // A closure body may use any type parameter in lexical scope, including
     // one that appears only in a local annotation or another generic call.
     for (auto owner = scope; owner != no_symbol; owner = symbol(owner).owner) {
+        if (is_static_scope(symbol(owner))) break;
         for (const auto parameter : symbol(owner).generics) {
             symbol(layout).generics.push_back(parameter);
             symbol(layout).type.arguments.push_back(symbol(parameter).type);
@@ -678,6 +805,7 @@ IrNode Lowering::bind_function(IrNode callee, Context& context) {
     if (callee.operands.empty() && !symbol(target).external && !symbol(target).has_body) {
         throw Diagnostic(span, "function requires an implementation");
     }
+    auto qualifier = static_qualifier(callee);
     auto replacements = callee.operands.empty() ? Substitution{}
         : receiver_arguments(callee.operands.front().type, symbol(target).owner);
     std::vector<IrType> signature;
@@ -714,7 +842,15 @@ IrNode Lowering::bind_function(IrNode callee, Context& context) {
     auto result = node(invocation.type.kind == TypeKind::Void ? IrOp::Discard : IrOp::Return, span);
     result.operands.push_back(std::move(invocation));
     program_.bodies.push_back({method, {std::move(result)}});
-    return closure_value(callable, environment, span);
+    auto closure = closure_value(callable, environment, span);
+    return qualifier ? discard_before(std::move(*qualifier), std::move(closure)) : std::move(closure);
+}
+
+std::optional<IrNode> Lowering::static_qualifier(IrNode& callee) {
+    if (callee.operands.empty() || !static_member(callee.symbol)) return std::nullopt;
+    auto qualifier = std::move(callee.operands.front());
+    callee.operands.clear();
+    return qualifier;
 }
 
 void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& context) {
@@ -801,6 +937,15 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     symbol(id).type = declared;
     if (decl.initializer) {
         entries_[id].initializer = value(*decl.initializer, ctx, &declared);
+    } else if (decl.static_member && !symbol(id).constant &&
+               (declared.kind == TypeKind::Integer || declared.kind == TypeKind::Float ||
+                declared.kind == TypeKind::Bool || declared.kind == TypeKind::Object)) {
+        const auto op = declared.kind == TypeKind::Integer ? IrOp::Integer
+                      : declared.kind == TypeKind::Float ? IrOp::Float
+                      : declared.kind == TypeKind::Bool ? IrOp::Boolean : IrOp::Nil;
+        auto initializer = node(op, decl.span, declared);
+        if (op != IrOp::Nil) initializer.text = op == IrOp::Boolean ? "false" : "0";
+        entries_[id].initializer = std::move(initializer);
     } else if (symbol(id).kind != SymbolKind::Field || decl.constant) {
         throw Diagnostic(decl.span, "binding requires an initializer");
     }
@@ -821,6 +966,8 @@ void Lowering::resolve(SymbolId id) {
     if (class_or_interface(symbol(id).kind) || decl.kind == DeclKind::Module) {
         auto kind = decl.kind == DeclKind::Module ? TypeKind::Module : TypeKind::Object;
         symbol(id).type = {kind, decl.name, id, {}};
+        if (const auto instance = entries_[id].singleton_instance; instance != no_symbol)
+            symbol(instance).type = symbol(id).type;
         resolve_generics(id, decl, ctx);
         for (auto generic : symbol(id).generics)
             symbol(id).type.arguments.push_back(symbol(generic).type);
@@ -831,6 +978,8 @@ void Lowering::resolve(SymbolId id) {
                 base = symbol(base).type.symbol;
             if (symbol(base).kind != symbol(id).kind)
                 throw Diagnostic(decl.base->span, "base must have the same declaration kind");
+            if (entries_[base].singleton_instance != no_symbol)
+                throw Diagnostic(decl.base->span, "a singleton cannot be extended");
             if (symbol(base).kind == SymbolKind::Module && symbol(base).constant)
                 throw Diagnostic(decl.base->span, "cannot inherit a constant module");
             if (!symbol(base).generics.empty() || !decl.base->arguments.empty() ||
@@ -900,6 +1049,8 @@ void Lowering::resolve(SymbolId id) {
         if (!decl.has_body && symbol(symbol(id).owner).kind != SymbolKind::Module &&
             !class_or_interface(symbol(symbol(id).owner).kind))
             throw Diagnostic(decl.span, "only class, interface or module members may omit a function body");
+        if (!decl.has_body && decl.static_member)
+            throw Diagnostic(decl.span, "a static function requires a body");
         if (decl.host_binding) {
             const auto file = source_file(program_, id);
             if (file == no_symbol || symbol(file).library_path.empty() ||
@@ -924,16 +1075,31 @@ void Lowering::resolve(SymbolId id) {
 }
 
 void Lowering::check_override(SymbolId id, const Declaration& decl) {
-    auto owner = symbol(id).owner;
+    auto owner = decl.static_member ? symbol(symbol(id).owner).owner : symbol(id).owner;
     auto base = symbol(owner).base;
     auto inherited = base == no_symbol ? no_symbol : member(base, decl.name, true);
+    if (inherited != no_symbol && (decl.static_member || static_member(inherited))) {
+        if (decl.override_member)
+            throw Diagnostic(decl.span, "a static member is hidden without .override");
+        if (symbol(id).kind == SymbolKind::Function || symbol(inherited).kind == SymbolKind::Function) {
+            resolve(inherited);
+            const auto same_parameter = [&](SymbolId a, SymbolId b) { return symbol(a).type == symbol(b).type; };
+            if (decl.static_member != static_member(inherited) ||
+                symbol(inherited).kind != SymbolKind::Function || symbol(id).kind != SymbolKind::Function ||
+                !symbol(id).generics.empty() || !symbol(inherited).generics.empty() ||
+                !assignable(symbol(id).type, symbol(inherited).type) ||
+                !std::ranges::equal(symbol(id).parameters, symbol(inherited).parameters, same_parameter))
+                throw Diagnostic(decl.span, "static function does not match inherited member '" + decl.name + "'");
+        }
+        return;
+    }
     if (inherited != no_symbol && symbol(owner).kind == SymbolKind::Class &&
         (decl.name == "init" || decl.name == "deinit")) inherited = no_symbol;
     if (decl.override_member && inherited == no_symbol) {
         for (const auto& view : nominal_views(program_, symbol(owner).type)) {
             if (view.symbol != owner && symbol(view.symbol).kind == SymbolKind::Interface) {
                 const auto requirement = own_member(view.symbol, decl.name);
-                if (requirement != no_symbol) {
+                if (requirement != no_symbol && !static_member(requirement)) {
                     if (!symbol(id).exported) throw Diagnostic(decl.span, "an override must be exported");
                     symbol(id).overrides = requirement;
                     return;
@@ -979,7 +1145,7 @@ void Lowering::check_interfaces(SymbolId id) {
         // the map being iterated, so iterate a copy of the names.
         const auto names = entries_[view.symbol].names;
         for (const auto& [name, method] : names) {
-            if (symbol(method).kind != SymbolKind::Function) continue;
+            if (symbol(method).kind != SymbolKind::Function || static_member(method)) continue;
             resolve(method);
             requirements[name].push_back({view, method});
         }
@@ -1005,7 +1171,8 @@ void Lowering::check_interfaces(SymbolId id) {
         if (implementation != no_symbol) {
             resolve(implementation);
             const auto& candidate = symbol(implementation);
-            if (candidate.kind != SymbolKind::Function || !candidate.exported || !candidate.generics.empty() ||
+            if (candidate.kind != SymbolKind::Function || static_member(implementation) ||
+                !candidate.exported || !candidate.generics.empty() ||
                 signature(implementation, nominal) != required) {
                 throw Diagnostic(candidate.span, "member '" + name + "' does not match the interface requirement");
             }
@@ -1030,6 +1197,7 @@ void Lowering::check_interfaces(SymbolId id) {
 
 IrNode Lowering::reference(SymbolId id, const Span& span, Context& context, bool implicit_receiver) {
     resolve(id);
+    if (entries_[id].singleton_instance != no_symbol) id = entries_[id].singleton_instance;
     const auto& target = symbol(id);
     if (context.closure && target.owner != context.owner &&
         (target.kind == SymbolKind::Local || target.kind == SymbolKind::Parameter)) {
@@ -1049,7 +1217,7 @@ IrNode Lowering::reference(SymbolId id, const Span& span, Context& context, bool
         result.op = target.kind == SymbolKind::Field ? IrOp::Field : IrOp::Load;
     }
     auto owner = target.owner;
-    if (implicit_receiver && owner != no_symbol && context.receiver != no_symbol) {
+    if (implicit_receiver && owner != no_symbol && context.receiver != no_symbol && !static_member(id)) {
         bool own_receiver = false;
         for (auto current = context.receiver; current != no_symbol; current = symbol(current).base)
             own_receiver |= current == owner;
@@ -1062,6 +1230,10 @@ IrNode Lowering::reference(SymbolId id, const Span& span, Context& context, bool
             result.operands.push_back(receiver(context.receiver, span, context));
         }
     }
+    if (implicit_receiver && result.operands.empty() && owner != no_symbol &&
+        class_or_interface(symbol(owner).kind) &&
+        (target.kind == SymbolKind::Field || target.kind == SymbolKind::Function))
+        throw Diagnostic(span, "instance member '" + target.name + "' requires a receiver");
     return result;
 }
 
@@ -1141,12 +1313,26 @@ IrNode Lowering::select(const Expr& expr, Context& context) {
     if (nominal.kind == TypeKind::Object && (expr.text == "init" || expr.text == "deinit"))
         throw Diagnostic(expr.span, "lifecycle functions require new, super.init, or destroy");
     const bool exported = !inside(lexical_owner(context), nominal.symbol);
-    auto target = nominal.kind == TypeKind::Object ? value_member(receiver.type, expr.text, exported)
-                                                 : member(nominal.symbol, expr.text, exported);
+    auto target = type_reference || nominal.kind != TypeKind::Object
+        ? member(nominal.symbol, expr.text, exported) : no_symbol;
+    if (target == no_symbol && nominal.kind == TypeKind::Object)
+        target = value_member(receiver.type, expr.text, exported);
     if (target == no_symbol)
         throw Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " +
                                     describe(nominal));
     auto result = reference(target, expr.span, context, false);
+    if (static_member(target)) {
+        if (!type_reference) {
+            const auto kind = symbol(target).kind;
+            const auto declaring_type = symbol(symbol(target).owner).owner;
+            if ((kind != SymbolKind::Global && kind != SymbolKind::Function) ||
+                (kind == SymbolKind::Function && symbol(declaring_type).kind == SymbolKind::Interface)) {
+                throw Diagnostic(expr.span, "static member '" + expr.text + "' requires a class or interface name");
+            }
+            result.operands.push_back(std::move(receiver));
+        }
+        return result;
+    }
     const auto kind = symbol(target).kind;
     if (kind == SymbolKind::Variant) {
         if (!symbol(nominal.symbol).generics.empty() &&
@@ -1230,7 +1416,7 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
     const auto& callee = expr.operands.front();
     if (callee.kind != ExprKind::Member || callee.operands.front().kind != ExprKind::Name) return std::nullopt;
     const auto& name = callee.operands.front().text;
-    if (find(name, context) != no_symbol) return std::nullopt;
+    if (find(name, context, expr.span) != no_symbol) return std::nullopt;
     const auto target = primitive(name);
     if (!target) return std::nullopt;
     const bool from_utf8 = target->kind == TypeKind::String && callee.text == "from_utf8";
@@ -1344,6 +1530,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     }
     if (symbol(target).kind != SymbolKind::Function)
         throw Diagnostic(expr.span, "expression is not callable");
+    auto qualifier = static_qualifier(callee);
     auto replacements = callee.operands.empty() ? Substitution{}
         : receiver_arguments(callee.operands.front().type, symbol(target).owner);
     auto generics = symbol(target).generics;
@@ -1360,7 +1547,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     }
     if (result.op != IrOp::ExternalCall) result.operands = std::move(callee.operands);
     arguments(result, expr, 1, target, replacements, context);
-    return result;
+    return qualifier ? discard_before(std::move(*qualifier), std::move(result)) : std::move(result);
 }
 
 IrNode Lowering::allocate(const Expr& expr, Context& context) {
@@ -1368,6 +1555,8 @@ IrNode Lowering::allocate(const Expr& expr, Context& context) {
     if (object.kind != TypeKind::Object || symbol(object.symbol).kind != SymbolKind::Class)
         throw Diagnostic(expr.span, "new requires a class type");
     const auto id = object.symbol;
+    if (entries_[id].singleton_instance != no_symbol)
+        throw Diagnostic(expr.span, "a singleton cannot be constructed with new");
     if (id == root_class_)
         throw Diagnostic(expr.span, "class is an umbrella type and cannot be constructed");
     Names effective;
@@ -1603,14 +1792,22 @@ IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* ex
     case ExprKind::Lambda:
         return lambda(*expr.lambda, context);
     case ExprKind::Name: {
-        auto id = find(expr.text, context);
+        SymbolId promoted_receiver = no_symbol;
+        auto id = find(expr.text, context, expr.span, &promoted_receiver);
         if (id == no_symbol) throw Diagnostic(expr.span, "unknown name '" + expr.text + "'");
         if (symbol(id).kind == SymbolKind::Function &&
             owner_kind(symbol(id).owner, SymbolKind::Class) != no_symbol &&
             (expr.text == "init" || expr.text == "deinit")) {
             throw Diagnostic(expr.span, "lifecycle functions require new, super.init, or destroy");
         }
-        return reference(id, expr.span, context);
+        auto result = reference(id, expr.span, context, promoted_receiver == no_symbol);
+        if (promoted_receiver != no_symbol &&
+            (symbol(id).kind == SymbolKind::Function || symbol(id).kind == SymbolKind::Global)) {
+            auto module = node(IrOp::Reference, expr.span, symbol(promoted_receiver).type);
+            module.symbol = promoted_receiver;
+            result.operands.push_back(std::move(module));
+        }
+        return result;
     }
     case ExprKind::Integer:
     case ExprKind::Float:
@@ -1787,6 +1984,16 @@ void Lowering::place(const IrNode& destination) const {
         throw Diagnostic(destination.span, "cannot assign to const '" + symbol(destination.symbol).name + "'");
 }
 
+IrNode Lowering::discard_binding(const Declaration& decl, Context& context) {
+    if (!decl.initializer)
+        throw Diagnostic(decl.span, "'_' requires a value initializer");
+    std::optional<IrType> expected;
+    if (decl.type) expected = type(*decl.type, context);
+    auto result = node(IrOp::Discard, decl.span);
+    result.operands.push_back(value(*decl.initializer, context, expected ? &*expected : nullptr));
+    return result;
+}
+
 IrNode Lowering::save_temporary(IrNode initializer, std::vector<IrNode>& instructions,
                                 Context& context, std::string name, bool constant) {
     auto owner = context.owner;
@@ -1848,9 +2055,10 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     case StmtKind::Binding: {
         const auto& declaration = *stmt.declaration;
         if (declaration.kind != DeclKind::Binding || declaration.exported ||
-            declaration.override_member) {
+            declaration.override_member || declaration.promote_import || declaration.static_member) {
             throw Diagnostic(declaration.span, "expected a local value binding");
         }
+        if (declaration.name == "_") return discard_binding(declaration, context);
         if (context.scopes.back().contains(declaration.name)) {
             throw Diagnostic(declaration.span, "duplicate local binding '" + declaration.name + "'");
         }
@@ -1879,7 +2087,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     case StmtKind::Expression: {
         const auto& syntax = stmt.expressions.front();
         if (syntax.kind == ExprKind::Call && syntax.operands.front().kind == ExprKind::Name &&
-            syntax.operands.front().text == "trap_with_message" && find("trap_with_message", context) == no_symbol) {
+            syntax.operands.front().text == "trap_with_message" &&
+            find("trap_with_message", context, syntax.span) == no_symbol) {
             if (!syntax.type_arguments.empty() || syntax.operands.size() != 2)
                 throw Diagnostic(syntax.span, "trap_with_message requires one string argument and no type arguments");
             auto result = node(IrOp::TrapMessage, syntax.span);
@@ -1981,6 +2190,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         if (object.type.kind != TypeKind::Object) {
             throw Diagnostic(object.span, "destroy requires an object");
         }
+        if (entries_[object.type.symbol].singleton_instance != no_symbol)
+            throw Diagnostic(object.span, "a singleton cannot be destroyed");
         auto result = node(IrOp::Destroy, stmt.span);
         result.symbol = object.type.symbol;
         result.operands.push_back(std::move(object));
@@ -2468,6 +2679,9 @@ void Lowering::check_constructor(SymbolId id, const Declaration& decl) {
         return;
     if (decl.kind != DeclKind::Function)
         throw Diagnostic(decl.span, "init and deinit are reserved lifecycle functions");
+    if (entries_[owner].singleton_instance != no_symbol &&
+        (decl.name == "deinit" || !decl.parameters.empty()))
+        throw Diagnostic(decl.span, "a singleton can declare only a zero-argument init lifecycle function");
     if (!decl.has_body || !decl.generics.empty() || symbol(id).type.kind != TypeKind::Void)
         throw Diagnostic(decl.span, "a lifecycle function needs a body, no type parameters, and void return");
     if (decl.name == "deinit" && !decl.parameters.empty())
@@ -2516,6 +2730,7 @@ void Lowering::lower_declaration(SymbolId id) {
     } else if (declaration.kind == DeclKind::Module || class_or_interface(symbol(id).kind)) {
         if (symbol(id).kind == SymbolKind::Interface) {
             for (const auto& member : declaration.members) {
+                if (member.static_member) continue;
                 if (member.kind != DeclKind::Function || !member.generics.empty() ||
                     member.name == "init" || member.name == "deinit") {
                     throw Diagnostic(member.span, "interfaces may declare only non-generic methods");
@@ -2524,17 +2739,47 @@ void Lowering::lower_declaration(SymbolId id) {
         }
         if (class_or_interface(symbol(id).kind)) check_interfaces(id);
         std::vector<IrNode> initializers;
+        std::vector<IrNode> static_initializers;
         for (const auto& member : declaration.members) {
+            if (member.name == "_") {
+                if (member.initializer->kind != ExprKind::Import) {
+                    auto ctx = context(id);
+                    initializers.push_back(discard_binding(member, ctx));
+                }
+                continue;
+            }
             auto child = own_member(id, member.name);
             lower_declaration(child);
             if (auto& initializer = entries_[child].initializer) {
                 auto instruction = node(IrOp::Initialize, member.span);
-                instruction.symbol = child;
+                const auto instance = entries_[child].singleton_instance;
+                instruction.symbol = instance == no_symbol ? child : instance;
                 instruction.operands.push_back(std::move(*initializer));
-                initializers.push_back(std::move(instruction));
+                auto& region = member.static_member ? static_initializers : initializers;
+                region.push_back(std::move(instruction));
             }
         }
         if (!initializers.empty()) program_.bodies.push_back({id, std::move(initializers)});
+        if (!static_initializers.empty())
+            program_.bodies.push_back({entries_[id].static_scope, std::move(static_initializers)});
+        if (entries_[id].singleton_instance != no_symbol) {
+            for (const auto& member : declaration.members) {
+                if (member.kind == DeclKind::Function && !member.has_body)
+                    throw Diagnostic(member.span, "a singleton cannot have an abstract method");
+            }
+            auto instance = node(IrOp::Allocate, declaration.span, symbol(id).type);
+            instance.symbol = own_member(id, "init");
+            entries_[id].initializer = std::move(instance);
+            // An umbrella or interface reference must not permit destroying
+            // the singleton after its concrete type has been erased.
+            const auto cleanup = add(SymbolKind::Function, "deinit", declaration.span, id);
+            symbol(cleanup).has_body = true;
+            auto trap = node(IrOp::TrapMessage, declaration.span);
+            auto message = node(IrOp::String, declaration.span, string_type);
+            message.text = "a singleton cannot be destroyed";
+            trap.operands.push_back(std::move(message));
+            program_.bodies.push_back({cleanup, {std::move(trap)}});
+        }
     }
 }
 
@@ -2571,16 +2816,27 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files) {
         }
     }
     for (std::size_t i = 0; i < files.size(); ++i) {
+        for (const auto& stmt : files[i].statements) {
+            if (stmt.kind == StmtKind::Binding) prepare_promotions(*stmt.declaration, file_ids_[i]);
+        }
+    }
+    for (std::size_t i = 0; i < files.size(); ++i) {
         const auto id = file_ids_[i];
         auto ctx = context(id);
         std::vector<IrNode> instructions;
         for (const auto& stmt : files[i].statements) {
             if (stmt.kind == StmtKind::Binding) {
+                if (stmt.declaration->name == "_") {
+                    if (stmt.declaration->initializer->kind != ExprKind::Import)
+                        instructions.push_back(discard_binding(*stmt.declaration, ctx));
+                    continue;
+                }
                 auto target = own_member(id, stmt.declaration->name);
                 lower_declaration(target);
                 if (auto& initializer = entries_[target].initializer) {
                     auto instruction = node(IrOp::Initialize, stmt.span);
-                    instruction.symbol = target;
+                    const auto instance = entries_[target].singleton_instance;
+                    instruction.symbol = instance == no_symbol ? target : instance;
                     instruction.operands.push_back(std::move(*initializer));
                     instructions.push_back(std::move(instruction));
                 }

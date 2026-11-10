@@ -23,6 +23,7 @@ constexpr auto keywords = std::to_array<std::string_view>({
     "let", "const", "export", "override", "func", "module", "class", "import", "new",
     "destroy", "if", "else", "while", "do", "for", "in", "break", "continue", "return", "true", "false",
     "as", "is", "nil", "enum", "match", "and", "or", "interface", "implements",
+    "promote", "static", "singleton",
 });
 
 constexpr auto compound_symbols = std::to_array<std::string_view>({

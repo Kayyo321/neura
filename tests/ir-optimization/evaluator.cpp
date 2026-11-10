@@ -462,7 +462,7 @@ private:
             }
             const bool global = symbol(destination.symbol).kind == SymbolKind::Global;
             if (global) {
-                check_module_receiver(destination, frame);
+                evaluate_global_qualifier(destination, frame);
             }
             auto value = evaluate(node.operands.at(1), frame);
             (global ? globals_ : frame.locals)[destination.symbol] = std::move(value);
@@ -530,11 +530,12 @@ private:
         return result;
     }
 
-    void check_module_receiver(const IrNode& load, Frame& frame) {
+    void evaluate_global_qualifier(const IrNode& load, Frame& frame) {
         if (load.operands.empty()) {
             return;
         }
         const auto receiver = evaluate(load.operands.front(), frame);
+        if (load.operands.front().type.kind != TypeKind::Module) return;
         if (receiver.kind != Value::Kind::Module || receiver.symbol != symbol(load.symbol).owner) {
             unsupported(load, "global accessed through another module");
         }
@@ -581,7 +582,7 @@ private:
         case IrOp::Load: {
             const auto kind = symbol(node.symbol).kind;
             if (kind == SymbolKind::Global) {
-                check_module_receiver(node, frame);
+                evaluate_global_qualifier(node, frame);
                 const auto found = globals_.find(node.symbol);
                 if (found == globals_.end()) {
                     unsupported(node, "read of an uninitialized global");

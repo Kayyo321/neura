@@ -45,11 +45,16 @@ bool scoped_statements(const IrNode& node) {
                     [](const IrNode& prefix) { return prefix.op != IrOp::Initialize; });
 }
 
+bool class_qualified_load(const IrNode& node) {
+    return node.op == IrOp::Load && !node.operands.empty() &&
+        node.operands.front().type.kind != TypeKind::Module;
+}
+
 std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (op > max_op_1_3 || scoped_statements(node)) return 4;
+        if (op > max_op_1_3 || scoped_statements(node) || class_qualified_load(node)) return 4;
         if (op > max_op_1_2) {
             version = 3;
         } else if (op > max_op_1_1 || new_operator(node)) {
@@ -95,6 +100,10 @@ public:
         u16(nir_major_version);
         std::uint16_t version = 0;
         for (const auto& item : program.symbols) {
+            if (is_static_scope(item)) {
+                version = 4;
+                break;
+            }
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
                 version = 3;
@@ -442,6 +451,7 @@ private:
         const auto max_kind = minor_ >= 3 ? SymbolKind::Interface : SymbolKind::Variant;
         value.kind = static_cast<SymbolKind>(tag(static_cast<std::uint8_t>(max_kind), "symbol kind"));
         value.name = text();
+        if (minor_ < 4 && is_static_scope(value)) fail("class static scopes require NeuraIR format 1.4");
         value.span = span();
         // References may point forward, so they are checked against the
         // symbol count rather than the symbols read so far.
@@ -506,6 +516,8 @@ private:
         value.text = text();
         if (!aggregates_ && new_operator(value)) fail("bitwise operations require NeuraIR format 1.2");
         value.operands = nodes(depth + 1);
+        if (minor_ < 4 && class_qualified_load(value))
+            fail("static fields with class reference qualifiers require NeuraIR format 1.4");
         value.body = nodes(depth + 1);
         value.alternative = nodes(depth + 1);
         if (minor_ < 4 && scoped_statements(value))

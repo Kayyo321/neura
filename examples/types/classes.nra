@@ -1,7 +1,8 @@
 let Classes = module (
     // A class groups fields and methods into a type.
     export let Animal = class (
-        export let name: string = "Animal";
+        export static const DefaultName = "Animal";
+        export let name: string = DefaultName;
 
         export let speak = func() -> string {
             return name + " makes a sound";

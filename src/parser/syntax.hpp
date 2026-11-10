@@ -107,6 +107,9 @@ struct Declaration {
     bool constant{};
     bool exported{};
     bool override_member{};
+    bool promote_import{};
+    bool static_member{};
+    bool singleton{};
     bool has_body{};
     // Binding annotation or function return type.
     std::optional<TypeSyntax> type;
@@ -124,6 +127,7 @@ struct Declaration {
 struct ResolvedImport {
     std::string name;
     std::string file;
+    std::string target_module{};
 };
 
 struct ParsedFile {
