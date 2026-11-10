@@ -170,7 +170,7 @@ None of these blocks anything. Each replaces a loop of storage operations with o
 | `Std.Log` | `Logger` | [14.1](#141-stdlog) |
 | `Std.Test` | Assertions | [14.2](#142-stdtest) |
 | `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` | [Foreign interop](ForeignInterop.md) |
-| `Std.Concurrent` | Reserved; not designed | [15.1](#151-deferred-and-excluded) |
+| `Std.Concurrent` | Reserved; [planned](Concurrency.md#9-stdconcurrent), not implemented | [15.1](#151-deferred-and-excluded) |
 
 `Std.Program`, `Std.Io.Console`, and `Std.Test` replace the built-in `SysIo` and `Test` modules, which are deleted ([section 4.6](#46-retiring-sysio-and-test)).
 

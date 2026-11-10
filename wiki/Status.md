@@ -27,7 +27,8 @@ This release carries the language below from source through NeuraIR, optimizatio
 | Area | Status |
 | --- | --- |
 | Standard library extensions | `Std.Concurrent`, time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
-| Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](https://github.com/Kayyo321/neura/wiki/ResourcesConcurrency)). |
+| Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](https://github.com/Kayyo321/neura/wiki/ResourcesConcurrency)). [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) plans scoped tasks, channels, cancellation, and their tooling; none of it is implemented. |
+| Native executables | `neura build` writes `.nvr` images only. [Native executables](https://github.com/Kayyo321/neura/blob/main/docs/lang/Standalone.md) plans `neura build --native`, which bundles an image and its runtime into one executable; none of it is implemented. |
 | Foreign interop | Interop with Java and other managed runtimes. Native code runs only on Linux x86-64 in this release's tests; other platforms build the same provider but are unverified. |
 | Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure)). |
 
