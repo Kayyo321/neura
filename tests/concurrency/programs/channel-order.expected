@@ -1,0 +1,48 @@
+== rendezvous
+try_send -> Full
+try_receive -> empty
+producer sends 1
+root receives
+root receive -> value 1
+producer send -> Sent
+== parked senders are served in the order they parked
+a sends 1
+b sends 2
+c sends 3
+root receive -> value 1
+root receive -> value 2
+root receive -> value 3
+a send -> Sent
+b send -> Sent
+c send -> Sent
+== parked receivers are served in the order they parked
+root send 10 -> Sent
+root send 20 -> Sent
+root send 30 -> Sent
+x receive -> value 10
+y receive -> value 20
+z receive -> value 30
+== a buffer keeps the order sends committed
+try_send 1 -> Sent
+try_send 2 -> Sent
+send 3 -> Sent
+try_send 4 -> Full
+try_receive -> value 1
+receive -> value 2
+try_send 5 -> Sent
+receive -> value 3
+receive -> value 5
+try_receive -> empty
+== close with parked senders
+send 1 -> Sent
+s1 sends 2
+s2 sends 3
+root closes
+s1 send -> Closed
+s2 send -> Closed
+close again
+try_send -> Closed
+send -> Closed
+try_receive -> value 1
+receive -> closed
+try_receive -> closed

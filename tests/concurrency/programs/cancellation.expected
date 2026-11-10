@@ -1,0 +1,32 @@
+== cancelling parked operations
+root cancels
+send task: send -> Cancelled
+receive task: receive -> cancelled
+first select: arm a cancelled
+second select: arm b cancelled
+the scope exited after every task finished
+== a select with only a join arm
+slow task: cancelled on entry is false
+root cancels
+slow task: done
+join-only select: committed 7, cancelled is true
+== an operation by a task cancelled before it ran
+started cancelled: true
+receive from a buffer -> value 41
+send with room -> Sent
+receive from an empty channel -> cancelled
+send to a full channel -> Cancelled
+select with a ready arm -> value 42
+select with nothing ready -> cancelled
+try_receive -> empty
+probe: started, cancelled is true
+room now holds value 1
+== nested shutdown
+root cancels
+level 3: receive -> cancelled
+level 2: receive -> cancelled
+level 1: receive -> cancelled
+level 1: scope drained
+level 2: scope drained
+level 3: scope drained
+all scopes drained

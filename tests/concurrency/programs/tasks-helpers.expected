@@ -1,0 +1,26 @@
+== all
+all returned 4, 9, 16
+== all_ok, every call succeeds
+a: ran to the end
+b: ran to the end
+all_ok returned Ok with 2 values, first 1
+== all_ok, the first failure cancels the rest
+quick: fails
+other: stopped early
+slow: stopped early
+all_ok returned Err quick failed
+== first_ok, the first success cancels the rest
+quick: succeeds
+other: stopped early
+slow: stopped early
+first_ok returned Ok 5
+== first_ok, failures before the success are skipped
+first: fails
+second: fails
+third: succeeds
+first_ok returned Ok 8
+== first_ok, every call fails
+first: fails
+second: fails
+third: fails
+first_ok returned Err third failed

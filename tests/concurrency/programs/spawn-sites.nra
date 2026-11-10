@@ -1,0 +1,42 @@
+// Three spawn sites with known task counts, for the trace events and the task profile (Concurrency.md section 14):
+// a loop that spawns five tasks, a call that spawns two, and a single spawn. Each task of the first two sites
+// sends one value that the root receives, so the tasks park and wake.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
+let report = func(out: channels.Sender<int>, value: int) -> void {
+    out.send(value);
+};
+
+let spawn_pair = func(out: channels.Sender<int>) -> void {
+    scope {
+        spawn report(out, 100);
+        spawn report(out, 200);
+    }
+};
+
+let alone = func -> int => 7;
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let [out, incoming, closer] = channels.open<int>(8);
+        let sum = 0;
+        scope {
+            for (let i: int = 0; i < 5; i++) {
+                spawn report(out, i);
+            }
+            let last = spawn alone();
+            spawn_pair(out);
+            for (let n: int = 0; n < 7; n++) {
+                match (incoming.receive()) {
+                    channels.Received.Value(value) => { sum += value; },
+                    _ => { },
+                }
+            }
+            sum += last.join();
+        }
+        console.print_line("sum " + sum.to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,79 @@
+// Backpressure (Concurrency.md section 6): a full buffer parks its senders, so a slow consumer slows its
+// producers. Each producer counts how often its send found the buffer full and had to wait; the run's statistics
+// (checked by programs.cmake) show the buffer never held more than its capacity.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let tasks = import:Std.Concurrent.Task;
+
+const Capacity = 2;
+const Producers = 3;
+const PerProducer = 6;
+
+let spin = func(rounds: int) -> int {
+    let n = 0;
+    for (let i: int = 0; i < rounds; i++) {
+        n += 1;
+    }
+    return n;
+};
+
+// Sends `count` values and returns how many of them found the buffer full and had to wait.
+let produce = func(id: int, out: channels.Sender<int>, count: int) -> int {
+    let waits = 0;
+    for (let k: int = 0; k < count; k++) {
+        let value = id * 100 + k;
+        match (out.try_send(value)) {
+            channels.TrySendOutcome.Sent => { },
+            _ => {
+                waits += 1;
+                out.send(value);
+            },
+        }
+    }
+    return waits;
+};
+
+// Receives `total` values, spending `delay` rounds on each, and returns their sum.
+let consume = func(incoming: channels.Receiver<int>, total: int, delay: int) -> int {
+    let sum = 0;
+    for (let n: int = 0; n < total; n++) {
+        match (incoming.receive()) {
+            channels.Received.Value(value) => { sum += value; },
+            _ => { console.print_line("unexpected end"); },
+        }
+        spin(delay);
+    }
+    return sum;
+};
+
+let run = func(label: string, delay: int) -> void {
+    let [out, incoming, closer] = channels.open<int>(Capacity);
+    let sum = 0;
+    let waits: int[list] = [];
+    scope {
+        let producers: tasks.Task<int>[list] = [];
+        for (let id: int = 1; id <= Producers; id++) {
+            producers.append(spawn produce(id, out, PerProducer));
+        }
+        sum = consume(incoming, Producers * PerProducer, delay);
+        for (let producer: tasks.Task<int> in producers) {
+            waits.append(producer.join());
+        }
+    }
+    console.print_line(label + ": received sum " + sum.to_string());
+    let total = 0;
+    for (let w: int in waits) {
+        console.print_line(label + ": a producer waited " + w.to_string() + " times");
+        total += w;
+    }
+    console.print_line(label + ": " + total.to_string() + " of " + (Producers * PerProducer).to_string() + " sends waited");
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        run("slow consumer", 3000);
+        run("fast consumer", 0);
+        return program.ExitCode.Ok;
+    };
+);

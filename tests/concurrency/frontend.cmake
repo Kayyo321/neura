@@ -59,6 +59,7 @@ function(check_rejection name declarations body location message_pattern)
     endif()
 endfunction()
 
+# Extra arguments are options for `neura run`, such as --allow-clock.
 function(check_accepted name declarations body expected)
     write_program("${name}" "${declarations}" "${body}")
     execute_process(COMMAND "${NEURA}" check "${name}.nra" WORKING_DIRECTORY "${TEST_DIR}"
@@ -71,10 +72,54 @@ function(check_accepted name declarations body expected)
     if(NOT status STREQUAL "0")
         message(FATAL_ERROR "${name}: build failed with status ${status}\n${stderr}")
     endif()
-    execute_process(COMMAND "${NEURA}" run "${name}.nvr" WORKING_DIRECTORY "${TEST_DIR}"
+    execute_process(COMMAND "${NEURA}" run ${ARGN} "${name}.nvr" WORKING_DIRECTORY "${TEST_DIR}"
         RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
     if(NOT status STREQUAL "0" OR NOT stdout STREQUAL "${expected}" OR NOT stderr STREQUAL "")
         message(FATAL_ERROR "${name}: expected output '${expected}', got status ${status}\n${stdout}\n${stderr}")
+    endif()
+endfunction()
+
+# A rejection whose diagnostic is reported inside a library file, because the
+# compiler checks the spawn there. `origin` is that file's name as printed.
+function(check_library_rejection name declarations body origin message_pattern)
+    write_program("${name}" "${declarations}" "${body}")
+    execute_process(
+        COMMAND "${NEURA}" check "${name}.nra"
+        WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+    )
+    if(NOT status MATCHES "^[1-9][0-9]*$")
+        message(FATAL_ERROR "Expected ${name} to be rejected, got status ${status}\n${stdout}\n${stderr}")
+    endif()
+    if(NOT stderr MATCHES "${origin}:[0-9]+:[0-9]+: error: ${message_pattern}")
+        message(FATAL_ERROR "${name}: expected a diagnostic in ${origin} matching '${message_pattern}'\n${stderr}")
+    endif()
+endfunction()
+
+# A defect of the compiler that this suite pins. The program must be accepted
+# (or must be reported differently) according to the specification; today
+# `neura <command>` fails it with `message_pattern`. The check passes while
+# that is still so, and fails as soon as it stops, so that whoever fixes the
+# defect moves the case to check_accepted or check_rejection. The minimal
+# reproduction is kept in tests/concurrency/defects/.
+function(check_known_defect name declarations body command message_pattern)
+    write_program("${name}" "${declarations}" "${body}")
+    set(output)
+    if(command STREQUAL "build")
+        set(output -o "${name}.nvr")
+    endif()
+    execute_process(
+        COMMAND "${NEURA}" ${command} "${name}.nra" ${output}
+        WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+    )
+    if(NOT status MATCHES "^[1-9][0-9]*$" OR NOT stderr MATCHES "${message_pattern}")
+        message(FATAL_ERROR "${name}: the known compiler defect no longer reproduces (status ${status}). "
+                            "Move the case to check_accepted or check_rejection.\n${stdout}\n${stderr}")
     endif()
 endfunction()
 
@@ -404,5 +449,466 @@ execute_process(COMMAND "${NEURA}" build --task-safety report.nra -o report.nvr 
 if(status STREQUAL "0" OR NOT stderr MATCHES "--task-safety applies only to check")
     message(FATAL_ERROR "build accepted --task-safety\n${stderr}")
 endif()
+
+# ---------------------------------------------------------------------------
+# Phase 2 forms: `scope (name)` and `select` (sections 6 and 7).
+
+set(channels_import "let channels = import:Std.Concurrent.Channel;\n")
+set(cancellation_import "let cancellation = import:Std.Concurrent.Cancellation;\nlet observe = func -> bool => cancellation.requested();\n")
+set(box_class [=[
+let Box = class (
+    export let value: int;
+    export let init = func(v: int) { value = v; };
+);
+]=])
+
+check_accepted(scope_named_cancel "${cancellation_import}" [=[
+        scope (group) {
+            console.print_line(group.is_cancelled().to_string());
+            let early = spawn observe();
+            group.cancel();
+            group.cancel();
+            console.print_line(group.is_cancelled().to_string());
+            let late = spawn observe();
+            // A task whose cancellation was requested before it first ran still starts and sees the request.
+            console.print_line(early.join().to_string());
+            console.print_line(late.join().to_string());
+        }
+        scope (other) {
+            console.print_line(other.is_cancelled().to_string());
+        }
+]=] "false\ntrue\ntrue\ntrue\nfalse\n")
+
+check_accepted(select_binding_arm "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        sender.send(5);
+        select {
+            let message = receiver.receive() => {
+                match (message) {
+                    channels.Received.Value(value) => { console.print_line("received " + value.to_string()); },
+                    _ => { console.print_line("other"); },
+                }
+            },
+        }
+]=] "received 5\n")
+
+# An arm without a binding still commits its operation: the value is taken and dropped.
+check_accepted(select_arm_without_binding "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        sender.send(5);
+        select {
+            receiver.receive() => { console.print_line("ready"); },
+        }
+        match (receiver.try_receive()) {
+            channels.TryReceived.Empty => { console.print_line("empty"); },
+            _ => { console.print_line("still there"); },
+        }
+]=] "ready\nempty\n")
+
+check_accepted(select_const_binding "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        sender.send(6);
+        select {
+            const message = receiver.receive() => {
+                match (message) {
+                    channels.Received.Value(value) => { console.print_line("received " + value.to_string()); },
+                    _ => { console.print_line("other"); },
+                }
+            },
+        }
+]=] "received 6\n")
+
+# The plain send before the select resolves Sender.send; see select_send_arm_alone below.
+check_accepted(select_send_arm "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(2);
+        sender.send(1);
+        select {
+            let outcome = sender.send(7) => { console.print_line("send " + outcome.to_string()); },
+        }
+        select {
+            let outcome = sender.send(9) => { console.print_line("send " + outcome.to_string()); },
+            _ => { console.print_line("full"); },
+        }
+        match (receiver.receive()) {
+            channels.Received.Value(first) => { console.print_line("first " + first.to_string()); },
+            _ => { },
+        }
+        match (receiver.receive()) {
+            channels.Received.Value(second) => { console.print_line("second " + second.to_string()); },
+            _ => { },
+        }
+]=] "send Sent\nfull\nfirst 1\nsecond 7\n")
+
+check_accepted(select_join_arm "${work}" [=[
+        scope {
+            let task = spawn work(41);
+            select {
+                let value = task.join() => { console.print_line("joined " + value.to_string()); },
+            }
+        }
+]=] "joined 42\n")
+
+check_accepted(select_timer_arm [=[
+let result = import:Std.Core.Result;
+let timers = import:Std.Concurrent.Timer;
+let durations = import:Std.Time.Duration;
+]=] [=[
+        match (timers.after(durations.of_millis(1))) {
+            result.Result.Ok(timer) => {
+                select {
+                    let outcome = timer.wait() => { console.print_line("timer " + outcome.to_string()); },
+                }
+            },
+            result.Result.Err(_) => { console.print_line("no clock"); },
+        }
+]=] "timer Fired\n" --allow-clock)
+
+check_accepted(select_default_arm "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        select {
+            let message = receiver.receive() => { console.print_line("received"); },
+            _ => { console.print_line("nothing was ready"); },
+        }
+        sender.send(1);
+        select {
+            let message = receiver.receive() => { console.print_line("received"); },
+            _ => { console.print_line("nothing was ready"); },
+        }
+]=] "nothing was ready\nreceived\n")
+
+# A `_` arm that is not last still runs only when no other arm is ready.
+check_accepted(select_default_arm_first "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        select {
+            _ => { console.print_line("nothing was ready"); },
+            let message = receiver.receive() => { console.print_line("received"); },
+        }
+        sender.send(1);
+        select {
+            _ => { console.print_line("nothing was ready"); },
+            let message = receiver.receive() => { console.print_line("received"); },
+        }
+]=] "nothing was ready\nreceived\n")
+
+check_accepted(select_nested "${channels_import}" [=[
+        let [first_sender, first, first_closer] = channels.open<int>(1);
+        let [second_sender, second, second_closer] = channels.open<int>(1);
+        first_sender.send(1);
+        second_sender.send(2);
+        select {
+            let outer = first.receive() => {
+                console.print_line("outer");
+                select {
+                    let inner = second.receive() => {
+                        match (inner) {
+                            channels.Received.Value(value) => { console.print_line("inner " + value.to_string()); },
+                            _ => { console.print_line("inner other"); },
+                        }
+                    },
+                }
+            },
+        }
+]=] "outer\ninner 2\n")
+
+# The contextual words stay ordinary names next to the forms they begin: a local named select, a function named
+# scope called as a statement, and fields named spawn and select.
+check_accepted(words_next_to_forms [=[
+let channels = import:Std.Concurrent.Channel;
+let scope = func(x: int) { console.print_line("function scope " + x.to_string()); };
+let Box = class (
+    export let spawn: int = 4;
+    export let select: int = 5;
+    export let init = func { };
+);
+]=] [=[
+        let select = 3;
+        scope(select);
+        let box = new Box();
+        console.print_line((box.spawn + box.select + select).to_string());
+        let [sender, receiver, closer] = channels.open<int>(1);
+        sender.send(select);
+        scope {
+            select {
+                let message = receiver.receive() => { console.print_line("received"); },
+            }
+        }
+        scope (group) {
+            console.print_line(group.is_cancelled().to_string());
+        }
+]=] "function scope 3\n12\nreceived\nfalse\n")
+
+# ---------------------------------------------------------------------------
+# Phase 2 rejections. Positions follow from the layout above: a declaration
+# block of N lines puts the first body line at N + 5.
+
+check_rejection(select_arm_not_a_call "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        select {
+            let value = 5 => { },
+        }
+]=] "8:25" "a select arm is a call of send, receive, join, or wait")
+
+check_rejection(select_arm_plain_function_call "${channels_import}${work}" [=[
+        select {
+            work(1) => { },
+        }
+]=] "8:13" "a select arm is a call of send, receive, join, or wait")
+
+check_rejection(select_arm_not_selectable_member "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        select {
+            receiver.try_receive() => { },
+        }
+]=] "8:13" "a select arm is a call of send, receive, join, or wait")
+
+check_rejection(select_arm_without_the_member "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        select {
+            sender.receive() => { },
+        }
+]=] "8:13" "type Sender<int32> has no selectable member 'receive'")
+
+check_rejection(select_arm_on_a_number "" [=[
+        let count = 5;
+        select {
+            count.receive() => { },
+        }
+]=] "7:13" "type int32 has no selectable member 'receive'")
+
+check_rejection(select_two_default_arms "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        select {
+            let message = receiver.receive() => { },
+            _ => { },
+            _ => { },
+        }
+]=] "10:13" "a select has at most one '_' arm")
+
+check_rejection(select_only_default_arm "" [=[
+        select {
+            _ => { },
+        }
+]=] "5:9" "a select needs at least one arm that waits")
+
+check_rejection(select_at_top_level [=[
+select {
+    _ => { },
+}
+]=] "" "3:1" "select is only allowed inside a function body")
+
+check_rejection(channel_of_class "${box_class}${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<Box>(1);
+]=] "10:42" "a value of type Box is not transferable, so it cannot be a channel's element type")
+
+check_rejection(channel_of_array "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int[]>(1);
+]=] "6:42" "a value of type int32\\[\\] is not transferable, so it cannot be a channel's element type")
+
+check_rejection(channel_of_list "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<string[list]>(1);
+]=] "6:42" "a value of type string\\[list\\] is not transferable, so it cannot be a channel's element type")
+
+check_rejection(channel_of_task [=[
+let channels = import:Std.Concurrent.Channel;
+let tasks = import:Std.Concurrent.Task;
+]=] [=[
+        let [sender, receiver, closer] = channels.open<tasks.Task<int>>(1);
+]=] "7:56" "a value of type Task<int32> cannot leave its scope: it cannot be a type argument")
+
+check_rejection(channel_of_scope_handle [=[
+let channels = import:Std.Concurrent.Channel;
+let scopes = import:Std.Concurrent.Scope;
+]=] [=[
+        let [sender, receiver, closer] = channels.open<scopes.Scope>(1);
+]=] "7:56" "a value of type Scope cannot leave its scope: it cannot be a type argument")
+
+check_rejection(channel_of_duration [=[
+let channels = import:Std.Concurrent.Channel;
+let durations = import:Std.Time.Duration;
+]=] [=[
+        let [sender, receiver, closer] = channels.open<durations.Duration>(1);
+]=] "7:42" "a value of type Duration is not transferable, so it cannot be a channel's element type")
+
+# A function value is transferable when every function value of its type that the program can create captures
+# only transferable values (5.1, 5.2), so a channel of functions is accepted until the program makes a closure
+# over an object with the same type.
+check_accepted(channel_of_function_values "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<func() -> int>(1);
+        let answer = func -> int => 42;
+        sender.send(answer);
+        match (receiver.receive()) {
+            channels.Received.Value(function) => { console.print_line(function().to_string()); },
+            _ => { console.print_line("none"); },
+        }
+]=] "42\n")
+
+check_rejection(channel_of_function_values_with_a_capturing_closure "${box_class}${channels_import}" [=[
+        let box = new Box(3);
+        let read = func -> int => box.value;
+        let [sender, receiver, closer] = channels.open<func() -> int>(1);
+]=] "12:42" "a value of type func\\(\\) -> int32 is not transferable, so it cannot be a channel's element type")
+
+# A generic function is checked at each specialization, at the user's own call.
+check_rejection(channel_of_a_generic_argument "${box_class}${channels_import}\
+let relay = func<T>(value: T) {
+    let [sender, receiver, closer] = channels.open<T>(1);
+    sender.send(value);
+};
+" [=[
+        relay<Box>(new Box(1));
+]=] "9:38" "a value of type Box is not transferable, so it cannot be a channel's element type")
+
+# open rejects such a channel, so a program reaches the check on a sent value only by building the end itself.
+check_rejection(send_of_a_class "${box_class}${channels_import}" [=[
+        let sender = new channels.Sender<Box>(new channels.State());
+        sender.send(new Box(1));
+]=] "11:9" "a value of type Box is not transferable, so it cannot be sent on a channel")
+
+check_rejection(select_send_of_a_class "${box_class}${channels_import}" [=[
+        let [plain, receiver, closer] = channels.open<int>(1);
+        plain.send(1);
+        let sender = new channels.Sender<Box>(new channels.State());
+        select {
+            sender.send(new Box(2)) => { },
+        }
+]=] "13:9" "a value of type Box is not transferable, so it cannot be sent on a channel")
+
+check_rejection(scope_handle_returned [=[
+let scopes = import:Std.Concurrent.Scope;
+let leak = func -> scopes.Scope {
+    scope (group) {
+        return group;
+    }
+};
+]=] "" "6:16" "a value of type Scope cannot leave its scope: it cannot be returned from a function")
+
+check_rejection(scope_handle_in_a_field [=[
+let scopes = import:Std.Concurrent.Scope;
+let Holder = class (
+    let handle: scopes.Scope;
+);
+]=] "" "5:17" "a value of type Scope cannot leave its scope: it cannot be stored in a field or global")
+
+check_rejection(scope_handle_captured_by_lambda "" [=[
+        scope (group) {
+            let stop = func { group.cancel(); };
+            stop();
+        }
+]=] "6:31" "a value of type Scope cannot leave its scope: a lambda cannot capture it")
+
+check_rejection(scope_handle_passed_to_spawn [=[
+let scopes = import:Std.Concurrent.Scope;
+let stop = func(group: scopes.Scope) { group.cancel(); };
+]=] [=[
+        scope (group) {
+            spawn stop(group);
+        }
+]=] "8:24" "a value of type Scope cannot leave its scope: it cannot be passed to spawn")
+
+# A spawned function reaches the handle only through a capture, which a lambda cannot make.
+check_rejection(spawn_calls_cancel_on_a_captured_handle "" [=[
+        scope (group) {
+            let stop = func { group.cancel(); };
+            spawn stop();
+        }
+]=] "6:31" "a value of type Scope cannot leave its scope: a lambda cannot capture it")
+
+check_rejection(scope_handle_in_an_outer_binding "" [=[
+        scope (first) {
+            let kept = first;
+            scope (second) {
+                kept = second;
+            }
+        }
+]=] "8:24" "a value of type Scope cannot leave its scope: it can be stored only in a local declared inside that scope")
+
+check_rejection(scope_name_is_constant "" [=[
+        scope (group) {
+            group = group;
+        }
+]=] "6:13" "cannot assign to const 'group'")
+
+# FIXME(compiler): `scope (a, b) { }` and `scope () { }` are not scope statements (4.4 recognizes one identifier),
+# so they parse as call statements and the user sees only "expected ';'" at the brace. The input is rejected, not a
+# crash, but the diagnostic does not say that a scope takes exactly one name.
+check_rejection(scope_with_two_names "" [=[
+        scope (first, second) {
+        }
+]=] "5:31" "expected ';'")
+
+check_rejection(scope_with_no_name "" [=[
+        scope () {
+        }
+]=] "5:18" "expected ';'")
+
+# ---------------------------------------------------------------------------
+# Library helpers that spawn. The compiler checks the spawn inside the helper, so a diagnostic about the
+# caller's function is reported in the library file; the first one names the caller's function and the binding
+# it reaches in the message, the second names neither.
+set(groups_import "let groups = import:Std.Concurrent.WorkerGroup;\nlet tasks = import:Std.Concurrent.Tasks;\nlet result = import:Std.Core.Result;\n")
+
+check_rejection(group_of_class_jobs "${box_class}${groups_import}\
+let handle = func(job: Box) -> void { };
+" [=[
+        groups.with_workers<Box>(1, 1, handle, func(group: groups.WorkerGroup<Box>) -> void { });
+]=] "13:9" "a value of type Box is not transferable, so it cannot be a channel's element type")
+
+check_library_rejection(group_work_writes_a_global "${groups_import}\
+let total: int = 0;
+let add = func(job: int) -> void { total = total + job; };
+" [=[
+        groups.with_workers<int>(1, 1, add, func(group: groups.WorkerGroup<int>) -> void { });
+]=] "std/concurrent/worker-group.nra"
+    "the spawned call is not task-safe: it reaches 'run_worker<int32>' \\(called at worker-group.nra:[0-9]+:[0-9]+\\), and it reaches 'add' \\(called at group_work_writes_a_global.nra:10:40\\), and that code uses the reassignable binding 'total' at group_work_writes_a_global.nra:7:36")
+
+# FIXME(compiler): when the helper's function value captures an object, the diagnostic is reported at the
+# helper's spawn and names neither the caller's function nor its capture.
+check_library_rejection(group_work_captures_an_object "${box_class}${groups_import}" [=[
+        let box = new Box(1);
+        let add = func(job: int) -> void { box.value = box.value + job; };
+        groups.with_workers<int>(1, 1, add, func(group: groups.WorkerGroup<int>) -> void { });
+]=] "std/concurrent/worker-group.nra"
+    "a value of type func\\(int32\\) -> void is not transferable, so it cannot be given to a spawned task")
+
+check_library_rejection(tasks_all_call_writes_a_global "${groups_import}\
+let total: int = 0;
+let add = func -> int { total = total + 1; return total; };
+" [=[
+        let calls: (func() -> int)[list] = [add];
+        tasks.all<int>(calls);
+]=] "std/concurrent/tasks.nra"
+    "the spawned call is not task-safe: it reaches 'add' \\(called at tasks_all_call_writes_a_global.nra:10:45\\), and that code uses the reassignable binding 'total' at tasks_all_call_writes_a_global.nra:7:25")
+
+check_library_rejection(tasks_all_ok_call_captures_an_object "${box_class}${groups_import}" [=[
+        let box = new Box(1);
+        let calls: (func() -> result.Result<int>)[list] = [func() -> result.Result<int> => result.Result<int>.Ok(box.value)];
+        tasks.all_ok<int>(calls);
+]=] "std/concurrent/tasks.nra"
+    "a value of type func\\(\\) -> Result<Erased> is not transferable, so it cannot be given to a spawned task")
+
+# ---------------------------------------------------------------------------
+# Known compiler defects (minimal reproductions in tests/concurrency/defects/). Each is pinned as it is today.
+
+# FIXME(compiler): a send arm is rejected unless Sender.send was lowered earlier in the program, because the
+# select lowering reads the member's parameters before resolving it (see select_send_arm above, which passes
+# once a plain send comes first).
+check_known_defect(select_send_arm_alone "${channels_import}" [=[
+        let [sender, receiver, closer] = channels.open<int>(1);
+        select {
+            let outcome = sender.send(7) => { console.print_line("send " + outcome.to_string()); },
+        }
+]=] check "select_send_arm_alone.nra:8:27: error: send takes the value to send")
+
+# FIXME(compiler): `scope (name)` in a function with type parameters (or in a method of a generic class) fails
+# NeuraIR verification: the hidden local that carries the scope's identity is not initialized in the
+# specialization.
+check_known_defect(named_scope_in_a_generic_function "let run = func<T>(value: T) -> int {
+    scope (group) {
+        return 5;
+    }
+};
+" [=[
+        console.print_line(run<int>(1).to_string());
+]=] build "NeuraIR verification failed before optimization: load of local [^\n]* '[$]scope' is not preceded by its initialization")
 
 message(STATUS "concurrency frontend conformance passed")

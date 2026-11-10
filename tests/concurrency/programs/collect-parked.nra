@@ -1,0 +1,76 @@
+// Collection with parked tasks and buffered messages (Concurrency.md sections 10.2 and 15): 120 tasks are parked
+// in sends that hold a string each, 40 more strings sit in a buffer, and the root allocates and drops a great
+// deal of garbage. Every parked task's frames and every held or buffered value are roots, so a run under a small
+// --max-heap-cells (programs.cmake) must collect the garbage and still deliver every message intact.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
+const Parked = 120;
+const Buffered = 40;
+
+let note = func(id: int) -> string {
+    return "message " + id.to_string() + " " + "padding".slice(0, 3 + id % 4);
+};
+
+let send_note = func(out: channels.Sender<string>, id: int) -> void {
+    out.send(note(id));
+};
+
+// Allocates lists and strings that are dead as soon as the round ends.
+let churn = func(rounds: int) -> int {
+    let kept = 0;
+    for (let round: int = 0; round < rounds; round++) {
+        let garbage: string[list] = [];
+        for (let i: int = 0; i < 20; i++) {
+            garbage.append("garbage " + round.to_string() + " " + i.to_string());
+        }
+        kept += garbage.length;
+    }
+    return kept;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let [out, incoming, closer] = channels.open<string>(0);
+        let [stock, stocked, stock_closer] = channels.open<string>(Buffered);
+        for (let id: int = 1000; id < 1000 + Buffered; id++) {
+            stock.send(note(id));
+        }
+        scope {
+            for (let id: int = 0; id < Parked; id++) {
+                spawn send_note(out, id);
+            }
+            console.print_line("churned " + churn(200).to_string() + " strings while " + Parked.to_string() + " senders were parked");
+            let intact = 0;
+            let length_sum = 0;
+            for (let n: int = 0; n < Parked; n++) {
+                match (incoming.receive()) {
+                    channels.Received.Value(text) => {
+                        if (text.slice(0, 8) == "message ") {
+                            intact += 1;
+                        }
+                        length_sum += text.byte_length;
+                    },
+                    _ => { console.print_line("unexpected end"); },
+                }
+            }
+            console.print_line("received " + intact.to_string() + " intact messages, " + length_sum.to_string() + " bytes");
+        }
+        let buffered_sum = 0;
+        let buffered_intact = 0;
+        for (let n: int = 0; n < Buffered; n++) {
+            match (stocked.receive()) {
+                channels.Received.Value(text) => {
+                    if (text.slice(0, 8) == "message ") {
+                        buffered_intact += 1;
+                    }
+                    buffered_sum += text.byte_length;
+                },
+                _ => { console.print_line("unexpected end"); },
+            }
+        }
+        console.print_line("buffered " + buffered_intact.to_string() + " intact messages, " + buffered_sum.to_string() + " bytes");
+        return program.ExitCode.Ok;
+    };
+);

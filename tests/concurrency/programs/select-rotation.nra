@@ -1,0 +1,117 @@
+// select (Concurrency.md section 6): rotating preference among ready arms, and a select parked on several arms
+// that is woken by each kind of arm: a receive, a send, and a join.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let tasks = import:Std.Concurrent.Task;
+
+const Rounds = 1000;
+
+let received = func(r: channels.Received<int>) -> string => match (r) {
+    channels.Received.Value(value) => "value " + value.to_string(),
+    channels.Received.Closed => "closed",
+    channels.Received.Cancelled => "cancelled",
+};
+
+// Two arms that are ready in every round: a closed channel, which reports Closed at once, and a buffer that holds
+// exactly one value per two rounds. The select starts at arm `count mod 2`, so neither arm starves the other.
+let two_ready_arms = func -> void {
+    let [out, data, closer] = channels.open<int>(Rounds);
+    let [never_out, always, always_closer] = channels.open<int>(0);
+    always_closer.close();
+    for (let i: int = 0; i < Rounds / 2; i++) {
+        out.send(i);
+    }
+    let closed_arm = 0;
+    let data_arm = 0;
+    for (let round: int = 0; round < Rounds; round++) {
+        select {
+            let from_closed = always.receive() => { closed_arm += 1; },
+            let from_data = data.receive() => { data_arm += 1; },
+        }
+    }
+    console.print_line("two ready arms, " + Rounds.to_string() + " rounds: closed arm " + closed_arm.to_string() +
+        ", buffer arm " + data_arm.to_string());
+};
+
+// Three ready arms commit in turn, in source order from the arm the count selects.
+let three_ready_arms = func -> void {
+    let [out_a, a, closer_a] = channels.open<int>(Rounds);
+    let [out_b, b, closer_b] = channels.open<int>(Rounds);
+    let [out_c, c, closer_c] = channels.open<int>(Rounds);
+    for (let i: int = 0; i < 10; i++) {
+        out_a.send(i);
+        out_b.send(i);
+        out_c.send(i);
+    }
+    let order = "";
+    for (let round: int = 0; round < 7; round++) {
+        select {
+            let x = a.receive() => { order = order + "a"; },
+            let y = b.receive() => { order = order + "b"; },
+            let z = c.receive() => { order = order + "c"; },
+        }
+    }
+    console.print_line("three ready arms: " + order);
+};
+
+let finish_when_told = func(gate: channels.Receiver<int>) -> int {
+    gate.receive();
+    return 9;
+};
+
+let send_after_others_ran = func(out: channels.Sender<int>, value: int) -> void {
+    out.send(value);
+};
+
+let make_room = func(incoming: channels.Receiver<int>) -> void {
+    incoming.receive();
+};
+
+let open_gate = func(gate_out: channels.Sender<int>) -> void {
+    gate_out.send(1);
+};
+
+// The root parks in a select over a receive, a send into a full channel, and a join; a task started after it
+// wakes it through the arm named by `kind`.
+let parked_select = func(kind: int) -> void {
+    let [r_out, r_in, r_closer] = channels.open<int>(0);
+    let [s_out, s_in, s_closer] = channels.open<int>(1);
+    let [gate_out, gate_in, gate_closer] = channels.open<int>(0);
+    // A plain send, so that the full channel is a buffered value of 0.
+    s_out.send(0);
+    scope {
+        let finisher = spawn finish_when_told(gate_in);
+        if (kind == 1) {
+            spawn send_after_others_ran(r_out, 11);
+        } else if (kind == 2) {
+            spawn make_room(s_in);
+        } else {
+            spawn open_gate(gate_out);
+        }
+        select {
+            let message = r_in.receive() => {
+                console.print_line("woken by the receive arm: " + received(message));
+            },
+            let outcome = s_out.send(5) => {
+                console.print_line("woken by the send arm: " + outcome.to_string());
+            },
+            let answer = finisher.join() => {
+                console.print_line("woken by the join arm: " + answer.to_string());
+            },
+        }
+        // Release whatever is still waiting, so that the scope can exit.
+        gate_closer.close();
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        two_ready_arms();
+        three_ready_arms();
+        parked_select(1);
+        parked_select(2);
+        parked_select(3);
+        return program.ExitCode.Ok;
+    };
+);

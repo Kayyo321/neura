@@ -1,0 +1,161 @@
+// Cancellation (Concurrency.md section 7): it wakes parked sends, receives, and selects with Cancelled; a select
+// with only a join arm stays parked until the join; an operation that can commit commits even in a cancelled
+// task; a task cancelled before it first runs still starts and sees the request; shutdown reaches every task
+// below the cancelled scope and each scope still drains.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let cancellation = import:Std.Concurrent.Cancellation;
+let channels = import:Std.Concurrent.Channel;
+let tasks = import:Std.Concurrent.Task;
+
+let received = func(r: channels.Received<int>) -> string => match (r) {
+    channels.Received.Value(value) => "value " + value.to_string(),
+    channels.Received.Closed => "closed",
+    channels.Received.Cancelled => "cancelled",
+};
+
+// Gives every other task a turn: the loop polls more often than a quantum, and each task runs until it parks.
+let let_others_run = func -> int {
+    let rounds = 0;
+    for (let i: int = 0; i < 4000; i++) {
+        rounds += 1;
+    }
+    return rounds;
+};
+
+let parked_send = func(full: channels.Sender<int>) -> void {
+    console.print_line("send task: send -> " + full.send(2).to_string());
+};
+
+let parked_receive = func(empty: channels.Receiver<int>) -> void {
+    console.print_line("receive task: receive -> " + received(empty.receive()));
+};
+
+// Two selects in one task: the preferred arm of the first is arm a, of the second arm b, so each channel arm
+// reports Cancelled once.
+let parked_selects = func(a: channels.Receiver<int>, b: channels.Receiver<int>) -> void {
+    select {
+        let x = a.receive() => { console.print_line("first select: arm a " + received(x)); },
+        let y = b.receive() => { console.print_line("first select: arm b " + received(y)); },
+    }
+    select {
+        let x = a.receive() => { console.print_line("second select: arm a " + received(x)); },
+        let y = b.receive() => { console.print_line("second select: arm b " + received(y)); },
+    }
+};
+
+// Does not look at cancellation: it computes, so a cancellation cannot interrupt it.
+let slow = func -> int {
+    console.print_line("slow task: cancelled on entry is " + cancellation.requested().to_string());
+    let rounds = 0;
+    for (let i: int = 0; i < 9000; i++) {
+        rounds += 1;
+    }
+    console.print_line("slow task: done");
+    return 7;
+};
+
+// A select whose only arm is a join: cancellation does not wake it, only the join does.
+let join_only = func -> void {
+    scope {
+        let child = spawn slow();
+        select {
+            let value = child.join() => {
+                console.print_line("join-only select: committed " + value.to_string() + ", cancelled is " +
+                    cancellation.requested().to_string());
+            },
+        }
+    }
+};
+
+// A task cancelled before it first ran. Everything that can commit does, and what would park is Cancelled.
+let already_cancelled = func(ready: channels.Receiver<int>, room: channels.Sender<int>,
+        empty: channels.Receiver<int>, full: channels.Sender<int>) -> void {
+    console.print_line("started cancelled: " + cancellation.requested().to_string());
+    console.print_line("receive from a buffer -> " + received(ready.receive()));
+    console.print_line("send with room -> " + room.send(1).to_string());
+    console.print_line("receive from an empty channel -> " + received(empty.receive()));
+    console.print_line("send to a full channel -> " + full.send(1).to_string());
+    select {
+        let value = ready.receive() => { console.print_line("select with a ready arm -> " + received(value)); },
+        let value = empty.receive() => { console.print_line("select with a ready arm -> " + received(value)); },
+    }
+    select {
+        let value = empty.receive() => { console.print_line("select with nothing ready -> " + received(value)); },
+    }
+    console.print_line("try_receive -> " + tried(empty.try_receive()));
+};
+
+let tried = func(r: channels.TryReceived<int>) -> string => match (r) {
+    channels.TryReceived.Value(value) => "value " + value.to_string(),
+    channels.TryReceived.Empty => "empty",
+    channels.TryReceived.Closed => "closed",
+};
+
+let probe = func -> void {
+    console.print_line("probe: started, cancelled is " + cancellation.requested().to_string());
+};
+
+// One scope per level, each with a task that opens the next level and parks on the same channel.
+let level = func(depth: int, never: channels.Receiver<int>) -> void {
+    scope {
+        if (depth > 1) {
+            spawn level(depth - 1, never);
+        }
+        console.print_line("level " + depth.to_string() + ": receive -> " + received(never.receive()));
+    }
+    console.print_line("level " + depth.to_string() + ": scope drained");
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        console.print_line("== cancelling parked operations");
+        let [full_out, full_in, full_closer] = channels.open<int>(1);
+        full_out.send(1);
+        let [empty_out, empty_in, empty_closer] = channels.open<int>(0);
+        let [other_out, other_in, other_closer] = channels.open<int>(0);
+        scope (group) {
+            spawn parked_send(full_out);
+            spawn parked_receive(empty_in);
+            spawn parked_selects(empty_in, other_in);
+            let_others_run();
+            console.print_line("root cancels");
+            group.cancel();
+        }
+        console.print_line("the scope exited after every task finished");
+
+        console.print_line("== a select with only a join arm");
+        scope (group) {
+            spawn join_only();
+            let_others_run();
+            console.print_line("root cancels");
+            group.cancel();
+        }
+
+        console.print_line("== an operation by a task cancelled before it ran");
+        let [ready_out, ready_in, ready_closer] = channels.open<int>(2);
+        ready_out.send(41);
+        ready_out.send(42);
+        let [room_out, room_in, room_closer] = channels.open<int>(1);
+        let [none_out, none_in, none_closer] = channels.open<int>(0);
+        let [stuffed_out, stuffed_in, stuffed_closer] = channels.open<int>(1);
+        stuffed_out.send(0);
+        scope (group) {
+            spawn already_cancelled(ready_in, room_out, none_in, stuffed_out);
+            group.cancel();
+            spawn probe();
+        }
+        console.print_line("room now holds " + tried(room_in.try_receive()));
+
+        console.print_line("== nested shutdown");
+        let [never_out, never_in, never_closer] = channels.open<int>(0);
+        scope (group) {
+            spawn level(3, never_in);
+            let_others_run();
+            console.print_line("root cancels");
+            group.cancel();
+        }
+        console.print_line("all scopes drained");
+        return program.ExitCode.Ok;
+    };
+);

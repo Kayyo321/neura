@@ -1,0 +1,111 @@
+// Channel ordering (Concurrency.md section 6): a rendezvous, values and parked senders and receivers served
+// first come first served, the outcomes of try_send and try_receive, and close with parked senders.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
+let received = func(r: channels.Received<int>) -> string => match (r) {
+    channels.Received.Value(value) => "value " + value.to_string(),
+    channels.Received.Closed => "closed",
+    channels.Received.Cancelled => "cancelled",
+};
+
+let tried = func(r: channels.TryReceived<int>) -> string => match (r) {
+    channels.TryReceived.Value(value) => "value " + value.to_string(),
+    channels.TryReceived.Empty => "empty",
+    channels.TryReceived.Closed => "closed",
+};
+
+// Gives every other task a turn: the loop polls more often than a quantum, and each task runs until it parks.
+let let_others_run = func -> int {
+    let rounds = 0;
+    for (let i: int = 0; i < 4000; i++) {
+        rounds += 1;
+    }
+    return rounds;
+};
+
+let send_and_report = func(label: string, out: channels.Sender<int>, value: int) -> void {
+    console.print_line(label + " sends " + value.to_string());
+    console.print_line(label + " send -> " + out.send(value).to_string());
+};
+
+let receive_and_report = func(label: string, incoming: channels.Receiver<int>) -> void {
+    console.print_line(label + " receive -> " + received(incoming.receive()));
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        console.print_line("== rendezvous");
+        let [out, incoming, closer] = channels.open<int>(0);
+        // Nobody is waiting, so a send that never parks cannot commit.
+        console.print_line("try_send -> " + out.try_send(1).to_string());
+        console.print_line("try_receive -> " + tried(incoming.try_receive()));
+        scope {
+            spawn send_and_report("producer", out, 1);
+            // The producer parks in its send until a receive takes the value.
+            let_others_run();
+            console.print_line("root receives");
+            console.print_line("root receive -> " + received(incoming.receive()));
+            let_others_run();
+        }
+
+        console.print_line("== parked senders are served in the order they parked");
+        let [out_a, incoming_a, closer_a] = channels.open<int>(0);
+        scope {
+            spawn send_and_report("a", out_a, 1);
+            spawn send_and_report("b", out_a, 2);
+            spawn send_and_report("c", out_a, 3);
+            let_others_run();
+            console.print_line("root receive -> " + received(incoming_a.receive()));
+            console.print_line("root receive -> " + received(incoming_a.receive()));
+            console.print_line("root receive -> " + received(incoming_a.receive()));
+        }
+
+        console.print_line("== parked receivers are served in the order they parked");
+        let [out_b, incoming_b, closer_b] = channels.open<int>(0);
+        scope {
+            spawn receive_and_report("x", incoming_b);
+            spawn receive_and_report("y", incoming_b);
+            spawn receive_and_report("z", incoming_b);
+            let_others_run();
+            console.print_line("root send 10 -> " + out_b.send(10).to_string());
+            console.print_line("root send 20 -> " + out_b.send(20).to_string());
+            console.print_line("root send 30 -> " + out_b.send(30).to_string());
+        }
+
+        console.print_line("== a buffer keeps the order sends committed");
+        let [out_c, incoming_c, closer_c] = channels.open<int>(3);
+        console.print_line("try_send 1 -> " + out_c.try_send(1).to_string());
+        console.print_line("try_send 2 -> " + out_c.try_send(2).to_string());
+        console.print_line("send 3 -> " + out_c.send(3).to_string());
+        console.print_line("try_send 4 -> " + out_c.try_send(4).to_string());
+        console.print_line("try_receive -> " + tried(incoming_c.try_receive()));
+        console.print_line("receive -> " + received(incoming_c.receive()));
+        console.print_line("try_send 5 -> " + out_c.try_send(5).to_string());
+        console.print_line("receive -> " + received(incoming_c.receive()));
+        console.print_line("receive -> " + received(incoming_c.receive()));
+        console.print_line("try_receive -> " + tried(incoming_c.try_receive()));
+
+        console.print_line("== close with parked senders");
+        let [out_d, incoming_d, closer_d] = channels.open<int>(1);
+        console.print_line("send 1 -> " + out_d.send(1).to_string());
+        scope {
+            spawn send_and_report("s1", out_d, 2);
+            spawn send_and_report("s2", out_d, 3);
+            let_others_run();
+            console.print_line("root closes");
+            closer_d.close();
+            let_others_run();
+        }
+        console.print_line("close again");
+        closer_d.close();
+        console.print_line("try_send -> " + out_d.try_send(4).to_string());
+        console.print_line("send -> " + out_d.send(5).to_string());
+        // The buffered value is still received; the parked senders' values were not delivered.
+        console.print_line("try_receive -> " + tried(incoming_d.try_receive()));
+        console.print_line("receive -> " + received(incoming_d.receive()));
+        console.print_line("try_receive -> " + tried(incoming_d.try_receive()));
+        return program.ExitCode.Ok;
+    };
+);

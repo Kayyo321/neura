@@ -1,0 +1,14 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: capacity
+let channels = import:Std.Concurrent.Channel;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        let [out, incoming, closer] = channels.open<int>(-1);
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

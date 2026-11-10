@@ -1,0 +1,85 @@
+// Std.Concurrent.Tasks (Concurrency.md section 4.2): all, all_ok, and first_ok. A call that is cancelled says so
+// from inside the call, and the helper returns only after every call has finished, so each of those lines
+// precedes the line that reports the helper's result.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let cancellation = import:Std.Concurrent.Cancellation;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let tasks = import:Std.Concurrent.Tasks;
+
+const Limit = 30000;
+
+let square = func(x: int) -> func() -> int {
+    return func() -> int => x * x;
+};
+
+// Works until it is cancelled or runs out of work. Cancelled, it says so and fails; otherwise it succeeds.
+let works = func(name: string, value: int) -> func() -> result.Result<int> {
+    return func() -> result.Result<int> {
+        let rounds = 0;
+        while (!cancellation.requested() && rounds < Limit) {
+            rounds += 1;
+        }
+        if (cancellation.requested()) {
+            console.print_line(name + ": stopped early");
+            return result.Result<int>.Err(error.custom("test.cancelled", name + " was cancelled"));
+        }
+        console.print_line(name + ": ran to the end");
+        return result.Result<int>.Ok(value);
+    };
+};
+
+let fails = func(name: string) -> func() -> result.Result<int> {
+    return func() -> result.Result<int> {
+        console.print_line(name + ": fails");
+        return result.Result<int>.Err(error.custom("test.failed", name + " failed"));
+    };
+};
+
+let succeeds = func(name: string, value: int) -> func() -> result.Result<int> {
+    return func() -> result.Result<int> {
+        console.print_line(name + ": succeeds");
+        return result.Result<int>.Ok(value);
+    };
+};
+
+let show = func(outcome: result.Result<int[list]>) -> string => match (outcome) {
+    result.Result.Ok(values) => "Ok with " + values.length.to_string() + " values, first " + values[0].to_string(),
+    result.Result.Err(failure) => "Err " + error.message(failure),
+};
+
+let show_one = func(outcome: result.Result<int>) -> string => match (outcome) {
+    result.Result.Ok(value) => "Ok " + value.to_string(),
+    result.Result.Err(failure) => "Err " + error.message(failure),
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        console.print_line("== all");
+        let squares: (func() -> int)[list] = [square(2), square(3), square(4)];
+        let values = tasks.all<int>(squares);
+        console.print_line("all returned " + values[0].to_string() + ", " + values[1].to_string() + ", " + values[2].to_string());
+
+        console.print_line("== all_ok, every call succeeds");
+        let good: (func() -> result.Result<int>)[list] = [works("a", 1), works("b", 2)];
+        console.print_line("all_ok returned " + show(tasks.all_ok<int>(good)));
+
+        console.print_line("== all_ok, the first failure cancels the rest");
+        let mixed: (func() -> result.Result<int>)[list] = [works("slow", 1), fails("quick"), works("other", 3)];
+        console.print_line("all_ok returned " + show(tasks.all_ok<int>(mixed)));
+
+        console.print_line("== first_ok, the first success cancels the rest");
+        let racing: (func() -> result.Result<int>)[list] = [works("slow", 1), succeeds("quick", 5), works("other", 3)];
+        console.print_line("first_ok returned " + show_one(tasks.first_ok<int>(racing)));
+
+        console.print_line("== first_ok, failures before the success are skipped");
+        let late: (func() -> result.Result<int>)[list] = [fails("first"), fails("second"), succeeds("third", 8)];
+        console.print_line("first_ok returned " + show_one(tasks.first_ok<int>(late)));
+
+        console.print_line("== first_ok, every call fails");
+        let none: (func() -> result.Result<int>)[list] = [fails("first"), fails("second"), fails("third")];
+        console.print_line("first_ok returned " + show_one(tasks.first_ok<int>(none)));
+        return program.ExitCode.Ok;
+    };
+);
