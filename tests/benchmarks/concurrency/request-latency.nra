@@ -1,0 +1,80 @@
+// Measurement workload for docs/lang/Concurrency.md section 16, phase 4:
+// 2,000 request tasks started at once, each making one round trip to the task
+// that owns a table and then doing a little work of its own. The latency of a
+// request is the time from its spawn event to its finish event in the trace
+// (--trace-events with --trace-wall-time).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let maps = import:Std.Collections.HashMap;
+
+const requests: int = 2000;
+
+let Lookup = enum (Get { key: int, reply: channels.Sender<int> });
+
+let table_owner = func(incoming: channels.Receiver<Lookup>) {
+    let table = maps.create<int, int>();
+    for (let key: int = 0; key < 256; key++) {
+        table.set(key, key * key);
+    }
+    do {
+        match (incoming.receive()) {
+            channels.Received.Value(lookup) => {
+                match (lookup) {
+                    Lookup.Get { key, reply } => {
+                        reply.send(table.get_or(key, -1));
+                    },
+                }
+            },
+            _ => {
+                return;
+            },
+        }
+    }
+};
+
+let request = func(index: int, owner: channels.Sender<Lookup>, results: channels.Sender<int>) {
+    let [reply, answer, closer] = channels.open<int>(1);
+    owner.send(Lookup.Get { key: index % 256, reply: reply });
+    let value = match (answer.receive()) {
+        channels.Received.Value(found) => found,
+        _ => -1,
+    };
+    for (let round: int = 0; round < 200; round++) {
+        value = (value * 31 + index) % 1000003;
+    }
+    results.send(value);
+};
+
+// The results channel holds every answer, so a finished request never waits
+// for the collector.
+let serve_all = func(owner: channels.Sender<Lookup>) -> int64 {
+    let total: int64 = 0;
+    let [results, collected, results_closer] = channels.open<int>(requests);
+    scope {
+        for (let index: int = 0; index < requests; index++) {
+            spawn request(index, owner, results);
+        }
+        for (let index: int = 0; index < requests; index++) {
+            match (collected.receive()) {
+                channels.Received.Value(value) => {
+                    total = total + (value as int64);
+                },
+                _ => {},
+            }
+        }
+    }
+    return total;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let [owner, incoming, owner_closer] = channels.open<Lookup>(64);
+        scope {
+            spawn table_owner(incoming);
+            console.print_line(serve_all(owner).to_string());
+            owner_closer.close();
+        }
+        return program.ExitCode.Ok;
+    };
+);
