@@ -1,6 +1,4 @@
-<img src="artwork/logo.png" alt="Neura logo" width="80" align="right">
-
-# Neura
+# Neura <img src="artwork/logo-mark.svg" alt="" width="40" height="40" align="right">
 
 Neura is a statically typed programming language and a toolchain for compiling its programs into deterministic neuron circuits and decompiling those circuits into readable representations. The compiler derives the topology and weights from the program. The resulting circuits can be run, inspected, tested, and optimized against the behavior defined by the language.
 
