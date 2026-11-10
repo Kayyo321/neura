@@ -1,6 +1,6 @@
 let error = import:Std.Core.Error;
-let result = import:Std.Core.Result;
-let unit = import:Std.Core.Unit;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
 
 // Byte-list helpers shared by Std.Io, Std.Fs, and Std.Net.
 export let Bytes = module (
@@ -11,7 +11,7 @@ export let Bytes = module (
         let i = 0;
         while (i < count) {
             bytes.append(text.byte_at(i));
-            i = i + 1;
+            i += 1;
         }
         return bytes;
     };
@@ -22,17 +22,17 @@ export let Bytes = module (
         let i = start;
         while (i < end) {
             copy.append(bytes[i]);
-            i = i + 1;
+            i += 1;
         }
         return copy;
     };
 
     // Appends bytes[start] up to but excluding bytes[end] to `target`.
-    export let append_range = func(target: uint8[list], bytes: uint8[list], start: int, end: int) -> void {
+    export let append_range = func(target: uint8[list], bytes: uint8[list], start: int, end: int) {
         let i = start;
         while (i < end) {
             target.append(bytes[i]);
-            i = i + 1;
+            i += 1;
         }
     };
 
@@ -44,36 +44,30 @@ export let Bytes = module (
             if (bytes[i] == value) {
                 return i;
             }
-            i = i + 1;
+            i += 1;
         }
         return -1;
     };
 
-    export let ok = func() -> result.Result<unit.Unit> {
-        return result.Result<unit.Unit>.Ok(unit.Unit.Value);
-    };
+    export let ok = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
 
-    export let io = func(kind: error.IoErrorKind, message: string, path: string) -> error.Error {
-        return error.Error.Io { kind: kind, message: message, path: path };
-    };
+    export let io = func(kind: error.IoErrorKind, message: string, path: string) -> error.Error =>
+        error.Error.Io { kind: kind, message: message, path: path };
 
     // The error of an operation on a closed resource (Stdlib.md 5.5).
-    export let closed = func(what: string, path: string) -> error.Error {
-        return io(error.IoErrorKind.Closed, what + " is closed", path);
-    };
+    export let closed = func(what: string, path: string) -> error.Error =>
+        io(error.IoErrorKind.Closed, what + " is closed", path);
 
     // The error for bytes that are not valid UTF-8.
-    export let invalid_utf8 = func(path: string) -> error.Error {
-        return io(error.IoErrorKind.InvalidData, "invalid UTF-8", path);
-    };
+    export let invalid_utf8 = func(path: string) -> error.Error =>
+        io(error.IoErrorKind.InvalidData, "invalid UTF-8", path);
 
     // The error for a host write that reported no progress.
-    export let no_progress = func(message: string, path: string) -> error.Error {
-        return io(error.IoErrorKind.Other, message, path);
-    };
+    export let no_progress = func(message: string, path: string) -> error.Error =>
+        io(error.IoErrorKind.Other, message, path);
 
     // A source's maximum count must be at least 1.
-    export let check_maximum = func(max: int) -> void {
+    export let check_maximum = func(max: int) {
         if (max < 1) {
             trap_with_message("invalid argument: maximum count below 1");
         }

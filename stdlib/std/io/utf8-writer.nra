@@ -1,28 +1,24 @@
 let bytes = import:Std.Io.Internal.Bytes;
-let result = import:Std.Core.Result;
-let unit = import:Std.Core.Unit;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
 
 // Writes UTF-8 text to a byte sink (Stdlib.md section 11.1). The bound write
 // method is a text sink.
 export let Utf8Writer = module (
     export let Utf8Writer = class (
-        let sink: func(uint8[list]) -> result.Result<unit.Unit>;
+        let sink: func(uint8[list]) -> Result<Unit>;
 
-        export let init = func(output: func(uint8[list]) -> result.Result<unit.Unit>) -> void {
+        export let init = func(output: func(uint8[list]) -> Result<Unit>) {
             sink = output;
         };
 
-        export let write = func(text: string) -> result.Result<unit.Unit> {
-            return sink(bytes.of_string(text));
-        };
+        export let write = func(text: string) -> Result<Unit> => sink(bytes.of_string(text));
 
         // Writes the text and one LF.
-        export let write_line = func(text: string) -> result.Result<unit.Unit> {
-            return sink(bytes.of_string(text + "\n"));
-        };
+        export let write_line = func(text: string) -> Result<Unit> =>
+            sink(bytes.of_string(text + "\n"));
     );
 
-    export let create = func(sink: func(uint8[list]) -> result.Result<unit.Unit>) -> Utf8Writer {
-        return new Utf8Writer(sink);
-    };
+    export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer =>
+        new Utf8Writer(sink);
 );

@@ -1,10 +1,10 @@
 let errors = import:Std.Core.Error;
 let floating = import:Std.Core.Float64;
-let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Result;
 let string_builder = import:Std.Core.StringBuilder;
 let strings = import:Std.Text.Strings;
 let unsigned = import:Std.Core.UInt64;
-let variadic = import:Std.Core.Variadic;
+let.promote _ = import:Std.Core.Variadic;
 
 // Formatting stays in the program. Console sends only the completed UTF-8
 // string to its existing write services.
@@ -22,7 +22,7 @@ export let Formatting = module (
 
     let Cursor = class (
         let pattern: string;
-        let values: variadic.Argument[];
+        let values: Argument[];
         let position: int = 0;
         let next_auto: int = 0;
         // 0 means unset, 1 automatic, and 2 manual indexing.
@@ -31,35 +31,35 @@ export let Formatting = module (
         let issue_offset: int = 0;
         let issue_kind: errors.ParseErrorKind = errors.ParseErrorKind.Syntax;
 
-        export let init = func(source: string, arguments: variadic.Argument[]) -> void {
+        export let init = func(source: string, arguments: Argument[]) {
             pattern = source;
             values = arguments;
         };
 
-        export let render = func() -> result.Result<string> {
+        export let render = func -> Result<string> {
             let output = string_builder.create();
             let literal_start = 0;
             while (position < pattern.byte_length) {
                 let b = pattern.byte_at(position);
                 if (b != 123 && b != 125) {
-                    position = position + 1;
+                    position += 1;
                     continue;
                 }
                 output.append(pattern.slice(literal_start, position));
-                position = position + 1;
+                position += 1;
                 if (position < pattern.byte_length && pattern.byte_at(position) == b) {
                     output.append(pattern.slice(position, position + 1));
-                    position = position + 1;
+                    position += 1;
                 } else if (b == 123) {
                     let field = replacement();
                     if (issue != "") {
-                        return result.Result<string>.Err(errors.Error.Parse {
+                        return Result<string>.Err(errors.Error.Parse {
                             kind: issue_kind, offset: issue_offset, message: issue
                         });
                     }
                     output.append(field);
                 } else {
-                    return result.Result<string>.Err(errors.Error.Parse {
+                    return Result<string>.Err(errors.Error.Parse {
                         kind: errors.ParseErrorKind.Syntax, offset: position - 1,
                         message: "unmatched closing brace"
                     });
@@ -67,10 +67,10 @@ export let Formatting = module (
                 literal_start = position;
             }
             output.append(pattern.slice(literal_start, position));
-            return result.Result<string>.Ok(output.to_string());
+            return Result<string>.Ok(output.to_string());
         };
 
-        let replacement = func() -> string {
+        let replacement = func -> string {
             if (position == pattern.byte_length) {
                 fail(errors.ParseErrorKind.UnexpectedEnd, "unclosed replacement field");
                 return "";
@@ -81,7 +81,7 @@ export let Formatting = module (
             }
             let spec = new Spec();
             if (peek() == 58) {
-                position = position + 1;
+                position += 1;
                 read_spec(spec);
             }
             if (issue != "") {
@@ -96,11 +96,11 @@ export let Formatting = module (
                 return "";
             }
             let text = render_value(values[index], spec);
-            position = position + 1;
+            position += 1;
             return text;
         };
 
-        let read_index = func() -> int {
+        let read_index = func -> int {
             let start = position;
             let mode = 1;
             let index = next_auto;
@@ -122,21 +122,21 @@ export let Formatting = module (
                 } else if (index >= values.length) {
                     fail_at(errors.ParseErrorKind.OutOfRange, start, "format argument index out of range");
                 } else if (mode == 1) {
-                    next_auto = next_auto + 1;
+                    next_auto += 1;
                 }
             }
             index_mode = mode;
             return index;
         };
 
-        let read_spec = func(spec: Spec) -> void {
+        let read_spec = func(spec: Spec) {
             // A single Unicode scalar followed by an alignment character is
             // the fill. Otherwise an alignment character can appear alone.
             let b = peek();
             if (position < pattern.byte_length && b != 123 && b != 125) {
                 let after_fill = position + 1;
                 while (after_fill < pattern.byte_length && (pattern.byte_at(after_fill) & 192) == 128) {
-                    after_fill = after_fill + 1;
+                    after_fill += 1;
                 }
                 if (after_fill < pattern.byte_length && is_align(pattern.byte_at(after_fill))) {
                     spec.fill = pattern.slice(position, after_fill);
@@ -144,21 +144,21 @@ export let Formatting = module (
                     position = after_fill + 1;
                 } else if (is_align(b)) {
                     spec.align = b;
-                    position = position + 1;
+                    position += 1;
                 }
             }
             b = peek();
             if (b == 43 || b == 45 || b == 32) {
                 spec.sign = b;
-                position = position + 1;
+                position += 1;
             }
             if (peek() == 35) {
                 spec.alternate = true;
-                position = position + 1;
+                position += 1;
             }
             if (peek() == 48) {
                 spec.zero = true;
-                position = position + 1;
+                position += 1;
             }
             if (is_digit(peek())) {
                 spec.width = read_number();
@@ -169,7 +169,7 @@ export let Formatting = module (
                 return;
             }
             if (peek() == 46) {
-                position = position + 1;
+                position += 1;
                 if (is_digit(peek())) {
                     spec.precision = read_number();
                 } else if (peek() == 123) {
@@ -185,12 +185,12 @@ export let Formatting = module (
                     return;
                 }
                 spec.presentation = b;
-                position = position + 1;
+                position += 1;
             }
         };
 
-        let read_dynamic = func() -> int {
-            position = position + 1;
+        let read_dynamic = func -> int {
+            position += 1;
             let start = position;
             let index = read_index();
             if (issue != "") {
@@ -200,14 +200,14 @@ export let Formatting = module (
                 fail(errors.ParseErrorKind.Syntax, "expected a closing brace for dynamic width or precision");
                 return 0;
             }
-            position = position + 1;
+            position += 1;
             match (values[index]) {
-                variadic.Argument.Signed(n) => {
+                Argument.Signed(n) => {
                     if (n >= 0 && n <= 2147483647) {
                         return n as int;
                     }
                 },
-                variadic.Argument.Unsigned(n) => {
+                Argument.Unsigned(n) => {
                     if (n <= 2147483647) {
                         return n as int;
                     }
@@ -221,7 +221,7 @@ export let Formatting = module (
             return 0;
         };
 
-        let read_number = func() -> int {
+        let read_number = func -> int {
             let number = 0;
             while (is_digit(peek())) {
                 let digit = (peek() - 48) as int;
@@ -230,40 +230,36 @@ export let Formatting = module (
                     return 0;
                 }
                 number = number * 10 + digit;
-                position = position + 1;
+                position += 1;
             }
             return number;
         };
 
-        let peek = func() -> uint8 {
+        let peek = func -> uint8 {
             if (position >= pattern.byte_length) {
                 return 0;
             }
             return pattern.byte_at(position);
         };
 
-        let fail = func(kind: errors.ParseErrorKind, message: string) -> void {
-            fail_at(kind, position, message);
-        };
+        let fail = func(kind: errors.ParseErrorKind, message: string) => fail_at(kind, position, message);
 
-        let fail_at = func(kind: errors.ParseErrorKind, offset: int, message: string) -> void {
+        let fail_at = func(kind: errors.ParseErrorKind, offset: int, message: string) {
             issue_kind = kind;
             issue_offset = offset;
             issue = message;
         };
 
-        let render_value = func(value: variadic.Argument, spec: Spec) -> string {
-            return match (value) {
-                variadic.Argument.Text(text) => render_text(text, spec),
-                variadic.Argument.Signed(n) => render_signed(n, spec),
-                variadic.Argument.Unsigned(n) => render_integer(n, false, spec),
-                variadic.Argument.Floating16(n) => render_float(n as float64, n.to_string(), spec),
-                variadic.Argument.BFloating16(n) => render_float(n as float64, n.to_string(), spec),
-                variadic.Argument.Floating32(n) => render_float(n as float64, n.to_string(), spec),
-                variadic.Argument.Floating(n) => render_float(n, n.to_string(), spec),
-                variadic.Argument.Boolean(flag) => render_bool(flag, spec),
-                variadic.Argument.Object(object) => render_text(object_text(object), spec),
-            };
+        let render_value = func(value: Argument, spec: Spec) -> string => match (value) {
+            Argument.Text(text) => render_text(text, spec),
+            Argument.Signed(n) => render_signed(n, spec),
+            Argument.Unsigned(n) => render_integer(n, false, spec),
+            Argument.Floating16(n) => render_float(n as float64, n.to_string(), spec),
+            Argument.BFloating16(n) => render_float(n as float64, n.to_string(), spec),
+            Argument.Floating32(n) => render_float(n as float64, n.to_string(), spec),
+            Argument.Floating(n) => render_float(n, n.to_string(), spec),
+            Argument.Boolean(flag) => render_bool(flag, spec),
+            Argument.Object(object) => render_text(object_text(object), spec),
         };
 
         let render_text = func(text: string, spec: Spec) -> string {
@@ -346,7 +342,7 @@ export let Formatting = module (
             }
             let prefix = number_sign(negative, spec.sign);
             if (spec.alternate) {
-                prefix = prefix + base_prefix;
+                prefix += base_prefix;
             }
             return pad(body, prefix, true, spec);
         };
@@ -398,15 +394,15 @@ export let Formatting = module (
             return pad(body, number_sign(negative, spec.sign), true, spec);
         };
 
-        let invalid_spec = func() -> string {
+        let invalid_spec = func -> string {
             fail(errors.ParseErrorKind.Syntax, "format specification is invalid for the argument type");
             return "";
         };
     );
 
-    export let try_vformat = func(pattern: string, args: variadic.Argument[]) -> result.Result<string> {
+    export let try_vformat = func(pattern: string, args: Argument[]) -> Result<string> {
         if (!strings.contains(pattern, "{") && !strings.contains(pattern, "}")) {
-            return result.Result<string>.Ok(pattern);
+            return Result<string>.Ok(pattern);
         }
         let cursor = new Cursor(pattern, args);
         return cursor.render();
@@ -435,11 +431,11 @@ export let Formatting = module (
         let end = 0;
         let remaining = count;
         while (end < text.byte_length && remaining > 0) {
-            end = end + 1;
+            end += 1;
             while (end < text.byte_length && (text.byte_at(end) & 192) == 128) {
-                end = end + 1;
+                end += 1;
             }
-            remaining = remaining - 1;
+            remaining -= 1;
         }
         return end;
     };
@@ -470,7 +466,7 @@ export let Formatting = module (
                 output.append(escape);
                 start = end + 1;
             }
-            end = end + 1;
+            end += 1;
         }
         output.append(text.slice(start, end));
         output.append("\"");
@@ -547,11 +543,11 @@ export let Formatting = module (
         if (precision < 0) {
             let end = digits.byte_length;
             while (end > 0 && digits.byte_at(end - 1) == 48) {
-                end--;
+                end -= 1;
             }
             digits = digits.slice(0, end);
         } else if (precision > places) {
-            digits = digits + strings.repeat("0", precision - places);
+            digits += strings.repeat("0", precision - places);
         }
         let point = alternate || digits != "" ? "." : "";
         let sign = exponent >= 0 ? "+" : "";
@@ -582,7 +578,7 @@ export let Formatting = module (
         let sign = mantissa.slice(0, start);
         let significant = mantissa.slice(start, start + 1);
         if (digits > 1) {
-            significant = significant + mantissa.slice(start + 2, mantissa.byte_length);
+            significant += mantissa.slice(start + 2, mantissa.byte_length);
         }
         let point = exponent + 1;
         let fixed = "";
@@ -603,12 +599,12 @@ export let Formatting = module (
         let i = start;
         let negative = text.byte_at(i) == 45;
         if (negative || text.byte_at(i) == 43) {
-            i = i + 1;
+            i += 1;
         }
         let value = 0;
         while (i < text.byte_length) {
             value = value * 10 + (text.byte_at(i) - 48) as int;
-            i = i + 1;
+            i += 1;
         }
         if (negative) {
             return -value;
@@ -623,7 +619,7 @@ export let Formatting = module (
         }
         let end = text.byte_length;
         while (end > point + 1 && text.byte_at(end - 1) == 48) {
-            end = end - 1;
+            end -= 1;
         }
         if (end == point + 1) {
             end = point;
@@ -641,7 +637,7 @@ export let Formatting = module (
         }
         let mantissa = body.slice(0, marker);
         if (alternate && !strings.contains(mantissa, ".")) {
-            mantissa = mantissa + ".";
+            mantissa += ".";
         }
         let exponent = parse_exponent(body, marker + 1);
         let sign = "+";

@@ -3,10 +3,10 @@ let errors = import:Std.Core.Error;
 let failure = import:Std.Core.Failure;
 let formatting = import:Std.Io.Internal.Formatting;
 let host_error = import:Std.Core.Internal.HostError;
-let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Optional;
 let result = import:Std.Core.Result;
-let unit = import:Std.Core.Unit;
-let variadic = import:Std.Core.Variadic;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Core.Variadic;
 
 // Console input and output (Stdlib.md section 11.1). Output is unbuffered:
 // each write is one host request (repeated only to finish a partial write),
@@ -26,17 +26,14 @@ export let Console = module (
     let pending_start: int = 0;
 
     // Explicit argument arrays support forwarding and runtime-built packs.
-    export let try_vformat = func(pattern: string, args: variadic.Argument[]) -> result.Result<string> {
-        return formatting.try_vformat(pattern, args);
-    };
+    export let try_vformat = func(pattern: string, args: Argument[]) -> result.Result<string> =>
+        formatting.try_vformat(pattern, args);
 
-    export let vformat = func(pattern: string, args: variadic.Argument[]) -> string {
-        return result.expect<string>(try_vformat(pattern, args), "invalid format");
-    };
+    export let vformat = func(pattern: string, args: Argument[]) -> string =>
+        result.expect<string>(try_vformat(pattern, args), "invalid format");
 
-    export let try_format = func(pattern: string, args: ...) -> result.Result<string> {
-        return try_vformat(pattern, args);
-    };
+    export let try_format = func(pattern: string, args: ...) -> result.Result<string> =>
+        try_vformat(pattern, args);
 
     export let format = func(pattern: string, args: ...) -> string => vformat(pattern, args);
 
@@ -46,7 +43,7 @@ export let Console = module (
 
     // Writes the text and one LF. A failed write traps with
     // "console write failed".
-    export let print_line = func(s: string) -> void {
+    export let print_line = func(s: string) {
         match (write_line(s)) {
             WriteOutcome.Ok => {},
             WriteOutcome.Error(_) => {
@@ -57,82 +54,61 @@ export let Console = module (
 
     // The same write, returning its failure. The service's error code 1
     // maps to Other.
-    export let try_print_line = func(s: string) -> result.Result<unit.Unit> {
-        return match (write_line(s)) {
-            WriteOutcome.Ok => bytes.ok(),
-            WriteOutcome.Error(_) => result.Result<unit.Unit>.Err(write_failed()),
-        };
+    export let try_print_line = func(s: string) -> result.Result<Unit> => match (write_line(s)) {
+        WriteOutcome.Ok => bytes.ok(),
+        WriteOutcome.Error(_) => result.Result<Unit>.Err(write_failed()),
     };
 
     // Formatted output to stdout and stderr, with or without a final LF.
-    export let print = func(pattern: string, args: ...) {
+    export let print = func(pattern: string, args: ...) =>
         check_written(try_formatted(pattern, args, try_write));
-    };
 
-    export let try_print = func(pattern: string, args: ...) -> result.Result<unit.Unit> {
-        return try_formatted(pattern, args, try_write);
-    };
+    export let try_print = func(pattern: string, args: ...) -> result.Result<Unit> =>
+        try_formatted(pattern, args, try_write);
 
-    export let println = func(pattern: string, args: ...) {
+    export let println = func(pattern: string, args: ...) =>
         check_written(try_formatted(pattern, args, try_print_line));
-    };
 
-    export let try_println = func(pattern: string, args: ...) -> result.Result<unit.Unit> {
-        return try_formatted(pattern, args, try_print_line);
-    };
+    export let try_println = func(pattern: string, args: ...) -> result.Result<Unit> =>
+        try_formatted(pattern, args, try_print_line);
 
-    export let eprint = func(pattern: string, args: ...) {
+    export let eprint = func(pattern: string, args: ...) =>
         check_written(try_formatted(pattern, args, try_write_error));
-    };
 
-    export let try_eprint = func(pattern: string, args: ...) -> result.Result<unit.Unit> {
-        return try_formatted(pattern, args, try_write_error);
-    };
+    export let try_eprint = func(pattern: string, args: ...) -> result.Result<Unit> =>
+        try_formatted(pattern, args, try_write_error);
 
-    export let eprintln = func(pattern: string, args: ...) {
+    export let eprintln = func(pattern: string, args: ...) =>
         check_written(try_formatted(pattern, args, try_error_line));
-    };
 
-    export let try_eprintln = func(pattern: string, args: ...) -> result.Result<unit.Unit> {
-        return try_formatted(pattern, args, try_error_line);
-    };
+    export let try_eprintln = func(pattern: string, args: ...) -> result.Result<Unit> =>
+        try_formatted(pattern, args, try_error_line);
 
-    export let write = func(s: string) {
-        check_written(try_write(s));
-    };
+    export let write = func(s: string) => check_written(try_write(s));
 
-    export let try_write = func(s: string) -> result.Result<unit.Unit> {
-        return write_all(1, bytes.of_string(s));
-    };
+    export let try_write = func(s: string) -> result.Result<Unit> => write_all(1, bytes.of_string(s));
 
-    let try_write_error = func(s: string) -> result.Result<unit.Unit> {
-        return write_all(2, bytes.of_string(s));
-    };
+    let try_write_error = func(s: string) -> result.Result<Unit> => write_all(2, bytes.of_string(s));
 
-    let try_formatted = func(pattern: string, args: variadic.Argument[], writer: func(string) -> result.Result<unit.Unit>)
-        -> result.Result<unit.Unit> {
-        return match (try_vformat(pattern, args)) {
-            result.Result.Ok(text) => writer(text),
-            result.Result.Err(problem) => result.Result<unit.Unit>.Err(problem),
-        };
+    let try_formatted = func(pattern: string, args: Argument[], writer: func(string) -> result.Result<Unit>)
+        -> result.Result<Unit> => match (try_vformat(pattern, args)) {
+        result.Result.Ok(text) => writer(text),
+        result.Result.Err(problem) => result.Result<Unit>.Err(problem),
     };
 
     // Writes the text and one LF to the error stream. A failed write traps
     // with "console write failed".
-    export let error_line = func(s: string) -> void {
-        check_written(try_error_line(s));
-    };
+    export let error_line = func(s: string) => check_written(try_error_line(s));
 
-    export let try_error_line = func(s: string) -> result.Result<unit.Unit> {
-        return write_all(2, bytes.of_string(s + "\n"));
-    };
+    export let try_error_line = func(s: string) -> result.Result<Unit> =>
+        write_all(2, bytes.of_string(s + "\n"));
 
     // The next line of input without its LF or a CR before it; None at the
     // end of input. A final line without an LF is returned. Invalid UTF-8
     // fails with InvalidData and consumes the line.
-    export let read_line = func() -> result.Result<optional.Optional<string>> {
+    export let read_line = func -> result.Result<Optional<string>> {
         let line: uint8[list] = [];
-        while (true) {
+        do {
             if (pending_start < pending.length) {
                 let end = bytes.index_of(pending, pending_start, 10 as uint8);
                 if (end >= 0) {
@@ -147,7 +123,7 @@ export let Console = module (
                 BytesOutcome.Ok(chunk) => {
                     if (chunk.length == 0) {
                         if (line.length == 0) {
-                            return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.None);
+                            return result.Result<Optional<string>>.Ok(Optional<string>.None);
                         }
                         return finish_line(line);
                     }
@@ -158,32 +134,23 @@ export let Console = module (
                     // Keep the partial line for the next read.
                     pending = line;
                     pending_start = 0;
-                    return result.Result<optional.Optional<string>>.Err(read_failed(code));
+                    return result.Result<Optional<string>>.Err(read_failed(code));
                 },
             }
         }
-        return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.None);
     };
 
     // The output stream as a byte sink.
-    export let output = func() -> func(uint8[list]) -> result.Result<unit.Unit> {
-        return func(data: uint8[list]) -> result.Result<unit.Unit> {
-            return write_all(1, data);
-        };
-    };
+    export let output = func -> func(uint8[list]) -> result.Result<Unit> =>
+        func(data: uint8[list]) -> result.Result<Unit> => write_all(1, data);
 
     // The error stream as a byte sink.
-    export let error = func() -> func(uint8[list]) -> result.Result<unit.Unit> {
-        return func(data: uint8[list]) -> result.Result<unit.Unit> {
-            return write_all(2, data);
-        };
-    };
+    export let error = func -> func(uint8[list]) -> result.Result<Unit> =>
+        func(data: uint8[list]) -> result.Result<Unit> => write_all(2, data);
 
     // Console input as a byte source. It first returns input that read_line
     // read ahead.
-    export let input = func() -> func(int) -> result.Result<uint8[list]> {
-        return read_input;
-    };
+    export let input = func -> func(int) -> result.Result<uint8[list]> => read_input;
 
     let read_input = func(max: int) -> result.Result<uint8[list]> {
         bytes.check_maximum(max);
@@ -205,31 +172,31 @@ export let Console = module (
         };
     };
 
-    let discard_pending = func() -> void {
+    let discard_pending = func {
         let empty: uint8[list] = [];
         pending = empty;
         pending_start = 0;
     };
 
-    let finish_line = func(line: uint8[list]) -> result.Result<optional.Optional<string>> {
+    let finish_line = func(line: uint8[list]) -> result.Result<Optional<string>> {
         if (line.length > 0 && line[line.length - 1] == 13) {
             line.remove_at(line.length - 1);
         }
         let [valid, text] = string.from_utf8(line);
         if (!valid) {
-            return result.Result<optional.Optional<string>>.Err(bytes.invalid_utf8(""));
+            return result.Result<Optional<string>>.Err(bytes.invalid_utf8(""));
         }
-        return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.Some(text));
+        return result.Result<Optional<string>>.Ok(Optional<string>.Some(text));
     };
 
     // Writes every byte to a stream, repeating partial writes.
-    let write_all = func(stream: int, data: uint8[list]) -> result.Result<unit.Unit> {
+    let write_all = func(stream: int, data: uint8[list]) -> result.Result<Unit> {
         let remaining = data;
         while (remaining.length > 0) {
             match (write_stream(stream, remaining)) {
                 CountOutcome.Ok(count) => {
                     if (count <= 0) {
-                        return result.Result<unit.Unit>.Err(bytes.no_progress("console write failed", ""));
+                        return result.Result<Unit>.Err(bytes.no_progress("console write failed", ""));
                     }
                     if (count >= remaining.length) {
                         return bytes.ok();
@@ -237,14 +204,14 @@ export let Console = module (
                     remaining = bytes.copy_range(remaining, count, remaining.length);
                 },
                 CountOutcome.Error(code) => {
-                    return result.Result<unit.Unit>.Err(host_error.io(code, "console write failed", ""));
+                    return result.Result<Unit>.Err(host_error.io(code, "console write failed", ""));
                 },
             }
         }
         return bytes.ok();
     };
 
-    let check_written = func(written: result.Result<unit.Unit>) -> void {
+    let check_written = func(written: result.Result<Unit>) {
         match (written) {
             result.Result.Ok(_) => {},
             result.Result.Err(problem) => {
@@ -258,11 +225,8 @@ export let Console = module (
         }
     };
 
-    let write_failed = func() -> errors.Error {
-        return errors.Error.Io { kind: errors.IoErrorKind.Other, message: "console write failed", path: "" };
-    };
+    let write_failed = func -> errors.Error =>
+        errors.Error.Io { kind: errors.IoErrorKind.Other, message: "console write failed", path: "" };
 
-    let read_failed = func(code: uint32) -> errors.Error {
-        return host_error.io(code, "console read failed", "");
-    };
+    let read_failed = func(code: uint32) -> errors.Error => host_error.io(code, "console read failed", "");
 );

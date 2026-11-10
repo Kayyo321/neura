@@ -1,11 +1,11 @@
-let result = import:Std.Core.Result;
-let unit = import:Std.Core.Unit;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
 
 // A resource released by an explicit close (Stdlib.md section 5.5). Closing
 // again does nothing and returns Ok; if close reports an error the resource
 // is still closed. File, TcpStream, and TcpListener implement it.
 export let Closeable = module (
     export let Closeable = interface (
-        let close = func() -> result.Result<unit.Unit>;
+        let close = func -> Result<Unit>;
     );
 );

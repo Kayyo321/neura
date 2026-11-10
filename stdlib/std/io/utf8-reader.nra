@@ -1,5 +1,5 @@
 let bytes = import:Std.Io.Internal.Bytes;
-let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Optional;
 let result = import:Std.Core.Result;
 
 // Reads UTF-8 text from a byte source (Stdlib.md section 11.1), requesting
@@ -10,26 +10,26 @@ export let Utf8Reader = module (
         let buffer: uint8[list] = [];
         let start: int = 0;
 
-        export let init = func(input: func(int) -> result.Result<uint8[list]>) -> void {
+        export let init = func(input: func(int) -> result.Result<uint8[list]>) {
             source = input;
         };
 
         // The next Unicode scalar value; None at the end of the stream. An
         // invalid or truncated sequence fails with InvalidData; the bytes
         // before the offending byte are consumed and that byte is not.
-        export let read_scalar = func() -> result.Result<optional.Optional<uint32>> {
+        export let read_scalar = func -> result.Result<Optional<uint32>> {
             match (fill()) {
                 result.Result.Ok(available) => {
                     if (!available) {
-                        return result.Result<optional.Optional<uint32>>.Ok(optional.Optional<uint32>.None);
+                        return result.Result<Optional<uint32>>.Ok(Optional<uint32>.None);
                     }
                 },
                 result.Result.Err(failure) => {
-                    return result.Result<optional.Optional<uint32>>.Err(failure);
+                    return result.Result<Optional<uint32>>.Err(failure);
                 },
             }
             let lead = buffer[start] as uint32;
-            start = start + 1;
+            start++;
             if (lead < 128) {
                 return some_scalar(lead);
             }
@@ -59,16 +59,16 @@ export let Utf8Reader = module (
                         }
                     },
                     result.Result.Err(failure) => {
-                        return result.Result<optional.Optional<uint32>>.Err(failure);
+                        return result.Result<Optional<uint32>>.Err(failure);
                     },
                 }
                 let next = buffer[start] as uint32;
                 if ((next & 192) != 128) {
                     return invalid_scalar();
                 }
-                start = start + 1;
+                start++;
                 value = (value << 6) | (next & 63);
-                following = following - 1;
+                following--;
             }
             if (value < minimum || (value >= 55296 && value <= 57343) || value > 1114111) {
                 return invalid_scalar();
@@ -79,20 +79,20 @@ export let Utf8Reader = module (
         // The next line without its LF or a CR before it; None at the end of
         // the stream. A final line without an LF is returned. Invalid UTF-8
         // fails with InvalidData and consumes the line.
-        export let read_line = func() -> result.Result<optional.Optional<string>> {
+        export let read_line = func -> result.Result<Optional<string>> {
             let line: uint8[list] = [];
-            while (true) {
+            do {
                 match (fill()) {
                     result.Result.Ok(available) => {
                         if (!available) {
                             if (line.length == 0) {
-                                return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.None);
+                                return result.Result<Optional<string>>.Ok(Optional<string>.None);
                             }
                             return finish_line(line);
                         }
                     },
                     result.Result.Err(failure) => {
-                        return result.Result<optional.Optional<string>>.Err(failure);
+                        return result.Result<Optional<string>>.Err(failure);
                     },
                 }
                 let end = bytes.index_of(buffer, start, 10 as uint8);
@@ -104,13 +104,12 @@ export let Utf8Reader = module (
                 bytes.append_range(line, buffer, start, buffer.length);
                 start = buffer.length;
             }
-            return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.None);
         };
 
         // The rest of the stream as text.
-        export let read_to_end = func() -> result.Result<string> {
+        export let read_to_end = func -> result.Result<string> {
             let all: uint8[list] = [];
-            while (true) {
+            do {
                 match (fill()) {
                     result.Result.Ok(available) => {
                         if (!available) {
@@ -128,11 +127,10 @@ export let Utf8Reader = module (
                 bytes.append_range(all, buffer, start, buffer.length);
                 start = buffer.length;
             }
-            return result.Result<string>.Ok("");
         };
 
         // Makes at least one byte available; false at the end of the stream.
-        let fill = func() -> result.Result<bool> {
+        let fill = func -> result.Result<bool> {
             if (start < buffer.length) {
                 return result.Result<bool>.Ok(true);
             }
@@ -148,27 +146,24 @@ export let Utf8Reader = module (
             return result.Result<bool>.Ok(chunk.length > 0);
         };
 
-        let finish_line = func(line: uint8[list]) -> result.Result<optional.Optional<string>> {
+        let finish_line = func(line: uint8[list]) -> result.Result<Optional<string>> {
             if (line.length > 0 && line[line.length - 1] == 13) {
                 line.remove_at(line.length - 1);
             }
             let [valid, text] = string.from_utf8(line);
             if (!valid) {
-                return result.Result<optional.Optional<string>>.Err(bytes.invalid_utf8(""));
+                return result.Result<Optional<string>>.Err(bytes.invalid_utf8(""));
             }
-            return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.Some(text));
+            return result.Result<Optional<string>>.Ok(Optional<string>.Some(text));
         };
 
-        let some_scalar = func(value: uint32) -> result.Result<optional.Optional<uint32>> {
-            return result.Result<optional.Optional<uint32>>.Ok(optional.Optional<uint32>.Some(value));
-        };
+        let some_scalar = func(value: uint32) -> result.Result<Optional<uint32>> =>
+            result.Result<Optional<uint32>>.Ok(Optional<uint32>.Some(value));
 
-        let invalid_scalar = func() -> result.Result<optional.Optional<uint32>> {
-            return result.Result<optional.Optional<uint32>>.Err(bytes.invalid_utf8(""));
-        };
+        let invalid_scalar = func -> result.Result<Optional<uint32>> =>
+            result.Result<Optional<uint32>>.Err(bytes.invalid_utf8(""));
     );
 
-    export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader {
-        return new Utf8Reader(source);
-    };
+    export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader =>
+        new Utf8Reader(source);
 );

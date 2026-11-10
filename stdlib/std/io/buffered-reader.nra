@@ -1,6 +1,6 @@
 let bytes = import:Std.Io.Internal.Bytes;
 let errors = import:Std.Core.Error;
-let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Result;
 
 // Buffers a byte source (Stdlib.md section 11.1). The bound read method is
 // itself a byte source. A read asking for at least the capacity bypasses an
@@ -10,13 +10,13 @@ export let BufferedReader = module (
     export const MinimumCapacity: int = 16;
 
     export let BufferedReader = class (
-        let source: func(int) -> result.Result<uint8[list]>;
+        let source: func(int) -> Result<uint8[list]>;
         let capacity: int = 8192;
         let buffer: uint8[list] = [];
         let start: int = 0;
 
         // Use create or with_capacity.
-        export let init = func(input: func(int) -> result.Result<uint8[list]>, size: int) -> void {
+        export let init = func(input: func(int) -> Result<uint8[list]>, size: int) {
             if (size < MinimumCapacity) {
                 trap_with_message("invalid argument: capacity below 16");
             }
@@ -26,23 +26,23 @@ export let BufferedReader = module (
 
         // Up to `max` bytes, at least one unless the source has ended. A
         // maximum below 1 traps.
-        export let read = func(max: int) -> result.Result<uint8[list]> {
+        export let read = func(max: int) -> Result<uint8[list]> {
             bytes.check_maximum(max);
             if (start == buffer.length) {
                 if (max >= capacity) {
                     return source(max);
                 }
                 match (source(capacity)) {
-                    result.Result.Ok(chunk) => {
+                    Result.Ok(chunk) => {
                         buffer = chunk;
                         start = 0;
                     },
-                    result.Result.Err(failure) => {
-                        return result.Result<uint8[list]>.Err(failure);
+                    Result.Err(failure) => {
+                        return Result<uint8[list]>.Err(failure);
                     },
                 }
                 if (buffer.length == 0) {
-                    return result.Result<uint8[list]>.Ok(buffer);
+                    return Result<uint8[list]>.Ok(buffer);
                 }
             }
             let end = buffer.length;
@@ -51,63 +51,59 @@ export let BufferedReader = module (
             }
             let chunk = bytes.copy_range(buffer, start, end);
             start = end;
-            return result.Result<uint8[list]>.Ok(chunk);
+            return Result<uint8[list]>.Ok(chunk);
         };
 
         // Exactly `count` bytes; the source ending first fails with
         // UnexpectedEnd. A negative count traps.
-        export let read_exact = func(count: int) -> result.Result<uint8[list]> {
+        export let read_exact = func(count: int) -> Result<uint8[list]> {
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
             }
             let collected: uint8[list] = [];
             while (collected.length < count) {
                 match (read(count - collected.length)) {
-                    result.Result.Ok(chunk) => {
+                    Result.Ok(chunk) => {
                         if (chunk.length == 0) {
-                            return result.Result<uint8[list]>.Err(unexpected_end());
+                            return Result<uint8[list]>.Err(unexpected_end());
                         }
                         bytes.append_range(collected, chunk, 0, chunk.length);
                     },
-                    result.Result.Err(failure) => {
-                        return result.Result<uint8[list]>.Err(failure);
+                    Result.Err(failure) => {
+                        return Result<uint8[list]>.Err(failure);
                     },
                 }
             }
-            return result.Result<uint8[list]>.Ok(collected);
+            return Result<uint8[list]>.Ok(collected);
         };
 
         // Every remaining byte.
-        export let read_all = func() -> result.Result<uint8[list]> {
+        export let read_all = func -> Result<uint8[list]> {
             let collected: uint8[list] = [];
-            while (true) {
+            do {
                 match (read(capacity)) {
-                    result.Result.Ok(chunk) => {
+                    Result.Ok(chunk) => {
                         if (chunk.length == 0) {
-                            return result.Result<uint8[list]>.Ok(collected);
+                            return Result<uint8[list]>.Ok(collected);
                         }
                         bytes.append_range(collected, chunk, 0, chunk.length);
                     },
-                    result.Result.Err(failure) => {
-                        return result.Result<uint8[list]>.Err(failure);
+                    Result.Err(failure) => {
+                        return Result<uint8[list]>.Err(failure);
                     },
                 }
             }
-            return result.Result<uint8[list]>.Ok(collected);
         };
 
-        let unexpected_end = func() -> errors.Error {
-            return bytes.io(errors.IoErrorKind.UnexpectedEnd, "unexpected end of stream", "");
-        };
+        let unexpected_end = func -> errors.Error =>
+            bytes.io(errors.IoErrorKind.UnexpectedEnd, "unexpected end of stream", "");
     );
 
     // A reader holding up to 8,192 bytes.
-    export let create = func(source: func(int) -> result.Result<uint8[list]>) -> BufferedReader {
-        return new BufferedReader(source, DefaultCapacity);
-    };
+    export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader =>
+        new BufferedReader(source, DefaultCapacity);
 
     // A capacity below 16 traps with "invalid argument: capacity below 16".
-    export let with_capacity = func(source: func(int) -> result.Result<uint8[list]>, capacity: int) -> BufferedReader {
-        return new BufferedReader(source, capacity);
-    };
+    export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader =>
+        new BufferedReader(source, capacity);
 );

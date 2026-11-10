@@ -5,20 +5,18 @@ export let Socket = module (
         export let id: int64 = 0;
         export let address: string = "";
 
-        export let init = func(host_id: int64, address_text: string) -> void {
+        export let init = func(host_id: int64, address_text: string) {
             id = host_id;
             address = address_text;
         };
     );
 
     // A port outside 0 through 65,535 traps.
-    export let check_port = func(port: int) -> void {
+    export let check_port = func(port: int) {
         if (port < 0 || port > 65535) {
             trap_with_message("invalid argument: port");
         }
     };
 
-    export let address_of = func(host: string, port: int) -> string {
-        return host + ":" + port.to_string();
-    };
+    export let address_of = func(host: string, port: int) -> string => host + ":" + port.to_string();
 );
