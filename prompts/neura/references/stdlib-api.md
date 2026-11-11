@@ -1801,7 +1801,7 @@ export const Bits: int = 8
 ```text
 #Since("0.1.0") export let Version = module (
 export const Major: int = 0
-export const Minor: int = 1
+export const Minor: int = 2
 export const Patch: int = 0
 ```
 
