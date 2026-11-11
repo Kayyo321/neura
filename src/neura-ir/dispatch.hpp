@@ -25,14 +25,15 @@ class DispatchTargets {
 public:
     explicit DispatchTargets(const IrProgram& program);
 
-    // Every function with a body that a call of the method named `name` on a
-    // receiver of static type `owner` (a class, interface, or module symbol)
-    // can run, in symbol order: for each class or module that is `owner` or
-    // derives from it, the implementation the runtime selects, together with
-    // every interface default it could select.
+    // Every function with a body, or bound outside the program, that a call
+    // of the method named `name` on a receiver of static type `owner` (a
+    // class, interface, or module symbol) can run, in symbol order: for each
+    // class or module that is `owner` or derives from it, the implementation
+    // the runtime selects, together with every interface default it could
+    // select.
     const std::vector<SymbolId>& members(SymbolId owner, const std::string& name) const;
 
-    // The targets of a VirtualCall: the declared function, if it has a body,
+    // The targets of a VirtualCall: the declared function, if it can run,
     // and the members of that name for the receiver's static type. A call
     // through a function value or on a type parameter has none here; callers
     // treat those separately.

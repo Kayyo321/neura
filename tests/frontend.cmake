@@ -1253,6 +1253,7 @@ check_rejection(tag-not-thread-safe-class "#NotThreadSafe\nlet P = class (\n    
 check_rejection(tag-not-thread-safe-immutable "#NotThreadSafe\n#Immutable\nlet P = class (\n    export const x: int32 = 0;\n);" "3:1" "error\\[E0907\\]: #Immutable conflicts with #NotThreadSafe")
 check_rejection(tag-not-thread-safe-synchronized "#[NotThreadSafe, Synchronized]\nlet P = class (\n    let x: int32 = 0;\n);" "2:18" "error\\[E0907\\]: #Synchronized conflicts with #NotThreadSafe")
 check_rejection(tag-not-thread-safe-subclass "#NotThreadSafe\nlet B = class (\n    export let x: int32 = 0;\n);\n#ThreadSafe\nlet C = class:B ();" "6:1" "error\\[E0610\\]: class 'C' is #NotThreadSafe and cannot be #ThreadSafe")
+check_rejection(tag-not-thread-safe-monitor-base "#Synchronized\nlet Counter = class (\n    let n: int32 = 0;\n    export let bump = func() -> int32 {\n        n = n + 1;\n        return n;\n    };\n);\n#NotThreadSafe\nlet Local = class:Counter ();" "2:1" "error\\[E0610\\]: class 'Local' is #NotThreadSafe and cannot be a monitor: method 'bump' is #Synchronized")
 # A task may allocate and use an instance of a #NotThreadSafe class of its
 # own, and the task that runs main may call a #NotThreadSafe function in a
 # program that spawns other tasks: only what a spawned call or a parallel

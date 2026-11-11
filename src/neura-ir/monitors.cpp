@@ -208,9 +208,9 @@ void declare_checked_tags(IrProgram& program, SymbolId first, const std::functio
         {
             SymbolId marked = no_symbol;
             std::set<SymbolId> chain;
-            for (auto scope = id; valid(program, scope) && chain.insert(scope).second && marked == no_symbol;
+            for (auto scope = id; valid(program, scope) && chain.insert(scope).second;
                  scope = program.symbols[scope].base) {
-                if (has_tag(program.symbols[scope], TagId::NotThreadSafe)) marked = scope;
+                if (marked == no_symbol && has_tag(program.symbols[scope], TagId::NotThreadSafe)) marked = scope;
             }
             if (marked != no_symbol) {
                 const auto declined = tag_or(marked, TagId::NotThreadSafe);
@@ -234,7 +234,11 @@ void declare_checked_tags(IrProgram& program, SymbolId first, const std::functio
                         !synchronized_method(function)) {
                         continue;
                     }
-                    throw conflict(tag_span(function, TagId::Synchronized).value_or(name_span(member)),
+                    // The method's tag, or the class's, which marks every
+                    // exported method.
+                    auto at = tag_span(function, TagId::Synchronized);
+                    if (!at) at = tag_span(program.symbols[function.owner], TagId::Synchronized);
+                    throw conflict(at.value_or(function.span),
                                    "cannot be a monitor: method " + quoted(function.name) + " is #Synchronized",
                                    "#Synchronized given here");
                 }

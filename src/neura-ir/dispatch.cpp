@@ -47,7 +47,7 @@ const std::vector<SymbolId>& DispatchTargets::members(SymbolId owner, const std:
         const auto found = by_name_.find({scope, name});
         if (found == by_name_.end()) return;
         for (const auto id : found->second) {
-            if (program_.symbols[id].has_body) out.push_back(id);
+            if (program_.symbols[id].has_body || program_.symbols[id].external) out.push_back(id);
         }
     };
     for (const auto type : types_) {
@@ -73,7 +73,9 @@ const std::vector<SymbolId>& DispatchTargets::members(SymbolId owner, const std:
 
 std::vector<SymbolId> DispatchTargets::of(const IrNode& call) const {
     std::set<SymbolId> result;
-    if (valid(call.symbol) && program_.symbols[call.symbol].has_body) result.insert(call.symbol);
+    if (valid(call.symbol) && (program_.symbols[call.symbol].has_body || program_.symbols[call.symbol].external)) {
+        result.insert(call.symbol);
+    }
     if (!call.operands.empty() && valid(call.symbol)) {
         const auto& receiver = call.operands.front().type;
         if ((receiver.kind == TypeKind::Object || receiver.kind == TypeKind::Module) && valid(receiver.symbol)) {

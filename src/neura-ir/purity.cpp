@@ -126,7 +126,7 @@ public:
     using Reason = PurityAnalysis::Reason;
     using Summary = PurityAnalysis::Summary;
 
-    PurityWalker(const PurityAnalysis& analysis, SymbolId owner) : a_(analysis), owner_(owner) {
+    PurityWalker(const PurityAnalysis& analysis, SymbolId owner) : a_(analysis) {
         if (a_.valid(owner) && a_.symbol(owner).kind == SymbolKind::Function) {
             const auto& parameters = a_.symbol(owner).parameters;
             for (std::size_t i = 0; i < parameters.size(); ++i) locals_[parameters[i]].slots.insert(i + 1);
@@ -149,7 +149,6 @@ public:
 
 private:
     const PurityAnalysis& a_;
-    SymbolId owner_;
     std::map<SymbolId, Roots> locals_;
     Roots fresh_graph_;
     Summary out_;
