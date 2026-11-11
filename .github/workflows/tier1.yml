@@ -49,6 +49,9 @@ jobs:
 
       - name: Check that the wiki pages are generated from docs
         run: python3 scripts/generate-wiki.py --check
+
+      - name: Check that the kernel table, reference, and declarations are generated
+        run: python3 scripts/gen-kernels.py --check
       - name: Check the website
         run: python3 scripts/build-site.py --check
 
@@ -88,6 +91,9 @@ jobs:
             echo "::error::The build reported the compiler warnings above in Neura's sources."
             exit 1
           fi
+
+      - name: Check that the kernels call no libm or stateful libc function
+        run: scripts/check-kernels.sh build
 
       # The runner's AppArmor profile forbids unprivileged user namespaces,
       # which native-install uses to run a static executable in an empty root.
