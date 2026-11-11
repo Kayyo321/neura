@@ -12,6 +12,7 @@ let optional = import:Std.Core.Optional;
 /// Iterators and member callbacks detect structural changes and trap with
 /// `collection modified during iteration`.
 /// @see [Std.Collections.HashMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-HashMap)
+#Since("0.1.0")
 export let HashMap = module (
     /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
@@ -19,15 +20,15 @@ export let HashMap = module (
     /// @brief A mutable hash table that visits entries in insertion order.
     export let HashMap = class<K, V> implements MutableMap<K, V> (
         /// @brief Never replaced, so iterators can read its modification count.
-        let core: hash_core.HashCore;
+        last core: hash_core.HashCore;
         /// @brief The keys indexed by dense entry number, including entries pending compaction.
         let stored_keys: K[list] = [];
         /// @brief The values indexed by the same dense entry numbers as their keys.
         let stored_values: V[list] = [];
         /// @brief The hash function for lookup and collection hashing.
-        let hash_of: func(K) -> uint32;
+        last hash_of: func(K) -> uint32;
         /// @brief The equality function used with the probe as its first argument.
-        let same: func(K, K) -> bool;
+        last same: func(K, K) -> bool;
         /// @brief Whether this instance's text conversion is running.
         let printing: bool = false;
 
@@ -55,8 +56,9 @@ export let HashMap = module (
         export let contains_key = func(key: K) -> bool => find(key, spread(hash_of(key))) >= 0;
 
         /// @brief Returns the associated value as `Some`, or `None` when the key is absent.
+        #NoDiscard
         export let get = func(key: K) -> optional.Optional<V> {
-            let slot = find(key, spread(hash_of(key)));
+            last slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 return optional.Optional<V>.None;
             }
@@ -65,7 +67,7 @@ export let HashMap = module (
 
         /// @brief Returns the associated value, or `fallback` when the key is absent.
         export let get_or = func(key: K, fallback: V) -> V {
-            let slot = find(key, spread(hash_of(key)));
+            last slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 return fallback;
             }
@@ -74,7 +76,7 @@ export let HashMap = module (
 
         /// @brief Returns the associated value. Traps with `no such element` when the key is absent.
         export let require = func(key: K) -> V {
-            let slot = find(key, spread(hash_of(key)));
+            last slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 trap_with_message("no such element");
             }
@@ -83,8 +85,8 @@ export let HashMap = module (
 
         /// @brief Stores the value for `key`. Replacing an existing value preserves the key and iterator validity.
         export let set = func(key: K, value: V) {
-            let hash = spread(hash_of(key));
-            let slot = find(key, hash);
+            last hash = spread(hash_of(key));
+            last slot = find(key, hash);
             if (slot >= 0) {
                 stored_values[core.index[slot]] = value;
                 return;
@@ -94,11 +96,11 @@ export let HashMap = module (
 
         /// @brief Stores the value for `key` and returns its previous value as `Some`, or `None` for a new key.
         export let put = func(key: K, value: V) -> optional.Optional<V> {
-            let hash = spread(hash_of(key));
-            let slot = find(key, hash);
+            last hash = spread(hash_of(key));
+            last slot = find(key, hash);
             if (slot >= 0) {
-                let entry = core.index[slot];
-                let previous = stored_values[entry];
+                last entry = core.index[slot];
+                last previous = stored_values[entry];
                 stored_values[entry] = value;
                 return optional.Optional<V>.Some(previous);
             }
@@ -108,7 +110,7 @@ export let HashMap = module (
 
         /// @brief Removes the entry for `key`. Returns true if an entry was present.
         export let delete = func(key: K) -> bool {
-            let slot = find(key, spread(hash_of(key)));
+            last slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 return false;
             }
@@ -118,20 +120,20 @@ export let HashMap = module (
 
         /// @brief Removes the entry for `key` and returns its value as `Some`, or `None` when absent.
         export let remove = func(key: K) -> optional.Optional<V> {
-            let slot = find(key, spread(hash_of(key)));
+            last slot = find(key, spread(hash_of(key)));
             if (slot < 0) {
                 return optional.Optional<V>.None;
             }
-            let value = stored_values[core.index[slot]];
+            last value = stored_values[core.index[slot]];
             release(slot);
             return optional.Optional<V>.Some(value);
         };
 
         /// @brief Copies the keys to a new built-in list in insertion order.
         export let keys = func -> K[list] {
-            let result: K[list] = [];
-            let live = core.live;
-            let length = live.length;
+            last result: K[list] = [];
+            last live = core.live;
+            last length = live.length;
             let entry = 0;
             while (entry < length) {
                 if (live[entry]) {
@@ -144,9 +146,9 @@ export let HashMap = module (
 
         /// @brief Copies the values to a new built-in list in insertion order.
         export let values = func -> V[list] {
-            let result: V[list] = [];
-            let live = core.live;
-            let length = live.length;
+            last result: V[list] = [];
+            last live = core.live;
+            last length = live.length;
             let entry = 0;
             while (entry < length) {
                 if (live[entry]) {
@@ -159,13 +161,13 @@ export let HashMap = module (
 
         /// @brief Copies the `[key, value]` tuples to a new built-in list in insertion order.
         export let entries = func -> [K, V][list] {
-            let result: [K, V][list] = [];
-            let live = core.live;
-            let length = live.length;
+            last result: [K, V][list] = [];
+            last live = core.live;
+            last length = live.length;
             let entry = 0;
             while (entry < length) {
                 if (live[entry]) {
-                    let item: [K, V] = [stored_keys[entry], stored_values[entry]];
+                    last item: [K, V] = [stored_keys[entry], stored_values[entry]];
                     result.append(item);
                 }
                 entry += 1;
@@ -179,8 +181,8 @@ export let HashMap = module (
 
         /// @brief Sets each entry of `other` in its iteration order.
         export let put_all = func(other: HashMap<K, V>) {
-            let items = other.entries();
-            let count = items.length;
+            last items = other.entries();
+            last count = items.length;
             let i = 0;
             while (i < count) {
                 let [key, value] = items[i];
@@ -192,7 +194,7 @@ export let HashMap = module (
         /// @brief Calls `action` with the key and value of each entry in insertion order.
         /// @pre The action leaves the map structure unchanged.
         export let for_each = func(action: func(K, V) -> void) {
-            let expected = core.modifications;
+            last expected = core.modifications;
             let entry = 0;
             while (entry < core.live.length) {
                 if (core.live[entry]) {
@@ -209,13 +211,13 @@ export let HashMap = module (
         /// @pre The predicate leaves the map structure unchanged.
         /// @return The number of removed entries.
         export let remove_if = func(drop: func(K, V) -> bool) -> int {
-            let expected = core.modifications;
-            let chosen: int[list] = [];
-            let length = core.live.length;
+            last expected = core.modifications;
+            last chosen: int[list] = [];
+            last length = core.live.length;
             let entry = 0;
             while (entry < length) {
                 if (core.live[entry]) {
-                    let removing = drop(stored_keys[entry], stored_values[entry]);
+                    last removing = drop(stored_keys[entry], stored_values[entry]);
                     if (core.modifications != expected) {
                         trap_with_message("collection modified during iteration");
                     }
@@ -241,13 +243,13 @@ export let HashMap = module (
         /// @brief Returns the associated value, or calls `make` once, stores its result, and returns it when absent.
         /// @pre The factory leaves the map structure unchanged.
         export let get_or_put = func(key: K, make: func() -> V) -> V {
-            let hash = spread(hash_of(key));
-            let slot = find(key, hash);
+            last hash = spread(hash_of(key));
+            last slot = find(key, hash);
             if (slot >= 0) {
                 return stored_values[core.index[slot]];
             }
-            let expected = core.modifications;
-            let value = make();
+            last expected = core.modifications;
+            last value = make();
             if (core.modifications != expected) {
                 trap_with_message("collection modified during iteration");
             }
@@ -258,15 +260,15 @@ export let HashMap = module (
         /// @brief Stores and returns `value` when the key is absent. Otherwise stores and returns `combine(old, value)`.
         /// @pre The combiner leaves the map structure unchanged.
         export let merge = func(key: K, value: V, combine: func(V, V) -> V) -> V {
-            let hash = spread(hash_of(key));
-            let slot = find(key, hash);
+            last hash = spread(hash_of(key));
+            last slot = find(key, hash);
             if (slot < 0) {
                 insert(key, value, hash, -slot - 1);
                 return value;
             }
-            let entry = core.index[slot];
-            let expected = core.modifications;
-            let combined = combine(stored_values[entry], value);
+            last entry = core.index[slot];
+            last expected = core.modifications;
+            last combined = combine(stored_values[entry], value);
             if (core.modifications != expected) {
                 trap_with_message("collection modified during iteration");
             }
@@ -278,14 +280,14 @@ export let HashMap = module (
         /// @pre The callback leaves the map structure unchanged.
         /// @return The result of the callback.
         export let compute = func(key: K, f: func(K, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V> {
-            let hash = spread(hash_of(key));
-            let slot = find(key, hash);
+            last hash = spread(hash_of(key));
+            last slot = find(key, hash);
             let current = optional.Optional<V>.None;
             if (slot >= 0) {
                 current = optional.Optional<V>.Some(stored_values[core.index[slot]]);
             }
-            let expected = core.modifications;
-            let outcome = f(key, current);
+            last expected = core.modifications;
+            last outcome = f(key, current);
             if (core.modifications != expected) {
                 trap_with_message("collection modified during iteration");
             }
@@ -308,8 +310,8 @@ export let HashMap = module (
 
         /// @brief Tests whether `value.equals(held_value)` is true for any entry.
         export let contains_value = func(value: V) -> bool {
-            let live = core.live;
-            let length = live.length;
+            last live = core.live;
+            last length = live.length;
             let entry = 0;
             while (entry < length) {
                 if (live[entry] && value === stored_values[entry]) {
@@ -329,7 +331,7 @@ export let HashMap = module (
         /// a live key's hash differs from its cached hash.
         export let validate = func {
             core.validate();
-            let length = core.hashes.length;
+            last length = core.hashes.length;
             if (stored_keys.length != length || stored_values.length != length) {
                 trap_with_message("invalid state: hash table owner lists");
             }
@@ -348,16 +350,16 @@ export let HashMap = module (
             if (!(other is HashMap<K, V>)) {
                 return false;
             }
-            let that = other as HashMap<K, V>;
+            last that = other as HashMap<K, V>;
             if (that.size() != core.count) {
                 return false;
             }
-            let items = that.entries();
-            let count = items.length;
+            last items = that.entries();
+            last count = items.length;
             let i = 0;
             while (i < count) {
                 let [key, value] = items[i];
-                let slot = find(key, spread(hash_of(key)));
+                last slot = find(key, spread(hash_of(key)));
                 if (slot < 0 || !(stored_values[core.index[slot]] === value)) {
                     return false;
                 }
@@ -370,12 +372,12 @@ export let HashMap = module (
         /// value hash.
         export let.override hash_code = func -> uint32 {
             let total: uint64 = 0;
-            let live = core.live;
-            let length = live.length;
+            last live = core.live;
+            last length = live.length;
             let entry = 0;
             while (entry < length) {
                 if (live[entry]) {
-                    let mixed = hash_of(stored_keys[entry]) ^ stored_values[entry].hash_code();
+                    last mixed = hash_of(stored_keys[entry]) ^ stored_values[entry].hash_code();
                     total = (total + (mixed as uint64)) & 4294967295;
                 }
                 entry += 1;
@@ -390,8 +392,8 @@ export let HashMap = module (
                 return "(this collection)";
             }
             printing = true;
-            let parts: string[list] = [];
-            let live = core.live;
+            last parts: string[list] = [];
+            last live = core.live;
             let entry = 0;
             while (entry < live.length) {
                 if (live[entry]) {
@@ -407,13 +409,13 @@ export let HashMap = module (
         /// a new entry takes (the first Tombstone passed, else the Empty slot
         /// that ended the search).
         let find = func(key: K, hash: uint32) -> int {
-            let slots = core.index;
-            let cached = core.hashes;
-            let mask = core.mask;
+            last slots = core.index;
+            last cached = core.hashes;
+            last mask = core.mask;
             let slot = (hash & (mask as uint32)) as int;
             let free = -1;
             do {
-                let entry = slots[slot];
+                last entry = slots[slot];
                 if (entry == -1) {
                     if (free < 0) {
                         free = slot;
@@ -456,7 +458,7 @@ export let HashMap = module (
         /// dead entries.
         let shorten = func(length: int) {
             while (stored_keys.length > length) {
-                let last = stored_keys.length - 1;
+                last last = stored_keys.length - 1;
                 stored_keys.remove_at(last);
                 stored_values.remove_at(last);
             }
@@ -464,7 +466,7 @@ export let HashMap = module (
 
         /// @brief Rebuilds the index and owner storage in the current live entry order using cached hashes.
         let compact = func(table_size: int) {
-            let order = core.live_entries();
+            last order = core.live_entries();
             stored_keys = reordered<K>(stored_keys, order);
             stored_values = reordered<V>(stored_values, order);
             core.rebuild(order, table_size);
@@ -474,13 +476,13 @@ export let HashMap = module (
     /// @brief A fail-fast traversal over live table entries in insertion order.
     let HashMapIterator = class<K, V> implements Iterator<[K, V]> (
         /// @brief The live table metadata, including its modification count.
-        let core: hash_core.HashCore;
+        last core: hash_core.HashCore;
         /// @brief The key storage captured when the iterator was created.
-        let source_keys: K[list];
+        last source_keys: K[list];
         /// @brief The value storage captured when the iterator was created.
-        let source_values: V[list];
+        last source_values: V[list];
         /// @brief The source version recorded when the iterator was created.
-        let expected: uint64;
+        last expected: uint64;
         /// @brief The dense entry position from which the next live entry search starts.
         let position: int = 0;
 
@@ -497,7 +499,7 @@ export let HashMap = module (
             if (core.modifications != expected) {
                 trap_with_message("collection modified during iteration");
             }
-            let live = core.live;
+            last live = core.live;
             while (position < live.length && !live[position]) {
                 position += 1;
             }
@@ -509,7 +511,7 @@ export let HashMap = module (
             if (!has_next()) {
                 trap_with_message("no such element");
             }
-            let item: [K, V] = [source_keys[position], source_values[position]];
+            last item: [K, V] = [source_keys[position], source_values[position]];
             position += 1;
             return item;
         };
@@ -552,8 +554,8 @@ export let HashMap = module (
 
     /// @brief Copies entries from `old` at the indices in `order`.
     let reordered = func<T>(old: T[list], order: int[list]) -> T[list] {
-        let result: T[list] = [];
-        let count = order.length;
+        last result: T[list] = [];
+        last count = order.length;
         let i = 0;
         while (i < count) {
             result.append(old[order[i]]);
@@ -564,7 +566,7 @@ export let HashMap = module (
 
     /// @brief `[a, b]` text of the parts with braces in place of the brackets.
     let braced = func(parts: string[list]) -> string {
-        let text = parts.to_string();
+        last text = parts.to_string();
         return "{" + text.slice(1, text.byte_length - 1) + "}";
     };
 );

@@ -2,6 +2,7 @@ let.promote _ = import:Std.Collections.Queue;
 
 /// @brief Access at both ends. `enqueue` is add_last and `dequeue` is remove_first.
 /// @see [Std.Collections.Deque](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Deque)
+#Since("0.1.0")
 export let Deque = module (
     /// @brief A queue with insertion, inspection, and removal at either end.
     export let Deque = interface<T>:Queue<T> (

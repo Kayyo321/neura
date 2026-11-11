@@ -2,6 +2,7 @@ let.promote _ = import:Std.Collections.Iterable;
 
 /// @brief The common interface for reading and traversing collections.
 /// @see [Std.Collections.Collection](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Collection)
+#Since("0.1.0")
 export let Collection = module (
     /// @brief Read-only operations over a collection of elements.
     export let Collection = interface<T>:Iterable<T> (
@@ -28,7 +29,7 @@ export let Collection = module (
         /// @brief Calls `action` with each element in iteration order.
         /// @pre The action leaves the collection structure unchanged.
         let for_each = func(action: func(T) -> void) {
-            let items = iterator();
+            last items = iterator();
             while (items.has_next()) {
                 action(items.next());
             }

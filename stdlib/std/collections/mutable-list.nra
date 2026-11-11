@@ -4,6 +4,7 @@ let ordering = import:Std.Core.Ordering;
 
 /// @brief A list that can change. `set` and `swap` are not structural changes.
 /// @see [Std.Collections.MutableList](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-MutableList)
+#Since("0.1.0")
 export let MutableList = module (
     /// @brief A positional collection that supports replacing, reordering, adding, and removing elements.
     export let MutableList = interface<T>:List<T>, MutableCollection<T> (

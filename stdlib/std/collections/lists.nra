@@ -4,11 +4,12 @@ let list = import:Std.Collections.List;
 /// list collections of different classes (section 9.10). An index outside a
 /// list is the language's bounds trap.
 /// @see [Std.Collections.Lists](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Lists)
+#Since("0.1.0")
 export let Lists = module (
     /// @brief A new list with the same elements.
     export let copy = func<T>(items: T[list]) -> T[list] {
-        let result: T[list] = [];
-        let count = items.length;
+        last result: T[list] = [];
+        last count = items.length;
         let i = 0;
         while (i < count) {
             result.append(items[i]);
@@ -19,8 +20,8 @@ export let Lists = module (
 
     /// @brief A new list with the elements of `a` followed by those of `b`.
     export let concat = func<T>(a: T[list], b: T[list]) -> T[list] {
-        let result = copy<T>(a);
-        let count = b.length;
+        last result = copy<T>(a);
+        last count = b.length;
         let i = 0;
         while (i < count) {
             result.append(b[i]);
@@ -34,7 +35,7 @@ export let Lists = module (
         let i = 0;
         let j = items.length - 1;
         while (i < j) {
-            let value = items[i];
+            last value = items[i];
             items[i] = items[j];
             items[j] = value;
             i += 1;
@@ -44,14 +45,14 @@ export let Lists = module (
 
     /// @brief Exchanges two elements. Not structural.
     export let swap = func<T>(items: T[list], i: int, j: int) {
-        let value = items[i];
+        last value = items[i];
         items[i] = items[j];
         items[j] = value;
     };
 
     /// @brief Replaces every element with `value`. Not structural.
     export let fill = func<T>(items: T[list], value: T) {
-        let count = items.length;
+        last count = items.length;
         let i = 0;
         while (i < count) {
             items[i] = value;
@@ -62,14 +63,14 @@ export let Lists = module (
     /// @brief Inserts `value` before position `index`, or appends when the index equals the length. Appends the last element again and shifts the suffix right by
     /// indexed writes.
     export let insert_at = func<T>(items: T[list], index: int, value: T) {
-        let count = items.length;
+        last count = items.length;
         if (index == count) {
             items.append(value);
             return;
         }
         // The read makes any other bad index a bounds trap before the list
         // changes.
-        let displaced = items[index];
+        last displaced = items[index];
         items.append(items[count - 1]);
         let k = count - 1;
         while (k > index) {
@@ -107,7 +108,7 @@ export let Lists = module (
         if (count < 0) {
             trap_with_message("invalid argument: negative count");
         }
-        let result: T[list] = [];
+        last result: T[list] = [];
         let i = 0;
         while (i < count) {
             result.append(value);
@@ -118,8 +119,8 @@ export let Lists = module (
 
     /// @brief A new list with the array's elements.
     export let from_array = func<T>(items: T[]) -> T[list] {
-        let result: T[list] = [];
-        let count = items.length;
+        last result: T[list] = [];
+        last count = items.length;
         let i = 0;
         while (i < count) {
             result.append(items[i]);
@@ -134,8 +135,8 @@ export let Lists = module (
         if (a.size() != b.size()) {
             return false;
         }
-        let left = a.iterator();
-        let right = b.iterator();
+        last left = a.iterator();
+        last right = b.iterator();
         while (left.has_next() && right.has_next()) {
             if (!left.next().equals(right.next())) {
                 return false;

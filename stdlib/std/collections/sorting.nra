@@ -6,6 +6,7 @@ let sort_kernels = import:Std.Internal.Kernels.Sort;
 /// list structurally: the list's version is compared after every call and a
 /// change traps with "collection modified during iteration".
 /// @see [Std.Collections.Sorting](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Sorting)
+#Since("0.1.0")
 export let Sorting = module (
     /// @brief Runs of this length are sorted by binary insertion before merging.
     const BlockSize: int = 16;
@@ -17,12 +18,12 @@ export let Sorting = module (
                                  version: uint64) {
         let i = start + 1;
         while (i < end) {
-            let value = items[i];
+            last value = items[i];
             let low = start;
             let high = i;
             while (low < high) {
-                let middle = low + (high - low) / 2;
-                let order = c(items[middle], value);
+                last middle = low + (high - low) / 2;
+                last order = c(items[middle], value);
                 if (items.version != version) {
                     trap_with_message("collection modified during iteration");
                 }
@@ -61,7 +62,7 @@ export let Sorting = module (
             let copy_only = middle == right_end;
             if (!copy_only) {
                 // A pair that is already in order is copied without merging.
-                let order = c(source[source_start + middle - 1], source[source_start + middle]);
+                last order = c(source[source_start + middle - 1], source[source_start + middle]);
                 if (items.version != version) {
                     trap_with_message("collection modified during iteration");
                 }
@@ -78,9 +79,9 @@ export let Sorting = module (
                 let j = middle;
                 let k = left;
                 while (i < middle && j < right_end) {
-                    let right_value = source[source_start + j];
-                    let left_value = source[source_start + i];
-                    let order = c(right_value, left_value);
+                    last right_value = source[source_start + j];
+                    last left_value = source[source_start + i];
+                    last order = c(right_value, left_value);
                     if (items.version != version) {
                         trap_with_message("collection modified during iteration");
                     }
@@ -154,7 +155,7 @@ export let Sorting = module (
         if (start < 0 || start > end || end > items.length) {
             trap_with_message("invalid argument: range");
         }
-        let version = items.version;
+        last version = items.version;
         let block = start;
         while (block < end) {
             let block_end = end;
@@ -188,7 +189,7 @@ export let Sorting = module (
     } or func(items: float64[list]) {
         sort_kernels.f64(items);
     } or func(items: int32[list]) {
-        let wide: int64[list] = [];
+        last wide: int64[list] = [];
         for (let item in items) {
             wide.append(item as int64);
         }
@@ -197,7 +198,7 @@ export let Sorting = module (
             items[i] = wide[i] as int32;
         }
     } or func(items: uint32[list]) {
-        let wide: uint64[list] = [];
+        last wide: uint64[list] = [];
         for (let item in items) {
             wide.append(item as uint64);
         }
@@ -211,12 +212,12 @@ export let Sorting = module (
     /// not Less than `value` when that element compares Equal, and otherwise
     /// -(insertion point) - 1.
     export let binary_search = func<T>(items: T[list], value: T, c: func(T, T) -> ordering.Ordering) -> int {
-        let version = items.version;
+        last version = items.version;
         let low = 0;
         let high = items.length;
         while (low < high) {
-            let middle = low + (high - low) / 2;
-            let order = c(items[middle], value);
+            last middle = low + (high - low) / 2;
+            last order = c(items[middle], value);
             if (items.version != version) {
                 trap_with_message("collection modified during iteration");
             }
@@ -227,7 +228,7 @@ export let Sorting = module (
             }
         }
         if (low < items.length) {
-            let order = c(items[low], value);
+            last order = c(items[low], value);
             if (items.version != version) {
                 trap_with_message("collection modified during iteration");
             }
