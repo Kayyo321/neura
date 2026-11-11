@@ -1,0 +1,44 @@
+name: Language or library proposal
+description: Propose new syntax, a semantic rule, a standard library member, a command, or a format feature.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What a Neura program cannot express today, or expresses badly. Show the code someone has to write now.
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: Proposed behavior
+      description: The syntax, the static rules (names, types, and what is rejected), the behavior at run time, and the failure cases with their diagnostics or traps.
+    validations:
+      required: true
+  - type: textarea
+    id: accepted
+    attributes:
+      label: An accepted example
+      description: A program that would be valid, with its expected output.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: rejected
+    attributes:
+      label: A rejected or failing example
+      description: A program that would be rejected or would trap, with the reason.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: open
+    attributes:
+      label: Unresolved rules
+      description: Overflow, coercion, evaluation order, failure, or compatibility questions the proposal leaves open. An implementation must not decide these silently.
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility
+      description: Existing programs, `.nir` files, or `.nvr` images whose behavior would change.

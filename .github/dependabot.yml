@@ -1,0 +1,21 @@
+# Dependency updates arrive as pull requests and go through the same checks
+# and review as any other change (GOVERNANCE.md).
+version: 2
+updates:
+  # The actions that the workflows pin by commit.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+
+  # third_party/neura-libclang: the libclang C API headers and loader.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: deps

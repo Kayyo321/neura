@@ -62,10 +62,10 @@ After pulling a change that moves the submodule to a new commit, update your che
 git submodule update --init --recursive
 ```
 
-The build needs the libffi development package, which the runner uses to call native code, and finds it with pkg-config. Neura loads libclang when it runs instead of linking it, so the build does not need the libclang development package; importing C headers needs the libclang shared library from LLVM 14 or newer (19 or newer recommended). On Debian and Ubuntu:
+The build needs the libffi development package, which the runner uses to call native code, and finds it with pkg-config. Neura loads libclang when it runs instead of linking it, so the build does not need the libclang development package; importing C headers needs the libclang shared library from LLVM 14 or newer (19 or newer recommended) and the Clang builtin headers of the same version, such as `stddef.h` and `stdarg.h`, which C library headers include. On Debian and Ubuntu:
 
 ```sh
-sudo apt install libclang1-19 libffi-dev
+sudo apt install libclang1-19 libclang-common-19-dev libffi-dev
 ```
 
 Neura looks for libclang under its usual names. Set `NEURA_LIBCLANG` to the library's path to choose a specific one.
