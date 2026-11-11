@@ -10,12 +10,12 @@ export let UnicodeCase = module (
 
     /// @brief Converts to lowercase using full mappings and applicable contextual rules.
     export let lower = func(s: string, language_tag: string) -> string {
-        let locale = casing_locale(language_tag);
-        let source = strings.scalars(s);
-        let result = string_builder.create();
+        last locale = casing_locale(language_tag);
+        last source = strings.scalars(s);
+        last result = string_builder.create();
         let before_cased = false;
         for (let index = 0; index < source.length; index += 1) {
-            let scalar = source[index];
+            last scalar = source[index];
             append_lowercase(result, source, index, locale, before_cased);
             if (!case_ignorable(scalar)) {
                 before_cased = cased(scalar);
@@ -26,9 +26,9 @@ export let UnicodeCase = module (
 
     /// @brief Converts to uppercase using full mappings and applicable contextual rules.
     export let upper = func(s: string, language_tag: string) -> string {
-        let locale = casing_locale(language_tag);
-        let source = strings.scalars(s);
-        let result = string_builder.create();
+        last locale = casing_locale(language_tag);
+        last source = strings.scalars(s);
+        last result = string_builder.create();
         for (let index = 0; index < source.length; index += 1) {
             append_uppercase(result, source, index, locale);
         }
@@ -37,10 +37,10 @@ export let UnicodeCase = module (
 
     /// @brief Applies full locale-independent Unicode case folding.
     export let fold = func(s: string) -> string {
-        let result = string_builder.create();
+        last result = string_builder.create();
         let offset = 0;
         while (offset < s.byte_length) {
-            let scalar = strings.scalar_at(s, offset);
+            last scalar = strings.scalar_at(s, offset);
             if (scalar < 128) {
                 let _ = result.append_scalar(scalars.to_ascii_lower(scalar));
             } else {
@@ -56,11 +56,11 @@ export let UnicodeCase = module (
         let a = 0;
         let b = 0;
         while (a < left.byte_length && b < right.byte_length) {
-            let first = strings.scalar_at(left, a);
-            let second = strings.scalar_at(right, b);
+            last first = strings.scalar_at(left, a);
+            last second = strings.scalar_at(right, b);
             if (first != second) {
-                let folded_first = simple_fold(first);
-                let folded_second = simple_fold(second);
+                last folded_first = simple_fold(first);
+                last folded_second = simple_fold(second);
                 if (folded_first != folded_second) {
                     return folded_first < folded_second ? -1 : 1;
                 }
@@ -76,8 +76,8 @@ export let UnicodeCase = module (
         if (language_tag.byte_length < 2 || (language_tag.byte_length > 2 && language_tag.byte_at(2) != 45)) {
             return CasingLocale.Root;
         }
-        let first = scalars.to_ascii_lower(language_tag.byte_at(0) as uint32);
-        let second = scalars.to_ascii_lower(language_tag.byte_at(1) as uint32);
+        last first = scalars.to_ascii_lower(language_tag.byte_at(0) as uint32);
+        last second = scalars.to_ascii_lower(language_tag.byte_at(1) as uint32);
         if ((first == 116 && second == 114) || (first == 97 && second == 122)) {
             return CasingLocale.Turkic;
         }
@@ -90,7 +90,7 @@ export let UnicodeCase = module (
     /// @brief Appends the uppercase mapping of the scalar, including multi-scalar expansions.
     let append_uppercase =
         func(result: string_builder.StringBuilder, source: uint32[list], index: int, locale: CasingLocale) {
-            let scalar = source[index];
+            last scalar = source[index];
             if (locale == CasingLocale.Turkic && scalar == 105) {
                 let _ = result.append_scalar(304);
             } else if (locale == CasingLocale.Lithuanian && scalar == 775 &&
@@ -107,7 +107,7 @@ export let UnicodeCase = module (
     let append_lowercase =
         func(result: string_builder.StringBuilder, source: uint32[list], index: int, locale: CasingLocale,
             before_cased: bool) {
-            let scalar = source[index];
+            last scalar = source[index];
             if (locale == CasingLocale.Turkic) {
                 if (scalar == 304) {
                     let _ = result.append_scalar(105);
@@ -155,7 +155,7 @@ export let UnicodeCase = module (
     /// @brief Looks for a following cased scalar, skipping case-ignorable scalars.
     let following_cased = func(source: uint32[list], index: int) -> bool {
         for (let next = index + 1; next < source.length; next += 1) {
-            let scalar = source[next];
+            last scalar = source[next];
             if (!case_ignorable(scalar)) {
                 return cased(scalar);
             }
@@ -166,7 +166,7 @@ export let UnicodeCase = module (
     /// @brief Return the first combining mark of class Above before the next base.
     let following_above = func(source: uint32[list], index: int) -> uint32 {
         for (let next = index + 1; next < source.length; next += 1) {
-            let scalar = source[next];
+            last scalar = source[next];
             if (!contains_property(data.Combining, scalar)) {
                 return 0;
             }
@@ -182,7 +182,7 @@ export let UnicodeCase = module (
         let previous = index;
         while (previous > 0) {
             previous -= 1;
-            let scalar = source[previous];
+            last scalar = source[previous];
             if (!contains_property(data.Combining, scalar)) {
                 return scalar;
             }
@@ -198,19 +198,19 @@ export let UnicodeCase = module (
         if (scalar < 128) {
             return scalars.to_ascii_lower(scalar);
         }
-        let offset = mapping_offset(data.SimpleFold, 8, scalar);
+        last offset = mapping_offset(data.SimpleFold, 8, scalar);
         return offset < 0 ? scalar : unpack(data.SimpleFold, offset + 4);
     };
 
     /// @brief Appends a scalar's mapped values from a fixed-stride table if a record exists.
     let append_mapping = func(result: string_builder.StringBuilder, table: string, stride: int, scalar: uint32) {
-        let offset = mapping_offset(table, stride, scalar);
+        last offset = mapping_offset(table, stride, scalar);
         if (offset < 0) {
             let _ = result.append_scalar(scalar);
             return;
         }
         for (let i = 4; i < stride; i += 4) {
-            let mapped = unpack(table, offset + i);
+            last mapped = unpack(table, offset + i);
             if (mapped == 0) {
                 return;
             }
@@ -223,9 +223,9 @@ export let UnicodeCase = module (
         let low = 0;
         let high = table.byte_length / stride;
         while (low < high) {
-            let middle = low + (high - low) / 2;
-            let offset = middle * stride;
-            let key = unpack(table, offset);
+            last middle = low + (high - low) / 2;
+            last offset = middle * stride;
+            last key = unpack(table, offset);
             if (key == scalar) {
                 return offset;
             }
@@ -243,7 +243,7 @@ export let UnicodeCase = module (
         let low = 0;
         let high = table.byte_length / 4;
         while (low < high) {
-            let middle = low + (high - low) / 2;
+            last middle = low + (high - low) / 2;
             if (unpack(table, middle * 4) <= scalar) {
                 low = middle + 1;
             } else {
@@ -260,7 +260,7 @@ export let UnicodeCase = module (
 
     /// @brief Decodes one digit of the compact case-data alphabet.
     let digit = func(byte: uint8) -> uint32 {
-        let code = byte as uint32;
+        last code = byte as uint32;
         if (code >= 97) {
             return code - 61;
         }
