@@ -10,6 +10,7 @@ an instance and passes its arguments to `init`. The function returns
 `void` and is called through construction. The resulting expression has
 the constructed class type.
 
+<!-- example: check -->
 ```neura
 let Message = class (
     export let text: string;
