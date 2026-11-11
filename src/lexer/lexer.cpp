@@ -218,7 +218,8 @@ private:
                 return TokenKind::Symbol;
             }
         }
-        constexpr std::string_view symbols = "(){}[]:;,.?=+-*/%!<>&|^~";
+        // '#' begins a tag (docs/lang/Tags.md).
+        constexpr std::string_view symbols = "(){}[]:;,.?=+-*/%!<>&|^~#";
         if (symbols.find(peek()) != std::string_view::npos) {
             advance();
             return TokenKind::Symbol;

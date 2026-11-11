@@ -1,0 +1,6 @@
+// A tag argument that the tag does not have (E0902), with the argument of
+// a similar name suggested.
+#Deprecated(as_off: "0.1.0")
+let old_count = func() -> int32 {
+    return 1;
+};

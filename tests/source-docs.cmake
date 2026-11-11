@@ -263,3 +263,73 @@ list(LENGTH stub_newlines stub_count)
 if(NOT original_count EQUAL stub_count OR NOT stubs MATCHES "/// A ticket[.]\nNeuraObject ticket;")
     message(FATAL_ERROR "Doxygen filter mishandled an anonymous class with accessors\n${stubs}")
 endif()
+
+# Tags (docs/lang/Tags.md): a documentation comment before the tags, among
+# them, or between them and the declaration documents the declaration; the
+# index lists the tags as written; #Hidden leaves a declaration and its
+# members out.
+set(tagged "${TEST_DIR}/tagged.nra")
+file(WRITE "${tagged}" [=[
+/// Before the tags.
+#Deprecated(as_of: "0.2.0", use_instead: next)
+#[Since("0.1.0"), Author("Ada")]
+let before = func() -> int32 {
+    return 1;
+};
+
+#Stable
+/// Between the tags and the declaration.
+let between = func() -> int32 {
+    return 2;
+};
+
+#Example("Tagged.count()")
+/// Among the tags.
+#SeeAlso(between)
+let among = func() -> int32 {
+    return 3;
+};
+
+/// Not listed.
+#Hidden
+let Secret = module (
+    /// Not listed either.
+    export let inner = func() -> int32 {
+        return 4;
+    };
+);
+
+let Colors = enum (
+    /// The first color.
+    #Likely Red,
+    #Removed(version: "1.0.0", reason: "unused")
+    /// The second color.
+    Green,
+);
+]=])
+run_docs(index "${tagged}")
+string(JSON count LENGTH "${index}" files 0 symbols)
+if(NOT count EQUAL 5)
+    message(FATAL_ERROR "Expected 5 documented declarations in the tagged file, got ${count}\n${index}")
+endif()
+expect_json("before" files 0 symbols 0 name)
+expect_json("Before the tags." files 0 symbols 0 documentation text)
+expect_json("Deprecated" files 0 symbols 0 tags 0 name)
+expect_json("as_of" files 0 symbols 0 tags 0 arguments 0 name)
+expect_json("string" files 0 symbols 0 tags 0 arguments 0 kind)
+expect_json("0.2.0" files 0 symbols 0 tags 0 arguments 0 value)
+expect_json("name" files 0 symbols 0 tags 0 arguments 1 kind)
+expect_json("next" files 0 symbols 0 tags 0 arguments 1 value)
+expect_json("Since" files 0 symbols 0 tags 1 name)
+expect_json("0.1.0" files 0 symbols 0 tags 1 arguments 0 value)
+expect_json("Author" files 0 symbols 0 tags 2 name)
+expect_json(4 files 0 symbols 0 declaration line)
+expect_json("Between the tags and the declaration." files 0 symbols 1 documentation text)
+expect_json("Stable" files 0 symbols 1 tags 0 name)
+expect_json("Among the tags." files 0 symbols 2 documentation text)
+expect_json("SeeAlso" files 0 symbols 2 tags 1 name)
+expect_json("Red" files 0 symbols 3 name)
+expect_json("Likely" files 0 symbols 3 tags 0 name)
+expect_json("The second color." files 0 symbols 4 documentation text)
+expect_json("Removed" files 0 symbols 4 tags 0 name)
+expect_json("unused" files 0 symbols 4 tags 0 arguments 1 value)

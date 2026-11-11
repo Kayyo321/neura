@@ -1,0 +1,5 @@
+// A tag on a declaration it does not apply to (E0901).
+let Shape = class (
+    #Final
+    export let sides: int32 = 0;
+);

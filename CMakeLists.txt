@@ -290,6 +290,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
     src/neura-ir/attributes.cpp
+    src/neura-ir/tags.cpp
     src/neura-ir/linker.cpp
     src/neura-ir/reference_initialization.cpp
     src/neura-ir/definite_assignment.cpp
@@ -322,7 +323,8 @@ neura_target_defaults(neura_decompiler)
 
 # `neura explain` prints the pages in docs/diagnostics, embedded here so that
 # the binary needs no documentation files at run time.
-file(GLOB neura_diagnostic_pages CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagnostics/E*.md")
+file(GLOB neura_diagnostic_pages CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagnostics/E*.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagnostics/W*.md")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${neura_diagnostic_pages})
 set(neura_diagnostic_pages_inc "")
 foreach(page IN LISTS neura_diagnostic_pages)

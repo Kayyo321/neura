@@ -3,6 +3,8 @@
 #include "neura-ir/ir.hpp"
 
 #include <cstddef>
+#include <string>
+#include <vector>
 
 namespace neura::optimization {
 
@@ -22,5 +24,13 @@ std::size_t remove_unreachable(IrProgram& program);
 std::size_t remove_dead_stores(IrProgram& program);
 std::size_t remove_pure_discards(IrProgram& program);
 std::size_t inline_calls(IrProgram& program);
+
+// A function whose inline.directive is Always but that inline-calls never
+// inlines, with the reason in words ("it is recursive").
+struct InlineRefusal {
+    SymbolId function;
+    std::string reason;
+};
+std::vector<InlineRefusal> inline_refusals(IrProgram& program);
 
 } // namespace neura::optimization

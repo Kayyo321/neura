@@ -1,0 +1,5 @@
+// A tag argument given twice (E0904), once by position and once by name.
+#Deprecated("0.1.0", as_of: "0.2.0")
+let old_count = func() -> int32 {
+    return 1;
+};

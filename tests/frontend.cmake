@@ -1053,3 +1053,223 @@ let named: class implements Named ( export let name = func() -> string => "n"; )
 let generic = func<T: class>(value: T) -> T => value;
 ]=])
 run_success(unused check "${TEST_DIR}/umbrella.nra")
+
+# Tags (docs/lang/Tags.md).
+function(run_status output status_output)
+    execute_process(
+        COMMAND "${NEURA}" ${ARGN}
+        WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+    )
+    set("${output}" "${stdout}${stderr}" PARENT_SCOPE)
+    set("${status_output}" "${status}" PARENT_SCOPE)
+endfunction()
+
+file(WRITE "${TEST_DIR}/tag-warnings.nra" [=[
+let Api = module (
+    #Deprecated(as_of: "0.2.0", use_instead: fresh)
+    export let stale = func() -> int32 {
+        return 1;
+    };
+
+    export let fresh = func() -> int32 {
+        return 2;
+    };
+
+    #Experimental
+    export let preview = func() -> int32 {
+        return 3;
+    };
+);
+
+let a: int32 = Api.stale();
+let b: int32 = Api.preview();
+]=])
+# Warnings print on success; -Wno-<name> hides one; -Werror fails the run.
+run_status(output status check --error-format=short tag-warnings.nra)
+if(NOT status STREQUAL "0" OR NOT output MATCHES "tag-warnings[.]nra:17:16: warning\\[W0001\\]: function 'stale' is deprecated since 0[.]2[.]0"
+   OR NOT output MATCHES "tag-warnings[.]nra:18:16: warning\\[W0002\\]")
+    message(FATAL_ERROR "Expected W0001 and W0002 on a successful check (${status})\n${output}")
+endif()
+run_status(output status check --error-format=short -Wno-deprecated tag-warnings.nra)
+if(NOT status STREQUAL "0" OR output MATCHES "W0001" OR NOT output MATCHES "W0002")
+    message(FATAL_ERROR "Expected -Wno-deprecated to hide only W0001 (${status})\n${output}")
+endif()
+run_status(output status check --error-format=short -Wno-experimental -Wno-deprecated tag-warnings.nra)
+if(NOT status STREQUAL "0" OR NOT output STREQUAL "")
+    message(FATAL_ERROR "Expected no output with both warnings disabled (${status})\n${output}")
+endif()
+run_status(output status check --error-format=short -Werror tag-warnings.nra)
+if(NOT status STREQUAL "1" OR NOT output MATCHES "error\\[W0001\\]" OR NOT output MATCHES "error\\[W0002\\]")
+    message(FATAL_ERROR "Expected -Werror to fail with both warnings as errors (${status})\n${output}")
+endif()
+# --fix applies the machine-applicable replacement and the tag spelling.
+file(WRITE "${TEST_DIR}/tag-fix.nra" [=[
+let Api = module (
+    #Depricated(use_instead: fresh)
+    export let stale = func() -> int32 {
+        return 1;
+    };
+
+    export let fresh = func() -> int32 {
+        return 2;
+    };
+);
+
+let a: int32 = Api.stale();
+]=])
+run_success(unused check --fix tag-fix.nra)
+file(READ "${TEST_DIR}/tag-fix.nra" fixed)
+if(NOT fixed MATCHES "#Deprecated[(]use_instead: fresh[)]" OR NOT fixed MATCHES "let a: int32 = Api[.]fresh[(][)];")
+    message(FATAL_ERROR "check --fix did not fix the tag and the deprecated use\n${fixed}")
+endif()
+
+# Tag validation: each rule's code at its span.
+check_rejection(tag-unknown "#Depricated\nlet f = func() -> int32 {\n    return 1;\n};" "2:2" "unknown tag #Depricated")
+check_rejection(tag-target "#Inline\nlet Shape = class ();" "2:2" "#Inline does not apply to a class")
+check_rejection(tag-variant-target "let Color = enum (\n    #Final Red\n);" "3:6" "#Final does not apply to an enum variant")
+check_rejection(tag-parameter-target "let f = func(#Deprecated value: int32) -> int32 {\n    return value;\n};" "2:15" "#Deprecated does not apply to a parameter")
+check_rejection(tag-local-target "let f = func() -> int32 {\n    #Stable\n    let value: int32 = 1;\n    return value;\n};" "3:6" "#Stable does not apply to a local binding")
+check_rejection(tag-lambda-parameter "let f = func() -> int32 {\n    let g = func(#Unit(1) value: int32) -> int32 {\n        return value;\n    };\n    return g(1);\n};" "3:24" "#Unit expects a string")
+check_rejection(tag-too-many "#Since(\"0.1.0\", \"0.2.0\")\nlet x: int32 = 1;" "2:17" "#Since takes 1 argument")
+check_rejection(tag-no-arguments "#Stable(true)\nlet x: int32 = 1;" "2:9" "#Stable takes no arguments")
+check_rejection(tag-list "#Since([\"0.1.0\"])\nlet x: int32 = 1;" "2:8" "found a list")
+check_rejection(tag-integer-range "#Unit(\"ms\")\n#Range(min: 0, max: 99999999999999999999)\nlet x: int32 = 1;" "3:21" "does not fit in 64 bits")
+check_rejection(tag-reserved-memoize "#Memoize\nlet f = func() -> int32 {\n    return 1;\n};" "2:1" "#Memoize is reserved")
+check_rejection(tag-reserved-checked "let C = class (\n    #Immutable\n    let x: int32 = 0;\n);" "3:5" "#Immutable is reserved")
+check_rejection(tag-final-sealed "#[Final, Sealed]\nlet C = class ();" "2:10" "#Sealed conflicts with #Final")
+check_rejection(tag-hot-cold "#Hot\n#Cold\nlet f = func() -> int32 {\n    return 1;\n};" "3:1" "#Cold conflicts with #Hot")
+check_rejection(tag-discard-name "#Stable\nlet _ = 3;" "2:1" "tags cannot apply to '_'")
+check_rejection(tag-end-of-file "let x: int32 = 1;\n#Stable" "3:8" "expected a declaration after tags")
+check_rejection(tag-deny-code "let Api = module (\n    #Deprecated\n    export let old = func() -> int32 {\n        return 1;\n    };\n);\n#Deny(W0001)\nlet x: int32 = Api.old();" "9:16" "'old' is deprecated")
+# A #Sealed type at the top of a file may be extended anywhere in the file.
+file(WRITE "${TEST_DIR}/tag-sealed-file.nra" "#Sealed\nlet Base = class ();\nlet Holder = module (\n    export let Inner = class:Base ();\n);\n")
+run_success(unused check tag-sealed-file.nra)
+# A tag on an or-func group applies to every branch.
+file(WRITE "${TEST_DIR}/tag-overloads.nra" [=[
+let Convert = module (
+    #Deprecated
+    export let show = func(value: int32) -> string {
+        return value.to_string();
+    } or func(value: bool) -> string {
+        return value.to_string();
+    };
+);
+let a: string = Convert.show(1);
+let b: string = Convert.show(true);
+]=])
+run_status(output status check --error-format=short tag-overloads.nra)
+string(REGEX MATCHALL "warning\\[W0001\\]" overload_warnings "${output}")
+list(LENGTH overload_warnings overload_count)
+if(NOT status STREQUAL "0" OR NOT overload_count EQUAL 2)
+    message(FATAL_ERROR "Expected a W0001 for each call of a deprecated overload group (${status})\n${output}")
+endif()
+
+# #Internal: usable from the declaring file's directory and below, not from
+# a parent directory.
+file(MAKE_DIRECTORY "${TEST_DIR}/tag-library/acme")
+file(WRITE "${TEST_DIR}/tag-library/acme/core.nra" [=[
+let Core = module (
+    #Internal
+    export let raw = func() -> int32 {
+        return 1;
+    };
+    export let cooked = func() -> int32 {
+        return raw() + 1;
+    };
+);
+]=])
+file(WRITE "${TEST_DIR}/tag-library/acme/report.nra" [=[
+let core = import:Acme.Core;
+let Report = module (
+    export let total = func() -> int32 {
+        return core.raw() + core.cooked();
+    };
+);
+]=])
+file(WRITE "${TEST_DIR}/tag-library/app.nra" [=[
+let report = import:Acme.Report;
+let core = import:Acme.Core;
+let total: int32 = report.total() + core.cooked();
+]=])
+run_success(unused check -I tag-library tag-library/acme/report.nra)
+run_success(unused check -I tag-library tag-library/app.nra)
+file(APPEND "${TEST_DIR}/tag-library/app.nra" "let raw: int32 = core.raw();\n")
+run_status(output status check --error-format=short -I tag-library tag-library/app.nra)
+if(NOT status STREQUAL "1" OR NOT output MATCHES "app[.]nra:4:18: error\\[E0911\\]: function 'raw' is internal to its library")
+    message(FATAL_ERROR "Expected E0911 for a use from outside the library (${status})\n${output}")
+endif()
+
+# The catalogue and the explain pages of warnings.
+run_success(catalogue tags)
+if(NOT catalogue MATCHES "#Deprecated[(]as_of: string = \"\", use_instead: name = \"\", reason: string = \"\"[)]"
+   OR NOT catalogue MATCHES "status:  reserved" OR NOT catalogue MATCHES "[0-9]+ tags: [0-9]+ implemented")
+    message(FATAL_ERROR "neura tags did not print the catalogue\n${catalogue}")
+endif()
+run_success(one_tag tags Final)
+if(NOT one_tag MATCHES "^#Final\n    status:  implemented" OR NOT one_tag MATCHES "applies to classes and methods")
+    message(FATAL_ERROR "neura tags Final did not print the entry\n${one_tag}")
+endif()
+run_status(output status tags Depricated)
+if(NOT status STREQUAL "1" OR NOT output MATCHES "did you mean Deprecated")
+    message(FATAL_ERROR "Expected neura tags to reject an unknown tag with a suggestion (${status})\n${output}")
+endif()
+run_success(page explain deprecated)
+run_success(code_page explain W0001)
+if(NOT page MATCHES "^# W0001: use of a deprecated declaration" OR NOT page STREQUAL code_page)
+    message(FATAL_ERROR "neura explain did not print the W0001 page by name and by code\n${page}")
+endif()
+
+# A tag persists in the NeuraIR as the `tag` attribute and survives a .nir
+# round trip; inline.directive follows #Inline(always: true) and #NoInline.
+file(WRITE "${TEST_DIR}/tag-ir.nra" [=[
+let Lib = module (
+    #[Deprecated(as_of: "0.2.0"), Since("0.1.0")]
+    export let old = func() -> int32 {
+        return 1;
+    };
+    #Inline(always: true)
+    export let small = func(value: int32) -> bool {
+        return value > 0;
+    };
+    #NoInline
+    export let kept = func(value: int32) -> bool {
+        return value < 0;
+    };
+);
+]=])
+run_success(listing emit-ir --no-optimize tag-ir.nra)
+if(NOT listing MATCHES "function \"old\"[^\n]*@tag[(]\\[1u, \"Deprecated\", \\[\\[\"as_of\", \"0[.]2[.]0\"\\]\\]"
+   OR NOT listing MATCHES "@tag[(]\\[5u, \"Since\""
+   OR NOT listing MATCHES "function \"small\"[^\n]*@inline[.]directive[(]1u[)]"
+   OR NOT listing MATCHES "function \"kept\"[^\n]*@inline[.]directive[(]2u[)]")
+    message(FATAL_ERROR "Expected tag and inline.directive attributes in the listing\n${listing}")
+endif()
+run_success(unused emit-ir tag-ir.nra -o tag-ir.nir)
+run_success(round_trip emit-ir --no-optimize tag-ir.nir)
+string(REGEX MATCHALL "@tag[(][^\n]*" source_tags "${listing}")
+string(REGEX MATCHALL "@tag[(][^\n]*" artifact_tags "${round_trip}")
+if(NOT source_tags OR NOT source_tags STREQUAL artifact_tags)
+    message(FATAL_ERROR "The tags differ after a .nir round trip\n${listing}\n---\n${round_trip}")
+endif()
+# The catalogue in docs/lang/Tags.md lists every registered tag.
+file(READ "${SOURCE_DIR}/docs/lang/Tags.md" tags_page)
+string(REGEX MATCHALL "\n#[A-Za-z]+" registered_tags "\n${catalogue}")
+list(LENGTH registered_tags registered_count)
+if(registered_count LESS 60)
+    message(FATAL_ERROR "Expected at least 60 tags in neura tags, found ${registered_count}")
+endif()
+foreach(tag IN LISTS registered_tags)
+    string(STRIP "${tag}" tag)
+    string(FIND "${tags_page}" "| `${tag}" position)
+    if(position EQUAL -1)
+        message(FATAL_ERROR "docs/lang/Tags.md does not list ${tag}")
+    endif()
+endforeach()
+# -W and -Wno- take the name of a warning.
+run_status(output status check -Wdepricated tag-warnings.nra)
+if(NOT status STREQUAL "1" OR NOT output MATCHES "unknown warning 'depricated'; did you mean deprecated[?]")
+    message(FATAL_ERROR "Expected -Wdepricated to be rejected with a suggestion (${status})\n${output}")
+endif()

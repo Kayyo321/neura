@@ -120,7 +120,7 @@ Each registered attribute has a stable identifier, the symbol kinds that may car
 
 | Id | Name | Carried by | Repeats | Schema | Payload |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `tag` | every kind except file | yes | `[u65535 t *[t a] p]` | A source tag: its identifier in the tag registry, its name as written, its arguments as pairs of an argument name (empty when positional) and a literal value, and its span |
+| 1 | `tag` | every kind except file | yes | `[u65535 t *[t a] p]` | A source tag ([Tags](lang/Tags.md)): its identifier in the tag registry (`src/neura-ir/tags.def`), its name as written, its arguments as pairs of an argument name (empty when positional) and a literal value, and its span. The compiler writes each argument under its parameter's name, a repeated parameter as one pair per value, a floating-point number or a name as text, and a warning as its code |
 | 2 | `accessor.get` | field | no | `s` | The field's hidden getter function |
 | 3 | `accessor.set` | field | no | `s` | The field's hidden setter function |
 | 4 | `accessor.of` | function | no | `[s u1]` | On a hidden accessor function: the field it serves, and 0 for a getter or 1 for a setter |

@@ -1,0 +1,9 @@
+// Tags before a statement instead of a declaration (E0909).
+let count_to = func(limit: int32) -> int32 {
+    let total: int32 = 0;
+    #Unroll
+    while (total < limit) {
+        total += 1;
+    }
+    return total;
+};

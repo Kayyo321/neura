@@ -1,0 +1,5 @@
+// A tag argument of the wrong type (E0905).
+#Since(2)
+let count = func() -> int32 {
+    return 1;
+};

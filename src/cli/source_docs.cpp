@@ -123,6 +123,62 @@ void write_comment(std::ostream& output, const DocComment& comment) {
     output << "]}";
 }
 
+std::string_view argument_kind(TagArgumentSyntax::Kind kind) {
+    switch (kind) {
+    case TagArgumentSyntax::Kind::String: return "string";
+    case TagArgumentSyntax::Kind::Integer: return "integer";
+    case TagArgumentSyntax::Kind::Float: return "float";
+    case TagArgumentSyntax::Kind::Boolean: return "bool";
+    case TagArgumentSyntax::Kind::Name: return "name";
+    case TagArgumentSyntax::Kind::List: return "list";
+    }
+    return {};
+}
+
+void write_argument(std::ostream& output, const TagArgumentSyntax& argument) {
+    output << "{\"kind\":";
+    quote(output, argument_kind(argument.kind));
+    if (!argument.name.empty()) {
+        output << ",\"name\":";
+        quote(output, argument.name);
+    }
+    if (argument.kind == TagArgumentSyntax::Kind::List) {
+        output << ",\"items\":[";
+        for (std::size_t i = 0; i < argument.items.size(); ++i) {
+            if (i != 0) output.put(',');
+            write_argument(output, argument.items[i]);
+        }
+        output.put(']');
+    } else {
+        output << ",\"value\":";
+        quote(output, argument.text);
+    }
+    output.put('}');
+}
+
+// The tags written before a declaration (docs/lang/Tags.md), as written.
+void write_tags(std::ostream& output, const std::vector<TagSyntax>& tags) {
+    output.put('[');
+    for (std::size_t i = 0; i < tags.size(); ++i) {
+        if (i != 0) output.put(',');
+        output << "{\"name\":";
+        quote(output, tags[i].name);
+        output << ",\"range\":";
+        range(output, tags[i].span);
+        output << ",\"arguments\":[";
+        for (std::size_t j = 0; j < tags[i].arguments.size(); ++j) {
+            if (j != 0) output.put(',');
+            write_argument(output, tags[i].arguments[j]);
+        }
+        output << "]}";
+    }
+    output.put(']');
+}
+
+bool hidden(const Declaration& declaration) {
+    return std::ranges::any_of(declaration.tags, [](const TagSyntax& tag) { return tag.name == "Hidden"; });
+}
+
 std::string_view kind_name(const Declaration& declaration, bool variant) {
     if (variant) return "variant";
     if (declaration.cast_target) return "cast";
@@ -267,7 +323,8 @@ private:
     }
 
     void symbol(std::string_view name, std::string_view kind, std::string_view signature,
-                const Span& declaration, const Span& selection, const DocComment& comment) {
+                const Span& declaration, const Span& selection, const DocComment& comment,
+                const std::vector<TagSyntax>& tags = {}) {
         if (!first_) output_ << ",\n";
         first_ = false;
         output_ << "{\"name\":";
@@ -287,14 +344,18 @@ private:
         range(output_, selection);
         output_ << ",\"documentation\":";
         write_comment(output_, comment);
+        output_ << ",\"tags\":";
+        write_tags(output_, tags);
         output_.put('}');
     }
 
     void declaration(const Declaration& declaration, bool variant = false) {
+        // #Hidden leaves the declaration and everything in it out.
+        if (hidden(declaration)) return;
         if (declaration.documentation && declaration.name_span && declaration.name != "_") {
             const auto kind = kind_name(declaration, variant);
             symbol(declaration.name, kind, signature(declaration, kind), declaration.span,
-                   *declaration.name_span, *declaration.documentation);
+                   *declaration.name_span, *declaration.documentation, declaration.tags);
         }
         if (!declaration.name.empty()) scope_.push_back(declaration.name);
         for (const auto& member : declaration.members) {

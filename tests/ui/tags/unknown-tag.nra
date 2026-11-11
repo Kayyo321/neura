@@ -1,0 +1,6 @@
+// An unknown tag (E0900): a close registered name is suggested, and
+// `neura check --fix` applies it.
+#Depricated(as_of: "0.2.0", use_instead: "count")
+let old_count = func() -> int32 {
+    return 1;
+};

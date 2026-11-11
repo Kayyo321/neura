@@ -34,11 +34,38 @@ struct GenericParameter {
     std::vector<TypeSyntax> bounds;
 };
 
+// One argument of a tag: `literal` or `name: literal` (docs/lang/Tags.md).
+struct TagArgumentSyntax {
+    enum class Kind { String, Integer, Float, Boolean, Name, List };
+
+    Kind kind;
+    // The value, without the name of a named argument.
+    Span span;
+    // The argument's name when it is written `name: value`, otherwise empty.
+    std::string name;
+    std::optional<Span> name_span{};
+    // A string's decoded text; the spelling of a number, `true` or `false`,
+    // or a qualified name; empty for a list.
+    std::string text;
+    // The items of a list, which are not lists themselves.
+    std::vector<TagArgumentSyntax> items{};
+};
+
+// `#Name` or `#Name(arguments)`, written before a declaration. A group
+// `#[A, B]` gives one TagSyntax per tag.
+struct TagSyntax {
+    Span span;
+    Span name_span;
+    std::string name;
+    std::vector<TagArgumentSyntax> arguments;
+};
+
 struct Parameter {
     Span span;
     std::string name;
     TypeSyntax type;
     bool variadic{};
+    std::vector<TagSyntax> tags{};
 };
 
 struct Declaration;
@@ -201,6 +228,9 @@ struct Declaration {
     std::optional<Span> name_span{};
     // Accessor clauses after the member's ';', in source order.
     std::vector<AccessorClause> accessors{};
+    // The tags written before the declaration, in source order. They apply
+    // to every branch of an `or func` group.
+    std::vector<TagSyntax> tags{};
 };
 
 struct ResolvedImport {

@@ -1,0 +1,9 @@
+error[E0903]: #Since needs the argument 'version'
+ --> $DIR/missing-argument.nra:2:1
+  |
+2 | #Since
+  | ^^^^^^ missing 'version'
+  |
+  = help: the signature is #Since(version: string)
+
+For more information about this error, try `neura explain E0903`.

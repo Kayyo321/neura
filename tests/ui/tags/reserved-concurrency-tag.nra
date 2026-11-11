@@ -1,0 +1,10 @@
+// #Synchronized is registered, and its target is checked, but it is reserved
+// until the compiler implements it (E0908).
+let Counter = class (
+    let value: int64 = 0;
+
+    #Synchronized
+    export let increment = func() -> void {
+        value += 1;
+    };
+);

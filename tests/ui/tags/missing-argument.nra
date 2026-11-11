@@ -1,0 +1,5 @@
+// A required tag argument that is not given (E0903).
+#Since
+let count = func() -> int32 {
+    return 1;
+};

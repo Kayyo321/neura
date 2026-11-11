@@ -1,0 +1,4 @@
+// #NoDiscard on a function that returns nothing (E0916).
+#NoDiscard
+let log = func(message: string) -> void {
+};

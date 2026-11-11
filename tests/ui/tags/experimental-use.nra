@@ -1,0 +1,15 @@
+// Uses of an #Experimental declaration (W0002); code that is itself
+// experimental may use it without a warning.
+let Search = module (
+    #Experimental(feature: "fuzzy-search")
+    export let fuzzy = func(text: string) -> int32 {
+        return text.byte_length;
+    };
+
+    #Experimental
+    export let fuzzy_twice = func(text: string) -> int32 {
+        return fuzzy(text) * 2;
+    };
+);
+
+let score: int32 = Search.fuzzy("neura");

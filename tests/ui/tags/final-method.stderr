@@ -1,0 +1,12 @@
+error[E0913]: method 'sides' overrides a final method
+  --> $DIR/final-method.nra:10:25
+   |
+ 3 |     #Final
+   |     ------ 'sides' is marked #Final here
+...
+10 |     export let.override sides = func() -> int32 {
+   |                         ^^^^^ overrides a final method
+   |
+   = help: give the method another name, or remove #Final from the base method
+
+For more information about this error, try `neura explain E0913`.

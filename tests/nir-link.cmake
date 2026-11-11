@@ -448,3 +448,41 @@ neura(run "${TEST_DIR}/shape-app.nvr")
 if(NOT output STREQUAL "user:4 other\n")
     message(FATAL_ERROR "a shared source in two artifacts produced:\n${output}")
 endif()
+
+# Tags travel with a prebuilt module (docs/lang/Tags.md): a program that
+# imports the .nir still gets the use-site checks of #Deprecated, #Experimental,
+# and #Internal, and the library itself may use its internal members.
+file(WRITE "${source}/tagged.nra" [=[
+let Tagged = module (
+    #Deprecated(as_of: "0.2.0", use_instead: fresh)
+    export let stale = func() -> int => 1;
+    export let fresh = func() -> int => 2;
+    #Experimental(feature: "preview")
+    export let preview = func() -> int => 3;
+    #Internal
+    export let secret = func() -> int => 4;
+    export let open = func() -> int => secret();
+    #Final
+    export let Sealed = class ();
+);
+]=])
+neura(emit-ir "${source}/tagged.nra" -o "${artifacts}/tagged.nir")
+file(WRITE "${artifacts}/tag-app.nra" [=[
+let tagged = import:"tagged.nir";
+let a: int = tagged.stale();
+let b: int = tagged.preview();
+let c: int = tagged.open();
+]=])
+execute_process(COMMAND "${NEURA}" check --error-format=short "${artifacts}/tag-app.nra"
+    RESULT_VARIABLE status ERROR_VARIABLE error)
+if(NOT status STREQUAL "0" OR NOT error MATCHES "tag-app[.]nra:2:14: warning\\[W0001\\]: function 'stale' is deprecated since 0[.]2[.]0"
+   OR NOT error MATCHES "tag-app[.]nra:3:14: warning\\[W0002\\]")
+    message(FATAL_ERROR "expected W0001 and W0002 from uses of a prebuilt module (${status})\n${error}")
+endif()
+file(APPEND "${artifacts}/tag-app.nra" "let d: int = tagged.secret();\n")
+reject("tag-app[.]nra:5:14: error\\[E0911\\]: function 'secret' is internal to its library" check "${artifacts}/tag-app.nra")
+file(WRITE "${artifacts}/tag-subclass.nra" [=[
+let tagged = import:"tagged.nir";
+let Mine = class:tagged.Sealed ();
+]=])
+reject("tag-subclass[.]nra:2:18: error\\[E0912\\]" check "${artifacts}/tag-subclass.nra")

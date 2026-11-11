@@ -45,6 +45,7 @@ pages = [
   { source = "docs/lang/Collections.md", label = "Collections" },
   { source = "docs/lang/ObjectLifecycle.md", label = "Object lifecycle" },
   { source = "docs/lang/Polymorphism.md", label = "Polymorphism" },
+  { source = "docs/lang/Tags.md", label = "Tags" },
   { source = "docs/lang/Errors.md", label = "Errors" },
   { source = "docs/lang/Testing.md", label = "Testing" },
   { source = "docs/lang/ResourcesConcurrency.md", label = "Resources and concurrency" },
@@ -82,7 +83,7 @@ plate = "caliper"
 pages = [
   { source = "docs/diagnostics/README.md", label = "Index of codes" },
 ]
-modules = "docs/diagnostics/E*.md"
+modules = "docs/diagnostics/[EW]*.md"
 
 [[sections]]
 title = "Compiler and circuits"

@@ -1,10 +1,12 @@
 #include "optimizer.hpp"
 
+#include "neura-ir/tags.hpp"
 #include "neura-ir/verifier.hpp"
 #include "passes.hpp"
 
 #include <algorithm>
 #include <iterator>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 
@@ -71,6 +73,25 @@ void measure(const std::vector<IrNode>& nodes, std::size_t depth, Measure& resul
     }
 }
 
+// W0004 for each #Inline(always: true) function that inline-calls refuses,
+// once per tag (specialized copies share their tag). Under #Deny it is an
+// error.
+void report_inline_refusals(IrProgram& program) {
+    std::set<std::pair<std::string, std::size_t>> seen;
+    for (const auto& refusal : optimization::inline_refusals(program)) {
+        const auto& function = program.symbols[refusal.function];
+        const auto at = tag_span(function, TagId::Inline);
+        if (!at || !seen.emplace(at->file, at->offset).second) continue;
+        auto warning = Diagnostic::warning(*at, "inline", "cannot inline '" + function.name + "': " + refusal.reason)
+            .with_code("W0004").label("inlining is required here");
+        warning.note("#Inline(always: true) lifts only the size budget of inline-calls; its other rules still apply");
+        auto scoped = scoped_tag_warning(program, refusal.function, std::move(warning));
+        if (!scoped) continue;
+        if (scoped->severity() == Severity::Error) throw *scoped;
+        report_warning(std::move(*scoped));
+    }
+}
+
 Measure measure(const IrProgram& program) {
     Measure result;
     for (const auto& body : program.bodies) {
@@ -132,6 +153,8 @@ OptimizationReport optimize(IrProgram& program, const OptimizationOptions& optio
     }
 
     require_valid_ir(program, "before optimization");
+    if (std::ranges::any_of(enabled, [](const RegisteredPass* pass) { return pass->info.name == "inline-calls"; }))
+        report_inline_refusals(program);
     // Every rewrite in a round removes at least one node, or keeps the node
     // count and moves nodes out of a loop, so each round that changes the
     // program strictly decreases (nodes, loop weight) lexicographically.

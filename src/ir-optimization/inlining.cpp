@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <map>
 #include <optional>
+#include <string>
 
 namespace neura::optimization {
 namespace {
@@ -73,6 +74,7 @@ public:
     explicit Inliner(IrProgram& program) : program_(program), analysis_(program) {}
 
     std::size_t run();
+    std::vector<InlineRefusal> refusals() const;
 
 private:
     IrProgram& program_;
@@ -84,7 +86,8 @@ private:
     // Only functions whose inlined body cannot trap, call, allocate, or
     // touch the heap, so that inlining changes no trap's function or caller
     // chain and no frame or slot holds a reference longer.
-    std::optional<Shape> inlinable(const IrBody& body) const;
+    // When the body is not inlinable and `why` is given, says why.
+    std::optional<Shape> inlinable(const IrBody& body, std::string* why = nullptr) const;
     // The module a call of `callee` runs on: the receiver of a module call,
     // or the callee's own module for a direct call.
     SymbolId receiver_module(const IrNode& call, SymbolId callee) const {
@@ -134,23 +137,29 @@ private:
     IrNode result_local(SymbolId callee, const IrType& type, const Span& span, std::uint32_t site, SymbolId& result);
 };
 
-std::optional<Shape> Inliner::inlinable(const IrBody& body) const {
+std::optional<Shape> Inliner::inlinable(const IrBody& body, std::string* why) const {
+    const auto refuse = [&](std::string reason) -> std::optional<Shape> {
+        if (why) *why = std::move(reason);
+        return std::nullopt;
+    };
     const auto& function = program_.symbols[body.owner];
-    if (!function.has_body || function.external || function.host_binding ||
-        inline_directive(function) == InlineDirective::Never || function.name.starts_with("$") ||
-        analysis_.recursive(body.owner)) {
-        return std::nullopt;
-    }
+    if (!function.has_body || function.external || function.host_binding) return refuse("it has no Neura body");
+    if (inline_directive(function) == InlineDirective::Never) return refuse("it is marked never to be inlined");
+    if (function.name.starts_with("$")) return refuse("it is a compiler-generated function");
+    if (analysis_.recursive(body.owner)) return refuse("it is recursive");
     const auto& effects = analysis_.function(body.owner);
-    if (effects.may_trap || effects.calls() || effects.allocates || effects.destroys || effects.any_reads ||
-        effects.any_writes || !effects.field_writes.empty() || !effects.field_reads.empty() ||
+    if (effects.may_trap) return refuse("it may trap, and inlining would change the trap's function");
+    if (effects.calls()) return refuse("it calls another function");
+    if (effects.allocates || effects.destroys) return refuse("it allocates or destroys objects");
+    if (effects.any_reads || effects.any_writes || !effects.field_writes.empty() || !effects.field_reads.empty() ||
         effects.element_reads || effects.element_writes) {
-        return std::nullopt;
+        return refuse("it reads or writes the heap or module state");
     }
-    if (function.type.kind != TypeKind::Void && !value_type(function.type)) return std::nullopt;
+    if (function.type.kind != TypeKind::Void && !value_type(function.type))
+        return refuse("its result is not a value type");
     if (contains_op(body.instructions, {IrOp::BaseInitialize, IrOp::ReferencePlace, IrOp::TaskScope, IrOp::Spawn,
                                         IrOp::SchedulerCall, IrOp::MakeClosure})) {
-        return std::nullopt;
+        return refuse("it starts tasks, makes closures, or initializes a base object");
     }
     // A module's receiver can be replaced by a reference to the module the
     // call runs on; an object's receiver cannot.
@@ -167,18 +176,20 @@ std::optional<Shape> Inliner::inlinable(const IrBody& body) const {
         }
     };
     visit(visit, body.instructions);
-    if (object_receiver) return std::nullopt;
+    if (object_receiver) return refuse("it uses its object's receiver");
     for (const auto parameter : function.parameters) {
-        if (!value_type(program_.symbols[parameter].type)) return std::nullopt;
+        if (!value_type(program_.symbols[parameter].type)) return refuse("a parameter is not a value type");
     }
     for (const auto& [local, use] : scan_locals(program_, body.instructions)) {
-        if (!value_type(program_.symbols[local].type) || use.other) return std::nullopt;
+        if (!value_type(program_.symbols[local].type) || use.other)
+            return refuse("a local is not a value type or is used other than by load and store");
         if (program_.symbols[local].kind == SymbolKind::Local && program_.symbols[local].owner != body.owner) {
-            return std::nullopt;
+            return refuse("it uses a local of another function");
         }
     }
     constexpr std::size_t budget = 40;
-    if (inline_directive(function) != InlineDirective::Always && count(body.instructions) > budget) return std::nullopt;
+    if (inline_directive(function) != InlineDirective::Always && count(body.instructions) > budget)
+        return refuse("it is larger than the size budget");
     const auto& statements = body.instructions;
     const auto total = returns(statements);
     const bool last_returns = !statements.empty() && statements.back().op == IrOp::Return;
@@ -478,6 +489,28 @@ std::size_t Inliner::run() {
 
 } // namespace
 
+std::vector<InlineRefusal> Inliner::refusals() const {
+    std::vector<InlineRefusal> result;
+    const bool tasks = uses_tasks(program_);
+    std::map<SymbolId, std::size_t> bodies;
+    for (const auto& body : program_.bodies) {
+        if (function_body(program_, body)) ++bodies[body.owner];
+    }
+    for (const auto& body : program_.bodies) {
+        if (!function_body(program_, body) ||
+            inline_directive(program_.symbols[body.owner]) != InlineDirective::Always)
+            continue;
+        std::string why;
+        if (tasks) why = "the program uses tasks, so every call is a scheduler poll that inlining would remove";
+        else if (bodies[body.owner] != 1) why = "it has more than one body";
+        else if (inlinable(body, &why)) continue;
+        result.push_back({body.owner, std::move(why)});
+    }
+    return result;
+}
+
 std::size_t inline_calls(IrProgram& program) { return Inliner(program).run(); }
+
+std::vector<InlineRefusal> inline_refusals(IrProgram& program) { return Inliner(program).refusals(); }
 
 } // namespace neura::optimization

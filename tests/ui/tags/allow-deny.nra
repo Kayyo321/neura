@@ -1,0 +1,30 @@
+// #Allow silences a warning inside the declaration it tags, and #Deny makes
+// it an error there (here W0001 by name and W0002 by code). The use outside
+// both stays a warning.
+let Api = module (
+    #Deprecated
+    export let old = func() -> int32 {
+        return 1;
+    };
+
+    #Experimental
+    export let preview = func() -> int32 {
+        return 2;
+    };
+);
+
+#Allow(deprecated)
+let Quiet = module (
+    export let a = func() -> int32 {
+        return Api.old();
+    };
+);
+
+#Deny(deprecated, W0002)
+let Strict = module (
+    export let b = func() -> int32 {
+        return Api.old() + Api.preview();
+    };
+);
+
+let loose: int32 = Api.old();

@@ -1,0 +1,27 @@
+warning[W0003]: unused result of #NoDiscard function 'write': check whether it was written
+  --> $DIR/no-discard.nra:16:5
+   |
+ 3 | #NoDiscard(reason: "check whether it was written")
+   | -------------------------------------------------- 'write' is marked #NoDiscard here
+...
+16 |     write("data");
+   |     ^^^^^^^^^^^^^ the result is discarded
+   |
+help: bind the result to '_' to discard it on purpose
+   |
+16 |     let _ = write("data");
+   |     ++++++++
+
+warning[W0003]: unused value of #NoDiscard type 'Status'
+  --> $DIR/no-discard.nra:17:5
+   |
+ 8 | #NoDiscard
+   | ---------- 'Status' is marked #NoDiscard here
+...
+17 |     finish();
+   |     ^^^^^^^^ the result is discarded
+   |
+help: bind the result to '_' to discard it on purpose
+   |
+17 |     let _ = finish();
+   |     ++++++++

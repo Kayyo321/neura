@@ -1,0 +1,10 @@
+let Core = module (
+    #Internal
+    export let raw_total = func() -> int32 {
+        return 1;
+    };
+
+    export let total = func() -> int32 {
+        return raw_total();
+    };
+);

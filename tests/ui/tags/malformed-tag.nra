@@ -1,0 +1,11 @@
+// A tag without a name and a tag argument that is not a literal (E0910);
+// the parser reports both and goes on.
+# (Deprecated)
+let old_count = func() -> int32 {
+    return 1;
+};
+
+#Since(version: 1 + 2)
+let count = func() -> int32 {
+    return 1;
+};

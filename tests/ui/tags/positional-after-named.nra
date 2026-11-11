@@ -1,0 +1,5 @@
+// A positional tag argument after a named one (E0902).
+#Deprecated(as_of: "0.1.0", "it rounds")
+let old_count = func() -> int32 {
+    return 1;
+};

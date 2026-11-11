@@ -1,0 +1,58 @@
+// Tags that are accepted without output: informational tags, stacked lines
+// and groups, tags on modules, classes, members, enum variants, parameters,
+// and local bindings, documentation comments before and after the tags, and
+// implemented tags used as intended.
+
+/// A module of geometry helpers.
+#[Since("0.2.0"), Stable, Author("Neura team"), Owner("geometry")]
+#License("Apache-2.0")
+let Geometry = module (
+    #SeeAlso(Geometry.Shape)
+    /// A shape with an area.
+    #Example("Geometry.area_of(new Geometry.Square())")
+    export let Shape = interface (
+        let area = func() -> int32;
+    );
+
+    #Final
+    export let Square = class implements Shape (
+        #Unit("px")
+        export let side: int32 = 2;
+
+        #[Hot, Inline(always: true)]
+        export let.override area = func() -> int32 {
+            return side * side;
+        };
+    );
+
+    #NoDiscard
+    export let area_of = func(#Note("any shape") shape: Shape) -> int32 {
+        return shape.area();
+    };
+
+    #Hidden
+    export let debug_area = func() -> int32 {
+        return 0;
+    };
+
+    export let Direction = enum (
+        #Likely North,
+        #Unlikely South,
+        #Removed("0.3.0") East,
+    );
+
+    #[Todo("cache the result"), Fixme("overflows for large sides"), Cold, NoInline]
+    export let total = func(shapes: Shape[list]) -> int32 {
+        #Todo("use a fold")
+        let sum: int32 = 0;
+        for (let shape: Shape in shapes) {
+            sum += area_of(shape);
+        }
+        return sum;
+    };
+
+    #[PreviewFeature("bulk"), Experimental("bulk"), Removed(version: "1.0.0", reason: "folded into total")]
+    export let bulk_total = func(shapes: Shape[list]) -> int32 {
+        return total(shapes);
+    };
+);

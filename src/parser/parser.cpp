@@ -415,6 +415,7 @@ private:
         if (!match("(")) return result;
         if (!at(")")) {
             do {
+                auto parameter_tags = tag_list();
                 const auto& name = identifier();
                 expect(":");
                 const bool variadic = match("...");
@@ -427,7 +428,8 @@ private:
                 }
                 if (variadic && at(","))
                     throw Diagnostic(current().span, "a variadic parameter must be last").with_code("E0207");
-                result.push_back({name.span, name.text, std::move(parameter_type), variadic});
+                result.push_back(
+                    {name.span, name.text, std::move(parameter_type), variadic, std::move(parameter_tags)});
             } while (match(","));
         }
         expect(")");
@@ -544,6 +546,137 @@ private:
                tokens_[cursor_ + offset + 1].kind == TokenKind::Identifier;
     }
 
+    // Tags (docs/lang/Tags.md):
+    //   tags := ( '#' tag | '#' '[' tag (',' tag)* [','] ']' )+
+    //   tag  := Name [ '(' [ arg (',' arg)* [','] ] ')' ]
+    //   arg  := [ident ':'] literal
+    // where a literal is a string, a number, true or false, a qualified
+    // name, or a bracketed list of those. Empty when no '#' is next.
+    std::vector<TagSyntax> tag_list() {
+        std::vector<TagSyntax> result;
+        while (at("#")) {
+            const auto hash = cursor_;
+            advance();
+            if (match("[")) {
+                do {
+                    if (at("]")) break;
+                    result.push_back(tag(cursor_));
+                } while (match(","));
+                expect("]");
+            } else {
+                result.push_back(tag(hash));
+            }
+        }
+        return result;
+    }
+
+    TagSyntax tag(std::size_t start) {
+        if (current().kind != TokenKind::Identifier) {
+            throw Diagnostic(current().span, "expected a tag name").with_code("E0910")
+                .label(current().kind == TokenKind::End ? "expected a tag name before the end of the file"
+                                                        : "expected a tag name, " + found_text(current()))
+                .help("a tag is '#Name' or '#Name(arguments)', such as '#Deprecated(use_instead: \"next\")'");
+        }
+        TagSyntax result{};
+        const auto& name = advance();
+        result.name = name.text;
+        result.name_span = name.span;
+        if (match("(")) {
+            while (!at(")")) {
+                result.arguments.push_back(tag_argument(false));
+                if (!match(",")) break;
+            }
+            expect(")");
+        }
+        result.span = span_from(start);
+        return result;
+    }
+
+    TagArgumentSyntax tag_argument(bool in_list) {
+        TagArgumentSyntax result{};
+        if (!in_list && current().kind == TokenKind::Identifier && next_is(1, ":")) {
+            result.name = current().text;
+            result.name_span = advance().span;
+            advance();
+        }
+        const auto value = cursor_;
+        const bool negative = match("-");
+        const auto& token = current();
+        if (!negative && token.kind == TokenKind::String) {
+            result.kind = TagArgumentSyntax::Kind::String;
+            result.text = decode_string_literal(advance().text);
+        } else if (token.kind == TokenKind::Integer || token.kind == TokenKind::Float) {
+            result.kind = token.kind == TokenKind::Integer ? TagArgumentSyntax::Kind::Integer
+                                                           : TagArgumentSyntax::Kind::Float;
+            result.text = (negative ? "-" : "") + advance().text;
+        } else if (!negative && (at("true") || at("false"))) {
+            result.kind = TagArgumentSyntax::Kind::Boolean;
+            result.text = advance().text;
+        } else if (!negative && token.kind == TokenKind::Identifier) {
+            result.kind = TagArgumentSyntax::Kind::Name;
+            result.text = qualified_name();
+        } else if (!negative && !in_list && match("[")) {
+            result.kind = TagArgumentSyntax::Kind::List;
+            while (!at("]")) {
+                result.items.push_back(tag_argument(true));
+                if (!match(",")) break;
+            }
+            expect("]");
+        } else {
+            cursor_ = value;
+            throw Diagnostic(current().span, "expected a tag argument").with_code("E0910")
+                .label("expected a string, a number, true or false, a name" +
+                       std::string(in_list ? "" : ", or a list") + ", " + found_text(current()))
+                .note("a tag argument is a literal, optionally written 'name: literal'");
+        }
+        // The value's span; a named argument's name has its own.
+        result.span = span_from(value);
+        return result;
+    }
+
+    // The documentation comment written among the tags that start at token
+    // `first` and end before the current token: the last one, which is the
+    // closest to the declaration.
+    std::shared_ptr<const DocComment> tag_documentation(std::size_t first) const {
+        std::shared_ptr<const DocComment> result;
+        for (auto i = first; i < cursor_; ++i)
+            if (tokens_[i].documentation) result = tokens_[i].documentation;
+        return result;
+    }
+
+    // A declaration with the tags written before it. The documentation
+    // comment may come before the tags, among them, or between them and the
+    // declaration; the one closest to the declaration documents it.
+    Declaration tagged_declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
+        if (!at("#")) return declaration(owner);
+        const auto first = cursor_;
+        auto tags = tag_list();
+        const auto documentation = tag_documentation(first);
+        const auto tags_span = span_from(first);
+        if (!at_declaration() || ((at("let") || at("const")) && next_is(1, "["))) {
+            const bool destructure = at_declaration();
+            auto error = Diagnostic(current().kind == TokenKind::End ? after_previous() : current().span,
+                                    destructure ? "tags cannot apply to a destructuring declaration"
+                                                : "expected a declaration after tags")
+                .with_code("E0909")
+                .label(destructure ? "a destructuring declaration takes no tags"
+                       : current().kind == TokenKind::End ? "expected 'let' or 'const' before the end of the file"
+                                                          : "expected 'let' or 'const', " + found_text(current()))
+                .label(tags_span, "these tags need a declaration to apply to");
+            if (!destructure) error.note("tags apply to declarations only, not to statements or expressions");
+            throw error;
+        }
+        auto result = declaration(owner);
+        if (result.name == "_") {
+            throw Diagnostic(tags_span, "tags cannot apply to '_'").with_code("E0909")
+                .label("these tags apply to nothing")
+                .label(result.name_span.value_or(result.span), "'_' declares no name");
+        }
+        if (!result.documentation) result.documentation = documentation;
+        result.tags = std::move(tags);
+        return result;
+    }
+
     Declaration declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
         const auto start = cursor_;
         bool expression_body = false;
@@ -637,12 +770,16 @@ private:
                 result.generics = generic_parameters();
                 expect("(");
                 while (!at(")")) {
+                    const auto tags_start = cursor_;
+                    auto variant_tags = tag_list();
+                    const auto variant_documentation = tag_documentation(tags_start);
                     const auto variant_start = cursor_;
                     const auto& variant = identifier();
                     Declaration member{};
                     member.kind = Declaration::Kind::Binding;
                     member.name = variant.text;
-                    member.documentation = variant.documentation;
+                    member.documentation = variant.documentation ? variant.documentation : variant_documentation;
+                    member.tags = std::move(variant_tags);
                     member.name_span = variant.span;
                     const bool positional = match("(");
                     member.named_payload = !positional && match("{");
@@ -698,7 +835,7 @@ private:
                     const auto member_start = cursor_;
                     Declaration member;
                     try {
-                        member = declaration(result.kind);
+                        member = tagged_declaration(result.kind);
                     } catch (const Diagnostic& error) {
                         recover(error, member_start);
                         skip_accessor_clauses();
@@ -873,6 +1010,12 @@ private:
     Statement statement() {
         const auto start = cursor_;
         Statement result{};
+        if (at("#")) {
+            result.kind = Statement::Kind::Binding;
+            result.declaration = std::make_unique<Declaration>(tagged_declaration());
+            result.span = result.declaration->span;
+            return result;
+        }
 
         if ((at("let") || at("const")) && tokens_[cursor_ + 1].text == "[") {
             result.kind = Statement::Kind::Destructure;

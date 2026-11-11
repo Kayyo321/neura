@@ -1,0 +1,11 @@
+error[E0916]: #NoDiscard on function 'log', which returns nothing
+ --> $DIR/no-discard-void.nra:2:1
+  |
+2 | #NoDiscard
+  | ^^^^^^^^^^ there is no result to discard
+3 | let log = func(message: string) -> void {
+  |     --- 'log' returns void
+  |
+  = help: remove #NoDiscard, or return a value
+
+For more information about this error, try `neura explain E0916`.
