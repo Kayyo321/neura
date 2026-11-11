@@ -1,4 +1,5 @@
 #include "aggregate.hpp"
+#include "attributes.hpp"
 #include "control_flow.hpp"
 #include "definite_assignment.hpp"
 #include "float.hpp"
@@ -393,6 +394,22 @@ private:
     // With `handle`, the Task<T> for the new task; without, the bare spawn
     // of a statement that discards it.
     IrNode spawn(const Expr& expr, Context& context, bool handle = true);
+
+    // Accessors of exported instance fields (Types.md, Accessors). The
+    // implementation is in lowering_accessors.inc.
+    std::map<SymbolId, const AccessorClause*> accessor_clauses_;
+    // The expression that the statement being lowered assigns to, so that a
+    // field reached through accessors is kept as a place rather than read.
+    const Expr* place_expr_ = nullptr;
+    void check_accessor_member(const Declaration& decl, SymbolId owner) const;
+    void declare_accessors(const Declaration& decl, SymbolId field);
+    void lower_accessors(SymbolId field);
+    SymbolId accessor(SymbolId field, AccessorKind kind) const;
+    IrNode route_field(IrNode field, const Expr& expr, Context& context);
+    IrNode place_expression(const Expr& expr, Context& context);
+    IrNode read_place(IrNode place, Context& context);
+    IrNode store_place(IrNode place, IrNode value, const Span& span);
+    [[noreturn]] void accessor_reference(const IrNode& place, const IrType& type) const;
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -589,6 +606,7 @@ SymbolId Lowering::function_branch(const Declaration& decl, SymbolId owner, std:
 }
 
 SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind kind) {
+    if (!decl.accessors.empty()) check_accessor_member(decl, owner);
     if (decl.name == "_" && kind != SymbolKind::Variant) {
         if (decl.kind != DeclKind::Binding || decl.exported || decl.override_member ||
             decl.static_member || !decl.initializer ||
@@ -677,6 +695,7 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         symbol(id).singleton_instance = instance;
         symbol(instance).constant = true;
     }
+    if (!decl.accessors.empty()) declare_accessors(decl, id);
     auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field
                      : kind == SymbolKind::Enum ? SymbolKind::Variant
                                                 : SymbolKind::Global;
@@ -1087,6 +1106,9 @@ bool Lowering::can_bind_reference(const IrNode& place, const IrType& type) const
 
 IrNode Lowering::bind_reference(IrNode place, const IrType& type) {
     if (place.type == type) return place;
+    if (!can_bind_reference(place, type) && place.op == IrOp::VirtualCall && place.symbol != no_symbol &&
+        has_attribute(symbol(place.symbol), AttributeId::AccessorOf))
+        accessor_reference(place, type);
     if (!can_bind_reference(place, type))
         throw Diagnostic(place.span, describe(type) + " requires mutable storage of type " +
                                      describe(symbol(reference_field(type)).type)).with_code("E0428");
@@ -2063,6 +2085,7 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
         result.type = substitute(std::move(result.type), receiver_arguments(receiver.type, symbol(target).owner));
         result.operands.clear();
         result.operands.push_back(std::move(receiver));
+        if (kind == SymbolKind::Field) return route_field(std::move(result), expr, context);
     }
     return result;
 }
@@ -2940,6 +2963,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             throw Diagnostic(expr.span, "lifecycle functions require new, super.init, or destroy").with_code("E0509");
         }
         auto result = reference(id, expr.span, context, promoted_receiver == no_symbol);
+        if (symbol(id).kind == SymbolKind::Field) result = route_field(std::move(result), expr, context);
         if (promoted_receiver != no_symbol &&
             (symbol(id).kind == SymbolKind::Function || symbol(id).kind == SymbolKind::Global)) {
             auto module = node(IrOp::Reference, expr.span, symbol(promoted_receiver).type);
@@ -3232,7 +3256,7 @@ IrNode Lowering::save_temporary(IrNode initializer, std::vector<IrNode>& instruc
 }
 
 IrNode Lowering::capture_place(const Expr& expr, std::vector<IrNode>& instructions, Context& context) {
-    auto destination = expression(expr, context);
+    auto destination = place_expression(expr, context);
     place(destination);
     if (destination.op == IrOp::Load && !destination.operands.empty() &&
         destination.operands.front().type.kind != TypeKind::Module) {
@@ -3256,16 +3280,14 @@ IrNode Lowering::update(const Expr& expr, Context& context) {
     result.type = destination.type;
 
     const bool postfix = expr.kind == ExprKind::PostfixUpdate;
-    auto previous = postfix ? save_temporary(destination, result.body, context, "$update_old") : destination;
+    auto previous = postfix ? save_temporary(read_place(destination, context), result.body, context, "$update_old")
+                            : read_place(destination, context);
     auto one = node(kind == TypeKind::Integer ? IrOp::Integer : IrOp::Float, expr.span, result.type);
     one.text = "1";
     auto updated = arithmetic(expr.text == "++" ? "+" : "-", expr.span, previous, std::move(one));
     if (!postfix)
         updated = save_temporary(std::move(updated), result.body, context, "$update_new");
-    auto store = node(IrOp::Store, expr.span);
-    store.operands.push_back(std::move(destination));
-    store.operands.push_back(updated);
-    result.body.push_back(std::move(store));
+    result.body.push_back(store_place(std::move(destination), updated, expr.span));
     result.body.push_back(postfix ? std::move(previous) : std::move(updated));
     return result;
 }
@@ -3784,14 +3806,11 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
             auto destination = capture_place(stmt.expressions[0], result.body, context);
             const auto op = stmt.assignment_operator.substr(0, stmt.assignment_operator.size() - 1);
             auto right = value(stmt.expressions[1], context, is_shift(op) ? nullptr : &destination.type);
-            auto source = arithmetic(op, stmt.span, destination, std::move(right));
-            auto store = node(IrOp::Store, stmt.span);
-            store.operands.push_back(std::move(destination));
-            store.operands.push_back(std::move(source));
-            result.body.push_back(std::move(store));
+            auto source = arithmetic(op, stmt.span, read_place(destination, context), std::move(right));
+            result.body.push_back(store_place(std::move(destination), std::move(source), stmt.span));
             return result;
         }
-        auto destination = expression(stmt.expressions[0], context);
+        auto destination = place_expression(stmt.expressions[0], context);
         if (!deferred_assignments_.contains(&stmt)) place(destination);
         if ((destination.op == IrOp::Load || destination.op == IrOp::Field) && destination.symbol != no_symbol)
             expected_origin_ = ExpectedOrigin{name_span(destination.symbol),
@@ -3799,10 +3818,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
                                                   describe(destination.type)};
         auto source = value(stmt.expressions[1], context, &destination.type);
         require_scope_local(destination, source.type, source.span, context);
-        auto result = node(IrOp::Store, stmt.span);
-        result.operands.push_back(std::move(destination));
-        result.operands.push_back(std::move(source));
-        return result;
+        return store_place(std::move(destination), std::move(source), stmt.span);
     }
     case StmtKind::Block: {
         auto result = node(IrOp::Block, stmt.span);
@@ -4518,6 +4534,7 @@ void Lowering::lower_declaration(SymbolId id) {
             }
             auto child = own_member(id, member.name);
             lower_declaration(child);
+            if (!member.accessors.empty()) lower_accessors(child);
             if (auto& initializer = entries_[child].initializer) {
                 auto instruction = node(IrOp::Initialize, member.span);
                 const auto instance = entries_[child].singleton_instance;
@@ -4710,6 +4727,8 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     lower_static_initializers(program_, singletons, linked_symbols, linked_bodies);
     return std::move(program_);
 }
+
+#include "lowering_accessors.inc"
 
 } // namespace
 
