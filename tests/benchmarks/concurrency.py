@@ -20,25 +20,45 @@ from pathlib import Path
 STEPS = '100000000000'
 
 
+def peak_resident_kib(pid):
+    """The high-water mark of the process's resident memory, from /proc, or None."""
+    try:
+        with open(f'/proc/{pid}/status', encoding='ascii') as status:
+            for line in status:
+                if line.startswith('VmHWM:'):
+                    return int(line.split()[1])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def measure(command, cwd, runs):
     """Median wall seconds and peak resident KiB over `runs`, and the output.
 
-    The peak is the child's own, read with wait4.
+    The peak is the last VmHWM reading of the child, sampled every 5 ms while
+    it runs. The mark belongs to the program's own address space, so it does
+    not include this script's memory, which the resource usage of a forked
+    child does. A rise in the final 5 ms can be missed.
     """
     times, peaks, output = [], [], None
     for _ in range(runs):
         started = time.perf_counter()
         process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out = process.stdout.read()
-        err = process.stderr.read()
-        _, status, usage = os.wait4(process.pid, 0)
-        process.returncode = os.waitstatus_to_exitcode(status)
+        peak = None
+        while process.poll() is None:
+            reading = peak_resident_kib(process.pid)
+            if reading is not None:
+                peak = reading
+            time.sleep(0.005)
         times.append(time.perf_counter() - started)
-        peaks.append(usage.ru_maxrss)
+        out, err = process.communicate()
         if process.returncode:
             raise RuntimeError(f'{command} exited {process.returncode}\n{err.decode(errors="replace")}')
         if output is not None and out != output:
             raise RuntimeError(f'{command} printed {out!r}, earlier {output!r}')
+        if peak is None:
+            raise RuntimeError(f'{command} ended before its memory could be read')
+        peaks.append(peak)
         output = out
     return statistics.median(times), statistics.median(peaks), output
 

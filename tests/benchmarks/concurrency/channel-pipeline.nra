@@ -8,7 +8,7 @@ let channels = import:Std.Concurrent.Channel;
 
 const messages: int = 200000;
 
-// A few steps of arithmetic per message, so that the channels dominate.
+// A few steps of arithmetic per message.
 let work = func(value: int) -> int {
     let x = value;
     for (let round: int = 0; round < 4; round++) {
