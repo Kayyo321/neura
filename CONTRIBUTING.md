@@ -36,6 +36,7 @@ Change the headers and loader in the neura-libclang repository, following its RE
 - For a language feature, define the syntax, static rules, observable behavior, and failure cases. Show at least one valid example and one rejected or failing example. Record any unresolved rule that the implementation would otherwise have to decide implicitly.
 - For a circuit or artifact change, describe which programs it applies to, how callers or tools observe the change, and how readers handle artifacts produced under earlier supported formats.
 - For a documentation change, update the page that owns the behavior. Keep illustrative examples and verified test fixtures distinct. When a change establishes new semantics, keep the language documentation, examples, and applicable tests in agreement.
+- For a website change, follow [website maintenance](docs/Site.md). Name the specification page that supports each new statement about Neura, and preview the change before you open the pull request.
 
 ## Locate the change in the pipeline
 
