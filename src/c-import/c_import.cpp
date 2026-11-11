@@ -184,6 +184,11 @@ public:
         index_ = lib_.clang_createIndex(0, 0);
         unit_ = parse(header_.string(), nullptr);
         const auto root = lib_.clang_getTranslationUnitCursor(unit_);
+        // The #include directives, which say what files hold this header's declarations.
+        visit(root, [&](CXCursor cursor) {
+            if (lib_.clang_getCursorKind(cursor) == CXCursor_InclusionDirective)
+                inclusions_.emplace_back(file_of(cursor), text(lib_.clang_getCursorSpelling(cursor)));
+        });
         // First pass: the typedef names of records, preferred over tags.
         visit(root, [&](CXCursor cursor) {
             if (lib_.clang_getCursorKind(cursor) == CXCursor_TypedefDecl && in_header(cursor)) {
@@ -261,14 +266,50 @@ private:
         return text(lib_.clang_getFileName(file));
     }
 
+    // Whether `file` is the imported header, or a header whose name begins
+    // with an underscore that the imported header includes, directly or
+    // through other such headers (ForeignInterop.md, C imports). C libraries
+    // keep the declarations of a public header in such files. libclang names
+    // an included file only as the directive spelled it, so a directive
+    // matches the file whose path ends with that spelling.
+    bool is_header_file(const std::string& file, std::set<std::string>& visiting) {
+        if (const auto known = header_files_.find(file); known != header_files_.end()) return known->second;
+        std::error_code ignored;
+        // The same file under another spelling counts, such as through a
+        // symbolic link in an SDK path.
+        if (fs::weakly_canonical(file, ignored) == fs::weakly_canonical(header_, ignored) ||
+            fs::equivalent(file, header_, ignored))
+            return header_files_[file] = true;
+        const fs::path path(file);
+        if (path.filename().string().rfind('_', 0) != 0) return header_files_[file] = false;
+        if (!visiting.insert(file).second) return false;
+        const auto text_path = path.generic_string();
+        bool found = false;
+        for (const auto& [includer, spelled] : inclusions_) {
+            fs::path tail;
+            for (const auto& part : fs::path(spelled).lexically_normal())
+                if (part != ".." && part != ".") tail /= part;
+            const auto wanted = "/" + tail.generic_string();
+            if (tail.empty() || text_path.size() < wanted.size() ||
+                text_path.compare(text_path.size() - wanted.size(), wanted.size(), wanted) != 0)
+                continue;
+            if (is_header_file(includer, visiting)) {
+                found = true;
+                break;
+            }
+        }
+        visiting.erase(file);
+        // A result reached while another file is being judged may rest on a
+        // cycle guard; only the outermost judgement is kept.
+        if (visiting.empty()) header_files_[file] = found;
+        return found;
+    }
+
     bool in_header(CXCursor cursor) {
         const auto file = file_of(cursor);
         if (file.empty()) return false;
-        std::error_code ignored;
-        if (fs::weakly_canonical(file, ignored) == fs::weakly_canonical(header_, ignored)) return true;
-        // The same file under another spelling, such as through a symbolic
-        // link in an SDK path.
-        return fs::equivalent(file, header_, ignored);
+        std::set<std::string> visiting;
+        return is_header_file(file, visiting);
     }
 
     std::string key(CXCursor cursor) {
@@ -1067,6 +1108,10 @@ private:
     std::map<std::string, std::string> unsupported_;
     // Functions declared in headers the imported one includes, with where.
     std::map<std::string, std::string> elsewhere_;
+    // Each #include directive as (the including file, the name as spelled),
+    // and the files already judged to be part of the header.
+    std::vector<std::pair<std::string, std::string>> inclusions_;
+    std::map<std::string, bool> header_files_;
     std::ostringstream constants_;
     std::ostringstream functions_;
     std::ostringstream shim_;
