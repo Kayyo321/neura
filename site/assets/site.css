@@ -282,8 +282,9 @@ figcaption,
   align-items: center;
   column-gap: clamp(1.75rem, 3vw, 3rem);
   width: min(90rem, 100vw - 2 * var(--gutter));
+  min-height: var(--bar);
   margin: 0 auto;
-  padding: 0.9rem 0;
+  padding: 0.35rem 0;
 }
 
 .masthead .side {
@@ -339,11 +340,15 @@ figcaption,
   display: none;
 }
 
-/* On the front page the masthead closes on a band of dither, the same counted marks as the plates. */
+/* The masthead is the same height on every page. On the front page a band of dither, the same counted marks as
+   the plates, opens the canvas below it. */
 .front .masthead {
   border-bottom: 0;
-  padding-bottom: 18px;
-  background: url("band.png") left bottom / 1440px 18px repeat-x, var(--ground);
+}
+
+.front .hero {
+  padding-top: 18px;
+  background: url("band.png") left top / 1440px 18px repeat-x;
 }
 
 /* On documentation pages the masthead stays at the top while the page scrolls. */
@@ -353,16 +358,7 @@ figcaption,
   z-index: 20;
 }
 
-.masthead-row {
-  min-height: 6.75rem;
-}
-
-.docs .masthead-row {
-  min-height: var(--bar);
-  padding: 0.35rem 0;
-}
-
-.docs .masthead {
+.masthead {
   --logo: 5.75rem;
 }
 
@@ -1442,13 +1438,11 @@ pre.numbered .line:target > a {
     grid-column: 1;
   }
 
-  .masthead,
-  .docs .masthead {
+  .masthead {
     --logo: 5rem;
   }
 
-  .masthead-row,
-  .docs .masthead-row {
+  .masthead-row {
     min-height: 4.5rem;
   }
 
@@ -1687,8 +1681,8 @@ pre.numbered .line:target > a {
     margin-inline: auto;
   }
 
-  .front .masthead {
-    background: url("band-light.png") left bottom / 1440px 18px repeat-x, var(--ground);
+  .front .hero {
+    background-image: url("band-light.png");
   }
 
   .front main {

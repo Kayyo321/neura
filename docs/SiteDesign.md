@@ -135,7 +135,7 @@ A plate reaches the documentation through `site/contents.toml`: `plate` on a sec
 
 The logo is the project's own drawing, [`artwork/logo.png`](../artwork/logo.png): a detailed eye in slate lines on a transparent ground, with white light in the iris. It is drawn for a light page, and its slate nearly vanishes on the site's ground, so the site shows the same drawing reversed, as a printer reverses a mark out of a dark field: every line keeps its shape, and its darkness becomes its opacity.
 
-`plates.py logo` writes that opacity as `site/assets/logo-mask.png`, three times the largest size a page shows it, and the tab icon `icon.png`. The stylesheet paints the mask with `mask-image` in a color of the palette, so the logo follows any change of palette without being drawn again: the reading color in the masthead and the documentation's footer, ink when pointed at, and the reading color again on the closing poster. Its size is the custom property `--logo`: 7.5 rem in the front page's masthead, 5.75 rem in the documentation's, 5 rem on a phone, and 11 rem on the poster.
+`plates.py logo` writes that opacity as `site/assets/logo-mask.png`, three times the largest size a page shows it, and the tab icon `icon.png`. The stylesheet paints the mask with `mask-image` in a color of the palette, so the logo follows any change of palette without being drawn again: the reading color in the masthead and the documentation's footer, ink when pointed at, and the reading color again on the closing poster. Its size is the custom property `--logo`: 5.75 rem in the masthead, which is the same height on every page, 5 rem on a phone, and 11 rem on the poster.
 
 ## The closing poster
 
@@ -161,4 +161,4 @@ The site writes no slogans. Its words about Neura are the repository's documents
 
 ## Bands of dither
 
-`band.png`, drawn by `plates.py band`, is a strip of ordered dither, pink into blue along its length and thinning to nothing toward its top edge. The front page repeats it under the masthead and across the top of the closing poster, so that the page's own rules are made of the same counted marks as its plates. The documentation keeps plain rules.
+`band.png`, drawn by `plates.py band`, is a strip of ordered dither, pink into blue along its length and thinning to nothing toward its top edge. The front page repeats it across the top of the opening plate, below the masthead, and across the top of the closing poster, so that the page's own rules are made of the same counted marks as its plates. The documentation keeps plain rules.
