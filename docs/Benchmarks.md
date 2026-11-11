@@ -51,7 +51,7 @@ The script writes `bench-wall.json` (every time, the outputs, steps, cells, the 
 
 ## Comparing execution tiers
 
-`neura run` evaluates proven lifted blocks natively, runs regions of them together, and evaluates other blocks by reference ([execution tiers](runtime/NVM.md#execution-tiers)). `--compare-tiers` runs each program at `--tier=0`, `--tier=1`, and `--tier=2` with the same binary, checks that all three print the same output and report the same steps and peak heap cells, and reports the three times, the speedups over tier 0, the share of steps tier 1 ran at `--tier=1`, and the share tier 2 ran inside regions at `--tier=2`, from `--tier-stats`. `--run-option` passes any other option to `neura run`.
+`neura run` evaluates proven lifted blocks natively, runs regions of them together, as native code where that is enabled, and evaluates other blocks by reference ([execution tiers](runtime/NVM.md#execution-tiers)). `--compare-tiers` runs each program at `--tier=0`, at `--tier=1`, at `--tier=2 --jit=off` (regions on the region interpreter), and, where `--jit=on` can run on the machine, at `--tier=2 --jit=on` (regions as native code, [native compilation](runtime/NVM.md#native-compilation)), with the same binary. It checks that all of them print the same output and report the same steps and peak heap cells, and reports the times, the speedups over tier 0, the ratio of native code to the region interpreter, the share of steps tier 1 ran at `--tier=1`, and the share tier 2 ran inside regions, from `--tier-stats`. `--run-option` passes any other option to `neura run`.
 
 ```sh
 python3 scripts/bench-wall.py --quick --compare-tiers --runs 3
