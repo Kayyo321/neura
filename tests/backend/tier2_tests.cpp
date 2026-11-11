@@ -336,6 +336,41 @@ NEURA_TEST(tier, every_check_of_a_region_deoptimizes_to_the_same_trap) {
     }
 }
 
+NEURA_TEST(tier, a_region_without_registers_runs_to_the_step_limit) {
+    // An empty loop: its region caches no slot and loads nothing. It runs
+    // until the step limit, which tier 1 reaches after the region's budget
+    // check hands it the last block.
+    const auto image = build_program({backend_dir(environment) / "traps" / "empty-endless-loop.nra"});
+    nvm::TierCache cache(image, eager_regions());
+    for (const std::uint64_t steps : {1ULL, 5ULL, 17ULL, 1000ULL, 100000ULL}) {
+        compare_with_tier_0(image, cache, "an empty loop with " + std::to_string(steps) + " steps", {},
+                            [&](nvm::RunLimits& limits) { limits.max_steps = steps; });
+    }
+    if (regions_enabled()) check(cache.statistics().steps.region > 0, "the empty loop ran in a region");
+}
+
+NEURA_TEST(tier, removed_overflow_checks_hold_at_the_ends_of_their_types) {
+    // Counters that start 0 to 40 below the largest int32, above the
+    // smallest int64, and below the largest uint8: `i < n` (and `i > n`)
+    // lets the region drop the increment's (and decrement's) check, and the
+    // runs still agree with tier 0; `i <= n` up to the largest int32 keeps
+    // its check and traps at the same block after the same steps.
+    const auto image = build_program({tier_program(environment, "region-counters")});
+    nvm::TierCache cache(image, eager_regions());
+    for (const int distance : {0, 1, 2, 3, 4, 5, 7, 10, 20, 40}) {
+        for (const int trap : {0, 1}) {
+            compare_with_tier_0(image, cache,
+                                "counters " + std::to_string(distance) + " below the top, trap " + std::to_string(trap),
+                                {std::to_string(distance), std::to_string(trap)});
+        }
+    }
+    if (regions_enabled()) {
+        const auto statistics = cache.statistics();
+        check(statistics.checks_eliminated >= 3, "the regions dropped the counters' checks");
+        check(statistics.region_counts.checks > 0, "the inclusive loop's check failed in a region");
+    }
+}
+
 NEURA_TEST(tier, references_are_written_back_before_a_region_ends_at_an_allocation) {
     // A local read inside a region keeps its cell alive across the
     // allocation where the region ends. Under heap limits from tight to

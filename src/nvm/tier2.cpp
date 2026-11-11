@@ -269,8 +269,12 @@ private:
         for (std::uint32_t r = 0; r < region_.slots.size(); ++r) start[r] = slot_widths_[r];
         for (const auto& constant : region_.constants) start[constant.reg] = constant.width;
         for (const auto& [reg, value] : region_.immediates) start[reg] = static_cast<std::uint8_t>(bits_of(value));
+        // `reached_` marks the ops some path reaches: a region with no
+        // registers has empty states that are still states.
         widths_.assign(size(), {});
+        reached_.assign(size(), 0);
         widths_[0] = start;
+        reached_[0] = 1;
         std::vector<std::uint32_t> work{0};
         std::vector<std::uint8_t> queued(size(), 0);
         queued[0] = 1;
@@ -287,8 +291,9 @@ private:
                 if (next >= size()) continue;
                 auto& in = widths_[next];
                 bool changed = false;
-                if (in.empty()) {
+                if (!reached_[next]) {
                     in = out;
+                    reached_[next] = 1;
                     changed = true;
                 } else {
                     for (std::uint32_t r = 0; r < count; ++r) {
@@ -326,7 +331,7 @@ private:
         std::map<std::uint32_t, std::uint32_t> renamed;
         for (std::uint32_t pc = 0; pc < size(); ++pc) {
             const auto& op = region_.code[pc];
-            if (op.code != Code::Mask || deleted_.contains(pc) || widths_[pc].empty()) continue;
+            if (op.code != Code::Mask || deleted_.contains(pc) || !reached_[pc]) continue;
             if (widths_[pc][op.a] <= op.width) {
                 renamed[op.dst] = op.a;
                 deleted_.insert(pc);
@@ -583,6 +588,7 @@ private:
     std::set<std::uint32_t> deleted_;
     std::map<std::uint32_t, std::uint64_t> immediate_values_;
     std::vector<std::vector<std::uint8_t>> widths_;
+    std::vector<std::uint8_t> reached_;
 };
 
 class Compiler {
