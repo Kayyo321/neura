@@ -262,9 +262,13 @@ add_library(neura_compiler STATIC
     src/neura-ir/reference_initialization.cpp
     src/neura-ir/reference_storage.cpp
     src/ir-optimization/analysis.cpp
+    src/ir-optimization/effects.cpp
+    src/ir-optimization/inlining.cpp
     src/ir-optimization/integer_folding.cpp
+    src/ir-optimization/locals.cpp
     src/ir-optimization/optimizer.cpp
     src/ir-optimization/passes.cpp
+    src/ir-optimization/value_passes.cpp
     src/backend/block_synth.cpp
     src/backend/circuit.cpp
     src/backend/float_circuit.cpp
@@ -474,6 +478,7 @@ if(BUILD_TESTING)
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
         tests/ir-optimization/main.cpp
+        tests/ir-optimization/pass_tests.cpp
         tests/ir-optimization/structure_tests.cpp
         tests/ir-optimization/support.cpp
         tests/ir-optimization/verifier_tests.cpp

@@ -1,0 +1,77 @@
+// Copy and constant propagation, common subexpressions, loop invariants, and
+// dead stores in a program that prints what it computes. The argument count
+// varies the inputs. tests/ir-optimization/cli.cmake builds it with and
+// without optimization and compares the runs.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Values = module:program.Entry (
+    let calls: int32 = 0;
+
+    let note = func(value: int32) -> int32 {
+        calls = calls + 1;
+        return value;
+    };
+
+    let propagate = func(seed: int32) -> int32 {
+        let step: int32 = 7;
+        let copy: int32 = seed;
+        let again: int32 = copy;
+        return again * step + copy;
+    };
+
+    let reuse = func(left: int32, right: int32) -> int32 {
+        let product: int32 = left * right;
+        note(product);
+        let twice: int32 = left * right + product;
+        let items: int32[list] = [left, right];
+        let first: int32 = items[0] + right;
+        items.append(first);
+        let length: int32 = items.length;
+        let again: int32 = items[0] + right;
+        return twice + again + length;
+    };
+
+    let hoist = func(limit: int32, base: int32) -> int32 {
+        let total: int32 = 0;
+        let index: int32 = 0;
+        while (index < limit) {
+            let large: bool = base > 3;
+            let odd: bool = (index & 1) == 1;
+            if (large && odd) {
+                total = total + index;
+            }
+            index = index + 1;
+        }
+        return total;
+    };
+
+    let dead = func(value: int32) -> int32 {
+        let scratch: int32 = 0;
+        scratch = value * 3;
+        scratch = note(value);
+        let unused: int32 = value + 1;
+        unused = note(unused);
+        return scratch;
+    };
+
+    // A propagated local captured by a closure: captures copy the value.
+    let captured = func(value: int32) -> int32 {
+        let offset: int32 = value;
+        let add = func(other: int32) -> int32 {
+            return other + offset;
+        };
+        return add(10);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let count: int32 = args.length as int32;
+        console.print_line("propagate " + propagate(count + 2).to_string());
+        console.print_line("reuse " + reuse(count + 3, count + 5).to_string());
+        console.print_line("hoist " + hoist(count * 4 + 3, count).to_string());
+        console.print_line("dead " + dead(count).to_string());
+        console.print_line("captured " + captured(count).to_string());
+        console.print_line("calls " + calls.to_string());
+        return program.ExitCode.Ok;
+    };
+);

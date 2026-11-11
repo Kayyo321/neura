@@ -64,6 +64,9 @@ function(check_both_modes label)
     endif()
     symbol_section(optimized_symbols "${optimized}")
     symbol_section(unoptimized_symbols "${unoptimized}")
+    # Inlining appends a local to the caller for each inlined parameter and
+    # local; every other symbol keeps its number and listing.
+    string(REGEX REPLACE "\n  %[0-9]+ local \"[$]inline[.][^\n]*" "" optimized_symbols "${optimized_symbols}")
     if(unoptimized MATCHES "reference_place" AND optimized MATCHES "reference_place")
         message(FATAL_ERROR "${label}: the executable IR still has a provisional reference binding")
     endif()
@@ -124,6 +127,107 @@ if(folded MATCHES "integer \"2\" : int32[^\n]*\n +integer \"3\"" OR NOT folded M
     message(FATAL_ERROR "Optimized emission should fold 2 + 3 to 5\n${folded}")
 endif()
 check_both_modes("folding fixture" "${folding}")
+
+# Optimized and unoptimized images of the same program must behave alike on
+# the NVM: the same stdout, exit status, and trap diagnostic. The diagnostic
+# is compared without the image path and the function and block numbers,
+# which name the blocks the converter built. The optimized run may consume
+# no more steps or peak heap cells than the unoptimized one
+# (docs/IrOptimization.md, "Resources").
+function(normalized_diagnostic output text)
+    string(REGEX REPLACE "(^|\n)[^\n]*: trap: " "\\1trap: " text "${text}")
+    string(REGEX REPLACE " in function [0-9]+ block [0-9]+" "" text "${text}")
+    string(REGEX REPLACE "(^|\n)(stats|gpu): [^\n]*" "" text "${text}")
+    set("${output}" "${text}" PARENT_SCOPE)
+endfunction()
+
+function(run_image prefix image)
+    execute_process(
+        COMMAND "${NEURA}" run --stats "${image}" -- ${ARGN}
+        WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+    )
+    string(REGEX MATCH "stats: steps ([0-9]+), peak heap cells ([0-9]+)" stats "${stderr}")
+    if(NOT stats)
+        message(FATAL_ERROR "${image} ${ARGN}: no statistics, status ${status}\n${stderr}")
+    endif()
+    normalized_diagnostic(diagnostic "${stderr}")
+    set("${prefix}_status" "${status}" PARENT_SCOPE)
+    set("${prefix}_stdout" "${stdout}" PARENT_SCOPE)
+    set("${prefix}_diagnostic" "${diagnostic}" PARENT_SCOPE)
+    set("${prefix}_steps" "${CMAKE_MATCH_1}" PARENT_SCOPE)
+    set("${prefix}_heap" "${CMAKE_MATCH_2}" PARENT_SCOPE)
+endfunction()
+
+# Builds `source` both ways and compares a run per argument list in ARGN;
+# each list separates its arguments with commas, and "-" stands for none.
+set(compared_runs 0)
+set(cheaper_runs 0)
+set(trapped_runs 0)
+function(compare_builds source)
+    get_filename_component(name "${source}" NAME_WE)
+    get_filename_component(directory "${source}" DIRECTORY)
+    get_filename_component(directory "${directory}" NAME)
+    set(stem "${TEST_DIR}/run-${directory}-${name}")
+    run_success(ignored build "${source}" -o "${stem}.nvr")
+    run_success(ignored build --no-optimize "${source}" -o "${stem}-unoptimized.nvr")
+    foreach(arguments IN LISTS ARGN)
+        if(arguments STREQUAL "-")
+            set(arguments "")
+        endif()
+        string(REPLACE "," ";" arguments "${arguments}")
+        set(label "${directory}/${name} [${arguments}]")
+        run_image(optimized "${stem}.nvr" ${arguments})
+        run_image(unoptimized "${stem}-unoptimized.nvr" ${arguments})
+        foreach(part IN ITEMS status stdout diagnostic)
+            if(NOT optimized_${part} STREQUAL unoptimized_${part})
+                message(FATAL_ERROR "${label}: the builds differ in ${part}\n"
+                                    "optimized:\n${optimized_${part}}\nunoptimized:\n${unoptimized_${part}}")
+            endif()
+        endforeach()
+        if(optimized_steps GREATER unoptimized_steps OR optimized_heap GREATER unoptimized_heap)
+            message(FATAL_ERROR "${label}: optimization raised a resource: steps ${unoptimized_steps} -> "
+                                "${optimized_steps}, peak heap cells ${unoptimized_heap} -> ${optimized_heap}")
+        endif()
+        math(EXPR compared_runs "${compared_runs} + 1")
+        if(optimized_steps LESS unoptimized_steps)
+            math(EXPR cheaper_runs "${cheaper_runs} + 1")
+        endif()
+        if(optimized_diagnostic MATCHES "trap: ")
+            math(EXPR trapped_runs "${trapped_runs} + 1")
+        endif()
+    endforeach()
+    set(compared_runs "${compared_runs}" PARENT_SCOPE)
+    set(cheaper_runs "${cheaper_runs}" PARENT_SCOPE)
+    set(trapped_runs "${trapped_runs}" PARENT_SCOPE)
+endfunction()
+
+set(programs "${SOURCE_DIR}/tests/ir-optimization/programs")
+compare_builds("${programs}/values.nra" - "a,b,c" "a,b,c,d,e,f")
+compare_builds("${programs}/inlining.nra" - "a1b2-c3" "zz9,x" "0123456789abc")
+# Argument counts 1, 2, 3, 6, 7, and 8 select each case with operands that
+# fit and that overflow.
+compare_builds("${programs}/traps.nra" a "a,b" "a,b,c" "a,b,c,d,e,f" "a,b,c,d,e,f,g" "a,b,c,d,e,f,g,h")
+file(GLOB backend_programs "${SOURCE_DIR}/tests/backend/programs/*.nra")
+list(SORT backend_programs)
+foreach(source IN LISTS backend_programs)
+    compare_builds("${source}" -)
+endforeach()
+# The cost benchmarks at their first size: standard library code throughout.
+file(GLOB benchmarks "${SOURCE_DIR}/tests/benchmarks/*.nra")
+list(SORT benchmarks)
+foreach(source IN LISTS benchmarks)
+    file(STRINGS "${source}" sizes_line REGEX "^// sizes: ")
+    string(REGEX MATCH "[0-9]+" size "${sizes_line}")
+    compare_builds("${source}" "${size}")
+endforeach()
+if(trapped_runs LESS 3 OR cheaper_runs EQUAL 0)
+    message(FATAL_ERROR "expected traps and cheaper optimized runs: ${trapped_runs} trapped, ${cheaper_runs} cheaper")
+endif()
+message(STATUS "Compared ${compared_runs} runs of optimized and unoptimized images: ${trapped_runs} trapped, "
+               "${cheaper_runs} took fewer steps optimized, none took more steps or peak heap cells")
 
 run_failure(check-option "--no-optimize applies only to emit-ir" check --no-optimize "${folding}")
 run_failure(unknown-option "unknown option: --optimize-harder" emit-ir --optimize-harder "${folding}")

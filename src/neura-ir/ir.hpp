@@ -185,6 +185,19 @@ struct IrNode {
     // taken, and on a Call, VirtualCall, or CallClosure when the call is
     // made. insert_polls sets it across a program that contains a Spawn.
     bool poll = false;
+    // One plus the index in IrProgram::inline_sites of the call that the
+    // optimizer inlined this node from, or 0 for a node that was not inlined.
+    std::uint32_t inline_site = 0;
+};
+
+// A call the optimizer replaced with a copy of the callee's body. `parent`
+// is the site of the call itself (one plus its index), or 0 when the call was
+// written in `caller`, so the chain of sites gives the original caller chain.
+struct IrInlineSite {
+    SymbolId callee;
+    SymbolId caller;
+    Span call;
+    std::uint32_t parent = 0;
 };
 
 // NeuraIR 1.10. An Initialize with no operand declares a local without a
@@ -235,6 +248,9 @@ struct IrProgram {
     std::vector<IrNativeUnit> native_units{};
     // The linked native library, when the program has C imports.
     std::optional<IrNativeLibrary> native_library{};
+    // Calls inlined by the optimizer; empty before optimization and not part
+    // of a .nir file, which holds IR as lowered.
+    std::vector<IrInlineSite> inline_sites{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

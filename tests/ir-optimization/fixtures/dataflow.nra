@@ -1,0 +1,253 @@
+// Copy and constant propagation, common subexpressions, loop invariants, and
+// dead stores, each next to the cases where the rewrite must not apply.
+let console = import:Std.Io.Console;
+
+let Dataflow = module (
+    export let trace: int64 = 0;
+    export let counter: int8 = 0;
+
+    // Records `tag` after the last few marks, so the final trace shows the
+    // order of the calls, then returns it.
+    export let mark = func(tag: int8) -> int8 {
+        trace = (trace % 1000000000000) * 1000 + (tag as int64) + 500;
+        return tag;
+    };
+
+    export let bump = func() -> int8 {
+        counter = counter + 1;
+        return counter;
+    };
+
+    // Copy and constant propagation.
+
+    export let propagate_constant = func(value: int8) -> int8 {
+        let step: int8 = 3;
+        let copy: int8 = value;
+        return copy + step;
+    };
+
+    export let propagate_chain = func(value: int16) -> int16 {
+        let first: int16 = value;
+        let second: int16 = first;
+        let third: int16 = second;
+        return third * 2;
+    };
+
+    export let propagate_into_loop = func(limit: int8) -> int8 {
+        let one: int8 = 1;
+        let total: int8 = 0;
+        let index: int8 = 0;
+        while (index < limit) {
+            let current: int8 = index;
+            total = total + current;
+            index = index + one;
+        }
+        return total;
+    };
+
+    export let keep_stored_local = func(value: int8) -> int8 {
+        let total: int8 = value;
+        total = total + 1;
+        return total;
+    };
+
+    export let keep_copy_of_changed_source = func(value: int8) -> int8 {
+        let source: int8 = value;
+        let copy: int8 = source;
+        source = source + 1;
+        return copy - source;
+    };
+
+    export let keep_copy_of_changed_parameter = func(value: int8) -> int8 {
+        let copy: int8 = value;
+        value = value / 2;
+        return copy + value;
+    };
+
+    // Common subexpressions.
+
+    export let reuse_across_call = func(left: int16, right: int16) -> int16 {
+        let product: int16 = left * right;
+        mark(1);
+        let again: int16 = left * right;
+        return again - product;
+    };
+
+    export let reuse_nested = func(left: int16, right: int16) -> int16 {
+        let sum: int16 = left + right;
+        if (left < right) {
+            return (left + right) / 2;
+        }
+        return mark(1) as int16 + (left + right) - sum;
+    };
+
+    export let reuse_in_loop = func(left: int16, right: int16) -> int16 {
+        let difference: int16 = left - right;
+        let total: int16 = 0;
+        let index: int16 = 0;
+        while (index < 3) {
+            total = total + (left - right);
+            index = index + 1;
+        }
+        return total - difference;
+    };
+
+    export let keep_after_operand_write = func(left: int16, right: int16) -> int16 {
+        let sum: int16 = left + right;
+        left = left / 2;
+        let again: int16 = left + right;
+        return again - sum;
+    };
+
+    export let keep_after_local_write = func(left: int16, right: int16) -> int16 {
+        let sum: int16 = left + right;
+        sum = 0;
+        let again: int16 = left + right;
+        return again - sum;
+    };
+
+    export let keep_after_global_write = func(step: int8) -> int8 {
+        let before: int8 = counter + step;
+        bump();
+        let after: int8 = counter + step;
+        return after - before;
+    };
+
+    export let keep_after_element_write = func(left: int16, right: int16) -> int16 {
+        let items: int16[] = [left, right];
+        let first: int16 = items[0] + 1;
+        items[0] = right;
+        let second: int16 = items[0] + 1;
+        return second - first;
+    };
+
+    // Loop-invariant code motion.
+
+    export let hoist_invariant = func(limit: int8, base: int16) -> int8 {
+        let total: int8 = 0;
+        let index: int8 = 0;
+        while (index < limit) {
+            let small: bool = base < 10;
+            if (small) {
+                total = total + 1;
+            }
+            index = index + 1;
+        }
+        return total;
+    };
+
+    export let keep_trapping_invariant = func(limit: int8, base: int16) -> int16 {
+        let last: int16 = 0;
+        let index: int8 = 0;
+        while (index < limit) {
+            mark(index);
+            let doubled: int16 = base * 2;
+            last = doubled;
+            index = index + 1;
+        }
+        return last;
+    };
+
+    export let keep_variant = func(limit: int8) -> int8 {
+        let count: int8 = 0;
+        let index: int8 = 0;
+        while (index < limit) {
+            let below: bool = index < 5;
+            if (below) {
+                count = count + 1;
+            }
+            index = index + 1;
+        }
+        return count;
+    };
+
+    // Dead stores.
+
+    export let drop_overwritten = func(value: int8) -> int8 {
+        let result: int8 = 0;
+        result = 5;
+        result = value + 1;
+        result = value;
+        return result;
+    };
+
+    export let drop_unread = func(value: int8) -> int8 {
+        let unused: int8 = value;
+        unused = 3;
+        unused = mark(value);
+        return value;
+    };
+
+    export let keep_read_between = func(value: int8) -> int8 {
+        let first: int8 = 0;
+        first = value;
+        let copy: int8 = first;
+        first = 2;
+        return first + copy;
+    };
+
+    export let keep_store_before_break = func(limit: int8) -> int8 {
+        let last: int8 = 0;
+        let index: int8 = 0;
+        while (index < limit) {
+            last = index;
+            if (index == 3) {
+                break;
+            }
+            last = 0;
+            index = index + 1;
+        }
+        return last;
+    };
+
+    export let keep_reference_store = func(value: int8) -> int8 {
+        let items: int8[] = [value];
+        items = [1, 2];
+        return value;
+    };
+
+    // Wider types, where boundary samples make the reused, kept, or moved
+    // operation overflow.
+
+    export let propagate_wide = func(value: uint64) -> uint64 {
+        let top: uint64 = 18446744073709551615;
+        let copy: uint64 = value;
+        return copy + top;
+    };
+
+    export let reuse_wide_product = func(left: int64, right: int64) -> int64 {
+        let product: int64 = left * right;
+        mark(2);
+        let again: int64 = left * right;
+        return again;
+    };
+
+    export let reuse_unsigned_difference = func(left: uint32, right: uint32) -> uint32 {
+        let difference: uint32 = left - right;
+        return (left - right) / 2 + difference / 2;
+    };
+
+    export let keep_dead_wide_product = func(left: int64, right: int64) -> int64 {
+        let unused: int64 = 0;
+        unused = left * right;
+        return left;
+    };
+
+    export let keep_zero_trip_trap = func(limit: int8, base: int16) -> int16 {
+        let last: int16 = 0;
+        let index: int8 = 0;
+        while (index < limit) {
+            let scaled: int16 = base * 300;
+            last = scaled;
+            index = index + 1;
+        }
+        return last;
+    };
+
+    export let keep_text_store = func(flag: bool) -> bool {
+        let label: string = "first";
+        label = "second";
+        console.print_line("done");
+        return flag;
+    };
+);

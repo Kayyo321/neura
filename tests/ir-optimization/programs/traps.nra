@@ -1,0 +1,48 @@
+// Traps reached through code the optimizer rewrites: a reused product that
+// overflows, a dead store whose value overflows, and an overflow after an
+// inlined call. The argument count selects the case and how large the
+// operands are. tests/ir-optimization/cli.cmake compares the trap text of
+// optimized and unoptimized builds.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Traps = module:program.Entry (
+    let is_small = func(value: int16) -> bool {
+        return value < 100;
+    };
+
+    let reused = func(scale: int16) -> int16 {
+        let product: int16 = scale * 1000;
+        console.print_line("first product");
+        let again: int16 = scale * 1000;
+        return again - product;
+    };
+
+    let dead = func(scale: int16) -> int16 {
+        let scratch: int16 = 0;
+        scratch = scale * 2000;
+        console.print_line("after the dead store");
+        return scale;
+    };
+
+    let after_inlined = func(scale: int16) -> int16 {
+        let small: bool = is_small(scale);
+        console.print_line("small " + small.to_string());
+        return scale * 3000;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let count: int16 = args.length as int16;
+        // One argument per case, then more arguments make the operands
+        // large enough to overflow.
+        let scale: int16 = count * count;
+        if (count % 3 == 0) {
+            console.print_line("reused " + reused(scale).to_string());
+        } else if (count % 3 == 1) {
+            console.print_line("dead " + dead(scale).to_string());
+        } else {
+            console.print_line("inlined " + after_inlined(scale).to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);
