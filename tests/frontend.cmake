@@ -22,7 +22,7 @@ function(check_rejection name source location message_pattern)
     set(file "${name}.nra")
     file(WRITE "${TEST_DIR}/${file}" "// Rejected frontend fixture.\n${source}\n")
     execute_process(
-        COMMAND "${NEURA}" check "${file}"
+        COMMAND "${NEURA}" check --error-format=short "${file}"
         WORKING_DIRECTORY "${TEST_DIR}"
         RESULT_VARIABLE status
         OUTPUT_VARIABLE stdout
@@ -31,7 +31,7 @@ function(check_rejection name source location message_pattern)
     if(NOT status MATCHES "^[1-9][0-9]*$")
         message(FATAL_ERROR "Expected ${name} to fail with a diagnostic, got ${status}\n${stdout}\n${stderr}")
     endif()
-    if(NOT stderr MATCHES "${name}[.]nra:${location}: error:" OR NOT stderr MATCHES "${message_pattern}")
+    if(NOT stderr MATCHES "${name}[.]nra:${location}: error(\\[[EW][0-9]+\\])?:" OR NOT stderr MATCHES "${message_pattern}")
         message(FATAL_ERROR "Missing diagnostic for ${name}\n${stderr}")
     endif()
 endfunction()

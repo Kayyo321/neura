@@ -33,7 +33,7 @@ endfunction()
 function(check_rejection name declarations body location message_pattern)
     write_program("${name}" "${declarations}" "${body}")
     execute_process(
-        COMMAND "${NEURA}" check "${name}.nra"
+        COMMAND "${NEURA}" check --error-format=short "${name}.nra"
         WORKING_DIRECTORY "${TEST_DIR}"
         RESULT_VARIABLE status
         OUTPUT_VARIABLE stdout
@@ -42,19 +42,19 @@ function(check_rejection name declarations body location message_pattern)
     if(NOT status MATCHES "^[1-9][0-9]*$")
         message(FATAL_ERROR "Expected ${name} to be rejected, got status ${status}\n${stdout}\n${stderr}")
     endif()
-    string(FIND "${stderr}" "${name}.nra:${location}: error: " at)
-    if(at EQUAL -1 OR NOT stderr MATCHES "${message_pattern}")
+    # The short form is the stable one-line form (Tooling.md, Diagnostics).
+    set(at_location "${name}[.]nra:${location}: error(\\[[EW][0-9]+\\])?: ")
+    if(NOT stderr MATCHES "${at_location}" OR NOT stderr MATCHES "${message_pattern}")
         message(FATAL_ERROR "${name}: expected a diagnostic at ${location} matching '${message_pattern}'\n${stderr}")
     endif()
     # `build` must refuse the same program: the checks do not depend on the command.
     execute_process(
-        COMMAND "${NEURA}" build "${name}.nra" -o "${name}.nvr"
+        COMMAND "${NEURA}" build --error-format=short "${name}.nra" -o "${name}.nvr"
         WORKING_DIRECTORY "${TEST_DIR}"
         RESULT_VARIABLE build_status
         OUTPUT_QUIET ERROR_VARIABLE build_stderr
     )
-    string(FIND "${build_stderr}" "${name}.nra:${location}: error: " build_at)
-    if(build_status STREQUAL "0" OR build_at EQUAL -1 OR EXISTS "${TEST_DIR}/${name}.nvr")
+    if(build_status STREQUAL "0" OR NOT build_stderr MATCHES "${at_location}" OR EXISTS "${TEST_DIR}/${name}.nvr")
         message(FATAL_ERROR "${name}: build did not report the same diagnostic\n${build_stderr}")
     endif()
 endfunction()

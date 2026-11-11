@@ -13,7 +13,8 @@ function(neura)
 endfunction()
 
 function(reject diagnostic)
-    execute_process(COMMAND "${NEURA}" ${ARGN}
+    # The short form is the stable one-line form (Tooling.md, Diagnostics).
+    execute_process(COMMAND "${NEURA}" ${ARGN} --error-format=short
         RESULT_VARIABLE status ERROR_VARIABLE error)
     if(NOT status STREQUAL "1" OR NOT error MATCHES "${diagnostic}")
         message(FATAL_ERROR "expected ${diagnostic} from ${ARGN}, got (${status})\n${error}")
@@ -182,13 +183,13 @@ neura(check "${artifacts}/plain-app.nra")
 file(WRITE "${artifacts}/missing-module.nra" [=[
 let missing = import:"first.nir".Missing;
 ]=])
-reject("missing-module.nra:1:[0-9]+: error:.*does not declare module 'Missing'"
+reject("missing-module.nra:1:[0-9]+: error(\\[[EW][0-9]+\\])?:.*does not declare module 'Missing'"
     check "${artifacts}/missing-module.nra")
 file(WRITE "${artifacts}/broken.nir" "invalid bytes")
 file(WRITE "${artifacts}/bad-file.nra" [=[
 let invalid = import:"broken.nir";
 ]=])
-reject("bad-file.nra:1:[0-9]+: error:.*not a NeuraIR file" check "${artifacts}/bad-file.nra")
+reject("bad-file.nra:1:[0-9]+: error(\\[[EW][0-9]+\\])?:.*not a NeuraIR file" check "${artifacts}/bad-file.nra")
 file(WRITE "${artifacts}/private.nra" [=[
 let shared = import:"shared.nir";
 let private_value = shared.initial();

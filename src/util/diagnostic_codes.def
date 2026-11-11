@@ -1,0 +1,22 @@
+// The registry of diagnostic codes, one NEURA_DIAGNOSTIC(code, title) entry
+// per code, in code order. A code is never reused or renumbered once it has
+// been released; retire it by keeping its entry.
+//
+// Ranges:
+//   E01xx  lexer               E06xx  concurrency
+//   E02xx  parser              E07xx  modules and imports
+//   E03xx  names               E08xx  backend
+//   E04xx  types and bindings  E09xx  tags
+//   E05xx  classes             W####  warnings
+//
+// Include this file after defining NEURA_DIAGNOSTIC; it undefines the macro.
+
+#ifndef NEURA_DIAGNOSTIC
+#error "define NEURA_DIAGNOSTIC(code, title) before including diagnostic_codes.def"
+#endif
+
+NEURA_DIAGNOSTIC(E0201, "expected a semicolon")
+NEURA_DIAGNOSTIC(E0301, "duplicate local binding")
+NEURA_DIAGNOSTIC(E0401, "assignment to a constant binding")
+
+#undef NEURA_DIAGNOSTIC
