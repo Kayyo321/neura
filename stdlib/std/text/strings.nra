@@ -22,21 +22,26 @@ let text_kernels = import:Std.Internal.Kernels.Text;
 #Since("0.1.0")
 export let Strings = module (
     /// @brief Constant time.
+    #[Pure, ThreadSafe]
     export let byte_length = func(s: string) -> int => s.byte_length;
 
     /// @brief The number of bytes that are not continuation bytes. Linear.
+    #[Pure, ThreadSafe]
     export let scalar_count = func(s: string) -> int => encoding_kernels.utf8_scalar_count(s) as int;
 
     /// @brief Tests whether the string has zero bytes.
+    #[Pure, ThreadSafe]
     export let is_empty = func(s: string) -> bool => s.byte_length == 0;
 
     /// @brief The byte at the offset; the built-in read traps outside the string.
+    #[Pure, ThreadSafe]
     export let byte_at = func(s: string, offset: int) -> uint8 => s.byte_at(offset);
 
     /// @brief The scalar value of the character starting at the offset.
     ///
     /// An offset outside the string is a built-in bounds trap; a continuation byte traps with "invalid
     /// argument: offset is not a character boundary".
+    #[Pure, ThreadSafe]
     export let scalar_at = func(s: string, offset: int) -> uint32 {
         if ((s.byte_at(offset) & 192) == 128) {
             trap_with_message("invalid argument: offset is not a character boundary");
@@ -46,6 +51,7 @@ export let Strings = module (
 
     /// @brief True for 0, for the byte length, and for every offset whose byte is not a continuation byte;
     /// false outside 0 through the byte length.
+    #[Pure, ThreadSafe]
     export let is_boundary = func(s: string, offset: int) -> bool {
         if (offset < 0 || offset > s.byte_length) {
             return false;
@@ -54,6 +60,7 @@ export let Strings = module (
     };
 
     /// @brief The scalar values in order.
+    #[Pure, ThreadSafe]
     export let scalars = func(s: string) -> uint32[list] {
         last values: uint32[list] = [];
         last length = s.byte_length;
@@ -67,6 +74,7 @@ export let Strings = module (
     };
 
     /// @brief Each character's starting offset with its scalar value.
+    #[Pure, ThreadSafe]
     export let scalar_offsets = func(s: string) -> [int, uint32][list] {
         last values: [int, uint32][list] = [];
         last length = s.byte_length;
@@ -80,19 +88,24 @@ export let Strings = module (
     };
 
     /// @brief The built-in slice: both ends on boundaries and start not above end.
+    #[Pure, ThreadSafe]
     export let slice = func(s: string, start: int, end: int) -> string => s.slice(start, end);
 
     /// @brief Returns the suffix beginning at a UTF-8 byte boundary.
+    #[Pure, ThreadSafe]
     export let slice_from = func(s: string, start: int) -> string => s.slice(start, s.byte_length);
 
     /// @brief Same bytes (Stdlib.md section 5.2).
+    #[Pure, ThreadSafe]
     export let equals = func(a: string, b: string) -> bool => a == b;
 
     /// @brief Start with 0; for each byte, 31 times the hash plus the byte, wrapping.
+    #[Pure, ThreadSafe]
     export let hash = func(s: string) -> uint32 => hash_kernels.string(s);
 
     /// @brief Byte-wise lexicographic order; a proper prefix sorts first. This is also the order of the scalar
     /// values.
+    #[Pure, ThreadSafe]
     export let compare = func(a: string, b: string) -> ordering.Ordering {
         last order = text_kernels.compare(a, b);
         if (order < 0) {
@@ -105,15 +118,19 @@ export let Strings = module (
     };
 
     /// @brief Tests whether the string starts with the literal prefix.
+    #[Pure, ThreadSafe]
     export let starts_with = func(s: string, prefix: string) -> bool => text_kernels.starts_with(s, prefix);
 
     /// @brief Tests whether the string ends with the literal suffix.
+    #[Pure, ThreadSafe]
     export let ends_with = func(s: string, suffix: string) -> bool => text_kernels.ends_with(s, suffix);
 
     /// @brief Tests whether the literal needle occurs anywhere in the string.
+    #[Pure, ThreadSafe]
     export let contains = func(s: string, needle: string) -> bool => text_kernels.contains(s, needle);
 
     /// @brief The offset of the first occurrence, or -1. An empty needle matches at 0.
+    #[Pure, ThreadSafe]
     export let index_of = func(s: string, needle: string) -> int => search(s, needle, 0);
 
     /// @brief The offset of the first occurrence at or after `from`, or -1. An empty needle matches at `from`.
@@ -121,9 +138,11 @@ export let Strings = module (
     ///
     /// Linear in the distance searched: a loop that calls it with `from` after each occurrence is linear in
     /// the text.
+    #[Pure, ThreadSafe]
     export let index_of_from = func(s: string, needle: string, from: int) -> int => search(s, needle, from);
 
     /// @brief The offset of the last occurrence, or -1. An empty needle matches at the byte length.
+    #[Pure, ThreadSafe]
     export let last_index_of = func(s: string, needle: string) -> int =>
         text_kernels.last_index_of(s, needle) as int;
 
@@ -131,11 +150,13 @@ export let Strings = module (
     ///
     /// Empty pieces are kept; the empty string gives one piece. An empty separator traps with "invalid
     /// argument: empty separator".
+    #[Pure, ThreadSafe]
     export let split = func(s: string, separator: string) -> string[list] =>
         split_pieces(s, separator, 2147483647);
 
     /// @brief As split, with at most `limit` pieces; the last piece holds the rest. A limit below 1 traps with
     /// "invalid argument: limit below 1".
+    #[Pure, ThreadSafe]
     export let split_limit = func(s: string, separator: string, limit: int) -> string[list] {
         if (limit < 1) {
             trap_with_message("invalid argument: limit below 1");
@@ -145,6 +166,7 @@ export let Strings = module (
 
     /// @brief Splits at LF. A CR immediately before an LF is removed, and the empty piece after a final LF is
     /// dropped. The empty string gives one empty line, as split does.
+    #[Pure, ThreadSafe]
     export let lines = func(s: string) -> string[list] {
         last pieces: string[list] = [];
         last length = s.byte_length;
@@ -164,6 +186,7 @@ export let Strings = module (
     };
 
     /// @brief The parts with the separator between each pair.
+    #ThreadSafe
     export let join = func(parts: string[list], separator: string) -> string {
         last count = parts.length;
         if (count == 0) {
@@ -187,7 +210,7 @@ export let Strings = module (
     };
 
     /// @brief `count` copies of the string. A negative count traps with "invalid argument: negative count".
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let repeat = func(s: string, count: int) -> string {
         if (count < 0) {
             trap_with_message("invalid argument: negative count");
@@ -208,7 +231,7 @@ export let Strings = module (
     };
 
     /// @brief Removes space, tab, LF, vertical tab, form feed, and CR from both ends.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let trim = func(s: string) -> string {
         last end = text_kernels.space_suffix_start(s) as int;
         let start = text_kernels.space_prefix_length(s) as int;
@@ -219,16 +242,16 @@ export let Strings = module (
     };
 
     /// @brief Removes ASCII space and bytes 9 through 13 from the start.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let trim_start = func(s: string) -> string =>
         s.slice(text_kernels.space_prefix_length(s) as int, s.byte_length);
 
     /// @brief Removes ASCII space and bytes 9 through 13 from the end.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let trim_end = func(s: string) -> string => s.slice(0, text_kernels.space_suffix_start(s) as int);
 
     /// @brief The rest of the string when it starts with the prefix.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let strip_prefix = func(s: string, prefix: string) -> optional.Optional<string> {
         if (text_kernels.starts_with(s, prefix)) {
             return optional.Optional<string>.Some(s.slice(prefix.byte_length, s.byte_length));
@@ -237,7 +260,7 @@ export let Strings = module (
     };
 
     /// @brief The start of the string when it ends with the suffix.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let strip_suffix = func(s: string, suffix: string) -> optional.Optional<string> {
         if (text_kernels.ends_with(s, suffix)) {
             return optional.Optional<string>.Some(s.slice(0, s.byte_length - suffix.byte_length));
@@ -247,31 +270,32 @@ export let Strings = module (
 
     /// @brief Replaces every non-overlapping occurrence, left to right. An empty target traps with "invalid
     /// argument: empty target".
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let replace = func(s: string, target: string, replacement: string) -> string =>
         text_kernels.replace(s, target, replacement, 2147483647);
 
     /// @brief Replaces the first occurrence. An empty target traps as in replace.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let replace_first = func(s: string, target: string, replacement: string) -> string =>
         text_kernels.replace(s, target, replacement, 1);
 
     /// @brief a through z become A through Z; every other byte is unchanged.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let to_ascii_upper = func(s: string) -> string => text_kernels.ascii_upper(s);
 
     /// @brief A through Z become a through z; every other byte is unchanged.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let to_ascii_lower = func(s: string) -> string => text_kernels.ascii_lower(s);
 
     /// @brief Equal after mapping A through Z to a through z in both strings.
+    #[Pure, ThreadSafe]
     export let equals_ignore_ascii_case = func(a: string, b: string) -> bool =>
         a == b ||
         (a.byte_length == b.byte_length && text_kernels.ascii_lower(a) == text_kernels.ascii_lower(b));
 
     /// @brief Copies of `pad` before the string until it has `width` scalar values. `pad` must be exactly one
     /// scalar value; otherwise the call traps with "invalid argument: pad is not one scalar value".
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let pad_start = func(s: string, width: int, pad: string) -> string {
         last missing = padding(s, width, pad);
         if (missing == 0) {
@@ -284,7 +308,7 @@ export let Strings = module (
     };
 
     /// @brief Copies of `pad` after the string, with the rules of pad_start.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let pad_end = func(s: string, width: int, pad: string) -> string {
         last missing = padding(s, width, pad);
         if (missing == 0) {
@@ -297,7 +321,7 @@ export let Strings = module (
     };
 
     /// @brief The scalar values in reverse order.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let reverse = func(s: string) -> string {
         last length = s.byte_length;
         last bytes: uint8[list] = [];
@@ -314,6 +338,7 @@ export let Strings = module (
     };
 
     /// @brief A copy of the UTF-8 bytes.
+    #ThreadSafe
     export let to_bytes = func(s: string) -> uint8[list] {
         last bytes: uint8[list] = [];
         append_bytes(bytes, s, 0, s.byte_length);
@@ -324,7 +349,7 @@ export let Strings = module (
     /// sequence (the length of the longest valid prefix).
     ///
     /// Its message is "invalid start byte", "invalid continuation byte", or "unexpected end of data".
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let from_bytes = func(bytes: uint8[list]) -> result.Result<string> {
         let [valid, text] = string.from_utf8(bytes);
         if (valid) {
@@ -339,7 +364,7 @@ export let Strings = module (
 
     /// @brief The text the bytes encode, with each maximal ill-formed subsequence (Unicode's "maximal subpart"
     /// practice) replaced by one U+FFFD.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let from_bytes_lossy = func(bytes: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(bytes);
         if (valid) {
@@ -368,6 +393,7 @@ export let Strings = module (
 
     /// @brief The text of the scalar values. A surrogate or a value above 0x10FFFF traps with "invalid
     /// argument: not a Unicode scalar value".
+    #ThreadSafe
     export let from_scalars = func(values: uint32[list]) -> string {
         last bytes: uint8[list] = [];
         for (let value in values) {

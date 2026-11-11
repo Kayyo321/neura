@@ -29,36 +29,36 @@ let.promote _ = import:Std.Core.Result;
 #Since("0.1.0")
 export let Base64 = module (
     /// @brief Encodes bytes with the standard alphabet and padding.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let encode = func(bytes: uint8[list]) -> string => kernels.base64_encode(bytes, false, true);
 
     /// @brief Encodes bytes with the standard alphabet and omits padding.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let encode_unpadded = func(bytes: uint8[list]) -> string => kernels.base64_encode(bytes, false, false);
 
     /// @brief Encodes bytes with the URL-safe alphabet and padding.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let encode_url = func(bytes: uint8[list]) -> string => kernels.base64_encode(bytes, true, true);
 
     /// @brief Encodes bytes with the URL-safe alphabet and omits padding.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let encode_url_unpadded = func(bytes: uint8[list]) -> string =>
         kernels.base64_encode(bytes, true, false);
 
     /// @brief Strict decoding of padded standard text.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let decode = func(text: string) -> Result<uint8[list]> => decode_with(text, false, true);
 
     /// @brief Strict decoding of unpadded standard text.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let decode_unpadded = func(text: string) -> Result<uint8[list]> => decode_with(text, false, false);
 
     /// @brief Strict decoding of padded URL-safe text.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let decode_url = func(text: string) -> Result<uint8[list]> => decode_with(text, true, true);
 
     /// @brief Strict decoding of unpadded URL-safe text.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let decode_url_unpadded = func(text: string) -> Result<uint8[list]> => decode_with(text, true, false);
 
     /// @brief Decodes with the selected alphabet and padding policy and turns a kernel failure into its
