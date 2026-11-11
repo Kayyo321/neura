@@ -14,7 +14,7 @@ let zone_offset = import:Std.Time.ZoneOffset;
 #Since("0.1.0")
 export let LocalDateTime = module (
     /// @brief An immutable local date and time without an associated UTC offset.
-    #[Final, NoDiscard]
+    #[Final, NoDiscard, Immutable, ThreadSafe]
     export let LocalDateTime = class implements Comparable<LocalDateTime> (
         /// @brief The local calendar date.
         export last date: local_date.LocalDate;
@@ -29,6 +29,7 @@ export let LocalDateTime = module (
 
         /// @brief Carries whole days into the date. Traps with "invalid argument: date out of range" when the
         /// date leaves its range.
+        #Pure
         export let plus = func(span: duration.Duration) -> LocalDateTime {
             last nanos = span.to_nanos();
             let days = calendar.floor_div(nanos, calendar.NanosPerDay);
@@ -41,6 +42,7 @@ export let LocalDateTime = module (
         };
 
         /// @brief The instant at which UTC reads this date and time minus the offset.
+        #Pure
         export let at_offset = func(offset: zone_offset.ZoneOffset) -> instant.Instant {
             last time_of_day = time.to_nano_of_day();
             last seconds = date.to_epoch_day() * calendar.SecondsPerDay + time_of_day / calendar.NanosPerSecond -
@@ -49,6 +51,7 @@ export let LocalDateTime = module (
         };
 
         /// @brief Orders by local date first and time of day second.
+        #Pure
         export let compare_to = func(other: LocalDateTime) -> Ordering {
             last by_date = date.compare_to(other.date);
             if (by_date != Ordering.Equal) {
@@ -58,6 +61,7 @@ export let LocalDateTime = module (
         };
 
         /// @brief Tests whether both date and time components are equal.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is LocalDateTime)) {
                 return false;
@@ -67,21 +71,24 @@ export let LocalDateTime = module (
         };
 
         /// @brief Combines the hashes of the date and time components.
+        #Pure
         export let.override hash_code = func -> uint32 {
             return hashing.combine(hashing.combine(17, date.hash_code()), time.hash_code());
         };
 
         /// @brief The date, T, and the time.
+        #Pure
         export let.override to_string = func -> string => date.to_string() + "T" + time.to_string();
     );
 
     /// @brief Combines a date and time of day without applying an offset.
+    #[Pure, ThreadSafe]
     export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime {
         return new(on, at);
     };
 
     /// @brief The LocalDate form, T, and the LocalTime form, with their errors.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let parse = func(text: string) -> result.Result<LocalDateTime> {
         last scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);

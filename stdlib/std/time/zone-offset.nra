@@ -10,7 +10,7 @@ let result = import:Std.Core.Result;
 #Since("0.1.0")
 export let ZoneOffset = module (
     /// @brief An immutable fixed offset from UTC with whole-minute resolution.
-    #[Final, NoDiscard]
+    #[Final, NoDiscard, Immutable, ThreadSafe]
     export let ZoneOffset = class implements Comparable<ZoneOffset> (
         /// @brief The signed offset in seconds east of UTC: -64,800 through 64,800, a multiple of 60.
         export last total_seconds: int;
@@ -21,6 +21,7 @@ export let ZoneOffset = module (
         };
 
         /// @brief By total seconds, west before east.
+        #Pure
         export let compare_to = func(other: ZoneOffset) -> Ordering {
             if (total_seconds < other.total_seconds) {
                 return Ordering.Less;
@@ -32,14 +33,17 @@ export let ZoneOffset = module (
         };
 
         /// @brief Tests equality of offsets in seconds.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             return other is ZoneOffset && total_seconds == (other as ZoneOffset).total_seconds;
         };
 
         /// @brief Hashes the offset in seconds.
+        #Pure
         export let.override hash_code = func -> uint32 => hashing.combine(17, total_seconds.hash_code());
 
         /// @brief Z for zero; otherwise +HH:MM or -HH:MM.
+        #Pure
         export let.override to_string = func -> string => calendar.offset_text(total_seconds);
     );
 
@@ -48,6 +52,7 @@ export let ZoneOffset = module (
 
     /// @brief Hours -18 through 18 and minutes -59 through 59 with the same sign (either may be zero), at most
     /// 18:00 from zero. Anything else traps with "invalid argument: invalid zone offset".
+    #[Pure, ThreadSafe]
     export let of_hours_minutes = func(hours: int, minutes: int) -> ZoneOffset {
         if (hours < -18 || hours > 18 || minutes < -59 || minutes > 59 || (hours > 0 && minutes < 0) ||
             (hours < 0 && minutes > 0)) {
@@ -64,7 +69,7 @@ export let ZoneOffset = module (
     ///
     /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an
     /// hour above 18 or a minute above 59, or at the sign when the total exceeds 18:00.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let parse = func(text: string) -> result.Result<ZoneOffset> {
         last scan = new calendar.Scanner(text);
         last total = calendar.read_offset(scan);
