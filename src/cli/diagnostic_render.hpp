@@ -63,6 +63,10 @@ public:
     // errors.
     std::size_t warnings(std::ostream& out, const std::vector<Diagnostic>& warnings);
     void print(std::ostream& out, const Diagnostic& diagnostic);
+    // Ends the human format's output: after errors with codes, the line that
+    // points to `neura explain`, once per run as rustc prints it. Prints
+    // nothing in the short and JSON formats.
+    void finish(std::ostream& out);
     const DiagnosticConfig& config() const { return config_; }
 
 private:
@@ -72,6 +76,8 @@ private:
     RenderOptions options_;
     const SourceMap& sources_;
     bool first_ = true;
+    // The codes of the errors printed, in order of first appearance.
+    std::vector<std::string> codes_;
 };
 
 } // namespace neura::cli

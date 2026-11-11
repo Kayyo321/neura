@@ -284,7 +284,21 @@ add_library(neura_decompiler STATIC
 target_link_libraries(neura_decompiler PUBLIC neura_compiler neura_nvm)
 neura_target_defaults(neura_decompiler)
 
-add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp src/launcher/descriptor.cpp)
+# `neura explain` prints the pages in docs/diagnostics, embedded here so that
+# the binary needs no documentation files at run time.
+file(GLOB neura_diagnostic_pages CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagnostics/E*.md")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${neura_diagnostic_pages})
+set(neura_diagnostic_pages_inc "")
+foreach(page IN LISTS neura_diagnostic_pages)
+    get_filename_component(code "${page}" NAME_WE)
+    file(READ "${page}" text)
+    string(APPEND neura_diagnostic_pages_inc "{\"${code}\", R\"neura_page(${text})neura_page\"},\n")
+endforeach()
+file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/diagnostic_pages.inc"
+    CONTENT "${neura_diagnostic_pages_inc}" @ONLY)
+
+add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/explain.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp
+    src/launcher/descriptor.cpp)
 target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler neura_lifecycle)
 if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(neura PRIVATE -static-libstdc++ -static-libgcc)

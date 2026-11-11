@@ -261,16 +261,32 @@ struct SuggestionLine {
 };
 
 // The edited lines that show a suggestion, or nothing when an edit is outside
-// the known sources or spans lines.
+// the known sources or spans lines. An insertion of whole lines at the start
+// of a line shows each new line, marked with '+'.
 std::optional<std::vector<SuggestionLine>> suggestion_lines(const DiagnosticSuggestion& suggestion,
                                                             const SourceMap& sources) {
     if (suggestion.edits.empty()) return std::nullopt;
     std::map<std::pair<std::string, std::size_t>, std::vector<const DiagnosticEdit*>> groups;
     std::map<std::string, std::shared_ptr<const SourceFile>> files;
+    std::vector<SuggestionLine> inserted;
     for (const auto& edit : suggestion.edits) {
         auto file = sources.find(edit.span.file);
         if (!file || edit.span.offset + edit.span.length > file->text().size()) return std::nullopt;
         const auto line = file->line_of(edit.span.offset);
+        if (edit.span.length == 0 && file->line_start(line) == edit.span.offset && edit.replacement.ends_with('\n')) {
+            std::size_t number = line;
+            for (std::size_t start = 0; start < edit.replacement.size();) {
+                const auto end = edit.replacement.find('\n', start);
+                SuggestionLine shown{file, number++, edit.replacement.substr(start, end - start), {}};
+                const auto cells_of = cells(shown.text);
+                const auto first = shown.text.find_first_not_of(' ');
+                if (first != std::string::npos)
+                    shown.marks.emplace_back(column_of(cells_of, first), total_width(cells_of), '+');
+                inserted.push_back(std::move(shown));
+                start = end + 1;
+            }
+            continue;
+        }
         const auto line_end = file->line_start(line) + file->line_text(line).size();
         if (edit.span.offset + edit.span.length > line_end || edit.replacement.find_first_of("\r\n") != std::string::npos)
             return std::nullopt;
@@ -312,6 +328,10 @@ std::optional<std::vector<SuggestionLine>> suggestion_lines(const DiagnosticSugg
         for (const auto& [begin, end, c] : bytes) shown.marks.emplace_back(column_of(line, begin), column_of(line, end), c);
         result.push_back(std::move(shown));
     }
+    for (auto& line : inserted) result.push_back(std::move(line));
+    std::ranges::stable_sort(result, [](const SuggestionLine& a, const SuggestionLine& b) {
+        return std::tie(a.file->name(), a.line) < std::tie(b.file->name(), b.line);
+    });
     return result;
 }
 
@@ -691,6 +711,9 @@ std::size_t DiagnosticPrinter::warnings(std::ostream& out, const std::vector<Dia
 }
 
 void DiagnosticPrinter::print(std::ostream& out, const Diagnostic& diagnostic) {
+    if (diagnostic.severity() == Severity::Error && !diagnostic.code().empty() &&
+        std::ranges::find(codes_, diagnostic.code()) == codes_.end())
+        codes_.emplace_back(diagnostic.code());
     switch (config_.format) {
     case ErrorFormat::Short:
         out << render_short(diagnostic);
@@ -705,6 +728,22 @@ void DiagnosticPrinter::print(std::ostream& out, const Diagnostic& diagnostic) {
         break;
     }
     first_ = false;
+}
+
+void DiagnosticPrinter::finish(std::ostream& out) {
+    if (config_.format != ErrorFormat::Human || codes_.empty()) return;
+    std::ranges::sort(codes_);
+    const Paint paint(options_.color);
+    out << '\n';
+    if (codes_.size() == 1) {
+        out << paint("For more information about this error, try `neura explain " + codes_.front() + "`.", bold)
+            << '\n';
+        return;
+    }
+    std::string list;
+    for (const auto& code : codes_) list += (list.empty() ? "" : ", ") + code;
+    out << paint("Some errors have detailed explanations: " + list + ".", bold) << '\n';
+    out << paint("For more information about an error, try `neura explain " + codes_.front() + "`.", bold) << '\n';
 }
 
 } // namespace neura::cli
