@@ -20,7 +20,7 @@ let Shapes = module (
 );
 ```
 
-`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 85 tags: 11 implemented, 17 informational, and 57 reserved. The [catalogue](#catalogue) below lists them all.
+`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 85 tags: 16 implemented, 17 informational, and 52 reserved. The [catalogue](#catalogue) below lists them all.
 
 ## Syntax
 
@@ -144,6 +144,63 @@ let save = func() -> void {
 
 `#Final` on a class forbids every subclass (`E0912`); on a method it forbids every override (`E0913`). `#Sealed` on a class or interface allows subclasses and implementations only inside the module that declares it, or inside its file when it is declared at the top of a file (`E0914`), so that every subtype is known where the type is declared. A class cannot be both `#Final` and `#Sealed`. [Polymorphism](Polymorphism.md) describes inheritance and overriding.
 
+### Pure
+
+`#Pure` on a function or method says that a call of it can be observed only through its result or its trap: the same arguments, with the same state reachable from them, give the same result or the same trap, and nothing else changes. The compiler checks it. A pure function:
+
+- writes no module, file, or static binding, and no field or element of an object it did not allocate during the call. It may build and fill objects, arrays, and lists of its own, in locals that only ever hold such new objects, and return them; a constructor and a field initializer may write the object they build;
+- reads no reassignable binding, and no `const` binding whose type is mutable (an array, a list, or a class that is not `#Immutable`); a `const` of an [immutable type](Types.md#immutable-classes) is fine;
+- makes no host request, uses no scheduler operation, and uses no object's identity (`hash_code` and `to_string` of the root class). A call of a [kernel](../runtime/Kernels.md) is pure;
+- calls no function value, and calls only pure functions. A call of a method is pure when the method and every override of it in the program are.
+
+A pure function may allocate, may trap (overflow, a bounds check, a failed cast), and may loop. A function that breaks a rule is error `E0917` at the tag, with a label at each call on the way to the first operation that breaks it, as a task-safety error labels its chain.
+
+<!-- example: check -->
+```neura
+#Pure
+let squares = func(count: int32) -> int64[list] {
+    let result: int64[list] = [];
+    for (let i = 0; i < count; i++) {
+        result.append((i as int64) * (i as int64));
+    }
+    return result;
+};
+```
+
+The optimizer uses the property the compiler infers, so an untagged pure function benefits as much as a tagged one; the tag turns "not pure" into an error ([IR optimization](../IrOptimization.md#pure-calls)). A function of a prebuilt `.nir` module counts as pure only when it carries `#Pure`, which was checked when the module was compiled: the tag is part of the module's interface, and a later version of the module cannot make a caller's `#Pure` false without changing that interface.
+
+### Immutable
+
+`#Immutable` on a class says that no field of an instance changes after construction. The compiler checks that every instance field is declared `last` or `const` (`E0918`) and has an immutable type (`E0919`): `bool`, a number, `string`, a tuple or enum whose parts are immutable, or a class marked `#Immutable`. An `#Immutable` class extends only `#Immutable` classes, and every class that extends it is `#Immutable` (`E0920`). A field whose type is a type parameter counts as immutable here; a specialization whose type arguments are mutable, such as `Pair<int32[list]>` of an `#Immutable` class `Pair<T>`, is not immutable, so tasks cannot share it. Tasks may share the instances of an `#Immutable` class ([Concurrency](Concurrency.md#51-transferable-types)).
+
+### ThreadSafe and NotThreadSafe
+
+`#ThreadSafe` on a function or method says that it is [task-safe](Concurrency.md#52-task-safe-calls). The compiler checks it with the same analysis as a `spawn`, and a function that is not task-safe is error `E0608` at the tag, with the call chain that a spawn of it would report. `#ThreadSafe` on a class says that tasks may share its instances and call every exported method: the class is `#Immutable` or a [monitor](Concurrency.md#81-monitors) (otherwise `E0609`, with a label at the member that breaks the rule), and each exported method is task-safe (`E0608`).
+
+`#NotThreadSafe` declines that promise. A spawned call or a parallel worker that reaches a `#NotThreadSafe` function, or a method of a `#NotThreadSafe` class, is error `E0601` with a label at the tag, even when the analysis would allow it, and an instance of a `#NotThreadSafe` class cannot be given to another task (`E0602`), even when the class is `#Immutable` or a monitor. The root task may use both freely. Both tags are persisted in `.nir` files, so they hold for the programs that import a module.
+
+### Synchronized
+
+`#Synchronized` on an instance method makes it run with exclusive access to its receiver: a task that calls it while another task is inside a synchronized method of the same instance waits, first come, first served. On a class it is shorthand for every exported method with a body. The accessors of a class with synchronized methods take the guard too. A synchronized method may call the synchronized methods of its own receiver: the guard is re-entrant for calls on the receiver, which differs from `Guarded.with`. A constructor, a destructor, a static function, an interface method or bodyless requirement, and a function bound to a host service or a kernel cannot be `#Synchronized` (`E0921`), and an override of a synchronized method must be `#Synchronized` too (`E0922`). [Concurrency](Concurrency.md#81-monitors) gives the rules: when tasks may share an instance, how the guard is released, and the cost.
+
+<!-- example: check -->
+```neura
+#Synchronized
+let Tally = class (
+    let count: int64 = 0;
+
+    export let add = func(amount: int64) -> int64 {
+        count = count + amount;
+        return count;
+    };
+
+    export let add_twice = func(amount: int64) -> int64 {
+        add(amount);
+        return add(amount);
+    };
+);
+```
+
 ### Inline and NoInline
 
 `#Inline(always: bool = false)` and `#NoInline` give a function or method the inlining directive that the `inline-calls` optimization pass reads ([IR optimization](../IrOptimization.md)). `#NoInline` sets the directive to never: the pass leaves every call of the function in place. `#Inline(always: true)` sets it to always, which lifts the pass's size budget. The pass still refuses a function that may trap, calls another function, is recursive, allocates, touches the heap or module state, or is part of a program that uses tasks, because inlining would change a trap's location, the frames, or the task schedule. When it refuses an `always` function, the optimizer warns once with `W0004` and the reason. `#Inline` without `always: true` records the request and leaves the decision to the pass's ordinary rules. The directive changes no output or trap: an optimized and an unoptimized build of the same program print the same thing, and only `--stats` step counts differ.
@@ -193,8 +250,8 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | `#NoDiscard(reason: string = "")` | classes, interfaces, enums, functions, methods | implemented | Discarding the result of a call warns (W0003); on a type, any call that returns it. |
 | `#Final` | classes, methods | implemented | A class that no class may extend, or a method that no method may override. |
 | `#Sealed` | classes, interfaces | implemented | Extended or implemented only inside the module or file that declares it. |
-| `#Immutable` | classes, fields, file and module bindings | reserved | No field of the value changes after construction. Instead: declare the fields with const; the compiler checks #Immutable in a later release. |
-| `#Pure` | functions, methods | reserved | No observable effects, and the same result for the same arguments. Instead: the optimizer already infers purity; the compiler checks #Pure in a later release. |
+| `#Immutable` | classes | implemented | Every instance field is `last` or `const` of an immutable type, and every base and subclass is `#Immutable` (E0918-E0920); tasks may share the instances. |
+| `#Pure` | functions, methods | implemented | Checked: no observable effect, and the same result or trap for the same arguments and state; may allocate and trap (E0917). |
 | `#Total` | functions, methods | reserved | Returns normally for every argument: never traps or loops forever. Instead: document the guarantee and test it; no analysis proves it yet. |
 | `#NoTrap` | functions, methods | reserved | Never traps. Instead: document the guarantee and test the boundary values; no analysis proves it yet. |
 | `#Idempotent` | functions, methods | reserved | Calling it twice has the effect of calling it once. Instead: document the property in the doc comment. |
@@ -228,9 +285,9 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 
 | Tag | Applies to | Status | Meaning |
 | --- | --- | --- | --- |
-| `#ThreadSafe` | modules, classes, functions, methods | reserved | Safe to use from several tasks at once. Instead: the compiler checks #ThreadSafe in a later release; `neura check --task-safety` reports it today. |
-| `#NotThreadSafe` | modules, classes, functions, methods | reserved | Must not be shared between tasks. Instead: the compiler checks #NotThreadSafe in a later release; document the restriction. |
-| `#Synchronized` | methods | reserved | The method runs under its instance's guard. Instead: keep the state in a Std.Concurrent.Guarded and call with(); #Synchronized lands in a later release. |
+| `#ThreadSafe` | classes, functions, methods | implemented | Checked: the function is task-safe (E0608), or tasks may share the class's instances and call its exported methods (E0609). |
+| `#NotThreadSafe` | classes, functions, methods | implemented | No spawned task or parallel worker may call it (E0601) or receive the class's instances (E0602). |
+| `#Synchronized` | classes, methods | implemented | The method, or every exported method of the class, runs under its instance's re-entrant guard (E0921, E0922). |
 | `#Isolated` | functions, methods | reserved | Touches no state shared with other tasks. Instead: `neura check --task-safety` reports which functions can be a parallel worker. |
 | `#Atomic` | fields, file and module bindings | reserved | Reads and writes are indivisible across tasks. Instead: use Std.Concurrent.AtomicInt64 or a Guarded. |
 | `#Blocking` | functions, methods | reserved | May wait for another task. Instead: document it; the scheduler already suspends a task that waits. |

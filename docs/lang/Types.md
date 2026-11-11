@@ -580,7 +580,9 @@ A value given to another task through `spawn` (the callee value, a method's rece
 | A tuple | When every element is |
 | A function value | When every closure of its type that the program creates has transferable captures. A named function has no captures. A closure that captures an object, array, or list is not transferable, because a copy of a closure shares what it captured. |
 | A `Std.Concurrent` handle: `Sender<T>`, `Receiver<T>`, `Closer<T>`, `Timer`, `AtomicInt64`, `Semaphore`, `Guarded<T>` | Yes, and its fields are transferable |
-| Any other class instance, including library collections, `StringBuilder`, and classes whose fields are all constant | No. Immutable classes are not transferable in this release. |
+| An instance of a class marked `#Immutable` ([below](#immutable-classes)) | When its fields are, which a specialization with mutable type arguments may not be; tasks share the instance |
+| An instance of a monitor, a class whose exported methods are all `#Synchronized` ([below](#monitors)) | Yes, for a task: tasks share the instance. Not for a parallel map item, which receives copies |
+| Any other class instance, including library collections, `StringBuilder`, classes whose fields are all constant but that are not marked `#Immutable`, and classes marked `#NotThreadSafe` | No |
 | An array or a list | No. Its elements can be assigned, so a variadic call whose arguments are packed into an array cannot be spawned. |
 | A primitive reference, `MemorySegment`, and every native handle | No |
 | `Task<T>` and `Scope` | No; they are scope-bound |
@@ -592,13 +594,48 @@ let total = func(items: int[]) -> int => items.length;
 
 `spawn total(items)` is rejected at `items` with `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A channel opened as `channels.open<result.Result<int>>(1)` is rejected with `a value of type Result<int32> is not transferable, so it cannot be a channel's element type`. An error is sent as its transferable copy, `Std.Core.Error.PortableError` ([Standard library](StandardLibrary.md)). A task returns its result to the task that joins it whatever the result's type, because nothing else can reach what the finished task built.
 
+### Immutable classes
+
+A class marked `#Immutable` promises that no field of an instance changes after its constructor returns, and the compiler checks it ([Tags](Tags.md#immutable)): every instance field is declared `last` or `const` and has an *immutable type*, and every base and subclass is `#Immutable` too.
+
+| Type | Immutable |
+| --- | --- |
+| `bool`, integers, floating-point types, `string` | Yes |
+| A tuple, or an enum whose payloads are immutable | When every element or payload is |
+| A class marked `#Immutable` | When its type arguments are |
+| A type parameter of the declaring generic class | Counts as immutable; each specialization is judged with its concrete types |
+| Arrays, lists, function values, interfaces, and other classes | No |
+
+<!-- example: check -->
+```neura
+#Immutable
+let Money = class (
+    export last currency: string;
+    export last cents: int64;
+
+    export let init = func(code: string, amount: int64) {
+        currency = code;
+        cents = amount;
+    };
+
+    export let plus = func(other: Money) -> Money => new Money(currency, cents + other.cents);
+);
+```
+
+Tasks share the instances of an `#Immutable` class: passing one to `spawn` or sending it on a channel gives the other task the same object, which neither task can change. A `const` binding of an immutable type may be read by a `#Pure` function ([Tags](Tags.md#pure)).
+
+### Monitors
+
+A *monitor* is a class whose exported methods are all `#Synchronized`: each runs with exclusive access to its receiver, under a guard per instance, and a method may call the methods of its own receiver. Tasks share a monitor's instances when its fields have transferable types and its state is reached only through the receiver of its own methods. [Concurrency, section 8.1](Concurrency.md#81-monitors) gives the rules, the guard, and the choice between a monitor and `Guarded<T>`.
+
 ### Task-safe calls
 
 A value check is not enough: a function can reach shared mutable state without being handed it. The call a `spawn` starts must be *task-safe*. Neither it nor anything it can call, transitively, may
 
 - read or write a module, file, or static binding that is reassignable or whose type is not transferable (reading a `const` of transferable type is allowed);
 - make an active use that could run a [static initializer](#static-initialization);
-- issue a request to a native library.
+- issue a request to a native library;
+- call a function or a method of a class marked `#NotThreadSafe`.
 
 For a virtual call or a call through a function value, the compiler takes the union over every override and over every function value of that type that code which can run creates (the program's own functions, initializers, and what they reach), so it can reject a call because of an implementation that never runs. Narrow the type, or pass the needed value as an argument. The diagnostic lists the chain of calls from the `spawn` to the offending operation. `neura check --task-safety` prints the verdict for every function of the program. The task that runs `main` is not restricted.
 
