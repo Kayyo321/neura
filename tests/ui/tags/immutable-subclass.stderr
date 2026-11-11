@@ -1,0 +1,13 @@
+error[E0920]: class 'Polygon' extends the #Immutable class 'Shape' and is not #Immutable
+ --> $DIR/immutable-subclass.nra:7:5
+  |
+2 | #Immutable
+  | ---------- 'Shape' is marked #Immutable here
+...
+7 | let Polygon = class:Shape (
+  |     ^^^^^^^ not #Immutable
+  |
+  = note: a value of type 'Shape' may be an instance of any subclass
+  = help: mark 'Polygon' #Immutable
+
+For more information about this error, try `neura explain E0920`.

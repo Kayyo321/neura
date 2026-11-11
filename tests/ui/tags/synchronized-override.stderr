@@ -1,0 +1,12 @@
+error[E0922]: method 'deposit' overrides a synchronized method and is not #Synchronized
+  --> $DIR/synchronized-override.nra:14:25
+   |
+ 6 |     #Synchronized
+   |     ------------- 'deposit' is synchronized here
+...
+14 |     export let.override deposit = func(amount: int64) -> int64 {
+   |                         ^^^^^^^ not synchronized
+   |
+   = help: mark the override #Synchronized, so that every implementation runs under the guard
+
+For more information about this error, try `neura explain E0922`.

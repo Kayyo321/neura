@@ -9,7 +9,9 @@
 #include "integer.hpp"
 #include "ir.hpp"
 #include "linker.hpp"
+#include "monitors.hpp"
 #include "nominal.hpp"
+#include "purity.hpp"
 #include "reference_initialization.hpp"
 #include "reference_storage.hpp"
 #include "static_initialization.hpp"
@@ -4843,6 +4845,19 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
         if (entry.singleton_instance != no_symbol) singletons.insert(entry.singleton_instance);
     }
     lower_static_initializers(program_, singletons, linked_symbols, linked_bodies);
+    // The checked tags (Tags.md): #Synchronized, #Immutable, and monitors on
+    // what this compilation declared, then #Pure over the whole program. A
+    // function of a prebuilt module is pure only when it is marked #Pure,
+    // because its tag is part of its interface.
+    declare_checked_tags(program_, linked_symbols, [&](SymbolId id) { return name_span(id); });
+    std::set<SymbolId> artifact_files;
+    for (SymbolId id = 0; id < linked_symbols; ++id) {
+        const auto& item = symbol(id);
+        if (item.kind == SymbolKind::File && item.library_path.empty() && !item.name.starts_with('<')) {
+            artifact_files.insert(id);
+        }
+    }
+    check_pure_tags(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
     return std::move(program_);
 }
 

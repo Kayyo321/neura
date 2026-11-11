@@ -1,0 +1,23 @@
+// A class with synchronized methods given to a spawned task (E0602): it is not
+// a monitor, because one exported method is not synchronized, so tasks cannot
+// share its instances. The label says which member breaks the rule.
+let Counter = class (
+    let count: int64 = 0;
+
+    #Synchronized
+    export let add = func(amount: int64) -> int64 {
+        count = count + amount;
+        return count;
+    };
+
+    export let peek = func() -> int64 => count;
+);
+
+let work = func(counter: Counter) -> int64 => counter.add(1);
+
+let run = func() {
+    let counter = new Counter();
+    scope {
+        spawn work(counter);
+    }
+};

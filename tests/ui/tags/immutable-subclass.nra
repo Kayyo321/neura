@@ -1,0 +1,9 @@
+// A subclass of an #Immutable class that is not #Immutable itself (E0920).
+#Immutable
+let Shape = class (
+    export const sides: int32 = 0;
+);
+
+let Polygon = class:Shape (
+    export let corners: int32 = 3;
+);

@@ -128,8 +128,8 @@ Each registered attribute has a stable identifier, the symbol kinds that may car
 | 6 | `class.anonymous` | class | no | `[b t p]` | An anonymous class: whether it is structural (fields only), its name (its canonical structural signature, such as `class(x: int32)`), and the occurrence's span, or for a structural class the start of its generated file ([Anonymous classes](#anonymous-classes)) |
 | 7 | `kernel.binding` | function | no | `[t u4294967295]` | A function implemented by a built-in C kernel: the kernel's name and ABI version |
 | 8 | `inline.directive` | function | no | `u2` | The optimizer's inlining directive: 0 automatic, 1 always, 2 never |
-| 9 | `synchronized` | function | no | `b` | A method that runs under its instance's guard |
-| 10 | `class.shareable` | class | no | `b` | A class whose instances may be shared between tasks |
+| 9 | `synchronized` | function | no | `b` | A method that runs under its instance's guard: one marked `#Synchronized`, an exported method of a class marked `#Synchronized`, or an accessor of a class with synchronized methods ([Concurrency](lang/Concurrency.md#81-monitors)) |
+| 10 | `class.shareable` | class | no | `b` | A monitor by its declaration: a class with synchronized methods whose exported methods are all synchronized, whose exported fields are `last` or `const` of an immutable type or have accessors, and whose base is such a class. The linked program shares its instances between tasks when the rules that depend on the whole program also hold ([Concurrency](lang/Concurrency.md#81-monitors)) |
 
 Identifier 0 is reserved, and identifiers are never reused. A new attribute takes the next free identifier and is added to this table. Registering one does not require a new format version: the version describes the encoding, and a reader that predates an identifier rejects the file as it rejects any unknown identifier.
 
@@ -142,7 +142,7 @@ The reader rejects an unknown identifier, an unknown value kind, a bool other th
 
 Linking a prebuilt module renumbers the symbol references, types, and span files in attributes, as it does for the symbol's own fields. Two definitions coalesce only when their attributes are equal. As with the 1.6 linkage fields, an embedded standard library definition without attributes still links against an installed one that has them. Specialization copies the attributes of every symbol it copies. A reference to a member of the generic class then names the instance's copy, which specialization creates if needed. A reference to a parameter or local of the copied function names its copy.
 
-No registered attribute changes the executable image. A build from source and a build from the `.nir` file it wrote produce the same image bytes. Adding attributes to a program does not change its image.
+Only `synchronized` and `class.shareable` change the executable image, and only in a program that spawns a task: a synchronized method then takes its instance's guard, and the layout of a shareable class is marked transferable ([Concurrency](lang/Concurrency.md#81-monitors)). That depends on the whole linked program, as polls do, so a module compiled alone is unaffected until it is linked into such a program. No other registered attribute changes the image; a `tag` attribute such as `#Pure` is a checked promise, and the optimizer infers the properties it uses whether or not a tag is present. A build from source and a build from the `.nir` file it wrote produce the same image bytes.
 
 #### Anonymous classes
 

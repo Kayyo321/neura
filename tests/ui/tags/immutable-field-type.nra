@@ -1,0 +1,12 @@
+// A last field of a mutable type in an #Immutable class (E0919): the list
+// can change after construction although the field cannot.
+#Immutable
+let Path = class (
+    export last name: string;
+    export last steps: int32[list];
+
+    export let init = func(label: string) {
+        name = label;
+        steps = [];
+    };
+);

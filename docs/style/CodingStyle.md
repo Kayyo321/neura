@@ -257,6 +257,35 @@ export let format_log = func(log_message: string, log_level: int) -> string {
   );
   ```
 - Avoid tags on the members of an anonymous class that should stay fields-only: a tag makes the body a class of its own, so it no longer matches the same fields written elsewhere. Declare a named class when its fields need tags.
+- Write `#Pure`, `#Immutable`, `#ThreadSafe`, and `#Synchronized` where the property is part of a declaration's contract, such as an exported function of a library or a class that tasks share; the compiler checks each one, so the tag documents a promise that holds. Do not tag a function only to help the optimizer, which infers purity on its own.
+- Mark a class `#Synchronized` when every exported method should take the guard, rather than tagging each method, and keep a monitor's methods short: a method that waits holds its guard. Keep a collection that tasks share in a `Std.Concurrent.Guarded` field or with an owner task:
+  <!-- example: check -->
+  ```neura
+  /// A count that tasks share.
+  #Synchronized
+  let Hits = class (
+      let count: int64 = 0;
+
+      export let record = func() -> int64 {
+          count = count + 1;
+          return count;
+      };
+
+      export let total = func() -> int64 => count;
+  );
+
+  /// A value that tasks share without a guard.
+  #Immutable
+  let Point = class (
+      export last x: int32;
+      export last y: int32;
+
+      export let init = func(left: int32, top: int32) {
+          x = left;
+          y = top;
+      };
+  );
+  ```
 
 ### Comments
 - Use `//` for single-line comments.

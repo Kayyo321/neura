@@ -158,6 +158,8 @@ Errors about tasks, scopes, and isolation.
 | [E0605](E0605.md) | scope-bound value leaves its scope |
 | [E0606](E0606.md) | invalid select |
 | [E0607](E0607.md) | scope block outside a function body |
+| [E0608](E0608.md) | #ThreadSafe function that is not task-safe |
+| [E0609](E0609.md) | #ThreadSafe class whose instances cannot be shared |
 
 ## E07xx: Modules and imports
 
@@ -219,6 +221,12 @@ Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
 | [E0914](E0914.md) | extension of a sealed type outside its module |
 | [E0915](E0915.md) | unknown warning in a tag |
 | [E0916](E0916.md) | result tag on a function without a result |
+| [E0917](E0917.md) | #Pure function that is not pure |
+| [E0918](E0918.md) | assignable field in an #Immutable class |
+| [E0919](E0919.md) | field of a mutable type in an #Immutable class |
+| [E0920](E0920.md) | #Immutable class with a base or subclass that is not #Immutable |
+| [E0921](E0921.md) | #Synchronized on a method without a body to guard |
+| [E0922](E0922.md) | override of a synchronized method that is not synchronized |
 
 ## Warnings
 

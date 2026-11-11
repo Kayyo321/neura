@@ -63,12 +63,11 @@ NEURA_TAG(Final, 10, Correctness, Class | Method, implemented, false, "", "0.2.0
           "a class that no class may extend, or a method that no method may override", "")
 NEURA_TAG(Sealed, 11, Correctness, Class | Interface, implemented, false, "", "0.2.0",
           "extended or implemented only inside the module or file that declares it", "")
-NEURA_TAG(Immutable, 12, Correctness, Class | Field | Global, reserved, false, "", "0.2.0",
-          "no field of the value changes after construction",
-          "declare the fields with const; the compiler checks #Immutable in a later release")
-NEURA_TAG(Pure, 13, Correctness, Callables, reserved, false, "", "0.2.0",
-          "no observable effects, and the same result for the same arguments",
-          "the optimizer already infers purity; the compiler checks #Pure in a later release")
+NEURA_TAG(Immutable, 12, Correctness, Class, implemented, false, "", "0.2.0",
+          "every field is last or const of an immutable type, and so is every subclass's; tasks may share instances",
+          "")
+NEURA_TAG(Pure, 13, Correctness, Callables, implemented, false, "", "0.2.0",
+          "checked: no observable effect, and the same result or trap for the same arguments (E0917)", "")
 NEURA_TAG(Total, 14, Correctness, Callables, reserved, false, "", "0.2.0",
           "returns normally for every argument: never traps or loops forever",
           "document the guarantee and test it; no analysis proves it yet")
@@ -126,15 +125,12 @@ NEURA_TAG(CompileTime, 36, Optimization, Callables | Values, reserved, false, ""
           "a const binding with a literal initializer is already folded; use const")
 
 // Concurrency
-NEURA_TAG(ThreadSafe, 37, Concurrency, Callables | Class | Module, reserved, false, "", "0.2.0",
-          "safe to use from several tasks at once",
-          "the compiler checks #ThreadSafe in a later release; `neura check --task-safety` reports it today")
-NEURA_TAG(NotThreadSafe, 38, Concurrency, Callables | Class | Module, reserved, false, "", "0.2.0",
-          "must not be shared between tasks",
-          "the compiler checks #NotThreadSafe in a later release; document the restriction")
-NEURA_TAG(Synchronized, 39, Concurrency, Method, reserved, false, "", "0.2.0",
-          "the method runs under its instance's guard",
-          "keep the state in a Std.Concurrent.Guarded and call with(); #Synchronized lands in a later release")
+NEURA_TAG(ThreadSafe, 37, Concurrency, Callables | Class, implemented, false, "", "0.2.0",
+          "checked: the function is task-safe, or tasks may share the class's instances and call its methods", "")
+NEURA_TAG(NotThreadSafe, 38, Concurrency, Callables | Class, implemented, false, "", "0.2.0",
+          "no spawned task or parallel worker may call it or receive the class's instances", "")
+NEURA_TAG(Synchronized, 39, Concurrency, Method | Class, implemented, false, "", "0.2.0",
+          "the method, or every exported method of the class, runs under its instance's re-entrant guard", "")
 NEURA_TAG(Isolated, 40, Concurrency, Callables, reserved, false, "", "0.2.0",
           "touches no state shared with other tasks",
           "`neura check --task-safety` reports which functions can be a parallel worker")

@@ -288,6 +288,8 @@ add_library(neura_compiler STATIC
     src/neura-ir/specialize.cpp
     src/neura-ir/static_initialization.cpp
     src/neura-ir/task_analysis.cpp
+    src/neura-ir/purity.cpp
+    src/neura-ir/monitors.cpp
     src/neura-ir/kernel_signature.cpp
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
@@ -480,6 +482,14 @@ if(BUILD_TESTING)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-schedules-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/schedules.cmake"
+    )
+
+    # Monitors: #Synchronized methods on shared instances (Concurrency.md section 8.1).
+    add_test(NAME concurrency-monitors COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-monitors-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/monitors.cmake"
     )
 
     add_test(NAME concurrency-parallel COMMAND ${CMAKE_COMMAND}

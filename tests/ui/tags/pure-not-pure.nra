@@ -1,0 +1,17 @@
+// A #Pure function that reaches a write to a module binding (E0917): the
+// error is at the tag, with the call chain to the write.
+let calls: int64 = 0;
+
+let count_call = func() -> void {
+    calls = calls + 1;
+};
+
+let scale = func(value: int64) -> int64 {
+    count_call();
+    return value * 3;
+};
+
+#Pure
+let area = func(width: int64, height: int64) -> int64 {
+    return scale(width) * height;
+};

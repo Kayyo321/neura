@@ -1,0 +1,12 @@
+error[E0918]: field 'y' of #Immutable class 'Point' can be assigned after construction
+ --> $DIR/immutable-field.nra:5:16
+  |
+2 | #Immutable
+  | ---------- 'Point' is marked #Immutable here
+...
+5 |     export let y: int32 = 0;
+  |                ^ declared with let, so it can be assigned again
+  |
+  = help: declare the field with last or const
+
+For more information about this error, try `neura explain E0918`.

@@ -1,0 +1,13 @@
+error[E0919]: field 'steps' of #Immutable class 'Path' has the mutable type int32[list]
+ --> $DIR/immutable-field-type.nra:6:17
+  |
+3 | #Immutable
+  | ---------- 'Path' is marked #Immutable here
+...
+6 |     export last steps: int32[list];
+  |                 ^^^^^ its value can change after construction
+  |
+  = note: immutable types are bool, numbers, string, tuples and enums of immutable types, and classes marked #Immutable
+  = help: store an immutable value, or mark its class #Immutable
+
+For more information about this error, try `neura explain E0919`.

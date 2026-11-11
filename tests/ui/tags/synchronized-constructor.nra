@@ -1,0 +1,10 @@
+// #Synchronized on a constructor (E0921): nothing else can reach the object
+// before its constructor returns, so there is nothing to guard.
+let Counter = class (
+    let count: int64 = 0;
+
+    #Synchronized
+    export let init = func(start: int64) {
+        count = start;
+    };
+);

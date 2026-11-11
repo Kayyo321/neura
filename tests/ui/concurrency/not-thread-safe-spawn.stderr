@@ -1,0 +1,16 @@
+error[E0601]: the spawned call is not task-safe: it reaches 'render', which is marked #NotThreadSafe
+  --> $DIR/not-thread-safe-spawn.nra:13:9
+   |
+ 4 | #NotThreadSafe
+   | -------------- is marked #NotThreadSafe here
+...
+ 9 | let work = func(value: int32) -> int32 => render(value);
+   |                                           ------------- calls 'render'
+...
+13 |         spawn work(3);
+   |         ^^^^^^^^^^^^^ this call must be task-safe
+   |               ------- calls 'work'
+   |
+   = note: `neura check --task-safety` reports for every function whether it is task-safe, and why not
+
+For more information about this error, try `neura explain E0601`.
