@@ -1,0 +1,82 @@
+// The checked tags (docs/lang/Tags.md): a monitor that tasks share, an
+// immutable value class whose instances tasks share, and pure and task-safe
+// functions. The compiler checks each promise: an exported method left out of
+// #Synchronized, a let field in the #Immutable class, or a write to a module
+// binding in a #Pure function is a compile-time error.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+/// A reading taken by one sensor. Nothing in it changes after construction,
+/// so tasks may share it.
+#Immutable
+let Reading = class (
+    export last sensor: string;
+    export last celsius: int64;
+
+    export let init = func(name: string, value: int64) {
+        sensor = name;
+        celsius = value;
+    };
+);
+
+/// Fahrenheit, rounded down. Pure: it depends only on its argument, so the
+/// optimizer may reuse a result, and the compiler checks the promise.
+#Pure
+let fahrenheit = func(celsius: int64) -> int64 => celsius * 9 / 5 + 32;
+
+/// The statistics of every reading, shared by the tasks that record them.
+/// Every exported method runs under the instance's guard.
+#Synchronized
+let Statistics = class (
+    let count: int64 = 0;
+    let total: int64 = 0;
+    let warmest: int64 = -1000;
+
+    /// The name shown in the report, read and written under the guard.
+    export let title: string = "readings";
+        | get: title;
+        | set: title = value;
+
+    export let record = func(reading: Reading) -> int64 {
+        count = count + 1;
+        total = total + reading.celsius;
+        remember_warmest(reading.celsius);
+        return count;
+    };
+
+    /// Calls record on its own receiver, which re-enters the guard it holds.
+    export let record_all = func(first: Reading, second: Reading) -> int64 {
+        record(first);
+        return record(second);
+    };
+
+    export let report = func -> string =>
+        title + ": " + count.to_string() + " readings, average " + (total / count).to_string() + " C (" +
+        fahrenheit(total / count).to_string() + " F), warmest " + warmest.to_string() + " C";
+
+    let remember_warmest = func(celsius: int64) {
+        if (celsius > warmest) {
+            warmest = celsius;
+        }
+    };
+);
+
+/// Task-safe: it touches no module state, which the compiler checks.
+#ThreadSafe
+let measure = func(statistics: Statistics, sensor: string, base: int64) -> int64 =>
+    statistics.record_all(new Reading(sensor, base), new Reading(sensor, base + 2));
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let statistics = new Statistics();
+        statistics.title = "greenhouse";
+        scope {
+            spawn measure(statistics, "north", 18);
+            spawn measure(statistics, "south", 24);
+            spawn measure(statistics, "east", 20);
+            spawn measure(statistics, "west", 22);
+        }
+        console.print_line(statistics.report());
+        return program.ExitCode.Ok;
+    };
+);

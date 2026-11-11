@@ -1,0 +1,5 @@
+visit 1 is inside; cancelling
+first (visit 1): cancelled
+second (visit 2): cancelled
+third (visit 3): cancelled
+visits: 3

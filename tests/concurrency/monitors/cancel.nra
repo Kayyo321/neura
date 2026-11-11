@@ -1,0 +1,57 @@
+// Cancellation while tasks wait for a monitor (Concurrency.md section 8.1).
+// The first task to enter Mailbox.wait_for_letter reports that it is inside,
+// then parks on a channel while it holds the mailbox's guard; the others park
+// on the guard itself. Once the root knows a task is inside, it cancels the
+// scope: the parked receive returns Cancelled, so the holder's method returns
+// and leaves the guard, and each waiting task then runs the method in turn. A
+// wait for a guard is not cancellable, like Guarded.with, so every waiter
+// still runs, and each sees the cancellation at its own receive.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
+#Synchronized
+let Mailbox = class (
+    let visits: int64 = 0;
+
+    export let wait_for_letter = func(entered: channels.Sender<int64>, letters: channels.Receiver<int64>,
+                                      name: string) -> string {
+        visits = visits + 1;
+        entered.try_send(visits);
+        let outcome = match (letters.receive()) {
+            channels.Received.Value(letter) => "letter " + letter.to_string(),
+            channels.Received.Cancelled => "cancelled",
+            _ => "closed",
+        };
+        return name + " (visit " + visits.to_string() + "): " + outcome;
+    };
+
+    export let visit_count = func -> int64 => visits;
+);
+
+let check = func(mailbox: Mailbox, entered: channels.Sender<int64>, letters: channels.Receiver<int64>,
+                 name: string) {
+    console.print_line(mailbox.wait_for_letter(entered, letters, name));
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let mailbox = new Mailbox();
+        let [entered, inside, entered_closer] = channels.open<int64>(3);
+        let [sender, letters, closer] = channels.open<int64>(0);
+        scope (waiting) {
+            spawn check(mailbox, entered, letters, "first");
+            spawn check(mailbox, entered, letters, "second");
+            spawn check(mailbox, entered, letters, "third");
+            match (inside.receive()) {
+                channels.Received.Value(visit) => {
+                    console.print_line("visit " + visit.to_string() + " is inside; cancelling");
+                },
+                _ => { },
+            }
+            waiting.cancel();
+        }
+        console.print_line("visits: " + mailbox.visit_count().to_string());
+        return program.ExitCode.Ok;
+    };
+);

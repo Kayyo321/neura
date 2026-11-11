@@ -203,6 +203,17 @@ foreach(variant IN ITEMS "" -unoptimized)
         "https://example.com/data x5, legacy x3\n256/1024\n750\n" 0 "")
 endforeach()
 
+# The checked tags: a monitor shared by tasks, an #Immutable class, and #Pure
+# and #ThreadSafe functions. The same output under any quantum, optimized or not.
+build_image("${TEST_DIR}/monitor.nvr" "${SOURCE_DIR}/examples/concurrency/monitor.nra")
+build_image("${TEST_DIR}/monitor-unoptimized.nvr" --no-optimize "${SOURCE_DIR}/examples/concurrency/monitor.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    foreach(quantum IN ITEMS 1 64 1024)
+        expect_run("checked tags example${variant}, quantum ${quantum}" "${TEST_DIR}/monitor${variant}.nvr"
+            "greenhouse: 8 readings, average 22 C (71 F), warmest 26 C\n" 0 "" --task-quantum ${quantum})
+    endforeach()
+endforeach()
+
 # Scoped tasks, a cancellable operation, and shared state: the same output
 # under any quantum.
 build_image("${TEST_DIR}/service.nvr" "${SOURCE_DIR}/examples/concurrency/service.nra")
