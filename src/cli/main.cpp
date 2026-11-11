@@ -675,7 +675,8 @@ void link_native(neura::IrProgram& program, const Options& options) {
     std::set<std::string> symbols;
     for (const auto& unit : program.native_units) {
         shim += unit.shim;
-        include_dirs.insert(fs::path(unit.header).parent_path().string());
+        if (!neura::is_system_header_directory(fs::path(unit.header).parent_path()))
+            include_dirs.insert(fs::path(unit.header).parent_path().string());
         for (const auto& library : unit.libraries)
             if (std::find(libraries.begin(), libraries.end(), library) == libraries.end()) libraries.push_back(library);
         symbols.insert(unit.symbols.begin(), unit.symbols.end());
@@ -689,17 +690,34 @@ void link_native(neura::IrProgram& program, const Options& options) {
         const char* environment = std::getenv("CC");
         compiler = environment != nullptr && *environment != '\0' ? environment : "cc";
     }
-    std::vector<std::string> command{compiler, "-shared", "-fPIC", "-O2", "-o", (directory / "neura-native.so").string(),
+#ifdef __APPLE__
+    // A Mach-O dynamic library: the install name is fixed so that the bytes
+    // do not depend on the scratch directory, and each archive is loaded
+    // whole, as --whole-archive does for an ELF link.
+    constexpr const char* object_name = "neura-native.dylib";
+    std::vector<std::string> command{compiler, "-dynamiclib", "-fPIC", "-O2", "-o", (directory / object_name).string(),
+                                     (directory / "neura-native.c").string(),
+                                     "-ffile-prefix-map=" + directory.string() + "=.", "-Wl,-install_name,neura-native"};
+#else
+    constexpr const char* object_name = "neura-native.so";
+    std::vector<std::string> command{compiler, "-shared", "-fPIC", "-O2", "-o", (directory / object_name).string(),
                                      (directory / "neura-native.c").string(),
                                      "-ffile-prefix-map=" + directory.string() + "=.", "-Wl,--build-id=none"};
+#endif
     for (const auto& dir : include_dirs) command.push_back("-I" + dir);
     for (const auto& dir : options.c_import.include_dirs) command.push_back("-I" + dir);
     for (const auto& define : options.c_import.defines) command.push_back("-D" + define);
+#ifdef __APPLE__
+    // -force_load takes archives only; an object file is always linked whole.
+    for (const auto& library : libraries)
+        command.push_back(fs::path(library).extension() == ".a" ? "-Wl,-force_load," + library : library);
+#else
     if (!libraries.empty()) {
         command.push_back("-Wl,--whole-archive");
         command.insert(command.end(), libraries.begin(), libraries.end());
         command.push_back("-Wl,--no-whole-archive");
     }
+#endif
     command.insert(command.end(), options.link_arguments.begin(), options.link_arguments.end());
     std::string output;
     const auto status = run_command(command, output, directory / "link.log");
@@ -710,7 +728,7 @@ void link_native(neura::IrProgram& program, const Options& options) {
             message += "hint: a static library linked into an image must be compiled with -fPIC\n";
         throw std::runtime_error(message);
     }
-    const auto object = read_file(directory / "neura-native.so");
+    const auto object = read_file(directory / object_name);
     fs::remove_all(directory, ignored);
     neura::IrNativeLibrary library;
     library.triple = neura::nvm::native_target_triple();
@@ -830,6 +848,11 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
     const auto file = options.launcher.value_or(directory / (options.static_launcher ? "neura-launcher-static" : "neura-launcher"));
     if (!fs::is_regular_file(file)) {
         if (options.launcher) throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
+        if (triple.ends_with("-apple-darwin")) {
+            throw std::runtime_error("--native: Neura has no native launcher for macOS (" + triple +
+                                     "); native executables are built for Linux targets only. Run the image with "
+                                     "'neura run' instead");
+        }
         throw std::runtime_error("--native: no launcher for " + triple + " in " + directory.string() +
                                  "; pass --launcher or install one");
     }

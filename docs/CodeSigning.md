@@ -21,7 +21,7 @@ Release files carry no signature from an operating-system vendor's program: no A
 
 - **Linux.** Linux has no vendor signing step for a downloaded archive. The checksum and the attestation are the evidence.
 - **Windows.** Neura has no native Windows build. On Windows, Neura is the Linux x86-64 archive run under WSL 2, where Windows does not check Authenticode signatures. There is no Windows executable or installer to sign.
-- **macOS.** No macOS archive is published ([supported platforms](Install.md#supported-platforms)), so there is nothing to notarize.
+- **macOS.** The macOS archives are not signed with an Apple Developer ID and are not notarized. The linker gives each executable an ad hoc signature, which is what Apple silicon requires to run a program and identifies nobody. macOS marks a file that a web browser downloads as quarantined and refuses to run an unsigned program from it. `curl` does not set that mark, so the [one-line install](Install.md#install-with-one-command) works. For an archive downloaded with a browser, remove the mark before unpacking it: `xattr -d com.apple.quarantine neura-<version>-<target>.tar.gz`.
 
 ### SignPath Foundation
 

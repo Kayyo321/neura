@@ -55,6 +55,16 @@ struct LibclangStatus {
     std::string resource_dir;
 };
 
+// The directories searched, in order, for a C header that no source root or
+// --c-include directory holds. On macOS they are in the SDK: the one named by
+// SDKROOT, else the developer directory's, the Command Line Tools', or Xcode's,
+// else the one `xcrun` reports. Imports parse with that SDK as -isysroot.
+std::vector<std::filesystem::path> system_header_directories();
+
+// Whether `directory` is one of those, so that a header found there needs no
+// -I. Always false outside macOS.
+bool is_system_header_directory(const std::filesystem::path& directory);
+
 LibclangStatus probe_libclang(const CImportOptions& options);
 
 // Imports `header`. `linked` says whether the import names libraries; the

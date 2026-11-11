@@ -11,7 +11,9 @@ endforeach()
 file(REMOVE_RECURSE "${TEST_DIR}")
 file(MAKE_DIRECTORY "${TEST_DIR}")
 set(tests "${SOURCE_DIR}/tests/c-import")
-file(COPY "${tests}/c-import.nra" "${tests}/qsort.nra" "${SOURCE_DIR}/tests/native/mathops.h"
+file(COPY "${tests}/c-import.nra" "${tests}/qsort.nra" "${tests}/nullability.nra" "${tests}/nullability.h"
+     "${tests}/nullability-inner.h" "${tests}/umbrella.nra" "${tests}/umbrella.h" "${tests}/_umbrella.h"
+     "${tests}/_umbrella_inner.h" "${tests}/umbrella-plain.h" "${SOURCE_DIR}/tests/native/mathops.h"
      "${SOURCE_DIR}/tests/native/mathops.c" "${NATIVE_DIR}/libmathops.a" DESTINATION "${TEST_DIR}")
 
 function(neura prefix)
@@ -40,7 +42,7 @@ function(expect_error source pattern)
 endfunction()
 
 # Programs and their output.
-foreach(name IN ITEMS c-import qsort)
+foreach(name IN ITEMS c-import qsort nullability umbrella)
     file(READ "${tests}/${name}.out" expected)
     expect_ok(build build ${name}.nra -o ${name}.nvr)
     expect_ok(run run --allow-native ${name}.nvr)
@@ -111,6 +113,14 @@ expect_error("${prefix}${body}        m.MATHOPS_TWICE(2);\n${tail}"
              "the C declaration 'MATHOPS_TWICE' was not imported: it is a function-like macro")
 expect_error("${prefix}${body}        let flags = new m.mathops_flags();\n${tail}"
              "the C declaration 'mathops_flags' was not imported: it is bit-field ready")
+# A function declared in a header that the imported one includes is not part
+# of the import, and the error says where it is declared.
+expect_error("let program = import:Std.Program;\nlet n = import:c(\"nullability.h\");\n${body}        n.abs(1);\n${tail}"
+             "the C declaration 'abs' was not imported: it is declared in nullability-inner.h, not in the imported header nullability.h")
+# An umbrella header imports the declarations of the underscore headers it
+# includes, and still not those of an include whose name has no underscore.
+expect_error("let program = import:Std.Program;\nlet u = import:c(\"umbrella.h\");\n${body}        u.atoi(\"1\");\n${tail}"
+             "the C declaration 'atoi' was not imported: it is declared in umbrella-plain.h, not in the imported header umbrella.h")
 expect_error("let missing = import:c(\"no-such-header.h\");\n" "cannot find C header 'no-such-header.h'")
 expect_error("let shared = import:c(\"mathops.h\", \"libmathops.so\");\n" "cannot find C library|links static libraries")
 file(COPY "${NATIVE_DIR}/libmathops.so" DESTINATION "${TEST_DIR}")

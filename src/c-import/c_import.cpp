@@ -4,13 +4,24 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <charconv>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
+
+#ifdef __APPLE__
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+extern char** environ;
+#endif
 
 namespace neura {
 namespace {
@@ -47,6 +58,75 @@ NeuraLibclang& libclang(const CImportOptions& options, const Span& site) {
     return *loaded;
 }
 
+#ifdef __APPLE__
+// What `xcrun --sdk macosx --show-sdk-path` prints, run without a shell; empty
+// if xcrun is missing, fails, or prints nothing.
+std::string xcrun_sdk_path() {
+    int pipe_ends[2];
+    if (::pipe(pipe_ends) != 0) return {};
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, pipe_ends[1], 1);
+    posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addclose(&actions, pipe_ends[0]);
+    posix_spawn_file_actions_addclose(&actions, pipe_ends[1]);
+    char program[] = "xcrun";
+    char sdk_flag[] = "--sdk";
+    char sdk_name[] = "macosx";
+    char query[] = "--show-sdk-path";
+    char* argv[] = {program, sdk_flag, sdk_name, query, nullptr};
+    pid_t child = 0;
+    const int spawned = ::posix_spawnp(&child, "xcrun", &actions, nullptr, argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    ::close(pipe_ends[1]);
+    std::string output;
+    if (spawned == 0) {
+        char buffer[512];
+        for (;;) {
+            const auto count = ::read(pipe_ends[0], buffer, sizeof buffer);
+            if (count <= 0) break;
+            output.append(buffer, static_cast<std::size_t>(count));
+            if (output.size() > 4096) break;
+        }
+    }
+    ::close(pipe_ends[0]);
+    if (spawned != 0) return {};
+    int status = 0;
+    while (::waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return {};
+    while (!output.empty() && (output.back() == '\n' || output.back() == '\r')) output.pop_back();
+    return output;
+}
+
+// The macOS SDK that holds the C headers (ForeignInterop.md, C imports): the
+// SDKROOT environment variable, then the SDKs of the developer directory and
+// of the Command Line Tools, and only then `xcrun`.
+fs::path macos_sdk() {
+    static const fs::path sdk = [] {
+        const auto usable = [](const fs::path& candidate) {
+            std::error_code ignored;
+            return !candidate.empty() && fs::is_regular_file(candidate / "usr/include/stdlib.h", ignored);
+        };
+        const auto environment = [](const char* name) {
+            const char* value = std::getenv(name);
+            return value != nullptr ? std::string(value) : std::string{};
+        };
+        constexpr auto platform_sdk = "Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
+        std::vector<fs::path> candidates;
+        if (const auto root = environment("SDKROOT"); !root.empty()) candidates.emplace_back(root);
+        if (const auto developer = environment("DEVELOPER_DIR"); !developer.empty())
+            candidates.push_back(fs::path(developer) / platform_sdk);
+        candidates.emplace_back("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk");
+        candidates.push_back(fs::path("/Applications/Xcode.app/Contents/Developer") / platform_sdk);
+        for (const auto& candidate : candidates)
+            if (usable(candidate)) return candidate;
+        if (const auto printed = xcrun_sdk_path(); usable(printed)) return fs::path(printed);
+        return fs::path{};
+    }();
+    return sdk;
+}
+#endif
+
 // libclang finds its builtin headers (stddef.h, stdarg.h) relative to where it
 // is installed; Debian's layout needs the directory named.
 std::string clang_resource_dir(const NeuraLibclang& lib) {
@@ -58,6 +138,22 @@ std::string clang_resource_dir(const NeuraLibclang& lib) {
         std::error_code ignored;
         if (fs::exists(candidate / "include/stddef.h", ignored)) return candidate.string();
     }
+#ifdef __APPLE__
+    // Apple's toolchains name the directory by their own version, which an
+    // older Xcode writes in full (15.0.0). Take the highest one that has the
+    // builtin headers, beside the libclang that was loaded.
+    if (lib.path[0] != '\0') {
+        std::error_code ignored;
+        std::vector<fs::path> found;
+        for (const auto& entry : fs::directory_iterator(fs::path(lib.path).parent_path() / "clang", ignored)) {
+            if (fs::exists(entry.path() / "include/stddef.h", ignored)) found.push_back(entry.path());
+        }
+        std::ranges::sort(found, [](const fs::path& left, const fs::path& right) {
+            return left.filename().string() < right.filename().string();
+        });
+        if (!found.empty()) return found.back().string();
+    }
+#endif
     return {};
 }
 
@@ -69,16 +165,30 @@ public:
           options_(options), site_(site) {}
 
     CImportResult run() {
-        arguments_ = {"-x", "c", "-std=gnu11", "-I" + header_.parent_path().string()};
+        arguments_ = {"-x", "c", "-std=gnu11"};
+        if (!is_system_header_directory(header_.parent_path()))
+            arguments_.push_back("-I" + header_.parent_path().string());
         for (const auto& dir : options_.include_dirs) arguments_.push_back("-I" + dir);
         for (const auto& define : options_.defines) arguments_.push_back("-D" + define);
         if (const auto resource = resource_dir(); !resource.empty()) {
             arguments_.push_back("-resource-dir");
             arguments_.push_back(resource);
         }
+#ifdef __APPLE__
+        // The C headers are in the SDK, which libclang does not look for.
+        if (const auto sdk = macos_sdk(); !sdk.empty()) {
+            arguments_.push_back("-isysroot");
+            arguments_.push_back(sdk.string());
+        }
+#endif
         index_ = lib_.clang_createIndex(0, 0);
         unit_ = parse(header_.string(), nullptr);
         const auto root = lib_.clang_getTranslationUnitCursor(unit_);
+        // The #include directives, which say what files hold this header's declarations.
+        visit(root, [&](CXCursor cursor) {
+            if (lib_.clang_getCursorKind(cursor) == CXCursor_InclusionDirective)
+                inclusions_.emplace_back(file_of(cursor), text(lib_.clang_getCursorSpelling(cursor)));
+        });
         // First pass: the typedef names of records, preferred over tags.
         visit(root, [&](CXCursor cursor) {
             if (lib_.clang_getCursorKind(cursor) == CXCursor_TypedefDecl && in_header(cursor)) {
@@ -156,11 +266,50 @@ private:
         return text(lib_.clang_getFileName(file));
     }
 
+    // Whether `file` is the imported header, or a header whose name begins
+    // with an underscore that the imported header includes, directly or
+    // through other such headers (ForeignInterop.md, C imports). C libraries
+    // keep the declarations of a public header in such files. libclang names
+    // an included file only as the directive spelled it, so a directive
+    // matches the file whose path ends with that spelling.
+    bool is_header_file(const std::string& file, std::set<std::string>& visiting) {
+        if (const auto known = header_files_.find(file); known != header_files_.end()) return known->second;
+        std::error_code ignored;
+        // The same file under another spelling counts, such as through a
+        // symbolic link in an SDK path.
+        if (fs::weakly_canonical(file, ignored) == fs::weakly_canonical(header_, ignored) ||
+            fs::equivalent(file, header_, ignored))
+            return header_files_[file] = true;
+        const fs::path path(file);
+        if (path.filename().string().rfind('_', 0) != 0) return header_files_[file] = false;
+        if (!visiting.insert(file).second) return false;
+        const auto text_path = path.generic_string();
+        bool found = false;
+        for (const auto& [includer, spelled] : inclusions_) {
+            fs::path tail;
+            for (const auto& part : fs::path(spelled).lexically_normal())
+                if (part != ".." && part != ".") tail /= part;
+            const auto wanted = "/" + tail.generic_string();
+            if (tail.empty() || text_path.size() < wanted.size() ||
+                text_path.compare(text_path.size() - wanted.size(), wanted.size(), wanted) != 0)
+                continue;
+            if (is_header_file(includer, visiting)) {
+                found = true;
+                break;
+            }
+        }
+        visiting.erase(file);
+        // A result reached while another file is being judged may rest on a
+        // cycle guard; only the outermost judgement is kept.
+        if (visiting.empty()) header_files_[file] = found;
+        return found;
+    }
+
     bool in_header(CXCursor cursor) {
         const auto file = file_of(cursor);
         if (file.empty()) return false;
-        std::error_code ignored;
-        return fs::weakly_canonical(file, ignored) == fs::weakly_canonical(header_, ignored);
+        std::set<std::string> visiting;
+        return is_header_file(file, visiting);
     }
 
     std::string key(CXCursor cursor) {
@@ -252,8 +401,11 @@ private:
         case CXType_Char32: return integer(canonical, false);
         case CXType_Float: return scalar("Float32", "float32", canonical);
         case CXType_Double: return scalar("Float64", "float64", canonical);
-        case CXType_Pointer:
-        case CXType_BlockPointer: {
+        case CXType_BlockPointer:
+            // A block is an object, not a code address: a function stub
+            // cannot stand in for one.
+            return unsupported("a block pointer");
+        case CXType_Pointer: {
             Mapped mapped;
             mapped.kind = Mapped::Kind::Pointer;
             const auto pointee = lib_.clang_getPointeeType(canonical);
@@ -508,7 +660,18 @@ private:
     // --- Declarations ---------------------------------------------------------
 
     void declaration(CXCursor cursor) {
-        if (!in_header(cursor)) return;
+        if (!in_header(cursor)) {
+            // Say where a function went, if it is asked for: a declaration
+            // that comes from an included header is not part of this import.
+            if (lib_.clang_getCursorKind(cursor) == CXCursor_FunctionDecl) {
+                const auto where = file_of(cursor);
+                if (!where.empty())
+                    elsewhere_.emplace(neura_name(text(lib_.clang_getCursorSpelling(cursor))),
+                                       "declared in " + fs::path(where).filename().generic_string() +
+                                           ", not in the imported header " + header_.filename().generic_string());
+            }
+            return;
+        }
         switch (lib_.clang_getCursorKind(cursor)) {
         case CXCursor_FunctionDecl: function(cursor); break;
         case CXCursor_StructDecl:
@@ -922,6 +1085,8 @@ private:
         out << functions_.str();
         out << ");\n";
         result.source = out.str();
+        for (const auto& [name, reason] : elsewhere_)
+            if (!names_.contains(name)) result.unsupported.emplace(name, reason);
         return result;
     }
 
@@ -941,6 +1106,12 @@ private:
     std::set<std::string> symbols_;
     std::vector<std::string> macro_names_;
     std::map<std::string, std::string> unsupported_;
+    // Functions declared in headers the imported one includes, with where.
+    std::map<std::string, std::string> elsewhere_;
+    // Each #include directive as (the including file, the name as spelled),
+    // and the files already judged to be part of the header.
+    std::vector<std::pair<std::string, std::string>> inclusions_;
+    std::map<std::string, bool> header_files_;
     std::ostringstream constants_;
     std::ostringstream functions_;
     std::ostringstream shim_;
@@ -948,6 +1119,31 @@ private:
 };
 
 } // namespace
+
+std::vector<std::filesystem::path> system_header_directories() {
+#ifdef __APPLE__
+    // The C headers are in the SDK; there is no /usr/include.
+    std::vector<fs::path> directories{"/usr/local/include"};
+    if (const auto sdk = macos_sdk(); !sdk.empty()) directories.push_back(sdk / "usr/include");
+    return directories;
+#else
+    return {"/usr/local/include", "/usr/include/x86_64-linux-gnu", "/usr/include/aarch64-linux-gnu", "/usr/include"};
+#endif
+}
+
+bool is_system_header_directory(const std::filesystem::path& directory) {
+#ifdef __APPLE__
+    // clang drops a -I directory that is also a system directory. Naming the
+    // SDK's usr/include with -I would put it ahead of the builtin headers.
+    std::error_code ignored;
+    const auto canonical = fs::weakly_canonical(directory, ignored);
+    for (const auto& system : system_header_directories())
+        if (canonical == fs::weakly_canonical(system, ignored)) return true;
+#else
+    (void)directory;
+#endif
+    return false;
+}
 
 LibclangStatus probe_libclang(const CImportOptions& options) {
     LibclangStatus status;

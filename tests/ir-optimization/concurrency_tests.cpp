@@ -16,6 +16,10 @@
 #include <thread>
 #include <set>
 
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+
 namespace neura::testing {
 namespace {
 
@@ -369,6 +373,17 @@ NEURA_TEST(concurrency, the_comparison_notices_a_removed_poll) {
 // the process, so an unjoined one would end this test run). Only a thread that
 // is still alive shows in /proc/self/task, so that is what is counted.
 NEURA_TEST(concurrency, every_task_thread_is_joined_on_every_exit_path) {
+#ifdef __APPLE__
+    // macOS has no procfs: the kernel lists the task's threads instead.
+    const auto threads = [] {
+        thread_act_array_t list = nullptr;
+        mach_msg_type_number_t count = 0;
+        if (::task_threads(::mach_task_self(), &list, &count) != KERN_SUCCESS) return std::optional<std::size_t>{};
+        for (mach_msg_type_number_t i = 0; i < count; ++i) ::mach_port_deallocate(::mach_task_self(), list[i]);
+        ::vm_deallocate(::mach_task_self(), reinterpret_cast<vm_address_t>(list), count * sizeof(thread_act_t));
+        return std::optional<std::size_t>{count};
+    };
+#else
     const auto threads = [] {
         std::size_t count = 0;
         std::error_code error;
@@ -378,6 +393,7 @@ NEURA_TEST(concurrency, every_task_thread_is_joined_on_every_exit_path) {
         }
         return error ? std::optional<std::size_t>{} : std::optional{count};
     };
+#endif
     const auto start = threads();
     std::set<Status> exits;
     for (const auto& fixture : concurrency_fixtures(environment)) {
@@ -407,7 +423,7 @@ NEURA_TEST(concurrency, every_task_thread_is_joined_on_every_exit_path) {
     check(exits.contains(Status::Returned) && exits.contains(Status::Trapped) && exits.contains(Status::Exited) &&
               exits.contains(Status::LimitReached),
           "the runs did not cover returning, trapping, exiting, and the task limit");
-    if (!start) std::cout << "  /proc is not available: thread counts were not checked\n";
+    if (!start) std::cout << "  this platform lists no threads: thread counts were not checked\n";
 }
 
 } // namespace neura::testing

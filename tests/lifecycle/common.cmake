@@ -5,7 +5,9 @@
 # reads its standard input from /dev/null, and updates use `--source <dir>`.
 
 find_program(LC_SH sh REQUIRED)
-find_program(LC_TAR tar REQUIRED)
+# The tests pack archives with GNU tar options (--transform). On macOS tar is
+# bsdtar, which has none; Homebrew's gnu-tar installs as gtar.
+find_program(LC_TAR NAMES gtar tar REQUIRED)
 
 # lc_exec(<prefix> [ENV NAME=value...] [WORKING_DIRECTORY dir] COMMAND args...)
 # Runs the command and sets <prefix>_STATUS, <prefix>_OUT, and <prefix>_ERR.

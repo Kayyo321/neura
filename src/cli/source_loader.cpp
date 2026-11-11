@@ -42,9 +42,7 @@ fs::path find_c_header(const std::string& header, const fs::path& base, const st
     std::vector<fs::path> directories{base};
     directories.insert(directories.end(), roots.begin(), roots.end());
     for (const auto& dir : c_import_options.include_dirs) directories.emplace_back(dir);
-    for (const auto* dir : {"/usr/local/include", "/usr/include/x86_64-linux-gnu", "/usr/include/aarch64-linux-gnu",
-                            "/usr/include"})
-        directories.emplace_back(dir);
+    for (auto& dir : system_header_directories()) directories.push_back(std::move(dir));
     if (name.is_absolute() && fs::is_regular_file(name)) return fs::canonical(name);
     for (const auto& dir : directories) {
         std::error_code ignored;

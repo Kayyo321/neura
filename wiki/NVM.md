@@ -142,7 +142,7 @@ The standard console service is `neura.console.write_line` version 1. It takes a
 | `neura.fs.seek` | int64 ID, int64 offset, int32 origin | int64 | Origin is the `SeekOrigin` ordinal: Start, Current, End |
 | `neura.fs.close` | int64 ID | void | Releases the ID |
 | `neura.fs.stat` | text path, bool follow links | [int32 kind, int64 size, int64 seconds, int32 nanoseconds] | Kind is the `FileKind` ordinal: File, Directory, Other |
-| `neura.fs.list` | text path | text list | Entry names sorted by their UTF-8 bytes |
+| `neura.fs.list` | text path | text list | Entry names sorted by their UTF-8 bytes. A name that is not UTF-8 fails with `unsupported`; macOS file systems refuse to create such a name, so the error arises only on file systems that accept one |
 | `neura.fs.make_directory` | text path | void | |
 | `neura.fs.remove` | text path, bool directory | void | Removes a file, or an empty directory when the flag is set |
 | `neura.fs.rename` | text from, text to | void | |

@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Neura's static libraries name each other, so one can reach a link line more
+# than once. Apple's linker warns about each repeat ("ignoring duplicate
+# libraries"), and the release build fails on a warning. From CMake 3.29 this
+# policy removes the repeats on the platforms whose linkers do not need them.
+if(POLICY CMP0156)
+    cmake_policy(SET CMP0156 NEW)
+endif()
+
 # The version of the tool and the standard library has one source: VERSION.
 # stdlib/std/core/version.nra must agree, which the version-consistency test
 # checks.
@@ -537,6 +545,10 @@ if(BUILD_TESTING)
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-tests"
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
     endforeach()
+    # The tests name the shared library libmathops.so. dlopen ignores a file's
+    # suffix, so on macOS the Mach-O dynamic library keeps that name instead of
+    # CMake's libmathops.dylib.
+    set_target_properties(neura_test_mathops_shared PROPERTIES SUFFIX ".so")
     set(neura_native_test_dir "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
     add_test(NAME backend-capabilities COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"

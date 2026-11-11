@@ -1,0 +1,41 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let arenas = import:Std.DynamicForeign.Arena;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let values = import:Std.DynamicForeign.ForeignValue;
+let nullable = import:c("nullability.h");
+
+// Pointers and a function pointer qualified _Nonnull or _Nullable are
+// imported like plain ones: strlen takes a string, memchr returns an
+// address, and qsort sorts through an upcall stub.
+export let Main = module:program.Entry (
+    let compare = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
+        let left = values.as_segment(arguments[0]).reinterpret(4).get_int32(0);
+        let right = values.as_segment(arguments[1]).reinterpret(4).get_int32(0);
+        return values.ForeignValue.Int32((left < right) ? -1 : (left > right) ? 1 : 0);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        let numbers = arena.allocate_array(layouts.Int32, 3);
+        let input = [9, 3, 5];
+        for (let i = 0; i < 3; i++) {
+            numbers.set_int32((i * 4) as int64, input[i]);
+        }
+        let stub = linkers.native_linker().upcall_stub(compare,
+            descriptors.of(layouts.Int32, layouts.Address, layouts.Address), arena);
+        nullable.qsort(numbers, 3, 4, stub);
+        let text = "";
+        for (let i = 0; i < 3; i++) {
+            text = text + numbers.get_int32((i * 4) as int64).to_string() + " ";
+        }
+        console.print_line(text);
+        console.print_line(nullable.strlen("nullable").to_string());
+        let found = nullable.memchr(numbers, 5, 12);
+        console.print_line(found.address() == numbers.address() + 4 ? "found" : "missing");
+        arena.close();
+        return program.ExitCode.Ok;
+    };
+);

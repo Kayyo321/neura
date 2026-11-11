@@ -472,6 +472,11 @@ void check_extracted_tree(const fs::path& staging, const std::string& top) {
                 pending.push_back(entry.path());
             } else if (!fs::is_regular_file(status)) {
                 throw Failure{"the archive holds " + entry.path().string() + ", which is not a regular file or a directory"};
+            } else if (fs::hard_link_count(entry.path()) > 1) {
+                // GNU tar lists a hard link as its own kind, which extract() rejects
+                // before unpacking. bsdtar (macOS) lists it like a regular file, so
+                // it is found here: a fresh tree has no file with two names.
+                throw Failure{"the archive holds " + entry.path().string() + ", which is not a regular file or a directory"};
             }
         }
     }
@@ -1093,14 +1098,24 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
         if (status.loaded) {
             report.ok("libclang", status.path + (status.major != 0 ? " (LLVM " + std::to_string(status.major) + ")" : ""));
             if (status.resource_dir.empty()) {
+#ifdef __APPLE__
+                report.warn("clang-headers", "libclang's builtin headers (stddef.h) were not found; C imports are unavailable. "
+                                             "Install the Xcode Command Line Tools (xcode-select --install) or Xcode");
+#else
                 report.warn("clang-headers", "libclang's builtin headers (stddef.h) were not found; C imports are unavailable. On Debian and Ubuntu install libclang-common-" +
                                                  std::to_string(status.major != 0 ? status.major : 19) + "-dev");
+#endif
             } else {
                 report.ok("clang-headers", status.resource_dir);
             }
         } else {
+#ifdef __APPLE__
+            report.warn("libclang", "C imports are unavailable: " + first_line(status.error) +
+                                        ". Install the Xcode Command Line Tools (xcode-select --install) or Xcode, or name a libclang.dylib with NEURA_LIBCLANG");
+#else
             report.warn("libclang", "C imports are unavailable: " + first_line(status.error) +
                                         ". On Debian and Ubuntu install libclang1-19 libclang-common-19-dev");
+#endif
             report.warn("clang-headers", "not checked: libclang did not load");
         }
     }

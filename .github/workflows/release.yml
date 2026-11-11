@@ -67,10 +67,17 @@ jobs:
         id: previous
         env:
           GH_TOKEN: ${{ github.token }}
+          REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 --json tagName \
-            --jq "[.[].tagName | select(. != \"$REF_NAME\")][0] // \"\"")
+          # A trial builds a -dev version, which sorts before every published
+          # candidate of the same version, so it has nothing to update from.
+          if [ "$REF_TYPE" = tag ]; then
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 --json tagName \
+              --jq "[.[].tagName | select(. != \"$REF_NAME\")][0] // \"\"")
+          else
+            tag=""
+          fi
           echo "previous release: ${tag:-none}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
@@ -93,6 +100,16 @@ jobs:
             runner: ubuntu-24.04-arm
             minimum: 123
             exclude: "^neura-libclang-load$"
+          # macOS has no native launcher, so the six native-* tests are not
+          # registered there.
+          - triple: aarch64-apple-darwin
+            runner: macos-15
+            minimum: 118
+            exclude: "^$"
+          - triple: x86_64-apple-darwin
+            runner: macos-15-intel
+            minimum: 118
+            exclude: "^$"
     env:
       NEURA_LIBCLANG_REQUIRED: "1"
       NEURA_USERNS_REQUIRED: "1"
@@ -106,13 +123,27 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-      - name: Install the build dependencies
+      - name: Install the build dependencies (Linux)
+        if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
           echo "CC=gcc-14" >> "$GITHUB_ENV"
           echo "CXX=g++-14" >> "$GITHUB_ENV"
+          echo "JOBS=$(nproc)" >> "$GITHUB_ENV"
+
+      # libffi's static library is linked into neura, so the archive does not
+      # need Homebrew on the machine it is installed on.
+      - name: Install the build dependencies (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          brew install libffi pkgconf gnu-tar
+          echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "JOBS=$(sysctl -n hw.ncpu)" >> "$GITHUB_ENV"
 
       - name: Configure
         run: >
@@ -122,7 +153,7 @@ jobs:
           "-DNEURA_BUILD_COMMIT=$GITHUB_SHA"
 
       - name: Build
-        run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
+        run: cmake --build build --parallel "$JOBS" 2>&1 | tee build/build.log
 
       - name: Require a build of Neura's sources without compiler warnings
         run: |
@@ -132,13 +163,14 @@ jobs:
           fi
 
       - name: Allow unprivileged user namespaces
+        if: ${{ runner.os == 'Linux' }}
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Test
         env:
           EXCLUDE: ${{ matrix.exclude }}
         run: >
-          ctest --test-dir build --parallel "$(nproc)" --no-tests=error
+          ctest --test-dir build --parallel "$JOBS" --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml -E "$EXCLUDE"
 
       - name: Require every test to have run
@@ -152,7 +184,8 @@ jobs:
 
       # The archive must run on a machine without a C++ runtime or libffi,
       # with a C library no newer than the one documented in docs/Install.md.
-      - name: Require the documented system dependencies and no others
+      - name: Require the documented system dependencies and no others (Linux)
+        if: ${{ runner.os == 'Linux' }}
         run: |
           status=0
           for file in stage/bin/neura stage/lib/neura/launchers/*/*; do
@@ -172,6 +205,22 @@ jobs:
               status=1
             fi
           done
+          exit "$status"
+
+      # On macOS the archive may need only libraries that are part of the
+      # system: everything under /usr/lib and /System.
+      - name: Require the documented system dependencies and no others (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          status=0
+          otool -L stage/bin/neura
+          for library in $(otool -L stage/bin/neura | tail -n +2 | awk '{ print $1 }'); do
+            case "$library" in
+              /usr/lib/*|/System/*) ;;
+              *) echo "::error::stage/bin/neura needs $library"; status=1 ;;
+            esac
+          done
+          echo "minimum macOS version: $(otool -l stage/bin/neura | awk '/LC_BUILD_VERSION/ { found = 1 } found && /minos/ { print $2; exit }')"
           exit "$status"
 
       - name: Require the built version to be the planned one
@@ -221,6 +270,10 @@ jobs:
             runner: ubuntu-24.04
           - triple: aarch64-linux-gnu
             runner: ubuntu-24.04-arm
+          - triple: aarch64-apple-darwin
+            runner: macos-15
+          - triple: x86_64-apple-darwin
+            runner: macos-15-intel
     env:
       FULL: ${{ needs.plan.outputs.full }}
       PREVIOUS: ${{ needs.plan.outputs.previous }}
@@ -239,21 +292,29 @@ jobs:
           name: archive-${{ matrix.triple }}
           path: dist
 
+      # A target that the previous release did not have has nothing to
+      # update from, and its upgrade check is reported as not run.
       - name: Download the previous release's archive
         if: ${{ env.PREVIOUS != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir previous
-          gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous \
-            --pattern "neura-*-$TRIPLE.tar.gz" --pattern SHA256SUMS
-          (cd previous && sha256sum --check --ignore-missing SHA256SUMS)
+          gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous --pattern SHA256SUMS
+          if grep -F -- "-$TRIPLE.tar.gz" previous/SHA256SUMS > previous/expected; then
+            gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous \
+              --pattern "neura-*-$TRIPLE.tar.gz"
+            (cd previous && shasum -a 256 --check expected)
+          else
+            echo "$PREVIOUS has no archive for $TRIPLE"
+          fi
 
       - name: Run the lifecycle checks
         run: |
           set -- --archive "dist/neura-$FULL-$TRIPLE.tar.gz" --version "$FULL" --triple "$TRIPLE" --examples examples
-          if [ -n "$PREVIOUS" ]; then
-            set -- "$@" --previous "$(ls previous/neura-*-"$TRIPLE".tar.gz)" --require-previous
+          previous=$(ls previous/neura-*-"$TRIPLE".tar.gz 2> /dev/null || true)
+          if [ -n "$previous" ]; then
+            set -- "$@" --previous "$previous" --require-previous
           fi
           sh packaging/qualify.sh "$@" | tee "qualify-$TRIPLE.txt"
 

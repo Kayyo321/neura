@@ -7,9 +7,6 @@ let tcp_listener = import:Std.Net.TcpListener;
 let tcp_stream = import:Std.Net.TcpStream;
 let test = import:Std.Test;
 let unit = import:Std.Core.Unit;
-let utf8_reader = import:Std.Io.Utf8Reader;
-let utf8_writer = import:Std.Io.Utf8Writer;
-let optional = import:Std.Core.Optional;
 
 // Runs against real sockets on the loopback interface.
 let NetTests = module (
@@ -64,22 +61,6 @@ let NetTests = module (
         // The peer closed its side: the stream ends.
         test.assert_equal_int32(0, test.assert_ok<uint8[list]>(client.read(64)).length);
         test.assert_ok<unit.Unit>(client.close());
-        test.assert_ok<unit.Unit>(listener.close());
-    };
-
-    export let test_text_over_a_connection = func() -> void {
-        let listener = listen();
-        let client = connect(listener.local_port());
-        let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
-        let writer = utf8_writer.create(client.write);
-        test.assert_ok<unit.Unit>(writer.write_line("first"));
-        test.assert_ok<unit.Unit>(writer.write_line("second"));
-        test.assert_ok<unit.Unit>(client.close());
-        let reader = utf8_reader.create(server.read);
-        test.assert_equal_string("first", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
-        test.assert_equal_string("second", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
-        test.assert_none<string>(test.assert_ok<optional.Optional<string>>(reader.read_line()));
-        test.assert_ok<unit.Unit>(server.close());
         test.assert_ok<unit.Unit>(listener.close());
     };
 

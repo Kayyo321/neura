@@ -1,0 +1,40 @@
+// test-options: --allow-net
+// host-dependent-counts: the reader asks the stream for more bytes once for each chunk the kernel delivers, and how the bytes of two writes are split between reads varies by host
+let duration = import:Std.Time.Duration;
+let tcp_listener = import:Std.Net.TcpListener;
+let tcp_stream = import:Std.Net.TcpStream;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+let utf8_reader = import:Std.Io.Utf8Reader;
+let utf8_writer = import:Std.Io.Utf8Writer;
+let optional = import:Std.Core.Optional;
+
+// Real sockets on the loopback interface, kept apart from net-tests.nra
+// because the step count of a line reader over a stream depends on how the
+// host delivers the stream's bytes: Utf8Reader calls the stream's read again
+// for each chunk, and two writes may arrive as one chunk or as two.
+let StreamChunkingTests = module (
+    let listen = func() -> tcp_listener.TcpListener {
+        return test.assert_ok<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0));
+    };
+
+    let connect = func(port: int) -> tcp_stream.TcpStream {
+        return test.assert_ok<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", port, duration.of_seconds(5)));
+    };
+
+    export let test_text_over_a_connection = func() -> void {
+        let listener = listen();
+        let client = connect(listener.local_port());
+        let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        let writer = utf8_writer.create(client.write);
+        test.assert_ok<unit.Unit>(writer.write_line("first"));
+        test.assert_ok<unit.Unit>(writer.write_line("second"));
+        test.assert_ok<unit.Unit>(client.close());
+        let reader = utf8_reader.create(server.read);
+        test.assert_equal_string("first", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
+        test.assert_equal_string("second", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
+        test.assert_none<string>(test.assert_ok<optional.Optional<string>>(reader.read_line()));
+        test.assert_ok<unit.Unit>(server.close());
+        test.assert_ok<unit.Unit>(listener.close());
+    };
+);
