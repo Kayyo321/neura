@@ -107,12 +107,29 @@ if(HAS_STATIC)
     if(NOT root_entries STREQUAL "hello-static")
         message(FATAL_ERROR "the empty root should hold only the executable, found: ${root_entries}")
     endif()
-    expect_hello("${root}" "${unshare}" --user --map-root-user --root "${root}" --wd / /hello-static)
-    message(STATUS "ran the installed static executable in a root holding only the executable, without procfs")
-    # With procfs mounted the launcher takes /proc/self/exe.
-    expect_hello("${proc_root}" "${unshare}" --user --map-root-user --pid --fork --mount-proc=/proc
-        --root "${proc_root}" --wd / /hello-static)
-    message(STATUS "ran the installed static executable in a root with procfs")
+    # Entering a root of its own needs an unprivileged user namespace, which
+    # some hosts forbid (Ubuntu 24.04 restricts them through AppArmor). There
+    # the static executable still runs alone in its directory, and the test
+    # says what it left out, or fails when NEURA_USERNS_REQUIRED=1 asks for
+    # the whole check, as continuous integration does.
+    execute_process(COMMAND "${unshare}" --user --map-root-user true
+        RESULT_VARIABLE namespace_status OUTPUT_QUIET ERROR_VARIABLE namespace_error)
+    string(STRIP "${namespace_error}" namespace_error)
+    if(namespace_status STREQUAL "0")
+        expect_hello("${root}" "${unshare}" --user --map-root-user --root "${root}" --wd / /hello-static)
+        message(STATUS "ran the installed static executable in a root holding only the executable, without procfs")
+        # With procfs mounted the launcher takes /proc/self/exe.
+        expect_hello("${proc_root}" "${unshare}" --user --map-root-user --pid --fork --mount-proc=/proc
+            --root "${proc_root}" --wd / /hello-static)
+        message(STATUS "ran the installed static executable in a root with procfs")
+    elseif("$ENV{NEURA_USERNS_REQUIRED}" STREQUAL "1")
+        message(FATAL_ERROR "NEURA_USERNS_REQUIRED=1, but this host does not allow an unprivileged user namespace, "
+                            "which the empty-root checks need: ${namespace_error}")
+    else()
+        expect_hello("${root}" "${root}/hello-static")
+        message(WARNING "empty-root checks NOT RUN: this host does not allow an unprivileged user namespace "
+                        "(${namespace_error}). The static executable ran alone in its directory instead.")
+    endif()
 else()
     message(WARNING "static launcher: NOT BUILT, static checks not run (NEURA_STATIC_LAUNCHER has no static C library to link)")
 endif()

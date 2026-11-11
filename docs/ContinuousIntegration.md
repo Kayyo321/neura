@@ -14,7 +14,7 @@ GitHub Actions checks every pull request before it is merged. The workflows are 
 
 **Tier 1** is the status check that a branch rule should require. GitHub treats a skipped job as passing, so requiring the other two jobs directly would let a pull request merge without them having run. The Tier 1 job always runs and fails unless both succeeded.
 
-The build and test job sets `NEURA_LIBCLANG_REQUIRED=1`, so a test that needs libclang fails when the library is missing instead of reporting itself as skipped. The job uploads the build log, the CTest JUnit report, and `LastTest.log` as the `tier1-test-report` artifact, including when a step fails.
+The build and test job sets `NEURA_LIBCLANG_REQUIRED=1`, so a test that needs libclang fails when the library is missing instead of reporting itself as skipped. It also sets `NEURA_USERNS_REQUIRED=1`: `native-install` runs a static executable in an empty root file system, which needs an unprivileged user namespace, and with the variable set the test fails where the host forbids one instead of leaving those checks out with a warning. Ubuntu 24.04 forbids them through AppArmor, so the job first runs `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` on its runner. The job uploads the build log, the CTest JUnit report, and `LastTest.log` as the `tier1-test-report` artifact, including when a step fails.
 
 A pull request that adds CTest entries raises `--minimum` in the workflow to the new count. A pull request that removes entries lowers it, which makes the removal visible in review.
 
@@ -34,7 +34,7 @@ python3 scripts/update-stdlib-wiki-api.py --check
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-NEURA_LIBCLANG_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
+NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
 python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 114
 ```
 
