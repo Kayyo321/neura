@@ -177,6 +177,57 @@ Three commands manage the installed tool; [Install](../Install.md) describes the
 
 `update` and `uninstall` apply only to an install made by the release archive's `install.sh`. A source build, a copy, or a package manager's install exits with status 3.
 
+## Diagnostics
+
+Diagnostics go to standard error. The first error ends compilation with status 1. Warnings are printed before that error, or at the end of a command that succeeds, sorted by file and byte offset. A diagnostic has a primary location, a message, and optionally a code, labels at other locations (which may be in other files), notes, and suggested edits. Codes are `E` or `W` and four digits; the hundreds digit names the area: `E01xx` lexer, `E02xx` parser, `E03xx` names, `E04xx` types and bindings, `E05xx` classes, `E06xx` concurrency, `E07xx` modules and imports, `E08xx` the backend, `E09xx` tags, and `W` warnings. Most errors have no code yet. A line is a line of the source as the lexer counts lines (LF, CRLF, or CR ends one), and a column counts Unicode code points from 1.
+
+`--error-format` chooses the form. Every command accepts it.
+
+| Form | Output |
+| --- | --- |
+| `human` (default) | The message, its location, and the source lines with the primary span underlined by `^` and other labels by `-`, then notes and suggested edits. |
+| `short` | One line per diagnostic: `file:line:column: error: message`, or `file:line:column: error[E0201]: message` when the diagnostic has a code, and `warning` in place of `error` for a warning. |
+| `json` | One JSON object per line. |
+
+The `short` form is the stable machine-readable form: tools and tests that match diagnostics use it, and its layout changes only with a release note. The `human` form may change in any release. This is a missing semicolon in both forms:
+
+```text
+error[E0201]: expected ';'
+ --> /work/limits.nra:2:15
+  |
+2 | let limit = 10
+  |               ^ expected ';' here
+3 | let half = limit / 2;
+  | --- found 'let'
+  |
+help: add the missing ';'
+  |
+2 | let limit = 10;
+  |               +
+```
+
+```text
+/work/limits.nra:2:15: error[E0201]: expected ';'
+```
+
+In the `human` form a tab shows as four spaces, a column is as wide as the character's East Asian width (two for wide characters, none for combining marks, from a table in the tool rather than the system locale), a span over several lines is underlined on its first line and followed by `...`, and a line wider than the terminal is cut around the span with `...`. A suggested edit shows the edited line with `+` under inserted text and `~` under replaced text, or the original line with `-` under removed text. A diagnostic in the module that a [C import](ForeignInterop.md#c-imports) generates has a note that names the header.
+
+Each `json` object has `code` (a string, or `null`), `severity` (`error` or `warning`), `message`, `spans`, `notes`, `help`, `suggestions`, `args`, and `rendered`. Each span has `file`, `offset` and `length` in bytes, `line`, `column`, `primary`, and `label` (a string, or `null`). Each suggestion has `message`, `applicability` (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, or `Unspecified`), and `edits`, each a span and its `replacement`. `args` holds facts about the error as strings, such as the `kind`, `name`, and `owner` of a name that did not resolve. `rendered` is the `human` form without color.
+
+`--color=auto|always|never` colors the `human` form. `auto`, the default, colors it when standard error is a terminal, `NO_COLOR` is unset or empty, and `TERM` is not `dumb`; `always` and `never` ignore all three. The width that long lines are cut to is the terminal's, else the `COLUMNS` environment variable, else 100.
+
+`check`, `emit-ir`, `build`, and `test` accept the warning options:
+
+| Option | Meaning |
+| --- | --- |
+| `-W<name>`, `-Wno-<name>` | Enable or disable the warning `<name>`. Warnings are enabled by default; the last option for a name wins. |
+| `-Werror` | Report every warning as an error; the command then exits with status 1. |
+| `--warn-library` | Also report warnings in the standard library, which are otherwise hidden. |
+
+The compiler does not report any warning yet.
+
+`neura check --fix <file.nra>...` applies the suggestions marked `MachineApplicable` to the source files, saving each file in place. It checks the program, applies the edits of what it reports from the end of each file to the start, and repeats until no edit applies, then reports `neura: check --fix applied <n> edits to <m> files` on standard error and checks the result as `check` does. It never edits a standard library file or a module generated from a C header, and says so when a suggestion would. `--fix` cannot be combined with `--task-safety`.
+
 ## Exit status
 
 Each status below is the tool's own. The exit status of a program that `neura run` executes, and of a native executable, is the program's: the `ExitCode` that `main` returns, or the status of its trap class.
@@ -193,6 +244,6 @@ Each status below is the tool's own. The exit status of a program that `neura ru
 
 The [NVM specification](../runtime/NVM.md#toolchain-and-distribution) defines how `neura build` produces an executable `.nvr` image from source or `.nir` and how `neura run` executes that image. Package configuration is not part of this release.
 
-Diagnostics should identify the source file, line and column, the offending span, a clear explanation and, where possible, a correction. For example, passing a `string` to a function expecting `int32` should report both types and the argument location. Diagnostics go to standard error and compilation fails on errors. Exact format, encoding of column offsets and warning policy remain open.
+Diagnostics should identify the source file, line and column, the offending span, a clear explanation and, where possible, a correction. For example, passing a `string` to a function expecting `int32` should report both types and the argument location. [Diagnostics](#diagnostics) defines their formats, columns, and warning options.
 
 A formatter should produce stable, idempotent output consistent with [Coding style](../style/CodingStyle.md). Editor integration should eventually expose diagnostics, navigation and completion; debugger support should include source locations, stepping and local variables. These are tooling goals, not promises of first-release support.
