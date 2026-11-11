@@ -12,6 +12,7 @@ The exit status is 0 when every case behaves as expected and 1 otherwise.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -172,7 +173,53 @@ def report(label: str, cases: str | None, minimum: int, problem: str | None) -> 
                                          "--minimum", str(minimum)], problem)
 
 
+RULESET = {"name": "main", "target": "branch", "enforcement": "active", "bypass_actors": [],
+           "rules": [{"type": "deletion"}, {"type": "pull_request", "parameters": {"required_approving_review_count": 0}}]}
+
+
+def settings(label: str, change: dict[str, object], problem: str | None) -> None:
+    """Run the settings check on saved responses; `change` replaces saved files by name."""
+    saved: dict[str, object] = {
+        "actions_permissions.json": {"enabled": True, "allowed_actions": "selected", "extra": 1},
+        "alerts.json": {},
+        "rulesets.json": [{"id": 7, "name": "main"}],
+        # GitHub returns more fields than a file names, and may order rules differently.
+        "rulesets_7.json": dict(RULESET, id=7, rules=list(reversed(RULESET["rules"]))),  # type: ignore[call-overload]
+    }
+    saved.update(change)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / ".github" / "settings").mkdir(parents=True)
+        (root / "live").mkdir()
+        (root / ".github" / "settings" / "repository.json").write_text(json.dumps({
+            "actions/permissions": {"enabled": True, "allowed_actions": "selected"}, "alerts": {}}), encoding="utf-8")
+        (root / ".github" / "settings" / "ruleset-main.json").write_text(json.dumps(RULESET), encoding="utf-8")
+        for name, value in saved.items():
+            if value is not None:
+                (root / "live" / name).write_text(json.dumps(value), encoding="utf-8")
+        expect(f"settings: {label}", [sys.executable, str(SCRIPTS / "check-repository-settings.py"), "--root", directory,
+                                      "--live", str(root / "live")], problem)
+
+
 def main() -> int:
+    settings("settings that match", {}, None)
+    settings("a changed value", {"actions_permissions.json": {"enabled": True, "allowed_actions": "all"}},
+             'actions/permissions.allowed_actions: expected "selected", found "all"')
+    settings("a missing value", {"actions_permissions.json": {"enabled": True}}, "allowed_actions: missing")
+    settings("a setting that cannot be read", {"alerts.json": None}, "alerts: cannot read")
+    settings("a ruleset that was deleted", {"rulesets.json": []}, 'no ruleset named "main" exists')
+    settings("a ruleset without a file", {"rulesets.json": [{"id": 7, "name": "main"}, {"id": 8, "name": "other"}]},
+             '"other" exists on GitHub and has no file')
+    settings("a ruleset with a rule removed", {"rulesets_7.json": dict(RULESET, rules=[{"type": "deletion"}])},
+             "expected 2 entries, found 1")
+    settings("a ruleset with a weaker rule", {"rulesets_7.json": dict(RULESET, rules=[
+        {"type": "deletion"}, {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}])},
+        "no entry matches")
+    settings("a ruleset with a bypass actor", {"rulesets_7.json": dict(RULESET, bypass_actors=[{"actor_id": 5}])},
+             "bypass_actors: expected 0 entries, found 1")
+    settings("a disabled ruleset", {"rulesets_7.json": dict(RULESET, enforcement="disabled")},
+             'enforcement: expected "active", found "disabled"')
+
     step = "      - name: Check out\n"
     workflow("a workflow that follows the rules", "", "", None)
     workflow("an action pinned to a tag", f"checkout@{COMMIT}", "checkout@v1", "not pinned to a full commit hash")

@@ -25,7 +25,11 @@ The project has one maintainer. A new maintainer is added by an existing maintai
 
 GitHub does not let an author approve their own pull request, so step 3 cannot be met for a pull request the sole maintainer writes: no second person holds the role. Those pull requests are merged by their author once steps 1, 2, and 4 hold. A contributor's pull request is reviewed and approved by the maintainer as written above.
 
-This is a limitation of the project's current size, and the rule returns to full force for every author when a second maintainer joins.
+This is a limitation of the project's current size, and the rule returns to full force for every author when a second maintainer joins. Until then no change to `main` has an independent approval that GitHub enforces: the ruleset for `main` requires a pull request, passing checks, and resolved conversations, and requires no approving review.
+
+### Enforcement
+
+GitHub rulesets enforce steps 1, 2, and 4, and the rules for release tags below. [Repository settings](docs/RepositorySettings.md) lists each setting, the file that records its expected value, and the script that compares the files with the live repository.
 
 ## Decisions
 

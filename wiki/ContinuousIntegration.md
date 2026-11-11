@@ -60,6 +60,8 @@ To check only the documentation examples, run `python3 scripts/check-doc-example
 
 The scripts need Python 3 and Git, and use no packages outside the Python standard library. `check-docs.py` reads the Markdown files that Git tracks, so `git add` a new page before checking it. It does not use the network: links to other websites are listed with `--list-external` and are not fetched.
 
+`scripts/check-repository-settings.py` is not part of Tier 1. It compares the repository's GitHub settings with the files in `.github/settings` and needs a signed-in `gh`; see [repository settings](RepositorySettings).
+
 ## Workflow rules
 
 `scripts/check-workflows.py` requires every workflow to:

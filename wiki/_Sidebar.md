@@ -46,3 +46,4 @@
 
 - [Coding style](CodingStyle)
 - [Continuous integration](ContinuousIntegration)
+- [Repository settings](RepositorySettings)

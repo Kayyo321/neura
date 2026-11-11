@@ -37,6 +37,7 @@ DEFAULT_BRANCH = "main"
 GENERATED: dict[str, str] = {
     "docs/Backend.md": "Backend",
     "docs/ContinuousIntegration.md": "ContinuousIntegration",
+    "docs/RepositorySettings.md": "RepositorySettings",
     "docs/Decompiler.md": "Decompiler",
     "docs/IrOptimization.md": "IrOptimization",
     "docs/NirFormat.md": "NirFormat",
