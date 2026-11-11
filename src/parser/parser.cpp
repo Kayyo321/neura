@@ -439,7 +439,17 @@ private:
             tokens_[cursor_ + 1].kind == TokenKind::Keyword && tokens_[cursor_ + 1].text == branch_keyword;
     }
 
-    bool at_declaration() const { return at("export") || at("static") || at("let") || at("const"); }
+    bool at_declaration() const {
+        return at("export") || at("static") || at("let") || at("const") || at_last_declaration();
+    }
+
+    // `last` is contextual: it starts a declaration only when an identifier
+    // follows, which no expression statement can begin with, so `last = v;`,
+    // `last(x);`, `last.next`, and `last[i] = v;` keep their meaning.
+    bool at_last_declaration() const {
+        return at_contextual("last") && cursor_ + 1 < tokens_.size() &&
+               tokens_[cursor_ + 1].kind == TokenKind::Identifier;
+    }
 
     Declaration declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
         const auto start = cursor_;
@@ -450,7 +460,10 @@ private:
         result.exported = match("export");
         result.static_member = match("static");
         result.constant = match("const");
-        if (!result.constant) {
+        if (!result.constant && at_last_declaration()) {
+            advance();
+            result.constant = result.last = true;
+        } else if (!result.constant) {
             expect("let");
         }
         if (match(".")) {
@@ -609,6 +622,8 @@ private:
             } else {
                 result.initializer = expression();
             }
+        } else if (!result.type && result.last) {
+            throw deferred_last_without_type(result);
         } else if (!result.type) {
             throw Diagnostic(current().span, "expected a type annotation or an initializer").with_code("E0205")
                 .label("'" + result.name + "' needs a type, a value, or both")
@@ -627,6 +642,18 @@ private:
         expect(";");
         if (result.overloads.empty()) result.span = span_from(start);
         return result;
+    }
+
+    // `last x;`: a deferred `last` binding is assigned later, so only its
+    // type can say what it holds.
+    static Diagnostic deferred_last_without_type(const Declaration& declaration) {
+        const auto name = *declaration.name_span;
+        const Span after{name.file, name.line, name.column + name.length, name.offset + name.length, 0};
+        return Diagnostic(name, "a deferred 'last' binding needs a type").with_code("E0444")
+            .label("'" + declaration.name + "' has neither a type nor a value")
+            .suggest("give it a type and assign it exactly once later", after, ": <type>",
+                     Applicability::HasPlaceholders)
+            .suggest("or give it its value now", after, " = <value>", Applicability::HasPlaceholders);
     }
 
     static void definition_has_no_annotation(const Declaration& declaration) {

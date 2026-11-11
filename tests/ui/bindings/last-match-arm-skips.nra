@@ -1,0 +1,14 @@
+// A match arm that leaves a deferred `last` binding unassigned (E0441).
+let Shape = enum(Circle(int), Dot);
+
+let radius = func(shape: Shape) -> int {
+    last result: int;
+    match (shape) {
+        Shape.Circle(r) => {
+            result = r;
+        },
+        Shape.Dot => {
+        },
+    }
+    return result;
+};

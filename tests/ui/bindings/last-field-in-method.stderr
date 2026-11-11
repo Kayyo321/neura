@@ -1,0 +1,12 @@
+error[E0445]: cannot assign to 'last' field 'size' here
+  --> $DIR/last-field-in-method.nra:10:9
+   |
+ 3 |     export last size: int;
+   |                 ---- declared here without a value
+...
+10 |         size = size + 1;
+   |         ^^^^ only an 'init' of its class can assign it, once
+   |
+   = help: assign it in each 'init' as 'size = value' or 'instance.size = value', outside any closure
+
+For more information about this error, try `neura explain E0445`.

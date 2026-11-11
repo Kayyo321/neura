@@ -1,0 +1,4 @@
+// A deferred `last` binding that is not a local or an instance field (E0447).
+let Counter = class(
+    static last limit: int;
+);

@@ -1,0 +1,8 @@
+// A deferred `last` binding read on a path that skips its assignment (E0441).
+let pick = func(flag: bool) -> int {
+    last x: int;
+    if (flag) {
+        x = 1;
+    }
+    return x;
+};

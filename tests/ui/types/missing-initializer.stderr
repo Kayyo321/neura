@@ -8,5 +8,9 @@ help: give it an initial value
   |
 4 |     let total: int = <value>;
   |                   ++++++++++
+help: or, to assign it exactly once later, declare it with 'last'
+  |
+4 |     last total: int;
+  |     ~~~~
 
 For more information about this error, try `neura explain E0404`.

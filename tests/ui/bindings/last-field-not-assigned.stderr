@@ -1,0 +1,14 @@
+error[E0446]: 'init' may end without assigning 'last' field 'size'
+ --> $DIR/last-field-not-assigned.nra:5:16
+  |
+3 |     export last size: int;
+  |                 ---- declared here without a value
+4 |
+5 |     export let init = func(initial: int) {
+  |                ^^^^ 'size' is not assigned on every path through this constructor
+6 |         if (initial > 0) {
+  |             ----------- 'size' is not assigned when this condition is false
+  |
+  = help: assign 'size' exactly once on every path through 'init'
+
+For more information about this error, try `neura explain E0446`.
