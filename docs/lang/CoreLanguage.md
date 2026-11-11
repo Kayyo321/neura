@@ -4,14 +4,49 @@ This page defines the initial core. See [Feature status](Status.md) for the fron
 
 ## Source and bindings
 
-Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let` or `const`, with an optional type annotation. `let` permits reassignment; `const` prevents reassignment, not mutation through a reference. A binding must be initialized before it is read. The exact Unicode identifier and escape rules remain open.
+Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let`, `const`, or `last`, with an optional type annotation, and ends with `;`. The exact Unicode identifier and escape rules remain open.
+
+| Introducer | Assigned | Where |
+| --- | --- | --- |
+| `let` | at its declaration, then any number of times | everywhere |
+| `const` | once, at its declaration | everywhere; the form for module, file, and static constants |
+| `last` | exactly once: at its declaration, or later on every path before it is read | everywhere with a value; without one, only a local or an instance field |
+
+None of them prevents mutation through a reference: a `const` or `last` binding to an object can still change the object's fields. A binding must be assigned before it is read.
 
 <!-- example: check -->
 ```neura
 let count: int32 = 0;
 const Limit: int32 = 3;
 count = count + 1;
+
+let describe = func(value: int32) -> string {
+    last sign: string;
+    if (value < 0) {
+        sign = "negative";
+    } else {
+        sign = "not negative";
+    }
+    last text = sign + " " + value.to_string();
+    return text;
+};
 ```
+
+`last x = e;` and `last x: T = e;` behave like a local `const`: assigning `x` again is error `E0401`. `last x: T;` declares `x` without a value; its type is required (`E0444`). `last` is a contextual word, not a keyword. It introduces a declaration only where a statement or member can start and an identifier follows it, as in `last x`, `export last x`, and `static last x`. Elsewhere it is an ordinary name, so `let last = func ...;`, `last = 3;`, `last(x);`, `last.next`, and `last[0] = 1;` keep their meaning. A destructuring `last [a, b] = e;` is not a declaration: it reads as an assignment to an element of `last`.
+
+### Deferred assignment
+
+A local `last x: T;` is assigned by a plain assignment `x = value;`. The compiler checks each such binding with a definite-assignment analysis over the function body, before lowering. At each point the binding is unassigned, assigned, or assigned on some paths but not others. Branches merge as follows: after an `if` with an `else`, a `match`, or a `select`, a binding is assigned when every arm that can reach the end of the statement assigned it. An arm that ends in `return`, `break`, `continue`, or `trap_with_message(...)` does not reach the end. An `if` without an `else` merges with the path on which its condition is false. A Boolean literal condition selects one arm, so `while (true)` without a `break` does not end. A loop leaves the state as it was before the loop.
+
+- **Read.** Reading `x`, including in `x += 1`, `x++`, or `x.field`, requires `x` to be assigned on every path to the read (`E0441`). The error points at the declaration and names a branch that skips the assignment, such as an `if` condition that can be false or a `match` arm.
+- **Assign.** Assigning `x` where it is, or may be, already assigned is an error (`E0440`), and so is `x += value` or `x++` after the assignment.
+- **Loops.** An assignment inside a loop body, condition, or step to a `last` binding declared outside that loop is an error (`E0442`), because the loop could run it twice. This holds even when a `break` follows the assignment. A binding declared inside the loop body is a new binding on each iteration and can be assigned there.
+- **Closures.** A lambda copies the locals it captures when it is created, so a lambda that uses `x` must be created where `x` is assigned on every path (`E0443`). A lambda cannot assign a captured binding (`E0402`).
+- **Scope.** The rules apply from the declaration to the end of its block. A name declared in an inner block, a parameter of a nested lambda, a `match` arm binding, or a for-each element hides `x`.
+
+The analysis follows the syntax, not values: it treats every condition other than a Boolean literal as possibly true and possibly false, and a `&&` or `||` right operand as possibly skipped. A binding that is declared and never read need not be assigned. NeuraIR records a deferred local as a declaration without a value ([NeuraIR 1.10](../NirFormat.md#deferred-initialization)); the runtime traps a read before the first store in a frame, which the analysis rules out.
+
+A `last` instance field follows the same rules within each `init`; [Object lifecycle](ObjectLifecycle.md#last-fields) states them. A module, file, or static binding cannot be deferred (`E0447`).
 
 Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. A nested block, and a function body, may declare a name that an enclosing scope or a parameter already has; the new binding hides the outer one for the rest of its block. Whether shadowing stays allowed is an open language decision ([Status](Status.md#open-language-decisions)). Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. Visibility and inheritance rules beyond these are not specified.
 

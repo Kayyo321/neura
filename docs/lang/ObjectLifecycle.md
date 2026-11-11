@@ -1,6 +1,6 @@
 # Object lifecycle
 
-This page specifies constructors and explicit destruction for the class model illustrated by [polymorphism.nra](../../examples/types/polymorphism.nra). The compiler lowers `new`, `init`, `super.init`, `deinit`, and `destroy` to NeuraIR operations, and the Neura Virtual Machine executes them. Ownership, alias safety, definite field initialization, and cleanup on failure are not specified; each limit is stated where it applies and listed in [Status](Status.md#open-language-decisions).
+This page specifies constructors and explicit destruction for the class model illustrated by [polymorphism.nra](../../examples/types/polymorphism.nra). The compiler lowers `new`, `init`, `super.init`, `deinit`, and `destroy` to NeuraIR operations, and the Neura Virtual Machine executes them. Ownership, alias safety, definite initialization of fields other than [`last` fields](#last-fields), and cleanup on failure are not specified; each limit is stated where it applies and listed in [Status](Status.md#open-language-decisions).
 
 ## Construction
 
@@ -23,9 +23,40 @@ let Message = class (
 let message = new Message("Hello");
 ```
 
-Field initializers run before the body of their declaring class's `init`. A field without an initializer starts uninitialized. The compiler does not check that a constructor stores to such a field, and reading it before a store traps at run time (reason: `read of an uninitialized field`). A class without a declared `init` has an implicit zero-argument constructor when its base can be initialized with no arguments; otherwise `new` is rejected with `class 'C' needs a constructor to initialize its base`. Code that assigns fields after `new` is accepted for the same reason.
+Field initializers run before the body of their declaring class's `init`. A field without an initializer starts uninitialized. Except for a [`last` field](#last-fields), the compiler does not check that a constructor stores to such a field, and reading it before a store traps at run time (reason: `read of an uninitialized field`). A class without a declared `init` has an implicit zero-argument constructor when its base can be initialized with no arguments; otherwise `new` is rejected with `class 'C' needs a constructor to initialize its base`. Code that assigns fields after `new` is accepted for the same reason.
 
 For a derived class, `super.init(...)` must be the first statement of each declared constructor. It initializes the direct base before derived field initializers and the rest of the derived constructor execute. A class without a declared constructor implicitly invokes the base's zero-argument constructor. `new Derived(...)` selects from the constructors declared by `Derived`, and `super.init(...)` selects from the direct base. Both use [function overload resolution](CoreLanguage.md#function-overloads). Failure during construction and the state of a partially constructed object are not specified.
+
+### `last` fields
+
+A field declared `last` is assigned once. `last name: T = value;` is assigned by its initializer, and no constructor or method can assign it again (`E0401`). `last name: T;` has no initializer, and every `init` of its class assigns it exactly once, as `name = value;` or `instance.name = value;`, under the [deferred assignment](CoreLanguage.md#deferred-assignment) rules:
+
+- Each path through each `init` overload that returns, by `return` or by reaching the end, assigns the field (`E0446`). A class with such a field must declare an `init` (`E0446`).
+- `init` reads the field, or creates a closure that uses it, only where every path has assigned it (`E0441`, `E0443`). A second assignment, or one inside a loop, is an error (`E0440`, `E0442`).
+- Nothing else assigns it: not a method, a closure, another class, a derived class's `init`, or `other.name` for another instance (`E0445`). Any code can read it.
+
+<!-- example: check -->
+```neura
+let Account = class (
+    export last owner: string;
+    export last limit: int;
+    export last currency: string = "EUR";
+
+    export let init = func(owner: string) {
+        instance.owner = owner;
+        limit = 100;
+    } or func(owner: string, premium: bool) {
+        instance.owner = owner;
+        if (premium) {
+            limit = 1000;
+        } else {
+            limit = 10;
+        }
+    };
+);
+```
+
+The analysis checks the body of `init` only. A method that `init` calls before assigning a field, or a base class constructor that calls an overriding method, can still read the field before its store; that read traps at run time as for any field without an initializer.
 
 ## Destruction
 
