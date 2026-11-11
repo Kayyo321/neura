@@ -6,6 +6,8 @@
 #include "neura-ir/nominal.hpp"
 #include "neura-ir/reference_storage.hpp"
 
+#include "kernel_binding.hpp"
+
 #include "float_reference.hpp"
 #include "support.hpp"
 
@@ -15,6 +17,7 @@
 #include <cstring>
 
 #include <algorithm>
+#include <array>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -1106,18 +1109,13 @@ private:
         }
         case IrOp::ExternalCall: {
             auto values = arguments(node, 0, frame);
-            effects_.push_back({qualified_name(program_, node.symbol), values});
-            if (const auto kernel = kernel_binding(symbol(node.symbol));
-                kernel && (kernel->first == "neura.sort.i64" || kernel->first == "neura.sort.u64")) {
-                // Sorts the list in place, the write that makes the kernel
-                // call an effect on its argument.
-                auto& entry = collection_entry(values.at(0), node);
-                std::ranges::stable_sort(entry.elements, [](const Value& left, const Value& right) {
-                    if (left.negative != right.negative) return left.negative;
-                    return left.negative ? left.magnitude > right.magnitude : left.magnitude < right.magnitude;
-                });
-                return Value{};
+            if (const auto kernel = kernel_binding(symbol(node.symbol))) {
+                // A kernel call is not a host request (docs/runtime/Kernels.md):
+                // it records no effect, and its result, its writes to the
+                // arguments, and its trap are those of the runtime's kernel.
+                return call_kernel(node, values, kernel->first, kernel->second);
             }
+            effects_.push_back({qualified_name(program_, node.symbol), values});
             if (const auto& binding = symbol(node.symbol).host_binding;
                 binding && binding->name == "neura.process.exit") {
                 // The host ends the run; no task continues.
@@ -1516,6 +1514,301 @@ private:
             }
         }
         unsupported(node, "no implementation of " + symbol(method).name + " in " + symbol(cls).name);
+    }
+
+    // ---- Kernel calls (docs/runtime/Kernels.md, "Running a kernel") ----
+    //
+    // The kernel itself is the runtime's: the call goes through the thunk of
+    // the generated table (kernel_table.inc), as NVM's does. The evaluator
+    // only moves values in and out: it views or packs the arguments, sizes
+    // the outputs by their buffer formulas, runs the kernel, copies writable
+    // arguments back when the kernel succeeds, and builds the result. The
+    // step charge is not modeled: the evaluator counts loop iterations and
+    // calls, not steps.
+
+    // The bits of a scalar argument or element as the C scalar of `kind`
+    // holds them: two's complement for an integer, the encoding of a float.
+    static U64 scalar_bits(const Value& value, kernels::Kind kind, const IrNode& node) {
+        if (kind == kernels::Kind::Bool) {
+            if (value.kind != Value::Kind::Bool) unsupported(node, "a kernel bool argument that is not a bool");
+            return value.boolean ? 1 : 0;
+        }
+        if (kernels::float_kind(kind)) {
+            if (value.kind != Value::Kind::Float) unsupported(node, "a kernel float argument that is not a float");
+            return value.magnitude;
+        }
+        if (value.kind != Value::Kind::Integer) unsupported(node, "a kernel integer argument that is not an integer");
+        return word(value) & word_mask(kernels::scalar_width(kind));
+    }
+
+    // The value a formula sees for a scalar argument: a negative or NaN value
+    // counts as 0 (neura_kernel.h, "Formulas").
+    static U64 formula_scalar(const Value& value, kernels::Kind kind) {
+        if (kernels::float_kind(kind)) {
+            double number = 0;
+            if (kind == kernels::Kind::F32) {
+                float single = 0;
+                const auto low = static_cast<std::uint32_t>(value.magnitude);
+                std::memcpy(&single, &low, sizeof single);
+                number = single;
+            } else {
+                std::memcpy(&number, &value.magnitude, sizeof number);
+            }
+            if (!(number > 0)) return 0;
+            return number >= 18446744073709551615.0 ? std::numeric_limits<U64>::max() : static_cast<U64>(number);
+        }
+        if (kind == kernels::Kind::Bool) return value.boolean ? 1 : 0;
+        return value.negative ? 0 : value.magnitude;
+    }
+
+    static void store_scalar(kernels::Kind kind, U64 bits, unsigned char* out) {
+        const auto width = kernels::scalar_width(kind) / 8;
+        for (unsigned i = 0; i < width; ++i) out[i] = static_cast<unsigned char>(bits >> (8 * i));
+    }
+
+    static U64 load_scalar(kernels::Kind kind, const unsigned char* in) {
+        const auto width = kernels::scalar_width(kind) / 8;
+        U64 bits = 0;
+        for (unsigned i = 0; i < width; ++i) bits |= static_cast<U64>(in[i]) << (8 * i);
+        if (kind == kernels::Kind::Bool) return bits != 0;
+        return bits;
+    }
+
+    // The Value of the C scalar `bits` of `kind`, with Neura type `type`.
+    static Value scalar_value(kernels::Kind kind, U64 bits, const IrType& type) {
+        if (kind == kernels::Kind::Bool) {
+            auto result = bool_value(bits != 0);
+            result.type = type;
+            return result;
+        }
+        if (kernels::float_kind(kind)) return float_value(type, bits);
+        const auto width = kernels::scalar_width(kind);
+        bits &= word_mask(width);
+        if (kernels::signed_kind(kind) && ((bits >> (width - 1)) & 1U) != 0) {
+            return integer_value(type, true, (U64{0} - bits) & word_mask(width));
+        }
+        return integer_value(type, false, bits);
+    }
+
+    Value reference_to(std::size_t handle, const IrType& type) {
+        Value result;
+        result.kind = Value::Kind::Reference;
+        result.type = type;
+        result.handle = handle;
+        return result;
+    }
+
+    // A new uint8[list] of `bytes`, of type `type`.
+    Value byte_list(const std::vector<unsigned char>& bytes, const IrType& type, const IrNode& node) {
+        if (type.kind != TypeKind::List || type.arguments.size() != 1) {
+            unsupported(node, "a kernel bytes result that is not a list");
+        }
+        std::vector<Value> elements;
+        elements.reserve(bytes.size());
+        for (const auto byte : bytes) elements.push_back(integer_value(type.arguments[0], false, byte));
+        heap_.entries.push_back({HeapEntry::Kind::List, no_symbol, {}, std::move(elements), 0, false, 0});
+        return reference_to(heap_.entries.size() - 1, type);
+    }
+
+    // As many C parameters as NVM supports (src/nvm/machine.cpp).
+    static constexpr std::size_t max_kernel_params = 16;
+
+    Value call_kernel(const IrNode& node, const std::vector<Value>& values, const std::string& name,
+                      std::uint32_t version) {
+        using kernels::Kind;
+        using kernels::Role;
+        const auto* info = kernels::find_kernel(name, version);
+        if (!info) unsupported(node, "kernel " + name + " is not in the kernel table");
+        const auto binding = kernels::plan_binding(*info);
+        if (binding.problem || info->param_count > max_kernel_params) {
+            unsupported(node, "kernel " + name + " has no binding");
+        }
+        if (values.size() != binding.arguments.size()) unsupported(node, "kernel " + name + " argument count");
+        const auto count = info->param_count;
+
+        // Copy every argument out of the heap first: nothing below holds a
+        // reference into heap_.entries across an allocation.
+        std::vector<std::vector<unsigned char>> buffers(count);
+        std::vector<U64> formula(count, 0);
+        std::vector<U64> scalars(count, 0);
+        for (std::size_t a = 0; a < binding.arguments.size(); ++a) {
+            const auto p = binding.arguments[a];
+            const auto kind = info->params[p];
+            const auto& value = values[a];
+            if (kernels::scalar_kind(kind)) {
+                scalars[p] = scalar_bits(value, kind, node);
+                formula[p] = formula_scalar(value, kind);
+                continue;
+            }
+            auto& buffer = buffers[p];
+            if (kind == Kind::Text) {
+                if (value.kind != Value::Kind::String) unsupported(node, "a kernel text argument that is not a string");
+                buffer.assign(value.text.begin(), value.text.end());
+                formula[p] = buffer.size();
+                continue;
+            }
+            const auto element = kernels::element_kind(kind);
+            const auto width = kernels::scalar_width(element) / 8;
+            const auto& item = collection_entry(value, node);
+            buffer.resize(item.elements.size() * width);
+            for (std::size_t i = 0; i < item.elements.size(); ++i) {
+                store_scalar(element, scalar_bits(item.elements[i], element, node), &buffer[i * width]);
+            }
+            formula[p] = item.elements.size();
+        }
+
+        // The runtime charges kernels::evaluate(info->cost, ...) here; the
+        // evaluator does not count steps.
+        std::vector<U64> sizes(count, 0);
+        for (std::size_t i = 0; i < info->buffer_count; ++i) {
+            sizes[info->buffers[i].param] = kernels::evaluate(info->buffers[i].size, formula.data());
+        }
+
+        // Lay out the C arguments: args[p] points to the p-th C argument.
+        struct View {
+            const void* data;
+            U64 len;
+        };
+        std::array<View, max_kernel_params> views{};
+        std::array<neura_state, max_kernel_params> states{};
+        std::array<neura_state*, max_kernel_params> state_pointers{};
+        std::array<neura_out_bytes, max_kernel_params> outputs{};
+        std::array<neura_out_bytes*, max_kernel_params> output_pointers{};
+        std::array<U64, max_kernel_params> results{};
+        std::array<void*, max_kernel_params> result_pointers{};
+        std::array<unsigned char, max_kernel_params * 8> scalar_cells{};
+        std::array<void*, max_kernel_params> pointers{};
+        for (std::size_t p = 0; p < count; ++p) {
+            const auto kind = info->params[p];
+            switch (binding.roles[p]) {
+            case Role::Argument:
+                if (kernels::scalar_kind(kind)) {
+                    store_scalar(kind, scalars[p], &scalar_cells[p * 8]);
+                    pointers[p] = &scalar_cells[p * 8];
+                } else if (kind == Kind::State) {
+                    states[p] = {buffers[p].data(), buffers[p].size()};
+                    state_pointers[p] = &states[p];
+                    pointers[p] = &state_pointers[p];
+                } else {
+                    // A text view counts bytes; element_kind leaves Text as is.
+                    const auto width =
+                        kind == Kind::Text ? 1 : kernels::scalar_width(kernels::element_kind(kind)) / 8;
+                    views[p] = {buffers[p].data(), buffers[p].size() / width};
+                    pointers[p] = &views[p];
+                }
+                break;
+            case Role::Scratch: {
+                const auto width = kernels::scalar_width(kernels::element_kind(kind)) / 8;
+                buffers[p].assign(static_cast<std::size_t>(sizes[p]) * width, 0);
+                views[p] = {buffers[p].data(), sizes[p]};
+                pointers[p] = &views[p];
+                break;
+            }
+            case Role::Output:
+            case Role::ErrorOffset:
+                if (kind == Kind::OutText || kind == Kind::OutBytes) {
+                    buffers[p].assign(static_cast<std::size_t>(sizes[p]), 0);
+                    outputs[p] = {buffers[p].data(), 0, sizes[p]};
+                    output_pointers[p] = &outputs[p];
+                    pointers[p] = &output_pointers[p];
+                } else {
+                    result_pointers[p] = &results[p];
+                    pointers[p] = &result_pointers[p];
+                }
+                break;
+            }
+        }
+
+        // Run it; an output found too small is grown once, as NVM does.
+        alignas(8) unsigned char returned[8]{};
+        neura_status status = NEURA_OK;
+        for (int attempt = 0;; ++attempt) {
+            info->thunk(pointers.data(), returned);
+            if (info->result != Kind::Status) break;
+            std::memcpy(&status, returned, sizeof status);
+            if (status != NEURA_NEED_CAPACITY || attempt == 1 || binding.value_param == kernels::Binding::none) break;
+            auto& out = outputs[binding.value_param];
+            if (out.len <= out.cap) break;
+            auto& buffer = buffers[binding.value_param];
+            buffer.assign(static_cast<std::size_t>(out.len), 0);
+            out = {buffer.data(), 0, buffer.size()};
+        }
+        const bool error = status >= NEURA_ERR_INVALID_START_BYTE && status < NEURA_TRAP_OFFSET_OUT_OF_RANGE;
+        if (status != NEURA_OK && !(error && binding.result == kernels::ResultShape::Outcome)) {
+            // The program trap of the Neura code the kernel replaces.
+            trap(node, 3, neura_kernel_status_message(status));
+        }
+
+        // Copy writable arguments back, element by element, keeping each
+        // element's type. Nothing has been allocated since the copy in.
+        for (std::size_t a = 0; a < binding.arguments.size(); ++a) {
+            const auto p = binding.arguments[a];
+            const auto kind = info->params[p];
+            if (kind != Kind::State && !kernels::mut_kind(kind)) continue;
+            const auto element = kernels::element_kind(kind);
+            const auto width = kernels::scalar_width(element) / 8;
+            auto& item = collection_entry(values[a], node);
+            for (std::size_t i = 0; i < item.elements.size() && (i + 1) * width <= buffers[p].size(); ++i) {
+                auto& slot = item.elements[i];
+                slot = scalar_value(element, load_scalar(element, &buffers[p][i * width]), slot.type);
+            }
+        }
+
+        // The result. Text and byte outputs are copied out of the buffers
+        // before anything is allocated.
+        const auto& result_type = symbol(node.symbol).type;
+        const auto make_value = [&](const IrType& type, bool empty) -> Value {
+            const auto kind = binding.value_kind;
+            if (kind == Kind::OutText || kind == Kind::OutBytes) {
+                const auto& out = outputs[binding.value_param];
+                const auto length = empty ? 0 : static_cast<std::size_t>(std::min(out.len, out.cap));
+                std::vector<unsigned char> bytes(out.data, out.data + length);
+                if (kind == Kind::OutBytes) return byte_list(bytes, type, node);
+                Value text;
+                text.kind = Value::Kind::String;
+                text.type = type;
+                text.text.assign(bytes.begin(), bytes.end());
+                if (!valid_utf8(text.text)) fault(node, "invalid text");
+                return text;
+            }
+            U64 bits = 0;
+            if (!empty) {
+                if (binding.value_param == kernels::Binding::none) {
+                    bits = load_scalar(kind, returned);
+                } else {
+                    unsigned char cell[8];
+                    std::memcpy(cell, &results[binding.value_param], sizeof cell);
+                    bits = load_scalar(kind, cell);
+                }
+            }
+            return scalar_value(kind, bits, type);
+        };
+        switch (binding.result) {
+        case kernels::ResultShape::Void:
+            return Value{};
+        case kernels::ResultShape::Scalar:
+        case kernels::ResultShape::Text:
+        case kernels::ResultShape::Bytes:
+            return make_value(result_type, false);
+        case kernels::ResultShape::Outcome: {
+            if (result_type.kind != TypeKind::Tuple || result_type.arguments.size() < 2) {
+                unsupported(node, "a kernel outcome that is not a tuple");
+            }
+            std::vector<Value> fields;
+            fields.push_back(integer_value(result_type.arguments[0], false, static_cast<U64>(status)));
+            U64 offset = 0;
+            if (error) {
+                unsigned char cell[8];
+                std::memcpy(cell, &results[binding.error_param], sizeof cell);
+                offset = load_scalar(Kind::I64, cell);
+            }
+            fields.push_back(scalar_value(Kind::I64, offset, result_type.arguments[1]));
+            if (result_type.arguments.size() == 3) fields.push_back(make_value(result_type.arguments[2], error));
+            heap_.entries.push_back({HeapEntry::Kind::Tuple, no_symbol, {}, std::move(fields), 0, false, 0});
+            return reference_to(heap_.entries.size() - 1, result_type);
+        }
+        }
+        return Value{};
     }
 
     static bool valid_utf8(const std::string& bytes) {
