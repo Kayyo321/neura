@@ -126,7 +126,7 @@ The marker is line-oriented text that tools parse strictly:
 neura-install 1
 method archive
 link /home/user/.local/bin/neura
-version 0.1.0
+version 0.2.0
 ```
 
 `link` is the absolute path of the symbolic link in the bin directory, and there is one `version` line for each directory in `versions/`. Any other line, a repeated version, or a missing final newline makes the marker invalid.
