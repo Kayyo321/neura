@@ -49,6 +49,17 @@ For each program the script:
 
 The script writes `bench-wall.json` (every time, the outputs, steps, cells, the Neura version, the Java version, and the machine) and `bench-wall.md` (a table) to `build/bench-wall/`, or to `--out-dir`.
 
+## Comparing execution tiers
+
+`neura run` evaluates proven lifted blocks natively and other blocks by reference ([execution tiers](runtime/NVM.md#execution-tiers)). `--compare-tiers` runs each program at `--tier=0` and at `--tier=1` with the same binary, checks that both print the same output and report the same steps and peak heap cells, and reports both times, the speedup, and the share of steps tier 1 ran, from `--tier-stats`. `--run-option` passes any other option to `neura run`.
+
+```sh
+python3 scripts/bench-wall.py --quick --compare-tiers --runs 3
+python3 scripts/bench-wall.py --run-option=--tier=0     # every program on the reference tier
+```
+
+The speed of tier 1 depends on how many of a program's steps run lifted and on the cost of proving its blocks, which the executor spends while the program runs. Blocks of float addition, subtraction, and multiplication stay on tier 0 for now, so programs dominated by them run at about the speed of tier 0. Whether tier 1 is correct is not measured here: `scripts/runtime-identity.py` compares the two tiers byte for byte (`capture --extended --run-option=--tier=0` and `--tier=1`, then `compare`), and `scripts/tier-boundary.py` compares boundary arithmetic of every integer type and of `float32` and `float64`, also under `NEURA_TIER_CHECK=1`.
+
 ## Reading the results
 
 - Compare times from one machine. Run on an otherwise idle machine and state the CPU, the operating system, and the Java version with any figures you publish.

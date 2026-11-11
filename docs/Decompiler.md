@@ -10,6 +10,8 @@ neura decompile program.nvr                     # typed reconstruction
 
 Optional metadata, the source map (`SMAP`) and names (`NAME`), only labels the output. It never decides what an operation is. `decompile --no-provenance` omits it, and decompiling an image with both sections removed produces the same text as `--no-provenance`.
 
+The `LIFT` section ([NVR](runtime/NVR.md#lift-hints)), which records the operations the converter built each block from, is not evidence either: the decompiler does not read it, keeps proving every lifted block by regenerating it from the circuit, and decompiles an image to the same text with or without it. Like any optional section, `disassemble` writes it as a `section "LIFT"` record of hex bytes and `assemble` reproduces it, so a disassembled and edited image keeps its hints; the runtime proves each hint against the edited graph, and a hint that no longer matches leaves its block on the reference evaluator.
+
 ## Assembly: the lossless form
 
 `disassemble` writes every record of every table in table order, each with its index, so the text names every field the encoding holds:

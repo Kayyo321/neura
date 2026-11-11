@@ -38,6 +38,7 @@ Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-versi
 | `GRPH` | Neuron graph records | Yes |
 | `IMPT` | Host import declarations | Yes |
 | `LAYO` | Object layout records | Yes |
+| `LIFT` | Lifted forms of blocks, as hints for a faster tier (not interpreted by the loader; never trusted) | Optional |
 | `META` | Entry function index as one `u32` | Yes |
 | `NATV` | The embedded native library (1.4); present only when the image has C imports | Yes, when present |
 | `NAME` | Source names for tools (provenance; not interpreted by the loader) | Optional |
@@ -282,6 +283,25 @@ The optional `NAME` section gives tools the source names of image entities. It i
 | 4 | Frame slot | Function | Slot |
 
 Names are qualified source names, such as `Objects.Counter.bump`, or descriptions of generated functions, such as `Counter.init` and `string +`.
+
+### Lift hints
+
+The optional `LIFT` section records, for blocks whose graphs have neurons, the typed operations the converter built each graph from ([Execution tiers](NVM.md#execution-tiers)). It is a hint, never evidence. The loader keeps it as raw bytes without interpreting it, the section raises no format version, and a loader that does not know it skips it. A runtime that uses it proves every hinted form exactly as it proves a form it found itself: regenerating the block from the form must reproduce the block and its graph, and an overflow analysis of the graph must show that reference evaluation cannot overflow and that every output lane is 0 or 1. A wrong, stale, or malicious hint can only leave its block on the reference evaluator. Execution never depends on the section, the decompiler does not read it, and `neura build --no-lift-hints` omits it; so does `neura build --native --no-lift-hints` of an image already built.
+
+All integers are little-endian. The section contains `version:u32` (1), `form_count:u32`, that many forms, `entry_count:u32`, and that many entries `function:u32, block:u32, form:u32` in strictly ascending (function, block) order, where `form` indexes the forms. Blocks with identical forms share one. A form is:
+
+```text
+node_count:u32, node[node_count]
+flags:u8                      bit 0: shared; bit 1: has a condition; other bits zero
+schedule_count:u32, node:u32[schedule_count]
+value_count:u32, (lane:u32, node:u32)[value_count]
+condition:u32, exit_when_true:u32      only when flag bit 1 is set
+dispatch_count:u32, (exit:u32, layout_count:u32, layout:u32[layout_count])[dispatch_count]
+```
+
+Each node is `kind:u8, type:u32` followed by its fields: kind 0, a block input, `input:u32` (its position in the block's input list); kind 1, an immediate, `bits:u64` (its slot encoding); kind 2, a unary operation, `op:u8, operand:u32`; kind 3, a binary operation, `op:u8, left:u32, right:u32`; kind 4, a conversion to `type`, `operand:u32`. An operand names an earlier node, so a form is acyclic, and nesting is at most 256 deep. Operator codes 0 through 22 are `!`, `~`, `index`, `neg`, `+`, `+~`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `&`, `|`, `^`, `<<`, and `>>`, with the meanings of [Numbers](../lang/Numbers.md) for the operand types; `index` widens a signed or unsigned integer to `uint64` after checking that it is not negative, and `+~` adds without an overflow check.
+
+A value names the first output lane an exit reads and the node that computes it, in the order the block computes them. In a shared form, a node stands for one computation however often it is used, and the schedule lists the operations in the order the block performs them, including any whose only effect is a check, which fixes the order in which checks fail. The condition chooses between a block's two normal exits: `exit_when_true` is the one taken when it holds. A dispatch form instead lists, for each call exit of a virtual dispatch block, the layouts that select it. A section of another version, or one with any malformed byte (a count beyond the bytes left, an operand that is not an earlier node, an unknown kind or operator, a duplicate lane or exit, entries out of order, or trailing bytes), is ignored whole; an entry that names a function or block outside the image is dropped.
 
 ## Writer and loader requirements
 
