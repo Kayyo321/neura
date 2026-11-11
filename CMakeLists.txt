@@ -95,6 +95,7 @@ set(neura_nvm_sources
     src/nvm/scalar_text.cpp
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
+    src/nvm/tier2.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
 )
@@ -578,6 +579,7 @@ if(BUILD_TESTING)
         tests/backend/placement_tests.cpp
         tests/backend/reference_tests.cpp
         tests/backend/tier_tests.cpp
+        tests/backend/tier2_tests.cpp
         tests/backend/vm_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
         tests/ir-optimization/evaluator.cpp
@@ -656,7 +658,7 @@ if(BUILD_TESTING)
     target_link_libraries(neura_lift_tests PRIVATE neura_lift neura_compiler neura_nvm)
     target_include_directories(neura_lift_tests PRIVATE tests)
     neura_target_defaults(neura_lift_tests)
-    foreach(suite IN ITEMS proof overflow execute corpus)
+    foreach(suite IN ITEMS proof overflow execute corpus floats)
         add_test(NAME lift-${suite} COMMAND neura_lift_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 

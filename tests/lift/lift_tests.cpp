@@ -9,8 +9,14 @@
 // a corpus of compiled programs, with coverage reported, then the benchmark
 // programs run with a device that checks each executed lifted block against
 // the reference and weights coverage by executed steps.
+// `floats`: binary32 and binary64 addition, subtraction, multiplication,
+// and division are proven, and their hardware lowering matches the
+// reference lane by lane on a dense boundary set (all pairs) and on a
+// million seeded random pairs per operation and width (a tenth for
+// division).
 
 #include "backend/converter.hpp"
+#include "circuit/float_circuit.hpp"
 #include "ir-optimization/support.hpp"
 #include "lift/hints.hpp"
 #include "lift/lift.hpp"
@@ -31,9 +37,11 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <random>
 #include <set>
 #include <sstream>
+#include <thread>
 
 namespace neura::testing {
 namespace {
@@ -683,6 +691,30 @@ NEURA_TEST(overflow, unrefined_and_bounded_proofs_agree_with_the_full_proof) {
         check(bounded.wires[w].lo == full.wires[w].lo && bounded.wires[w].hi == full.wires[w].hi,
               "wire " + std::to_string(w) + " has the same interval");
     }
+    // Resumed in small pieces, the analysis settles a few nodes at a time
+    // and ends with the proof the unbounded analysis finds.
+    // A node that needs more than a piece makes no progress until the
+    // pieces grow, as the executor's allowances do.
+    lift::OverflowProof partial;
+    std::size_t pieces = 0;
+    std::uint64_t size = 64;
+    for (; pieces < 10000; ++pieces) {
+        std::uint64_t piece = size;
+        auto next = lift::prove_no_overflow(graph, true, &piece, pieces ? &partial : nullptr);
+        if (!next.exhausted) {
+            partial = std::move(next);
+            break;
+        }
+        check(pieces == 0 || next.node >= partial.node, "a resumed analysis does not go back");
+        if (pieces != 0 && next.node == partial.node) size *= 2;
+        partial = std::move(next);
+    }
+    check(partial.safe && pieces > 2, "the analysis finishes in pieces");
+    check(partial.wires.size() == full.wires.size(), "the resumed proof covers every wire");
+    for (std::size_t w = 0; w < full.wires.size() && w < partial.wires.size(); ++w) {
+        check(partial.wires[w].lo == full.wires[w].lo && partial.wires[w].hi == full.wires[w].hi,
+              "wire " + std::to_string(w) + " has the same interval when resumed");
+    }
     lift::GraphProofs proofs;
     check_equal(proofs.verdict(graph, 0, 0), std::string(lift::exhausted_work), "a starved verdict is not final");
     check(proofs.verdict(graph, 0).empty(), "an unbounded verdict proves the graph");
@@ -970,6 +1002,250 @@ NEURA_TEST(corpus, blocks_match_the_reference_and_coverage_is_reported) {
     std::cout << "  " << std::fixed << std::setprecision(1)
               << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() << " s\n";
     check(total_lifted > 0, "the corpus has lifted blocks");
+}
+
+// ---------------------------------------------------------------------------
+// Float arithmetic: the proofs and the
+// hardware lowering against the reference, lane by lane.
+
+struct FloatShape {
+    unsigned width;
+    unsigned fraction;
+    unsigned exponent() const { return width - 1 - fraction; }
+    std::uint64_t bias() const { return (std::uint64_t{1} << (exponent() - 1)) - 1; }
+    std::uint64_t sign() const { return std::uint64_t{1} << (width - 1); }
+    std::uint64_t infinity() const { return ((std::uint64_t{1} << exponent()) - 1) << fraction; }
+    std::uint64_t ulp_mask() const { return (std::uint64_t{1} << fraction) - 1; }
+    // 2^power * (1 + mantissa / 2^fraction) for a normal power.
+    std::uint64_t value(std::int64_t power, std::uint64_t mantissa) const {
+        return (static_cast<std::uint64_t>(static_cast<std::int64_t>(bias()) + power) << fraction) | (mantissa & ulp_mask());
+    }
+};
+
+// The dense boundary set of a format, both signs: zeros, the smallest and
+// largest subnormals, the smallest normal, 1 and its neighbours, the
+// largest finite value, infinities, quiet and signalling NaNs with several
+// payloads, powers that put exponents 0, 1, 2, p - 1, p, and p + 1 apart (p
+// the significand's width), values that make rounding ties and exact
+// cancellation, and products near overflow and underflow.
+std::vector<std::uint64_t> dense_float_set(const FloatShape& s) {
+    const auto f = static_cast<std::int64_t>(s.fraction);
+    const auto top = static_cast<std::int64_t>(s.bias());
+    const auto half = std::uint64_t{1} << (s.fraction - 1);
+    const auto ones = s.ulp_mask();
+    std::set<std::uint64_t> magnitudes{
+        0, 1, 2, 3, ones, ones - 1, std::uint64_t{1} << s.fraction, (std::uint64_t{1} << s.fraction) + 1,
+        s.value(0, 0), s.value(0, 1), s.value(0, 2), s.value(0, ones), s.value(0, half), s.value(0, half + 1),
+        s.value(-1, ones), s.value(1, 0), s.value(1, 1), s.value(top, ones), s.value(top, ones - 1), s.value(top, 0),
+        s.value(top - 1, ones), s.infinity(),
+        // NaNs: quiet with payloads, signalling with payloads.
+        s.infinity() | half, s.infinity() | half | 1, s.infinity() | half | 0x123, s.infinity() | ones,
+        s.infinity() | 1, s.infinity() | 0x2a, s.infinity() | (half >> 1),
+        // Products near overflow and into the subnormal range.
+        s.value(top / 2, 0), s.value(top / 2, ones), s.value(top / 2 + 1, 0), s.value(-(top / 2), 0),
+        s.value(-(top / 2) - f / 2, 0), s.value(1 - top, ones), s.value(2 - top, 0), s.value(f, 0), s.value(f + 1, 1),
+        // A thirds pattern and other dense mantissas.
+        s.value(0, 0x5555555555555555ULL), s.value(-2, 0x5555555555555555ULL), s.value(3, 0x2aaaaaaaaaaaaaaaULL),
+    };
+    // Exponents 0, 1, 2, p - 1, p, and p + 1 below 1 (p = fraction + 1),
+    // with mantissas that make ties (1 + 2^-p), round-up ties (with an odd
+    // neighbour), and near-cancellation.
+    for (const std::int64_t d : {0L, 1L, 2L, f, f + 1, f + 2}) {
+        for (const std::uint64_t m : {std::uint64_t{0}, std::uint64_t{1}, half, ones, half | 1}) {
+            magnitudes.insert(s.value(-d, m));
+        }
+    }
+    std::vector<std::uint64_t> values;
+    for (const auto m : magnitudes) {
+        values.push_back(m);
+        values.push_back(m | s.sign());
+    }
+    return values;
+}
+
+// A seeded random pair, by one of several strategies: random bit patterns,
+// exponents close together (cancellation and alignment), small exponents
+// (subnormal results), exponents summing near the range's ends (products
+// that overflow or underflow), and a boundary value against a random one.
+std::pair<std::uint64_t, std::uint64_t> random_float_pair(std::mt19937_64& random, const FloatShape& s,
+                                                         const std::vector<std::uint64_t>& dense) {
+    const auto mask = lift::width_mask(s.width);
+    const auto exponent_field = (std::uint64_t{1} << s.exponent()) - 1;
+    const auto make = [&](std::uint64_t sign, std::uint64_t exponent, std::uint64_t mantissa) {
+        return ((sign & 1U) << (s.width - 1)) | ((exponent & exponent_field) << s.fraction) | (mantissa & s.ulp_mask());
+    };
+    const auto a = random();
+    const auto b = random();
+    switch (random() % 5) {
+    case 0: return {a & mask, b & mask};
+    case 1: {
+        const auto e = random() % (exponent_field + 1);
+        const auto d = random() % (s.fraction + 4);
+        const auto other = random() & 1U ? e + d : (e >= d ? e - d : 0);
+        auto y = random() & s.ulp_mask();
+        // Often a neighbour of a's mantissa, for cancellation.
+        if (random() & 1U) y = (a + (random() % 5) - 2) & s.ulp_mask();
+        return {make(a >> 63, e, a), make(b >> 63, other, y)};
+    }
+    case 2: return {make(a >> 63, random() % 4, a), make(b >> 63, random() % (s.fraction + 3), b)};
+    case 3: {
+        const auto e = random() % (exponent_field + 1);
+        const auto target = random() & 1U ? s.bias() * 2 + (random() % 8) : s.bias() - s.fraction - (random() % 8);
+        const auto other = target > e ? target - e : random() % 4;
+        return {make(a >> 63, e, a), make(b >> 63, other, b)};
+    }
+    default: {
+        const auto fixed = dense[random() % dense.size()];
+        return random() & 1U ? std::make_pair(fixed, b & mask) : std::make_pair(a & mask, fixed);
+    }
+    }
+}
+
+NEURA_TEST(floats, arithmetic_is_proven_and_matches_the_reference) {
+    // NEURA_LIFT_FLOAT_PAIRS lowers the count of random pairs for a quick
+    // local run; the test's own count is a million per operation and width.
+    std::size_t random_pairs = 1'000'000;
+    if (const char* text = std::getenv("NEURA_LIFT_FLOAT_PAIRS")) random_pairs = std::strtoull(text, nullptr, 10);
+    const unsigned workers = 3;
+    for (const auto t : {F32, F64}) {
+        const FloatShape shape{t == F32 ? 32U : 64U, t == F32 ? 23U : 52U};
+        const auto dense = dense_float_set(shape);
+        for (const auto* op : {"+", "-", "*", "/"}) {
+            const auto label = type_name(t) + " " + op;
+            auto image = op_image();
+            LiftedForm form;
+            check(construct(image, {t, t}, lift::binary(op, t, lift::input(t, 0), lift::input(t, 1)), nullptr, form),
+                  label + ": the circuit library assembles it");
+            const auto started = std::chrono::steady_clock::now();
+            const auto result = lift::lift_and_prove(image, 0, 0, &form);
+            const auto proof_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+            check(result.block != nullptr, label + ": proven (" + result.rejection + ")");
+            if (!result.block) continue;
+            // Every output lane is 0 or 1 by one of the arguments, and the
+            // elimination settles the lanes intervals alone do not.
+            const auto& graph = image.graphs[0];
+            const auto overflow = lift::prove_no_overflow(graph);
+            std::vector<std::uint32_t> lanes(graph.outputs.size());
+            std::iota(lanes.begin(), lanes.end(), 0U);
+            lift::BitEvidence evidence;
+            check(overflow.safe && lift::lanes_are_bits(overflow, graph, lanes, &evidence), label + ": lanes are bits");
+            const auto& block = image.functions[0].blocks[0];
+            std::vector<std::vector<std::uint64_t>> pairs;
+            for (const auto x : dense) {
+                for (const auto y : dense) pairs.push_back({x, y});
+            }
+            const auto dense_count = pairs.size();
+            std::mt19937_64 random(std::hash<std::string>{}(label) ^ 0xf10a7);
+            // Division, a larger circuit outside this test's main subject, gets a
+            // tenth of the random pairs.
+            const auto pairs_here = std::string(op) == "/" ? random_pairs / 10 : random_pairs;
+            for (std::size_t n = 0; n < pairs_here; ++n) {
+                const auto [x, y] = random_float_pair(random, shape, dense);
+                pairs.push_back({x, y});
+            }
+            std::vector<Comparison> parts(workers);
+            std::vector<std::thread> threads;
+            for (unsigned w = 0; w < workers; ++w) {
+                threads.emplace_back([&, w] {
+                    const auto first = pairs.size() * w / workers;
+                    const auto last = pairs.size() * (w + 1) / workers;
+                    parts[w] = compare(image, block, *result.block,
+                                       std::vector<std::vector<std::uint64_t>>(pairs.begin() + static_cast<std::ptrdiff_t>(first),
+                                                                               pairs.begin() + static_cast<std::ptrdiff_t>(last)));
+                });
+            }
+            for (auto& thread : threads) thread.join();
+            std::size_t compared = 0;
+            for (const auto& part : parts) {
+                check(part.mismatch.empty(), label + ": " + part.mismatch);
+                compared += part.vectors;
+            }
+            check_equal(compared, pairs.size(), label + ": every pair compared");
+            std::cout << "  " << label << ": proven in " << std::fixed << std::setprecision(3) << proof_seconds
+                      << " s (" << graph.nodes.size() << " neurons; lanes by intervals " << evidence.intervals
+                      << ", exclusive tests " << evidence.one_hot << ", cases " << evidence.cases << ", elimination "
+                      << evidence.eliminated << "); " << dense_count << " boundary pairs and " << pairs_here
+                      << " random pairs match the reference\n";
+        }
+    }
+}
+
+NEURA_TEST(overflow, elimination_proves_small_float_circuits_and_accepts_nothing_false) {
+    // Float addition, subtraction, multiplication, and division in small
+    // formats (two or three exponent and fraction bits), whose inputs can be
+    // enumerated: each graph's proof is checked against every input, and
+    // so are graphs with one node's bias or one weight changed by one.
+    // Whenever the proofs accept a graph, the reference evaluation must not
+    // overflow and every output lane must be 0 or 1 on every input. A proof
+    // that accepted something false would show up here.
+    std::size_t graphs = 0;
+    std::size_t accepted = 0;
+    std::size_t edited_accepted = 0;
+    std::size_t edited_rejected_wrong = 0;
+    std::mt19937_64 random(0x5eedf10a7);
+    const auto exhaustive = [](const nvr::Graph& graph) {
+        // True when no input overflows and every output lane is a bit.
+        std::vector<std::int64_t> inputs(graph.input_lanes);
+        std::vector<std::int64_t> scratch;
+        std::vector<std::int64_t> lanes(graph.outputs.size());
+        for (std::uint64_t bits = 0; bits < (std::uint64_t{1} << graph.input_lanes); ++bits) {
+            for (std::uint32_t i = 0; i < graph.input_lanes; ++i) inputs[i] = static_cast<std::int64_t>((bits >> i) & 1U);
+            if (nvm::evaluate_outputs(graph, inputs, scratch, lanes)) return false;
+            for (const auto lane : lanes) {
+                if (lane != 0 && lane != 1) return false;
+            }
+        }
+        return true;
+    };
+    const auto proven = [](const nvr::Graph& graph) {
+        std::vector<std::uint32_t> lanes(graph.outputs.size());
+        std::iota(lanes.begin(), lanes.end(), 0U);
+        // Bounded as the executor bounds it; running out decides nothing.
+        std::uint64_t work = std::uint64_t{1} << 22;
+        const auto proof = lift::prove_no_overflow(graph, true, &work);
+        return proof.safe && lift::lanes_are_bits(proof, graph, lanes, nullptr, true, &work);
+    };
+    for (const FloatFormat format : {FloatFormat{2, 2}, FloatFormat{3, 2}, FloatFormat{2, 3}}) {
+        for (int op = 0; op < 4; ++op) {
+            backend::Circuit circuit;
+            backend::Word a;
+            backend::Word b;
+            for (unsigned i = 0; i < format.width(); ++i) a.push_back(circuit.input());
+            for (unsigned i = 0; i < format.width(); ++i) b.push_back(circuit.input());
+            const auto result = op == 0   ? backend::float_add(circuit, a, b, format)
+                                : op == 1 ? backend::float_subtract(circuit, a, b, format)
+                                : op == 2 ? backend::float_multiply(circuit, a, b, format)
+                                          : backend::float_divide(circuit, a, b, format);
+            for (const auto& lane : result) circuit.output(lane);
+            const auto graph = circuit.finish();
+            ++graphs;
+            const auto label = std::to_string(format.exponent_bits) + "/" + std::to_string(format.fraction_bits) +
+                               " op " + std::to_string(op);
+            check(exhaustive(graph), label + ": the circuit's lanes are bits");
+            const bool ok = proven(graph);
+            check(ok, label + ": proven");
+            accepted += ok ? 1 : 0;
+            for (int edit = 0; edit < 30 && !graph.nodes.empty(); ++edit) {
+                auto changed = graph;
+                auto& node = changed.nodes[random() % changed.nodes.size()];
+                if (node.edges.empty() || random() % 2 == 0) {
+                    node.bias += random() % 2 ? 1 : -1;
+                } else {
+                    node.edges[random() % node.edges.size()].weight += random() % 2 ? 1 : -1;
+                }
+                const bool truth = exhaustive(changed);
+                if (proven(changed)) {
+                    check(truth, label + ": an edited graph was accepted although a lane is not a bit");
+                    ++edited_accepted;
+                } else if (truth) {
+                    ++edited_rejected_wrong;
+                }
+            }
+        }
+    }
+    std::cout << "  " << accepted << " of " << graphs << " small float graphs proven; edited graphs: "
+              << edited_accepted << " accepted (all true), " << edited_rejected_wrong
+              << " true but not proven\n";
 }
 
 } // namespace neura::testing

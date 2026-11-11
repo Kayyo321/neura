@@ -86,12 +86,12 @@ void usage(std::ostream& out) {
            "       neura build --native [policy] [--static] [--target <triple>] [--launcher <file>]\n"
            "                  <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
            "       neura inspect <file> [-o <file.nvr>]\n"
-           "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [--tier=0|1] "
+           "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [--tier=0|1|2] "
            "[--tier-stats] [capabilities] "
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
-           "                  [--max-heap-cells N] [--stats] [--tier=0|1] [--tier-stats] [capabilities]\n"
+           "                  [--max-heap-cells N] [--stats] [--tier=0|1|2] [--tier-stats] [capabilities]\n"
            "                  [--gpu=auto|always|off] [--no-gpu]\n"
            "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
            "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
@@ -126,9 +126,10 @@ void usage(std::ostream& out) {
            "  Run an image you do not trust with --deny-all, plus the --allow options it needs.\n"
            "  --record <file>          (run) write every host request and response to a trace\n"
            "  --profile                (run) print the steps each function took\n"
-           "  --tier=0|1               the highest execution tier: 0 evaluates every graph by reference, 1 (the\n"
-           "                           default) also runs proven lifted blocks natively; the result is the same\n"
-           "  --tier-stats             print the blocks lifted and the steps each tier ran\n"
+           "  --tier=0|1|2             the highest execution tier: 0 evaluates every graph by reference, 1 also\n"
+           "                           runs proven lifted blocks natively, 2 (the default) also runs regions of\n"
+           "                           them without returning to the dispatcher; the result is the same\n"
+           "  --tier-stats             print the blocks lifted, the regions formed, and the steps each tier ran\n"
            "  --replay <file>          (run) answer host requests from a trace instead of services; a trace of a\n"
            "                           concurrent run carries its own quantum and limits, which replace the options\n"
            "\n"
@@ -616,11 +617,11 @@ Options read_options(int argc, char** argv) {
                 throw std::runtime_error("--no-lift-hints applies only to build");
             }
             options.lift_hints = false;
-        } else if (arg == "--tier=0" || arg == "--tier=1") {
+        } else if (arg == "--tier=0" || arg == "--tier=1" || arg == "--tier=2") {
             if (!runs) throw std::runtime_error("--tier applies only to run and test");
             options.limits.tier = static_cast<std::uint8_t>(arg.back() - '0');
         } else if (arg.starts_with("--tier=")) {
-            throw std::runtime_error("--tier expects 0 or 1");
+            throw std::runtime_error("--tier expects 0, 1, or 2");
         } else if (arg == "--tier-stats") {
             if (!runs) throw std::runtime_error("--tier-stats applies only to run and test");
             options.tier_stats = true;

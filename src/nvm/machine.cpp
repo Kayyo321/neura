@@ -5,6 +5,8 @@
 #include "run_support.hpp"
 #include "scalar_text.hpp"
 #include "tier1.hpp"
+#include "tier2.hpp"
+#include "lift/evaluate.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
 
@@ -346,6 +348,7 @@ public:
         if (tier_) {
             tier_->add_steps(tier_steps_);
             flush_reference_steps();
+            flush_region_events();
         }
     }
 
@@ -366,6 +369,7 @@ public:
         }
         tier_ = limits_.tier_cache;
         tier_check_ = tier_check_enabled();
+        tier2_ = std::min(limits_.tier, tier_ceiling()) >= 2;
     }
 
     // A concurrent image needs a positive quantum; reject it before any run state exists.
@@ -396,6 +400,9 @@ public:
         // dump request between host requests.
         serve_dump_request();
         for (;;) {
+            // Regions run while the current block has one; the block where
+            // the last one stopped, and any block without one, runs at tier 1.
+            if (tier2_) run_regions(std::numeric_limits<std::uint64_t>::max());
             if (auto event = step(wires_)) return std::move(*event);
         }
     }
@@ -2811,6 +2818,17 @@ private:
         // Reference blocks stay there.
         enum class Tier : std::uint8_t { Reference, Counting, Lifted, Wired, Empty };
         Tier tier = Tier::Reference;
+        // Tier 2: the region entered here (tier2_steps.inc), once settled;
+        // until then, arrivals are counted toward `region_threshold`.
+        enum class RegionState : std::uint8_t { Unknown, Counting, Settled };
+        RegionState region_state = RegionState::Unknown;
+        std::uint64_t region_threshold = 0;
+        const tier2::Region* region = nullptr;
+        // --tier-stats: steps of the region entered here, and regions that
+        // deoptimized at or left to this block.
+        std::uint64_t region_steps = 0;
+        std::uint64_t region_deopts = 0;
+        std::uint64_t region_leaves = 0;
         std::uint64_t threshold = 0;
         std::size_t first_wire = 0;
         const lift::LoweredBlock* lifted = nullptr;
@@ -3062,6 +3080,7 @@ private:
     }
 
 #include "tier1_steps.inc"
+#include "tier2_steps.inc"
 
     std::optional<Event> commit_step(const nvr::Block& block, const BlockPlan& plan) {
         return commit_exit(block.exits[select(block, plan)]);
@@ -3380,6 +3399,10 @@ private:
         }
         case nvr::StateOp::WriteField: {
             auto& item = typed_entry(args[0], types[0].type);
+            if (heap_log_) {
+                heap_log_->push_back({false, true, args[0], exit.immediate, item.cells[exit.immediate],
+                                      item.initialized[exit.immediate], args[1]});
+            }
             item.cells[exit.immediate] = args[1];
             item.initialized[exit.immediate] = 1;
             return 0;
@@ -3397,6 +3420,10 @@ private:
             }
             return globals_[exit.immediate];
         case nvr::StateOp::WriteGlobal:
+            if (heap_log_) {
+                heap_log_->push_back({true, false, 0, exit.immediate, globals_[exit.immediate],
+                                      global_initialized_[exit.immediate], args[0]});
+            }
             globals_[exit.immediate] = args[0];
             global_initialized_[exit.immediate] = 1;
             return 0;
@@ -3432,7 +3459,12 @@ private:
         }
         case nvr::StateOp::WriteElement: {
             auto& item = typed_entry(args[0], types[0].type);
-            item.cells[checked_index(item, args[1])] = args[2];
+            const auto index = checked_index(item, args[1]);
+            if (heap_log_) {
+                heap_log_->push_back({false, false, args[0], static_cast<std::uint32_t>(index), item.cells[index], 0,
+                                      args[2]});
+            }
+            item.cells[index] = args[2];
             return 0;
         }
         case nvr::StateOp::AppendElement: {
@@ -3919,6 +3951,17 @@ private:
     TierCache* tier_ = nullptr;
     bool tier_check_ = false;
     TierSteps tier_steps_;
+    // Tier 2 (tier2_steps.inc): whether regions run, the registers and
+    // initialized flags of the running region, the arguments of an inline
+    // state operation, and the events for --tier-stats.
+    bool tier2_ = false;
+    std::vector<std::uint64_t> region_registers_;
+    std::vector<std::uint8_t> region_initialized_;
+    std::vector<std::uint64_t> region_arguments_;
+    RegionCounts region_counts_;
+    // NEURA_TIER_CHECK=1: the heap and global writes of state operations,
+    // in order, while a region and its tier-1 replay run.
+    std::vector<HeapWrite>* heap_log_ = nullptr;
     TierLanes tier_lanes_ = TierLanes::None;
     const BlockPlan* tier_plan_ = nullptr;
     std::vector<std::uint64_t> tier_inputs_;
@@ -4170,8 +4213,15 @@ std::span<const std::int64_t> Execution::prepared_inputs() {
 
 Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::int64_t>& scratch,
                                                                std::uint64_t limit) {
-    for (std::uint64_t count = 0; count < limit; ++count) {
-        if (auto event = state_->step(scratch)) return {std::move(event), count + 1};
+    // A round is a block: a region's blocks count one each, and the regions
+    // stop at the limit, so the members of a fleet stay in step.
+    for (std::uint64_t count = 0; count < limit;) {
+        if (state_->tier2_) {
+            count += state_->run_regions(limit - count);
+            if (count >= limit) break;
+        }
+        ++count;
+        if (auto event = state_->step(scratch)) return {std::move(event), count};
     }
     return {std::nullopt, limit};
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run boundary arithmetic at tier 0 and tier 1 and compare every byte.
+"""Run boundary arithmetic at tiers 0, 1, and 2 and compare every byte.
 
 For each integer width and signedness, and for float32 and float64, the
 script writes a program whose operations each get a block of their own (a
@@ -11,11 +11,13 @@ its trap. All cases of a program run in one process with `run --each`, so
 the image's lifted blocks are shared by its cases as they are by the tests
 of `neura test`.
 
-Each program runs at --tier=0, at --tier=1, and at --tier=1 with
-NEURA_TIER_CHECK=1, the last two with NEURA_TIER_EAGER=1 so that every block
-is lifted when it first runs (every tier-1 step also evaluated by reference, aborting
-on a difference). Status, standard output, and standard error must be
-identical, and --tier-stats must show that tier 1 ran lifted blocks.
+Each program runs at --tier=0, at --tier=1 and --tier=2, and at each of
+those with NEURA_TIER_CHECK=1, all but the first with NEURA_TIER_EAGER=1 so
+that every block is lifted, and every region formed, when it first runs
+(under the check, every tier-1 step is also evaluated by reference and every
+region run again block by block, aborting on a difference). Status,
+standard output, and standard error must be identical, and --tier-stats
+must show that tier 1 ran lifted blocks and tier 2 ran regions.
 
     scripts/tier-boundary.py --neura build/neura --out build/tier-boundary
 """
@@ -104,19 +106,39 @@ def integer_program(name, width, signed):
     return "\n".join(lines) + "\n", cases
 
 
-FLOAT_VALUES = {
-    "float32": [0x00000000, 0x80000000, 0x3f800000, 0xbf800000, 0x3f000000, 0x7f7fffff, 0xff7fffff, 0x00800000,
-                0x00000001, 0x007fffff, 0x80000001, 0x7f800000, 0xff800000, 0x7fc00000, 0x7fc00123, 0xffc00000,
-                0x7f800001, 0x7fa00000, 0x4b800000, 0x4b800001, 0x33800000, 0x33800001, 0x3f800001, 0x4f000000,
-                0xcf000000, 0x5f000000],
-    "float64": [0x0000000000000000, 0x8000000000000000, 0x3ff0000000000000, 0xbff0000000000000,
-                0x3fe0000000000000, 0x7fefffffffffffff, 0xffefffffffffffff, 0x0010000000000000,
-                0x0000000000000001, 0x000fffffffffffff, 0x8000000000000001, 0x7ff0000000000000,
-                0xfff0000000000000, 0x7ff8000000000000, 0x7ff8000000000123, 0xfff8000000000000,
-                0x7ff0000000000001, 0x7ff4000000000000, 0x4340000000000000, 0x4340000000000001,
-                0x3ca0000000000000, 0x3ca0000000000001, 0x3ff0000000000001, 0x43e0000000000000,
-                0xc3e0000000000000, 0x41e0000000000000, 0x3fb999999999999a],
-}
+def dense_float_values(width):
+    """Boundary bit patterns of a binary format: signed zeros, the smallest
+    and largest subnormals, the smallest normal, 1 and its neighbours, the
+    largest finite value, infinities, quiet and signalling NaNs with
+    payloads, powers whose exponents differ from 1's by 0, 1, 2, p - 1, p,
+    and p + 1 (p the significand's width) with mantissas that make rounding
+    ties and near-cancellation, and products near overflow and underflow."""
+    fraction = 23 if width == 32 else 52
+    exponent_bits = width - 1 - fraction
+    bias = (1 << (exponent_bits - 1)) - 1
+    sign = 1 << (width - 1)
+    infinity = ((1 << exponent_bits) - 1) << fraction
+    ones = (1 << fraction) - 1
+    half = 1 << (fraction - 1)
+
+    def value(power, mantissa=0):
+        return ((bias + power) << fraction) | (mantissa & ones)
+
+    magnitudes = {0, 1, ones, 1 << fraction, value(0), value(0, 1), value(0, ones), value(0, half), value(-1, ones),
+                  value(1), value(bias, ones), value(bias, ones - 1), infinity,
+                  infinity | half, infinity | half | 0x123, infinity | 1, infinity | 0x2a,
+                  value(bias // 2), value(bias // 2 + 1), value(-(bias // 2) - fraction // 2), value(1 - bias, ones),
+                  value(fraction), value(fraction + 1, 1), value(0, 0x5555555555555555)}
+    for d in (1, 2, fraction, fraction + 1, fraction + 2):
+        for mantissa in (0, 1, half | 1):
+            magnitudes.add(value(-d, mantissa))
+    values = []
+    for magnitude in sorted(magnitudes):
+        values += [magnitude, magnitude | sign]
+    return values
+
+
+FLOAT_VALUES = {"float32": dense_float_values(32), "float64": dense_float_values(64)}
 
 FLOAT_BINARY = ["+", "-", "*", "/", "==", "!=", "<", "<=", ">", ">="]
 
@@ -211,23 +233,26 @@ def main():
         lists = out / f"{name}.cases"
         lists.write_text("".join(f"{op} {i} {j}\n" for op, i, j in cases))
         reference = run([neura, "run", "--tier=0", "--each", str(lists), str(image)])
-        # Every block is lifted when it first runs: each case runs each
-        # operation once, far below the usual thresholds.
+        # Every block is lifted, and every region formed, when it first
+        # runs: each case runs each operation once, far below the usual
+        # thresholds.
         eager = dict(os.environ, NEURA_TIER_EAGER="1")
-        lifted = run([neura, "run", "--tier=1", "--each", str(lists), str(image)], eager)
-        checked = run([neura, "run", "--tier=1", "--each", str(lists), str(image)],
-                      dict(eager, NEURA_TIER_CHECK="1"))
-        stats = run([neura, "run", "--tier=1", "--tier-stats", "--each", str(lists), str(image)], eager)
+        runs = {}
+        for tier in (1, 2):
+            runs[f"tier {tier}"] = run([neura, "run", f"--tier={tier}", "--each", str(lists), str(image)], eager)
+            runs[f"tier {tier} checked"] = run([neura, "run", f"--tier={tier}", "--each", str(lists), str(image)],
+                                               dict(eager, NEURA_TIER_CHECK="1"))
+        stats = run([neura, "run", "--tier=2", "--tier-stats", "--each", str(lists), str(image)], eager)
         lifted_line = next((line for line in stats[2].decode(errors="replace").splitlines()
                             if line.startswith("tier: steps")), "tier: no statistics")
         traps = reference[2].count(b": trap: ")
-        same = reference == lifted and reference == checked
+        same = all(other == reference for other in runs.values())
         total += len(cases)
         print(f"{name:8} {len(cases):5} cases, {traps:4} traps: {'identical' if same else 'DIFFERENT'}; "
               f"{lifted_line}", flush=True)
         if not same:
             failures += 1
-            for label, other in (("tier 1", lifted), ("tier 1 checked", checked)):
+            for label, other in runs.items():
                 if other != reference:
                     (out / f"{name}.{label.replace(' ', '-')}.stdout").write_bytes(other[1])
                     (out / f"{name}.{label.replace(' ', '-')}.stderr").write_bytes(other[2])

@@ -2,38 +2,14 @@
 
 #include "lift/lift.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
-#include <set>
 
 namespace neura::nvm {
 namespace {
-
-// Whether a form adds, subtracts, or multiplies floats. The overflow analysis
-// cannot yet show that those circuits' output lanes are bits (docs/runtime/
-// NVM.md, "Execution tiers"), and trying costs much work, so such a hint is
-// not proven. A wrong claim here only leaves its block on tier 0.
-bool float_arithmetic(const nvr::Image& image, const lift::LiftedForm& form) {
-    std::vector<const lift::Expression*> pending;
-    for (const auto& e : form.schedule) pending.push_back(e.get());
-    for (const auto& [lane, e] : form.values) pending.push_back(e.get());
-    if (form.condition) pending.push_back(form.condition.get());
-    std::set<const lift::Expression*> seen;
-    while (!pending.empty()) {
-        const auto* e = pending.back();
-        pending.pop_back();
-        if (!e || !seen.insert(e).second) continue;
-        if (e->kind == lift::Expression::Kind::Binary && (e->op == "+" || e->op == "-" || e->op == "*") &&
-            !e->operands.empty() && e->operands[0] && e->operands[0]->type < image.types.size() &&
-            lift::is_floating(image.types[e->operands[0]->type])) {
-            return true;
-        }
-        for (const auto& operand : e->operands) pending.push_back(operand.get());
-    }
-    return false;
-}
 
 std::uint64_t microseconds(std::chrono::steady_clock::duration duration) {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
@@ -56,7 +32,8 @@ std::uint8_t tier_ceiling() {
     static const std::uint8_t ceiling = [] {
         const char* text = std::getenv("NEURA_TIER");
         if (text && std::strcmp(text, "0") == 0) return std::uint8_t{0};
-        return std::uint8_t{1};
+        if (text && std::strcmp(text, "1") == 0) return std::uint8_t{1};
+        return std::uint8_t{2};
     }();
     return ceiling;
 }
@@ -71,7 +48,7 @@ bool tier_check_enabled() {
 
 std::string describe(const TierStatistics& s) {
     const auto& steps = s.steps;
-    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference;
+    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference + steps.region;
     const auto percent = [&](std::uint64_t part) {
         char text[32];
         std::snprintf(text, sizeof text, "%.1f%%", total ? 100.0 * static_cast<double>(part) / total : 0.0);
@@ -88,10 +65,37 @@ std::string describe(const TierStatistics& s) {
                       " by hint, " + std::to_string(s.lifted_by_search) + " by search), hints rejected " +
                       std::to_string(s.hints_rejected) + "; proving " + milliseconds(s.hint_microseconds) +
                       ", searching " + milliseconds(s.search_microseconds) + "\n";
-    out += "tier: steps " + std::to_string(total) + ": tier 1 " + percent(steps.lifted + steps.wired + steps.empty) +
+    out += "tier: steps " + std::to_string(total) + ": tier 2 " + percent(steps.region) + " (in regions " +
+           std::to_string(steps.region) + "), tier 1 " + percent(steps.lifted + steps.wired + steps.empty) +
            " (lifted " + std::to_string(steps.lifted) + ", wired " + std::to_string(steps.wired) + ", empty " +
            std::to_string(steps.empty) + "), tier 0 " + percent(steps.reference + steps.declined) + " (reference " +
            std::to_string(steps.reference) + ", declined " + std::to_string(steps.declined) + ")\n";
+    const auto& r = s.region_counts;
+    if (s.regions != 0 || !s.region_rejections.empty()) {
+        out += "tier: regions " + std::to_string(s.regions) + " (" + std::to_string(s.region_blocks) +
+               " blocks, " + std::to_string(s.checks_eliminated) + " checks eliminated, " +
+               std::to_string(s.refreshed) + " formed again); entered " +
+               std::to_string(r.entries) + ", refused " + std::to_string(r.refused) + ", left " +
+               std::to_string(r.leaves) + "; deoptimized: budget " + std::to_string(r.budget) + ", exits " +
+               std::to_string(r.exits) + ", checks " + std::to_string(r.checks) + ", selectors " +
+               std::to_string(r.selectors) + ", references " + std::to_string(r.references) + ", state traps " +
+               std::to_string(r.state_traps) + "\n";
+        for (const auto& [reason, count] : s.region_rejections) {
+            out += "tier: no region " + std::to_string(count) + ": " + reason + "\n";
+        }
+        const auto top = [&](const std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>& counts,
+                             const char* what) {
+            std::vector<std::pair<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>>> ends;
+            for (const auto& [block, count] : counts) ends.emplace_back(count, block);
+            std::sort(ends.begin(), ends.end(), std::greater<>());
+            for (std::size_t i = 0; i < ends.size() && i < 5; ++i) {
+                out += std::string("tier: ") + what + " " + std::to_string(ends[i].first) + " times at function " +
+                       std::to_string(ends[i].second.first) + " block " + std::to_string(ends[i].second.second) + "\n";
+            }
+        };
+        top(s.region_deopts, "deoptimized");
+        top(s.region_leaves, "left");
+    }
     for (const auto& [reason, count] : s.rejections) {
         out += "tier: not lifted " + std::to_string(count) + ": " + reason + "\n";
     }
@@ -123,6 +127,7 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
         options_.search_after = 1;
         options_.minimum_proof_work = std::uint64_t{1} << 32;
         options_.search_budget = std::chrono::milliseconds(60'000);
+        options_.region_after = 1;
     }
     first_entry_.reserve(image.functions.size());
     std::size_t total = 0;
@@ -132,6 +137,8 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
     }
     entries_ = std::vector<Entry>(total);
     counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
+    regions_ = std::vector<RegionEntry>(total);
+    region_counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     statistics_.blocks = total;
     statistics_.hinted = hints_.size();
 }
@@ -238,9 +245,7 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
     std::chrono::steady_clock::duration time{};
     std::string hint_rejection;
     const auto start = std::chrono::steady_clock::now();
-    if (hint && float_arithmetic(image_, *hint)) {
-        result.rejection = "float addition, subtraction, or multiplication";
-    } else if (hint) {
+    if (hint) {
         result = lift::lift_and_prove(image_, function, block, hint, std::chrono::steady_clock::time_point::max(),
                                       &graph_proofs_, work);
     } else {
@@ -273,7 +278,14 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         ++statistics_.deferred;
         statistics_.block_reasons[{function, block}] =
             "deferred after " + std::to_string(runs) + " runs: the proof or search needs more work";
-        found.next_attempt = std::max<std::uint64_t>(runs * 8, 256);
+        // The analysis's work grows about in proportion to the nodes it
+        // settles, so the share it reached says how much more the rest
+        // needs: the next attempt waits until the block's allowance has
+        // grown that much (at least eightfold), so a run too short to repay
+        // the proof does not pay for attempts that cannot finish.
+        const auto share = std::max(result.progress, 1.0 / 256);
+        const auto factor = std::clamp<std::uint64_t>(static_cast<std::uint64_t>(std::ceil(2.0 / share)), 8, 512);
+        found.next_attempt = std::max<std::uint64_t>(runs * factor, 256);
         return {nullptr, false, found.next_attempt};
     }
     // A failure is final for its source: a failed hint is not tried again
@@ -316,6 +328,7 @@ void TierCache::add_steps(const TierSteps& steps) {
     statistics_.steps.empty += steps.empty;
     statistics_.steps.declined += steps.declined;
     statistics_.steps.reference += steps.reference;
+    statistics_.steps.region += steps.region;
 }
 
 TierStatistics TierCache::statistics() const {
