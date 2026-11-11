@@ -85,3 +85,7 @@ The three names are this page's shorthand. A type overlay cannot name a function
 - **Buffers.** `BufferedReader` passes a large read straight through when its buffer is empty; `BufferedWriter` drops its buffer when the sink fails. `Utf8Reader.read_scalar` leaves the byte that broke a sequence unread.
 - **Trap details.** `maximum count below 1`, `capacity below 16`, `negative count`, `port`, and `negative timeout` after `invalid argument: `.
 - **Lifetime.** File and socket IDs count from 1 in each run; the runner closes what a run left open when it ends, and after each test.
+
+### Task safety
+
+A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). `read`, `read_exact`, and `read_all` call the reader's byte source, which is a function value, and the compiler judges such a call by every function value of that type the program can create. `Std.Io.Console` provides one that is not task-safe, the source that `Console.input()` returns. In a program that links `Std.Io.Console`, these three functions are therefore not task-safe whatever source the reader was built from, and a spawned task reads a stream with the stream's own `read`. `create` and `with_capacity` are task-safe. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.

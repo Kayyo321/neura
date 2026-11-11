@@ -14,7 +14,7 @@
 | Image | The `.nvr` bytes `neura build` writes ([NVR](../runtime/NVR.md)). |
 | Launcher | A prebuilt executable that contains the NVM library and the standard host providers, and no compiler. |
 | Native executable | The output of `neura build --native`: a launcher, a payload, and a footer in one file. |
-| Policy | The capabilities and run limits recorded in a native executable when it is built. |
+| Policy | The capabilities, run limits, and task settings recorded in a native executable when it is built. |
 | Payload | The policy followed by the image. |
 
 **Stages affected.** Only the output stage's packaging and the CLI, plus one program, the launcher. The lexer, parser, NeuraIR, IR optimization, IRtoNeuronConversion, the NVR writer and loader, and the NVM's execution contract do not change. No image byte changes.
@@ -73,6 +73,7 @@ These are accepted only with `--native`.
 | `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, `--deny-all` | Remove the group (every group for `--deny-all`) from the policy. Without any capability option the policy grants every group (N6). |
 | `--allow-fs`, `--allow-fs=prefix,...`, `--allow-net`, `--allow-env`, `--allow-clock`, `--allow-entropy`, `--allow-native` | Grant the group in the policy, which matters after a `--deny` option. Same meaning as for [`neura run`](Tooling.md#build-and-run-executables). |
 | `--max-steps N`, `--max-frames N`, `--max-heap-cells N` | Record a run limit in the policy. Without one, the policy records the default of `neura run`. |
+| `--max-tasks N`, `--task-quantum N`, `--max-queued-messages N`, `--max-pending-requests N`, `--parallel-workers N` | Record a task setting in the policy ([Concurrency](Concurrency.md#103-limits)). Without one, the policy records the default of `neura run`: 65,536 tasks, a quantum of 1,024, 1,048,576 queued messages, 4,096 pending requests, and 1 parallel worker. `--parallel-workers` is at most 1,024. The settings matter only to an image with tasks or a parallel map; they are recorded for every image. |
 | `--sealed` | The executable ignores `NEURA_RUN_OPTIONS` (section 6.4). |
 | `--static` | Use the static launcher (section 7.2). |
 | `--target <triple>` | Use the launcher for another target, such as `aarch64-linux-gnu`. The default is the target of the `neura` that is running. |
@@ -110,6 +111,7 @@ Errors are printed as `neura: error: <text>` and exit with status 1. No output f
 | An option without its value | `expected a value after <option>` |
 | A limit that is not a positive integer | `expected a positive integer after <option>` |
 | `--max-frames` above 4,294,967,295 | `--max-frames is too large` |
+| `--parallel-workers` above 1,024 | `--parallel-workers is at most 1024` |
 | `--allow-fs=` with an empty entry | `--allow-fs= expects a comma-separated list of path prefixes` |
 
 One note is printed to standard error without failing the build: for each capability group whose services the image imports and the policy does not grant, `neura: note: the image uses <group> services, which are denied; they fail with CapabilityDenied`. Because every group is granted by default, a note appears only for a group that a `--deny` option or `--static` removed. The executable is still valid: a denied service binds and fails with error 14, as under `neura run`. Granting the group again removes exactly its note.
@@ -140,30 +142,47 @@ All integers are fixed-width and little-endian, and `text`, `bytes`, and `vector
 | Payload offset | u64 | Absolute offset of the payload; equal to the launcher's size |
 | Payload size | u64 | Bytes of policy and image together |
 | Payload checksum | u32 | IEEE CRC-32 of the payload bytes |
-| Container version | u32 | 1 |
+| Container version | u32 | 2. Version 1 is the same layout without the task settings of the policy. |
 | Magic | 8 bytes | ASCII `NEURAEXE` |
 
 **Policy.**
 
 | Field | Type | Value |
 | --- | --- | --- |
-| Flags | u32 | Bit 0: sealed. Other bits are zero in version 1. |
+| Flags | u32 | Bit 0: sealed. Other bits are zero. |
 | Capabilities | u32 | Bit 0 files, 1 network, 2 environment, 3 clock, 4 entropy, 5 native. Other bits are zero. |
 | File-system prefixes | `vector<text>` | Empty when files are not granted or every path is allowed. Each prefix is non-empty, valid UTF-8 text. |
 | Maximum steps | u64 | |
 | Maximum frames | u32 | |
 | Maximum heap cells | u64 | |
+| Maximum tasks | u64 | Version 2 only, as are the four fields below. Not zero. |
+| Task quantum | u64 | Polls per turn. Not zero. |
+| Maximum queued messages | u64 | Not zero. |
+| Maximum pending requests | u64 | Not zero. |
+| Parallel workers | u32 | From 1 to 1,024. |
 | Image | `bytes` | The image. An image of 4 GiB or more is a build error. |
+
+`neura build --native` writes version 2. The five task settings sit between the maximum heap cells and the image, 36 bytes in all, so the default policy, which has no file-system prefix, is 72 bytes with the image's length word. A version 1 policy ends its fixed fields at the maximum heap cells.
 
 The checksum detects truncation and accidental damage. It is not a signature and gives no protection against deliberate modification; an operator who needs that signs the whole file with their platform's tools.
 
 ### 5.2 The launcher descriptor
 
-A launcher carries one descriptor so that `neura build` can check it without running it, which a build for another target could not do. The descriptor is a constant in the launcher's data that begins with the 16 bytes `NEURA-LAUNCHER-1`, followed by `triple:text`, `flavor:u8` (0 default, 1 static), `nvr_major:u16`, `nvr_minor:u16` (the newest image version it loads), `container_version:u32`, and `toolchain_version:text`. `neura build` finds it by searching the launcher file for those 16 bytes, and rejects a file in which they occur zero times or more than once.
+A launcher carries one descriptor so that `neura build` can check it without running it, which a build for another target could not do. The descriptor is a constant in the launcher's data that begins with the 16 bytes `NEURA-LAUNCHER-1`, followed by `triple:text`, `flavor:u8` (0 default, 1 static), `nvr_major:u16`, `nvr_minor:u16` (the newest image version it loads), `container_version:u32` (the version it writes and the newest it reads), and `toolchain_version:text`. `neura build` finds it by searching the launcher file for those 16 bytes, and rejects a file in which they occur zero times or more than once, and a launcher whose container version is not the one this `neura` writes.
 
 ### 5.3 Reading a container
 
-A reader takes the last 32 bytes, checks the magic and the container version, checks that the payload lies inside the file and ends exactly at the footer, and verifies the checksum, before it decodes the policy. It bounds every count by the bytes that remain before allocating, as the [NVR loader](../runtime/NVR.md#writer-and-loader-requirements) does. Reserved bits that are set, bytes left over after the image, an image length that does not end at the footer, an empty or non-UTF-8 file-system prefix, a payload that starts inside the launcher or is shorter than the fixed policy fields, and a newer container version are errors. The image then goes through the unchanged NVR loader, so an invalid image fails before any host import is invoked.
+A reader takes the last 32 bytes, checks the magic and the container version, checks that the payload lies inside the file and ends exactly at the footer, and verifies the checksum, before it decodes the policy. It bounds every count by the bytes that remain before allocating, as the [NVR loader](../runtime/NVR.md#writer-and-loader-requirements) does. Reserved bits that are set, bytes left over after the image, an image length that does not end at the footer, an empty or non-UTF-8 file-system prefix, and a payload that starts inside the launcher or is shorter than the fixed policy fields of its version are errors. The image then goes through the unchanged NVR loader, so an invalid image fails before any host import is invoked.
+
+A reader accepts versions 1 and 2, so an executable built before the task settings existed still runs:
+
+| Container | Result |
+| --- | --- |
+| Version 2 | The policy's task settings are used. A setting of zero, or more than 1,024 parallel workers, is `native executable: invalid task settings`. |
+| Version 1 | The policy has no task settings. They take the defaults of `neura run`, and `neura inspect` marks them `(defaults: container version 1 records none)`. |
+| Version 0, or 3 and above | `native executable: unsupported container version <n>` |
+
+The version decides how many policy bytes precede the image, so a version 1 policy under a version 2 footer, or the reverse, does not line up and is refused.
 
 ### 5.4 Why the end of the file
 
@@ -200,7 +219,7 @@ A native executable built without a `--deny-*` option can do whatever the user w
 
 Choosing capabilities at build time fits what a native executable is. Under `neura run`, the person running an image decides what it may touch. A native executable has no runner command line (N5), so the builder decides, and `neura inspect` shows anyone what was decided. The operating system remains the security boundary for whoever starts the file, as for any program; the policy bounds what the Neura program inside can ask for, which still contains a bug or a compromised dependency.
 
-Run limits work as under `neura run`: exhaustion traps at the operation that would exceed the limit.
+Run limits and task settings work as under `neura run` with the same values: exhaustion of a limit traps at the operation that would exceed it, and the recorded quantum gives the interleaving that `neura run --task-quantum` gives with that value.
 
 ### 6.4 `NEURA_RUN_OPTIONS`
 
@@ -209,7 +228,10 @@ An operator sometimes needs to bound or record a deployed program without rebuil
 | Option | Effect |
 | --- | --- |
 | `--max-steps N`, `--max-frames N`, `--max-heap-cells N` | The run uses the smaller of this value and the policy's. A limit can be lowered, never raised. |
-| `--max-tasks N` | Lowers the run's live-task bound for NVR 1.5 task images: the run uses the smaller of this value and the default of 65,536. |
+| `--max-tasks N`, `--max-queued-messages N`, `--max-pending-requests N` | The run uses the smaller of this value and the policy's, as for the limits above. |
+| `--parallel-workers N` | The run uses the smaller of this value and the policy's. Fewer workers change only wall time: a parallel map means the same under any number of them. |
+| `--task-dump`, `--task-dump=text`, `--task-dump=json` | Prints every task when one traps, as for `neura run` ([Concurrency](Concurrency.md#141-task-dump)). |
+| `--trace-events <file>`, `--trace-wall-time` | Writes one JSON line per scheduler event, with wall-clock times when asked ([Concurrency](Concurrency.md#142-profiling-and-trace-events)). |
 | `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, `--deny-all` | Removes the group, or every group, from the policy for this run, as the same option does for `neura run`. A group the policy does not grant stays denied. Files with a prefix list lose the list and all files with it. |
 | `--no-gpu`, `--gpu=off` | Accepted as requests for the launcher's CPU execution mode. The launcher has no GPU backend. |
 | `--stats`, `--profile` | As for `neura run`, on standard error. |
@@ -217,14 +239,14 @@ An operator sometimes needs to bound or record a deployed program without rebuil
 | `--replay <file>` | Answers every host request from the trace. No service runs, so the policy's capabilities are not used. |
 
 - An unset or empty variable has no effect.
-- Any other option, including every `--allow-*` (the variable only restricts), `--task-quantum`, `--gpu=auto`, and `--gpu=always`, is the start-up error `NEURA_RUN_OPTIONS: <option> is not accepted by a native executable`. The variable cannot widen the policy (N6). `--task-quantum` is refused because the quantum changes how tasks interleave and so the order of their output; N7 admits only settings that restrict or observe a run. The quantum of a native executable is the default 1,024. A missing or non-positive number after a limit is `NEURA_RUN_OPTIONS: expected a positive integer after <option>`, a missing path after `--record` or `--replay` is `NEURA_RUN_OPTIONS: expected a value after <option>`, and giving both is `NEURA_RUN_OPTIONS: --record and --replay cannot be combined`.
+- Any other option, including every `--allow-*` (the variable only restricts), `--task-quantum`, `--virtual-time`, `--gpu=auto`, and `--gpu=always`, is the start-up error `NEURA_RUN_OPTIONS: <option> is not accepted by a native executable`. The variable cannot widen the policy (N6). `--task-quantum` is refused because the quantum changes how tasks interleave and so the order of their output, and `--virtual-time` because it changes what the program reads from the clock; N7 admits only settings that restrict or observe a run. The quantum of a native executable is the one its policy records. A missing or non-positive number after a limit is `NEURA_RUN_OPTIONS: expected a positive integer after <option>`, a missing path after `--record`, `--replay`, or `--trace-events` is `NEURA_RUN_OPTIONS: expected a value after <option>`, a task dump form other than `text` or `json` is refused like any unknown option, and giving both `--record` and `--replay` is `NEURA_RUN_OPTIONS: --record and --replay cannot be combined`.
 - A sealed executable ignores the variable entirely. Sealing suits programs that run with more privilege than the user who sets their environment.
-- A non-sealed executable trusts whoever sets its environment. `--record <file>` creates or replaces any file the process may write, and `--replay <file>` answers host requests from a file of that person's choosing. A trace is written through a new, uniquely named temporary file in the destination directory (created exclusively, never through a symbolic link, and flushed) and renamed over the destination, so a symbolic link at the destination or at a guessed temporary name is replaced or ignored rather than followed. That protects other files from a planted link; it does not restrict where the trace goes. Build with `--sealed` when this trust is not acceptable.
+- A non-sealed executable trusts whoever sets its environment. `--record <file>` and `--trace-events <file>` create or replace any file the process may write, and `--replay <file>` answers host requests from a file of that person's choosing. A trace written by `--record` goes through a new, uniquely named temporary file in the destination directory (created exclusively, never through a symbolic link, and flushed) and renamed over the destination, so a symbolic link at the destination or at a guessed temporary name is replaced or ignored rather than followed. That protects other files from a planted link; it does not restrict where the trace goes. The events file of `--trace-events` has no such protection: the launcher opens the named path directly and truncates it, so a symbolic link there is followed. Build with `--sealed` when this trust is not acceptable.
 - A trace recorded this way replays under `neura run --replay` with the extracted image, and a trace recorded by `neura run` replays in the executable, because both run the same image on the same NVM.
 
-Rule for options added later: the [concurrency](Concurrency.md#143-command-line) and [GPU](GpuExecution.md#14-command-line) pages describe further run options. A native executable accepts such an option through this variable only when it restricts or observes a run, and the launcher then handles `SIGQUIT` task dumps as `neura run` does.
+Rule for options added later: the [concurrency](Concurrency.md#143-command-line) and [GPU](GpuExecution.md#14-command-line) pages describe further run options. A native executable accepts such an option through this variable only when it restricts or observes a run. The launcher answers `SIGQUIT` with a task dump on standard error, as `neura run` does, whatever the variable holds.
 
-Implementation status: the launcher accepts `--max-tasks`, which can only lower the run's live-task bound. It applies to NVR 1.5 images with a `TRNS` table. `--no-gpu` and `--gpu=off` are accepted because they request the CPU evaluation the launcher always uses; `--gpu=auto` and `--gpu=always` are rejected, since launchers stay CPU-only. Task-dump selection, trace events, virtual time, and the `SIGQUIT` task dump are not implemented. The policy record of section 5 has no field for a task limit, so `build --native` does not accept `--max-tasks` and an executable always starts from the default bound; a sealed executable therefore keeps the default, and so does the quantum. Baking task settings needs a container revision.
+Implementation status: every option of the table is implemented. The task limits and the worker count apply to images with tasks or a parallel map and are accepted for any image. `--no-gpu` and `--gpu=off` are accepted because they request the CPU evaluation the launcher always uses; `--gpu=auto` and `--gpu=always` are rejected, since launchers stay CPU-only. A sealed executable keeps exactly the settings its policy records, the quantum included. The `SIGQUIT` task dump of the launcher shares the runner's code with `neura run`; no test sends the signal to a native executable.
 
 ### 6.5 Native libraries
 
@@ -270,9 +292,12 @@ native executable: hello
 launcher: neura <version>, x86_64-linux-gnu, default, runs NVR up to 1.5
 capabilities: console, process exit, files (/var/lib/hello), network
 limits: steps 100000000, frames 10000, heap cells 67108864
+tasks: at most 65536, quantum 1024, queued messages 1048576, pending requests 4096, parallel workers 1
 run options: accepted
 image: 48211 bytes, NVR 1.2, 31 graphs, source map present, native library absent
 ```
+
+The `tasks:` line gives the policy's task settings in the order the container stores them. For a version 1 container it ends with ` (defaults: container version 1 records none)`.
 
 The decompiler's evidence rules are unchanged. A reconstruction of an executable's image rests on that image's graphs and tables, and the launcher contributes nothing to it ([Decompiler](../Decompiler.md#evidence)).
 
@@ -297,11 +322,11 @@ CTest entries, with the evidence each gives:
 
 | Test | Check | Kind |
 | --- | --- | --- |
-| `native-build` | Sources, a `.nir`, and a `.nvr` give the same executable for the same options, from another working directory and from a copy at another path. Building twice gives identical bytes. `inspect -o` returns the bytes `neura build` writes. `inspect` of a file that is not a native executable. Every error and note of section 4.3. The default launcher is CPU-only (no Vulkan dependency or text). | Structural, reproducibility |
+| `native-build` | Sources, a `.nir`, and a `.nvr` give the same executable for the same options, from another working directory and from a copy at another path. Building twice gives identical bytes. `inspect -o` returns the bytes `neura build` writes. `inspect` of a file that is not a native executable. Every error and note of section 4.3. The default launcher is CPU-only (no Vulkan dependency or text). For an image with tasks: the default settings, recorded task settings read back by `inspect`, a recorded quantum of 1 giving the interleaving of `neura run --task-quantum 1`, `NEURA_RUN_OPTIONS` lowering a recorded limit and never raising one, a sealed executable keeping its recorded limit, a JSON task dump on a trap, trace events with wall-clock times, and the refusal of `--task-quantum`, `--virtual-time`, and an unknown dump form. | Structural, reproducibility, end to end |
 | `native-run` | Every runnable example, every driver in `tests/backend/examples`, and every trap program (the test prints how many): standard output, standard error, and status equal those of `neura run`. Arguments such as `--help`, `--`, `--max-steps`, an empty string, and one with spaces reach `main`. | End to end, differential |
 | `native-policy` | Every capability granted with no option, each denied by its `--deny-*` option and by `--deny-all`, and its denial note appearing only then; `--allow-*` after `--deny-all`; the order of options, including both files corner cases, read back with `inspect`; path prefixes narrowing the default; recorded limits; `NEURA_RUN_OPTIONS` lowering a limit, denying each group as an executable built with that `--deny-*` behaves, refusing every `--allow-*` and `--task-quantum`, and rejecting malformed values; a sealed executable ignoring the variable, `--deny-*` options included. | End to end |
 | `native-replay` | A trace recorded by the executable replays under `neura run`, and the reverse, with identical trace bytes. A symbolic link planted at the destination and at the old temporary name is not followed, and the trace still replays. | Replay, hardening |
-| `native-container` | Every truncation of the payload and footer, a wrong checksum, reserved bits, trailing bytes, a newer container version, a bare launcher, a stripped executable, and crafted payloads (empty or non-UTF-8 file-system prefix, a prefix count or length beyond the payload, an image length that lies, a zero-length payload, a payload offset inside the launcher) each fail at start-up with status 1 and before any host import is invoked. | Exhaustive (truncations), structural |
+| `native-container` | Every truncation of the payload and footer, a wrong checksum, reserved bits, trailing bytes, container versions 0 and 3, a bare launcher, a stripped executable, and crafted payloads (empty or non-UTF-8 file-system prefix, a prefix count or length beyond the payload, an image length that lies, a zero-length payload, a payload offset inside the launcher, a zero task setting, 1,025 parallel workers, a version 1 policy under a version 2 footer and the reverse) each fail at start-up with status 1 and before any host import is invoked. A version 1 container runs, and so does one that records 1,024 workers. | Exhaustive (truncations), structural |
 | `native-install` | From an installed toolchain, an executable is built, copied to an empty directory with no toolchain on the path, and run. With `--static`, it runs with no shared library available, in a root holding only the executable (no procfs) and in a root with procfs. When no static launcher was built, the test prints `static launcher: NOT BUILT, static checks not run` as a warning. | End to end |
 | `native-c-import` | An image with a `NATV` section runs with the default policy and fails as documented under `--deny-native`; the static launcher's default policy omits native code; a library for another target is a build error. | End to end on Linux x86-64 |
 
@@ -339,14 +364,14 @@ The existing image tests are the evidence for the image itself. These tests esta
 | `neura run <executable>` | Whether it should offer a way to apply the executable's policy instead of the runner's command line. |
 | Descriptor location | Searching for the descriptor's 16 bytes is simple and format-independent. An ELF section would be more conventional and ties the reader to one format. |
 | Launcher provenance | Whether an executable should record a digest of its launcher so `inspect` can confirm it is an unmodified, released one. |
-| Baked task settings | A container revision that records the task limit (and whether a quantum other than the default may be baked) so that sealed executables can differ from the default. |
 
 ## 14. Status
 
-Linux x86-64 is verified for both launcher flavors. The feature was delivered in three steps, and each test in section 10 covers the step that introduced it.
+Linux x86-64 is verified for both launcher flavors. The feature was delivered in four steps, and each test in section 10 covers the step that introduced it.
 
 | Step | Contents | Evidence |
 | --- | --- | --- |
 | 1 | `neura_runner`, `neura_launcher` with its descriptor, the container writer and reader, and `build --native` for sources, `.nir`, and `.nvr` with the default policy. | `native-build`, `native-run`, and `native-container`. Launcher size and start-up time are in section 7.3. |
 | 2 | Recorded capabilities and limits, `NEURA_RUN_OPTIONS`, `--sealed`, `neura inspect`, and executables as inputs to `run`, `disassemble`, and `decompile`. | `native-policy` and `native-replay`. An image extracted with `inspect -o` equals the `neura build` output. |
 | 3 | `--static`, `--target`, `--launcher`, the install layout, and images with C imports. | `native-install` and `native-c-import`. A static executable runs in an empty root file system. Targets other than Linux x86-64 are unverified. |
+| 4 | Task settings in the policy (container version 2, with version 1 still read), the task options of `build --native`, the `tasks:` line of `inspect`, and the task and observing options of `NEURA_RUN_OPTIONS`. | `native-build` and `native-container`. |

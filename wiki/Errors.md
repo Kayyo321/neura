@@ -41,7 +41,7 @@ A message trap or failed assertion in any task has the status of its class, and 
 
 Concurrency ([Core language](https://github.com/Kayyo321/neura/wiki/CoreLanguage#tasks-scopes-and-select)) adds no way to catch a failure and does not change the error model.
 
-**Expected failures are still returned values.** A task's function returns its failures as values. If it returns `Result<User>`, `task.join()` is that `Result<User>`, and the caller reads it. Closure and cancellation are expected events of channels, timers, and selects and are returned as typed outcomes, such as `Closed` and `Cancelled`, not raised.
+**Expected failures are still returned values.** A task's function returns its failures as values. If it returns `Result<User>`, `task.join()` is that `Result<User>`, and the caller reads it. Closure and cancellation are expected events of channels, timers, and selects and are returned as typed outcomes, such as `Closed` and `Cancelled`, not raised. A host operation that is cancelled while its task waits returns an `Io` error of kind `Cancelled`. An `Error` crosses a channel as its transferable copy, `PortableError` ([Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary)).
 
 **A trap in any task ends the run.** The run stops at once with that trap's status. No other task runs afterwards, no scope waits for its tasks, no cleanup runs, and effects that have already happened stay visible. The diagnostic names the task, the place it was spawned, and the chain of spawns up to the root task, which is task 0. For a task that divides by zero two spawns below `main`:
 
@@ -62,7 +62,7 @@ wait chain: task 0 (parked: join of task 1) -> task 1 (parked: receive on channe
 
 A run that waits for a timer, a deadline, or a host request is waiting and not deadlocked.
 
-**Limits.** A program that would have more live tasks than `--max-tasks` (65,536 by default), buffer more than `--max-queued-messages` values (1,048,576) in channels, or have more than `--max-pending-requests` (4,096) overlapping host requests in flight ends with status 137 at the operation that would exceed the limit, before it changes any state: `trap: task limit exceeded: spawning another task (task 0) ...`. The memory that tasks, scopes, channels, timers, and guards use also counts toward `--max-heap-cells`. No service overlaps yet, so the pending-request limit cannot be reached at this time.
+**Limits.** A program that would have more live tasks than `--max-tasks` (65,536 by default), buffer more than `--max-queued-messages` values (1,048,576) in channels, or have more than `--max-pending-requests` (4,096) overlapping host requests in flight ends with status 137 at the operation that would exceed the limit, before it changes any state: `trap: task limit exceeded: spawning another task (task 0) ...`. The memory that tasks, scopes, channels, timers, and guards use also counts toward `--max-heap-cells`. A request counts toward the pending-request limit while its task is parked on it, as during a socket read or a sleep.
 
 
 For the intended use cases, see [errors.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/errors.nra). Its commented pseudocode illustrates a file-read failure and invalid input; file input belongs to the standard library.

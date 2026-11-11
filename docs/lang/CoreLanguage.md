@@ -184,7 +184,7 @@ A `scope` statement is allowed only in a function body: a function, a method, or
 
 `scope { ... }` runs an ordinary block with one added rule. Every exit from it, whether by reaching the end, `return`, `break`, or `continue`, first waits until every task spawned in the block, and every task those tasks spawned, has finished. A `return` evaluates its expression before it waits. Waiting does not cancel a task. Scopes nest, and a task belongs to the nearest enclosing scope of its `spawn`. No task outlives its scope, so none outlives `main`. A runtime failure in any task ends the run at once without waiting ([Errors](Errors.md)).
 
-`scope (name) { ... }` also binds `name`, a constant of type `Std.Concurrent.Scope`, in the block. Its `cancel()` requests cancellation of the scope's tasks, `is_cancelled()` reports it, and `cancel_after`, `cancel_at`, and `deadline()` set and read a deadline. Cancellation is cooperative: it wakes a task that is parked on a channel operation or a timer with a `Cancelled` result, and a running task learns of it by asking `Std.Concurrent.Cancellation.requested()`. Nothing interrupts a running task, and `join` is never cancelled.
+`scope (name) { ... }` also binds `name`, a constant of type `Std.Concurrent.Scope`, in the block. Its `cancel()` requests cancellation of the scope's tasks, `is_cancelled()` reports it, and `cancel_after`, `cancel_at`, and `deadline()` set and read a deadline. Cancellation is cooperative: it wakes a task that is parked on a channel operation, a timer, or a cancellable host request with a `Cancelled` result, and a running task learns of it by asking `Std.Concurrent.Cancellation.requested()`. Nothing interrupts a running task, and `join` is never cancelled.
 
 ### Spawn
 

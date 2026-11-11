@@ -59,6 +59,26 @@ Each feature of this release with the tests that establish it. A feature counts 
 | Vulkan graph evaluation | [GPU execution](lang/GpuExecution.md) | `gpu-device`, `gpu-cli` | Exhaustive (8-bit pairs), sampled (wider), end to end |
 | Automatic graph placement | [GPU execution](lang/GpuExecution.md#11-auto-mode) | `backend-placement`, `gpu-device`, `gpu-cli` | Structural, end to end |
 
+## Concurrency
+
+[Concurrency](lang/Concurrency.md) specifies each feature; its [section 15](lang/Concurrency.md#15-verification) lists the same tests by boundary. The independent reference evaluator models the phase 1 operations (scopes, `spawn`, `join`, `is_finished`); for the other operations the comparison is between optimized and unoptimized builds on the NVM.
+
+| Feature | Specification | Tests | Kind |
+| --- | --- | --- | --- |
+| `scope`, `spawn`, `join`, and `select` as source forms | [Concurrency 4](lang/Concurrency.md#4-scoped-tasks), [6](lang/Concurrency.md#6-channels-and-select) | `concurrency-frontend` (each form accepted, each rejection at its span with its message, the three words as ordinary names, `scope (name)` in a generic function, a `select` send arm alone) | Conformance |
+| Scope-bound values, transferable types, task-safe calls | [Concurrency 4.3](lang/Concurrency.md#43-scope-bound-values), [5](lang/Concurrency.md#5-isolation-between-tasks) | `concurrency-frontend` (escapes, captures, the call chain in the diagnostic, checks through library helpers reported at the program's call, the rule against native bindings, `check --task-safety` and the audit of the library) | Conformance |
+| Optimization preserves tasks, polls, and scheduler operations | [NeuraIR optimization](IrOptimization.md#tasks-polls-and-scheduler-operations) | `ir-optimization-concurrency` (the phase 1 fixtures against the reference evaluator, before and after optimization, under several quanta); `concurrency-programs` (every fixture optimized against unoptimized under six quanta) | Differential |
+| The scheduler, NVR 1.5, and task limits | [Concurrency 10](lang/Concurrency.md#10-runtime), [NVR](runtime/NVR.md#scheduler-operations-15) | `backend-concurrency` (source to NVM against the reference evaluator, repeated runs, fleets, hand-assembled task images); `backend-format` (1.5 images and their rejection); `concurrency-programs` (both build routes give the same bytes; limits and their statuses) | Differential, structural, determinism |
+| Channels, cancellation, deadlines, timers, guards, and deadlock | [Concurrency 6–8](lang/Concurrency.md#6-channels-and-select), [10.5](lang/Concurrency.md#105-deadlock) | `backend-concurrency`; `concurrency-programs` (`channel-order`, `backpressure`, `select-rotation`, `cancellation`, `deadline`, `collect-parked`, `queued-limit`, `deadlock`, and a deadline that stops a task that never parks) | Runtime, end to end |
+| Overlapping and cancellable host I/O; the scoped resource helpers | [Concurrency 10.4](lang/Concurrency.md#104-host-io), [7](lang/Concurrency.md#7-cancellation-deadlines-and-resources) | `backend-concurrency` (delivery order, the pending-request limit, cancellation racing completion in both orders, exactly one close); `concurrency-io` (an echo service, cancelled reads, accepts, and sleeps, overlapping sleeps, and `with_connection` on the loopback interface) | Runtime, end to end |
+| Record and replay of concurrent runs | [Concurrency 11](lang/Concurrency.md#11-record-and-replay), [NVM](runtime/NVM.md#traces-of-images-with-tasks) | `backend-concurrency` (replay without services, a perturbed trace, outcomes); `concurrency-io` (each program recorded and replayed with every capability denied) | Replay |
+| `Std.Concurrent.Tasks` and `WorkerGroup` | [Concurrency 4.2](lang/Concurrency.md#42-errors-and-traps), [9](lang/Concurrency.md#9-stdconcurrent) | `stdlib-concurrent`; `concurrency-programs` (`tasks-helpers`, `worker-group`) | End to end |
+| Task dumps, profiles, and trace events | [Concurrency 14.1–14.2](lang/Concurrency.md#141-task-dump) | `concurrency-programs` (the dump of a trap in text and JSON, with and without a source map; `SIGQUIT`; event counts and repeatable event files; the profile by spawn site) | End to end |
+| Virtual time, schedule exploration, and saved schedules | [Concurrency 14.4](lang/Concurrency.md#144-testing-concurrent-code), [Testing](lang/Testing.md#tests-of-concurrent-code) | `concurrency-schedules` (virtual time under `run` and `test`, exploration from a seed and its repetition, a saved schedule and its reproduction, malformed and foreign schedules, the service fixture of the phase 3 gate) | End to end |
+| `Parallel.map`, `AtomicInt64`, `Semaphore`, `Guarded<T>` | [Concurrency 8](lang/Concurrency.md#8-shared-state), [12](lang/Concurrency.md#12-multicore-parallelmap) | `concurrency-parallel` (one worker against several: values, the trapping item, item limits, statistics; shared state under every quantum; what the compiler refuses) | Differential |
+| Task settings of a native executable | [Native executables](lang/Standalone.md#5-the-container) | `native-build` (recorded settings, the options variable, the observing options); `native-container` (container versions 1 and 2, invalid settings) | End to end, structural |
+
+
 ## Standard library
 
 Every module of the [implementation plan](lang/Stdlib.md) has a test area `stdlib-<area>` that runs its tests optimized twice (identical output and step counts) and unoptimized, and builds and runs its trap and output programs in both modes; program images also round-trip through assembly and decompile.
@@ -91,4 +111,4 @@ Every module of the [implementation plan](lang/Stdlib.md) has a test area `stdli
 
 ## Not in this release
 
-The deferred standard library areas of [Stdlib section 15.1](lang/Stdlib.md#151-deferred-and-excluded); concurrency; interop with managed runtimes; native interop on platforms other than Linux x86-64; and packages ([Status](lang/Status.md#outside-this-release)). MSVC builds are not verified.
+The deferred standard library areas of [Stdlib section 15.1](lang/Stdlib.md#151-deferred-and-excluded); concurrent collections, tasks in a program that uses native bindings, and a scheduler that runs tasks on several cores ([Concurrency, section 18](lang/Concurrency.md#18-decisions-and-open-questions)); interop with managed runtimes; native interop on platforms other than Linux x86-64; and packages ([Status](lang/Status.md#outside-this-release)). MSVC builds are not verified, and tasks are unverified on Windows.

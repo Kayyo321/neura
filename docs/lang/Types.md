@@ -401,7 +401,7 @@ A value given to another task through `spawn` (the callee value, a method's rece
 let total = func(items: int[]) -> int => items.length;
 ```
 
-`spawn total(items)` is rejected at `items` with `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A channel opened as `channels.open<result.Result<int>>(1)` is rejected with `a value of type Result<int32> is not transferable, so it cannot be a channel's element type`. A task returns its result to the task that joins it whatever the result's type, because nothing else can reach what the finished task built.
+`spawn total(items)` is rejected at `items` with `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A channel opened as `channels.open<result.Result<int>>(1)` is rejected with `a value of type Result<int32> is not transferable, so it cannot be a channel's element type`. An error is sent as its transferable copy, `Std.Core.Error.PortableError` ([Standard library](StandardLibrary.md)). A task returns its result to the task that joins it whatever the result's type, because nothing else can reach what the finished task built.
 
 ### Task-safe calls
 
@@ -413,7 +413,7 @@ A value check is not enough: a function can reach shared mutable state without b
 
 For a virtual call or a call through a function value, the compiler takes the union over every override or function value of that type that the program can create, so it can reject a call because of an implementation that never runs. Narrow the type, or pass the needed value as an argument. The diagnostic lists the chain of calls from the `spawn` to the offending operation. `neura check --task-safety` prints the verdict for every function of the program. The task that runs `main` is not restricted.
 
-Under the last rule a program cannot both spawn a task and use `Std.DynamicForeign` or `import:c(...)`. A parallel map's worker must also issue no host request, use no scheduler operation, and not use an object's identity; [Concurrency](Concurrency.md#12-multicore-parallelmap) gives the rule.
+Under the last rule a program cannot both use tasks and use `Std.DynamicForeign` or `import:c(...)`. The compiler rejects the combination for any scheduler operation, not only a `spawn`: a scope, a channel, a timer, a guard, a select, or a parallel map. A parallel map's worker must also issue no host request, use no scheduler operation, and not use an object's identity; [Concurrency](Concurrency.md#12-multicore-parallelmap) gives the rule.
 
 ## Inference, conversions, equality, and absence
 

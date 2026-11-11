@@ -150,6 +150,7 @@ There is no accessor for the error alone: `match` reads it.
 - **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works today. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
 - Adding a variant to `Error` breaks every `match` without a wildcard arm, so the variant list changes only with a major version. Code that only reports errors should end its `match` with a wildcard arm that calls `Errors.message`.
 - Errors are immutable. A cause is set at construction, so chains are finite and acyclic.
+- **`PortableError`** is the transferable copy of an `Error`, for a failure that must cross a channel or a spawn. `Error` itself is not transferable, because `Custom` holds an `ErrorDetail` object ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#51-transferable-types)). `PortableError` has the same variants and fields with one change: `Custom` is `Custom { code: string, message: string }`, and the cause of its `Context` is a `PortableError`.
 
 The module `Error` exports the enum, the two kind enums, `ErrorDetail`, `SimpleDetail`, and:
 
@@ -160,6 +161,8 @@ The module `Error` exports the enum, the two kind enums, `ErrorDetail`, `SimpleD
 | `message(e: Error) → string` | `Io`: the kind's name, `: `, the message, and ` (` path `)` when the path is not empty. `Parse`: `parse error at ` offset `: ` message. `Encoding`: `invalid encoding at ` offset `: ` message. `Custom`: the detail's message. `Context`: the message, `: `, and the cause's message. |
 | `root_cause(e: Error) → Error` | Follows `Context` causes to the end. |
 | `chain(e: Error)` | A built-in list of `Error`: the error, then each cause. |
+| `to_portable(e: Error) → PortableError` | The transferable copy. A `Custom` error keeps its detail's `code()` and `message()` and loses the object, so any other member of a subclass is gone. Every other variant is copied as it is, causes included. |
+| `from_portable(p: PortableError) → Error` | The error a portable copy stands for. A `Custom` copy comes back holding a `SimpleDetail` with the same code and message, so `message(from_portable(to_portable(e)))` equals `message(e)`. |
 | `io_kind_name(kind) → string`, `parse_kind_name(kind) → string` | The variant's name, written as a `match`. |
 
 `message` uses only concatenation and integer text, so it works before T1.
