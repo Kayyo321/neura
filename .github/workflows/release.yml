@@ -85,13 +85,13 @@ jobs:
         include:
           - triple: x86_64-linux-gnu
             runner: ubuntu-24.04
-            minimum: 123
+            minimum: 124
             exclude: "^$"
           # neura-libclang-load, a test of the neura-libclang submodule,
           # expects `char` to be signed, which it is not on arm64.
           - triple: aarch64-linux-gnu
             runner: ubuntu-24.04-arm
-            minimum: 122
+            minimum: 123
             exclude: "^neura-libclang-load$"
     env:
       NEURA_LIBCLANG_REQUIRED: "1"
@@ -301,6 +301,10 @@ jobs:
           sh packaging/make-release-metadata.sh dist "$FULL"
           cat dist/SHA256SUMS dist/neura-release.txt
 
+      # The one-line install command downloads this script from the release.
+      - name: Add the install script
+        run: cp packaging/bootstrap.sh dist/install.sh
+
       - name: Attest the build provenance of each file
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -332,3 +336,23 @@ jobs:
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done
           cmp check/neura-release.txt dist/neura-release.txt
+          cmp check/install.sh dist/install.sh
+
+      # A published release candidate can be downloaded by anyone, so the
+      # documented install command is run against it as a user would. A final
+      # version is still a draft here; docs/ReleaseProcess.md has the
+      # maintainer run the command after publishing it.
+      - name: Install the published candidate with the one-line command
+        if: ${{ env.PRERELEASE != '' }}
+        run: |
+          home=$(mktemp -d)
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh" |
+            env -i HOME="$home" PATH=/usr/bin:/bin sh -s -- --version "$FULL"
+          reported=$(env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" neura --version)
+          echo "$reported"
+          case "$reported" in
+            "neura $FULL (x86_64-linux-gnu, commit $GITHUB_SHA)") ;;
+            *) echo "::error::the installed neura is not $FULL built from $GITHUB_SHA"; exit 1 ;;
+          esac
+          env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" neura doctor
