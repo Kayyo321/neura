@@ -172,3 +172,40 @@ expect_json("last owner: string" files 0 symbols 1 signature)
 expect_json("constant" files 0 symbols 1 kind)
 expect_json("last currency: string" files 0 symbols 2 signature)
 expect_json("last = func() -> string" files 0 symbols 3 signature)
+
+# Accessor clauses (Types.md, Accessors) appear in a field's signature, and the
+# Doxygen filter keeps the source's line count across them.
+set(accessors "${TEST_DIR}/accessors.nra")
+file(WRITE "${accessors}" [=[
+/// A record with accessors.
+export let Record = class (
+    /// Read and written from outside.
+    export let data: string = "";
+        | set: data = value;
+        | get: data;
+    /// Read-only outside the class.
+    export let code = "XY729H08";
+        | get: code;
+    /// Write-only outside the class.
+    export let sink: int = 0;
+        | set: {
+            /// A local in a setter.
+            let next = value;
+            sink = next;
+        };
+);
+]=])
+run_docs(index "${accessors}")
+expect_json("let data: string { get; set }" files 0 symbols 1 signature)
+expect_json("let code { get }" files 0 symbols 2 signature)
+expect_json("let sink: int { set }" files 0 symbols 3 signature)
+expect_json("next" files 0 symbols 4 name)
+run_docs(stubs --doxygen "${accessors}")
+file(READ "${accessors}" original)
+string(REGEX MATCHALL "\n" original_newlines "${original}")
+string(REGEX MATCHALL "\n" stub_newlines "${stubs}")
+list(LENGTH original_newlines original_count)
+list(LENGTH stub_newlines stub_count)
+if(NOT original_count EQUAL stub_count OR NOT stubs MATCHES "/// Read-only outside the class[.]\nNeuraValue code;")
+    message(FATAL_ERROR "Doxygen filter mishandled accessor clauses\n${stubs}")
+endif()

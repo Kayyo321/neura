@@ -62,6 +62,8 @@ NEURA_TOKEN = re.compile(
     r"|(?P<n>\b\d[\d_]*(?:\.\d+)?\b)|(?P<w>\b[A-Za-z_][A-Za-z0-9_]*\b)",
     re.DOTALL,
 )
+# The word of an accessor clause (Types.md, Accessors), followed by its colon.
+ACCESSOR_CLAUSE = re.compile(r"(?:get|set)\s*:")
 # References that a page or stylesheet loads, which `fingerprint` versions.
 PAGE_REFERENCE = re.compile(r'\b(href|src|srcset|data-index)="([^"]*)"')
 CSS_URL = re.compile(r'url\("([^"]+)"\)')
@@ -88,6 +90,10 @@ def highlight(language: str, source: str) -> str | None:
             keyword = follower is not None and follower.group(1) not in NEURA_KEYWORDS
         else:
             keyword = text in NEURA_KEYWORDS
+        # `get` and `set` are keywords only as an accessor clause, `| get:`.
+        if (kind == "w" and text in ("get", "set") and ACCESSOR_CLAUSE.match(source, match.start())
+                and re.search(r"\|\s*$", source[:match.start()])):
+            keyword = True
         if kind == "w" and not keyword:
             out.append(html.escape(text, quote=False))
         else:

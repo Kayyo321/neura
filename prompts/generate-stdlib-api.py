@@ -55,6 +55,28 @@ INTERFACE = re.compile(r"=\s*interface\b")
 INTERFACE_MEMBER = re.compile(r"^(static\s+)?(let|const|last)\s+\w+\s*=\s*func\b")
 ENUM_OPEN = re.compile(r"=\s*enum(<[^>]*>)?\s*\($")
 SIGNATURE_END = re.compile(r"(=>|\{|;|\($|\)\s*;?$)")
+# An accessor clause line after a field (Types.md, Accessors).
+ACCESSOR = re.compile(r"^\s*\|\s*(get|set)\s*:")
+
+
+def accessors(lines: list[str], start: int) -> str:
+    """The `{ get; set }` summary of the clauses that follow a field."""
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    kinds = set()
+    clause_indent = None
+    for line in lines[start + 1:]:
+        if not line.strip() or line.lstrip().startswith("//"):
+            continue
+        depth = len(line) - len(line.lstrip())
+        if clause_indent is not None and (depth > clause_indent or
+                                          (depth == clause_indent and line.lstrip().startswith("}"))):
+            continue  # The block body of the previous clause.
+        clause = ACCESSOR.match(line)
+        if not clause or depth <= indent:
+            break
+        kinds.add(clause.group(1))
+        clause_indent = depth
+    return " { " + "; ".join(kind for kind in ("get", "set") if kind in kinds) + " }" if kinds else ""
 
 
 def module_name(path: Path) -> str:
@@ -101,7 +123,7 @@ def signatures(path: Path) -> list[str]:
             signature = re.sub(r"\s*\{\s*$", "", signature)
             if "enum" not in signature and signature.count("{") > signature.count("}"):
                 signature = re.sub(r"\s*\{[^}]*$", "", signature)
-            signature = signature.rstrip(";").rstrip()
+            signature = signature.rstrip(";").rstrip() + accessors(lines, end)
             depth = max(indent // 4 - 1, 0)
             result.append("  " * depth + signature)
         index += 1
