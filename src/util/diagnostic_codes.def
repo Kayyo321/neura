@@ -136,4 +136,39 @@ NEURA_DIAGNOSTIC(E0807, "literal not representable in the circuit")
 NEURA_DIAGNOSTIC(E0808, "generic specialization limit exceeded")
 NEURA_DIAGNOSTIC(E0899, "internal compiler error")
 
+// Tags (docs/lang/Tags.md); E0918-E0929 stay free for later tags.
+NEURA_DIAGNOSTIC(E0900, "unknown tag")
+NEURA_DIAGNOSTIC(E0901, "tag on a declaration it does not apply to")
+NEURA_DIAGNOSTIC(E0902, "unknown or misplaced tag argument")
+NEURA_DIAGNOSTIC(E0903, "missing tag argument")
+NEURA_DIAGNOSTIC(E0904, "duplicate tag argument")
+NEURA_DIAGNOSTIC(E0905, "tag argument of the wrong type")
+NEURA_DIAGNOSTIC(E0906, "duplicate tag")
+NEURA_DIAGNOSTIC(E0907, "conflicting tags")
+NEURA_DIAGNOSTIC(E0908, "reserved tag")
+NEURA_DIAGNOSTIC(E0909, "tags without a declaration")
+NEURA_DIAGNOSTIC(E0910, "malformed tag")
+NEURA_DIAGNOSTIC(E0911, "use of an internal declaration outside its library")
+NEURA_DIAGNOSTIC(E0912, "extension of a final class")
+NEURA_DIAGNOSTIC(E0913, "override of a final method")
+NEURA_DIAGNOSTIC(E0914, "extension of a sealed type outside its module")
+NEURA_DIAGNOSTIC(E0915, "unknown warning in a tag")
+NEURA_DIAGNOSTIC(E0916, "result tag on a function without a result")
+
+// Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
+// -Wno-<name>, #Allow, and #Deny accept. W0005-W0009 stay free for later
+// warnings. An includer that defines only NEURA_DIAGNOSTIC sees them as codes.
+#ifndef NEURA_WARNING
+#define NEURA_WARNING(code, name, title) NEURA_DIAGNOSTIC(code, title)
+#define NEURA_WARNING_FROM_DIAGNOSTIC
+#endif
+NEURA_WARNING(W0001, "deprecated", "use of a deprecated declaration")
+NEURA_WARNING(W0002, "experimental", "use of an experimental declaration")
+NEURA_WARNING(W0003, "unused-result", "discarded result of a #NoDiscard call")
+NEURA_WARNING(W0004, "inline", "#Inline(always: true) function that cannot be inlined")
+#ifdef NEURA_WARNING_FROM_DIAGNOSTIC
+#undef NEURA_WARNING_FROM_DIAGNOSTIC
+#endif
+#undef NEURA_WARNING
+
 #undef NEURA_DIAGNOSTIC

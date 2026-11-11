@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <map>
 #include <memory>
@@ -193,6 +194,37 @@ public:
         if (size < entries_.size()) entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(size), entries_.end());
     }
     void clear() { entries_.clear(); }
+    // Removes and returns the entries at or after `from` whose severity is
+    // Error (warnings that a #Deny tag made errors), in order.
+    std::vector<Diagnostic> take_errors(std::size_t from) {
+        std::vector<Diagnostic> errors;
+        std::vector<Diagnostic> kept;
+        for (std::size_t i = from; i < entries_.size(); ++i)
+            (entries_[i].severity() == Severity::Error ? errors : kept).push_back(std::move(entries_[i]));
+        entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(std::min(from, entries_.size())), entries_.end());
+        for (auto& entry : kept) entries_.push_back(std::move(entry));
+        return errors;
+    }
+    // Removes the entries at or after `from` that repeat an earlier entry at
+    // or after `from`: the same severity, code, location, and message. A
+    // construct that a stage lowers twice reports its warnings once.
+    void deduplicate(std::size_t from) {
+        std::vector<Diagnostic> kept;
+        for (std::size_t i = from; i < entries_.size(); ++i) {
+            const auto& entry = entries_[i];
+            bool repeated = false;
+            for (const auto& earlier : kept) {
+                repeated = earlier.severity() == entry.severity() && earlier.code() == entry.code() &&
+                           earlier.span.file == entry.span.file && earlier.span.offset == entry.span.offset &&
+                           earlier.span.length == entry.span.length &&
+                           std::string_view(earlier.what()) == entry.what();
+                if (repeated) break;
+            }
+            if (!repeated) kept.push_back(entry);
+        }
+        entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(std::min(from, entries_.size())), entries_.end());
+        for (auto& entry : kept) entries_.push_back(std::move(entry));
+    }
 
     // The sink installed on this thread, or null.
     static DiagnosticSink*& current() {

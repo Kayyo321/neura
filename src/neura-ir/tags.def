@@ -1,0 +1,257 @@
+// The tag registry (docs/lang/Tags.md): one entry per tag that may be written
+// as `#Name` or `#Name(arguments)` before a declaration.
+//
+//   NEURA_TAG(Name, id, group, targets, status, repeats, "arguments", "since",
+//             "meaning", "alternative")
+//
+// - Name: the tag's spelling, PascalCase, and its TagId enumerator.
+// - id: the stable u16 stored in the NeuraIR `tag` attribute. Never renumber or
+//   reuse an id; retire a tag by keeping its line with status `reserved`.
+// - group: the catalogue section (TagGroup).
+// - targets: the declarations it applies to, combined with `|` from Module,
+//   Class, Interface, Enum, Variant, Function, Method, Field, Global, Local,
+//   Parameter, and the shorthands Types, Callables, Values, Members, and
+//   Declarations (tags.hpp).
+// - status: `implemented` (the compiler checks or does what the tag says),
+//   `informational` (validated, recorded, and shown, with no effect on the
+//   program), or `reserved` (rejected with E0908 and the alternative, because
+//   the compiler does not do what the tag promises yet).
+// - repeats: whether one declaration may carry the tag more than once.
+// - arguments: comma-separated `name:type` entries, in positional order. The
+//   type is one letter: t string, i integer, b bool, x number, n name (a
+//   qualified name or a string), w warning (a warning name or code, as a name
+//   or a string), a any literal. A suffix `=value` gives a default, `?` makes it
+//   optional without one, `+` (one or more) or `*` (any number) makes it the
+//   last, repeated parameter. Otherwise the argument is required.
+// - since: the release that introduced the tag.
+// - meaning: one line for `neura tags` and the catalogue.
+// - alternative: for a reserved tag, what to write instead today.
+//
+// Turning a reserved tag on is a one-line change here (status `implemented`,
+// alternative "") plus the check or the behaviour itself; validation of its
+// targets and arguments already runs.
+//
+// Include this file after defining NEURA_TAG; it undefines the macro.
+
+#ifndef NEURA_TAG
+#error "define NEURA_TAG(...) before including tags.def"
+#endif
+
+// API lifecycle
+NEURA_TAG(Deprecated, 1, Lifecycle, Declarations, implemented, false,
+          "as_of:t=,use_instead:n=,reason:t=", "0.2.0",
+          "every use outside deprecated code warns (W0001), naming the replacement", "")
+NEURA_TAG(Experimental, 2, Lifecycle, Declarations, implemented, false, "feature:t=", "0.2.0",
+          "every use outside experimental code warns (W0002)", "")
+NEURA_TAG(Internal, 3, Lifecycle, Declarations & ~Variant, implemented, false, "", "0.2.0",
+          "usable only inside the declaring library: its directory tree, or the whole standard library", "")
+NEURA_TAG(Hidden, 4, Lifecycle, Declarations, implemented, false, "", "0.2.0",
+          "left out of `neura docs` and the generated API listings; no other effect", "")
+NEURA_TAG(Since, 5, Lifecycle, Declarations, informational, false, "version:t", "0.2.0",
+          "the release that introduced the declaration", "")
+NEURA_TAG(Stable, 6, Lifecycle, Declarations, informational, false, "", "0.2.0",
+          "the declaration's interface will not change incompatibly", "")
+NEURA_TAG(Removed, 7, Lifecycle, Declarations, informational, false, "version:t,reason:t=", "0.2.0",
+          "the release in which the declaration will be or was removed", "")
+NEURA_TAG(PreviewFeature, 8, Lifecycle, Declarations, informational, false, "name:t", "0.2.0",
+          "the preview feature the declaration belongs to", "")
+
+// Correctness
+NEURA_TAG(NoDiscard, 9, Correctness, Callables | Class | Interface | Enum, implemented, false, "reason:t=",
+          "0.2.0", "discarding the result of a call warns (W0003); on a type, any call that returns it", "")
+NEURA_TAG(Final, 10, Correctness, Class | Method, implemented, false, "", "0.2.0",
+          "a class that no class may extend, or a method that no method may override", "")
+NEURA_TAG(Sealed, 11, Correctness, Class | Interface, implemented, false, "", "0.2.0",
+          "extended or implemented only inside the module or file that declares it", "")
+NEURA_TAG(Immutable, 12, Correctness, Class | Field | Global, reserved, false, "", "0.2.0",
+          "no field of the value changes after construction",
+          "declare the fields with const; the compiler checks #Immutable in a later release")
+NEURA_TAG(Pure, 13, Correctness, Callables, reserved, false, "", "0.2.0",
+          "no observable effects, and the same result for the same arguments",
+          "the optimizer already infers purity; the compiler checks #Pure in a later release")
+NEURA_TAG(Total, 14, Correctness, Callables, reserved, false, "", "0.2.0",
+          "returns normally for every argument: never traps or loops forever",
+          "document the guarantee and test it; no analysis proves it yet")
+NEURA_TAG(NoTrap, 15, Correctness, Callables, reserved, false, "", "0.2.0", "never traps",
+          "document the guarantee and test the boundary values; no analysis proves it yet")
+NEURA_TAG(Idempotent, 16, Correctness, Callables, reserved, false, "", "0.2.0",
+          "calling it twice has the effect of calling it once", "document the property in the doc comment")
+NEURA_TAG(Commutative, 17, Correctness, Callables, reserved, false, "", "0.2.0",
+          "the two arguments may be swapped", "document the property in the doc comment")
+NEURA_TAG(Associative, 18, Correctness, Callables, reserved, false, "", "0.2.0",
+          "grouping of repeated calls does not matter", "document the property in the doc comment")
+NEURA_TAG(Unsafe, 19, Correctness, Callables | Class | Module, reserved, false, "reason:t=", "0.2.0",
+          "callers must uphold a rule the compiler cannot check",
+          "Neura has no unchecked operations; state the rule in the doc comment")
+NEURA_TAG(Requires, 20, Correctness, Callables, reserved, true, "condition:t", "0.2.0",
+          "a precondition checked on entry",
+          "check the condition at the start of the body and call trap_with_message")
+NEURA_TAG(Ensures, 21, Correctness, Callables, reserved, true, "condition:t", "0.2.0",
+          "a postcondition checked on return", "check the condition before each return")
+NEURA_TAG(Invariant, 22, Correctness, Class, reserved, true, "condition:t", "0.2.0",
+          "a condition that holds between method calls",
+          "write a validate() method and call it in tests")
+
+// Optimization
+NEURA_TAG(Inline, 23, Optimization, Callables, implemented, false, "always:b=false", "0.2.0",
+          "asks inline-calls to inline the function; always: true lifts the size budget (W0004 when refused)", "")
+NEURA_TAG(NoInline, 24, Optimization, Callables, implemented, false, "", "0.2.0",
+          "inline-calls never inlines the function", "")
+NEURA_TAG(Hot, 25, Optimization, Callables, informational, false, "", "0.2.0",
+          "a hint that the function runs often; no effect today", "")
+NEURA_TAG(Cold, 26, Optimization, Callables, informational, false, "", "0.2.0",
+          "a hint that the function runs rarely; no effect today", "")
+NEURA_TAG(Likely, 27, Optimization, Callables | Variant, informational, false, "", "0.2.0",
+          "a hint that calls or this variant are common; no effect today", "")
+NEURA_TAG(Unlikely, 28, Optimization, Callables | Variant, informational, false, "", "0.2.0",
+          "a hint that calls or this variant are rare; no effect today", "")
+NEURA_TAG(Unroll, 29, Optimization, Callables, reserved, false, "count:i?", "0.2.0",
+          "unroll the loops of the function", "unroll the loop by hand where it matters")
+NEURA_TAG(NoUnroll, 30, Optimization, Callables, reserved, false, "", "0.2.0",
+          "never unroll the loops of the function", "no pass unrolls loops today; omit the tag")
+NEURA_TAG(Vectorize, 31, Optimization, Callables, reserved, false, "", "0.2.0",
+          "evaluate the loops of the function several items at a time",
+          "use Parallel.map or the GPU graph device for data-parallel work")
+NEURA_TAG(Memoize, 32, Optimization, Callables, reserved, false, "capacity:i?", "0.2.0",
+          "cache results by argument", "keep a Std.Collections.HashMap of results")
+NEURA_TAG(Specialize, 33, Optimization, Callables | Class, reserved, true, "types:n*", "0.2.0",
+          "compile separate copies for the named type arguments",
+          "every generic is already specialized for each instantiation; omit the tag")
+NEURA_TAG(TailCall, 34, Optimization, Callables, reserved, false, "", "0.2.0",
+          "require that the self-calls in tail position reuse the frame", "rewrite the recursion as a loop")
+NEURA_TAG(Flatten, 35, Optimization, Callables, reserved, false, "", "0.2.0",
+          "inline every call made by the function", "mark the callees #Inline(always: true)")
+NEURA_TAG(CompileTime, 36, Optimization, Callables | Values, reserved, false, "", "0.2.0",
+          "evaluate during compilation",
+          "a const binding with a literal initializer is already folded; use const")
+
+// Concurrency
+NEURA_TAG(ThreadSafe, 37, Concurrency, Callables | Class | Module, reserved, false, "", "0.2.0",
+          "safe to use from several tasks at once",
+          "the compiler checks #ThreadSafe in a later release; `neura check --task-safety` reports it today")
+NEURA_TAG(NotThreadSafe, 38, Concurrency, Callables | Class | Module, reserved, false, "", "0.2.0",
+          "must not be shared between tasks",
+          "the compiler checks #NotThreadSafe in a later release; document the restriction")
+NEURA_TAG(Synchronized, 39, Concurrency, Method, reserved, false, "", "0.2.0",
+          "the method runs under its instance's guard",
+          "keep the state in a Std.Concurrent.Guarded and call with(); #Synchronized lands in a later release")
+NEURA_TAG(Isolated, 40, Concurrency, Callables, reserved, false, "", "0.2.0",
+          "touches no state shared with other tasks",
+          "`neura check --task-safety` reports which functions can be a parallel worker")
+NEURA_TAG(Atomic, 41, Concurrency, Field | Global, reserved, false, "", "0.2.0",
+          "reads and writes are indivisible across tasks", "use Std.Concurrent.AtomicInt64 or a Guarded")
+NEURA_TAG(Blocking, 42, Concurrency, Callables, reserved, false, "", "0.2.0", "may wait for another task",
+          "document it; the scheduler already suspends a task that waits")
+NEURA_TAG(NonBlocking, 43, Concurrency, Callables, reserved, false, "", "0.2.0", "never waits for another task",
+          "document it; no analysis proves it yet")
+NEURA_TAG(Cancellable, 44, Concurrency, Callables, reserved, false, "", "0.2.0",
+          "returns early when its task is cancelled", "poll the cancellation of the task scope explicitly")
+NEURA_TAG(GuardedBy, 45, Concurrency, Field | Global, reserved, false, "guard:n", "0.2.0",
+          "accessed only while the named guard is held", "keep the value inside the Guarded itself")
+
+// Testing
+NEURA_TAG(Test, 46, Testing, Callables, reserved, false, "name:t=", "0.2.0", "a test case",
+          "declare tests with Std.Test as docs/lang/Testing.md describes")
+NEURA_TAG(Ignore, 47, Testing, Callables, reserved, false, "reason:t=", "0.2.0", "a test that is skipped",
+          "leave the test out of the suite and say why in a comment")
+NEURA_TAG(Benchmark, 48, Testing, Callables, reserved, false, "", "0.2.0", "a benchmark",
+          "measure with `neura run --stats` or the tests/bench-wall harness")
+NEURA_TAG(Fixture, 49, Testing, Callables | Class, reserved, false, "", "0.2.0", "shared test setup",
+          "call a setup function at the start of each test")
+NEURA_TAG(Timeout, 50, Testing, Callables, reserved, false, "milliseconds:i", "0.2.0",
+          "fail the test after the given time", "run the test with `neura test --max-steps`")
+NEURA_TAG(ExpectTrap, 51, Testing, Callables, reserved, false, "message:t=", "0.2.0",
+          "a test that passes when it traps", "write a trap program with its expected diagnostic")
+NEURA_TAG(Property, 52, Testing, Callables, reserved, false, "cases:i?", "0.2.0",
+          "a property-based test over generated inputs", "write a seeded loop over random inputs")
+NEURA_TAG(BeforeEach, 53, Testing, Callables, reserved, false, "", "0.2.0", "runs before each test",
+          "call the function at the start of each test")
+NEURA_TAG(AfterEach, 54, Testing, Callables, reserved, false, "", "0.2.0", "runs after each test",
+          "call the function at the end of each test")
+NEURA_TAG(Repeat, 55, Testing, Callables, reserved, false, "count:i", "0.2.0", "runs a test several times",
+          "loop inside the test")
+
+// Documentation
+NEURA_TAG(Example, 56, Documentation, Declarations, informational, true, "text:t", "0.2.0",
+          "a short usage example", "")
+NEURA_TAG(SeeAlso, 57, Documentation, Declarations, informational, true, "target:n", "0.2.0",
+          "a related declaration or document", "")
+NEURA_TAG(Author, 58, Documentation, Declarations, informational, true, "name:t", "0.2.0",
+          "an author of the declaration", "")
+NEURA_TAG(Todo, 59, Documentation, Declarations | Local | Parameter, informational, true, "text:t", "0.2.0",
+          "work still to do", "")
+NEURA_TAG(Fixme, 60, Documentation, Declarations | Local | Parameter, informational, true, "text:t", "0.2.0",
+          "a known defect to fix", "")
+NEURA_TAG(Note, 61, Documentation, Declarations | Local | Parameter, informational, true, "text:t", "0.2.0",
+          "a remark for readers", "")
+NEURA_TAG(License, 62, Documentation, Declarations, informational, false, "spdx:t", "0.2.0",
+          "the SPDX license expression of the declaration", "")
+NEURA_TAG(Owner, 63, Documentation, Declarations, informational, true, "team:t", "0.2.0",
+          "the team that maintains the declaration", "")
+
+// Interop and layout
+NEURA_TAG(Export, 64, Interop, Callables, reserved, false, "symbol:t?", "0.2.0",
+          "make the function callable from C",
+          "Neura calls C through import:c; C cannot call into an image yet")
+NEURA_TAG(Callback, 65, Interop, Callables, reserved, false, "", "0.2.0",
+          "a function C code may call back",
+          "pass a Neura function value to Std.DynamicForeign, which supports upcalls")
+NEURA_TAG(NativeName, 66, Interop, Callables | Values, reserved, false, "name:t", "0.2.0",
+          "the C symbol name of a declaration", "import:c names declarations as the header does")
+NEURA_TAG(Repr, 67, Interop, Class | Enum, reserved, false, "layout:n", "0.2.0", "a fixed memory layout",
+          "object layout is the runtime's; marshal through Std.DynamicForeign")
+NEURA_TAG(Align, 68, Interop, Class | Field, reserved, false, "bytes:i", "0.2.0", "a minimum alignment",
+          "object layout is the runtime's; marshal through Std.DynamicForeign")
+NEURA_TAG(Packed, 69, Interop, Class, reserved, false, "", "0.2.0", "no padding between fields",
+          "object layout is the runtime's; marshal through Std.DynamicForeign")
+
+// Diagnostics control
+NEURA_TAG(Allow, 70, Diagnostics, Declarations & ~Variant, implemented, true, "warnings:w+", "0.2.0",
+          "silences the named warnings inside the declaration", "")
+NEURA_TAG(Deny, 71, Diagnostics, Declarations & ~Variant, implemented, true, "warnings:w+", "0.2.0",
+          "turns the named warnings into errors inside the declaration", "")
+NEURA_TAG(Expect, 72, Diagnostics, Declarations & ~Variant, reserved, true, "warnings:w+", "0.2.0",
+          "silences the named warnings and reports when none occurs", "use #Allow")
+
+// Security
+NEURA_TAG(RequiresCapability, 73, Security, Callables | Module, reserved, true, "capability:n+", "0.2.0",
+          "callers need the named runtime capability",
+          "capabilities are granted per run (`neura run --deny-*`); document the requirement")
+NEURA_TAG(Sensitive, 74, Security, Values | Local | Parameter | Class, reserved, false, "", "0.2.0",
+          "a secret kept out of traces, dumps, and to_string",
+          "avoid printing the value; --record and --task-dump may contain it")
+NEURA_TAG(Untrusted, 75, Security, Values | Parameter | Callables, reserved, false, "", "0.2.0",
+          "data from outside the program that must be validated before use",
+          "validate the value where it enters the program")
+NEURA_TAG(ConstantTime, 76, Security, Callables, reserved, false, "", "0.2.0",
+          "runs in time independent of secret inputs",
+          "write the comparison without early exits; no analysis proves it yet")
+
+// Serialization
+NEURA_TAG(Serializable, 77, Serialization, Class | Enum, reserved, false, "", "0.2.0",
+          "can be written and read by Std serializers",
+          "write to_json and from_json with Std.Encoding.Json explicitly")
+NEURA_TAG(SerialName, 78, Serialization, Field | Class | Variant, reserved, false, "name:t", "0.2.0",
+          "the name used when serialized", "choose the key in the explicit to_json")
+NEURA_TAG(Skip, 79, Serialization, Field, reserved, false, "", "0.2.0", "left out when serialized",
+          "leave the field out of the explicit to_json")
+NEURA_TAG(SerialDefault, 80, Serialization, Field, reserved, false, "value:a", "0.2.0",
+          "the value used when the input has no entry", "supply the default in the explicit from_json")
+
+// Resource management
+NEURA_TAG(Resource, 81, Resources, Class, reserved, false, "", "0.2.0",
+          "instances must be destroyed before they become unreachable",
+          "destroy the instance explicitly or bind it in a scope block")
+NEURA_TAG(NoAlloc, 82, Resources, Callables, reserved, false, "", "0.2.0", "never allocates heap cells",
+          "measure peak_heap_cells with `neura run --stats`")
+NEURA_TAG(MaxSteps, 83, Resources, Callables, reserved, false, "steps:i", "0.2.0",
+          "a step budget for each call", "bound the whole run with --max-steps")
+
+// Numerics
+NEURA_TAG(Unit, 84, Numerics, Values | Local | Parameter | Callables, informational, false, "name:t", "0.2.0",
+          "the unit of measure of the value or result, such as \"ms\"", "")
+NEURA_TAG(Range, 85, Numerics, Values | Local | Parameter | Callables, reserved, false, "min:x,max:x", "0.2.0",
+          "the value always lies within [min, max]",
+          "check the bounds where the value is produced and trap_with_message")
+
+#undef NEURA_TAG

@@ -10,6 +10,7 @@
 #include "reference_initialization.hpp"
 #include "reference_storage.hpp"
 #include "static_initialization.hpp"
+#include "tags.hpp"
 #include "parser/syntax.hpp"
 #include "util/source_map.hpp"
 #include "util/suggest.hpp"
@@ -605,6 +606,7 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         }
         const auto id = function_branch(decl, owner, "$as$" + std::to_string(entries_.size()));
         entries_[owner].casts.push_back(id);
+        attach_tags(program_, id, TagTarget::Method, decl.tags, decl.name_span.value_or(decl.span));
         return id;
     }
     const auto lexical = owner;
@@ -668,6 +670,8 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         symbol(id).singleton_instance = instance;
         symbol(instance).constant = true;
     }
+    attach_tags(program_, id, tag_target(program_, id), decl.tags, decl.name_span.value_or(decl.span),
+                entries_[id].overloads);
     auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field
                      : kind == SymbolKind::Enum ? SymbolKind::Variant
                                                 : SymbolKind::Global;
@@ -749,6 +753,7 @@ SymbolId Lowering::resolve_import(const Expr& expr) {
     }
     auto result = resolve_import_target(*import, expr.span);
     resolve(result);
+    check_tagged_use(program_, result, expr.span, file_ids_[static_cast<std::size_t>(source - files_->begin())]);
     return result;
 }
 
@@ -795,6 +800,7 @@ void Lowering::prepare_promotions(const Declaration& decl, SymbolId owner) {
             if (import.name != expr.text || import.artifact_path != expr.import_path.value_or("")) continue;
             found = true;
             const auto target = resolve_import_target(import, expr.span);
+            check_tagged_use(program_, target, expr.span, owner);
             if (decl.promote_import) entries_[owner].promoted_modules.push_back(target);
             if (decl.name == "_") {
                 const auto dependency = add(SymbolKind::Import, "$import", decl.span, owner);
@@ -935,6 +941,10 @@ SymbolId Lowering::qualified(const std::string& name, const Span& span, const Co
     }
     if (!(nominal_type && (symbol(id).kind == SymbolKind::Enum || class_or_interface(symbol(id).kind)) &&
           entries_[id].resolution == Resolution::Resolving)) resolve(id);
+    check_tagged_use(program_, id, span, lexical_owner(context), [&](std::string_view other) {
+        SpeculativeDiagnostics lookup;
+        try { return find(other, context, span); } catch (const Diagnostic&) { return no_symbol; }
+    });
     return id;
 }
 
@@ -1284,6 +1294,7 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
             throw Diagnostic(parameter.span, "a variadic parameter requires a named function").with_code("E0207");
         signature.push_back(parameter_type(parameter, context));
         names.push_back(parameter.name);
+        check_tags(parameter.tags, TagTarget::Parameter, parameter.span);
     }
     signature.push_back(type(*declaration.type, context));
     const auto callable = callable_type(std::move(signature), span);
@@ -1484,6 +1495,7 @@ void Lowering::resolve(SymbolId id) {
         return;
     }
     entries_[id].resolution = Resolution::Resolving;
+    const TagScope tag_scope(id);
     const auto& decl = *entries_[id].declaration;
     auto ctx = context(id);
     if (class_or_interface(symbol(id).kind) || decl.kind == DeclKind::Module) {
@@ -1578,6 +1590,7 @@ void Lowering::resolve(SymbolId id) {
             if (argument_type.kind == TypeKind::Void)
                 throw Diagnostic(parameter.span, "a parameter cannot have type void").with_code("E0416");
             auto arg = add(SymbolKind::Parameter, parameter.name, parameter.span, id);
+            attach_tags(program_, arg, TagTarget::Parameter, parameter.tags, parameter.span);
             if (const auto [earlier, added] = entries_[id].names.emplace(parameter.name, arg); !added) {
                 throw Diagnostic(parameter.span, "duplicate parameter '" + parameter.name + "'").with_code("E0303")
                     .label("'" + parameter.name + "' is declared again here")
@@ -1843,6 +1856,10 @@ void Lowering::check_interfaces(SymbolId id) {
 
 IrNode Lowering::reference(SymbolId id, const Span& span, Context& context, bool implicit_receiver) {
     resolve(id);
+    check_tagged_use(program_, id, span, lexical_owner(context), [&](std::string_view name) {
+        SpeculativeDiagnostics lookup;
+        try { return find(name, context, span); } catch (const Diagnostic&) { return no_symbol; }
+    });
     if (entries_[id].singleton_instance != no_symbol) id = entries_[id].singleton_instance;
     const auto& target = symbol(id);
     if (context.closure && target.owner != context.owner &&
@@ -3637,6 +3654,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         symbol(id).constant = declaration.constant;
         symbol(id).type = declared.value_or(initializer.type);
         context.scopes.back().emplace(declaration.name, id);
+        attach_tags(program_, id, TagTarget::Local, declaration.tags, declaration.name_span.value_or(declaration.span));
 
         auto result = node(IrOp::Initialize, stmt.span);
         result.symbol = id;
@@ -3668,6 +3686,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
                 throw Diagnostic(operand.span, "enum variant requires a payload").with_code("E0427");
             operand.op = IrOp::EnumConstruct;
         }
+        check_discarded_result(program_, operand, stmt.span, lexical_owner(context));
         result.operands.push_back(std::move(operand));
         return result;
     }
@@ -4326,6 +4345,7 @@ void Lowering::require_implicit_constructor(SymbolId cls, const Span& span) {
 }
 
 void Lowering::lower_declaration(SymbolId id) {
+    const TagScope tag_scope(id);
     resolve(id);
     const auto& declaration = *entries_[id].declaration;
     check_override(id, declaration);
@@ -4518,6 +4538,8 @@ void Lowering::seed(LinkedImports linked) {
 
 IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports linked) {
     files_ = &files;
+    const auto* warnings = DiagnosticSink::current();
+    const auto warning_mark = warnings ? warnings->size() : 0;
     seed(std::move(linked));
     const auto linked_symbols = program_.symbols.size();
     const auto linked_bodies = program_.bodies.size();
@@ -4590,6 +4612,13 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
         }
         if (!instructions.empty()) program_.bodies.push_back({id, std::move(instructions)});
     }
+    finish_tags(program_, linked_symbols, warning_mark, [&](SymbolId id) -> std::optional<TagDeclarationSpans> {
+        if (id >= entries_.size() || !entries_[id].declaration) return std::nullopt;
+        const auto& decl = *entries_[id].declaration;
+        TagDeclarationSpans spans{decl.base ? std::optional<Span>(decl.base->span) : std::nullopt, {}, name_span(id)};
+        for (const auto& item : decl.interfaces) spans.interfaces.push_back(item.span);
+        return spans;
+    });
     std::set<SymbolId> singletons;
     for (const auto& entry : entries_) {
         if (entry.singleton_instance != no_symbol) singletons.insert(entry.singleton_instance);
