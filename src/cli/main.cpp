@@ -3,8 +3,10 @@
 #include "decompiler/assembly.hpp"
 #include "decompiler/decompile.hpp"
 #include "gpu_run.hpp"
+#include "neura/version.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "launcher/container.hpp"
+#include "lifecycle.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/reference_storage.hpp"
@@ -23,6 +25,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -42,6 +45,10 @@
 
 #ifndef _WIN32
 #include <unistd.h>
+#endif
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
 #endif
 
 #ifdef _WIN32
@@ -80,6 +87,15 @@ void usage(std::ostream& out) {
            "       neura assemble <file.nvra> -o <file.nvr>\n"
            "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
            "       neura c-bindings [--linked] [c-options] <header.h>\n"
+           "       neura --version | version\n"
+           "       neura --help | help\n"
+           "       neura doctor\n"
+           "       neura update [--check] [--source <https-url-or-directory>] [--require-attestation]\n"
+           "       neura uninstall [--dry-run] [--yes]\n"
+           "\n"
+           "doctor, update, and uninstall manage an installed neura and are described in docs/Install.md.\n"
+           "update and uninstall exit with status 3 for an install that neura did not make, and update --check\n"
+           "exits with status 4 when a newer version is available.\n"
            "\n"
            "capabilities: run and test, and the policy that build --native records, grant every host\n"
            "service by default: files, network, environment, clock, entropy, and native code. A denied\n"
@@ -131,10 +147,14 @@ void usage(std::ostream& out) {
            "  --c-link-arg <arg>       pass an argument to that link\n";
 }
 
-enum class Command { Check, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble, Assemble, Decompile, CBindings };
+enum class Command {
+    Check, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble, Assemble, Decompile, CBindings,
+    Version, Help, Doctor, Update, Uninstall
+};
 
 constexpr const char* commands =
-    "expected check, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, or c-bindings";
+    "expected check, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, c-bindings, "
+    "doctor, update, uninstall, version, or help";
 
 neura::nvm::Capabilities granted_capabilities() {
     neura::nvm::Capabilities capabilities;
@@ -192,12 +212,26 @@ struct Options {
     std::vector<std::string> link_arguments;
     // c-bindings: generate as if the import named libraries.
     bool linked = false;
+    // update and uninstall.
+    neura::lifecycle::UpdateOptions update;
+    neura::lifecycle::UninstallOptions uninstall;
 };
 
 fs::path executable_path(const fs::path& launch) {
     std::error_code error;
 #ifdef __linux__
     if (const auto actual = fs::canonical("/proc/self/exe", error); !actual.empty()) return actual;
+#endif
+#ifdef __APPLE__
+    {
+        std::uint32_t size = 0;
+        _NSGetExecutablePath(nullptr, &size);
+        std::string buffer(size, '\0');
+        if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
+            buffer.resize(std::strlen(buffer.c_str()));
+            if (const auto actual = fs::canonical(buffer, error); !actual.empty()) return actual;
+        }
+    }
 #endif
     if (launch.has_parent_path()) return fs::canonical(launch, error);
     const auto* path = std::getenv("PATH");
@@ -309,6 +343,33 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
     return true;
 }
 
+// The commands that manage the installed tool take no files.
+void read_lifecycle_options(Options& options, int argc, char** argv) {
+    const std::string name = argv[1];
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view arg = argv[i];
+        const auto value = [&]() -> std::string {
+            if (++i == argc) throw std::runtime_error("expected a value after " + std::string(arg));
+            return argv[i];
+        };
+        if (options.command == Command::Update && arg == "--check") {
+            options.update.check = true;
+        } else if (options.command == Command::Update && arg == "--source") {
+            options.update.source = value();
+        } else if (options.command == Command::Update && arg == "--require-attestation") {
+            options.update.require_attestation = true;
+        } else if (options.command == Command::Uninstall && arg == "--dry-run") {
+            options.uninstall.dry_run = true;
+        } else if (options.command == Command::Uninstall && arg == "--yes") {
+            options.uninstall.yes = true;
+        } else if (arg.starts_with('-')) {
+            throw std::runtime_error("unknown option for " + name + ": " + std::string(arg));
+        } else {
+            throw std::runtime_error(name + " takes no files");
+        }
+    }
+}
+
 Options read_options(int argc, char** argv) {
     if (argc < 2) {
         throw std::runtime_error(commands);
@@ -339,8 +400,22 @@ Options read_options(int argc, char** argv) {
         options.command = Command::Decompile;
     } else if (command == "c-bindings") {
         options.command = Command::CBindings;
+    } else if (command == "--version" || command == "version") {
+        options.command = Command::Version;
+    } else if (command == "--help" || command == "help") {
+        options.command = Command::Help;
+    } else if (command == "doctor") {
+        options.command = Command::Doctor;
+    } else if (command == "update") {
+        options.command = Command::Update;
+    } else if (command == "uninstall") {
+        options.command = Command::Uninstall;
     } else {
         throw std::runtime_error(commands);
+    }
+    if (options.command >= Command::Version) {
+        read_lifecycle_options(options, argc, argv);
+        return options;
     }
     const bool runs = options.command == Command::Run || options.command == Command::Test;
     const bool compiles = options.command == Command::Check || options.command == Command::EmitIr ||
@@ -1312,48 +1387,83 @@ int task_safety_report(neura::IrProgram program) {
     return 0;
 }
 
-int main(int argc, char** argv) {
-    if (argc == 2 && std::string_view(argv[1]) == "--help") {
+namespace {
+
+// Commands after which an update notice may appear: the ones that do their
+// work and exit. run and test execute user programs, and the lifecycle
+// commands manage the install themselves.
+bool shows_update_notice(Command command) {
+    switch (command) {
+    case Command::Check: case Command::Docs: case Command::EmitIr: case Command::Build: case Command::Inspect:
+    case Command::Disassemble: case Command::Assemble: case Command::Decompile: case Command::CBindings:
+        return true;
+    default:
+        return false;
+    }
+}
+
+int dispatch(const Options& options) {
+    switch (options.command) {
+    case Command::Version:
+        std::cout << neura::lifecycle::version_line() << "\n";
+        return 0;
+    case Command::Help:
         usage(std::cout);
         return 0;
+    case Command::Doctor:
+        return neura::lifecycle::doctor(options.executable, {options.library});
+    case Command::Update:
+        return neura::lifecycle::update(options.executable, options.update);
+    case Command::Uninstall:
+        return neura::lifecycle::uninstall(options.executable, options.uninstall);
+    case Command::Check: {
+        auto program = load_source_program(options);
+        if (options.task_safety) return task_safety_report(std::move(program));
+        if (neura::uses_tasks(program)) {
+            // The isolation rules of a spawn need concrete types, which
+            // exist after specialization (Concurrency.md section 5).
+            neura::require_valid_ir(program, "before specialization");
+            neura::materialize_reference_storage(program);
+            neura::specialize(program);
+        }
+        return 0;
     }
+    case Command::Docs:
+        return docs(options);
+    case Command::EmitIr:
+        return emit_ir(options);
+    case Command::Build:
+        return build(options);
+    case Command::Inspect:
+        return inspect(options);
+    case Command::Run:
+        return run(options);
+    case Command::Test:
+        return run_tests(options);
+    case Command::Disassemble:
+        return disassemble(options);
+    case Command::Assemble:
+        return assemble(options);
+    case Command::Decompile:
+        return decompile(options);
+    case Command::CBindings:
+        return c_bindings(options);
+    }
+    return 1;
+}
 
+} // namespace
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        usage(std::cerr);
+        return 1;
+    }
     try {
         const auto options = read_options(argc, argv);
-        switch (options.command) {
-        case Command::Check: {
-            auto program = load_source_program(options);
-            if (options.task_safety) return task_safety_report(std::move(program));
-            if (neura::uses_tasks(program)) {
-                // The isolation rules of a spawn need concrete types, which
-                // exist after specialization (Concurrency.md section 5).
-                neura::require_valid_ir(program, "before specialization");
-                neura::materialize_reference_storage(program);
-                neura::specialize(program);
-            }
-            return 0;
-        }
-        case Command::Docs:
-            return docs(options);
-        case Command::EmitIr:
-            return emit_ir(options);
-        case Command::Build:
-            return build(options);
-        case Command::Inspect:
-            return inspect(options);
-        case Command::Run:
-            return run(options);
-        case Command::Test:
-            return run_tests(options);
-        case Command::Disassemble:
-            return disassemble(options);
-        case Command::Assemble:
-            return assemble(options);
-        case Command::Decompile:
-            return decompile(options);
-        case Command::CBindings:
-            return c_bindings(options);
-        }
+        const int status = dispatch(options);
+        if (status == 0 && shows_update_notice(options.command)) neura::lifecycle::update_notice(options.executable);
+        return status;
     } catch (const neura::Diagnostic& error) {
         const auto& span = error.span;
         std::cerr << span.file << ':' << span.line << ':' << span.column << ": error: " << error.what() << '\n';

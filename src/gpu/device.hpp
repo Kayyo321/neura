@@ -12,6 +12,10 @@ struct ContextOptions {
     bool allow_software = false;
 };
 
+// Whether the system's Vulkan loader library can be opened. It creates no
+// instance and enumerates no device.
+bool vulkan_loader_available();
+
 class Context {
 public:
     static std::unique_ptr<Context> create(const ContextOptions& options, std::string& reason);

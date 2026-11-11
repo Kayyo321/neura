@@ -284,4 +284,9 @@ std::unique_ptr<Context> Context::create(const ContextOptions& options, std::str
 
 const std::string& Context::device_name() const { return state_->name; }
 
+bool vulkan_loader_available() {
+    VulkanLoader loader;
+    return loader.open();
+}
+
 } // namespace neura::gpu

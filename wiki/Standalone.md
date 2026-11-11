@@ -283,7 +283,7 @@ Dynamic loading needs a dynamic C library, which is why native interop and a ful
 
 `neura build --native` uses `--launcher <file>` when given. Otherwise it looks in the launcher directory of the `neura` that is running, under the triple from `--target` or its own. A launcher for another target comes from building Neura for that target and copying its launcher directory; the image needs no rebuilding, because an image moves between hosts unchanged ([NVM](NVM#toolchain-and-distribution)). With an explicit launcher and no `--target`, its descriptor determines the target and flavor. An explicit target must match the descriptor, and `--static` requires a static descriptor. Target strings must be single directory names made of letters, digits, periods, underscores, and hyphens.
 
-The phase 1 Release build on Linux x86-64 with GCC 14.2.0 produced a stripped default launcher of 1,999,344 bytes and a packaged Hello World of 2,012,899 bytes. On the Ryzen 7 9800X3D pinned to CPU 7, the median of 21 paired launches after warming both modes was 0.418 ms for the executable and 0.644 ms for `neura run --no-gpu`. The descriptor uses `development` as the toolchain version for this unversioned build. With policy and environment handling, the stripped default and static launchers measured 2,007,536 and 2,880,840 bytes. The static Hello World ran in an empty root file system, one holding only its executable and no procfs, and in a root with procfs mounted.
+The phase 1 Release build on Linux x86-64 with GCC 14.2.0 produced a stripped default launcher of 1,999,344 bytes and a packaged Hello World of 2,012,899 bytes. On the Ryzen 7 9800X3D pinned to CPU 7, the median of 21 paired launches after warming both modes was 0.418 ms for the executable and 0.644 ms for `neura run --no-gpu`. The descriptor carries the version of the `neura` that built the launcher (`0.1.0-dev` for a build from a checkout; see [Install](Install)). With policy and environment handling, the stripped default and static launchers measured 2,007,536 and 2,880,840 bytes. The static Hello World ran in an empty root file system, one holding only its executable and no procfs, and in a root with procfs mounted.
 
 ## 8. Reading an executable back
 
@@ -355,7 +355,7 @@ The existing image tests are the evidence for the image itself. These tests esta
 - **Mach-O and PE.** Both need the payload in a place their signing rules allow.
 - **Bundled data.** Files a program reads at run time are not embedded. A program that needs them ships them beside the executable and is built with a file-system grant.
 - **Bundled shared libraries.** Only the statically linked library of C imports travels in the image.
-- **Payload compression, self-update, and installers.**
+- **Payload compression, self-update, and installers.** The `neura` tool has its own install, update, and uninstall commands, which concern the toolchain and not a packaged program; see [Install](Install). A packaged program has no installer or updater.
 - **A library form.** Embedding a program in another application is the [embedding API](Backend#running-an-image), which exists.
 - **A GPU launcher.** Launchers are CPU-only. A flavor that links `neura_gpu` is not provided; the [GPU plan](GpuExecution) would define the rules for a runtime-only distribution of it.
 

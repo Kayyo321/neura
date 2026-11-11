@@ -166,6 +166,32 @@ build/neura decompile hello.nvr
 
 `decompile` writes a typed reconstruction of the image: functions, blocks, state operations, calls, host effects, and the operations each block's graph computes, with every block labeled by how its meaning was established. `--no-provenance` omits names and source locations from the optional NAME section and source map. [Decompiler](Decompiler) specifies both forms and the evidence behind them.
 
+## Version, install, and update
+
+`neura --version` and `neura version` print one line to standard output, `neura <version> (<target>, commit <commit>)`, and exit with status 0. A build from a checkout reports a `-dev` version and commit `unknown`. `neura help` and `neura --help` print the usage text and exit with status 0; `neura` with no arguments prints it to standard error and exits with status 1.
+
+Three commands manage the installed tool; [Install](Install) describes the install layout, the verification an update performs, and what each command removes:
+
+| Command | Does |
+| --- | --- |
+| `neura doctor` | Prints `ok`, `warn`, or `FAIL` for each check of the install and its optional tools (the standard library, native launchers, libclang, a C compiler, the GPU backend, `curl`, `tar`, `gh`). Exits with status 1 if a check failed. Uses no network. |
+| `neura update [--check] [--source <https-url-or-directory>] [--require-attestation]` | Replaces an archive install with a newer release after checking the archive's size and SHA-256 and, where `gh` is available, its build provenance. `--check` reports without changing anything. |
+| `neura uninstall [--dry-run] [--yes]` | Removes an archive install and nothing else. |
+
+`update` and `uninstall` apply only to an install made by the release archive's `install.sh`. A source build, a copy, or a package manager's install exits with status 3.
+
+## Exit status
+
+Each status below is the tool's own. The exit status of a program that `neura run` executes, and of a native executable, is the program's: the `ExitCode` that `main` returns, or the status of its trap class.
+
+| Status | Meaning | Defined in |
+| --- | --- | --- |
+| 0 | The command succeeded. For `test`, every test passed. For `update`, the install is up to date or was updated. | [Test](#test), [Install](Install) |
+| 1 | A usage error, an unknown command or option, a diagnostic in the source, an image that fails to load or bind, a failed test, or a failed `update` or `uninstall` | [Errors](Errors) |
+| 3 | `update` or `uninstall` on an install that `neura update` does not manage | [Install](Install) |
+| 4 | `update --check` found a newer version | [Install](Install) |
+| 128 and above from `run` | The program's trap class, such as 136 for an arithmetic trap or 134 for a message trap, or the program's own `ExitCode` | [Errors](Errors), [Program entry](Modules#program-entry) |
+
 ## Execution contract
 
 The [NVM specification](NVM#toolchain-and-distribution) defines how `neura build` produces an executable `.nvr` image from source or `.nir` and how `neura run` executes that image. Package configuration is not part of this release.

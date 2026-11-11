@@ -41,6 +41,22 @@ struct CImportResult {
     std::map<std::string, std::string> unsupported;
 };
 
+// What `neura doctor` reports about the libclang that C imports would use:
+// the same loader and builtin-header search as an import, without parsing
+// anything.
+struct LibclangStatus {
+    bool loaded = false;
+    // Why loading failed, when it did.
+    std::string error;
+    // The library that was opened, and its LLVM major version (0 if unknown).
+    std::string path;
+    int major = 0;
+    // The directory of libclang's builtin headers; empty when none was found.
+    std::string resource_dir;
+};
+
+LibclangStatus probe_libclang(const CImportOptions& options);
+
 // Imports `header`. `linked` says whether the import names libraries; the
 // generated module then looks symbols up in the image's embedded native
 // library before the process's default lookup. Failures are diagnostics at

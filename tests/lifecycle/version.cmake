@@ -1,0 +1,36 @@
+# The tool's version has one source, the VERSION file. This fails unless it
+# agrees with the standard library's Std.Core.Version and with what
+# `neura --version` and `neura version` print.
+if(NOT DEFINED NEURA OR NOT DEFINED SOURCE_DIR)
+    message(FATAL_ERROR "Provide NEURA and SOURCE_DIR")
+endif()
+include("${SOURCE_DIR}/tests/lifecycle/common.cmake")
+
+file(READ "${SOURCE_DIR}/VERSION" file_text)
+if(NOT file_text MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)\n$")
+    message(FATAL_ERROR "VERSION must hold exactly MAJOR.MINOR.PATCH and a newline, not [${file_text}]")
+endif()
+set(version "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+set(parts "${CMAKE_MATCH_1}" "${CMAKE_MATCH_2}" "${CMAKE_MATCH_3}")
+
+file(READ "${SOURCE_DIR}/stdlib/std/core/version.nra" library_text)
+set(index 0)
+foreach(component IN ITEMS Major Minor Patch)
+    if(NOT library_text MATCHES "export const ${component}: int = ([0-9]+);")
+        message(FATAL_ERROR "stdlib/std/core/version.nra has no '${component}' constant")
+    endif()
+    list(GET parts ${index} expected)
+    if(NOT CMAKE_MATCH_1 STREQUAL expected)
+        message(FATAL_ERROR "Std.Core.Version.${component} is ${CMAKE_MATCH_1}, but VERSION says ${version}")
+    endif()
+    math(EXPR index "${index} + 1")
+endforeach()
+
+foreach(spelling IN ITEMS --version version)
+    lc_exec(output COMMAND "${NEURA}" ${spelling})
+    lc_expect_status("neura ${spelling}" output 0)
+    if(NOT output_OUT MATCHES "^neura ${version}(-[0-9A-Za-z.-]+)? \\([^,()]+, commit [^()]+\\)\n$")
+        message(FATAL_ERROR "neura ${spelling} printed [${output_OUT}], expected one line 'neura ${version}... (triple, commit ...)'")
+    endif()
+    lc_expect_equal("neura ${spelling} on standard error" "${output_ERR}" "")
+endforeach()

@@ -1,5 +1,6 @@
 #include "container.hpp"
 
+#include "neura/version.hpp"
 #include "nvr/format.hpp"
 #include "runner/runner.hpp"
 
@@ -20,7 +21,7 @@
 namespace {
 
 constexpr std::string_view triple = NEURA_LAUNCHER_TRIPLE;
-constexpr std::string_view toolchain_version = "development";
+constexpr std::string_view toolchain_version = neura::version::full;
 
 [[gnu::used]] constinit const auto descriptor = []() consteval {
     constexpr std::string_view magic = "NEURA-LAUNCHER-1";

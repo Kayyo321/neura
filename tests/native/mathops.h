@@ -18,7 +18,7 @@ typedef struct mathops_point {
 } mathops_point;
 
 typedef struct mathops_mixed {
-    char tag;
+    signed char tag;
     double weight;
     int16_t count;
 } mathops_mixed;
@@ -40,7 +40,7 @@ signed char negate8(signed char value);
 _Bool is_even(int value);
 mathops_point make_point(int x, int y);
 int point_sum(mathops_point point);
-mathops_mixed make_mixed(char tag, double weight, short count);
+mathops_mixed make_mixed(signed char tag, double weight, short count);
 double mixed_weight(mathops_mixed value);
 void divide(int a, int b, int* quotient, int* remainder);
 int string_length(const char* text);

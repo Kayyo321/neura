@@ -4,6 +4,7 @@
 
 - [Tutorial](Tutorial)
 - [Tooling](Tooling)
+- [Install and update](Install)
 - [Native executables](Standalone)
 - [Language overview](Overview)
 - [Feature status and decisions](Status)
@@ -47,3 +48,5 @@
 - [Coding style](CodingStyle)
 - [Continuous integration](ContinuousIntegration)
 - [Repository settings](RepositorySettings)
+- [Release process](ReleaseProcess)
+- [Code signing policy](CodeSigning)

@@ -47,6 +47,20 @@ NeuraLibclang& libclang(const CImportOptions& options, const Span& site) {
     return *loaded;
 }
 
+// libclang finds its builtin headers (stddef.h, stdarg.h) relative to where it
+// is installed; Debian's layout needs the directory named.
+std::string clang_resource_dir(const NeuraLibclang& lib) {
+    const auto major = std::to_string(lib.major);
+    std::vector<fs::path> candidates{fs::path("/usr/lib/llvm-" + major) / "lib/clang" / major,
+                                     fs::path("/usr/lib/clang") / major, fs::path("/usr/local/lib/clang") / major};
+    if (lib.path[0] != '\0') candidates.push_back(fs::path(lib.path).parent_path() / "clang" / major);
+    for (const auto& candidate : candidates) {
+        std::error_code ignored;
+        if (fs::exists(candidate / "include/stddef.h", ignored)) return candidate.string();
+    }
+    return {};
+}
+
 class Importer {
 public:
     Importer(NeuraLibclang& lib, fs::path header, bool linked, std::string module_name, const CImportOptions& options,
@@ -157,19 +171,7 @@ private:
                ":" + text(lib_.clang_getCursorSpelling(cursor));
     }
 
-    std::string resource_dir() const {
-        // libclang finds its builtin headers (stddef.h, stdarg.h) relative to
-        // where it is installed; Debian's layout needs the directory named.
-        const auto major = std::to_string(lib_.major);
-        std::vector<fs::path> candidates{fs::path("/usr/lib/llvm-" + major) / "lib/clang" / major,
-                                         fs::path("/usr/lib/clang") / major, fs::path("/usr/local/lib/clang") / major};
-        if (lib_.path[0] != '\0') candidates.push_back(fs::path(lib_.path).parent_path() / "clang" / major);
-        for (const auto& candidate : candidates) {
-            std::error_code ignored;
-            if (fs::exists(candidate / "include/stddef.h", ignored)) return candidate.string();
-        }
-        return {};
-    }
+    std::string resource_dir() const { return clang_resource_dir(lib_); }
 
     CXTranslationUnit parse(const std::string& file, CXUnsavedFile* unsaved, bool report = true) {
         std::vector<const char*> argv;
@@ -946,6 +948,21 @@ private:
 };
 
 } // namespace
+
+LibclangStatus probe_libclang(const CImportOptions& options) {
+    LibclangStatus status;
+    NeuraLibclang library{};
+    if (!neura_libclang_load(&library, options.libclang.empty() ? nullptr : options.libclang.c_str())) {
+        status.error = library.error;
+        return status;
+    }
+    status.loaded = true;
+    status.path = library.path;
+    status.major = library.major;
+    status.resource_dir = clang_resource_dir(library);
+    neura_libclang_unload(&library);
+    return status;
+}
 
 CImportResult import_c_header(const std::filesystem::path& header, bool linked, const std::string& module_name,
                               const CImportOptions& options, const Span& site) {

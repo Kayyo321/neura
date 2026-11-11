@@ -20,7 +20,7 @@ mathops_point make_point(int x, int y) {
 
 int point_sum(mathops_point point) { return point.x + point.y; }
 
-mathops_mixed make_mixed(char tag, double weight, short count) {
+mathops_mixed make_mixed(signed char tag, double weight, short count) {
     mathops_mixed value = {tag, weight, count};
     return value;
 }

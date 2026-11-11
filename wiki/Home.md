@@ -5,6 +5,7 @@ Neura is a statically typed language whose compiler translates programs into det
 ## Start here
 
 1. [Build and use the toolchain](Tooling) to compile and run a program.
+   [Install, update, and uninstall](Install) covers a release archive and the `neura update` command.
 2. Follow the [tutorial](Tutorial) and read the [language overview](Overview).
 3. Explore [neurons and circuits](Neurons-and-Circuits) for the mathematical model behind the execution target.
 

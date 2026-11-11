@@ -201,7 +201,25 @@ def settings(label: str, change: dict[str, object], problem: str | None) -> None
                                       "--live", str(root / "live")], problem)
 
 
+def release_tag(label: str, tag: str, version: str, changelog: str, problem: str | None) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        (Path(directory) / "VERSION").write_text(version + "\n", encoding="utf-8")
+        (Path(directory) / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+        expect(f"release tag: {label}", [sys.executable, str(SCRIPTS / "check-release-tag.py"), tag, "--root", directory,
+                                         "--no-ancestry"], problem)
+
+
 def main() -> int:
+    released = "# Changelog\n\n## Unreleased\n\n## [1.2.3] - 2026-01-02\n\n### Added\n"
+    release_tag("a release candidate", "v1.2.3-rc.2", "1.2.3", "# Changelog\n\n## Unreleased\n", None)
+    release_tag("a final version with a changelog section", "v1.2.3", "1.2.3", released, None)
+    release_tag("a final version without a changelog section", "v1.2.3", "1.2.3", "# Changelog\n\n## Unreleased\n",
+                "CHANGELOG.md has no `## [1.2.3] - <date>` section")
+    release_tag("a tag for another version", "v1.2.4-rc.1", "1.2.3", released, "VERSION holds 1.2.3")
+    release_tag("a tag that is not a version", "v1.2", "1.2.3", released, "a release tag is")
+    release_tag("a candidate numbered zero", "v1.2.3-rc.0", "1.2.3", released, "a release tag is")
+    release_tag("another prerelease kind", "v1.2.3-beta.1", "1.2.3", released, "a release tag is")
+
     settings("settings that match", {}, None)
     settings("a changed value", {"actions_permissions.json": {"enabled": True, "allowed_actions": "all"}},
              'actions/permissions.allowed_actions: expected "selected", found "all"')

@@ -25,7 +25,7 @@ A pull request that adds CTest entries raises `--minimum` in the workflow to the
 
 ### What Tier 1 does not cover
 
-Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does not build or test Neura on macOS, on another processor architecture, or with another compiler, and it does not run sanitizers; [Tier 2](#tier-2-platform-and-sanitizer-runs) does, when a maintainer starts it. No workflow builds or tests Neura on Windows, runs fuzzing, checks links to other websites, or builds release artifacts.
+Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does not build or test Neura on macOS, on another processor architecture, or with another compiler, and it does not run sanitizers; [Tier 2](#tier-2-platform-and-sanitizer-runs) does, when a maintainer starts it. Release archives are built, tested, and qualified by [Tier 3](#tier-3-release-qualification), which runs for a release tag. No workflow builds or tests Neura on Windows, runs fuzzing, or checks links to other websites.
 
 ## Tier 2: platform and sanitizer runs
 
@@ -53,12 +53,16 @@ python3 scripts/generate-wiki.py --check
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
-python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 115
+python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 123
 ```
 
 To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.
 
 The scripts need Python 3 and Git, and use no packages outside the Python standard library. `check-docs.py` reads the Markdown files that Git tracks, so `git add` a new page before checking it. It does not use the network: links to other websites are listed with `--list-external` and are not fetched.
+
+## Tier 3: release qualification
+
+[`release.yml`](https://github.com/Kayyo321/neura/blob/main/.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. For each supported target it builds and tests the tagged commit, packs the release archive, and runs the lifecycle checks of [`packaging/qualify.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/qualify.sh) on the packed archive on a second runner. Its publishing job is the only job in the repository with a token that can write. It runs in the protected `release` environment, after a maintainer approves it. The [release process](ReleaseProcess) describes each job and check.
 
 `scripts/check-repository-settings.py` is not part of Tier 1. It compares the repository's GitHub settings with the files in `.github/settings` and needs a signed-in `gh`; see [repository settings](RepositorySettings).
 
