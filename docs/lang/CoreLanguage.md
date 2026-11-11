@@ -1,6 +1,6 @@
 # Core language
 
-This page defines the initial core. See [Feature status](Status.md) for the frontend’s coverage and open semantic decisions.
+This page defines the core of the language: bindings, functions, control flow, tasks, and expressions. See [Feature status](Status.md) for what this release supports and the open semantic decisions.
 
 ## Source and bindings
 

@@ -13,7 +13,7 @@ the constructed class type.
 <!-- example: check -->
 ```neura
 let Message = class (
-    export let text: string;
+    export last text: string;
 
     export let init = func(initial_text: string) {
         text = initial_text;
@@ -57,6 +57,7 @@ let Account = class (
 ```
 
 The analysis checks the body of `init` only. A method that `init` calls before assigning a field, or a base class constructor that calls an overriding method, can still read the field before its store; that read traps at run time as for any field without an initializer.
+
 ### Target-typed new
 
 Where the type of a value is already known, `new` can leave the class out:

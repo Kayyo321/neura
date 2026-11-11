@@ -96,6 +96,8 @@ let write_line = func(message: string) -> WriteResult host("neura.console.write_
 
 The result enum has exactly two variants. `Ok` represents success without a value and `Ok(T)` represents success with one value. `Error(uint32)` carries the host error code. Supported host data include Boolean and numeric values, strings, arrays, lists, and tuples made of supported types. The runner must register the named service with the matching version and signature. The compiler emits imports only for bindings reached by the built program. [NVM](../runtime/NVM.md#host-calls-and-standard-output) defines value transfer and continuation behavior.
 
+A bodyless function in that tree may instead end in `kernel("neura.area.name", version)`, which binds it to a built-in C [kernel](../runtime/Kernels.md): a deterministic, pure function that the runtime calls in place of Neura code, with no capability and no host request. The compiler checks the signature against its kernel table (`E0780` to `E0783`), and [Stdlib, P2a](Stdlib.md#p2a-kernel-bindings-in-source) lists the modules that use kernels.
+
 A module in that tree may also mark a function with a block body as a host callback, which a host service may call while it serves a request:
 
 <!-- example: fragment: a host callback with an ellipsis for its body, accepted only inside a module of the trusted standard library -->

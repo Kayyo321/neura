@@ -184,7 +184,7 @@ A call that `spawn` starts must be [task-safe](Concurrency.md#52-task-safe-calls
 | `Std.Fs`, `Std.Net` | Every function. They issue host requests, which a task may do. | None |
 | `Std.Io` | Console output and formatting, `Closeable`, `ByteBuffer`, `BufferedWriter`, `Utf8Writer` | `Console.read_line` and the byte source that `Console.input()` returns: the read-ahead buffer belongs to the root task. In a program that calls `Console.input()`, also the read functions of `BufferedReader` (`read`, `read_exact`, `read_all`) and `Utf8Reader` (`read_scalar`, `read_line`, `read_to_end`), whatever source they were built from, because that source is a function value of the same type. A program that never calls `Console.input()` may use them in a task |
 | `Std.Time` | Every function, `SystemClock`, `FixedClock`, and `Stopwatch` included | None. The constant objects `Duration.Zero`, `Instant.Epoch`, `LocalTime.Midnight`, and `ZoneOffset.Utc` cannot be read by a task (see below) |
-| `Std.Encoding` | `Utf8`, `Json`, `Csv`, the encoders of `Hex` and `Base64`, and `Base64.decode_with` | `Hex.decode`, and `Base64.decode`, `decode_unpadded`, `decode_url`, and `decode_url_unpadded`, which build a lookup table in a module binding on first use |
+| `Std.Encoding` | Every function. `Utf8.validate`, `Hex`, and `Base64` run built-in kernels, which keep no module state | None |
 | `Std.Digest` | Every function. Both digests run built-in kernels, which keep no module state, so a task or a parallel item can compute either one | None |
 | `Std.DynamicForeign` | | Every function: it cannot be linked into a program with tasks |
 

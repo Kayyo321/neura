@@ -363,7 +363,7 @@ A function that a spawned task calls must be task-safe ([Concurrency](Concurrenc
 
 - **How to check.** `neura check --task-safety <files>` lists every function of the linked program with `task-safe`, `task-safe; not for a parallel map: <reason>`, or `not task-safe: <reason>`, grouped by source file. Run it on a program that imports the module.
 - **What is pinned.** The `concurrency-frontend` test runs the report over a program that links `Console`, `HashMap`, `ArrayList`, `TreeMap`, `Float64`, `Duration`, `SystemClock`, `Instant`, `Logger`, `TcpStream`, `TcpListener`, `Strings`, `Regex`, `Random`, and `Json`, and fails when a function other than console input is not task-safe.
-- **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`); `Hex.decode` and the four fixed-alphabet `Base64` decoders; and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](StandardLibrary.md#task-safety) gives the reason for each and the statement for every area.
+- **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`) and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](StandardLibrary.md#task-safety) gives the reason for each and the statement for every area.
 - **Changes made for it.** A collection's text conversion keeps its self-containment flag in the instance ([section 5.2](#52-equality-hashing-and-text)). Float parsing reads no module state. The `BigInteger` and `BigDecimal` methods build the small values they need and do not read the exported constants `Zero`, `One`, and `Ten`, which stay for the root task's use.
 
 
