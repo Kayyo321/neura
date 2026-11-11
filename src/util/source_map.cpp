@@ -48,4 +48,28 @@ void SourceMap::clear() {
     files_.clear();
 }
 
+std::optional<Span> source_span(std::string_view file, std::size_t offset, std::size_t length) {
+    const auto source = SourceMap::global().find(file);
+    if (!source || offset > source->text().size() || length > source->text().size() - offset) return std::nullopt;
+    const auto line = source->line_of(offset);
+    std::size_t column = 1;
+    const auto& text = source->text();
+    for (auto i = source->line_start(line); i < offset; ++i) {
+        if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) ++column;
+    }
+    return Span{std::string(file), line + 1, column, offset, length};
+}
+
+std::optional<std::string> source_text(const Span& span) {
+    const auto source = SourceMap::global().find(span.file);
+    if (!source || span.offset > source->text().size() || span.length > source->text().size() - span.offset)
+        return std::nullopt;
+    return source->text().substr(span.offset, span.length);
+}
+
+bool user_source(std::string_view file) {
+    const auto source = SourceMap::global().find(file);
+    return source && source->kind() == SourceKind::User;
+}
+
 } // namespace neura

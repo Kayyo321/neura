@@ -2,6 +2,13 @@ error[E0401]: cannot assign to const 'start'
  --> $DIR/assign-to-const.nra:4:5
   |
 3 |     const start = 1;
-  |     ---------------- declared constant here
+  |           ----- declared constant here
 4 |     start = 2;
   |     ^^^^^ cannot assign to a constant binding
+  |
+help: consider declaring it with 'let'
+  |
+3 |     let start = 1;
+  |     ~~~
+
+For more information about this error, try `neura explain E0401`.

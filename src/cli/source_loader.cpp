@@ -7,6 +7,7 @@
 #include "neura-ir/linker.hpp"
 #include "neura-ir/nir_format.hpp"
 #include "util/source_map.hpp"
+#include "util/suggest.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -119,6 +120,43 @@ bool internal_module(std::string_view name) {
     return name.ends_with(".Internal") || name.find(".Internal.") != std::string_view::npos;
 }
 
+// The names of the public standard library modules, from the files under
+// `library`: std/io/utf8-reader.nra is Std.Io.Utf8Reader. A file whose name
+// does not map back to its path (module_path) is left out.
+std::vector<std::string> library_modules(const fs::path& library) {
+    std::vector<std::string> result;
+    std::error_code error;
+    const auto root = library / "std";
+    if (library.empty() || !fs::is_directory(root, error)) return result;
+    const auto pascal = [](std::string_view text) {
+        std::string name;
+        bool upper = true;
+        for (const char c : text) {
+            if (c == '-') {
+                upper = true;
+                continue;
+            }
+            name += upper && c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+            upper = false;
+        }
+        return name;
+    };
+    for (auto it = fs::recursive_directory_iterator(root, error); !error && it != fs::recursive_directory_iterator();
+         it.increment(error)) {
+        if (!it->is_regular_file(error) || it->path().extension() != ".nra") continue;
+        const auto relative = it->path().lexically_relative(library);
+        std::string name;
+        for (auto part = relative.begin(); part != relative.end(); ++part) {
+            auto text = part->string();
+            if (std::next(part) == relative.end()) text = part->stem().string();
+            name += (name.empty() ? "" : ".") + pascal(text);
+        }
+        if (!internal_module(name) && module_path(name) == relative) result.push_back(std::move(name));
+    }
+    std::ranges::sort(result);
+    return result;
+}
+
 fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, const fs::path& library,
                      bool from_library, bool artifact = false) {
     auto relative = module_path(import.text);
@@ -135,8 +173,19 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
             // to bypass an Internal component of the actual module path.
             if (library_path(actual, library) == relative.generic_string()) return actual;
         }
-        throw Diagnostic(import.span, "cannot resolve standard library import '" + import.text + "'")
-            .with_code("E0701");
+        auto error = Diagnostic(import.span, "cannot resolve standard library import '" + import.text + "'")
+            .with_code("E0701").label("no standard library module has this name");
+        if (const auto close = closest_name(import.text, library_modules(library))) {
+            const auto at = import.span.offset + import.span.length - import.text.size();
+            const auto span = import.span.length >= import.text.size()
+                ? source_span(import.span.file, at, import.text.size()) : std::nullopt;
+            if (span && source_text(*span) == import.text)
+                error.suggest("there is a module with a similar name: '" + *close + "'", *span, *close,
+                              Applicability::MaybeIncorrect);
+            else
+                error.help("there is a module with a similar name: '" + *close + "'");
+        }
+        throw error;
     }
     std::set<fs::path> candidates;
     auto search = [&](const fs::path& root) {

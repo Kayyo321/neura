@@ -11,6 +11,8 @@
 #include "reference_storage.hpp"
 #include "static_initialization.hpp"
 #include "parser/syntax.hpp"
+#include "util/source_map.hpp"
+#include "util/suggest.hpp"
 
 #include <algorithm>
 #include <array>
@@ -236,6 +238,32 @@ private:
     // Trusted library functions bound to a scheduler operation, by name.
     std::map<SymbolId, std::string> scheduler_bindings_;
 
+    // Source positions that only diagnostics use: the name of a declared
+    // symbol, the `const` keyword of a constant binding, and the declared
+    // result type of a function.
+    std::map<SymbolId, Span> name_spans_;
+    std::map<SymbolId, Span> const_spans_;
+    std::map<SymbolId, Span> result_spans_;
+    // Where the expected type of the next value() comes from, so that a
+    // mismatch can label it. value() takes it on entry; nested calls do not
+    // see it.
+    struct ExpectedOrigin {
+        Span span;
+        std::string text;
+    };
+    std::optional<ExpectedOrigin> expected_origin_;
+
+    Span name_span(SymbolId id) const;
+    void record_names(SymbolId id, const Declaration& decl);
+    std::vector<std::string> visible_names(const Context& context) const;
+    std::vector<std::string> member_names(const IrType& receiver, bool exported) const;
+    void suggest_name(Diagnostic& error, const Span& at, std::string_view name,
+                      const std::vector<std::string>& candidates, std::string_view what) const;
+    void not_exported(Diagnostic& error, SymbolId hidden) const;
+    Diagnostic duplicate_local(const Span& at, std::string message, SymbolId earlier) const;
+    Diagnostic missing_return(const Span& at, SymbolId function, const Declaration& declaration) const;
+    Diagnostic non_exhaustive(const Statement& stmt, const std::vector<SymbolId>& missing, bool produces_value) const;
+
     IrSymbol& symbol(SymbolId id) { return program_.symbols[id]; }
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols[id]; }
     SymbolId add(SymbolKind kind, std::string name, const Span& span, SymbolId owner = no_symbol);
@@ -288,7 +316,8 @@ private:
                                 const Span& span, const Context& context);
     IrType apply_arguments(IrType type, const Substitution& arguments);
     bool assignable(const IrType& actual, const IrType& expected) const;
-    void require_type(const IrType& actual, const IrType& expected, const Span& span) const;
+    void require_type(const IrType& actual, const IrType& expected, const Span& span,
+                      const ExpectedOrigin* origin = nullptr) const;
     IrType receiver_type(const IrType& type) const;
     Substitution receiver_arguments(const IrType& type, SymbolId owner = no_symbol) const;
 
@@ -359,6 +388,173 @@ private:
     IrNode spawn(const Expr& expr, Context& context, bool handle = true);
 };
 
+static std::string plural(std::size_t count, std::string_view noun) {
+    return std::to_string(count) + " " + std::string(noun) + (count == 1 ? "" : "s");
+}
+
+Span Lowering::name_span(SymbolId id) const {
+    const auto found = name_spans_.find(id);
+    return found != name_spans_.end() ? found->second : symbol(id).span;
+}
+
+void Lowering::record_names(SymbolId id, const Declaration& decl) {
+    if (decl.name_span && !decl.name_span->file.empty()) name_spans_.insert_or_assign(id, *decl.name_span);
+    // A constant binding that is neither exported nor static starts with
+    // its `const` keyword.
+    if (decl.constant && !decl.exported && !decl.static_member && decl.kind == DeclKind::Binding &&
+        !decl.span.file.empty())
+        const_spans_.insert_or_assign(id, Span{decl.span.file, decl.span.line, decl.span.column, decl.span.offset, 5});
+}
+
+// The names a reference at `context` could mean: locals from the innermost
+// scope out, then the members of each enclosing declaration, then promoted
+// module members. Compiler-generated names (with '$') are left out.
+std::vector<std::string> Lowering::visible_names(const Context& context) const {
+    std::vector<std::string> result;
+    std::set<std::string, std::less<>> seen;
+    const auto add_name = [&](const std::string& name) {
+        if (name.find('$') == std::string::npos && seen.insert(name).second) result.push_back(name);
+    };
+    for (const auto* current = &context; current; current = current->closure ? &current->closure->enclosing : nullptr) {
+        for (auto it = current->scopes.rbegin(); it != current->scopes.rend(); ++it)
+            for (const auto& [name, id] : *it) add_name(name);
+        for (auto scope = current->owner; scope != no_symbol; scope = symbol(scope).owner) {
+            for (const auto& [name, id] : entries_[scope].names) add_name(name);
+            for (auto base = symbol(scope).base; base != no_symbol; base = symbol(base).base) {
+                for (const auto& [name, id] : entries_[base].names)
+                    if (symbol(id).exported) add_name(name);
+            }
+            for (const auto module : entries_[scope].promoted_modules) {
+                for (const auto& [name, id] : entries_[module].names)
+                    if (symbol(id).exported) add_name(name);
+            }
+        }
+    }
+    return result;
+}
+
+// The members of `receiver` that a reference may name: its own (exported
+// ones only when `exported`), then those of its bases and interfaces.
+std::vector<std::string> Lowering::member_names(const IrType& receiver, bool exported) const {
+    std::vector<std::string> result;
+    std::set<std::string, std::less<>> seen;
+    for (const auto& view : nominal_views(program_, receiver)) {
+        if (view.symbol == no_symbol || view.symbol >= entries_.size()) continue;
+        bool own = true;
+        for (auto scope = view.symbol; scope != no_symbol; scope = symbol(scope).base) {
+            for (const auto& [name, id] : entries_[scope].names) {
+                if ((exported || !own) && !symbol(id).exported) continue;
+                if (name.find('$') == std::string::npos && seen.insert(name).second) result.push_back(name);
+            }
+            own = false;
+        }
+    }
+    return result;
+}
+
+// A "did you mean" suggestion that replaces the text of `name` at the start
+// of `at` (or at its end, for a member) with the closest candidate.
+void Lowering::suggest_name(Diagnostic& error, const Span& at, std::string_view name,
+                            const std::vector<std::string>& candidates, std::string_view what) const {
+    const auto close = closest_name(name, candidates);
+    if (!close) return;
+    error.arg("suggestion", *close);
+    for (const auto offset : {at.offset, at.offset + at.length - name.size()}) {
+        if (at.length < name.size()) break;
+        const auto span = source_span(at.file, offset, name.size());
+        if (span && source_text(*span) == name) {
+            error.suggest("there is " + std::string(what) + " with a similar name: '" + *close + "'", *span, *close,
+                          Applicability::MaybeIncorrect);
+            return;
+        }
+    }
+    error.help("there is " + std::string(what) + " with a similar name: '" + *close + "'");
+}
+
+// Labels a member that exists but is not exported, and suggests exporting it
+// when its declaration is in the program's own source.
+void Lowering::not_exported(Diagnostic& error, SymbolId hidden) const {
+    const auto& item = symbol(hidden);
+    error.label("'" + item.name + "' is not exported");
+    error.label(name_span(hidden), "'" + item.name + "' is declared here without 'export'");
+    const auto* declaration = hidden < entries_.size() ? entries_[hidden].declaration : nullptr;
+    if (declaration && !declaration->span.file.empty() && user_source(declaration->span.file)) {
+        if (const auto start = source_span(declaration->span.file, declaration->span.offset, 0)) {
+            error.suggest("consider exporting it", *start, "export ", Applicability::MaybeIncorrect);
+            return;
+        }
+    }
+    error.note("only exported members are visible outside the declaration that contains them");
+}
+
+Diagnostic Lowering::duplicate_local(const Span& at, std::string message, SymbolId earlier) const {
+    auto error = Diagnostic(at, std::move(message)).with_code("E0301").label("bound again here");
+    const auto& first = symbol(earlier);
+    if (!first.span.file.empty()) error.label(name_span(earlier), "first bound here");
+    return error;
+}
+
+// A body that can reach its end without a return. The error points at the
+// declared result type, which is what the body fails to produce.
+Diagnostic Lowering::missing_return(const Span& at, SymbolId function, const Declaration& declaration) const {
+    const auto type = describe(symbol(function).type);
+    const bool typed = declaration.type && !declaration.type->span.file.empty();
+    auto error = Diagnostic(typed ? declaration.type->span : at, "function may exit without returning " + type)
+        .with_code("E0405").label("the function must return " + type + " on every path");
+    if (name_spans_.contains(function)) error.label(name_span(function), "in this function");
+    error.note("a path through the body ends without 'return' or a trap");
+    return error;
+}
+
+// A match on an enum without a wildcard arm that leaves variants out. The
+// suggestion adds an arm per variant before the closing brace when that
+// brace is on a line of its own after a complete arm.
+Diagnostic Lowering::non_exhaustive(const Statement& stmt, const std::vector<SymbolId>& missing,
+                                    bool produces_value) const {
+    std::string names;
+    for (std::size_t i = 0; i < missing.size(); ++i)
+        names += (i == 0 ? "'" : i + 1 == missing.size() ? " and '" : ", '") + symbol(missing[i]).name + "'";
+    auto error = Diagnostic(Span{stmt.span.file, stmt.span.line, stmt.span.column, stmt.span.offset, 5},
+                            "non-exhaustive match, missing variant '" + symbol(missing.front()).name + "'")
+        .with_code("E0410").label(names + (missing.size() == 1 ? " is" : " are") + " not covered");
+    error.note("a match without a '_' arm needs an arm for every variant");
+    std::string qualifier;
+    for (const auto& arm : stmt.arms) {
+        if (const auto dot = arm.variant.rfind('.'); arm.variant != "_" && dot != std::string::npos) {
+            qualifier = arm.variant.substr(0, dot + 1);
+            break;
+        }
+    }
+    const auto close = source_span(stmt.span.file, stmt.span.offset + stmt.span.length - 1, 1);
+    const auto file = SourceMap::global().find(stmt.span.file);
+    if (!close || !file || !user_source(stmt.span.file) || source_text(*close) != "}" || stmt.arms.empty())
+        return error;
+    const auto& text = file->text();
+    const auto line_start = file->line_start(close->line - 1);
+    const auto indent = text.substr(line_start, close->offset - line_start);
+    if (indent.find_first_not_of(" \t") != std::string::npos) return error;
+    auto before = line_start;
+    while (before > 0 && std::string_view(" \t\r\n").find(text[before - 1]) != std::string_view::npos) --before;
+    if (before == 0 || (text[before - 1] != ',' && text[before - 1] != '{')) return error;
+    const auto arm_indent = std::string(stmt.arms.front().span.column - 1, ' ');
+    std::string arms;
+    for (const auto variant : missing) {
+        std::string pattern = qualifier + symbol(variant).name;
+        const auto* declaration = variant < entries_.size() ? entries_[variant].declaration : nullptr;
+        if (declaration && !declaration->parameters.empty()) {
+            std::string fields;
+            for (const auto& field : declaration->parameters)
+                fields += (fields.empty() ? "" : ", ") + (declaration->named_payload ? field.name : std::string("_"));
+            pattern += declaration->named_payload ? " { " + fields + " }" : "(" + fields + ")";
+        }
+        arms += arm_indent + pattern + (produces_value ? " => <value>,\n" : " => {},\n");
+    }
+    error.suggest(missing.size() == 1 ? "add an arm for it" : "add an arm for each missing variant",
+                  *source_span(stmt.span.file, line_start, 0),
+                  arms, Applicability::HasPlaceholders);
+    return error;
+}
+
 SymbolId Lowering::add(SymbolKind kind, std::string name, const Span& span, SymbolId owner) {
     auto id = program_.symbols.size();
     IrSymbol entry{};
@@ -374,6 +570,7 @@ SymbolId Lowering::add(SymbolKind kind, std::string name, const Span& span, Symb
 
 SymbolId Lowering::function_branch(const Declaration& decl, SymbolId owner, std::string name) {
     const auto id = add(SymbolKind::Function, std::move(name), decl.span, owner);
+    record_names(id, decl);
     entries_[id].declaration = &decl;
     entries_[id].resolution = Resolution::Pending;
     symbol(id).constant = decl.constant;
@@ -419,8 +616,19 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         if (kind == SymbolKind::Field) kind = SymbolKind::Global;
     }
     auto id = add(kind, decl.name, decl.span, owner);
-    if (!entries_[lexical].names.emplace(decl.name, id).second)
-        throw Diagnostic(decl.span, "duplicate declaration of '" + decl.name + "'").with_code("E0302");
+    record_names(id, decl);
+    if (const auto [earlier, added] = entries_[lexical].names.emplace(decl.name, id); !added) {
+        auto error = Diagnostic(decl.name_span.value_or(decl.span), "duplicate declaration of '" + decl.name + "'")
+            .with_code("E0302")
+            .label("'" + decl.name + "' is declared again here")
+            .label(name_span(earlier->second), "'" + decl.name + "' is first declared here");
+        if (decl.kind == DeclKind::Function && symbol(earlier->second).kind == SymbolKind::Function)
+            error.help("to overload '" + decl.name + "', write the alternatives in one declaration, "
+                       "joined with 'or func'");
+        else
+            error.help("rename one of them");
+        throw error;
+    }
     entries_[id].declaration = &decl;
     entries_[id].resolution = Resolution::Pending;
     symbol(id).constant = decl.constant ||
@@ -688,7 +896,13 @@ bool Lowering::inside(SymbolId scope, SymbolId owner) const {
 SymbolId Lowering::qualified(const std::string& name, const Span& span, const Context& context, bool nominal_type) {
     const auto parts = components(name);
     auto id = find(parts.front(), context, span);
-    if (id == no_symbol) throw Diagnostic(span, "unknown name '" + parts.front() + "'").with_code("E0304");
+    if (id == no_symbol) {
+        auto error = Diagnostic(span, "unknown name '" + parts.front() + "'").with_code("E0304")
+            .label("not found in this scope");
+        suggest_name(error, Span{span.file, span.line, span.column, span.offset, parts.front().size()}, parts.front(),
+                     visible_names(context), "a declaration");
+        throw error;
+    }
     for (std::size_t i = 1; i < parts.size(); ++i) {
         resolve(id);
         auto kind = symbol(id).kind;
@@ -701,10 +915,23 @@ SymbolId Lowering::qualified(const std::string& name, const Span& span, const Co
             throw Diagnostic(span, "'" + parts[i - 1] + "' is not a namespace").with_code("E0308");
         }
         const auto owner = id;
-        id = member(owner, parts[i], !inside(lexical_owner(context), owner));
-        if (id == no_symbol)
-            throw Diagnostic(span, "unknown or inaccessible name '" + name + "'").with_code("E0304")
+        const bool outside = !inside(lexical_owner(context), owner);
+        id = member(owner, parts[i], outside);
+        if (id == no_symbol) {
+            auto error = Diagnostic(span, "unknown or inaccessible name '" + name + "'").with_code("E0304")
                 .arg("kind", "name").arg("name", parts[i]).arg("owner", symbol(owner).name);
+            if (const auto hidden = member(owner, parts[i], false); hidden != no_symbol) {
+                not_exported(error, hidden);
+            } else {
+                error.label("'" + symbol(owner).name + "' has no member '" + parts[i] + "'");
+                std::size_t prefix = 0;
+                for (std::size_t j = 0; j < i; ++j) prefix += parts[j].size() + 1;
+                if (span.length >= prefix + parts[i].size())
+                    suggest_name(error, Span{span.file, span.line, span.column, span.offset + prefix, parts[i].size()},
+                                 parts[i], member_names(symbol(owner).type, outside), "a member");
+            }
+            throw error;
+        }
     }
     if (!(nominal_type && (symbol(id).kind == SymbolKind::Enum || class_or_interface(symbol(id).kind)) &&
           entries_[id].resolution == Resolution::Resolving)) resolve(id);
@@ -866,9 +1093,13 @@ bool Lowering::assignable(const IrType& actual, const IrType& expected) const {
     return nominal_assignable(program_, actual, expected);
 }
 
-void Lowering::require_type(const IrType& actual, const IrType& expected, const Span& span) const {
-    if (!assignable(actual, expected))
-        throw Diagnostic(span, "expected " + describe(expected) + ", got " + describe(actual)).with_code("E0403");
+void Lowering::require_type(const IrType& actual, const IrType& expected, const Span& span,
+                            const ExpectedOrigin* origin) const {
+    if (assignable(actual, expected)) return;
+    auto error = Diagnostic(span, "expected " + describe(expected) + ", got " + describe(actual)).with_code("E0403")
+        .label("expected " + describe(expected) + ", found " + describe(actual));
+    if (origin && !origin->span.file.empty()) error.label(origin->span, origin->text);
+    throw error;
 }
 
 IrType Lowering::receiver_type(const IrType& type) const {
@@ -1058,12 +1289,11 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
     const auto callable = callable_type(std::move(signature), span);
     ClosureEnvironment environment{closure_layout(span, lexical_owner(context)), context, {}, {}};
     const auto method = closure_method(environment.layout, callable, span, names);
+    if (declaration.type && symbol(method).type.kind != TypeKind::Void) result_spans_.emplace(method, declaration.type->span);
     Context inner{method, method, context.receiver, 0, {entries_[method].names}, &environment};
     auto instructions = body(declaration.body, inner);
-    if (symbol(method).type.kind != TypeKind::Void && !always_returns(instructions)) {
-        throw Diagnostic(span, "function may exit without returning " + describe(symbol(method).type))
-            .with_code("E0405");
-    }
+    if (symbol(method).type.kind != TypeKind::Void && !always_returns(instructions))
+        throw missing_return(span, method, declaration);
     program_.bodies.push_back({method, std::move(instructions)});
     return closure_value(callable, environment, span);
 }
@@ -1228,6 +1458,7 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     }
     symbol(id).type = declared;
     if (decl.initializer) {
+        expected_origin_ = ExpectedOrigin{decl.type->span, "expected because of this type"};
         entries_[id].initializer = value(*decl.initializer, ctx, &declared);
     } else if (decl.static_member && !symbol(id).constant &&
                (declared.kind == TypeKind::Integer || declared.kind == TypeKind::Float ||
@@ -1347,8 +1578,11 @@ void Lowering::resolve(SymbolId id) {
             if (argument_type.kind == TypeKind::Void)
                 throw Diagnostic(parameter.span, "a parameter cannot have type void").with_code("E0416");
             auto arg = add(SymbolKind::Parameter, parameter.name, parameter.span, id);
-            if (!entries_[id].names.emplace(parameter.name, arg).second)
-                throw Diagnostic(parameter.span, "duplicate parameter '" + parameter.name + "'").with_code("E0303");
+            if (const auto [earlier, added] = entries_[id].names.emplace(parameter.name, arg); !added) {
+                throw Diagnostic(parameter.span, "duplicate parameter '" + parameter.name + "'").with_code("E0303")
+                    .label("'" + parameter.name + "' is declared again here")
+                    .label(symbol(earlier->second).span, "'" + parameter.name + "' is first declared here");
+            }
             symbol(arg).type = std::move(argument_type);
             symbol(id).parameters.push_back(arg);
             if (parameter.variadic) {
@@ -1602,7 +1836,10 @@ IrNode Lowering::reference(SymbolId id, const Span& span, Context& context, bool
     if (context.function == no_symbol && target.owner == context.owner &&
         (target.kind == SymbolKind::Global || target.kind == SymbolKind::Field) &&
         target.span.file == span.file && target.span.offset > span.offset) {
-        throw Diagnostic(span, "'" + target.name + "' is used before its declaration").with_code("E0306");
+        throw Diagnostic(span, "'" + target.name + "' is used before its declaration").with_code("E0306")
+            .label("used here")
+            .label(name_span(id), "'" + target.name + "' is declared here, later in the file")
+            .help("move the declaration of '" + target.name + "' above its first use");
     }
     auto result = node(IrOp::Reference, span, target.type);
     result.symbol = id;
@@ -1753,10 +1990,23 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
         ? member(nominal.symbol, expr.text, exported) : no_symbol;
     if (target == no_symbol && nominal.kind == TypeKind::Object)
         target = value_member(receiver.type, expr.text, exported);
-    if (target == no_symbol)
-        throw Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " +
-                                    describe(nominal)).with_code("E0305")
+    if (target == no_symbol) {
+        auto error = Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " +
+                                           describe(nominal)).with_code("E0305")
             .arg("kind", "member").arg("name", expr.text).arg("owner", describe(nominal));
+        auto hidden = type_reference || nominal.kind != TypeKind::Object
+            ? member(nominal.symbol, expr.text, false) : no_symbol;
+        if (hidden == no_symbol && nominal.kind == TypeKind::Object) hidden = value_member(receiver.type, expr.text, false);
+        if (hidden != no_symbol && exported) {
+            not_exported(error, hidden);
+        } else {
+            error.label(describe(nominal) + " has no member '" + expr.text + "'");
+            suggest_name(error, expr.span, expr.text,
+                         member_names(type_reference || nominal.kind != TypeKind::Object ? nominal : receiver.type, exported),
+                         "a member");
+        }
+        throw error;
+    }
     auto result = reference(target, expr.span, context, false);
     if (static_member(target)) {
         if (!type_reference) {
@@ -1797,11 +2047,21 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
     const bool rest = variadic != VariadicKind::None;
     const auto fixed = params.size() - leading - (rest ? 1 : 0);
     const auto count = expr.operands.size() - first;
-    if (count < fixed || (!rest && count != fixed))
-        throw Diagnostic(expr.span, "expected " + std::string(rest ? "at least " : "") +
-                                    std::to_string(fixed) + " argument(s)").with_code("E0407");
+    if (count < fixed || (!rest && count != fixed)) {
+        auto error = Diagnostic(expr.span, "expected " + std::string(rest ? "at least " : "") +
+                                           std::to_string(fixed) + " argument(s)").with_code("E0407")
+            .label("expected " + std::string(rest ? "at least " : "") + plural(fixed, "argument") + ", found " +
+                   std::to_string(count));
+        if (target != no_symbol && !symbol(target).span.file.empty())
+            error.label(name_span(target), "'" + symbol(target).name + "' takes " +
+                                               std::string(rest ? "at least " : "") + plural(fixed, "parameter"));
+        throw error;
+    }
     for (std::size_t i = 0; i < fixed; ++i) {
         auto expected = substitute(symbol(params[i + leading]).type, replacements);
+        const auto& parameter = symbol(params[i + leading]);
+        if (!parameter.span.file.empty())
+            expected_origin_ = ExpectedOrigin{parameter.span, "parameter '" + parameter.name + "' is declared here"};
         call.operands.push_back(value(expr.operands[i + first], context, &expected, true));
     }
     if (!rest) return;
@@ -2234,7 +2494,18 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         return candidates.front();
     }
     const auto no_match = [&] {
-        return Diagnostic(expr.span, "no matching overload of '" + symbol(group).name + "'").with_code("E0408");
+        auto error = Diagnostic(expr.span, "no matching overload of '" + symbol(group).name + "'").with_code("E0408")
+            .label("no alternative of '" + symbol(group).name + "' accepts " + plural(count, "argument") +
+                   (count == 0 ? "" : " of these types"));
+        constexpr std::size_t shown = 3;
+        for (std::size_t i = 0; i < branches.size() && i < shown; ++i) {
+            std::string signature;
+            for (std::size_t p = leading; p < symbol(branches[i]).parameters.size(); ++p)
+                signature += (signature.empty() ? "" : ", ") + describe(symbol(symbol(branches[i]).parameters[p]).type);
+            error.label(name_span(branches[i]), "this alternative takes (" + signature + ")");
+        }
+        if (branches.size() > shown) error.note("and " + plural(branches.size() - shown, "more alternative"));
+        return error;
     };
     if (candidates.empty()) throw no_match();
 
@@ -2629,7 +2900,12 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             class_or_interface(symbol(context.receiver).kind)) {
             return receiver(context.receiver, expr.span, context);
         }
-        if (id == no_symbol) throw Diagnostic(expr.span, "unknown name '" + expr.text + "'").with_code("E0304");
+        if (id == no_symbol) {
+            auto error = Diagnostic(expr.span, "unknown name '" + expr.text + "'").with_code("E0304")
+                .label("not found in this scope");
+            suggest_name(error, expr.span, expr.text, visible_names(context), "a declaration");
+            throw error;
+        }
         if (symbol(id).kind == SymbolKind::Function &&
             owner_kind(symbol(id).owner, SymbolKind::Class) != no_symbol &&
             (expr.text == "init" || expr.text == "deinit")) {
@@ -2787,6 +3063,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
 }
 
 IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
+    const auto origin = std::exchange(expected_origin_, std::nullopt);
     auto result = expression(expr, context, expected, call_argument);
     if (expected && is_primitive_reference(*expected))
         return bind_reference(std::move(result), *expected);
@@ -2811,7 +3088,7 @@ IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expecte
         if (const auto method = cast_method(result.type, *expected, context); method != no_symbol)
             return cast_call(method, std::move(result), *expected, expr.span);
     }
-    if (expected) require_type(result.type, *expected, expr.span);
+    if (expected) require_type(result.type, *expected, expr.span, origin ? &*origin : nullptr);
     return result;
 }
 
@@ -2825,7 +3102,11 @@ void Lowering::place(const IrNode& destination) const {
     if (const auto& target = symbol(destination.symbol); target.constant) {
         auto error = Diagnostic(destination.span, "cannot assign to const '" + target.name + "'")
             .with_code("E0401").label("cannot assign to a constant binding");
-        if (!target.span.file.empty()) error.label(target.span, "declared constant here");
+        if (!target.span.file.empty()) error.label(name_span(destination.symbol), "declared constant here");
+        if (const auto keyword = const_spans_.find(destination.symbol);
+            keyword != const_spans_.end() && user_source(keyword->second.file) &&
+            source_text(keyword->second) == "const")
+            error.suggest("consider declaring it with 'let'", keyword->second, "let", Applicability::MaybeIncorrect);
         throw error;
     }
 }
@@ -3140,7 +3421,8 @@ IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
                 if (produced.type.kind == TypeKind::Void)
                     throw Diagnostic(arm.binding->span, "this operation has no result to bind").with_code("E0606");
                 if (arm.binding->text != "_" && context.scopes.back().contains(arm.binding->text))
-                    throw Diagnostic(arm.binding->span, "duplicate local binding '" + arm.binding->text + "'")
+                    throw duplicate_local(arm.binding->span, "duplicate local binding '" + arm.binding->text + "'",
+                                          context.scopes.back().find(arm.binding->text)->second)
                         .with_code("E0301");
                 const auto binding = add(SymbolKind::Local, arm.binding->text, arm.binding->span, context.owner);
                 symbol(binding).type = produced.type;
@@ -3306,16 +3588,22 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         if (declaration.name == "_") return discard_binding(declaration, context);
         if (const auto earlier = context.scopes.back().find(declaration.name);
             earlier != context.scopes.back().end()) {
-            auto error = Diagnostic(declaration.span, "duplicate local binding '" + declaration.name + "'")
+            auto error = Diagnostic(declaration.name_span.value_or(declaration.span),
+                                    "duplicate local binding '" + declaration.name + "'")
                 .with_code("E0301").label("'" + declaration.name + "' is bound again here");
             const auto& first = symbol(earlier->second);
-            if (!first.span.file.empty()) error.label(first.span, "first bound here");
+            if (!first.span.file.empty()) error.label(name_span(earlier->second), "first bound here");
             error.help(first.constant ? "give the second binding another name"
                                       : "give the second binding another name, or assign to the first one");
             throw error;
         }
         if (!declaration.initializer) {
-            throw Diagnostic(declaration.span, "a local binding requires an initializer").with_code("E0404");
+            auto error = Diagnostic(declaration.span, "a local binding requires an initializer").with_code("E0404")
+                .label("'" + declaration.name + "' is declared without a value");
+            const auto after = declaration.type ? std::optional<Span>(declaration.type->span) : declaration.name_span;
+            if (const auto at = after ? source_span(after->file, after->offset + after->length, 0) : std::nullopt)
+                error.suggest("give it an initial value", *at, " = <value>", Applicability::HasPlaceholders);
+            throw error;
         }
 
         std::optional<IrType> declared;
@@ -3325,8 +3613,10 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
                 throw Diagnostic(declaration.type->span, "a binding cannot have type void").with_code("E0416");
             }
         }
+        if (declared) expected_origin_ = ExpectedOrigin{declaration.type->span, "expected because of this type"};
         auto initializer = value(*declaration.initializer, context, declared ? &*declared : nullptr);
         auto id = add(SymbolKind::Local, declaration.name, declaration.span, context.owner);
+        record_names(id, declaration);
         symbol(id).constant = declaration.constant;
         symbol(id).type = declared.value_or(initializer.type);
         context.scopes.back().emplace(declaration.name, id);
@@ -3386,6 +3676,10 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         }
         auto destination = expression(stmt.expressions[0], context);
         place(destination);
+        if ((destination.op == IrOp::Load || destination.op == IrOp::Field) && destination.symbol != no_symbol)
+            expected_origin_ = ExpectedOrigin{name_span(destination.symbol),
+                                              "'" + symbol(destination.symbol).name + "' is declared here with type " +
+                                                  describe(destination.type)};
         auto source = value(stmt.expressions[1], context, &destination.type);
         require_scope_local(destination, source.type, source.span, context);
         auto result = node(IrOp::Store, stmt.span);
@@ -3428,15 +3722,27 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
             throw Diagnostic(stmt.span, "return is only allowed inside a function").with_code("E0431");
         }
         const auto expected = symbol(context.function).type;
+        const auto result_span = result_spans_.find(context.function);
         auto result = node(IrOp::Return, stmt.span);
         if (stmt.expressions.empty()) {
             if (expected.kind != TypeKind::Void) {
-                throw Diagnostic(stmt.span, "return requires a value of type " + describe(expected)).with_code("E0406");
+                auto error = Diagnostic(stmt.span, "return requires a value of type " + describe(expected))
+                    .with_code("E0406").label("return without a value");
+                if (result_span != result_spans_.end())
+                    error.label(result_span->second, "the function returns " + describe(expected));
+                throw error;
             }
         } else {
             if (expected.kind == TypeKind::Void) {
-                throw Diagnostic(stmt.span, "a void function cannot return a value").with_code("E0406");
+                auto error = Diagnostic(stmt.span, "a void function cannot return a value").with_code("E0406")
+                    .label("returns a value");
+                if (name_spans_.contains(context.function))
+                    error.label(name_span(context.function), "this function declares no result type");
+                error.help("declare the result type with '-> T' after the parameters, or return without a value");
+                throw error;
             }
+            if (result_span != result_spans_.end())
+                expected_origin_ = ExpectedOrigin{result_span->second, "expected because of this result type"};
             result.operands.push_back(value(stmt.expressions.front(), context, &expected));
             if (scope_bound(result.operands.back().type))
                 throw Diagnostic(result.operands.back().span,
@@ -3760,7 +4066,8 @@ void Lowering::destructure(std::vector<IrNode>& instructions, const Statement& s
         } else {
             auto& names = context.scopes.back();
             if (names.contains(binding.text))
-                throw Diagnostic(binding.span, "duplicate local binding '" + binding.text + "'").with_code("E0301");
+                throw duplicate_local(binding.span, "duplicate local binding '" + binding.text + "'",
+                                      names.find(binding.text)->second);
             id = add(SymbolKind::Local, binding.text, binding.span, context.owner);
             names.emplace(binding.text, id);
         }
@@ -3863,7 +4170,8 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
             if (binding.text == "_") continue;
             auto& names = context.scopes.back();
             if (names.contains(binding.text))
-                throw Diagnostic(binding.span, "duplicate match binding '" + binding.text + "'").with_code("E0301");
+                throw duplicate_local(binding.span, "duplicate match binding '" + binding.text + "'",
+                                      names.find(binding.text)->second);
             const auto local = add(SymbolKind::Local, binding.text, binding.span, owner);
             names.emplace(binding.text, local);
             symbol(local).type = fields[field];
@@ -3890,12 +4198,13 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
         arms.emplace_back(variant, std::move(region));
     }
     if (!wildcard) {
+        std::vector<SymbolId> missing;
         for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
             const auto& item = symbol(id);
             if (item.kind == SymbolKind::Variant && item.owner == enum_type.symbol && !seen.contains(id))
-                throw Diagnostic(stmt.span, "non-exhaustive match, missing variant '" + item.name + "'")
-                    .with_code("E0410");
+                missing.push_back(id);
         }
+        if (!missing.empty()) throw non_exhaustive(stmt, missing, produces_value);
     }
     if (arms.empty()) throw Diagnostic(stmt.span, "match requires at least one arm").with_code("E0411");
     if (match_type) result.type = *match_type;
@@ -4022,10 +4331,10 @@ void Lowering::lower_declaration(SymbolId id) {
                 reference_field_bindings_.insert(bindings.begin(), bindings.end());
             }
         }
+        if (declaration.type && symbol(id).type.kind != TypeKind::Void) result_spans_.emplace(id, declaration.type->span);
         auto instructions = body(declaration.body, ctx);
         if (symbol(id).type.kind != TypeKind::Void && !always_returns(instructions))
-            throw Diagnostic(declaration.span, "function may exit without returning " +
-                                               describe(symbol(id).type)).with_code("E0405");
+            throw missing_return(declaration.span, id, declaration);
         program_.bodies.push_back({id, std::move(instructions)});
         const auto branches = entries_[id].overloads;
         for (const auto branch : branches) lower_declaration(branch);
@@ -4217,9 +4526,11 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
                         continue;
                     }
                     const auto id = add(SymbolKind::Global, binding.text, binding.span, file_id);
-                    if (!entries_[file_id].names.emplace(binding.text, id).second)
+                    if (const auto [earlier, added] = entries_[file_id].names.emplace(binding.text, id); !added) {
                         throw Diagnostic(binding.span, "duplicate declaration of '" + binding.text + "'")
-                            .with_code("E0302");
+                            .with_code("E0302").label("'" + binding.text + "' is declared again here")
+                            .label(name_span(earlier->second), "'" + binding.text + "' is first declared here");
+                    }
                     entries_[id].resolution = Resolution::Pending;
                     entries_[id].destructure = &stmt;
                     group.bindings.push_back(id);

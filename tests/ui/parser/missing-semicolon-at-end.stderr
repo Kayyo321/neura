@@ -8,3 +8,5 @@ help: add the missing ';'
   |
 2 | let ready = true;
   |                 +
+
+For more information about this error, try `neura explain E0201`.

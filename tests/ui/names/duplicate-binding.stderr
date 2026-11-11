@@ -1,9 +1,11 @@
 error[E0301]: duplicate local binding 'count'
- --> $DIR/duplicate-binding.nra:4:5
+ --> $DIR/duplicate-binding.nra:4:9
   |
 3 |     let count = 1;
-  |     -------------- first bound here
+  |         ----- first bound here
 4 |     let count = 2;
-  |     ^^^^^^^^^^^^^^ 'count' is bound again here
+  |         ^^^^^ 'count' is bound again here
   |
   = help: give the second binding another name, or assign to the first one
+
+For more information about this error, try `neura explain E0301`.
