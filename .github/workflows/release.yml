@@ -156,8 +156,10 @@ jobs:
         run: |
           status=0
           for file in stage/bin/neura stage/lib/neura/launchers/*/*; do
-            needed=$(readelf -d "$file" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ')
-            newest=$(objdump -T "$file" | grep -o 'GLIBC_[0-9.]*' | sort -u -V | tail -n 1)
+            # A static executable has no dynamic section: readelf prints
+            # nothing for it and objdump fails. Both mean it needs nothing.
+            needed=$(readelf -d "$file" 2> /dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ' || true)
+            newest=$(objdump -T "$file" 2> /dev/null | grep -o 'GLIBC_[0-9.]*' | sort -u -V | tail -n 1 || true)
             echo "$file: needs ${needed:-nothing}; newest symbol version ${newest:-none}"
             for library in $needed; do
               case "$library" in
