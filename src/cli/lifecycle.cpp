@@ -703,7 +703,9 @@ int run_update(const fs::path& executable, const Detection& detection, const Upd
     bool tree_placed = false;
     bool link_switched = false;
     try {
-        fs::create_directories(root / "versions");
+        std::error_code created;
+        fs::create_directories(root / "versions", created);
+        if (created) throw Failure{"cannot create " + (root / "versions").string() + ": " + describe(created)};
         if (::rename(staged.c_str(), new_dir.c_str()) != 0) {
             throw Failure{"cannot move the new version to " + new_dir.string() + ": " + std::strerror(errno)};
         }
@@ -1165,6 +1167,9 @@ int update(const fs::path& executable, const UpdateOptions& options) {
         return run_update(executable, detection, options);
     } catch (const Failure& failure) {
         std::cerr << "neura: update: " << failure.message << "\n";
+        return exit_failure;
+    } catch (const std::exception& error) {
+        std::cerr << "neura: update: " << error.what() << "\n";
         return exit_failure;
     }
 }
