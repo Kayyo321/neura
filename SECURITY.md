@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Neura has no published release. Security fixes are made on the `main` branch. Once releases exist, fixes are issued for the most recent release.
+Security fixes are made on the `main` branch and issued in a new release. Only the most recent [release](https://github.com/Kayyo321/neura/releases) receives fixes.
 
 ## Report a vulnerability
 
