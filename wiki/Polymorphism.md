@@ -66,7 +66,7 @@ These restrictions apply:
 
 `Box<Alert>` is not a subtype of `Box<Renderable>`; mutable boxes would make such a conversion unsafe. These rules do not specify ownership, nullability, or lifetime behavior.
 
-For proposed constructor and destructor behavior, including cleanup through a base-typed reference, see [Object lifecycle](ObjectLifecycle).
+For constructor and destructor behavior, including cleanup through a base-typed reference, see [Object lifecycle](ObjectLifecycle).
 
 ## Interfaces
 

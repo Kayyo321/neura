@@ -50,7 +50,7 @@ bringing any names into scope. For an ordinary value, `let _ = expression;`
 evaluates the expression once and discards the result. This works for local,
 file, and module bindings. Each occurrence has no name to read or redeclare.
 
-For project-local modules, the proposed qualified-name and file layout convention is described in [Project structure](ProjectStructure.md). The [multi-file example](../../examples/modules/multi-file/main.nra) shows a project module importing another project module.
+For project-local modules, the qualified-name and file layout convention is described in [Project structure](ProjectStructure.md). The [multi-file example](../../examples/modules/multi-file/main.nra) shows a project module importing another project module.
 
 ### C headers
 

@@ -1,13 +1,13 @@
 <!-- Generated from docs/lang/Concurrency.md by scripts/generate-wiki.py. Edit that file, not this one. -->
-# Concurrency: specification and implementation status
+# Concurrency
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-This page specifies the concurrency language and runtime and records which parts exist. Phases 1 through 4 of section 16 are implemented: `scope`, `spawn`, and `select`, with the scope-bound, transferable, and task-safe checks, NeuraIR 1.9, polls, typed scheduler exits, NVR 1.5, the reference scheduler in NVM, cancellation and deadlines, channels, timers, overlapping and cancellable host I/O, concurrent record and replay, the scoped resource helpers, virtual time, schedule exploration with saved schedules, guards, the isolated parallel map, and task settings recorded in native executables. `Std.Concurrent` has eleven modules: `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, and `Guarded`. What does not exist: concurrent collections, tasks in a program that uses native bindings (C15), and a scheduler that runs tasks on several cores (section 18). The implementation is tested on Linux; Windows is unverified. Section 13 gives each compiler stage's part and section 16 the status of each phase. [Concurrency example](https://github.com/Kayyo321/neura/blob/main/examples/concurrency/service.nra) is a complete program that uses tasks, a cancellable operation, and shared state.
+This page specifies the concurrency language and runtime and provides `scope`, `spawn`, and `select`, with the scope-bound, transferable, and task-safe checks, NeuraIR 1.9, polls, typed scheduler exits, NVR 1.5, the reference scheduler in NVM, cancellation and deadlines, channels, timers, overlapping and cancellable host I/O, concurrent record and replay, the scoped resource helpers, virtual time, schedule exploration with saved schedules, guards, the isolated parallel map, and task settings recorded in native executables. `Std.Concurrent` has eleven modules: `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, and `Guarded`. Section 16 lists the limits: no concurrent collections, no tasks in a program that uses native bindings, and no scheduler that runs tasks on several cores. Tasks are tested on Linux; Windows is unverified. Section 13 gives each compiler stage's part. [Concurrency example](https://github.com/Kayyo321/neura/blob/main/examples/concurrency/service.nra) is a complete program that uses tasks, a cancellable operation, and shared state.
 
 ## 1. How to read this page
 
-- "Must" states a requirement on the implementation. A row of section 3 is a decision. Section 18 lists what is decided and what is still open; an implementer who reaches an open item stops and records the choice with the change, as the [repository rules](https://github.com/Kayyo321/neura/blob/main/AGENTS.md) require.
+- "Must" states a requirement on the implementation. Section 3 lists the rules in brief, and section 16 lists the limits of this release.
 - Names of options, modules, and members are fixed here. The NVR operation codes and the exit encoding are final and defined in [NVR](NVR#scheduler-operations-15); the `.nir` revision is defined in [NeuraIR format](NirFormat#revision-19-tasks); the trace file of a run with tasks and the services that overlap are defined in [NVM](NVM#traces-of-images-with-tasks).
 - Code blocks marked `neura` compile. A fragment uses names that the program around it declares, such as `fetch_user` or `Job`; the fragments of sections 4 to 8 and 12 are compiled and run with stand-in declarations for those names. [Concurrency example](https://github.com/Kayyo321/neura/blob/main/examples/concurrency/service.nra) is complete.
 
@@ -46,28 +46,28 @@ For readers who know another language's vocabulary:
 | Mutex-protected object | `Std.Concurrent.Guarded<T>`, or a task that owns the object |
 | Thread dump | Task dump |
 
-## 3. Decisions
+## 3. Rules in brief
 
-| ID | Decision |
-| --- | --- |
-| C1 | Tasks, with one function style. There are no `async` functions and no `await`. A function called from a task may suspend at a channel, a join, or host I/O without any marking in its signature. |
-| C2 | Concurrency is structured. Every `spawn` is lexically inside a `scope` of the same function body, and every exit from that scope waits for its tasks and their descendants. There are no detached tasks. |
-| C3 | `scope`, `spawn`, and `select` are contextual. The lexer keeps producing identifier tokens; the parser recognizes the forms by position (section 4.4). Programs that use these words as names keep their meaning. |
-| C4 | `spawn` evaluates its callee and arguments in the parent, in the ordinary order, and returns `Std.Concurrent.Task<T>`. |
-| C5 | `Task<T>` and `Scope` values are scope-bound: they cannot leave the scope that created them (section 4.3). |
-| C6 | Tasks are isolated. Spawn arguments and channel messages must be transferable, and a spawned call must be task-safe. The compiler checks both over the whole linked program: the scope-bound rules during lowering, and transferability and task safety on the specialized program, so a generic function is checked at each specialization (section 5). |
-| C7 | A join transfers the finished child's result to the joiner whatever its type. Join results are not restricted to transferable types; section 5.3 gives the reason. |
-| C8 | The error model does not change. Expected failures are returned values that `join` hands to the caller. A trap in any task ends the run. Nothing unwinds. |
-| C9 | Cancellation is cooperative and inherited through scopes. It wakes parked operations with a typed result. It never interrupts a running task, and `join` is never cancelled. |
-| C10 | Channels are typed and bounded, with separate send, receive, and close capabilities. There is no unbounded channel. |
-| C11 | The reference executor is one deterministic scheduler inside the NVM with FIFO queues. A program may rely on the memory model of section 5.4 and the channel rules of section 6. It must not rely on FIFO order, which exists to make runs reproducible. |
-| C12 | Preemption is by compiler-inserted polls that count language operations (loop back edges and calls), never steps, blocks, or time. |
-| C13 | Scheduler state is NVM state reached through explicit exits, like the heap. Graph profile 1 does not change. An image that uses tasks declares a new NVR minor version and is rejected by earlier runtimes. |
-| C14 | Host I/O may overlap only where the provider declares it. Completions are delivered at scheduling points and recorded by tick, so a replay delivers them at the same points (sections 10.4 and 11). |
-| C15 | The first concurrent image profile excludes native bindings and callbacks: a program cannot use both a scheduler operation (a scope, a spawn, a channel, a timer, a guard, a select, or a parallel map) and `Std.DynamicForeign` or `import:c(...)`. The compiler rejects the combination, at the first `spawn` when the program has one and otherwise at its first scheduler operation, and the NVR loader rejects any image that has scheduler exits or polls together with `CALB`, `NATV`, or a `neura.ffi.*` import. |
-| C16 | First-use static initialization stays on the root task. A spawned call that could run a static initializer is not task-safe (section 5.2). |
-| C17 | Multicore execution begins with `Parallel.map` over isolated computations. Its meaning is the sequential map; more workers may change only wall time. |
-| C18 | A deadlock ends the run with a diagnostic, a task dump, and status 134 (`Abort`). |
+The rules the rest of the page specifies, in one place. [Design notes](https://github.com/Kayyo321/neura/blob/main/docs/design/Concurrency.md) record why each was chosen.
+
+- Tasks, with one function style. There are no `async` functions and no `await`. A function called from a task may suspend at a channel, a join, or host I/O without any marking in its signature.
+- Concurrency is structured. Every `spawn` is lexically inside a `scope` of the same function body, and every exit from that scope waits for its tasks and their descendants. There are no detached tasks.
+- `scope`, `spawn`, and `select` are contextual. The lexer keeps producing identifier tokens; the parser recognizes the forms by position (section 4.4). Programs that use these words as names keep their meaning.
+- `spawn` evaluates its callee and arguments in the parent, in the ordinary order, and returns `Std.Concurrent.Task<T>`.
+- `Task<T>` and `Scope` values are scope-bound: they cannot leave the scope that created them (section 4.3).
+- Tasks are isolated. Spawn arguments and channel messages must be transferable, and a spawned call must be task-safe. The compiler checks both over the whole linked program: the scope-bound rules during lowering, and transferability and task safety on the specialized program, so a generic function is checked at each specialization (section 5).
+- A join transfers the finished child's result to the joiner whatever its type. Join results are not restricted to transferable types; section 5.3 gives the reason.
+- The error model does not change. Expected failures are returned values that `join` hands to the caller. A trap in any task ends the run. Nothing unwinds.
+- Cancellation is cooperative and inherited through scopes. It wakes parked operations with a typed result. It never interrupts a running task, and `join` is never cancelled.
+- Channels are typed and bounded, with separate send, receive, and close capabilities. There is no unbounded channel.
+- The reference executor is one deterministic scheduler inside the NVM with FIFO queues. A program may rely on the memory model of section 5.4 and the channel rules of section 6. It must not rely on FIFO order, which exists to make runs reproducible.
+- Preemption is by compiler-inserted polls that count language operations (loop back edges and calls), never steps, blocks, or time.
+- Scheduler state is NVM state reached through explicit exits, like the heap. Graph profile 1 does not change. An image that uses tasks declares a new NVR minor version and is rejected by earlier runtimes.
+- Host I/O may overlap only where the provider declares it. Completions are delivered at scheduling points and recorded by tick, so a replay delivers them at the same points (sections 10.4 and 11).
+- The first concurrent image profile excludes native bindings and callbacks: a program cannot use both a scheduler operation (a scope, a spawn, a channel, a timer, a guard, a select, or a parallel map) and `Std.DynamicForeign` or `import:c(...)`. The compiler rejects the combination, at the first `spawn` when the program has one and otherwise at its first scheduler operation, and the NVR loader rejects any image that has scheduler exits or polls together with `CALB`, `NATV`, or a `neura.ffi.*` import.
+- First-use static initialization stays on the root task. A spawned call that could run a static initializer is not task-safe (section 5.2).
+- Multicore execution begins with `Parallel.map` over isolated computations. Its meaning is the sequential map; more workers may change only wall time.
+- A deadlock ends the run with a diagnostic, a task dump, and status 134 (`Abort`).
 
 ## 4. Scoped tasks
 
@@ -168,9 +168,9 @@ The parser recognizes the contextual words only in these positions:
 
 | Form | Recognized when | Why existing code is unaffected |
 | --- | --- | --- |
-| `scope {` | `scope` begins a statement and the next token is `{` | A bare name followed by `{` is not a statement today. Enum constructors with named payloads are always qualified (`Tree.Branch { ... }`). |
+| `scope {` | `scope` begins a statement and the next token is `{` | A bare name followed by `{` is not a statement in the grammar. Enum constructors with named payloads are always qualified (`Tree.Branch { ... }`). |
 | `scope (name) {` | `scope` begins a statement followed by `(`, one identifier, `)`, and `{` | A call statement `scope(name);` is followed by `;`, never `{`. A call of `scope` with no argument or with several, followed by `{`, is not a statement either, and is reported as the rejection below. |
-| `spawn name...` | `spawn` begins an expression and the next token is an identifier | Two adjacent identifiers are not an expression today. `spawn(x)` remains a call of a function named `spawn`; so does `spawn (f)(x)`, unless no function named `spawn` is in scope, in which case lowering reports the rejection below. |
+| `spawn name...` | `spawn` begins an expression and the next token is an identifier | Two adjacent identifiers are not an expression in the grammar. `spawn(x)` remains a call of a function named `spawn`; so does `spawn (f)(x)`, unless no function named `spawn` is in scope, in which case lowering reports the rejection below. |
 | `select {` | `select` begins a statement and the next token is `{` | As for `scope {`. |
 
 In every other position the three words are ordinary names, so a program that declares `let scope = 3;` or a module member `select` keeps its meaning. After `spawn` the parser reads one postfix expression and requires it to be a call: `spawn work;` is rejected with "spawn requires a call, such as 'spawn work(item)'". A `select` arm separator is a comma, and a trailing comma is allowed.
@@ -187,8 +187,8 @@ Representative rejections. Each is reported at the named span with both the rule
 | `spawn (pick())(x)` | The `(`: a spawn operand begins with a name; bind the callee to a name first |
 | `scope { ... }` in a top-level statement or an initializer | The `scope` word: a scope block is only allowed inside a function body |
 | `scope (a, b) { ... }` or `scope () { ... }` | The `(`: `a scope statement names one scope or none: scope (name) { } or scope { }` |
-| A program that spawns a task and imports `Std.DynamicForeign` or has a C import | The first `spawn` expression: `a program that spawns a task cannot use Std.DynamicForeign or import:c(...): tasks and native calls cannot share an image yet` (C15) |
-| A program without a `spawn` that opens a scope or a channel, or uses another scheduler operation, and imports `Std.DynamicForeign` or has a C import | The first such operation, or the program's own call that reaches it when it is inside the library: `a program that uses a scope, a channel, or another scheduler operation cannot use Std.DynamicForeign or import:c(...): tasks and native calls cannot share an image yet` (C15) |
+| A program that spawns a task and imports `Std.DynamicForeign` or has a C import | The first `spawn` expression: `a program that spawns a task cannot use Std.DynamicForeign or import:c(...): tasks and native calls cannot share an image yet` |
+| A program without a `spawn` that opens a scope or a channel, or uses another scheduler operation, and imports `Std.DynamicForeign` or has a C import | The first such operation, or the program's own call that reaches it when it is inside the library: `a program that uses a scope, a channel, or another scheduler operation cannot use Std.DynamicForeign or import:c(...): tasks and native calls cannot share an image yet` |
 
 ## 5. Isolation between tasks
 
@@ -209,9 +209,9 @@ A value given to another task through a spawn (the callee value, a receiver, and
 
 The check is recursive and on static types, and it runs on the specialized program: a generic function is checked at each specialization, and a type that reaches itself is transferable when its other parts are. A named function has no captures, and a closure is transferable when its captures are. The rule for a function value is the union rule of section 5.2 applied to values. Copying a closure does not copy what it captured: a closure that captures an object aliases that object ([Core language](CoreLanguage#function-values-and-closures)), which is why such a closure is not transferable.
 
-A class instance is transferable only if its class is a `Std.Concurrent` handle whose fields are transferable. Decision: immutable classes are not transferable in this release (section 18). The checks apply at a spawn to the callee value, the receiver, and each argument, each reported at the expression it came from: `a value of type HashMap<string, string> is not transferable, so it cannot be given to a spawned task`. The same check applies to a channel's element type, to a value sent on a channel or in a `select` send arm, and to the arguments and result of a parallel map item.
+A class instance is transferable only if its class is a `Std.Concurrent` handle whose fields are transferable. Immutable classes are not transferable (section 16). The checks apply at a spawn to the callee value, the receiver, and each argument, each reported at the expression it came from: `a value of type HashMap<string, string> is not transferable, so it cannot be given to a spawned task`. The same check applies to a channel's element type, to a value sent on a channel or in a `select` send arm, and to the arguments and result of a parallel map item.
 
-`Std.Core.Error` is not transferable as declared, because its `Custom` variant holds an `ErrorDetail` object ([Stdlib](Stdlib-Design#63-error)). A `Result<T>` therefore crosses a join (section 5.3) but not a channel or a spawn. Decision: `Error` has a transferable flattening. `Std.Core.Error.PortableError` mirrors `Error` with one change: its `Custom` variant holds the detail's code and message texts in place of the object. `to_portable(e)` converts an error before it is sent and `from_portable(p)` converts it back after it is received:
+`Std.Core.Error` is not transferable as declared, because its `Custom` variant holds an `ErrorDetail` object ([Stdlib](Stdlib-Design#63-error)). A `Result<T>` therefore crosses a join (section 5.3) but not a channel or a spawn. `Error` has a transferable flattening. `Std.Core.Error.PortableError` mirrors `Error` with one change: its `Custom` variant holds the detail's code and message texts in place of the object. `to_portable(e)` converts an error before it is sent and `from_portable(p)` converts it back after it is received:
 
 <!-- example: check -->
 ```neura
@@ -230,8 +230,8 @@ A `Custom` error comes back holding a `SimpleDetail` with the same code and mess
 A value check alone is not enough: a function can reach shared mutable state without being handed it. A spawned call must be task-safe, meaning that neither it nor anything it can call, transitively:
 
 - reads or writes a module, file, or static binding that is reassignable or whose type is not transferable. Reading a `const` global of transferable type is allowed;
-- makes an active use that could run a [static initializer](Types#static-initialization). A class with no static fields that need run-time initialization, and whose bases and interfaces have none, is safe to construct (C16). The guard function that first-use initialization calls records that it started in a reassignable binding of the class's static scope, so a spawned call that reaches a guard is rejected through the first rule, with the binding `$static_started`;
-- issues a `neura.ffi.*` request (C15).
+- makes an active use that could run a [static initializer](Types#static-initialization). A class with no static fields that need run-time initialization, and whose bases and interfaces have none, is safe to construct. The guard function that first-use initialization calls records that it started in a reassignable binding of the class's static scope, so a spawned call that reaches a guard is rejected through the first rule, with the binding `$static_started`;
+- issues a `neura.ffi.*` request (section 16).
 
 The compiler computes one effect summary per function over the whole linked program, including [prebuilt NeuraIR modules](Modules#prebuilt-neurair-modules), and checks it at each `spawn`. The summary of a function is its own direct reasons together with those of everything it can call: the callee of a call, every override of a virtual call, every constructor, field initializer, and destructor an allocation or `destroy` can run. For a virtual call or a call through a function value, the summary is the union over every override and over every function value of that type the program can create. A function value can be created only where code that can run allocates it: the program's own functions, initializers, and whatever those reach. A closure in a library function that nothing reaches is not counted. That is still conservative: a call rejected for an implementation it never reaches is fixed by narrowing the type or passing the needed value explicitly. The diagnostic lists the call chain from the `spawn` to the offending operation:
 
@@ -250,7 +250,7 @@ boxed.nra:13:9: error: a value of type func(int32) -> void is not transferable, 
 
 `neura check --task-safety` prints the summary of every function of the linked program: whether it is task-safe, the reason when it is not, and whether it could also be the worker of a parallel map (section 12). It never rejects a program for what it reports.
 
-The root task is not restricted. It may use mutable globals as today, because no other task can reach them. A spawned call can read a `const` global whose type is transferable, and can print to the console: `Console.print_line` is task-safe, while reading standard input (`Console.read_line`, and the byte source that `Console.input()` returns) is not, because the console keeps its read-ahead buffer in a reassignable binding that belongs to the root task.
+The root task is not restricted. It may use mutable globals as in a program without tasks, because no other task can reach them. A spawned call can read a `const` global whose type is transferable, and can print to the console: `Console.print_line` is task-safe, while reading standard input (`Console.read_line`, and the byte source that `Console.input()` returns) is not, because the console keeps its read-ahead buffer in a reassignable binding that belongs to the root task.
 
 Each `Std` module's page must state whether its functions are task-safe; the `--task-safety` report is the list the compiler uses. [Standard library](StandardLibrary#task-safety) has the statement for each area, and the wiki page of each `Std.Concurrent` module, and of each module with an exception, has its own. The library was audited against this rule in two steps.
 
@@ -263,7 +263,7 @@ A constant that is an object is module state that a spawned task may not read. `
 
 When a task finishes, nothing else can reach what it built: it received only transferable values, it could not touch mutable globals, the scopes it opened have waited for its own children, and its frames are gone. Its result is therefore the only reference to that part of the heap, and handing it to the joiner shares nothing. So `join()` returns any `T`, including a list the child built or a `Result<T>` whose error holds a custom detail object. The handle cannot leave the scope's task, so a second `join()` gives the same reference to the same task, which is ordinary aliasing inside one task.
 
-The alternative, restricting join results to transferable types as spawn arguments are, was rejected. Under it the example of section 4.1 fails to compile whenever `fetch_user` returns `Result<User>`, and no task could return a collection. C7 keeps isolation and removes both problems. `parallel_map` results stay restricted to transferable types (section 12), because its workers may not share a heap.
+Join results are not restricted to transferable types: a restriction would make the example of section 4.1 fail to compile whenever `fetch_user` returns `Result<User>`, and no task could return a collection. `Parallel.map` results stay restricted to transferable types (section 12), because its workers may not share a heap.
 
 ### 5.4 Memory model
 
@@ -277,7 +277,7 @@ These are the ordering guarantees a program may rely on. An effect A is *visible
 - A and B are operations on one `AtomicInt64`, which are totally ordered, each seeing the latest earlier store;
 - A is inside one `Guarded<T>.with` call and B is inside a later one on the same guard.
 
-Isolation means there is nothing else to order: two tasks have no other common state. The reference scheduler's FIFO order is deterministic but is not part of this model (C11).
+Isolation means there is nothing else to order: two tasks have no other common state. The reference scheduler's FIFO order is deterministic but is not part of this model (section 3).
 
 ## 6. Channels and `select`
 
@@ -387,7 +387,7 @@ let outcome = files.with_open<Summary>(path, files.OpenMode.Read, func(file: fil
 });
 ```
 
-`File.with_open<T>(path, mode, body)` and `TcpStream.with_connection<T>(host, port, body)` are implemented. Each helper:
+`File.with_open<T>(path, mode, body)` and `TcpStream.with_connection<T>(host, port, body)` open a resource around a body. Each helper:
 
 - opens the resource, and returns the open error without calling the body if that fails;
 - runs the body in a scope it owns, so every task the helper started that borrows the handle has finished when the body's scope exits;
@@ -396,7 +396,7 @@ let outcome = files.with_open<Summary>(path, files.OpenMode.Read, func(file: fil
 
 `Std.Io.Closeable.release<T>(resource, outcome)` is that closing rule on its own, for a resource the two helpers do not cover: it closes the resource and combines the result with the outcome of the work, and a program calls it exactly once, after the work, on every ordinary completion. `File.with_open` is `open`, the body in a scope, and `release`. A file is closed even when the body closed it already, which reports no error, because a second `close` does nothing.
 
-A trap still ends the run without cleanup, and the runner then closes every file and socket the run left open, as it does today. These helpers reverse one earlier library decision, "there is no scoped helper"; that line was written when a body could only return or end the run, which remains true and is exactly what makes the helper sufficient.
+A trap still ends the run without cleanup, and the runner then closes every file and socket the run left open, as it does for any run. A body can only return or end the run, which is what makes the helper sufficient.
 
 ## 8. Shared state
 
@@ -428,7 +428,7 @@ let cache_owner = func(requests: channels.Receiver<CacheRequest>) {
 
 `entries` is an ordinary map. No other task can reach it, so it needs no synchronization, and the request channel's capacity bounds the backlog.
 
-Three synchronized handles are implemented, each transferable:
+Three synchronized handles exist, each transferable:
 
 | Handle | Contract |
 | --- | --- |
@@ -436,25 +436,25 @@ Three synchronized handles are implemented, each transferable:
 | `Semaphore` | `create(permits)`; `acquire()` parks until a permit is free and returns `Acquired` or `Cancelled`; `try_acquire()` returns a `bool` and never parks; `release()` wakes the longest-waiting task. A semaphore is a channel of `bool` permits, so waiting tasks are served first come, first served and a wait can be cancelled. Releasing more permits than were created traps with `invalid state: released more permits than were created`; a negative count traps with `invalid argument: permits`. |
 | `Guarded<T>` | `create<T>(initializer)` runs `initializer` in the calling task and wraps the state it builds, whose captures must be transferable; the state is reachable only through the guard. `with<U>(func(state: T) -> U) -> U` runs the function with exclusive access. The function's captures and `U` must be transferable, so no reference to the state can escape. A second task calling `with` parks until the first returns, first come, first served, and that wait is not cancellable because `with` has no outcome for it. Calling `with` on a guard the task already holds is the program trap `invalid state: guard already held`, status 134. |
 
-Concurrent collections come after these, as needed, built on `Guarded<T>` or as owner tasks; none exists yet. General shared mutable objects wait for the ownership and aliasing decisions listed under [Lifecycle](Status#open-language-decisions).
+There are no concurrent collections; build one on `Guarded<T>` or as an owner task. General shared mutable objects need the ownership and aliasing rules that are open under [Lifecycle](Status#open-language-decisions).
 
 ## 9. `Std.Concurrent`
 
 One module per type, as in the rest of the [library](Stdlib-Design#42-source-layout). `Std.Concurrent` sits after `Std.Time` in the dependency order and imports only `Std.Core` and `Std.Time`.
 
-| Module | Contents | Phase |
-| --- | --- | --- |
-| `Task` | `Task<T>` with `join()` and `is_finished()` | 1 |
-| `Scope` | `Scope` with `cancel()`, `is_cancelled()`, `cancel_after`, `cancel_at`, `deadline()` | 2 |
-| `Channel` | `open<T>`, `Sender<T>`, `Receiver<T>`, `Closer<T>`, and the outcome enums | 2 |
-| `Cancellation` | `requested()`, `remaining()` for the current task | 2 |
-| `Timer` | `after(duration)`, `at(instant)`; `wait()` is selectable and returns `Fired` or `Cancelled` | 2 |
-| `Tasks` | `all`, `all_ok`, `first_ok` over a list of calls (section 4.2) | 3 |
-| `WorkerGroup` | `with_workers<T>(workers, capacity, work, body)`, and the handle `WorkerGroup<T>` with `submit`, `try_submit`, and `close_and_drain` | 3 |
-| `Parallel` | `map<T, U>(items: T[], worker, limits) -> U[]`, `limits(steps, heap_cells)`, and `ItemLimits` (section 12) | 4 |
-| `AtomicInt64`, `Semaphore`, `Guarded` | Section 8 | 4 |
+| Module | Contents |
+| --- | --- |
+| `Task` | `Task<T>` with `join()` and `is_finished()` |
+| `Scope` | `Scope` with `cancel()`, `is_cancelled()`, `cancel_after`, `cancel_at`, `deadline()` |
+| `Channel` | `open<T>`, `Sender<T>`, `Receiver<T>`, `Closer<T>`, and the outcome enums |
+| `Cancellation` | `requested()`, `remaining()` for the current task |
+| `Timer` | `after(duration)`, `at(instant)`; `wait()` is selectable and returns `Fired` or `Cancelled` |
+| `Tasks` | `all`, `all_ok`, `first_ok` over a list of calls (section 4.2) |
+| `WorkerGroup` | `with_workers<T>(workers, capacity, work, body)`, and the handle `WorkerGroup<T>` with `submit`, `try_submit`, and `close_and_drain` |
+| `Parallel` | `map<T, U>(items: T[], worker, limits) -> U[]`, `limits(steps, heap_cells)`, and `ItemLimits` (section 12) |
+| `AtomicInt64`, `Semaphore`, `Guarded` | Section 8 |
 
-Every module of the table is implemented. [Standard library](StandardLibrary#stdconcurrent) gives each module's contract in one place.
+[Standard library](StandardLibrary#stdconcurrent) gives each module's contract in one place.
 
 **`WorkerGroup`** is the answer to overload: a service bounds its in-flight work with a group and a queue long before it reaches the run-wide limits of section 10.3. Because tasks need a scope, a group exists only inside `with_workers`:
 
@@ -493,7 +493,7 @@ One scheduler runs one task at a time.
 - **Polls.** A program that contains a `spawn` gets a poll on every `Call`, every `VirtualCall`, every call through a function value, and every loop back edge. The flag is a property of the whole program: a module compiled alone carries none, and gains them when it is linked into a program that spawns. A poll counts one language operation; when a task has counted its quantum since it was last scheduled, its turn ends as the previous rule says. The quantum is a run setting (`--task-quantum`), default 1,024. A native executable uses the quantum recorded in its policy ([Standalone](Standalone#5-the-container)), and a trace records the quantum of the run it holds (section 11).
 - **Why polls count language operations.** Steps and blocks depend on how conversion shaped the graphs. Loop iterations and calls do not. Optimized and unoptimized builds of one program therefore execute the same polls in the same order: a poll is a flag on the call or loop it counts, and no pass removes an executed call or back edge, duplicates one, or moves one across a scheduler operation ([NeuraIR optimization](IrOptimization#tasks-polls-and-scheduler-operations)).
 - **Identity.** The root task is task 0. Tasks are numbered in spawn order. Channel and timer identities are numbered in creation order. A dump or trace names the same things in every run of the same trace.
-- **Choosing the next task.** The reference scheduler takes the first task of the runnable queue. Any other runnable task would also be a legal choice: the memory model of section 5.4 holds under all of them (C11). The NVM lets a `ScheduleChooser` make the choice, which is how schedule exploration and the reproduction of a saved schedule work (section 14.4).
+- **Choosing the next task.** The reference scheduler takes the first task of the runnable queue. Any other runnable task would also be a legal choice: the memory model of section 5.4 holds under all of them. The NVM lets a `ScheduleChooser` make the choice, which is how schedule exploration and the reproduction of a saved schedule work (section 14.4).
 - **Garbage collection.** The root set gains every task's frames, parked or runnable, every buffered message, every value held by a parked sender, every unjoined result, and every pending host request's arguments ([NVM](NVM#garbage-collection)). Collection remains invisible to the program.
 
 ### 10.3 Limits
@@ -509,19 +509,19 @@ Existing limits keep their meaning for the run as a whole: steps and heap cells 
 
 The defaults are confirmed against the memory a parked task actually costs by the measurement below. A request counts toward `--max-pending-requests` from the moment it parks its task until its completion is delivered; the limit traps before the request reaches the provider. A native executable records all four settings and the worker count of section 12 in its policy ([Standalone](Standalone#5-the-container)).
 
-**Frame storage (decided for phase 1, runtime).** In an image that carries a `TRNS` table, every live frame of every task counts toward `--max-heap-cells`: one cell for the frame and one for each of its slots, checked before the frame is pushed and released when it returns. The scheduler charges the records it keeps in the same budget: a task record 20 cells, released when the scope that owns it closes (at once when the task has no handle); an open scope 1 cell; a channel 16 cells and one more for each buffered message; a timer 8; a guard 8; and a parallel-map item 8 plus the cells of its argument (section 12). The charge for a spawn, a channel, a timer, and a guard is checked before anything changes, so exhausting the budget traps at the operation that would exceed it with status 137. `--max-frames` still bounds each task's own depth. The reason is the conservative rule for open decisions: without a run-wide bound, up to `--max-tasks` times `--max-frames` frames could be live, so the runtime adds a bound instead of leaving one out, and it reuses an existing limit instead of adding an option this plan does not name. Images without a `TRNS` table keep their existing accounting, so their limits, traps, and `peak_heap_cells` statistics do not change. Fleet admission counts these cells as part of a member's live heap.
+**Frame storage.** In an image that carries a `TRNS` table, every live frame of every task counts toward `--max-heap-cells`: one cell for the frame and one for each of its slots, checked before the frame is pushed and released when it returns. The scheduler charges the records it keeps in the same budget: a task record 20 cells, released when the scope that owns it closes (at once when the task has no handle); an open scope 1 cell; a channel 16 cells and one more for each buffered message; a timer 8; a guard 8; and a parallel-map item 8 plus the cells of its argument (section 12). The charge for a spawn, a channel, a timer, and a guard is checked before anything changes, so exhausting the budget traps at the operation that would exceed it with status 137. `--max-frames` still bounds each task's own depth. Without a run-wide bound, up to `--max-tasks` times `--max-frames` frames could be live, so the existing `--max-heap-cells` limit bounds them. Images without a `TRNS` table count only what they counted before tasks existed, so their limits, traps, and `peak_heap_cells` statistics are those of a program without tasks. Fleet admission counts these cells as part of a member's live heap.
 
 **Measured default.** The fixture `tests/backend/task-chain.nvra` is a chain in which every task opens a scope, spawns one child, and parks at the scope exit until `--max-tasks` ends the run. On Linux x86-64 with a Release build, the peak resident memory of `neura run --max-tasks N` (median of three runs, read from `getrusage` of the child process, including the trap diagnostic that ends the run) was 11.4 MiB at N = 1 and 38.5 MiB at N = 65,536: about 27 MiB more for 65,535 parked tasks, an average of 0.43 KB each and about 0.55 KB each between 16,384 and 65,536 tasks. The defaults are kept.
 
 ### 10.4 Host I/O
 
-Overlapping and cancellable host I/O is implemented. In an image with tasks the standard providers declare the services below overlapping, and the driver (`src/nvm/driver.hpp`) starts their requests without blocking, keeps them while other tasks run, and delivers their completions at scheduling points. It starts no thread. An image without tasks is served as before: every request completes before the run continues. [NVM](NVM#host-services) has the provider contract.
+Host I/O can overlap and be cancelled. In an image with tasks the standard providers declare the services below overlapping, and the driver (`src/nvm/driver.hpp`) starts their requests without blocking, keeps them while other tasks run, and delivers their completions at scheduling points. It starts no thread. In an image without tasks every request completes before the run continues. [NVM](NVM#host-services) has the provider contract.
 
 A provider may declare a service **overlapping**: the calling task parks, other tasks run, and the completion is delivered later.
 
 - A request carries its execution-local sequence number, as now. That number is its ID.
 - A live run delivers completions only at scheduling points, in ascending order of request number among those that are ready, appending each woken task to the runnable queue. If no task is runnable and requests are pending, the driver blocks until one completes or the earliest timer or deadline passes.
-- Services that are not declared overlapping complete before the scheduler continues, exactly as today. Console writes stay in this class, so output order is the order tasks ran.
+- Services that are not declared overlapping complete before the scheduler continues, as in a program without tasks. Console writes stay in this class, so output order is the order tasks ran.
 - The overlapping set: `neura.net.connect`, `accept`, `read`, and `write`, `neura.console.read` when standard input is a descriptor, and `neura.clock.sleep`. File operations and every other service stay synchronous. `neura.net.connect` resolves the name before it returns, so name resolution holds up every task for its duration.
 - **Cancellable requests.** The cancellable form of a service is interface version 2; version 1 keeps its contract and overlaps without being cancellable. The library binds version 2. Its provider answers a cancel request with exactly one of: the completion, if the operation finished first, or error 15 (`Cancelled`), with any partial effect stated in the result (a write that stored some bytes completes with that count). The library maps code 15 to `IoErrorKind.Cancelled`. A cancelled read consumed nothing, a cancelled accept took no connection, and a cancelled connect leaves no socket.
 - [NVM](NVM#host-services) states for each service whether it overlaps, whether it is cancellable, and what a cancelled operation may have done. The library pages of `Console`, `SystemClock`, `TcpStream`, and `TcpListener` say the same from the caller's side.
@@ -532,7 +532,7 @@ If no task is runnable, at least one is parked, no timer is armed, and no host r
 
 ## 11. Record and replay
 
-Concurrent record and replay are implemented. `neura run --record` writes trace file version 3 for an image with tasks, and `neura run --replay` replays it. A trace of an image without tasks keeps its earlier version and bytes, so existing traces keep replaying. [NVM](NVM#traces-of-images-with-tasks) gives the grammar.
+`neura run --record` writes trace file version 3 for an image with tasks, and `neura run --replay` replays it. A trace of an image without tasks keeps its earlier version and bytes, so existing traces keep replaying. [NVM](NVM#traces-of-images-with-tasks) gives the grammar.
 
 [Record and replay](NVM#determinism-limits-and-observability) extend to concurrent runs. The contract: given the same image, inputs, limits, quantum, and trace, a replay reproduces every scheduling decision, exit selection, effect, and the terminal outcome, without invoking any service and therefore without repeating any external write.
 
@@ -546,7 +546,7 @@ Trace file version 3 adds:
 
 A trace does not record schedule choices. A recorded run is a run of the reference scheduler, whose every decision follows from the image, the settings, and the recorded deliveries and clock readings. The schedules that `neura test --schedules` explores are saved in a file of their own (section 14.4).
 
-A replay that reaches a recorded tick with different scheduler state stops with status 1 and names the first difference, as a diverging request does today: a request that differs, a delivery for a request that is not pending, a run that waits at a tick where the trace records nothing, a `Cancel` that the trace does not record or one the run never makes, or a different outcome. A run under `--virtual-time` records and replays the same way: its clock readings are the virtual ones, and the replay needs neither the option nor a clock.
+A replay that reaches a recorded tick with different scheduler state stops with status 1 and names the first difference, as a diverging request does in any replay: a request that differs, a delivery for a request that is not pending, a run that waits at a tick where the trace records nothing, a `Cancel` that the trace does not record or one the run never makes, or a different outcome. A run under `--virtual-time` records and replays the same way: its clock readings are the virtual ones, and the replay needs neither the option nor a clock.
 
 ## 12. Multicore: `Parallel.map`
 
@@ -605,7 +605,7 @@ The two channel operations and the scheduling of a message add about 3.3 microse
 
 | Stage | Change | Hands on |
 | --- | --- | --- |
-| C import | None. A program with C imports cannot spawn or use any other scheduler operation (C15). | |
+| C import | None. A program with C imports cannot spawn or use any other scheduler operation (section 16). | |
 | Lexer | None. `scope`, `spawn`, and `select` stay identifiers. | |
 | Parser | The three contextual forms of section 4.4, with spans for the keyword, the operand, and each `select` arm. No typing or name resolution. | Syntax nodes for scope, spawn, and select |
 | NeuraIR | Resolves `Task<T>` and `Scope`; checks scope-bound values during lowering and transferable types and task-safe calls over the specialized, linked program, including prebuilt `.nir` modules; represents scope entry and exit (`task_scope`), spawn (`spawn`), each other scheduler operation (`scheduler_call`: join, cancellation, channels, timers, guards, select, parallel items), and polls (a flag on a call or loop) as explicit operations. Written as NeuraIR 1.9 ([NeuraIR format](NirFormat#revision-19-tasks)). | No operation after this point needs a source-level rule. Every spawn starts a function value of no arguments whose captures are transferable. |
@@ -613,7 +613,7 @@ The two channel operations and the scheduling of a message add about 3.3 microse
 | IRtoNeuronConversion | Task bodies become ordinary blocks. Each scheduler operation becomes a typed exit; `return`, `break`, and `continue` first leave the scopes they cross. A poll rides on the exit that takes the back edge or makes the call, so it adds no block. Marks the layouts of transferable classes, payload enums, and tuples in the required `TRNS` table. | Exits whose arguments and results are typed like state operations |
 | Output | A new NVR minor version with the scheduler-operation exit and a required table marking transferable layouts. | An image a compatible runtime executes without source |
 
-**Artifact and implementation status.** [NVR](NVR#scheduler-operations-15) 1.5 is implemented: the scheduler exit with its 26 operations, the poll bit on continue and call exits, and the required `TRNS` table. The writer emits the lowest version required, so an image of a program without tasks keeps its earlier version and bytes. The loader validates the shape of each operation, the sorted and closed `TRNS` marks, and rejects a task image that contains `neura.ffi.*` imports, `CALB`, or `NATV`. The compiler emits all of it from source and from `.nir` 1.9 (`task_scope`, `spawn`, `scheduler_call`, and polls), and performs the scope-bound, transferability, and task-safety source checks of sections 4 and 5. The NVM runs the images on the reference scheduler of section 10.2, checks the layout of every object a spawn or a send transfers against `TRNS`, enforces the limits of section 10.3, and exposes task snapshots (`Execution::dump_tasks()`), events, and per-spawn-site profiles. `nvm::record` and `nvm::replay` accept task images and use trace file version 3 (section 11). A native executable records the task settings in its policy: container version 2 carries the task limit, the quantum, the queued-message and pending-request limits, and the parallel worker count, which `neura build --native` sets with the options of section 14.3 and `neura inspect` prints. `NEURA_RUN_OPTIONS` can lower the limits and the worker count and cannot change the quantum, because the quantum changes the interleaving and so the output order ([Standalone](Standalone#64-neura_run_options)).
+**Artifact.** [NVR](NVR#scheduler-operations-15) 1.5 carries the scheduler exit with its 26 operations, the poll bit on continue and call exits, and the required `TRNS` table. The writer emits the lowest version required, so an image of a program without tasks keeps its earlier version and bytes. The loader validates the shape of each operation, the sorted and closed `TRNS` marks, and rejects a task image that contains `neura.ffi.*` imports, `CALB`, or `NATV`. The compiler emits all of it from source and from `.nir` 1.9 (`task_scope`, `spawn`, `scheduler_call`, and polls), and performs the scope-bound, transferability, and task-safety source checks of sections 4 and 5. The NVM runs the images on the reference scheduler of section 10.2, checks the layout of every object a spawn or a send transfers against `TRNS`, enforces the limits of section 10.3, and exposes task snapshots (`Execution::dump_tasks()`), events, and per-spawn-site profiles. `nvm::record` and `nvm::replay` accept task images and use trace file version 3 (section 11). A native executable records the task settings in its policy: container version 2 carries the task limit, the quantum, the queued-message and pending-request limits, and the parallel worker count, which `neura build --native` sets with the options of section 14.3 and `neura inspect` prints. `NEURA_RUN_OPTIONS` can lower the limits and the worker count and cannot change the quantum, because the quantum changes the interleaving and so the output order ([Standalone](Standalone#64-neura_run_options)).
 
 **Inspection.** `disassemble` prints scheduler operations as it prints state operations, with no source map needed, and `assemble` reads them back to the same bytes. `decompile` labels each scheduler operation and poll `[decoded]`, because it is read from the exit record and not inferred, and pairs scope entries and exits when every path agrees on the open scopes; where it cannot pair them it shows the operations and says so ([Decompiler](Decompiler#tasks-and-scheduler-operations)). A recovered image that has tasks can be compared with its original by replaying the original's version 3 trace, which is an observed match under that trace, not a proof; the decompiler's own behavior tests do not include a task image yet.
 
@@ -653,7 +653,7 @@ It shows the parent and child tree, each task's spawn site and stack, its wait r
 - `neura run --trace-events <file>` writes one JSON object per line: `spawn`, `start`, `park`, `wake`, and `finish` of tasks; channel `send`, `receive`, and `close`; `host-request` and `host-completion`; `cancel`; `deadline`. Every event carries its `tick` and `task`, and the others add the child, channel, scope, timer, or request it concerns, a park's reason, and a spawn's site. Wall-clock times are added only with `--trace-wall-time`, because they differ between runs.
 - `--stats` adds peak live tasks, peak queued messages, and peak pending requests.
 
-Task dumps, profiles, trace events, and the task peaks of `--stats` are implemented. A native executable takes `--task-dump`, `--trace-events`, `--trace-wall-time`, `--stats`, and `--profile` through `NEURA_RUN_OPTIONS`, and answers `SIGQUIT` with a task dump as `neura run` does.
+A native executable takes `--task-dump`, `--trace-events`, `--trace-wall-time`, `--stats`, and `--profile` through `NEURA_RUN_OPTIONS`, and answers `SIGQUIT` with a task dump as `neura run` does.
 
 ### 14.3 Command line
 
@@ -669,7 +669,7 @@ Each option is rejected on the other commands: `--task-dump applies only to run 
 
 ### 14.4 Testing concurrent code
 
-The three tools of this section are implemented. Each rests on one mechanism of the NVM: a `TaskClock` supplies the time that timers, deadlines, and the clock services read, and a `ScheduleChooser` picks which runnable task goes next at each scheduling decision. The reference scheduler is the chooser that always takes the first task, and the host's steady clock is the default `TaskClock`.
+Each of the three tools rests on one mechanism of the NVM: a `TaskClock` supplies the time that timers, deadlines, and the clock services read, and a `ScheduleChooser` picks which runnable task goes next at each scheduling decision. The reference scheduler is the chooser that always takes the first task, and the host's steady clock is the default `TaskClock`.
 
 **Virtual time.** `--virtual-time` on `run` and `test` replaces the clock with a virtual one.
 
@@ -686,8 +686,8 @@ The three tools of this section are implemented. Each rests on one mechanism of 
 - Schedule 1 is the reference scheduler's. Schedule `k` for `k` from 2 to `N` picks uniformly among the runnable tasks at every scheduling decision, from a fixed generator seeded with `S + k - 1`, where `S` is `--schedule-seed` (default 0). The same seed gives the same schedules on every machine and in every run.
 - A test stops at its first failing schedule. A test in which no decision ever offered more than one runnable task has a single schedule and is reported as `[1 schedule]`.
 - Every schedule obeys section 5.4, so a failure is a real bug in the program, not an artifact. Exploration is bounded and makes no claim about schedules it did not run; the report states how many ran.
-- **Decision: exploration varies which runnable task goes next and nothing else.** It does not vary where the completions of overlapping host requests are delivered: those arrive when the host makes them ready. A test whose host requests are deterministic is therefore explored and reproduced exactly; a test that uses timers or deadlines gets that by running under `--virtual-time`. This narrows the earlier plan, which also varied delivery points.
-- **Decision: with `--schedules` above 1, or with `--virtual-time`, tests run one at a time on the CPU.** They are not advanced together as a fleet, and no graph device is used.
+- **Exploration varies which runnable task goes next and nothing else.** It does not vary where the completions of overlapping host requests are delivered: those arrive when the host makes them ready. A test whose host requests are deterministic is therefore explored and reproduced exactly; a test that uses timers or deadlines gets that by running under `--virtual-time`.
+- **With `--schedules` above 1, or with `--virtual-time`, tests run one at a time on the CPU.** They are not advanced together as a fleet, and no graph device is used.
 
 The report adds the count to each line and one line of totals, in this form:
 
@@ -703,7 +703,7 @@ The `seed` in a `FAIL` line is the seed of the failing schedule, `S + k - 1`. Th
 
 **Reproduction.** `--save-schedule <file>` writes the first failing schedule of the run (with `--schedules 1`, the default, that can only be the reference schedule, which has no choices), and prints `neura: note: the failing schedule of <test> was written to <file>` to standard error. `neura test --schedule <file>` runs that one test under exactly that schedule, with the file's quantum and clock, and reports it as `FAIL <test> [saved schedule]: ...` or `PASS <test> [saved schedule]`.
 
-**Decision: a saved schedule is a small text file of its own, not a host trace.** The earlier plan wrote it as a trace that `neura run --replay` would also take. A test is not a runnable program, so `run` has nothing to replay it against, and a trace would add the host responses, which a schedule does not need. `neura run --replay` does not accept the file. Its form, with one example choice:
+**A saved schedule is a small text file of its own, not a host trace.** A test is not a runnable program, so `run` has nothing to replay it against. `neura run --replay` does not accept the file. Its form, with one example choice:
 
 ```text
 neura-schedule 1
@@ -731,79 +731,29 @@ Each row names its boundary, the CTest entry that establishes it, and the kind o
 | --- | --- | --- | --- |
 | Parser | Each form accepted; each row of section 4.4 rejected at its span; programs using `scope`, `spawn`, and `select` as names unchanged | `concurrency-frontend` | Conformance |
 | NeuraIR | Scope-bound, transfer, and effect checks, including through virtual calls and function values; the call chain in the diagnostic; `check` and `build` report the same diagnostic. Prebuilt `.nir` modules are checked as part of the linked program | `concurrency-frontend` | Conformance |
-| IR optimization | The NeuraIR reference evaluator, extended with its own scheduler, runs the fixtures it models before and after optimization under several quanta and task limits; results, traps, host effects, and the schedule, tick for tick, must agree. It models the phase 1 operations: scopes, `spawn`, `join`, and `is_finished`. The structure check shows that every scheduler operation and poll the evaluator can reach survives, and that removing the polls changes the schedule | `ir-optimization-concurrency` | Differential |
-| Conversion and NVM | The phase 1 fixtures built from source (optimized, unoptimized, and through a `.nir` file) and run on the NVM must match the reference evaluator on host requests, exit status or trap class, and schedule; a second run from clean state repeats everything; fleet members give each its serial result; hand-assembled task images exercise each operation, and a handle used after its scope closed is an invalid task operation | `backend-concurrency` | Differential, determinism |
+| IR optimization | The NeuraIR reference evaluator, extended with its own scheduler, runs the fixtures it models before and after optimization under several quanta and task limits; results, traps, host effects, and the schedule, tick for tick, must agree. It models the scope operations: scopes, `spawn`, `join`, and `is_finished`. The structure check shows that every scheduler operation and poll the evaluator can reach survives, and that removing the polls changes the schedule | `ir-optimization-concurrency` | Differential |
+| Conversion and NVM | The scope fixtures built from source (optimized, unoptimized, and through a `.nir` file) and run on the NVM must match the reference evaluator on host requests, exit status or trap class, and schedule; a second run from clean state repeats everything; fleet members give each its serial result; hand-assembled task images exercise each operation, and a handle used after its scope closed is an invalid task operation | `backend-concurrency` | Differential, determinism |
 | Build routes | Every fixture under `tests/concurrency/programs`, the ones that use channels, `select`, cancellation, timers, `Tasks`, and `WorkerGroup` included, is built optimized, unoptimized, and through a `.nir` file. The two routes give the same bytes, and the optimized and unoptimized images give the same output and status under six quanta, run after run. The evaluator does not model these operations, so this comparison is between two builds on the NVM, not against an independent model | `concurrency-programs` | Differential (optimized against unoptimized), determinism |
 | Format | Hand-assembled 1.5 images; scheduler operations in an image that declares an earlier version, an unclosed transferable marking, and a concurrent image with `NATV` are rejected | `backend-format`, `backend-concurrency` | Structural |
 | Channels, cancellation, and guards | Rendezvous, full buffers, close with parked senders, cancellation of parked operations, nested shutdown, the task, queue, and heap limits, collection with parked tasks, a deadline that stops a task that never parks | `backend-concurrency`, `concurrency-programs` | Runtime |
 | Host I/O | Completions delivered in provider order while other tasks run, a busy task that does not starve a ready completion, the pending-request limit, cancellation racing completion in both orders, and the scoped helpers closing exactly once; an echo service, cancelled reads, accepts, and sleeps, and overlapping sleeps on the loopback interface and the real clock | `backend-concurrency`, `concurrency-io` | Runtime, end to end |
 | Replay | Recorded runs replay with every capability denied; a perturbed trace reports the first difference; a deadlock, a limit trap, and a process exit delivered by a completion replay as outcomes | `backend-concurrency`, `concurrency-io` | Replay |
 | Library | `Tasks` and `WorkerGroup`: results in call order, the first failure or success by completion order, cancellation of the remaining calls, shedding, draining, and their traps | `stdlib-concurrent` | End to end |
-| Test modes | Virtual time under `run` and `test`; exploration from a seed, repeated; a saved schedule and its reproduction; malformed and foreign schedules; the service fixture of section 16 | `concurrency-schedules` | End to end |
+| Test modes | Virtual time under `run` and `test`; exploration from a seed, repeated; a saved schedule and its reproduction; malformed and foreign schedules; the service fixture `tests/concurrency/schedules/service-tests.nra` | `concurrency-schedules` | End to end |
 | Native executables | Recorded task settings, the options variable lowering them, and the observing options | `native-build`, `native-container` | End to end, structural |
 | Decompiler | Scheduler operations and polls in images without `SMAP` and `NAME` | `decompiler-*` | Structural, observed |
 | `Parallel.map` | One worker against several: values, the trapping item, item limits, and every statistic | `concurrency-parallel` | Differential |
 
-These establish observed agreement on the fixtures and quanta they run. They are not proofs of equivalence, and the evaluator shares the language rules as written with the compiler. The independent model covers phase 1 only: for channels, `select`, cancellation, timers, guards, and the library helpers, the evidence that optimization preserves behavior is the comparison of optimized and unoptimized builds on the same NVM, which cannot show an error the two builds share.
+These establish observed agreement on the fixtures and quanta they run. They are not proofs of equivalence, and the evaluator shares the language rules as written with the compiler. The independent model covers scopes, `spawn`, `join`, and `is_finished` only: for channels, `select`, cancellation, timers, guards, and the library helpers, the evidence that optimization preserves behavior is the comparison of optimized and unoptimized builds on the same NVM, which cannot show an error the two builds share.
 
-## 16. Phases and release gates
+## 16. Limits
 
-A phase does not start until the gate of the one before it is met and reported with its commands and results.
-
-| Phase | Delivers | Gate |
-| --- | --- | --- |
-| **1. Scoped tasks** | `scope { }`, `spawn`, `join`; the transfer and effect checks; the reference scheduler and polls; task limits; task dumps; NVR 1.5 and the `.nir` revision | Standalone images behave identically across repeated runs. Source checks explain invalid captures, unsafe calls, and escaping handles. Optimized and unoptimized builds agree on results, traps, effects, and schedule. |
-| **2. Production I/O** | Bounded channels, `select`, `scope (name)` with cancellation and deadlines, overlapping and cancellable providers, the resource helpers, concurrent record and replay | Cancellation against completion, close with parked senders, nested shutdown, and collection with parked tasks are exercised. Replay passes with providers disabled. The artifact checks pass without source maps. |
-| **3. Service tooling** | `WorkerGroup`, the `Tasks` helpers, virtual time, schedule exploration, profiling, and trace events | A service fixture sheds overload through a bounded queue, times out a dependency, drains on shutdown, and reproduces a failing interleaving from a saved schedule. |
-| **4. Multicore and shared state** | `Parallel.map`, then `AtomicInt64`, `Semaphore`, and `Guarded<T>`, then concurrent collections as needed | One worker and several agree on values, trap order, and limits. Throughput, tail latency, peak memory, and cancellation latency are published for named workloads, with the machine and baseline. |
-
-**Current implementation status.** Each phase's status, with the tests that cover its gate. This page does not record test results; a change reports the checks it ran.
-
-- **Phase 1 is implemented.** The three language forms, the scope-bound, transferable, and task-safe checks, polls, the reference scheduler, the task limits, task dumps (also `SIGQUIT` and `--task-dump`), NVR 1.5, and NeuraIR 1.9 exist. Its gate rows are covered by `concurrency-frontend` (source checks that explain invalid captures, unsafe calls, and escaping handles), `ir-optimization-concurrency` and `backend-concurrency` (optimized and unoptimized builds agree with the reference evaluator on results, traps, effects, and schedule), and `concurrency-programs` (the same output and status from repeated runs and from each build route). The standalone half of the first gate row is covered too: a native executable runs the same image and carries its task settings, which `native-build` and `native-container` check.
-- **Phase 2 is implemented.** Bounded channels with typed outcomes, `select` with the default arm and rotating preference, `scope (name)` with `cancel`, `is_cancelled`, `cancel_after`, `cancel_at`, and `deadline`, `Cancellation`, `Timer`, deadlines and cancellation of parked channel, timer, select, and host operations, deadlock detection with its diagnostic, overlapping and cancellable host I/O with its providers (section 10.4), concurrent record and replay with trace file version 3 (section 11), and the scoped resource helpers (section 7). Its gate rows are covered by `backend-concurrency` (cancellation against completion in both orders, close with parked senders, nested shutdown, collection with parked tasks, replay without services, and a perturbed trace), `concurrency-io` (programs on the loopback interface, recorded and then replayed with every capability denied), and `concurrency-programs` (assembly round trips and decompilation of images built without a source map).
-- **Phase 3 is implemented.** `WorkerGroup`, the `Tasks` helpers, virtual time, schedule exploration, saved schedules (section 14.4), profiling, trace events, and the task peaks of `--stats` (section 14.2). Its gate is covered by `concurrency-schedules`: the service fixture `tests/concurrency/schedules/service-tests.nra` sheds overload through a bounded queue with `try_submit`, times out a slow dependency with a scope deadline, and drains the accepted work when the group closes, with the same answers under each of the six schedules explored and under virtual time; `order-tests.nra` holds a test that the reference schedule never fails, which exploration fails, saves, and reproduces from the saved schedule. `stdlib-concurrent` covers the two library modules. The gate's last clause was written as "from a saved trace"; it is met with a saved schedule, by the decision of section 14.4.
-- **Phase 4 is implemented.** `Parallel.map` with `--parallel-workers`, `AtomicInt64`, `Semaphore`, and `Guarded<T>` exist, and `concurrency-parallel` covers the first gate row: one worker and several agree on values, trap order, and limits. The second gate row asks for published measurements. The named workloads are `tests/benchmarks/concurrency/channel-pipeline.nra`, `request-latency.nra`, `cancellation-latency.nra`, and `parallel-primes.nra`, run by `tests/benchmarks/concurrency.py`, and the **Measured** paragraph of section 12 publishes their throughput, tail latency, peak memory, and cancellation latency with the machine and each baseline. Concurrent collections do not exist.
-
-The first public concurrency release is phases 1 through 3, and its acceptance test is one small network service taken all the way through **fan-out, backpressure, deadline, graceful shutdown, and replay**. [Concurrency example](https://github.com/Kayyo321/neura/blob/main/examples/concurrency/service.nra) is the part of it that needs no network: state owned by a task behind a channel, a cancellable race that stops the slow backends, and shared state behind a guard. Phase 4 uses the isolated executor to establish what multicore Neura delivers before general-purpose threads are considered.
-
-## 17. Documentation to update with the implementation
-
-| Page | Change | State |
-| --- | --- | --- |
-| [Resources and concurrency](ResourcesConcurrency) | The deferral paragraph is replaced by a pointer here and to the example; the resource paragraph keeps the scoped helpers as described in the standard library page. | Done |
-| [Core language](CoreLanguage), [Types](Types) | The three forms, scope-bound and transferable types, and the root-task rule for static initialization. | Done |
-| [Errors](Errors) | Deadlock and the new limits in the status table; a trap in any task ends the run. | Done |
-| [Stdlib](Stdlib-Design), [Standard library](StandardLibrary) | `Std.Concurrent`; the task-safety of each module; `IoErrorKind.Cancelled`; `PortableError`; the scoped helpers in section 5.5. | Done |
-| [NVM](NVM) | The scheduler, overlapping requests, the trace version, virtual time, and the schedule chooser. | Done |
-| [NVR](NVR), [NeuraIR format](NirFormat) | Minor version 5 with the scheduler operations, and the `.nir` revision 1.9. | Done |
-| [Project](Project), [Backend](Backend), [NeuraIR optimization](IrOptimization), [Decompiler](Decompiler) | Each stage's contract from section 13. | Done |
-| [Tooling](Tooling), [Testing](Testing), [Standalone](Standalone) | The options of section 14, the test modes, and the task settings of a native executable. | Done |
-| [Status](Status), [Release](Release) | Concurrency moves out of "Outside this release", each feature mapped to its tests. | Done |
-| An example under `examples/` | A cancellable operation and safe shared state, which [Resources and concurrency](ResourcesConcurrency) already asks for. | Done: `examples/concurrency/service.nra` |
-| `wiki/` | The matching pages and one page for each `Std.Concurrent` module, following [wiki maintenance](https://github.com/Kayyo321/neura/blob/main/docs/Wiki.md). | Done; this page is not a wiki page |
-
-## 18. Decisions and open questions
-
-Each row names an area, what was decided or is still open, and the phase by which a decision is needed. Rows marked decided were settled with the implementation and are part of the specification; the others remain open.
-
-| Area | Decision or open question | State |
-| --- | --- | --- |
-| Errors on channels | Decided: `Error` has a transferable flattening. `Std.Core.Error.PortableError` copies an error with `Custom` reduced to its code and message; `to_portable` and `from_portable` convert (section 5.1). `Error` itself and `Result<T>` stay untransferable, and immutable classes stay as the next row says. | Decided |
-| Immutable classes | Decided: not transferable in this release. A class instance is transferable only if it is a `Std.Concurrent` handle (section 5.1). A class whose fields are all constant and transferable could be transferable later; it needs definite field initialization and a rule for `destroy` on a shared object ([Lifecycle](Status#open-language-decisions)). | Decided |
-| Scope in initialization | Decided: no. `scope` is a function-body statement; in a top-level statement or an initializer it is an error, because globals are still being initialized. | Decided |
-| Effect summary precision | The union rule for dynamic calls may reject too much real code. `check --task-safety` reports the summary of every function, which is how to measure it. Measured on the standard library (section 5.2): counting every closure of the linked program rejected a `BufferedReader` or `Utf8Reader` read in any program that linked `Std.Io.Console`, because the console's input source has the same function type. The rule now counts only closures that code which can run creates, which leaves that case to programs that call `Console.input()`. Whether to make it more precise still is open. | Narrowed; open |
-| Frame storage | Decided: live frames across all tasks count toward `--max-heap-cells` in images with a `TRNS` table (section 10.3), as do the scheduler's records (20 cells for a task, 16 for a channel plus one per buffered message, 8 for a timer, 8 for a guard, 1 for an open scope). | Decided |
-| Scope-bound values | Decided: a scope-bound type may not be a type argument. A scope-bound value may be stored only in a local declared inside the innermost enclosing scope; a parameter is not such a local (section 4.3). | Decided |
-| Function values | Decided: a function value is transferable when every closure of its type that the program creates has transferable captures (section 5.1). | Decided |
-| Variadic arguments | Decided: they are packed in the parent into an array, which is not transferable, so a variadic call with packed arguments cannot be spawned. | Decided |
-| Polls | Decided: a program that contains a `spawn` gets a poll on every `Call`, `VirtualCall`, call through a function value, and loop back edge; the count is per language operation and identical for optimized and unoptimized builds (section 10.2). | Decided |
-| Exit statuses | Decided: the task limit, queued-message limit, and pending-request limit end the run with 137; an invalid task operation with 132; a deadlock with 134 (section 10.3 and [Errors](Errors)). | Decided |
-| Guard re-entry | Decided: `Guarded<T>.with` on a guard the task holds is the program trap `invalid state: guard already held`; a task parked in `with` is not cancellable. | Decided |
-| `Parallel.map` | Decided: it takes and returns arrays, returns results in input order, reports the trap of the lowest index as `(item N of a parallel map)`, runs each item in its own heap with copies of the program's transferable globals, and takes its worker count from `--parallel-workers` (section 12). | Decided |
-| Blocking file I/O | File services complete before the scheduler continues (section 10.4). When they become overlapping, and whether a long synchronous file call needs a watchdog, is open. | Open |
-| Deadlines for a lone task | Decided: a turn ends when its quantum is spent and a deadline, a timer, or a host request is outstanding, even when no other task can run, so the driver reads the clock and a deadline stops a task that only computes (sections 7 and 10.2). A program with nothing outstanding schedules as before. | Decided |
-| Saved schedules | Decided: a failing schedule is saved as a text file of its own (`neura-schedule 1`), not as a host trace, and `neura run --replay` does not take it (section 14.4). | Decided |
-| Schedule exploration | Decided: exploration varies which runnable task goes next and not where overlapping completions are delivered; with `--schedules` above 1 or `--virtual-time`, tests run one at a time on the CPU (section 14.4). Varying delivery points is open. | Decided |
-| Task settings of a native executable | Decided: the policy records the task limit, the quantum, the queued-message and pending-request limits, and the parallel worker count (container version 2). The options variable can lower the limits and the worker count and cannot change the quantum ([Standalone](Standalone#5-the-container)). | Decided |
-| Native interop | A concurrency contract for native calls, upcalls, and callbacks, lifting C15. | Open, after 4 |
-| General parallel scheduler | Running tasks on several cores. It needs the ownership and aliasing rules that are open today. | Open, after 4 |
+- **Native code.** A program that uses a scheduler operation (a scope, a spawn, a channel, a timer, a guard, a select, or a parallel map) cannot use `Std.DynamicForeign` or `import:c(...)`. The compiler rejects the combination (section 4.4).
+- **Cores.** The reference scheduler runs all tasks on one thread. Only `Parallel.map` uses more than one core (section 12).
+- **Collections.** There are no concurrent collections. Build one on `Guarded<T>` or as an owner task. General shared mutable objects need the ownership and aliasing rules that are open under Lifecycle in [Status](Status#open-language-decisions).
+- **Transfer.** Immutable classes are not transferable: a class instance is transferable only if it is a `Std.Concurrent` handle (section 5.1). `Error` and `Result<T>` are not transferable; `PortableError` is the transferable copy of an error.
+- **Initialization.** `scope` is a function-body statement. In a top-level statement or an initializer it is an error, because globals are still being initialized (section 4.1).
+- **Task safety.** The union rule for virtual calls and function values (section 5.2) can reject a call because of an implementation that never runs. `check --task-safety` reports the verdict for every function. Counting every closure of the linked program rejected a `BufferedReader` or `Utf8Reader` read in any program that linked `Std.Io.Console`, because the console's input source has the same function type; the rule counts only closures that code which can run creates, which leaves that case to programs that call `Console.input()`.
+- **File I/O.** File services complete before the scheduler continues; they do not overlap other work (section 10.4), so a long synchronous file call holds every task.
+- **Exploration.** Schedule exploration varies which runnable task goes next. It does not vary where the completions of overlapping host requests are delivered (section 14.4).
+- **Platforms.** Tasks are tested on Linux. Windows is unverified.

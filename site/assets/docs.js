@@ -9,10 +9,10 @@
   let index = null;
   let loading = null;
 
-  function load(root) {
+  function load(root, address) {
     if (index) return Promise.resolve(index);
     if (!loading) {
-      loading = fetch(root + "assets/search.json")
+      loading = fetch(address || root + "assets/search.json")
         .then((response) => response.json())
         .then((data) => {
           const items = [];
@@ -60,6 +60,8 @@
 
   function setUp(box) {
     const root = box.dataset.root || "";
+    // The build gives the index's address a version, so a new deployment is never searched with an old index.
+    const address = box.dataset.index;
     const input = box.querySelector("input");
     const list = box.querySelector(".results");
     let results = [];
@@ -84,7 +86,7 @@
     }
 
     function show() {
-      load(root).then((items) => {
+      load(root, address).then((items) => {
         results = search(items, input.value);
         list.replaceChildren();
         if (!input.value.trim()) {
@@ -120,7 +122,7 @@
       });
     }
 
-    input.addEventListener("focus", () => load(root));
+    input.addEventListener("focus", () => load(root, address));
     input.addEventListener("input", show);
     input.addEventListener("keydown", (event) => {
       if (event.key === "ArrowDown" && results.length) {
