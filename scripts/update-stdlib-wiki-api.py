@@ -111,7 +111,8 @@ def exports(path, module):
         container = re.match(
             r"^(\s*)(export\s+)?let(?:\.[A-Za-z_]+)*\s+(\w+)\s*=\s*(?:module|class|interface)\b", line
         )
-        match = re.match(r"^\s*export\s+(?:static\s+)?(?:let(?:\.[A-Za-z_]+)*|const)\s+(\w+)\b", line)
+        # `last` is contextual: it declares only when a name follows it.
+        match = re.match(r"^\s*export\s+(?:static\s+)?(?:let(?:\.[A-Za-z_]+)*|const|last(?=\s+[A-Za-z_]))\s+(\w+)\b", line)
         owner = ".".join(item[1] for item in owners)
         public = all(item[2] for item in owners)
         if container:

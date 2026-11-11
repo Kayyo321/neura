@@ -162,7 +162,7 @@ private:
             result += type_text(*declaration.cast_target);
             result += " = func";
         } else if (declaration.kind == DeclKind::Binding) {
-            result = declaration.constant ? "const " : "let ";
+            result = declaration.last ? "last " : declaration.constant ? "const " : "let ";
             result += declaration.name;
             if (declaration.type) {
                 result += ": ";

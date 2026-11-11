@@ -66,7 +66,11 @@ NEURA_TOKEN = re.compile(
 PAGE_REFERENCE = re.compile(r'\b(href|src|srcset|data-index)="([^"]*)"')
 CSS_URL = re.compile(r'url\("([^"]+)"\)')
 API_ITEM = re.compile(r'<li><strong>([^<]*)</strong> · <a href="([^"]*)"><code>([^<]*)</code></a>')
-DECLARED_NAME = re.compile(r"\b(?:let|const)\s+([A-Za-z_][A-Za-z0-9_]*)")
+DECLARED_NAME = re.compile(r"\b(?:let|const|last)\s+([A-Za-z_][A-Za-z0-9_]*)")
+# `last` is a contextual word: a keyword only when a name follows it, as in
+# `last total: int;`, and an ordinary name in `last = 3;` or `last.next`.
+CONTEXTUAL_KEYWORDS = {"last"}
+CONTEXTUAL_FOLLOWER = re.compile(r"[ \t]+([A-Za-z_][A-Za-z0-9_]*)")
 
 Report = Callable[[str, int, str], None]
 
@@ -79,7 +83,12 @@ def highlight(language: str, source: str) -> str | None:
     for match in NEURA_TOKEN.finditer(source):
         out.append(html.escape(source[position:match.start()], quote=False))
         kind, text = match.lastgroup, match.group()
-        if kind == "w" and text not in NEURA_KEYWORDS:
+        if kind == "w" and text in CONTEXTUAL_KEYWORDS:
+            follower = CONTEXTUAL_FOLLOWER.match(source, match.end())
+            keyword = follower is not None and follower.group(1) not in NEURA_KEYWORDS
+        else:
+            keyword = text in NEURA_KEYWORDS
+        if kind == "w" and not keyword:
             out.append(html.escape(text, quote=False))
         else:
             out.append(f'<span class="{"k" if kind == "w" else kind}">{html.escape(text, quote=False)}</span>')
