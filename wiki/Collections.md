@@ -1,9 +1,7 @@
-
-The same loop visits any value that implements `Std.Collections.Iterable<T>`, calling `iterator()` once and then `has_next()` and `next()` ([Core language](https://github.com/Kayyo321/neura/wiki/CoreLanguage#loops)). Every standard-library collection, `Sequence`, and `Std.Core.IntRange` implement it, and a program's own classes can too. A source that is not an array, list, or `Iterable<T>` is rejected, as is an element annotation that differs from `T`.
+<!-- Generated from docs/lang/Collections.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Arrays and lists
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
-
 
 Arrays and lists are built-in, homogeneous collections. Their type is formed by adding a suffix to the element type:
 
@@ -22,6 +20,7 @@ Read suffixes from left to right: each suffix wraps the type to its left. Nested
 
 A bracketed literal constructs a collection using the expected type. Its elements must be assignable to that type's element type. An empty literal requires an expected type. For example:
 
+<!-- example: check -->
 ```neura
 let names: string[] = ["Ada", "Lin"];
 let queue: string[list] = ["first", "second"];
@@ -35,6 +34,7 @@ An array's length is fixed when it is created, including when that length is det
 
 `start .. stop` constructs a collection starting at `start` and ending before `stop`. Supply a step with `start .. stop : step`. Braces may group a range as `{start .. stop : step}`. The step defaults to one. A negative step counts down. A range whose start has already reached or passed its stop in the selected direction is empty. A zero step traps, including for an empty range.
 
+<!-- example: check -->
 ```neura
 let numbers = {0 .. 5};                 // int[] containing 0, 1, 2, 3, 4
 let evens: int[list] = 0 .. 8 : 2;      // [0, 2, 4, 6]
@@ -57,10 +57,12 @@ Collection operations must also check length and allocation arithmetic for overf
 
 The spelling of bounds and allocation errors, error handling, ownership and aliasing, collection equality, and general allocation APIs remain to be specified. In particular, a fixed array length does not imply immutable elements or exclusive ownership.
 
-A negative index fails with trap reason 2 (bounds failure); an index at or past the length is a bounds fault detected by NVM. Both end the run with status 139, `ExitCode.SegmentationFault` ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)).
+A negative index fails with trap reason 2 (bounds failure); an index at or past the length is a bounds fault detected by NVM. Both end the run with status 139, `ExitCode.SegmentationFault` ([Errors](Errors)).
 
 ## Iteration
 
-`for (let element in collection) { ... }` visits an array's or a list's elements in index order ([Core language](https://github.com/Kayyo321/neura/wiki/CoreLanguage#loops)). Assigning to elements by index during the loop is allowed. Appending to or removing from a list while a for-each loop visits it, through any alias, makes the loop trap with reason 5 before its next advance; each list carries a structural version that every successful `append` and `remove_at` changes.
+`for (let element in collection) { ... }` visits an array's or a list's elements in index order ([Core language](CoreLanguage#loops)). Assigning to elements by index during the loop is allowed. Appending to or removing from a list while a for-each loop visits it, through any alias, makes the loop trap with reason 5 before its next advance; each list carries a structural version that every successful `append` and `remove_at` changes.
+
+The same loop visits any value that implements `Std.Collections.Iterable<T>`, calling `iterator()` once and then `has_next()` and `next()` ([Core language](CoreLanguage#loops)). Every standard-library collection, `Sequence`, and `Std.Core.IntRange` implement it, and a program's own classes can too. A source that is not an array, list, or `Iterable<T>` is rejected, as is an element annotation that differs from `T`.
 
 See [collections.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/collections.nra) for examples of indexing, mutation, and nested types; the test driver in `tests/backend/examples/collections-driver.nra` builds and runs it.

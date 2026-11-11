@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Test the repository's check scripts.
 
-`check-docs.py`, `check-workflows.py`, `check-test-report.py`, and
-`build-site.py` gate pull requests, so each must accept valid input and reject
-each kind of problem it exists to find. This script runs them on small inputs
-built in a temporary directory and compares the exit status and the reported
-problem.
+`check-docs.py`, `check-workflows.py`, `check-test-report.py`,
+`generate-wiki.py`, `check-doc-examples.py`, and `build-site.py` gate pull
+requests, so each must accept valid input and reject each kind of problem it
+exists to find. This script runs them on small inputs built in a temporary
+directory and compares the exit status and the reported problem.
 
 The exit status is 0 when every case behaves as expected and 1 otherwise.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -150,6 +151,24 @@ DOCUMENTS = {
 }
 
 failures = 0
+
+
+def load_script(name: str):
+    """Import a script whose file name has a hyphen."""
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), SCRIPTS / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def same(label: str, got: str, wanted: str) -> None:
+    """A case that compares text in this process."""
+    global failures
+    if got == wanted:
+        print(f"PASS {label}")
+    else:
+        failures += 1
+        print(f"FAIL {label}: expected\n{wanted}\nbut got\n{got}")
 
 
 def expect(label: str, command: list[str], problem: str | None) -> None:
@@ -304,6 +323,72 @@ def markdown() -> None:
         print(f"{'PASS' if passed else f'FAIL'} markdown: {name}" + ("" if passed else f": got {output!r}"))
 
 
+def redirects() -> None:
+    """The preview's redirects stay on the preview and keep the request out of the header line."""
+    global failures
+    handler = load_script("build-site").PreviewHandler
+
+    class Response:
+        def __init__(self) -> None:
+            self.headers: dict[str, str] = {}
+
+        def send_response(self, code: int) -> None:
+            pass
+
+        def send_header(self, name: str, value: str) -> None:
+            self.headers[name] = value
+
+        def end_headers(self) -> None:
+            pass
+
+    cases = {
+        "a path is kept as it is": ("/neura/docs/", "/neura/docs/"),
+        "an escape stays one escape": ("/neura/a%20b/", "/neura/a%20b/"),
+        "a line break is encoded": ("/neura\r\nSet-Cookie: x/", "/neura%0D%0ASet-Cookie:%20x/"),
+        "a second leading slash cannot name a host": ("//example.com/", "/example.com/"),
+    }
+    for name, (location, wanted) in cases.items():
+        response = Response()
+        handler.redirect(response, location)
+        same(f"site: preview redirect: {name}", response.headers.get("Location", ""), wanted)
+
+
+def wiki(label: str, change, problem: str | None) -> None:
+    """Run generate-wiki.py --check on a tree it has just written, after `change(root)` edits it."""
+    generator = load_script("generate-wiki")
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for path in generator.GENERATED:
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text("# Page\n\nSee [the overview](../lang/Overview.md#top) and "
+                                     "[source](../../src/main.cpp).\n", encoding="utf-8")
+        (root / "src").mkdir()
+        (root / "src" / "main.cpp").write_text("", encoding="utf-8")
+        (root / "wiki").mkdir()
+        for name in generator.HAND_WRITTEN | {"Stdlib-Core-Text", "Stdlib-Program"}:
+            (root / "wiki" / f"{name}.md").write_text("# By hand\n", encoding="utf-8")
+        script = str(SCRIPTS / "generate-wiki.py")
+        subprocess.run([sys.executable, script, "--root", directory], check=True, capture_output=True)
+        change(root)
+        expect(f"generate-wiki: {label}", [sys.executable, script, "--root", directory, "--check"], problem)
+
+
+def examples(label: str, files: dict[str, str], problem: str | None) -> None:
+    """Run check-doc-examples.py --directives-only, which needs no compiler."""
+    with tempfile.TemporaryDirectory() as directory:
+        for name, text in files.items():
+            path = Path(directory) / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        expect(f"doc examples: {label}", [sys.executable, str(SCRIPTS / "check-doc-examples.py"), "--root", directory,
+                                          "--directives-only"], problem)
+
+
+def block(directive: str | None, blank: str = "") -> str:
+    comment = f"<!-- example: {directive} -->\n{blank}" if directive else ""
+    return f"# Page\n\n{comment}```neura\nlet x = 1;\n```\n"
+
+
 def report(label: str, cases: str | None, minimum: int, problem: str | None) -> None:
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "junit.xml"
@@ -406,6 +491,85 @@ def main() -> int:
     docs("a repository URL to a missing path", {"wiki/Home.md": f"[a]({BLOB}/src/gone.cpp)\n"},
          "src/gone.cpp does not exist")
 
+    wiki("pages that match", lambda root: None, None)
+    wiki("a stale page", lambda root: (root / "wiki" / "Types.md").write_text("# Page\n", encoding="utf-8"),
+         "wiki/Types.md: is stale")
+    wiki("an edited generated page",
+         lambda root: (root / "wiki" / "Status.md").write_text(
+             (root / "wiki" / "Status.md").read_text(encoding="utf-8") + "\nextra\n", encoding="utf-8"),
+         "wiki/Status.md: is stale")
+    wiki("a missing page", lambda root: (root / "wiki" / "Tooling.md").unlink(), "wiki/Tooling.md: is missing")
+    wiki("an unknown wiki page", lambda root: (root / "wiki" / "Notes.md").write_text("# Notes\n", encoding="utf-8"),
+         "wiki/Notes.md: neither generated")
+    wiki("a docs page with no wiki page", lambda root: (root / "docs" / "Extra.md").write_text("# E\n", encoding="utf-8"),
+         "docs/Extra.md: has no wiki page")
+    wiki("a missing hand-written page", lambda root: (root / "wiki" / "Home.md").unlink(),
+         "wiki/Home.md: listed as hand-written but does not exist")
+    wiki("a repository-only page", lambda root: (root / "docs" / "Wiki.md").write_text("# W\n", encoding="utf-8"), None)
+
+    generator = load_script("generate-wiki")
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for path in ("docs/lang/Status.md", "docs/runtime/NVM.md", "docs/lang/Stdlib.md", "docs/Wiki.md",
+                     "README.md", "wiki/Home.md", "wiki/Stdlib.md", "src/main.cpp"):
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text("", encoding="utf-8")
+        for name, link, wanted in (
+            ("a docs page with a wiki page", "[a](Status.md)", "[a](Status)"),
+            ("a docs page and anchor", "[a](Status.md#open-decisions)", "[a](Status#open-decisions)"),
+            ("a page in another docs directory", "[a](../runtime/NVM.md#x)", "[a](NVM#x)"),
+            ("the renamed standard library plan", "[a](Stdlib.md#18-implementation-decisions)",
+             "[a](Stdlib-Design#18-implementation-decisions)"),
+            ("a docs page with no wiki page", "[a](../Wiki.md)", f"[a]({BLOB}/docs/Wiki.md)"),
+            ("a repository file", "[a](../../src/main.cpp#L3)", f"[a]({BLOB}/src/main.cpp#L3)"),
+            ("a repository directory", "[a](../../src/)", f"[a]({BLOB.replace("blob", "tree")}/src)"),
+            ("a hand-written wiki page", "[a](../../wiki/Stdlib.md#x)", "[a](Stdlib#x)"),
+            ("the wiki home page", "[a](../../wiki/Home.md)", "[a](Home)"),
+            ("a link with a title", '[a](Status.md "t")', '[a](Status "t")'),
+            ("an angle-bracket target", "[a](<Status.md>)", "[a](<Status>)"),
+            ("an image", "![a](../../src/main.cpp)", f"![a]({BLOB}/src/main.cpp)"),
+            ("a reference definition", "[a]: Status.md", "[a]: Status"),
+            ("an HTML link", '<a href="Status.md">a</a>', '<a href="Status">a</a>'),
+            ("a link text with a code span", "[`a`](Status.md)", "[`a`](Status)"),
+            ("a link split over two lines", "[a\nb](Status.md)", "[a\nb](Status)"),
+            ("a same-page link", "[a](#heading)", "[a](#heading)"),
+            ("an external link", "[a](https://example.com/Status.md)", "[a](https://example.com/Status.md)"),
+            ("a mail link", "[a](mailto:x@example.com)", "[a](mailto:x@example.com)"),
+            ("a link in a code span", "`[a](Status.md)` and [b](Status.md)", "`[a](Status.md)` and [b](Status)"),
+            ("a link in a fenced block", "```text\n[a](Status.md)\n```\n[b](Status.md)",
+             "```text\n[a](Status.md)\n```\n[b](Status)"),
+            ("a link in a longer fence", "````md\n```\n[a](Status.md)\n````\n[b](Status.md)",
+             "````md\n```\n[a](Status.md)\n````\n[b](Status)"),
+            ("a link in a tilde fence", "~~~\n[a](Status.md)\n~~~\n[b](Status.md)",
+             "~~~\n[a](Status.md)\n~~~\n[b](Status)"),
+        ):
+            same(f"generate-wiki: {name}",
+                 generator.rewrite_links(link, "docs/lang/Types.md", root, "example/project"),
+                 wanted)
+        page = generator.generate("docs/lang/Status.md", "\n# Title\n\nBody [a](Types.md).\n", root, "example/project")
+        same("generate-wiki: the generated page", page, generator.COMMENT.format(path="docs/lang/Status.md")
+             + "\n# Title\n\n" + generator.NAVIGATION + "\n\nBody [a](Types).\n")
+
+    examples("every directive", {
+        "README.md": block("check"),
+        "docs/A.md": block("run") + "\n```text\nhi\n```\n" + block("test") + block("rejected: unknown name")
+                     + block("fragment: a single declaration", "\n"),
+    }, None)
+    examples("a block that is not Neura", {"docs/A.md": "```text\nplain\n```\n```sh\nls\n```\n"}, None)
+    examples("a missing directive", {"docs/A.md": block(None)}, "docs/A.md:3: a ```neura block has no")
+    examples("a missing directive in the README", {"README.md": block(None)}, "README.md:3: a ```neura block has no")
+    examples("a directive two lines above", {"docs/A.md": "<!-- example: check -->\n\n\n```neura\nlet x = 1;\n```\n"},
+             "docs/A.md:4: a ```neura block has no")
+    examples("a directive in a nested directory", {"docs/lang/B.md": block(None)}, "docs/lang/B.md:3:")
+    examples("an unknown directive", {"docs/A.md": block("compile")}, "unknown example directive `compile`")
+    examples("a fragment without a reason", {"docs/A.md": block("fragment")}, "`example: fragment` needs a reason")
+    examples("a fragment with an empty reason", {"docs/A.md": block("fragment:  ")}, "`example: fragment` needs a reason")
+    examples("a rejected block without text", {"docs/A.md": block("rejected")}, "`example: rejected` needs")
+    examples("a check with an argument", {"docs/A.md": block("check: yes")}, "`example: check` takes no argument")
+    examples("a run without expected output", {"docs/A.md": block("run")}, "must be followed by a ```text block")
+    examples("a run followed by another kind of block", {"docs/A.md": block("run") + "\n```sh\nls\n```\n"},
+             "must be followed by a ```text block")
+
     ran = '<testcase name="a" status="run"/><testcase name="b" status="run"/>'
     report("every test ran", ran, 2, None)
     report("fewer tests than the minimum", ran, 3, "at least 3 are required")
@@ -477,6 +641,7 @@ def main() -> int:
               "has the path of a page the build generates")
     documents_build()
     markdown()
+    redirects()
     site_build()
 
     print(f"{failures} unexpected results.")

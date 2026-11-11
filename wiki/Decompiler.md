@@ -1,4 +1,7 @@
+<!-- Generated from docs/Decompiler.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Decompiler
+
+[Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
 The decompiler reads an `.nvr` image with the shared validating loader and recovers what the image does from its executable content: its graphs, weights, types, layouts, globals, functions, blocks, exits, and host imports. It has three commands:
 

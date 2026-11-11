@@ -67,7 +67,7 @@ import threading
 import time
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import site_docs
 
@@ -77,6 +77,9 @@ SITE_DIRECTORY = "site"
 WIKI_DIRECTORY = "wiki"
 HOME_PAGE = "index.html"
 NOT_FOUND_PAGE = "404.html"
+# Characters a redirect's path keeps as they are: the unreserved and sub-delimiter characters of a URL path, `/`,
+# and `%`, so that an escape already in the request stays one escape.
+PATH_CHARACTERS = "/%:@!$&'()*+,;=-._~"
 # Directories whose files the preview watches, besides the Markdown files at the top of the checkout.
 WATCHED = (SITE_DIRECTORY, "docs", "wiki", "examples", "stdlib")
 
@@ -378,6 +381,10 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
         return super().send_head()
 
     def redirect(self, location: str):
+        # The location is a path of this server made from the request's path. Percent-encode every character a
+        # URL path does not hold, so nothing the client sent can break the header line, and start it with a single
+        # slash, so that it cannot name another host.
+        location = "/" + quote(location.lstrip("/"), safe=PATH_CHARACTERS)
         self.send_response(302)
         self.send_header("Location", location)
         self.send_header("Content-Length", "0")

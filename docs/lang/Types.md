@@ -3,6 +3,7 @@
 Types describe values used in declarations, parameters, and return values.
 Bindings and function parameters put the type after the name.
 
+<!-- example: check -->
 ```neura
 let count: int32 = 1;
 let advance = func(count: int32) -> int32 {
@@ -40,6 +41,7 @@ String equality compares UTF-8 bytes. `text.byte_length` returns the byte count 
 
 Booleans, sized integers and floats, and strings have [standard library companions](Stdlib.md#7-primitive-companion-modules). A primitive-qualified call such as `int32.parse("42")` looks up an exported function in that companion. A call on a value passes it as the first argument to a function whose first parameter has the same primitive type.
 
+<!-- example: check -->
 ```neura
 let score: int16 = -7;
 let magnitude = score.abs();
@@ -52,6 +54,7 @@ Aliases use the companion of their resolved type. Built-in members take preceden
 
 Prefix a Boolean, integer, float, or string type with `&` to declare a non-null alias to mutable storage of that exact type. An ordinary read through the alias yields the stored primitive value. Assigning through the alias changes the stored value and leaves the alias pointing at the same storage.
 
+<!-- example: check -->
 ```neura
 let increment = func(value: &int) {
     value += 1;
@@ -79,6 +82,7 @@ A tuple has one or more ordered elements, each with its own static type. Write
 expected. Tuple types may appear in bindings, fields, function signatures, type
 arguments, and collection element types.
 
+<!-- example: check -->
 ```neura
 let measure = func() -> [int, float] {
     return [42, 0.5];
@@ -103,6 +107,7 @@ tuple retains the behavior of the referenced value.
 
 A type definition can give an existing type another name. These overlays describe the role of a value without introducing a separate representation or a distinct type.
 
+<!-- example: check -->
 ```neura
 let Types = module (
     export let UserId = int32;
@@ -122,6 +127,7 @@ Overlays can refer to other overlays. See `examples/types/overlay.nra` for more 
 A class defines a type with fields and methods. Mark members `export` to expose them and use `new` to create an instance.
 Inside an instance method, constructor, or field initializer, `instance` names the current receiver if no ordinary binding supplies that name.
 
+<!-- example: check -->
 ```neura
 let LogEntry = class (
     export let level: string;
@@ -140,7 +146,13 @@ entry.level = "INFO";
 
 Class inheritance parallels module inheritance: put a colon and the base class after `class`.
 
+<!-- example: check -->
 ```neura
+let LogEntry = class (
+    export let level: string;
+    export let message: string;
+);
+
 let NamedEntry = class:LogEntry (
     export let name: string;
 );
@@ -154,6 +166,7 @@ Add `static` before `let` or `const` in a class or interface. Static fields
 belong to the declaring type. Static functions and nested types do not need
 an enclosing instance.
 
+<!-- example: check -->
 ```neura
 let Limits = class (
     export static const Max = 100;
@@ -243,6 +256,7 @@ names that instance in expressions and its type in annotations. The program
 initializes the instance before entry, and every alias refers to the same
 state.
 
+<!-- example: check -->
 ```neura
 export let counter = singleton (
     let index = 0;
@@ -263,7 +277,13 @@ initialization rules.
 
 `class` is a type in annotation, parameter, result, and type argument positions. Every class instance can be stored in it. An interface reference can also be passed as `class`. The runtime keeps the concrete identity and dispatches methods to the instance's implementation.
 
+<!-- example: check -->
 ```neura
+let LogEntry = class (
+    export let level: string;
+    export let message: string;
+);
+
 let entry: class = new LogEntry();
 let missing: LogEntry = nil;
 
@@ -283,6 +303,7 @@ if (entry is LogEntry) {
 
 A class can declare a zero-argument conversion method with `let.as Target = func -> Target`. Each target appears at most once per class and must exactly match the method's declared return type. `or as` gives another conversion the same visibility. Separate declarations can choose visibility independently.
 
+<!-- example: check -->
 ```neura
 let Reading = class (
     let value: int16 = 0;
@@ -309,6 +330,7 @@ Function arguments can use one visible conversion when their type is otherwise i
 
 An enum declares a closed set of named variants. Variants are written qualified by the enum's name.
 
+<!-- example: check -->
 ```neura
 export let Light = enum (Red, Yellow, Green);
 
@@ -324,6 +346,7 @@ An enum can annotate bindings, fields, parameters, results, collection elements,
 
 Generic enums declare parameters after `enum`. Qualify a value constructor with an explicit instance, such as `Optional<int>.Some(4)` or `Optional<int>.None`. Patterns such as `Optional.Some(value)` get their payload types from the subject. A type overlay for a concrete instance can also qualify constructors and patterns.
 
+<!-- example: check -->
 ```neura
 let Optional = enum<T> (None, Some(T));
 let IntOptional = Optional<int>;
@@ -335,6 +358,7 @@ constructor evaluates its fields in written order, even when named arguments
 are reordered. The payload belongs to the selected variant and is read through
 a match. An enum with payloads has no built-in equality or numeric cast.
 
+<!-- example: check -->
 ```neura
 let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });
 
@@ -397,6 +421,7 @@ A value given to another task through `spawn` (the callee value, a method's rece
 | A primitive reference, `MemorySegment`, and every native handle | No |
 | `Task<T>` and `Scope` | No; they are scope-bound |
 
+<!-- example: check -->
 ```neura
 let total = func(items: int[]) -> int => items.length;
 ```

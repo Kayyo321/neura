@@ -1,6 +1,9 @@
+<!-- Generated from docs/lang/ForeignInterop.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Foreign interop
 
-Neura programs can call native C code in two ways. `Std.DynamicForeign`, a standard library modeled on Java's Foreign Function and Memory API, loads shared libraries at run time. A [C import](#c-imports) reads a C header at compile time and links static libraries into the image. Native code runs in the [Neura Virtual Machine](https://github.com/Kayyo321/neura/wiki/NVM)'s process as a host service. It never becomes part of the circuit. Every native operation crosses the runtime boundary as a host request. The native group is granted by default, like every other host service, and `--deny-native` (or `--deny-all`) turns it off.
+[Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
+
+Neura programs can call native C code in two ways. `Std.DynamicForeign`, a standard library modeled on Java's Foreign Function and Memory API, loads shared libraries at run time. A [C import](#c-imports) reads a C header at compile time and links static libraries into the image. Native code runs in the [Neura Virtual Machine](NVM)'s process as a host service. It never becomes part of the circuit. Every native operation crosses the runtime boundary as a host request. The native group is granted by default, like every other host service, and `--deny-native` (or `--deny-all`) turns it off.
 
 [`examples/foreign/native.nra`](https://github.com/Kayyo321/neura/blob/main/examples/foreign/native.nra) uses both.
 
@@ -33,6 +36,7 @@ Native results enter through the host boundary like file contents or clock readi
 
 The Java example that loads `libmathops.so`, finds `add`, and calls it reads:
 
+<!-- example: fragment: loads libmathops.so, a native library the page does not provide, and omits the Std.DynamicForeign imports -->
 ```neura
 let arena = arenas.of_confined();
 let lib = result.expect<lookups.SymbolLookup>(lookups.library_lookup("./libmathops.so", arena), "load");
@@ -45,7 +49,7 @@ arena.close();
 
 ### Arenas and segments
 
-An arena owns native memory. Allocation returns zeroed memory aligned as requested, up to 4,096 bytes. Closing a confined arena frees its memory and unloads the libraries loaded through it. The global arena is never closed; its memory and libraries are released when the run ends. Neura has one thread, so `of_shared()` is the same as `of_confined()`. There is no automatic arena: explicit closing follows the [resource rules](https://github.com/Kayyo321/neura/wiki/Stdlib#55-resources) of the standard library.
+An arena owns native memory. Allocation returns zeroed memory aligned as requested, up to 4,096 bytes. Closing a confined arena frees its memory and unloads the libraries loaded through it. The global arena is never closed; its memory and libraries are released when the run ends. Neura has one thread, so `of_shared()` is the same as `of_confined()`. There is no automatic arena: explicit closing follows the [resource rules](Stdlib-Design#55-resources) of the standard library.
 
 A segment made from a raw address, such as a symbol, a pointer that native code returned, or `of_address`, has size 0. As in Java, `reinterpret(size)` gives it an extent that native code defines. The library cannot check that extent. Values use the runner's native byte order, and `get_utf8` reads up to a NUL byte that must lie inside the segment.
 
@@ -73,6 +77,7 @@ The result is a `ForeignValue`. A pointer result is an `Address` segment of size
 
 `import:c("header.h", "library.a", ...)` imports the declarations of a C header as a module. Any further strings name static libraries (`.a`, `.lib`) or object files (`.o`, `.obj`) to link into the image. A header-only import such as `import:c("stdlib.h")` calls functions that the C library already provides.
 
+<!-- example: fragment: imports mathops.h and libmathops.a, which the page does not provide -->
 ```neura
 let mathops = import:c("mathops.h", "libmathops.a");
 let clib = import:c("stdlib.h");
@@ -90,7 +95,7 @@ The module is named after the header in PascalCase, so `math-ops.h` becomes `Mat
 
 The compiler reads the header with libclang, which it loads at run time through the `third_party/neura-libclang` submodule. It generates the source of an ordinary Neura module whose functions call the header's functions through `Std.DynamicForeign`. That source then goes through the parser, lowering, optimization, and conversion like any other module. `neura c-bindings header.h` prints it.
 
-At build time, the tool links the libraries named by every C import with `--whole-archive`, plus wrappers for the headers' `static inline` functions, into one shared object. It uses the system C compiler (`--cc`, else `$CC`, else `cc`). The libraries must be compiled with `-fPIC`; a link failure reports the linker's message and that hint. The shared object goes into the image's [`NATV` section](https://github.com/Kayyo321/neura/wiki/NVR#imports-and-optional-source-maps) with the target it was linked for and the symbols the image uses. `neura run` loads it on the first call when the target matches, and unless native code is denied with `--deny-native` or `--deny-all`. A `.nir` file carries the linked object, so building from it needs neither the libraries nor a C compiler. Building twice with the same toolchain reproduces the image.
+At build time, the tool links the libraries named by every C import with `--whole-archive`, plus wrappers for the headers' `static inline` functions, into one shared object. It uses the system C compiler (`--cc`, else `$CC`, else `cc`). The libraries must be compiled with `-fPIC`; a link failure reports the linker's message and that hint. The shared object goes into the image's [`NATV` section](NVR#imports-and-optional-source-maps) with the target it was linked for and the symbols the image uses. `neura run` loads it on the first call when the target matches, and unless native code is denied with `--deny-native` or `--deny-all`. A `.nir` file carries the linked object, so building from it needs neither the libraries nor a C compiler. Building twice with the same toolchain reproduces the image.
 
 Only declarations written in the imported header itself are imported, not those of the headers it includes. Each one maps to Neura as follows:
 
@@ -112,6 +117,7 @@ C names are kept; a name that is a Neura keyword or built-in type name gets a tr
 
 `Linker.upcall_stub(target, descriptor, arena)` returns a native function pointer that calls a Neura function, the counterpart of Java's `upcallStub`. Native code such as `qsort` can call it with a comparator:
 
+<!-- example: fragment: continues the previous examples: linker, qsort, numbers, arena, values, and layouts are not defined here -->
 ```neura
 let compare = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
     let left = values.as_segment(arguments[0]).reinterpret(4).get_int32(0);
@@ -124,11 +130,11 @@ qsort.invoke(numbers, 5, 4, stub);
 
 The target is a function value of type `func(ForeignValue[list]) -> ForeignValue`. It receives the arguments tagged by their layouts and returns `ForeignValue.Void` for a void descriptor. A struct argument is a copy that lives until the target returns. A result that does not match the descriptor's result layout traps.
 
-Native code may call a stub only while a downcall from the same program is in progress and while the stub's arena is open. A call at any other time, such as from another thread or after the arena closes, ends the process with status 134. A trap in the target ends the run: native code receives zeros from that call and from every later call, and when the downcall returns the run reports the trap. Native frames are not unwound, as in Java. A variadic descriptor cannot be an upcall. The runner implements stubs with libffi closures and the image's `neura.ffi.upcall` callback ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#callbacks)), so record and replay cover upcalls: a replay calls the target again with the recorded arguments.
+Native code may call a stub only while a downcall from the same program is in progress and while the stub's arena is open. A call at any other time, such as from another thread or after the arena closes, ends the process with status 134. A trap in the target ends the run: native code receives zeros from that call and from every later call, and when the downcall returns the run reports the trap. Native frames are not unwound, as in Java. A variadic descriptor cannot be an upcall. The runner implements stubs with libffi closures and the image's `neura.ffi.upcall` callback ([NVM](NVM#callbacks)), so record and replay cover upcalls: a replay calls the target again with the recorded arguments.
 
 ## Runtime services and tooling
 
-C imports need libclang 14 or newer and its builtin headers at compile time (`libclang1-19` and `libclang-common-19-dev` on Debian and Ubuntu), found as [Tooling](https://github.com/Kayyo321/neura/wiki/Tooling#c-imports) describes, and a C compiler to link libraries. Running an image needs neither.
+C imports need libclang 14 or newer and its builtin headers at compile time (`libclang1-19` and `libclang-common-19-dev` on Debian and Ubuntu), found as [Tooling](Tooling#c-imports) describes, and a C compiler to link libraries. Running an image needs neither.
 
 
-The library binds the `neura.ffi.*` host services ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services)). Arguments and results travel as packed bytes in native byte order, described by a signature that names each C type. The runner calls native functions through libffi and loads libraries with the platform's loader.
+The library binds the `neura.ffi.*` host services ([NVM](NVM#host-services)). Arguments and results travel as packed bytes in native byte order, described by a signature that names each C type. The runner calls native functions through libffi and loads libraries with the platform's loader.
