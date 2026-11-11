@@ -30,26 +30,33 @@ export let Float64 = module (
     const Magnitude: uint64 = 9223372036854775807;
 
     /// @brief Reports whether the value is a NaN.
+    #[Pure, ThreadSafe]
     export let is_nan = func(v: float64) -> bool => v != v;
 
     /// @brief Reports whether the value is either signed infinity.
+    #[Pure, ThreadSafe]
     export let is_infinite = func(v: float64) -> bool => (v.to_bits() & Magnitude) == 9218868437227405312;
 
     /// @brief Reports whether the value is finite, including zero and subnormal values.
+    #[Pure, ThreadSafe]
     export let is_finite = func(v: float64) -> bool =>
         (v.to_bits() & 9218868437227405312) != 9218868437227405312;
 
     /// @brief Reads the sign bit, so it is true for -0.0 and for a NaN with the sign bit set.
+    #[Pure, ThreadSafe]
     export let is_negative = func(v: float64) -> bool => (v.to_bits() & SignBit) != 0;
 
     /// @brief Clears the sign bit; never rounds.
+    #[Pure, ThreadSafe]
     export let abs = func(v: float64) -> float64 => float64.from_bits(v.to_bits() & Magnitude);
 
     /// @brief The magnitude of `magnitude` with the sign bit of `sign`.
+    #[Pure, ThreadSafe]
     export let copy_sign = func(magnitude: float64, sign: float64) -> float64 =>
         float64.from_bits((magnitude.to_bits() & Magnitude) | (sign.to_bits() & SignBit));
 
     /// @brief NaN (canonical) if either operand is NaN; -0.0 is less than 0.0.
+    #[Pure, ThreadSafe]
     export let min = func(a: float64, b: float64) -> float64 {
         if (a != a || b != b) {
             return NaN;
@@ -67,6 +74,7 @@ export let Float64 = module (
     };
 
     /// @brief Returns the greater value, propagating NaN and preferring positive zero over negative zero.
+    #[Pure, ThreadSafe]
     export let max = func(a: float64, b: float64) -> float64 {
         if (a != a || b != b) {
             return NaN;
@@ -85,6 +93,7 @@ export let Float64 = module (
 
     /// @brief max(v, low), then min with high, so a NaN `v` gives NaN. Traps when either bound is NaN or `low`
     /// exceeds `high` (-0.0 is below 0.0).
+    #[Pure, ThreadSafe]
     export let clamp = func(v: float64, low: float64, high: float64) -> float64 {
         if (low != low || high != high) {
             trap_with_message("invalid argument: NaN bound");
@@ -97,28 +106,36 @@ export let Float64 = module (
 
     /// @brief Rounding to an integral value. All keep the sign of zero (ceil(-0.5) is -0.0); infinities are
     /// unchanged and a NaN becomes the canonical NaN.
+    #[Pure, ThreadSafe]
     export let floor = func(v: float64) -> float64 => round_with(v, 0);
 
     /// @brief Rounds toward positive infinity, retaining the sign of zero.
+    #[Pure, ThreadSafe]
     export let ceil = func(v: float64) -> float64 => round_with(v, 1);
 
     /// @brief Rounds toward zero, retaining the sign of zero.
+    #[Pure, ThreadSafe]
     export let trunc = func(v: float64) -> float64 => round_with(v, 2);
 
     /// @brief Halves round away from zero.
+    #[Pure, ThreadSafe]
     export let round = func(v: float64) -> float64 => round_with(v, 3);
 
     /// @brief Halves round to the even neighbour.
+    #[Pure, ThreadSafe]
     export let round_even = func(v: float64) -> float64 => round_with(v, 4);
 
     /// @brief Returns the raw bit pattern as an unsigned integer.
+    #[Pure, ThreadSafe]
     export let to_bits = func(v: float64) -> uint64 => v.to_bits();
 
     /// @brief Interprets an unsigned integer as a raw floating-point bit pattern.
+    #[Pure, ThreadSafe]
     export let from_bits = func(bits: uint64) -> float64 => float64.from_bits(bits);
 
     /// @brief The total order of section 5.3: -Infinity, negative values, -0.0, 0.0, positive values, Infinity,
     /// then every NaN (all NaNs equal).
+    #[Pure, ThreadSafe]
     export let total_compare = func(a: float64, b: float64) -> Ordering {
         last a_nan = a != a;
         last b_nan = b != b;
@@ -148,27 +165,32 @@ export let Float64 = module (
     };
 
     /// @brief Same bit pattern, except that every NaN equals every NaN; 0.0 and -0.0 differ (section 5.2).
+    #[Pure, ThreadSafe]
     export let equals = func(a: float64, b: float64) -> bool => a === b;
 
     /// @brief Returns the primitive hash consistent with canonical-NaN and signed-zero equality.
+    #[Pure, ThreadSafe]
     export let hash = func(v: float64) -> uint32 => v.hash_code();
 
     /// @brief The shortest text that parses back to the same value (section 7.5).
+    #[Pure, ThreadSafe]
     export let to_string = func(v: float64) -> string => v.to_string();
 
     /// @brief Exactly `digits` fraction digits (0 through 100; no point for 0), correctly rounded, ties to
     /// even. Other digit counts trap.
+    #ThreadSafe
     export let to_fixed = func(v: float64, digits: int) -> string =>
         float_text.to_fixed(v.to_bits() as uint64, 52, 11, digits);
 
     /// @brief `d.ddd` with `digits` fraction digits (0 through 100), `e`, and the decimal exponent; correctly
     /// rounded, ties to even.
+    #ThreadSafe
     export let to_exponential = func(v: float64, digits: int) -> string =>
         float_text.to_exponential(v.to_bits() as uint64, 52, 11, digits);
 
     /// @brief The grammar of section 7.5, converted exactly and rounded once, ties to even. Too large becomes
     /// an infinity and too small a signed zero.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let parse = func(text: string) -> Result<float64> => match (float_text.parse(text, 52, 11)) {
         float_text.Parsed.Failure(failure) => Result<float64>.Err(failure),
         float_text.Parsed.Bits(bits) => Result<float64>.Ok(float64.from_bits(bits as uint64)),

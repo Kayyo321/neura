@@ -11,7 +11,7 @@ let iterators = import:Std.Collections.Iterator;
 #Since("0.1.0")
 export let IntRange = module (
     /// @brief An immutable half-open arithmetic progression with a nonzero stride.
-    #[Final, Since("0.1.0")]
+    #[Final, Since("0.1.0"), Immutable, ThreadSafe]
     export let IntRange = class implements iterables.Iterable<int> (
         /// @brief The inclusive start bound.
         #Since("0.2.0")
@@ -39,6 +39,7 @@ export let IntRange = module (
         };
 
         /// @brief Progressions compare by their defining bounds and step.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is IntRange)) {
                 return false;
@@ -48,6 +49,7 @@ export let IntRange = module (
         };
 
         /// @brief Combines the start, end, and step into a hash.
+        #Pure
         export let.override hash_code = func -> uint32 {
             last start_hash = hashing.combine(17, start.hash_code());
             last bounds_hash = hashing.combine(start_hash, end.hash_code());
@@ -55,17 +57,21 @@ export let IntRange = module (
         };
 
         /// @brief Formats the progression as `start..end:step`.
+        #Pure
         export let.override to_string = func -> string =>
             start.to_string() + ".." + end.to_string() + ":" + step.to_string();
 
         /// @brief The number of values. Computed in int64; a range with more than Int32.Max values traps
         /// (reason 1) in the conversion to int.
+        #Pure
         export let size = func -> int => count() as int;
 
         /// @brief Reports whether the bounds leave no values in the stride's direction.
+        #Pure
         export let is_empty = func -> bool => (step > 0) ? start >= end : start <= end;
 
         /// @brief Tests whether the value lies within the bounds and on a stride boundary.
+        #Pure
         export let contains = func(value: int) -> bool {
             last offset = (value as int64) - (start as int64);
             last stride = step as int64;
@@ -77,6 +83,7 @@ export let IntRange = module (
 
         /// @brief The value at `index`. An index outside 0 through size() - 1 traps with "invalid argument:
         /// index out of range".
+        #Pure
         export let get = func(index: int) -> int {
             if (index < 0 || (index as int64) >= count()) {
                 trap_with_message("invalid argument: index out of range");
@@ -85,6 +92,7 @@ export let IntRange = module (
         };
 
         /// @brief A new built-in list of the values in order.
+        #Pure
         export let to_list = func -> int[list] {
             last values: int[list] = [];
             let current = start as int64;
@@ -105,6 +113,7 @@ export let IntRange = module (
         };
 
         /// @brief An iterator over the values in order, for for-each and other Iterable consumers.
+        #Pure
         export let iterator = func -> iterators.Iterator<int> => new IntRangeIterator(start, end, step);
 
         /// @brief The exact number of values as an int64.
@@ -140,6 +149,7 @@ export let IntRange = module (
         };
 
         /// @brief Reports whether another value remains.
+        #Pure
         export let has_next = func -> bool => (stride > 0) ? current < stop : current > stop;
 
         /// @brief Returns the next value and advances. Traps with `no such element` at exhaustion.
@@ -154,10 +164,10 @@ export let IntRange = module (
     );
 
     /// @brief The values from `start` up to, but not including, `end`.
-    #[NoDiscard, Since("0.1.0")]
+    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
     export let of = func(start: int, end: int) -> IntRange => new(start, end, 1);
 
     /// @brief A zero step traps with "invalid argument: zero step".
-    #[NoDiscard, Since("0.1.0")]
+    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
     export let stepped = func(start: int, end: int, step: int) -> IntRange => new(start, end, step);
 );

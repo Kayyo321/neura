@@ -34,7 +34,7 @@ export let Program = module (
 
     /// @brief The process status `code` stands for: 0 through 255. Traps with "invalid argument: exit status"
     /// for a Status outside that range.
-    #NoDiscard
+    #[NoDiscard, Pure]
     export let status_of = func(code: ExitCode) -> int {
         return match (code) {
             ExitCode.Ok => 0,

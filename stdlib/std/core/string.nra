@@ -17,68 +17,80 @@ export let String = module:strings (
     export let Charset = charsets.Charset;
 
     /// @brief Returns the text with suffix appended.
+    #[Pure, ThreadSafe]
     export let concat = func(s: string, suffix: string) -> string => s + suffix;
 
     /// @brief Returns the suffix beginning at a UTF-8 byte boundary.
+    #[Pure, ThreadSafe]
     export let substring = func(s: string, start: int) -> string => s.slice(start, s.byte_length)
         /// @brief Returns the half-open byte range. Invalid ranges or UTF-8 boundaries trap.
         or func(s: string, start: int, end: int) -> string => s.slice(start, end);
 
     /// @brief Returns the half-open byte range as an immutable string.
+    #[Pure, ThreadSafe]
     export let sub_sequence = func(s: string, start: int, end: int) -> string => s.slice(start, end);
 
     /// @brief Tests for identical UTF-8 bytes.
+    #[Pure, ThreadSafe]
     export let content_equals = func(s: string, other: string) -> bool => s == other
         /// @brief Tests against a builder's current text.
         or func(s: string, other: string_builder.StringBuilder) -> bool =>
             other != nil && s == other.to_string();
 
     /// @brief Compares UTF-8 bytes lexicographically and returns -1, 0, or 1.
+    #[Pure, ThreadSafe]
     export let compare_to = func(s: string, other: string) -> int => text_kernels.compare(s, other) as int;
 
     /// @brief Compares UTF-8 bytes lexicographically after folding ASCII letters.
+    #[Pure, ThreadSafe]
     export let compare_to_ignore_ascii_case = func(s: string, other: string) -> int =>
         text_kernels.compare(text_kernels.ascii_lower(s), text_kernels.ascii_lower(other)) as int;
 
     /// @brief Applies Unicode lowercase mapping with the root locale rules.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let to_lower_case = func(s: string) -> string => unicode_case.lower(s, "")
         /// @brief Applies Unicode lowercase mapping with Turkish, Azerbaijani, or Lithuanian tailoring when
         /// selected.
         or func(s: string, language_tag: string) -> string => unicode_case.lower(s, language_tag);
 
     /// @brief Applies Unicode uppercase mapping with the root locale rules.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let to_upper_case = func(s: string) -> string => unicode_case.upper(s, "")
         /// @brief Applies Unicode uppercase mapping with Turkish, Azerbaijani, or Lithuanian tailoring when
         /// selected.
         or func(s: string, language_tag: string) -> string => unicode_case.upper(s, language_tag);
 
     /// @brief Compares scalars after simple uppercase followed by simple lowercase mapping.
+    #[Pure, ThreadSafe]
     export let compare_to_ignore_case = func(s: string, other: string) -> int =>
         unicode_case.compare_ignore_case(s, other);
 
     /// @brief Tests equality using simple scalar case mapping.
+    #[Pure, ThreadSafe]
     export let equals_ignore_case = func(s: string, other: string) -> bool =>
         compare_to_ignore_case(s, other) == 0;
 
     /// @brief Applies full locale-independent Unicode case folding, which can expand a scalar.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let case_fold = func(s: string) -> string => unicode_case.fold(s);
 
     /// @brief Orders the results of full Unicode case folding.
+    #ThreadSafe
     export let compare_to_fold_case = func(s: string, other: string) -> int =>
         compare_to(case_fold(s), case_fold(other));
 
     /// @brief Tests equality of the results of full Unicode case folding.
+    #ThreadSafe
     export let equals_fold_case = func(s: string, other: string) -> bool =>
         s == other || case_fold(s) == case_fold(other);
 
     /// @brief Tests whether the prefix begins at the supplied byte offset.
+    #[Pure, ThreadSafe]
     export let starts_with_at = func(s: string, prefix: string, offset: int) -> bool =>
         region_matches(s, offset, prefix, 0, prefix.byte_length);
 
     /// @brief Compares two equally sized UTF-8 byte ranges. Invalid regions return false.
+    #[Pure, ThreadSafe]
     export let region_matches = func(s: string, start: int, other: string, other_start: int, byte_count: int)
         -> bool {
         if (!valid_region(s, start, byte_count) || !valid_region(other, other_start, byte_count)) {
@@ -109,16 +121,19 @@ export let String = module:strings (
         };
 
     /// @brief Finds the first occurrence wholly within the half-open byte range, or returns -1.
+    #[Pure, ThreadSafe]
     export let index_of_range = func(s: string, needle: string, start: int, end: int) -> int {
         last found = strings.index_of(s.slice(start, end), needle);
         return found < 0 ? -1 : start + found;
     };
 
     /// @brief Finds the first byte offset of the scalar, or returns -1.
+    #ThreadSafe
     export let index_of_code_point = func(s: string, scalar: uint32) -> int =>
         strings.index_of(s, strings.from_scalars([scalar]));
 
     /// @brief Finds the last occurrence starting at or before the specified byte offset, or returns -1.
+    #[Pure, ThreadSafe]
     export let last_index_of_from = func(s: string, needle: string, from: int) -> int {
         check_boundary(s, from);
         let offset = from;
@@ -134,21 +149,26 @@ export let String = module:strings (
     };
 
     /// @brief Finds the last byte offset of the scalar, or returns -1.
+    #ThreadSafe
     export let last_index_of_code_point = func(s: string, scalar: uint32) -> int =>
         strings.last_index_of(s, strings.from_scalars([scalar]));
 
     /// @brief Returns the Unicode scalar beginning at a UTF-8 byte offset.
+    #[Pure, ThreadSafe]
     export let code_point_at = func(s: string, offset: int) -> uint32 => strings.scalar_at(s, offset);
 
     /// @brief Returns the Unicode scalar ending at the supplied byte boundary.
+    #[Pure, ThreadSafe]
     export let code_point_before = func(s: string, offset: int) -> uint32 =>
         strings.scalar_at(s, offset_by_code_points(s, offset, -1));
 
     /// @brief Counts Unicode scalars in a half-open UTF-8 byte range.
+    #[Pure, ThreadSafe]
     export let code_point_count = func(s: string, start: int, end: int) -> int =>
         strings.scalar_count(s.slice(start, end));
 
     /// @brief Copies all Unicode scalars into a list in order.
+    #[Pure, ThreadSafe]
     export let code_points = func(s: string) -> uint32[list] => strings.scalars(s);
 
     /// @brief Copies the UTF-8 bytes into a new list.
@@ -161,7 +181,7 @@ export let String = module:strings (
             charsets.encode(s, result.expect<Charset>(charsets.for_name(charset_name), "encode text"));
 
     /// @brief Encodes strictly and reports the byte offset of an unrepresentable scalar.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let try_get_bytes = func(s: string, charset: Charset) -> result.Result<uint8[list]> =>
         charsets.try_encode(s, charset)
         /// @brief Resolves the charset name and encodes strictly, returning an error for either failure.
@@ -180,7 +200,7 @@ export let String = module:strings (
             charsets.decode(bytes, result.expect<Charset>(charsets.for_name(charset_name), "decode bytes"));
 
     /// @brief Decodes UTF-8 strictly, returning an error at the first invalid sequence.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let try_decode_bytes = func(bytes: uint8[list]) -> result.Result<string> =>
         charsets.try_decode(bytes, Charset.Utf8)
         /// @brief Decodes the supplied charset strictly, returning an error for malformed input.
@@ -194,6 +214,7 @@ export let String = module:strings (
             };
 
     /// @brief Explicit UTF-16 adapters. Other positional operations use UTF-8.
+    #[Pure, ThreadSafe]
     export let utf16_length = func(s: string) -> int {
         let length = 0;
         last bytes = s.byte_length;
@@ -208,6 +229,7 @@ export let String = module:strings (
 
     /// @brief Returns a UTF-16 code unit by index, including either half of a surrogate pair. Invalid indexes
     /// trap.
+    #[Pure, ThreadSafe]
     export let char_at = func(s: string, index: int) -> uint16 {
         if (index < 0) {
             trap_with_message("invalid argument: UTF-16 index out of range");
@@ -227,9 +249,11 @@ export let String = module:strings (
     };
 
     /// @brief Copies the text into UTF-16 code units in a new list.
+    #[Pure, ThreadSafe]
     export let to_char_array = func(s: string) -> uint16[list] => utf16_window(s, 0, s.byte_length);
 
     /// @brief Returns the UTF-16 code units as a list.
+    #[Pure, ThreadSafe]
     export let chars = func(s: string) -> uint16[list] => to_char_array(s);
 
     /// @brief Copies a half-open UTF-16 code-unit range into an existing array or list. Invalid ranges trap.
@@ -247,6 +271,7 @@ export let String = module:strings (
         };
 
     /// @brief Decodes UTF-16 code units. Unpaired surrogates trap.
+    #ThreadSafe
     export let from_char_array = func(units: uint16[list]) -> string {
         last text = string_builder.create();
         let i = 0;
@@ -271,6 +296,7 @@ export let String = module:strings (
     };
 
     /// @brief Moves a byte offset by a signed number of Unicode scalars. Invalid offsets or positions trap.
+    #[Pure, ThreadSafe]
     export let offset_by_code_points = func(s: string, offset: int, count: int) -> int {
         check_boundary(s, offset);
         let pos = offset;
@@ -293,7 +319,7 @@ export let String = module:strings (
     };
 
     /// @brief Removes leading and trailing code points through U+0020.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let.override trim = func(s: string) -> string {
         last start = text_kernels.blank_prefix_length(s) as int;
         let end = text_kernels.blank_suffix_start(s) as int;
@@ -304,19 +330,20 @@ export let String = module:strings (
     };
 
     /// @brief Tests whether the entire string consists of whitespace, including the empty string.
+    #[Pure, ThreadSafe]
     export let is_blank = func(s: string) -> bool => leading_whitespace_end(s, s.byte_length as int64) == s.byte_length;
 
     /// @brief Removes whitespace from both ends using the companion's Unicode whitespace set.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let strip = func(s: string) -> string => strip_trailing(strip_leading(s));
 
     /// @brief Removes leading whitespace using the companion's Unicode whitespace set.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let strip_leading = func(s: string) -> string =>
         s.slice(leading_whitespace_end(s, s.byte_length as int64), s.byte_length);
 
     /// @brief Removes trailing whitespace using the companion's Unicode whitespace set.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let strip_trailing = func(s: string) -> string {
         let end = s.byte_length;
         while (end > 0) {
@@ -330,6 +357,7 @@ export let String = module:strings (
     };
 
     /// @brief CR, LF, and CRLF each end a line. An empty string has no lines.
+    #[Pure, ThreadSafe]
     export let.override lines = func(s: string) -> string[list] {
         last pieces: string[list] = [];
         let start = 0;
@@ -354,7 +382,7 @@ export let String = module:strings (
 
     /// @brief Positive counts add spaces. Negative counts remove up to that many leading whitespace code
     /// points. Each resulting line ends with LF.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let indent = func(s: string, count: int) -> string {
         last parts = lines(s);
         if (parts.length == 0) {
@@ -373,7 +401,7 @@ export let String = module:strings (
 
     /// @brief Removes incidental indentation and trailing whitespace per line. A terminal line separator fixes
     /// the removable indentation at zero.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let strip_indent = func(s: string) -> string {
         last parts = lines(s);
         if (parts.length == 0) {
@@ -412,7 +440,7 @@ export let String = module:strings (
         compile_pattern(pattern).matches_fully(s);
 
     /// @brief Replaces every occurrence of a Unicode scalar with another scalar.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string =>
         strings.replace(s, strings.from_scalars([target]), strings.from_scalars([replacement]));
 
@@ -454,7 +482,7 @@ export let String = module:strings (
 
     /// @brief Decodes supported backslash and octal escapes and removes escaped line endings. Malformed escapes
     /// trap.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let translate_escapes = func(s: string) -> string {
         last text = string_builder.create();
         let start = 0;
