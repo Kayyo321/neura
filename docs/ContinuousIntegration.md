@@ -22,7 +22,19 @@ A pull request that adds CTest entries raises `--minimum` in the workflow to the
 
 ### What Tier 1 does not cover
 
-Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. No workflow builds or tests Neura on macOS, on Windows, on another processor architecture, or with another compiler. No workflow runs sanitizers or fuzzing, checks links to other websites, or builds release artifacts.
+Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does not build or test Neura on macOS, on another processor architecture, or with another compiler, and it does not run sanitizers; [Tier 2](#tier-2-platform-and-sanitizer-runs) does, when a maintainer starts it. No workflow builds or tests Neura on Windows, runs fuzzing, checks links to other websites, or builds release artifacts.
+
+## Tier 2: platform and sanitizer runs
+
+[`tier2.yml`](../.github/workflows/tier2.yml) has no automatic trigger. A maintainer starts it for a branch or commit with `gh workflow run tier2.yml --ref <branch>`. It has a read-only token and no secrets.
+
+| Job | Configuration |
+| --- | --- |
+| Build and test (Linux arm64) | Release, GCC 14, Ubuntu 24.04 on arm64, every CTest entry. |
+| Build and test (macOS arm64) and (macOS x86-64) | Release, Apple Clang, macOS 15, libffi and pkgconf from Homebrew, every CTest entry CMake registers on macOS. |
+| Address and undefined-behavior sanitizers (Linux x86-64) | GCC 14 with `-fsanitize=address,undefined`, without the static launcher, every CTest entry. |
+
+Each job uploads its build log and CTest report. A Tier 2 job does not yet run `check-test-report.py`, so a skipped test does not fail it: read the report before treating a green job as full coverage of that platform. A green Tier 2 run is not required to merge a pull request.
 
 ## Run the checks locally
 
