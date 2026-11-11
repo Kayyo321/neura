@@ -185,7 +185,9 @@ NEURA_TEST(lift, lifted_operations_match_the_source) {
     const auto image = build_program({backend_dir(environment) / "fixtures" / "shared-multiplier.nra"});
     const auto text = decompiler::decompile(image).text;
     check(text.find(" * ") != std::string::npos, "the shared multiplication is lifted:\n" + text);
-    const auto both = build_program({backend_dir(environment) / "fixtures" / "both.nra"});
+    // Built as written: the optimizer inlines `both(true, true)` and folds it,
+    // which leaves no conjunction in the image to lift.
+    const auto both = build_program({backend_dir(environment) / "fixtures" / "both.nra"}, {}, false);
     const auto both_text = decompiler::decompile(both).text;
     check(both_text.find("&&") != std::string::npos, "the conjunction is lifted:\n" + both_text);
     const auto loops = build_program({program_path(environment, "loops")});
