@@ -16,8 +16,12 @@ with one binary: each capture passes its tier to every `run` and `test`, and
 --extended adds the wider case list below.
 
     scripts/runtime-identity.py capture --neura build/neura --images DIR --out t0 --extended --run-option=--tier=0
-    scripts/runtime-identity.py capture --neura build/neura --images DIR --out t1 --extended --run-option=--tier=1
-    scripts/runtime-identity.py compare t0 t1
+    scripts/runtime-identity.py capture --neura build/neura --images DIR --out t2 --extended --run-option=--tier=2
+    scripts/runtime-identity.py compare t0 t2
+
+The environment is passed on, so NEURA_TIER_EAGER=1 (lift blocks and form
+regions at their first execution) and NEURA_TIER_CHECK=1 (check every lifted
+block and region against the slower path) apply to a capture.
 
 Images are built once, by the first capture, so both runs execute the same
 NVR bytes and the comparison isolates the runtime. Each case records the
@@ -195,19 +199,37 @@ def extended_programs():
                     f"tests/stdlib/{directory.name}/{kind}/{path.name}", [])
     for path in sorted((ROOT / "tests/concurrency/programs").glob("*.nra")):
         add(f"x-concurrency-{path.stem}", f"tests/concurrency/programs/{path.name}", [])
+    add("x-tier-regions", "tests/backend/tier/regions.nra", [])
     return programs
 
 
 # --extended: a step limit at every position of a small loop's first blocks,
 # and on programs whose blocks run lifted, so a step limit trap lands on
-# every kind of block.
+# every kind of block. x-tier-regions (tests/backend/tier/regions.nra) has
+# nested loops with element and field reads and writes: its first 3,000
+# steps, every one a step limit, put the trap at every block of those
+# loops, inside and at the edges of tier 2 regions.
 STEP_SWEEPS = [
     ("x-programs-loops", range(1, 401)),
     ("wall-collatz", list(range(1, 201)) + [997, 4093, 65521, 100003]),
     ("bench-sort", [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181, 6765, 10946]),
+    ("x-tier-regions", range(1, 3001)),
 ]
 EXTENDED_SWEEP_PROGRAMS = ["x-programs-loops", "bench-sort", "bench-tree-map", "wall-binary-trees",
-                           "computation", "concurrency-worker-group"]
+                           "computation", "concurrency-worker-group", "x-tier-regions"]
+# --extended: heap-cell limits around the peak of x-tier-regions, whose
+# regions read and write elements and fields and end at allocations, and
+# frame limits at each depth it reaches.
+REGION_SWEEP = [["--max-heap-cells", str(n)] for n in (400, 800, 1200, 1600, 1800, 2000, 2100, 2200, 2240, 2250,
+                                                         2300, 2400)] + \
+               [["--max-frames", str(n)] for n in range(1, 7)]
+# --extended: the task quantum at every value from 1 (a turn ends at every
+# poll) to 12, and 97, for every concurrency program, so a turn ends at
+# every poll they take.
+QUANTUM_SWEEP = list(range(1, 13)) + [97]
+# --extended: `neura test` under explored schedules.
+SCHEDULE_TESTS = [("schedules-order", "tests/concurrency/schedules/order-tests.nra"),
+                  ("schedules-service", "tests/concurrency/schedules/service-tests.nra")]
 EXTENDED_SWEEP = [
     ["--max-heap-cells", "64"], ["--max-heap-cells", "200"], ["--max-heap-cells", "2048"],
     ["--max-heap-cells", "20000"], ["--max-frames", "1"], ["--max-frames", "2"], ["--max-frames", "3"],
@@ -296,6 +318,18 @@ def capture(args):
                 tail = ["--virtual-time", *tail]
             for limit in SWEEP + EXTENDED_SWEEP:
                 record(f"{name}.sweep{limit[0]}={limit[1]}", [neura, "run", "--stats", *limit, *tail])
+        image, arguments = by_name["x-tier-regions"]
+        for limit in REGION_SWEEP:
+            record(f"x-tier-regions.region{limit[0]}={limit[1]}", [neura, "run", "--stats", *limit, image])
+        for name in sorted(by_name):
+            if not name.startswith("x-concurrency-"):
+                continue
+            image, _ = by_name[name]
+            for quantum in QUANTUM_SWEEP:
+                record(f"{name}.quantum={quantum}",
+                       [neura, "run", "--stats", "--virtual-time", "--task-quantum", str(quantum), image])
+        for name, source in SCHEDULE_TESTS:
+            record(f"{name}.explored", [neura, "test", "--stats", "--schedules", "25", str(ROOT / source)])
         # One image run once per argument list (a fleet of runs).
         lists = work / "each-lists.txt"
         lists.write_text("".join(f"{n}\n" for n in (1, 7, 27, 97, 871, 6171, 2, 3, 0, 100)))

@@ -70,8 +70,9 @@ def parse_args():
     parser.add_argument("--run-option", action="append", default=[], metavar="OPTION",
                         help="pass OPTION to neura run, for example --run-option=--tier=0 (repeatable)")
     parser.add_argument("--compare-tiers", action="store_true",
-                        help="run each program at --tier=0 and --tier=1 instead of comparing with Java, and "
-                             "report the share of steps tier 1 ran (docs/runtime/NVM.md, \"Execution tiers\")")
+                        help="run each program at --tier=0, --tier=1, and --tier=2 instead of comparing with Java, "
+                             "and report the share of steps tiers 1 and 2 ran (docs/runtime/NVM.md, "
+                             "\"Execution tiers\")")
     parser.add_argument("--out-dir", default=str(ROOT / "build" / "bench-wall"),
                         help="where images, classes, and results go (default build/bench-wall)")
     args = parser.parse_args()
@@ -217,46 +218,58 @@ def main():
     return 0
 
 
-TIER_STEPS = re.compile(r"tier: steps (\d+): tier 1 ([0-9.]+)%")
+TIER_STEPS = re.compile(r"tier: steps (\d+): tier 2 ([0-9.]+)% .*?, tier 1 ([0-9.]+)%")
 
 
 def compare_tiers(command, cwd, runs, name, size):
-    """Times one program at tier 0 and tier 1. Both must print the same
+    """Times one program at tiers 0, 1, and 2. All must print the same
     output and report the same steps and peak heap cells."""
     at = command.index("run") + 1
-    tier0 = command[:at] + ["--tier=0"] + command[at:]
-    tier1 = command[:at] + ["--tier=1", "--tier-stats"] + command[at:]
-    seconds0, times0, output0, stats0 = median_run(tier0, cwd, runs, f"{name} (tier 0)")
-    seconds1, times1, output1, stats1 = median_run(tier1, cwd, runs, f"{name} (tier 1)")
-    if output0 != output1 or stats0 != stats1:
-        fail(f"{name}: tier 0 and tier 1 differ in output or stats")
-    shares = TIER_STEPS.search(subprocess.run(tier1, cwd=cwd, capture_output=True).stderr.decode(errors="replace"))
-    share = float(shares.group(2)) if shares else None
-    print(f"{name:16} size {size:>8}  tier 0 {seconds0:8.3f} s  tier 1 {seconds1:8.3f} s  "
-          f"speedup {seconds0 / seconds1:5.2f}  tier 1 steps {share}%", flush=True)
+    timed_runs = {}
+    for tier in (0, 1, 2):
+        tiered = command[:at] + [f"--tier={tier}"] + command[at:]
+        timed_runs[tier] = median_run(tiered, cwd, runs, f"{name} (tier {tier})")
+    seconds = {tier: timed_runs[tier][0] for tier in timed_runs}
+    for tier in (1, 2):
+        if timed_runs[tier][2] != timed_runs[0][2] or timed_runs[tier][3] != timed_runs[0][3]:
+            fail(f"{name}: tier 0 and tier {tier} differ in output or stats")
+    shares = {}
+    for tier in (1, 2):
+        stats = command[:at] + [f"--tier={tier}", "--tier-stats"] + command[at:]
+        match = TIER_STEPS.search(subprocess.run(stats, cwd=cwd, capture_output=True).stderr.decode(errors="replace"))
+        shares[tier] = (float(match.group(2)), float(match.group(3))) if match else (None, None)
+    print(f"{name:16} size {size:>8}  tier 0 {seconds[0]:8.3f} s  tier 1 {seconds[1]:8.3f} s  "
+          f"tier 2 {seconds[2]:8.3f} s  speedup {seconds[0] / seconds[1]:5.2f} {seconds[0] / seconds[2]:5.2f}  "
+          f"tier 1 steps {shares[1][1]}%  tier 2 steps in regions {shares[2][0]}%", flush=True)
+    stats0 = timed_runs[0][3]
     return {"name": name, "size": size, "steps": stats0[0] if stats0 else None,
-            "tier0": {"median_seconds": seconds0, "seconds": times0},
-            "tier1": {"median_seconds": seconds1, "seconds": times1, "steps_percent": share},
-            "output": output0.decode(errors="replace")}
+            "tier0": {"median_seconds": seconds[0], "seconds": timed_runs[0][1]},
+            "tier1": {"median_seconds": seconds[1], "seconds": timed_runs[1][1], "steps_percent": shares[1][1]},
+            "tier2": {"median_seconds": seconds[2], "seconds": timed_runs[2][1], "region_percent": shares[2][0],
+                      "tier1_percent": shares[2][1]},
+            "output": timed_runs[0][2].decode(errors="replace")}
 
 
 def tier_markdown(report):
     lines = [
-        f"Tier 0 against tier 1, {report['mode']} sizes, median of {report['runs']} runs "
+        f"Tiers 0, 1, and 2, {report['mode']} sizes, median of {report['runs']} runs "
         f"({report['date']}, {report['machine']['system']} {report['machine']['machine']}, "
         f"{report['machine']['cpus']} CPUs).",
         "",
         f"- Neura: {report['neura_version'] or report['neura']}",
         "",
-        "| Program | Size | Steps | Tier 0 (s) | Tier 1 (s) | Speedup | Steps on tier 1 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Program | Size | Steps | Tier 0 (s) | Tier 1 (s) | Tier 2 (s) | Speedup 1 | Speedup 2 | "
+        "Steps on tier 1 | Steps in regions |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
+    percent = lambda value: "" if value is None else f"{value:.1f}%"
     for entry in report["results"]:
         t0 = entry["tier0"]["median_seconds"]
         t1 = entry["tier1"]["median_seconds"]
-        share = entry["tier1"]["steps_percent"]
-        lines.append(f"| {entry['name']} | {entry['size']} | {entry['steps']} | {t0:.3f} | {t1:.3f} | "
-                     f"{t0 / t1:.2f} | {'' if share is None else f'{share:.1f}%'} |")
+        t2 = entry["tier2"]["median_seconds"]
+        lines.append(f"| {entry['name']} | {entry['size']} | {entry['steps']} | {t0:.3f} | {t1:.3f} | {t2:.3f} | "
+                     f"{t0 / t1:.2f} | {t0 / t2:.2f} | {percent(entry['tier1']['steps_percent'])} | "
+                     f"{percent(entry['tier2']['region_percent'])} |")
     return "\n".join(lines) + "\n"
 
 

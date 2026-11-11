@@ -1,0 +1,124 @@
+// Loops for tier 2 regions (docs/runtime/NVM.md, "Execution tiers"): nested
+// loops, element reads and writes, field reads and writes, a global, float
+// arithmetic, and loops whose regions end at an allocation (list growth),
+// a call, or text construction. scripts/runtime-identity.py runs it at
+// every tier, under step limits at every block of its first loops and
+// under heap-cell and frame limits; tests/backend/tier_tests.cpp uses it
+// for the region unit tests.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Regions = module:program.Entry (
+    let Cell = class (
+        export let value: int64 = 0;
+        export let visits: int32 = 0;
+    );
+
+    let total: int64 = 0;
+
+    // A nested loop that reads and writes an array: a small matrix product.
+    let multiply = func(size: int32) -> int64 {
+        let a = lists.filled<int64>(size * size, 0);
+        let b = lists.filled<int64>(size * size, 0);
+        let c = lists.filled<int64>(size * size, 0);
+        for (let i = 0; i < size * size; i = i + 1) {
+            a[i] = (i % 7) as int64;
+            b[i] = (i % 5) as int64 - 1;
+        }
+        for (let row = 0; row < size; row = row + 1) {
+            for (let column = 0; column < size; column = column + 1) {
+                let sum: int64 = 0;
+                for (let k = 0; k < size; k = k + 1) {
+                    sum = sum + a[row * size + k] * b[k * size + column];
+                }
+                c[row * size + column] = sum;
+            }
+        }
+        let trace: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            trace = trace + c[i * size + i];
+        }
+        return trace;
+    };
+
+    // Field reads and writes in a loop, and a global written each time.
+    let walk = func(cells: Cell[list], rounds: int32) -> int64 {
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let cell in cells) {
+                cell.value = cell.value + (round as int64);
+                cell.visits = cell.visits + 1;
+                total = total + cell.value;
+            }
+        }
+        return total;
+    };
+
+    // A loop whose region ends at list growth, an allocation.
+    let squares = func(count: int32) -> int64[list] {
+        let values: int64[list] = [];
+        for (let i = 0; i < count; i = i + 1) {
+            values.append((i as int64) * (i as int64));
+        }
+        return values;
+    };
+
+    // Float arithmetic in a loop.
+    let series = func(terms: int32) -> float64 {
+        let sum = 0.0;
+        let sign = 1.0;
+        for (let k = 0; k < terms; k = k + 1) {
+            sum = sum + sign / ((2 * k + 1) as float64);
+            sign = -sign;
+        }
+        return sum;
+    };
+
+    // A loop that calls a function each time, so its region ends at the
+    // call and starts again after the return.
+    let step = func(value: int64) -> int64 {
+        if (value % 2 == 0) {
+            return value / 2;
+        }
+        return 3 * value + 1;
+    };
+
+    let collatz = func(start: int64) -> int32 {
+        let steps = 0;
+        let value = start;
+        while (value != 1) {
+            value = step(value);
+            steps = steps + 1;
+        }
+        return steps;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let size = 6;
+        if (args.length > 0) {
+            size = result.value_or<int32>(int32s.parse(args[0]), 6);
+        }
+        console.println("multiply {}", multiply(size));
+        let cells: Cell[list] = [];
+        for (let i = 0; i < size; i = i + 1) {
+            cells.append(new Cell());
+        }
+        console.println("walk {}", walk(cells, size));
+        let values = squares(size * 10);
+        let sum: int64 = 0;
+        for (let value in values) {
+            sum = sum + value;
+        }
+        console.println("squares {} {}", values.length, sum);
+        console.println("series {}", series(size * 50));
+        console.println("collatz {}", collatz(27));
+        let words: string[list] = [];
+        for (let i = 0; i < size; i = i + 1) {
+            words.append("w" + i.to_string());
+        }
+        console.println("words {}", words.length);
+        return program.ExitCode.Ok;
+    };
+);

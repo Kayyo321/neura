@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run boundary arithmetic at tier 0 and tier 1 and compare every byte.
+"""Run boundary arithmetic at tiers 0, 1, and 2 and compare every byte.
 
 For each integer width and signedness, and for float32 and float64, the
 script writes a program whose operations each get a block of their own (a
@@ -11,11 +11,13 @@ its trap. All cases of a program run in one process with `run --each`, so
 the image's lifted blocks are shared by its cases as they are by the tests
 of `neura test`.
 
-Each program runs at --tier=0, at --tier=1, and at --tier=1 with
-NEURA_TIER_CHECK=1, the last two with NEURA_TIER_EAGER=1 so that every block
-is lifted when it first runs (every tier-1 step also evaluated by reference, aborting
-on a difference). Status, standard output, and standard error must be
-identical, and --tier-stats must show that tier 1 ran lifted blocks.
+Each program runs at --tier=0, at --tier=1 and --tier=2, and at each of
+those with NEURA_TIER_CHECK=1, all but the first with NEURA_TIER_EAGER=1 so
+that every block is lifted, and every region formed, when it first runs
+(under the check, every tier-1 step is also evaluated by reference and every
+region run again block by block, aborting on a difference). Status,
+standard output, and standard error must be identical, and --tier-stats
+must show that tier 1 ran lifted blocks and tier 2 ran regions.
 
     scripts/tier-boundary.py --neura build/neura --out build/tier-boundary
 """
@@ -231,23 +233,26 @@ def main():
         lists = out / f"{name}.cases"
         lists.write_text("".join(f"{op} {i} {j}\n" for op, i, j in cases))
         reference = run([neura, "run", "--tier=0", "--each", str(lists), str(image)])
-        # Every block is lifted when it first runs: each case runs each
-        # operation once, far below the usual thresholds.
+        # Every block is lifted, and every region formed, when it first
+        # runs: each case runs each operation once, far below the usual
+        # thresholds.
         eager = dict(os.environ, NEURA_TIER_EAGER="1")
-        lifted = run([neura, "run", "--tier=1", "--each", str(lists), str(image)], eager)
-        checked = run([neura, "run", "--tier=1", "--each", str(lists), str(image)],
-                      dict(eager, NEURA_TIER_CHECK="1"))
-        stats = run([neura, "run", "--tier=1", "--tier-stats", "--each", str(lists), str(image)], eager)
+        runs = {}
+        for tier in (1, 2):
+            runs[f"tier {tier}"] = run([neura, "run", f"--tier={tier}", "--each", str(lists), str(image)], eager)
+            runs[f"tier {tier} checked"] = run([neura, "run", f"--tier={tier}", "--each", str(lists), str(image)],
+                                               dict(eager, NEURA_TIER_CHECK="1"))
+        stats = run([neura, "run", "--tier=2", "--tier-stats", "--each", str(lists), str(image)], eager)
         lifted_line = next((line for line in stats[2].decode(errors="replace").splitlines()
                             if line.startswith("tier: steps")), "tier: no statistics")
         traps = reference[2].count(b": trap: ")
-        same = reference == lifted and reference == checked
+        same = all(other == reference for other in runs.values())
         total += len(cases)
         print(f"{name:8} {len(cases):5} cases, {traps:4} traps: {'identical' if same else 'DIFFERENT'}; "
               f"{lifted_line}", flush=True)
         if not same:
             failures += 1
-            for label, other in (("tier 1", lifted), ("tier 1 checked", checked)):
+            for label, other in runs.items():
                 if other != reference:
                     (out / f"{name}.{label.replace(' ', '-')}.stdout").write_bytes(other[1])
                     (out / f"{name}.{label.replace(' ', '-')}.stderr").write_bytes(other[2])
