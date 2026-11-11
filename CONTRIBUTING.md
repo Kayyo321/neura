@@ -20,6 +20,16 @@ Neura has one submodule, [`third_party/neura-libclang`](https://github.com/Kayyo
 
 Building needs the libffi development package (found with pkg-config), which the runner uses for native calls. C header imports need the libclang shared library from LLVM 14 or newer (19 or newer recommended) and the Clang builtin headers of the same version, such as `stddef.h`. On Debian and Ubuntu, install them with `sudo apt install libclang1-19 libclang-common-19-dev libffi-dev`. The libclang development package, `libclang-19-dev`, is not needed. Set `NEURA_LIBCLANG` to a library's path to use it instead of the one found by the default search. The `neura-libclang-load` test loads libclang and reads a small header through it; CTest reports it as skipped when no libclang is installed, and `NEURA_LIBCLANG_REQUIRED=1` turns that into a failure.
 
+Build and test with CMake 3.20 or newer and C and C++20 compilers:
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The build puts the tool at `build/neura`. It reports its version as `<version>-dev`, and it is not an installation that `neura update` manages ([Install and update](docs/Install.md)).
+
 To move Neura to a newer neura-libclang commit, update the submodule in its own commit and describe the header or loader change it brings in:
 
 ```sh

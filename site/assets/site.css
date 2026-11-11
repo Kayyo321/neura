@@ -1081,7 +1081,17 @@ figcaption {
   opacity: 0;
 }
 
-.prose pre:hover .copy,
+/* docs.js puts each block in a frame that does not scroll and holds its copy button. The block keeps room at
+   the end of its lines, so the button never covers their last characters. */
+.code-frame {
+  position: relative;
+}
+
+.code-frame pre {
+  padding-right: 4.75rem;
+}
+
+.code-frame:hover .copy,
 .copy:focus-visible {
   opacity: 1;
 }
