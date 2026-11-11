@@ -32,7 +32,8 @@ std::uint8_t tier_ceiling() {
     static const std::uint8_t ceiling = [] {
         const char* text = std::getenv("NEURA_TIER");
         if (text && std::strcmp(text, "0") == 0) return std::uint8_t{0};
-        return std::uint8_t{1};
+        if (text && std::strcmp(text, "1") == 0) return std::uint8_t{1};
+        return std::uint8_t{2};
     }();
     return ceiling;
 }
@@ -47,7 +48,7 @@ bool tier_check_enabled() {
 
 std::string describe(const TierStatistics& s) {
     const auto& steps = s.steps;
-    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference;
+    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference + steps.region;
     const auto percent = [&](std::uint64_t part) {
         char text[32];
         std::snprintf(text, sizeof text, "%.1f%%", total ? 100.0 * static_cast<double>(part) / total : 0.0);
@@ -64,10 +65,37 @@ std::string describe(const TierStatistics& s) {
                       " by hint, " + std::to_string(s.lifted_by_search) + " by search), hints rejected " +
                       std::to_string(s.hints_rejected) + "; proving " + milliseconds(s.hint_microseconds) +
                       ", searching " + milliseconds(s.search_microseconds) + "\n";
-    out += "tier: steps " + std::to_string(total) + ": tier 1 " + percent(steps.lifted + steps.wired + steps.empty) +
+    out += "tier: steps " + std::to_string(total) + ": tier 2 " + percent(steps.region) + " (in regions " +
+           std::to_string(steps.region) + "), tier 1 " + percent(steps.lifted + steps.wired + steps.empty) +
            " (lifted " + std::to_string(steps.lifted) + ", wired " + std::to_string(steps.wired) + ", empty " +
            std::to_string(steps.empty) + "), tier 0 " + percent(steps.reference + steps.declined) + " (reference " +
            std::to_string(steps.reference) + ", declined " + std::to_string(steps.declined) + ")\n";
+    const auto& r = s.region_counts;
+    if (s.regions != 0 || !s.region_rejections.empty()) {
+        out += "tier: regions " + std::to_string(s.regions) + " (" + std::to_string(s.region_blocks) +
+               " blocks, " + std::to_string(s.checks_eliminated) + " checks eliminated, " +
+               std::to_string(s.refreshed) + " formed again); entered " +
+               std::to_string(r.entries) + ", refused " + std::to_string(r.refused) + ", left " +
+               std::to_string(r.leaves) + "; deoptimized: budget " + std::to_string(r.budget) + ", exits " +
+               std::to_string(r.exits) + ", checks " + std::to_string(r.checks) + ", selectors " +
+               std::to_string(r.selectors) + ", references " + std::to_string(r.references) + ", state traps " +
+               std::to_string(r.state_traps) + "\n";
+        for (const auto& [reason, count] : s.region_rejections) {
+            out += "tier: no region " + std::to_string(count) + ": " + reason + "\n";
+        }
+        const auto top = [&](const std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>& counts,
+                             const char* what) {
+            std::vector<std::pair<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>>> ends;
+            for (const auto& [block, count] : counts) ends.emplace_back(count, block);
+            std::sort(ends.begin(), ends.end(), std::greater<>());
+            for (std::size_t i = 0; i < ends.size() && i < 5; ++i) {
+                out += std::string("tier: ") + what + " " + std::to_string(ends[i].first) + " times at function " +
+                       std::to_string(ends[i].second.first) + " block " + std::to_string(ends[i].second.second) + "\n";
+            }
+        };
+        top(s.region_deopts, "deoptimized");
+        top(s.region_leaves, "left");
+    }
     for (const auto& [reason, count] : s.rejections) {
         out += "tier: not lifted " + std::to_string(count) + ": " + reason + "\n";
     }
@@ -99,6 +127,7 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
         options_.search_after = 1;
         options_.minimum_proof_work = std::uint64_t{1} << 32;
         options_.search_budget = std::chrono::milliseconds(60'000);
+        options_.region_after = 1;
     }
     first_entry_.reserve(image.functions.size());
     std::size_t total = 0;
@@ -108,6 +137,8 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
     }
     entries_ = std::vector<Entry>(total);
     counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
+    regions_ = std::vector<RegionEntry>(total);
+    region_counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     statistics_.blocks = total;
     statistics_.hinted = hints_.size();
 }
@@ -297,6 +328,7 @@ void TierCache::add_steps(const TierSteps& steps) {
     statistics_.steps.empty += steps.empty;
     statistics_.steps.declined += steps.declined;
     statistics_.steps.reference += steps.reference;
+    statistics_.steps.region += steps.region;
 }
 
 TierStatistics TierCache::statistics() const {

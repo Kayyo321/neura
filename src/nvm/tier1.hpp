@@ -17,6 +17,10 @@
 
 namespace neura::nvm {
 
+namespace tier2 {
+struct Region;
+}
+
 // Tier 1 of the executor (docs/runtime/NVM.md, "Execution tiers"): blocks
 // whose graphs are proven to compute typed operations run as native 64-bit
 // code. Which blocks run lifted never changes what a run does, only how fast
@@ -48,6 +52,13 @@ struct TierOptions {
     std::uint64_t search_picoseconds = 200;
     // Wall time the searches of one image may take in total.
     std::chrono::milliseconds search_budget{250};
+    // Tier 2: arrivals of the dispatcher at a lifted block, counted over
+    // every run sharing the cache, before a region is formed there. While
+    // blocks the region would reach are still being lifted, formation waits
+    // (twice the arrivals each time) until `region_patience` times this;
+    // a region formed without them is formed again later.
+    std::uint32_t region_after = 1000;
+    std::uint32_t region_patience = 8;
 };
 
 // Steps of one execution by how the block was evaluated. `lifted` ran a
@@ -61,6 +72,31 @@ struct TierSteps {
     std::uint64_t empty = 0;
     std::uint64_t declined = 0;
     std::uint64_t reference = 0;
+    // Steps run inside tier-2 regions (not counted above).
+    std::uint64_t region = 0;
+};
+
+// Tier 2 events of one execution, by kind. A region is entered, then ends
+// by leaving (a continue exit to a block outside it) or by deoptimizing:
+// tier 1 then runs the named block. The reasons of deoptimization are the
+// budget (the step limit, the scheduler's quantum, or the caller's
+// allowance would be reached before the next check), a failed check of a
+// lifted operation, an invalid selector, a reference check, a trapping
+// inline state operation, and an exit the region does not run (a call,
+// return, host request, scheduler operation, trap, or a state operation
+// that allocates). A refused entry is one where a slot the region reads
+// before writing is not initialized, or the floating-point environment is
+// not the default.
+struct RegionCounts {
+    std::uint64_t entries = 0;
+    std::uint64_t leaves = 0;
+    std::uint64_t refused = 0;
+    std::uint64_t budget = 0;
+    std::uint64_t checks = 0;
+    std::uint64_t selectors = 0;
+    std::uint64_t references = 0;
+    std::uint64_t state_traps = 0;
+    std::uint64_t exits = 0;
 };
 
 struct TierStatistics {
@@ -84,6 +120,21 @@ struct TierStatistics {
     // block was not lifted: its rejection, or that it was not tried.
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> reference_blocks;
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::string> block_reasons;
+    // Tier 2: regions formed (and formed again once more of their blocks
+    // were lifted), and why entries did not get one.
+    std::uint64_t regions = 0;
+    std::uint64_t refreshed = 0;
+    std::uint64_t region_blocks = 0;
+    std::uint64_t checks_eliminated = 0;
+    std::map<std::string, std::uint64_t> region_rejections;
+    RegionCounts region_counts;
+    // Steps each region ran, by (function, entry), and the exits that ended
+    // regions most, by (function, block).
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> region_steps;
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> region_deopts;
+    // Blocks outside a region that regions left to most, by (function,
+    // block).
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> region_leaves;
 };
 
 // The lifted blocks of one validated image, shared by every execution of it:
@@ -125,6 +176,30 @@ public:
         return counts_[first_entry_[function] + block].fetch_add(1, std::memory_order_relaxed) + 1;
     }
 
+    // Tier 2. The region entered at a block, formed from the lowered blocks
+    // settled so far once the block has had `arrivals` dispatcher arrivals
+    // (count_region), or null: no region starts there. Not settled while
+    // another thread forms it or while blocks it would reach are still
+    // being lifted; ask again after `retry_after` arrivals. A settled
+    // region with `retry_after` set was formed while blocks it would reach
+    // were still being lifted: asking again at that count may give one
+    // formed anew. A published region is immutable and lives as long as
+    // the cache.
+    struct RegionResolution {
+        const tier2::Region* region = nullptr;
+        bool settled = true;
+        std::uint64_t retry_after = 0;
+    };
+    RegionResolution region(std::uint32_t function, std::uint32_t block, std::uint64_t arrivals);
+    std::uint64_t count_region(std::uint32_t function, std::uint32_t block) {
+        return region_counts_[first_entry_[function] + block].fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+    std::uint64_t region_threshold(std::uint32_t function, std::uint32_t block) const;
+    void add_region_events(const RegionCounts& counts,
+                           const std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>& steps,
+                           const std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>& deopts,
+                           const std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>& leaves);
+
     void add_steps(const TierSteps& steps);
     void add_reference_steps(std::uint32_t function, std::uint32_t block, std::uint64_t steps);
     TierStatistics statistics() const;
@@ -161,6 +236,22 @@ private:
     std::map<Key, std::shared_ptr<const lift::LoweredBlock>> accepted_;
     std::map<Key, std::string> searched_;
     lift::GraphProofs graph_proofs_;
+    // Tier 2, per block: its region, and when to try forming it again.
+    struct RegionEntry {
+        enum class State : std::uint8_t { Unknown, Forming, Settled };
+        State state = State::Unknown;
+        std::shared_ptr<const tier2::Region> region;
+        std::uint64_t next_attempt = 0;
+        // Formed while blocks it would reach were not settled: form it
+        // again at `refresh_at` arrivals (at most four times).
+        std::uint64_t refresh_at = 0;
+        std::uint32_t refreshes = 0;
+        bool refreshing = false;
+    };
+    std::vector<RegionEntry> regions_;
+    // Regions replaced by a refresh, which runs may still hold.
+    std::vector<std::shared_ptr<const tier2::Region>> retired_regions_;
+    std::unique_ptr<std::atomic<std::uint64_t>[]> region_counts_;
     std::chrono::steady_clock::duration search_spent_{};
     std::chrono::steady_clock::duration hint_spent_{};
     TierStatistics statistics_;
@@ -171,15 +262,17 @@ private:
 // depend on thresholds, the time budget, and thread timing.
 std::string describe(const TierStatistics& statistics);
 
-// The highest tier the process allows: NEURA_TIER=0 or 1 lowers it for
+// The highest tier the process allows: NEURA_TIER=0, 1, or 2 lowers it for
 // every execution (the test suite uses it), and nothing raises it.
 std::uint8_t tier_ceiling();
 // NEURA_TIER_CHECK=1: run every block that tier 1 evaluates on the
-// reference evaluator too and abort with a report on any difference.
+// reference evaluator too, and every region execution again block by block
+// at tier 1 (tier2_steps.inc), and abort with a report on any difference.
 bool tier_check_enabled();
 // NEURA_TIER_EAGER=1: lift every block when it first runs, with ample proof
-// work and search time, so that short test runs exercise tier 1. It changes
-// only which blocks run lifted, and when.
+// work and search time, and form regions at the first arrival, so that
+// short test runs exercise tiers 1 and 2. It changes only which blocks run
+// lifted or in regions, and when.
 bool tier_eager();
 
 } // namespace neura::nvm

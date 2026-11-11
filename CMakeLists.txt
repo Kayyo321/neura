@@ -95,6 +95,7 @@ set(neura_nvm_sources
     src/nvm/scalar_text.cpp
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
+    src/nvm/tier2.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
 )
@@ -567,6 +568,7 @@ if(BUILD_TESTING)
         tests/backend/placement_tests.cpp
         tests/backend/reference_tests.cpp
         tests/backend/tier_tests.cpp
+        tests/backend/tier2_tests.cpp
         tests/backend/vm_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
         tests/ir-optimization/evaluator.cpp
