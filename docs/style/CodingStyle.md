@@ -161,6 +161,26 @@ export let format_log = func(log_message: string, log_level: int) -> string {
   console.print_line(prefix + " -> " + message);
   ```
 
+### Tags
+- Write [tags](../lang/Tags.md) on their own lines directly above the declaration, after its documentation comment, at the declaration's indentation.
+- Put several short tags in one `#[...]` group, and give a tag with long arguments a line of its own:
+  <!-- example: check -->
+  ```neura
+  let Shapes = module (
+      /// The area of a square of the given width.
+      #[Since("0.2.0"), Stable]
+      #Deprecated(as_of: "0.3.0", use_instead: area, reason: "it takes the width twice")
+      export let square_area = func(width: int32, height: int32) -> int32 {
+          return width * height;
+      };
+
+      export let area = func(width: int32) -> int32 {
+          return width * width;
+      };
+  );
+  ```
+- Tag an enum variant or a parameter on the same line, before its name: `#Likely Ready,` and `func(#Unit("ms") timeout: int64)`.
+
 ### Comments
 - Use `//` for single-line comments.
 - Place comments above the relevant code or inline with a single space after code:

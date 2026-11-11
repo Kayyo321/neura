@@ -188,7 +188,7 @@ How many errors a run reports depends on the stage that finds them:
 - **Syntax.** The lexer and the parser recover and go on. The lexer skips an invalid character, a malformed number, or an unterminated string and reads the next token. The parser skips the rest of a statement or member that fails to parse: to the `;` that ends it at the same depth, to the closing delimiter of the enclosing block or member list, or to a keyword that begins the next statement. They report up to `--max-errors N` errors (20 by default; `check`, `emit-ir`, `build`, and `test` accept the option), in source order, and any syntax error stops compilation before NeuraIR lowering.
 - **Everything after parsing.** Name resolution, type checking, the later NeuraIR checks, and circuit conversion stop at the first error. Lowering resolves declarations on demand and abandons speculative work, such as ranking an overload, by catching errors, so continuing after an error would report errors that the first one caused.
 
-Every error has a code: `E` and four digits, whose hundreds digit names the area. `E01xx` is the lexer, `E02xx` the parser, `E03xx` names, `E04xx` types and bindings, `E05xx` classes and lifecycle, `E06xx` concurrency, `E07xx` modules and imports, and `E08xx` the backend; `E09xx` is reserved for tags, and warnings will have `W` codes. Errors that report the same mistake share a code, and `E0899` is the one code for errors that only a compiler defect can cause. A code is never reused for another error. [Diagnostic codes](../diagnostics/README.md) lists them. `neura explain <CODE>` (or `neura --explain <CODE>`) prints a code's page: the rule, a program that breaks it, and the program fixed. `neura explain --list` prints each code and its title. The pages are part of the `neura` binary, so `explain` reads no files.
+Every error has a code: `E` and four digits, whose hundreds digit names the area. `E01xx` is the lexer, `E02xx` the parser, `E03xx` names, `E04xx` types and bindings, `E05xx` classes and lifecycle, `E06xx` concurrency, `E07xx` modules and imports, `E08xx` the backend, and `E09xx` [tags](Tags.md). A warning has a code, `W` and four digits, and a name. Errors that report the same mistake share a code, and `E0899` is the one code for errors that only a compiler defect can cause. A code is never reused for another error. [Diagnostic codes](../diagnostics/README.md) lists them. `neura explain <CODE>` (or `neura --explain <CODE>`) prints a code's page: the rule, a program that breaks it, and the program fixed. `neura explain --list` prints each code and its title, with the name of each warning; `neura explain <name>` also takes a warning's name. `neura tags` prints the catalogue of [tags](Tags.md), and `neura tags <Name>` one tag's signature, targets, status, and meaning. The pages are part of the `neura` binary, so `explain` reads no files.
 
 `--error-format` chooses the form. Every command accepts it.
 
@@ -235,9 +235,18 @@ Each `json` object has `code` (a string, or `null`), `severity` (`error` or `war
 | --- | --- |
 | `-W<name>`, `-Wno-<name>` | Enable or disable the warning `<name>`. Warnings are enabled by default; the last option for a name wins. |
 | `-Werror` | Report every warning as an error; the command then exits with status 1. |
-| `--warn-library` | Also report warnings in the standard library, which are otherwise hidden. |
+| `--warn-library` | Also report warnings in the standard library, which are otherwise hidden. A warning about a use is reported where the use is, so a program that uses a deprecated standard library declaration gets the warning without this option. |
 
-The compiler does not report any warning yet.
+The warnings come from [tags](Tags.md):
+
+| Code | Name | Warning | Reported by |
+| --- | --- | --- | --- |
+| `W0001` | `deprecated` | A use of a `#Deprecated` declaration, or an override of a deprecated method | `check`, `emit-ir`, `build`, `test` |
+| `W0002` | `experimental` | A use of an `#Experimental` declaration | `check`, `emit-ir`, `build`, `test` |
+| `W0003` | `unused-result` | An expression statement that discards the result of a `#NoDiscard` function or type | `check`, `emit-ir`, `build`, `test` |
+| `W0004` | `inline` | An `#Inline(always: true)` function that the `inline-calls` pass cannot inline | `emit-ir`, `build`, and `test` when they optimize |
+
+`#Allow(<name or code>)` on a declaration silences a warning inside it, and `#Deny(...)` makes it an error there; neither is affected by `-Wno-<name>`, and `-Werror` applies to the warnings that remain.
 
 `neura check --fix <file.nra>...` applies the suggestions marked `MachineApplicable` to the source files, saving each file in place. It checks the program, applies the edits of what it reports from the end of each file to the start, and repeats until no edit applies, then reports `neura: check --fix applied <n> edits to <m> files` on standard error and checks the result as `check` does. It never edits a standard library file or a module generated from a C header, and says so when a suggestion would. `--fix` cannot be combined with `--task-safety`.
 

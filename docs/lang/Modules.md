@@ -84,6 +84,8 @@ The executable and any newly emitted `.nir` contain the linked program. They can
 
 The compiler reserves the `Std` namespace. Installed tools resolve `Std.*` below their installation's `share/neura/stdlib` directory. A checkout build can also resolve them from the checkout's `stdlib` directory. Project files and `-I` roots cannot supply replacements for these imports. Imports with an `Internal` component are accessible only from standard library files.
 
+The [`#Internal` tag](Tags.md#internal) gives a single declaration the same limit. An internal declaration of the standard library is usable only inside the standard library; an internal declaration of a project is usable only from files in its file's directory and the directories below it, which are its own module, its sibling modules, and their children ([Project structure](ProjectStructure.md)). With `export`, an internal member is visible to the other modules of its library and hidden from the programs that import the library. A use from outside is error `E0911`. The rule also applies to a module imported from a prebuilt `.nir` artifact, which records its tags.
+
 A module in that source tree may bind a bodyless, non-generic function to a versioned host service.
 
 <!-- example: fragment: a host binding, which the compiler accepts only inside a module of the trusted standard library -->

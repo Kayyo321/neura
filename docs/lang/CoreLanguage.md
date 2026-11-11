@@ -13,11 +13,13 @@ const Limit: int32 = 3;
 count = count + 1;
 ```
 
+A declaration may be preceded by [tags](Tags.md), such as `#Deprecated(use_instead: "next")` or `#[Inline(always: true), Since("0.2.0")]`, on the lines above it. A tag tells the compiler how to treat the declaration: to warn at its uses, to restrict who may extend or use it, to require that its result be used, or to inline it. `neura tags` lists them.
+
 Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. A nested block, and a function body, may declare a name that an enclosing scope or a parameter already has; the new binding hides the outer one for the rest of its block. Whether shadowing stays allowed is an open language decision ([Status](Status.md#open-language-decisions)). Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. Visibility and inheritance rules beyond these are not specified.
 
 ### Documentation comments
 
-Start each line of a documentation comment with `///` and place it immediately above the definition it describes. Consecutive documentation lines form one block. An empty `///` line adds a paragraph break. A blank source line or an ordinary `//` comment ends the block. An inline comment after code has ordinary comment behavior.
+Start each line of a documentation comment with `///` and place it immediately above the definition it describes, or above its [tags](Tags.md); a comment between the tags and the definition documents it too. Consecutive documentation lines form one block. An empty `///` line adds a paragraph break. A blank source line or an ordinary `//` comment ends the block. An inline comment after code has ordinary comment behavior.
 
 <!-- example: check -->
 ```neura
