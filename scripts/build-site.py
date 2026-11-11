@@ -3,8 +3,9 @@
 
 The website is the files in `site/`. The build copies each one to the same
 path in the output directory, so `site/assets/site.css` is published as
-`assets/site.css` below the site's address. It changes one file: `404.html`
-receives a `<base>` element, described below. docs/Site.md describes the
+`assets/site.css` below the site's address. It changes two things: each
+reference to a file of `assets/` gains a version made from the file's content
+(`site.css?v=...`), and `404.html` receives a `<base>` element, described below. docs/Site.md describes the
 site and how it is published.
 
 The build checks every HTML and CSS file in `site/`:
