@@ -110,7 +110,7 @@ Names, spawn sites, and source locations come from optional metadata only. None 
 
 ## Lifting
 
-Lifting works on one block at a time and uses only the block's graph, inputs, and exits:
+Lifting works on one block at a time and uses only the block's graph, inputs, and exits. The search and the structural proof live in the lift library (`src/lift`), which the runtime's lifted blocks also use ([execution tiers](runtime/NVM.md#execution-tiers)); the exhaustive fallback, rendering, and evidence labels are the decompiler's.
 
 1. **Targets.** The values the exits read from the graph, each a typed lane group, and, for a block with two normal exits, the condition that selects between them.
 2. **Observation.** The graph is evaluated on 40 pseudo-random and boundary input samples, plus samples at the constants that equality neurons spell (a ReLU reading every lane of an input word with weights of +1 and -1 tests equality with the constant those signs spell).

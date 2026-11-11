@@ -28,9 +28,10 @@ hello.nvr --> load --> bind imports --> Execution
 | `src/gpu/` | `neura_gpu` | Optional Vulkan graph evaluator with a dynamically loaded Vulkan loader. |
 | `src/runner/` | `neura_runner` | Shared host setup, trace handling, and run diagnostics. |
 | `src/launcher/` | `neura_launcher`, `neura_launcher_static` | CPU launchers and the executable container. |
-| `src/decompiler/` | `neura_decompiler` | Assembly, lifting, and the reconstruction form ([Decompiler](Decompiler.md)). |
+| `src/lift/` | `neura_lift` | Lifted blocks ([NVM](runtime/NVM.md#execution-tiers)): the typed expressions behind a block's graph, the structural search that finds them, the structural and overflow proofs, and the lowering to native 64-bit operations. Tier 1 of the runtime; the executor does not use it yet. |
+| `src/decompiler/` | `neura_decompiler` | Assembly, the reconstruction form, and the evidence it reports ([Decompiler](Decompiler.md)). Lifting itself is in `neura_lift`. |
 
-`neura_circuit` links only `neura_nvr` and `neura_compiler` links it, so the circuit library builds without the rest of the compiler. `neura_nvm` links only `neura_nvr`, so a runtime-only distribution needs no compiler code. The `neura` executable links both and provides `neura run`.
+`neura_circuit` links only `neura_nvr` and `neura_compiler` links it, so the circuit library builds without the rest of the compiler. `neura_lift` links only `neura_circuit`, so a runtime can link it without compiler code; `neura_decompiler` links it. `neura_nvm` links only `neura_nvr`, so a runtime-only distribution needs no compiler code. The `neura` executable links both and provides `neura run`.
 
 ## Supported NeuraIR
 
@@ -235,6 +236,10 @@ The [release checklist](Release.md) maps each feature to its tests and states wh
 | `native-policy`, `native-replay` | Recorded grants and limits, environment overrides, sealing, and cross-runner traces. |
 | `native-install`, `native-c-import` | Relocated launchers, static execution in a root with only the executable and procfs, and C-import target checks. |
 | `decompiler-*` | See [Decompiler](Decompiler.md#evidence). |
+| `lift-proof` | The structural proof accepts a regenerated block and rejects a graph with one weight or bias changed, forged hints (another operation, an unchecked addition, a missing input, operands of different widths, a missing value), and every one-weight edit of the recognized blocks of a compiled program. |
+| `lift-overflow` | The interval proof on constructed graphs: a bias, a product, and a running partial sum that overflow are rejected, and a sum reaching the maximum is accepted. The 0/1 lane arguments: exclusive equality tests, trap indicators, and a ripple-carry sum lane are proven bits, and overlapping or independent indicators are not. |
+| `lift-execute` | Each operation of the lift vocabulary, built as the converter builds it, lowered and compared with the reference evaluator lane by lane: every input for operands of up to 16 lanes (all 8-bit integer operations), otherwise boundary values crossed and seeded random values. Operations that must not lower (16-bit float arithmetic, conversions to 16-bit formats) are refused. |
+| `lift-corpus` | Every block of the example, backend, benchmark, and twelve standard library programs that lifts is compared with the reference on the same kinds of inputs, and each benchmark runs with a device that compares every executed lifted block with the reference. Prints coverage by blocks and by executed steps, and the rejection reasons. |
 
 These are observed agreements over the stated domains; the exhaustive checks are exhaustive only over the stated domains, and nothing here is a proof beyond them. The IR evaluator models objects, collections, floats, and initialization independently of the converter, but it shares the language rules as written in these pages, so a misreading common to both would not be caught. MSVC builds have not been verified.
 
