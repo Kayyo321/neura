@@ -316,6 +316,7 @@ The loop form depends on the source value.
 ### 5.5 Resources
 
 - A host resource (`File`, `TcpStream`, `TcpListener`) has `close() → Result<Unit>`. Closing again does nothing and returns `Ok`. Any other operation on a closed resource returns an `Io` error of kind `Closed`. If `close` reports an error the resource is still closed.
+- **Results that must be used.** The functions and methods of `Std.Io`, `Std.Fs`, and `Std.Net` whose `Result` can report a failed read, write, open, connection, or file system operation are tagged `#NoDiscard`, and so are the classes `File`, `TcpStream`, and `TcpListener`: a statement that drops such a result warns with `W0003` ([Tags](Tags.md#nodiscard)), and `let _ = ...;` drops one on purpose. `close()` is not tagged.
 - **Closing is always explicit.** Reclaiming an unreachable resource object frees its storage and does nothing else: `deinit` does not run and the host ID stays open until the run ends. No library class declares `deinit`. `Fs` and `Net` each allow at most 1,024 simultaneously open IDs per run; exceeding that returns an `Io` error of kind `Other`.
 - **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. With tasks a body can end early by cancellation, and the close must still happen ([Concurrency](Concurrency.md#7-cancellation-deadlines-and-resources)).
   - If the open fails, the helper returns that error and does not call the body.
@@ -1017,9 +1018,9 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 | Class | Behavior | Needs |
 | --- | --- | --- |
-| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, `size()`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
+| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, the read-only field `size`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
 | `BufferedReader` | Built from a `ByteSource`. Holds up to 8,192 bytes (configurable, at least 16). `read` is a `ByteSource`; `read_exact(count) → Result<uint8[list]>` fails with kind `UnexpectedEnd`; `read_all()`. | None |
-| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`. It does not close anything. | None |
+| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`; the read-only field `buffered` is the number of bytes waiting. It does not close anything. | None |
 | `Utf8Reader` | Built from a `ByteSource`. `read_scalar() → Result<Optional<uint32>>`, `read_line() → Result<Optional<string>>`, `read_to_end() → Result<string>`. Invalid UTF-8 fails with kind `InvalidData`. | T1 |
 | `Utf8Writer` | Built from a `ByteSink`. `write` is a `TextSink`; `write_line(s)` adds one LF. | T1 |
 
@@ -1033,7 +1034,7 @@ Needs P2 for every host operation and T1 for `Path`.
 
 - The separator is `/` on every host. The host service translates.
 - **Normalization at construction:** repeated separators collapse; `.` components are removed; a trailing separator is removed except for the root; an empty result is `.`. `..` components are kept, because removing them is not correct in the presence of links.
-- `is_absolute()` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
+- The read-only field `is_absolute` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
 - Module function `of(text)`. Members include `join(other: string) → Path`, `parent() → Path`, `file_name()`, `stem()`, `extension()`, `components()`, `resolve_lexically() → Path`, `starts_with(other: Path) → bool`, and `relative_to(base: Path) → Path`. An absolute argument to `join` replaces the path. `parent` returns `nil` when the path has no parent. `relative_to` returns `nil` when it cannot express the path relative to the base. `file_name`, `stem`, and `extension` return `Optional<string>`. The extension is the text after the last `.` of the file name when that dot is not the first character. `components` returns a built-in list of strings. Equality, hash, ordering, and text use the normalized path.
 
 **`File`** is a class wrapping a host file ID. The module functions `open(path, mode: OpenMode) → Result<File>` and `with_open<T>(path, mode, body)`, the scoped helper of [section 5.5](#55-resources). `OpenMode` is a fieldless enum: `Read` (must exist), `Write` (create or truncate), `Append`, `ReadWrite` (must exist), `CreateNew` (fails with `AlreadyExists`). Members: `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `seek(offset: int64, origin: SeekOrigin) → Result<int64>` (`SeekOrigin`: `Start`, `Current`, `End`), `size() → Result<int64>`, and `close() → Result<Unit>` ([section 5.5](#55-resources)). A `File` is unbuffered.
@@ -1045,7 +1046,7 @@ Needs P2 for every host operation and T1 for `Path`.
 | `read_bytes(path) → Result<uint8[list]>`, `read_text(path) → Result<string>` | `read_text` fails with `InvalidData` for invalid UTF-8. Both close the file on every path, including a failed read. |
 | `write_bytes(path, bytes)`, `write_text(path, text)`, `append_text(path, text)` `→ Result<Unit>` | Create the file if needed; the `write_` forms truncate. A failed write is reported after the file is closed. |
 | `exists(path) → Result<bool>` | `Ok(false)` for `NotFound`; other failures are errors. |
-| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class: `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, `modified: Instant`. |
+| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class with the read-only fields `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, and `modified: Instant`. |
 | `list(path)` | A `Result` of a built-in list of `Path`: the directory's entries joined to `path`, sorted by name bytes. |
 | `create_directory(path)`, `create_directories(path)` | The second creates missing parents and succeeds when the directory exists. |
 | `remove_file(path)`, `remove_directory(path)` | `remove_directory` requires an empty directory. |
@@ -1068,8 +1069,8 @@ This module replaces `SysIo.Entry` ([section 4.6](#46-retired-built-ins)). It ne
 
 TCP only. A call waits for its result; in a program with tasks the waiting task parks and the others run, and cancelling its scope ends the wait with kind `Cancelled` ([Concurrency](Concurrency.md#104-host-io)). Needs P2 and T1.
 
-- `TcpStream`: the module functions `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>` and `with_connection<T>(host, port, body)`, the scoped helper of [section 5.5](#55-resources). Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `set_read_timeout(timeout: Duration)` (zero for none; an expired timeout fails with kind `TimedOut`), and `close()`. A write that is cancelled while it waits fails with kind `Cancelled` and the message `stream write cancelled after N bytes`, where N is the number of bytes already sent.
-- `TcpListener`: the module function `bind(host: string, port: int) → Result<TcpListener>`. Members `accept() → Result<TcpStream>`, `local_port() → int`, and `close()`. Port 0 asks the host for a free port.
+- `TcpStream`: the module functions `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>` and `with_connection<T>(host, port, body)`, the scoped helper of [section 5.5](#55-resources). Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), the field `read_timeout: Duration` (zero, the initial value, for none; an expired timeout fails with kind `TimedOut`; assigning a negative duration traps with `invalid argument: negative timeout`), and `close()`. A write that is cancelled while it waits fails with kind `Cancelled` and the message `stream write cancelled after N bytes`, where N is the number of bytes already sent.
+- `TcpListener`: the module function `bind(host: string, port: int) → Result<TcpListener>`. Members `accept() → Result<TcpStream>`, the read-only field `local_port: int`, and `close()`. Port 0 asks the host for a free port.
 - A port outside 0 through 65,535 traps.
 - Service arguments: `connect` takes the host text, the port, and the timeout in nanoseconds; `listen` takes the host text and port; `accept` takes a listener ID; `read` takes a socket ID, a maximum count, and a timeout in nanoseconds (0 for none); `write` takes a socket ID and bytes; `close` takes either kind of ID.
 
@@ -1197,7 +1198,7 @@ These are for integrity checks and content addressing. The library makes no clai
 - Module functions `create(name: string, sink, level: LogLevel)` and `create_timed(name, sink, level, clock: Clock)`.
 - Each record is one line: with a clock, the instant's text and a space; then the level in uppercase, a space, the name, `: `, and the message. If the clock fails, the timestamp is `-`.
 - Without a clock there is no timestamp, so log output is deterministic by default.
-- Members: `trace`, `debug`, `info`, `warn`, `error` (each taking a message), `log(level, message)`, `log_lazy(level, make: () → string)` (the function runs only when the level is enabled), `is_enabled(level)`, and `set_level(level)`.
+- Members: `trace`, `debug`, `info`, `warn`, `error` (each taking a message), `log(level, message)`, `log_lazy(level, make: () → string)` (the function runs only when the level is enabled), `is_enabled(level)`, and the field `level`, which a program assigns to change the logger's level.
 - There is no global logger registry. A logger is passed to the code that uses it.
 
 ### 14.2 `Std.Test`
@@ -1399,7 +1400,7 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency.md) s
 | `Guarded` | Mutable state that tasks share one at a time. `create<T>(initializer)` builds the state inside the guard. `with<U>(body)` runs `body` with exclusive access and returns its result; a second task that calls `with` parks until the first returns, and that wait is not cancellable. The captures of `initializer` and `body` and the result `U` are transferable, so no reference to the state escapes. Calling `with` on a guard the task already holds traps with `invalid state: guard already held`. |
 
 - Every handle except `Task<T>` and `Scope` is transferable ([Concurrency](Concurrency.md#51-transferable-types)). The compiler recognizes the handle classes by the trusted file that declares them.
-- The classes `Sender`, `Receiver`, `Task`, and `Timer` also export `select_handle()` and a `<member>_selected(code)` function. The `select` statement calls them; a program does not.
+- The classes `Sender`, `Receiver`, `Task`, and `Timer` also export `select_handle()` and a `<member>_selected(code)` function. The `select` statement calls them; a program does not. They are tagged `#Hidden`, so `neura docs` and the API listings leave them out.
 - `Channel.State` is the identity the three ends of one channel share. A program does not construct one.
 - Tests: `stdlib-concurrent` for `Tasks` and `WorkerGroup`; the `concurrency-*` and `backend-concurrency` entries for the rest ([Concurrency](Concurrency.md#15-verification)).
 - Task safety of the library as a whole is in [section 5.8](#58-task-safety).
