@@ -8,7 +8,7 @@ let tcp_stream = import:Std.Net.TcpStream;
 
 export let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        tcp_stream.connect("127.0.0.1", -1, duration.of_seconds(1));
+        let _ = tcp_stream.connect("127.0.0.1", -1, duration.of_seconds(1));
         return program.ExitCode.Ok;
     };
 );

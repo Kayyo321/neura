@@ -15,6 +15,7 @@ let.promote _ = import:Std.Core.Unit;
 /// arrived first, in which case `accept` returns that stream. A cancelled `accept` takes no connection from the
 /// queue. `bind` and `close` do not wait and are not cancellable. Without tasks `accept` waits as before.
 /// @see [Std.Net.TcpListener](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-TcpListener)
+#Since("0.1.0")
 export let TcpListener = module (
     /// @brief Represents a host success with an identifier or position, or an unsigned host error code.
     let IdOutcome = enum (Ok(int64), Error(uint32));
@@ -32,21 +33,26 @@ export let TcpListener = module (
     let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
     /// @brief Owns a listening socket and retains its port after close.
+    #[Final, NoDiscard(reason: "a listener must be closed")]
     export let TcpListener = class implements Closeable (
         /// @brief Holds the provider handle and the context used in error messages.
-        let handle: socket.Handle = nil;
-        /// @brief The port the provider actually bound.
-        let port: int = 0;
+        last handle: socket.Handle;
         /// @brief Tracks whether the wrapper may still use the host handle.
         let open_now: bool = true;
+
+        /// @brief The port the listener is bound to; for a bind to port 0, the one the host chose. Still
+        /// available after close. Read-only.
+        #Since("0.2.0")
+        export last local_port: int;
 
         /// @brief Use bind; the handle comes from the library.
         export let init = func(opened: socket.Handle, bound_port: int) {
             handle = opened;
-            port = bound_port;
+            local_port = bound_port;
         };
 
         /// @brief Waits for the next connection. Fails with Cancelled when the task's scope is cancelled first.
+        #NoDiscard
         export let accept = func -> Result<TcpStream> {
             if (!open_now) {
                 return Result<TcpStream>.Err(bytes.closed("listener", handle.address));
@@ -56,10 +62,6 @@ export let TcpListener = module (
                 IdOutcome.Error(code) => Result<TcpStream>.Err(host_error.io(code, "accept failed", handle.address)),
             };
         };
-
-        /// @brief The port the listener is bound to; for a bind to port 0, the one the host chose. Still
-        /// available after close.
-        export let local_port = func -> int => port;
 
         /// @brief Releases the listener. Repeated calls succeed, and an initial close error still leaves it
         /// closed.
@@ -79,10 +81,11 @@ export let TcpListener = module (
     /// host for a free port.
     ///
     /// A port outside 0 through 65,535 traps with "invalid argument: port".
+    #NoDiscard
     export let bind = func(host: string, port: int) -> Result<TcpListener> {
         socket.check_port(port);
-        let address = socket.address_of(host, port);
-        let id: int64 = 0;
+        last address = socket.address_of(host, port);
+        last id: int64;
         match (listen_socket(host, port)) {
             IdOutcome.Ok(opened) => {
                 id = opened;

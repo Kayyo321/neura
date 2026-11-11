@@ -24,7 +24,7 @@ let StreamChunkingTests = module (
 
     export let test_text_over_a_connection = func() -> void {
         let listener = listen();
-        let client = connect(listener.local_port());
+        let client = connect(listener.local_port);
         let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
         let writer = utf8_writer.create(client.write);
         test.assert_ok<unit.Unit>(writer.write_line("first"));

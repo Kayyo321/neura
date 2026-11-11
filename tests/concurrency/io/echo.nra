@@ -43,7 +43,7 @@ let echo_all = func(stream: streams.TcpStream) -> int {
                     more = false;
                 } else {
                     total = total + chunk.length;
-                    stream.write(chunk);
+                    let _ = stream.write(chunk);
                 }
             },
             result.Result.Err(_) => {
@@ -62,7 +62,7 @@ let serve = func(ports: channels.Sender<int>, served: channels.Sender<int>) {
             served.send(0 - 1);
         },
         result.Result.Ok(listener) => {
-            ports.send(listener.local_port());
+            ports.send(listener.local_port);
             match (listener.accept()) {
                 result.Result.Err(_) => {
                     served.send(0 - 1);
