@@ -205,3 +205,68 @@ let first = import:"first.nir";
 let second = import:"changed.nir".Second;
 ]=])
 reject("incompatible definitions of.*shared.nra" check "${artifacts}/conflict.nra")
+
+# A fields-only anonymous class is one class across a module and the program
+# that links its artifact (Types.md, Anonymous classes). Two separately
+# compiled modules each keep a copy, and mixing the copies is E0534.
+file(WRITE "${source}/points.nra" [=[
+let Points = module (
+    export let make = func(x: int) -> class (export let x: int; export let label: string;) {
+        let made: class (export let x: int = 0; export let label: string = "point";) = new;
+        made.x = x;
+        return made;
+    };
+    export let show = func(p: class (export let x: int; export let label: string;)) -> string {
+        return p.label + ":" + p.x.to_string();
+    };
+);
+]=])
+file(WRITE "${source}/other-points.nra" [=[
+let OtherPoints = module (
+    export let make = func() -> class (export let x: int; export let label: string;) {
+        let made: class (export let x: int = 1; export let label: string = "other";) = new;
+        return made;
+    };
+);
+]=])
+neura(emit-ir "${source}/points.nra" -o "${artifacts}/points.nir")
+neura(emit-ir "${source}/other-points.nra" -o "${artifacts}/other-points.nir")
+file(WRITE "${artifacts}/points-app.nra" [=[
+let points = import:"points.nir".Points;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let mine: class (export let x: int = 5; export let label: string = "mine";) = new;
+        console.print_line(points.show(mine));
+        let back: class (export let x: int; export let label: string;) = points.make(6);
+        console.print_line(points.show(back) + " " + back.to_string());
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+foreach(mode IN ITEMS optimized plain)
+    set(flags)
+    if(mode STREQUAL "plain")
+        set(flags --no-optimize)
+    endif()
+    neura(build ${flags} "${artifacts}/points-app.nra" -o "${TEST_DIR}/points-${mode}.nvr")
+    neura(run "${TEST_DIR}/points-${mode}.nvr")
+    if(NOT output STREQUAL "mine:5\npoint:6 class(x: int32, label: string)#1\n")
+        message(FATAL_ERROR "${mode} anonymous class link produced:\n${output}")
+    endif()
+endforeach()
+neura(emit-ir "${artifacts}/points-app.nra" -o "${TEST_DIR}/points-combined.nir")
+neura(build "${TEST_DIR}/points-combined.nir" -o "${TEST_DIR}/points-round-trip.nvr")
+file(SHA256 "${TEST_DIR}/points-optimized.nvr" original)
+file(SHA256 "${TEST_DIR}/points-round-trip.nvr" rebuilt)
+if(NOT original STREQUAL rebuilt)
+    message(FATAL_ERROR "linked anonymous class round trip changed the executable")
+endif()
+file(WRITE "${artifacts}/points-mixed.nra" [=[
+let points = import:"points.nir".Points;
+let other = import:"other-points.nir".OtherPoints;
+let shown = points.show(other.make());
+]=])
+reject("points-mixed.nra:3:25: error\\[E0534\\]: two separately compiled copies of class[(]x: int32, label: string[)]"
+    check "${artifacts}/points-mixed.nra")

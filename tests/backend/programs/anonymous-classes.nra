@@ -1,0 +1,100 @@
+// Anonymous classes in type positions (Types.md, Anonymous classes): a
+// fields-only body is one class wherever its fields are written, and a body
+// with methods or a base is a class of its own.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let area = func() -> int => 0;
+);
+
+let order: string = "";
+let note = func(text: string, value: int) -> int {
+    order = order + text;
+    return value;
+};
+
+// The parameter repeats the shape of the binding below: the same class.
+let show = func(point: class (export let x: int; export let label: string;)) -> string {
+    return point.label + "=" + point.x.to_string();
+};
+
+// A result type with the same fields, and a 'new' that writes its body.
+let make = func(x: int) -> class (export let x: int; export let label: string;) {
+    let made: class (
+        export let x: int = 0;
+        export let label: string = "made";
+    ) = new;
+    made.x = x;
+    return made;
+};
+
+let fresh = func() -> class (export let x: int; export let label: string;) {
+    return new class (export let x: int = 99; export let label: string = "body";)();
+};
+
+// A function in another declaration that writes the same fields in another
+// order is a different class: the field order is part of the shape.
+let swapped = func(point: class (export let label: string; export let x: int;)) -> string => point.label;
+
+let Main = module:program.Entry (
+    // A field whose type is a class with a method: one class for this field.
+    let counter: class (
+        export let count: int = 0;
+        export let bump = func() -> int {
+            count = count + 1;
+            return count;
+        };
+    ) = new;
+
+    // A body with a base class and an override.
+    let square: class:Shape (
+        export let side: int = 3;
+        export let.override area = func() -> int => side * side;
+    ) = new;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // The headline form: the annotation is the class, and 'new' runs its
+        // field initializers in order.
+        let my_instance: class (
+            export let x: int = note("x", 7);
+            export let label: string = "seven";
+            export let y: int = note("y", 1);
+        ) = new;
+        console.print_line(order);
+        my_instance.x = my_instance.x + my_instance.y;
+        console.print_line(my_instance.label + " " + my_instance.x.to_string());
+
+        let point: class (export let x: int = 5; export let label: string = "point";) = new;
+        console.print_line(show(point));
+        console.print_line(show(make(9)));
+        console.print_line(show(fresh()));
+        const kept: class (export let x: int; export let label: string;) = make(3);
+        console.print_line(kept.to_string());
+
+        // Fields without initializers start uninitialized, as in any class.
+        let bare: class (export let x: int; export let label: string;) = new;
+        bare.x = 1;
+        bare.label = "bare";
+        console.print_line(show(bare));
+
+        // Nested anonymous classes and multi-binding.
+        let nested: class (
+            export let inner: class (export let v: int = 11;) = new;
+            export let tag: string = "n";
+        ) = new;
+        console.print_line(nested.tag + nested.inner.v.to_string());
+        let [left, right]: [class (export let v: int = 1;), class (export let v: int = 2;)] = new, new;
+        let values: class (export let v: int;)[] = [left, right, nested.inner];
+        console.print_line(values.length.to_string() + " " + (values[0].v + values[1].v + values[2].v).to_string());
+
+        // Classes with methods.
+        counter.bump();
+        console.print_line(counter.bump().to_string());
+        let shape: Shape = square;
+        console.print_line(shape.area().to_string());
+        console.print_line(counter.to_string());
+        console.print_line((point is class (export let x: int; export let label: string;)).to_string());
+        return program.ExitCode.Ok;
+    };
+);
