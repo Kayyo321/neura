@@ -4,6 +4,7 @@ let.promote _ = import:Std.DynamicForeign.MemorySegment;
 ///
 /// A struct passed or returned by value travels as a segment that holds its bytes.
 /// @see [Std.DynamicForeign.ForeignValue](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-ForeignValue)
+#Since("0.1.0")
 export let ForeignValue = module (
     /// @brief A native argument or result, tagged by its carrier.
     export let ForeignValue = enum (

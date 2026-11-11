@@ -11,13 +11,15 @@ let scopes = import:Std.DynamicForeign.Internal.Scope;
 /// A library loaded through an arena stays loaded until the arena closes; finding a symbol after that traps.
 /// Needs the native capability.
 /// @see [Std.DynamicForeign.SymbolLookup](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-SymbolLookup)
+#Since("0.1.0")
 export let SymbolLookup = module (
     /// @brief A loaded library, the process's default lookup, or the image's embedded library.
+    #Final
     export let SymbolLookup = class (
         /// @brief The provider's library identifier.
-        let library: int64;
+        last library: int64;
         /// @brief The scope that keeps the library loaded.
-        let owner: scopes.Scope;
+        last owner: scopes.Scope;
         /// @brief The lookup tried when this library has no match, or nil.
         let fallback: SymbolLookup = nil;
 
@@ -30,7 +32,7 @@ export let SymbolLookup = module (
         /// @brief The address of `name` as a segment of size 0, or None when the library has no such symbol.
         export let find = func(name: string) -> Optional<MemorySegment> {
             owner.check_alive();
-            let address = native.find_symbol(library, name);
+            last address = native.find_symbol(library, name);
             if (address == 0) {
                 return (fallback == nil) ? Optional<MemorySegment>.None : fallback.find(name);
             }
@@ -52,7 +54,7 @@ export let SymbolLookup = module (
 
         /// @brief A lookup that tries this one, then `other` (Java's SymbolLookup.or).
         export let or_else = func(other: SymbolLookup) -> SymbolLookup {
-            let chained = new SymbolLookup(library, owner);
+            last chained: SymbolLookup = new(library, owner);
             chained.fallback = (fallback == nil) ? other : fallback.or_else(other);
             return chained;
         };
@@ -62,8 +64,8 @@ export let SymbolLookup = module (
     /// (such as "libm.so.6"), owned by `arena` (Java's SymbolLookup.libraryLookup). A library that cannot be
     /// loaded is an Io error of kind NotFound.
     export let library_lookup = func(path: string, arena: Arena) -> Result<SymbolLookup> {
-        let scope = arena.scope();
-        let id = native.open_library(scope.id(), path);
+        last scope = arena.scope();
+        last id = native.open_library(scope.id(), path);
         if (id == 0) {
             return Result<SymbolLookup>.Err(Error.Io {
                 kind: IoErrorKind.NotFound,
@@ -75,8 +77,8 @@ export let SymbolLookup = module (
     };
 
     /// @brief The libraries already loaded into the process, including the C library.
-    export let default_lookup = func -> SymbolLookup => new SymbolLookup(native.default_library(), scopes.global());
+    export let default_lookup = func -> SymbolLookup => new(native.default_library(), scopes.global());
 
     /// @brief The native library linked into the image from C imports (ForeignInterop.md).
-    export let embedded = func -> SymbolLookup => new SymbolLookup(native.embedded_library(), scopes.global());
+    export let embedded = func -> SymbolLookup => new(native.embedded_library(), scopes.global());
 );

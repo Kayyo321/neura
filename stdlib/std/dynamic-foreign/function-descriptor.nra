@@ -4,13 +4,15 @@ let.promote _ = import:Std.Core.Optional;
 /// @brief The C signature of a native function (ForeignInterop.md), the counterpart of Java's
 /// FunctionDescriptor: an optional result layout and the argument layouts.
 /// @see [Std.DynamicForeign.FunctionDescriptor](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-FunctionDescriptor)
+#Since("0.1.0")
 export let FunctionDescriptor = module (
     /// @brief A result layout, or none for void, and the argument layouts in order.
+    #Final
     export let FunctionDescriptor = class (
         /// @brief The result layout, or None for a void function.
-        let result: Optional<MemoryLayout> = Optional<MemoryLayout>.None;
+        last result: Optional<MemoryLayout>;
         /// @brief The argument layouts.
-        let arguments: MemoryLayout[list] = [];
+        last arguments: MemoryLayout[list] = [];
 
         /// @brief Use of or of_void.
         export let init = func(result_layout: Optional<MemoryLayout>, argument_layouts: MemoryLayout[list]) {
@@ -26,7 +28,7 @@ export let FunctionDescriptor = module (
 
         /// @brief A copy of the argument layouts.
         export let argument_layouts = func -> MemoryLayout[list] {
-            let copy: MemoryLayout[list] = [];
+            last copy: MemoryLayout[list] = [];
             for (let layout in arguments) {
                 copy.append(layout);
             }
@@ -35,11 +37,11 @@ export let FunctionDescriptor = module (
 
         /// @brief A descriptor with `more` appended to the arguments.
         export let append_argument_layouts = func(more: ...MemoryLayout) -> FunctionDescriptor {
-            let all: MemoryLayout[list] = argument_layouts();
+            last all: MemoryLayout[list] = argument_layouts();
             for (let layout in more) {
                 all.append(layout);
             }
-            return new FunctionDescriptor(result, all);
+            return new(result, all);
         };
 
         /// @brief Descriptors with the same layouts are equal.
@@ -76,16 +78,16 @@ export let FunctionDescriptor = module (
     /// @brief A function returning `result` and taking `arguments` (Java's FunctionDescriptor.of).
     export let of = func(result: MemoryLayout, arguments: ...MemoryLayout) -> FunctionDescriptor {
         check_argument(result);
-        return new FunctionDescriptor(Optional<MemoryLayout>.Some(result), listed(arguments));
+        return new(Optional<MemoryLayout>.Some(result), listed(arguments));
     };
 
     /// @brief A void function taking `arguments` (Java's FunctionDescriptor.ofVoid).
     export let of_void = func(arguments: ...MemoryLayout) -> FunctionDescriptor =>
-        new FunctionDescriptor(Optional<MemoryLayout>.None, listed(arguments));
+        new(Optional<MemoryLayout>.None, listed(arguments));
 
     /// @brief The layouts of an array as a list.
     let listed = func(layouts: MemoryLayout[]) -> MemoryLayout[list] {
-        let list: MemoryLayout[list] = [];
+        last list: MemoryLayout[list] = [];
         for (let layout in layouts) {
             list.append(layout);
         }

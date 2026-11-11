@@ -17,17 +17,19 @@ let scopes = import:Std.DynamicForeign.Internal.Scope;
 /// when one does not fit, so a mismatch never reaches native code. A struct result is copied into memory owned by
 /// the allocator arena, the global arena unless `invoke_with` names one. Needs the native capability.
 /// @see [Std.DynamicForeign.MethodHandle](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-MethodHandle)
+#Since("0.1.0")
 export let MethodHandle = module (
     /// @brief A native function address bound to a descriptor.
+    #Final
     export let MethodHandle = class (
         /// @brief The function's address and the scope of the library that holds it.
-        let target: MemorySegment;
+        last target: MemorySegment;
         /// @brief The C signature.
-        let signature: FunctionDescriptor;
+        last signature: FunctionDescriptor;
         /// @brief The index of the first variadic argument, or -1 for a function with fixed arguments.
-        let first_variadic: int;
+        last first_variadic: int;
         /// @brief The encoded signature for the provider.
-        let encoded: uint8[list] = [];
+        last encoded: uint8[list];
 
         /// @brief Use Linker.downcall_handle.
         export let init = func(symbol: MemorySegment, descriptor: FunctionDescriptor, variadic_index: int) {
@@ -61,12 +63,12 @@ export let MethodHandle = module (
         /// a double for a float, an int for a bool, and an address for a string, a MemorySegment, or nil.
         export static let call_variadic = func(symbol: MemorySegment, fixed: FunctionDescriptor, args: Argument[list])
             -> ForeignValue {
-            let layouts = fixed.argument_layouts();
-            let named = layouts.length;
+            last layouts = fixed.argument_layouts();
+            last named = layouts.length;
             if (args.length < named) {
                 trap_with_message("invalid argument: expected at least " + named.to_string() + " arguments");
             }
-            let promoted: Argument[list] = [];
+            last promoted: Argument[list] = [];
             for (let i = 0; i < args.length; i++) {
                 if (i < named) {
                     promoted.append(args[i]);
@@ -99,19 +101,19 @@ export let MethodHandle = module (
                     },
                 }
             }
-            let descriptor = new FunctionDescriptor(fixed.return_layout(), layouts);
+            last descriptor: FunctionDescriptor = new(fixed.return_layout(), layouts);
             return new MethodHandle(symbol, descriptor, named).invoke_arguments(global(), promoted);
         };
 
         /// @brief Converts packed arguments and calls the function.
         let invoke_arguments = func(allocator: Arena, args: Argument[list]) -> ForeignValue {
-            let layouts = signature.argument_layouts();
+            last layouts = signature.argument_layouts();
             if (args.length != layouts.length) {
                 trap_with_message("invalid argument: expected " + layouts.length.to_string() + " arguments, got " +
                                   args.length.to_string());
             }
             let temporary: Arena = nil;
-            let values: ForeignValue[list] = [];
+            last values: ForeignValue[list] = [];
             for (let i = 0; i < args.length; i++) {
                 match (args[i]) {
                     Argument.Text(text) => {
@@ -128,7 +130,7 @@ export let MethodHandle = module (
                     },
                 }
             }
-            let result = invoke_values_with(allocator, values);
+            last result = invoke_values_with(allocator, values);
             if (temporary != nil) {
                 temporary.close();
             }
@@ -142,16 +144,16 @@ export let MethodHandle = module (
         /// @brief invoke_values, copying a struct result into `allocator`.
         export let invoke_values_with = func(allocator: Arena, values: ForeignValue[list]) -> ForeignValue {
             target.scope().check_alive();
-            let layouts = signature.argument_layouts();
+            last layouts = signature.argument_layouts();
             if (values.length != layouts.length) {
                 trap_with_message("invalid argument: expected " + layouts.length.to_string() + " arguments, got " +
                                   values.length.to_string());
             }
-            let bytes: uint8[list] = [];
+            last bytes: uint8[list] = [];
             for (let i = 0; i < values.length; i++) {
                 codec.encode_value(bytes, values[i], layouts[i]);
             }
-            let result = native.call(target.address(), encoded, bytes);
+            last result = native.call(target.address(), encoded, bytes);
             return match (signature.return_layout()) {
                 Optional.Some(layout) => codec.decode_value(result, 0, layout, allocator),
                 Optional.None => ForeignValue.Void,
@@ -162,7 +164,7 @@ export let MethodHandle = module (
 
     /// @brief The arguments of an array as a list.
     let listed = func(args: Argument[]) -> Argument[list] {
-        let list: Argument[list] = [];
+        last list: Argument[list] = [];
         for (let arg in args) {
             list.append(arg);
         }

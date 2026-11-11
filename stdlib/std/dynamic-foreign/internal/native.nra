@@ -238,8 +238,8 @@ export let Native = module (
         if (size >= 8) {
             return uint64s.to_signed(bits);
         }
-        let width = size * 8;
-        let limit: uint64 = (1 as uint64) << width;
+        last width = size * 8;
+        last limit: uint64 = (1 as uint64) << width;
         if (bits < (limit >> 1)) {
             return bits as int64;
         }
