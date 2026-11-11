@@ -143,6 +143,7 @@ NEURA_DIAGNOSTIC(E0606, "invalid select")
 NEURA_DIAGNOSTIC(E0607, "scope block outside a function body")
 NEURA_DIAGNOSTIC(E0608, "#ThreadSafe function that is not task-safe")
 NEURA_DIAGNOSTIC(E0609, "#ThreadSafe class whose instances cannot be shared")
+NEURA_DIAGNOSTIC(E0610, "#NotThreadSafe class that promises sharing")
 
 // Modules and imports
 NEURA_DIAGNOSTIC(E0701, "unresolved import")

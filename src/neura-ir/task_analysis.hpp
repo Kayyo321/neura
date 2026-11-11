@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dispatch.hpp"
 #include "ir.hpp"
 
 #include <map>
@@ -34,7 +35,8 @@ public:
     };
     // Why instances of `cls` may not be shared between tasks, or nothing for
     // a shareable monitor: a class whose declaration is a monitor's
-    // (class.shareable), not marked #NotThreadSafe, whose fields are all
+    // (class.shareable), neither marked #NotThreadSafe nor extending such a
+    // class, whose fields are all
     // transferable, whose state no code reaches except through the
     // receiver, and whose subclasses are all shareable.
     std::optional<Problem> shareable_problem(SymbolId cls) const;
@@ -71,6 +73,7 @@ private:
     };
 
     const IrProgram& program_;
+    DispatchTargets dispatch_;
     std::map<SymbolId, const IrBody*> bodies_;
     std::map<SymbolId, std::vector<SymbolId>> overriders_;
     std::map<SymbolId, std::vector<SymbolId>> fields_;
@@ -87,6 +90,8 @@ private:
     // For each body owner, the owners whose bodies can run it and where.
     std::map<SymbolId, std::vector<std::pair<SymbolId, Span>>> callers_;
     bool library_code(SymbolId owner) const;
+    // The class marked #NotThreadSafe that `cls` is or extends, or no_symbol.
+    SymbolId not_thread_safe_class(SymbolId cls) const;
     Span user_site(SymbolId owner, const Span& fallback) const;
     // The closure layouts that code which can run allocates. A function value
     // exists only where one of these is created, so the union rules of

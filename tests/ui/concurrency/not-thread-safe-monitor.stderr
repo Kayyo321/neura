@@ -1,0 +1,13 @@
+error[E0610]: class 'Buffer' is #NotThreadSafe and cannot be a monitor: method 'grow' is #Synchronized
+ --> $DIR/not-thread-safe-monitor.nra:7:5
+  |
+3 | #NotThreadSafe
+  | -------------- #NotThreadSafe given here
+...
+7 |     #Synchronized
+  |     ^^^^^^^^^^^^^ #Synchronized given here
+  |
+  = note: the instances of a #NotThreadSafe class stay in the task that holds them, so tasks never share one
+  = help: remove #NotThreadSafe, or the promise that tasks may share the instances
+
+For more information about this error, try `neura explain E0610`.

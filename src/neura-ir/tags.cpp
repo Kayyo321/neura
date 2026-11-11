@@ -51,6 +51,8 @@ constexpr std::pair<TagId, TagId> conflicts[] = {
     {TagId::Likely, TagId::Unlikely},
     {TagId::Stable, TagId::Experimental},
     {TagId::ThreadSafe, TagId::NotThreadSafe},
+    {TagId::Immutable, TagId::NotThreadSafe},
+    {TagId::Synchronized, TagId::NotThreadSafe},
     {TagId::Blocking, TagId::NonBlocking},
     {TagId::Unroll, TagId::NoUnroll},
 };

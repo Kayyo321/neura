@@ -83,7 +83,7 @@ void insert_polls(IrProgram& program) {
     }
 }
 
-TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program) {
+TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program), dispatch_(program) {
     for (const auto& body : program.bodies) bodies_.emplace(body.owner, &body);
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
         const auto& item = program.symbols[id];
@@ -242,7 +242,11 @@ void TaskAnalysis::find_stray_accesses() {
 std::optional<TaskAnalysis::Problem> TaskAnalysis::shareable_problem(SymbolId cls) const {
     if (!valid(cls) || symbol(cls).kind != SymbolKind::Class) return Problem{"it is not a class", {}};
     const auto& item = symbol(cls);
-    if (const auto tag = tag_span(item, TagId::NotThreadSafe)) return Problem{"it is marked #NotThreadSafe", *tag};
+    if (const auto marked = not_thread_safe_class(cls); marked != no_symbol) {
+        return Problem{marked == cls ? "it is marked #NotThreadSafe"
+                                     : "it extends '" + symbol(marked).name + "', which is marked #NotThreadSafe",
+                       tag_span(symbol(marked), TagId::NotThreadSafe).value_or(symbol(marked).span)};
+    }
     if (!has_attribute(item, AttributeId::ClassShareable)) {
         if (const auto problem = monitor_problem(program_, cls)) return Problem{problem->text, problem->span};
         return Problem{"it is not a monitor", item.span};
@@ -292,7 +296,7 @@ bool TaskAnalysis::class_transferable(SymbolId cls, bool item) const {
         }
     } else if (capture_layout(cls) || concurrent_handle(cls)) {
         result = parts(cls);
-    } else if (has_tag(symbol(cls), TagId::NotThreadSafe)) {
+    } else if (not_thread_safe_class(cls) != no_symbol) {
         result = false;
     } else if (has_tag(symbol(cls), TagId::Immutable)) {
         // No field changes after construction, so a task that receives the
@@ -353,8 +357,11 @@ void TaskAnalysis::explain_class(Diagnostic& error, const IrType& type) const {
     const auto cls = type.symbol;
     const auto& item = symbol(cls);
     if (item.kind != SymbolKind::Class) return;
-    if (const auto tag = tag_span(item, TagId::NotThreadSafe)) {
-        error.label(*tag, "'" + item.name + "' is marked #NotThreadSafe here");
+    if (const auto marked = not_thread_safe_class(cls); marked != no_symbol) {
+        error.label(tag_span(symbol(marked), TagId::NotThreadSafe).value_or(symbol(marked).span),
+                    "'" + symbol(marked).name + "' is marked #NotThreadSafe here");
+        error.note("the instances of a #NotThreadSafe class, and of a class that extends one, stay in the task that "
+                   "holds them");
         return;
     }
     if (has_tag(item, TagId::Immutable)) {
@@ -436,16 +443,30 @@ void TaskAnalysis::callees(const IrNode& node, std::vector<std::pair<SymbolId, S
     case IrOp::Call:
         add(node.symbol);
         break;
-    case IrOp::VirtualCall:
-        // The union over every implementation the call can reach.
-        add(node.symbol);
+    case IrOp::VirtualCall: {
+        // The union over every implementation the call can reach: every
+        // override, and every implementation of an interface method, which
+        // needs no `.override` (dispatch.hpp).
+        std::set<SymbolId> reached{node.symbol};
         if (const auto found = overriders_.find(node.symbol); found != overriders_.end()) {
-            for (const auto id : found->second) {
-                // Only a closure that some reachable code creates can be
-                // what the call runs.
-                if (const auto layout = closure_of(id); layout != no_symbol && !created_.contains(layout)) continue;
-                add(id);
-            }
+            reached.insert(found->second.begin(), found->second.end());
+        }
+        for (const auto id : dispatch_.of(node)) reached.insert(id);
+        for (const auto id : reached) {
+            // Only a closure that some reachable code creates can be what
+            // the call runs.
+            if (const auto layout = closure_of(id); layout != no_symbol && !created_.contains(layout)) continue;
+            add(id);
+        }
+        break;
+    }
+    case IrOp::ValueEquals:
+    case IrOp::ValueHash:
+    case IrOp::ValueText:
+        // The members that equality, hashing, and text of the value run.
+        if (!node.operands.empty()) {
+            bool deferred = false;
+            for (const auto id : dispatch_.value_members(node.operands.front().type, node.op, deferred)) add(id);
         }
         break;
     case IrOp::BaseInitialize:
@@ -490,18 +511,15 @@ void TaskAnalysis::summarize() {
     // of each owner. A class owner stands for its field initializers.
     std::map<SymbolId, std::vector<std::pair<SymbolId, Span>>> edges;
     std::map<SymbolId, std::vector<SymbolId>> callers;
-    // #NotThreadSafe: the author declines to promise task safety, for the
-    // function, or for every method of the class (static ones included).
+    // #NotThreadSafe on a function or method: the author declines to promise
+    // task safety for it. On a class it keeps the instances in one task
+    // (class_transferable), and a task may use an instance of its own.
     for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
         const auto& item = symbol(id);
         if (item.kind != SymbolKind::Function) continue;
-        auto tag = tag_span(item, TagId::NotThreadSafe);
-        for (auto owner = item.owner; !tag && valid(owner) && (symbol(owner).kind == SymbolKind::Class ||
-                                                               is_static_scope(symbol(owner)));
-             owner = symbol(owner).owner) {
-            tag = tag_span(symbol(owner), TagId::NotThreadSafe);
+        if (const auto tag = tag_span(item, TagId::NotThreadSafe)) {
+            unsafe_.emplace(id, Reason{"is marked #NotThreadSafe", *tag, no_symbol});
         }
-        if (tag) unsafe_.emplace(id, Reason{"is marked #NotThreadSafe", *tag, no_symbol});
     }
     for (const auto& body : program_.bodies) {
         auto& out = edges[body.owner];
@@ -539,6 +557,14 @@ void TaskAnalysis::summarize() {
     };
     propagate(unsafe_);
     propagate(impure_);
+}
+
+SymbolId TaskAnalysis::not_thread_safe_class(SymbolId cls) const {
+    std::set<SymbolId> seen;
+    for (auto scope = cls; valid(scope) && seen.insert(scope).second; scope = symbol(scope).base) {
+        if (symbol(scope).kind == SymbolKind::Class && has_tag(symbol(scope), TagId::NotThreadSafe)) return scope;
+    }
+    return no_symbol;
 }
 
 bool TaskAnalysis::library_code(SymbolId owner) const {

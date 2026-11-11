@@ -1246,7 +1246,60 @@ check_rejection(tag-immutable-base "let B = class (\n    export let x: int32 = 0
 check_rejection(tag-synchronized-interface "let I = interface (\n    #Synchronized\n    let f = func() -> int32;\n);" "3:5" "error\\[E0921\\].*interface method")
 check_rejection(tag-synchronized-static "let C = class (\n    #Synchronized\n    export static let f = func() -> int32 {\n        return 1;\n    };\n);" "3:5" "error\\[E0921\\]: #Synchronized method 'f' is static")
 check_rejection(tag-thread-safe-class "#ThreadSafe\nlet C = class (\n    export let x: int32 = 0;\n);" "2:1" "error\\[E0609\\]: #ThreadSafe class 'C' cannot be shared between tasks")
-check_rejection(tag-not-thread-safe-class "#NotThreadSafe\n#Immutable\nlet P = class (\n    export const x: int32 = 0;\n);\nlet use = func(p: P) {};\nlet run = func() {\n    scope {\n        spawn use(new P());\n    }\n};" "10:19" "error\\[E0602\\]: a value of type P is not transferable")
+check_rejection(tag-not-thread-safe-class "#NotThreadSafe\nlet P = class (\n    export const x: int32 = 0;\n);\nlet use = func(p: P) {};\nlet run = func() {\n    scope {\n        spawn use(new P());\n    }\n};" "9:19" "error\\[E0602\\]: a value of type P is not transferable")
+# #NotThreadSafe on a class keeps its instances in one task: it cannot be
+# #Immutable or #Synchronized (E0907), and no class that extends it can be
+# #ThreadSafe (E0610).
+check_rejection(tag-not-thread-safe-immutable "#NotThreadSafe\n#Immutable\nlet P = class (\n    export const x: int32 = 0;\n);" "3:1" "error\\[E0907\\]: #Immutable conflicts with #NotThreadSafe")
+check_rejection(tag-not-thread-safe-synchronized "#[NotThreadSafe, Synchronized]\nlet P = class (\n    let x: int32 = 0;\n);" "2:18" "error\\[E0907\\]: #Synchronized conflicts with #NotThreadSafe")
+check_rejection(tag-not-thread-safe-subclass "#NotThreadSafe\nlet B = class (\n    export let x: int32 = 0;\n);\n#ThreadSafe\nlet C = class:B ();" "6:1" "error\\[E0610\\]: class 'C' is #NotThreadSafe and cannot be #ThreadSafe")
+# A task may allocate and use an instance of a #NotThreadSafe class of its
+# own, and the task that runs main may call a #NotThreadSafe function in a
+# program that spawns other tasks: only what a spawned call or a parallel
+# worker can reach is restricted.
+file(WRITE "${TEST_DIR}/tag-not-thread-safe-own.nra" [=[
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+#NotThreadSafe
+let Bag = class (
+    let count: int64 = 0;
+
+    export let add = func(amount: int64) -> int64 {
+        count = count + amount;
+        return count;
+    };
+);
+
+#NotThreadSafe
+let report = func(value: int64) {
+    console.print_line(value.to_string());
+};
+
+let work = func(n: int64) -> int64 {
+    let bag = new Bag();
+    bag.add(n);
+    return bag.add(n);
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let mine = new Bag();
+        mine.add(1);
+        scope {
+            let task = spawn work(3);
+            report(task.join());
+        }
+        report(mine.add(1));
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+run_success(unused build tag-not-thread-safe-own.nra -o tag-not-thread-safe-own.nvr)
+run_success(own_output run tag-not-thread-safe-own.nvr)
+if(NOT own_output STREQUAL "6\n2\n")
+    message(FATAL_ERROR "Unexpected output of tag-not-thread-safe-own.nvr: ${own_output}")
+endif()
 check_rejection(tag-final-sealed "#[Final, Sealed]\nlet C = class ();" "2:10" "#Sealed conflicts with #Final")
 check_rejection(tag-hot-cold "#Hot\n#Cold\nlet f = func() -> int32 {\n    return 1;\n};" "3:1" "#Cold conflicts with #Hot")
 check_rejection(tag-discard-name "#Stable\nlet _ = 3;" "2:1" "tags cannot apply to '_'")

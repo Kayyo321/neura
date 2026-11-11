@@ -82,7 +82,7 @@ The compiler validates the tags of every declaration while it lowers the program
 | Each argument exists and is in its place; each required argument is given; none is given twice. | `E0902`, `E0903`, `E0904` |
 | Each argument has the type of its parameter. | `E0905` |
 | A tag that does not repeat is given once. | `E0906` |
-| No two tags contradict each other: `Inline` and `NoInline`, `Final` and `Sealed`, `Hot` and `Cold`, `Likely` and `Unlikely`, `Stable` and `Experimental`, `ThreadSafe` and `NotThreadSafe`, `Blocking` and `NonBlocking`, `Unroll` and `NoUnroll`, or an `Allow` and a `Deny` of the same warning. | `E0907` |
+| No two tags contradict each other: `Inline` and `NoInline`, `Final` and `Sealed`, `Hot` and `Cold`, `Likely` and `Unlikely`, `Stable` and `Experimental`, `ThreadSafe` and `NotThreadSafe`, `Immutable` and `NotThreadSafe`, `Synchronized` and `NotThreadSafe`, `Blocking` and `NonBlocking`, `Unroll` and `NoUnroll`, or an `Allow` and a `Deny` of the same warning. | `E0907` |
 | The tag is not reserved. | `E0908` |
 | An `Allow` or `Deny` names a warning that exists. | `E0915` |
 
@@ -180,7 +180,12 @@ The optimizer uses the property the compiler infers, so an untagged pure functio
 
 `#ThreadSafe` on a function or method says that it is [task-safe](Concurrency.md#52-task-safe-calls). The compiler checks it with the same analysis as a `spawn`, and a function that is not task-safe is error `E0608` at the tag, with the call chain that a spawn of it would report. `#ThreadSafe` on a class says that tasks may share its instances and call every exported method: the class is `#Immutable` or a [monitor](Concurrency.md#81-monitors) (otherwise `E0609`, with a label at the member that breaks the rule), and each exported method is task-safe (`E0608`).
 
-`#NotThreadSafe` declines that promise. A spawned call or a parallel worker that reaches a `#NotThreadSafe` function, or a method of a `#NotThreadSafe` class, is error `E0601` with a label at the tag, even when the analysis would allow it, and an instance of a `#NotThreadSafe` class cannot be given to another task (`E0602`), even when the class is `#Immutable` or a monitor. The root task may use both freely. Both tags are persisted in `.nir` files, so they hold for the programs that import a module.
+`#NotThreadSafe` declines that promise, with a meaning that depends on what it marks:
+
+- On a function or method, the author declines to promise task safety: a spawned call or a parallel worker that can reach it is error `E0601` with a label at the tag, even when the analysis would allow it. *Can reach* is the task-safety analysis's union ([Concurrency](Concurrency.md#52-task-safe-calls)): the call a `spawn` starts or a parallel map's worker, and everything it can call transitively, through every implementation a virtual call can run and every function value of a called type that the program creates. The task that runs `main` is not checked, so it may call the function even in a program that spawns other tasks, and so may anything that only `main` reaches. A `#ThreadSafe` function or method that can reach it is `E0608`.
+- On a class, its instances stay in the task that holds them: an instance of the class, or of a class that extends it, is never transferable, so it cannot be given to another task (`E0602`, with a label at the tag), sent on a channel, or shared as a monitor. A task may allocate an instance of its own and call its methods, which are task-safe or not by the usual rule. The class cannot also promise sharing: `#Immutable` or `#Synchronized` on the same declaration is `E0907`, and a `#Synchronized` method of the class or of a subclass, or `#ThreadSafe` or `#Immutable` on a subclass, is `E0610`.
+
+Both tags are persisted in `.nir` files, so they hold for the programs that import a module.
 
 ### Synchronized
 
@@ -289,7 +294,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | Tag | Applies to | Status | Meaning |
 | --- | --- | --- | --- |
 | `#ThreadSafe` | classes, functions, methods | implemented | Checked: the function is task-safe (E0608), or tasks may share the class's instances and call its exported methods (E0609). |
-| `#NotThreadSafe` | classes, functions, methods | implemented | No spawned task or parallel worker may call it (E0601) or receive the class's instances (E0602). |
+| `#NotThreadSafe` | classes, functions, methods | implemented | No spawned task or parallel worker may call the function (E0601); no task may give the class's instances to another (E0602), and the class cannot be shared (E0610). |
 | `#Synchronized` | classes, methods | implemented | The method, or every exported method of the class, runs under its instance's re-entrant guard (E0921, E0922). |
 | `#Isolated` | functions, methods | reserved | Touches no state shared with other tasks. Instead: `neura check --task-safety` reports which functions can be a parallel worker. |
 | `#Atomic` | fields, file and module bindings | reserved | Reads and writes are indivisible across tasks. Instead: use Std.Concurrent.AtomicInt64 or a Guarded. |

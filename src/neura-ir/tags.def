@@ -128,7 +128,7 @@ NEURA_TAG(CompileTime, 36, Optimization, Callables | Values, reserved, false, ""
 NEURA_TAG(ThreadSafe, 37, Concurrency, Callables | Class, implemented, false, "", "0.2.0",
           "checked: the function is task-safe, or tasks may share the class's instances and call its methods", "")
 NEURA_TAG(NotThreadSafe, 38, Concurrency, Callables | Class, implemented, false, "", "0.2.0",
-          "no spawned task or parallel worker may call it or receive the class's instances", "")
+          "no spawned task or parallel worker may call it; no task may give the class's instances to another", "")
 NEURA_TAG(Synchronized, 39, Concurrency, Method | Class, implemented, false, "", "0.2.0",
           "the method, or every exported method of the class, runs under its instance's re-entrant guard", "")
 NEURA_TAG(Isolated, 40, Concurrency, Callables, reserved, false, "", "0.2.0",
