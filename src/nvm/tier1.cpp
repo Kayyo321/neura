@@ -96,6 +96,21 @@ std::string describe(const TierStatistics& s) {
         top(s.region_deopts, "deoptimized");
         top(s.region_leaves, "left");
     }
+    if (!s.jit_mode.empty()) {
+        if (!s.jit_off.empty() && s.jit_compiled == 0 && s.jit_failures.empty()) {
+            out += "tier: jit " + s.jit_mode + ", off: " + s.jit_off + "\n";
+        } else {
+            std::uint64_t failed = 0;
+            for (const auto& [reason, count] : s.jit_failures) failed += count;
+            out += "tier: jit " + s.jit_mode + ": " + std::to_string(s.jit_compiled) + " regions compiled (" +
+                   std::to_string(s.jit_bytes) + " bytes of code), " + std::to_string(failed) +
+                   " on the interpreter; entries native " + std::to_string(r.native) + ", interpreted " +
+                   std::to_string(r.entries - r.native) + "\n";
+            for (const auto& [reason, count] : s.jit_failures) {
+                out += "tier: jit fallback " + std::to_string(count) + ": " + reason + "\n";
+            }
+        }
+    }
     for (const auto& [reason, count] : s.rejections) {
         out += "tier: not lifted " + std::to_string(count) + ": " + reason + "\n";
     }

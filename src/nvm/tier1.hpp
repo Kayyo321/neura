@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jit/jit.hpp"
 #include "lift/hints.hpp"
 #include "lift/lift.hpp"
 #include "lift/lowered_block.hpp"
@@ -97,6 +98,9 @@ struct RegionCounts {
     std::uint64_t references = 0;
     std::uint64_t state_traps = 0;
     std::uint64_t exits = 0;
+    // Entries that ran the region's native code (the rest ran the region
+    // interpreter).
+    std::uint64_t native = 0;
 };
 
 struct TierStatistics {
@@ -135,6 +139,15 @@ struct TierStatistics {
     // Blocks outside a region that regions left to most, by (function,
     // block).
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> region_leaves;
+    // The native code generator (src/jit): the mode of the runs (empty when
+    // none ran at tier 2), why it stayed off, the regions compiled and
+    // their bytes of code, and the regions it could not compile, by reason:
+    // those run on the region interpreter.
+    std::string jit_mode;
+    std::string jit_off;
+    std::uint64_t jit_compiled = 0;
+    std::uint64_t jit_bytes = 0;
+    std::map<std::string, std::uint64_t> jit_failures;
 };
 
 // The lifted blocks of one validated image, shared by every execution of it:
@@ -200,6 +213,14 @@ public:
                            const std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>& deopts,
                            const std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>& leaves);
 
+    // The native code of a region (src/jit), compiled when first asked for,
+    // or null when it could not be compiled (remembered, and the region
+    // runs on the interpreter). Published code is immutable and lives as
+    // long as the cache.
+    const jit::Program* native(const tier2::Region& region);
+    // Records the native-code mode of a run at tier 2, for the statistics.
+    void note_jit(jit::Mode mode, const jit::Availability& availability);
+
     void add_steps(const TierSteps& steps);
     void add_reference_steps(std::uint32_t function, std::uint32_t block, std::uint64_t steps);
     TierStatistics statistics() const;
@@ -251,6 +272,8 @@ private:
     std::vector<RegionEntry> regions_;
     // Regions replaced by a refresh, which runs may still hold.
     std::vector<std::shared_ptr<const tier2::Region>> retired_regions_;
+    // Native code by region; null where compilation failed.
+    std::map<const tier2::Region*, std::unique_ptr<jit::Program>> native_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> region_counts_;
     std::chrono::steady_clock::duration search_spent_{};
     std::chrono::steady_clock::duration hint_spent_{};

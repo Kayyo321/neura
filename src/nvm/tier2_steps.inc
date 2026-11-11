@@ -106,49 +106,129 @@
             auto& plan = block_plan(frame.function, frame.block);
             const auto* region = region_for(frame.function, frame.block, plan);
             if (!region) break;
-            const auto outcome = tier_check_ ? checked_region(*region, allowance - total)
-                                             : run_region(*region, allowance - total);
+            const auto* native = jit_ ? native_code(plan) : nullptr;
+            const auto outcome = tier_check_ ? checked_region(*region, allowance - total, native)
+                                             : run_region(*region, allowance - total, native);
             total += outcome.blocks;
             if (outcome.deoptimized) break;
         }
         return total;
     }
 
-    RegionOutcome run_region(const tier2::Region& region, std::uint64_t allowance) {
-        auto frame = frames_.back();
+    // The native code of the plan's region, compiled by the cache the first
+    // time any run asks (src/jit), or null: the region interpreter runs it.
+    const jit::Program* native_code(BlockPlan& plan) {
+        if (plan.native_region != plan.region) {
+            plan.native = plan.region ? tier_->native(*plan.region) : nullptr;
+            plan.native_region = plan.region;
+        }
+        return plan.native;
+    }
+
+    // The helpers of native code (jit::Context). Each runs the region
+    // interpreter's code for its op and reports a failure the interpreter
+    // deoptimizes for as status 1. An exception other than a Fault cannot
+    // unwind through generated code: the helper keeps it and reports status
+    // 2, and run_native rethrows it where the interpreter's exception would
+    // have left the region, before any write-back.
+    static std::uint64_t jit_check_reference(jit::Context* context, std::uint32_t type_index, std::uint64_t bits,
+                                             std::uint64_t) {
+        auto& self = *static_cast<State*>(context->owner);
+        try {
+            if (!(self.type(type_index).kind == nvr::TypeKind::Object && bits == 0 &&
+                  self.image_.minor_version >= 2)) {
+                self.typed_entry(bits, type_index);
+            }
+            context->status = 0;
+        } catch (const Fault&) {
+            context->status = 1;
+        } catch (...) {
+            self.region_exception_ = std::current_exception();
+            context->status = 2;
+        }
+        return 0;
+    }
+
+    static std::uint64_t jit_state(jit::Context* context, std::uint32_t pc, std::uint64_t, std::uint64_t) {
+        auto& self = *static_cast<State*>(context->owner);
+        const auto& region = *context->region;
+        const auto& op = region.code[pc];
+        try {
+            auto& arguments = self.region_arguments_;
+            arguments.clear();
+            for (unsigned i = 0; i < op.width; ++i) {
+                arguments.push_back(context->registers[region.operands[op.other + i]]);
+            }
+            const auto result = self.state(*region.exits[op.index], arguments);
+            context->status = 0;
+            return result;
+        } catch (const Fault&) {
+            context->status = 1;
+        } catch (...) {
+            self.region_exception_ = std::current_exception();
+            context->status = 2;
+        }
+        return 0;
+    }
+
+    static std::uint64_t jit_poll(jit::Context* context, std::uint32_t, std::uint64_t, std::uint64_t) {
+        auto& self = *static_cast<State*>(context->owner);
+        try {
+            // As poll(), with the quantum out of reach (Budget).
+            self.serve_dump_request();
+            ++self.scheduler_->polls;
+            context->status = 0;
+        } catch (...) {
+            self.region_exception_ = std::current_exception();
+            context->status = 2;
+        }
+        return 0;
+    }
+
+    // The region's native code: the region program compiled, with the same
+    // ending as interpret_region's.
+    void run_native(const jit::Program& native, const tier2::Region& region, std::uint64_t allowance,
+                    std::uint64_t& done, std::uint32_t& next_block, bool& deoptimized) {
+        ++region_counts_.native;
+        auto& context = jit_context_;
+        context.registers = region_registers_.data();
+        context.initialized = region_initialized_.data();
+        context.steps = &steps_;
+        context.max_steps = limits_.max_steps;
+        context.allowance = allowance;
+        context.polls = scheduler_ ? &scheduler_->polls : nullptr;
+        context.quantum = limits_.task_quantum;
+        context.done = 0;
+        context.next_block = 0;
+        context.outcome = 0;
+        context.status = 0;
+        context.region = &region;
+        native.run(context);
+        done = context.done;
+        next_block = context.next_block;
+        deoptimized = true;
+        switch (static_cast<jit::Outcome>(context.outcome)) {
+        case jit::Outcome::Leave:
+            deoptimized = false;
+            ++region_counts_.leaves;
+            break;
+        case jit::Outcome::Budget: ++region_counts_.budget; break;
+        case jit::Outcome::Checks: ++region_counts_.checks; break;
+        case jit::Outcome::Selectors: ++region_counts_.selectors; break;
+        case jit::Outcome::References: ++region_counts_.references; break;
+        case jit::Outcome::StateTraps: ++region_counts_.state_traps; break;
+        case jit::Outcome::Exits: ++region_counts_.exits; break;
+        case jit::Outcome::Exception: std::rethrow_exception(std::exchange(region_exception_, nullptr));
+        }
+    }
+
+    // The region interpreter: the region program, op by op.
+    void interpret_region(const tier2::Region& region, std::uint64_t allowance, std::uint64_t& done,
+                          std::uint32_t& next_block, bool& deoptimized) {
         auto* regs = region_registers_.data();
         auto* init = region_initialized_.data();
-        const auto slot_count = region.slots.size();
-        for (std::size_t r = 0; r < slot_count; ++r) {
-            regs[r] = frame.slots[region.slots[r]];
-            init[r] = frame.initialized[region.slots[r]];
-        }
-        for (const auto r : region.entry_reads) {
-            if (!init[r]) {
-                ++region_counts_.refused;
-                return {0, true};
-            }
-        }
-        for (const auto& [r, width] : region.entry_canonical) {
-            if ((regs[r] >> width) != 0) {
-                ++region_counts_.refused;
-                return {0, true};
-            }
-        }
-        if (region.uses_float && !lift::float_environment_is_default()) {
-            ++region_counts_.refused;
-            return {0, true};
-        }
-        for (const auto& constant : region.constants) {
-            regs[constant.reg] = const_values_[constant.index] & lift::mask_of(constant.width);
-        }
-        for (const auto& [r, value] : region.immediates) regs[r] = value;
-        ++region_counts_.entries;
         const auto* code = region.code.data();
-        std::uint64_t done = 0;
         std::uint32_t pc = 0;
-        std::uint32_t next_block = 0;
-        bool deoptimized = false;
         const auto deopt = [&](std::uint32_t block, std::uint64_t& counter) {
             next_block = block;
             deoptimized = true;
@@ -262,6 +342,46 @@
                 break;
             }
         }
+    }
+
+    RegionOutcome run_region(const tier2::Region& region, std::uint64_t allowance, const jit::Program* native) {
+        auto frame = frames_.back();
+        auto* regs = region_registers_.data();
+        auto* init = region_initialized_.data();
+        const auto slot_count = region.slots.size();
+        for (std::size_t r = 0; r < slot_count; ++r) {
+            regs[r] = frame.slots[region.slots[r]];
+            init[r] = frame.initialized[region.slots[r]];
+        }
+        for (const auto r : region.entry_reads) {
+            if (!init[r]) {
+                ++region_counts_.refused;
+                return {0, true};
+            }
+        }
+        for (const auto& [r, width] : region.entry_canonical) {
+            if ((regs[r] >> width) != 0) {
+                ++region_counts_.refused;
+                return {0, true};
+            }
+        }
+        if (region.uses_float && !lift::float_environment_is_default()) {
+            ++region_counts_.refused;
+            return {0, true};
+        }
+        for (const auto& constant : region.constants) {
+            regs[constant.reg] = const_values_[constant.index] & lift::mask_of(constant.width);
+        }
+        for (const auto& [r, value] : region.immediates) regs[r] = value;
+        ++region_counts_.entries;
+        std::uint64_t done = 0;
+        std::uint32_t next_block = 0;
+        bool deoptimized = false;
+        if (native) {
+            run_native(*native, region, allowance, done, next_block, deoptimized);
+        } else {
+            interpret_region(region, allowance, done, next_block, deoptimized);
+        }
         for (const auto r : region.written) {
             frame.slots[region.slots[r]] = regs[r];
             frame.initialized[region.slots[r]] = init[r];
@@ -306,7 +426,8 @@
     // results must agree: the block reached, every slot and flag of the
     // frame, the steps and polls, and the writes to heap and global storage
     // in order with their values. Reads are covered by the slots they feed.
-    RegionOutcome checked_region(const tier2::Region& region, std::uint64_t allowance) {
+    // It checks a region's native code (src/jit) the same way.
+    RegionOutcome checked_region(const tier2::Region& region, std::uint64_t allowance, const jit::Program* native) {
         auto before = frames_.back();
         const auto function = before.function;
         const auto depth = frames_.size();
@@ -321,7 +442,7 @@
 
         std::vector<HeapWrite> region_writes;
         heap_log_ = &region_writes;
-        const auto outcome = run_region(region, allowance);
+        const auto outcome = run_region(region, allowance, native);
         heap_log_ = nullptr;
 
         auto frame = frames_.back();
@@ -378,9 +499,10 @@
         }
         if (!report.empty()) {
             std::fprintf(stderr,
-                         "neura: NEURA_TIER_CHECK: a region differs from tier 1 in function %u (entry block %u, "
+                         "neura: NEURA_TIER_CHECK: a region%s differs from tier 1 in function %u (entry block %u, "
                          "%llu blocks): %s\n%s",
-                         region.function, region.entry, static_cast<unsigned long long>(outcome.blocks),
+                         native ? " (native code)" : "", region.function, region.entry,
+                         static_cast<unsigned long long>(outcome.blocks),
                          report.c_str(), tier2::describe(region).c_str());
             std::abort();
         }

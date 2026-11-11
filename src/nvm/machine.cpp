@@ -22,6 +22,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <deque>
+#include <exception>
 #include <limits>
 #include <map>
 #include <optional>
@@ -370,6 +371,21 @@ public:
         tier_ = limits_.tier_cache;
         tier_check_ = tier_check_enabled();
         tier2_ = std::min(limits_.tier, tier_ceiling()) >= 2;
+        // Native code exists only at tier 2 (docs/runtime/NVM.md, "Native
+        // compilation"). --jit=on fails here, before the run starts, when
+        // the platform cannot run it.
+        if (tier2_) {
+            const auto mode = jit::combine(limits_.jit, jit::environment_mode());
+            const auto available = jit::availability(mode);
+            if (!available.error.empty()) throw std::invalid_argument(available.error);
+            jit_ = available.enabled;
+            tier_->note_jit(mode, available);
+            jit_context_.owner = this;
+            jit_context_.lift = jit::evaluate_helper;
+            jit_context_.check_reference = &State::jit_check_reference;
+            jit_context_.state = &State::jit_state;
+            jit_context_.poll = &State::jit_poll;
+        }
     }
 
     // A concurrent image needs a positive quantum; reject it before any run state exists.
@@ -2824,6 +2840,9 @@ private:
         RegionState region_state = RegionState::Unknown;
         std::uint64_t region_threshold = 0;
         const tier2::Region* region = nullptr;
+        // Its native code (src/jit), or null, for `native_region`.
+        const tier2::Region* native_region = nullptr;
+        const jit::Program* native = nullptr;
         // --tier-stats: steps of the region entered here, and regions that
         // deoptimized at or left to this block.
         std::uint64_t region_steps = 0;
@@ -3959,6 +3978,12 @@ private:
     std::vector<std::uint8_t> region_initialized_;
     std::vector<std::uint64_t> region_arguments_;
     RegionCounts region_counts_;
+    // Native code (src/jit): whether regions run it, the context it reads
+    // and writes, and an exception a helper caught, rethrown when the code
+    // returns.
+    bool jit_ = false;
+    jit::Context jit_context_;
+    std::exception_ptr region_exception_;
     // NEURA_TIER_CHECK=1: the heap and global writes of state operations,
     // in order, while a region and its tier-1 replay run.
     std::vector<HeapWrite>* heap_log_ = nullptr;

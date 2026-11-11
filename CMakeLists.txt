@@ -98,6 +98,12 @@ set(neura_nvm_sources
     src/nvm/tier2.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
+    # The native code generator of tier 2 (docs/runtime/NVM.md, "Native
+    # compilation"): part of the runtime, with no dependency of its own.
+    src/jit/aarch64.cpp
+    src/jit/compiler.cpp
+    src/jit/jit.cpp
+    src/jit/x86_64.cpp
 )
 add_library(neura_nvm STATIC ${neura_nvm_sources})
 target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift)
