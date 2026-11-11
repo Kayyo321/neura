@@ -1,4 +1,5 @@
 #include "aggregate.hpp"
+#include "attributes.hpp"
 #include "control_flow.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
@@ -250,8 +251,33 @@ private:
     struct ExpectedOrigin {
         Span span;
         std::string text;
+        // The written annotation that gives the expected type, when known,
+        // and whether the value initializes the binding it annotates. A
+        // target-typed `new` of a fields-only anonymous class takes its
+        // field initializers from such a binding annotation.
+        const TypeSyntax* syntax = nullptr;
+        bool initializes = false;
     };
     std::optional<ExpectedOrigin> expected_origin_;
+    // The origin that value() received for a `new` expression it lowers.
+    std::optional<std::pair<const Expr*, ExpectedOrigin>> new_origin_;
+
+    // Anonymous classes (Types.md, Anonymous classes). A fields-only
+    // class is interned by its fields; any other is one class per written
+    // occurrence. Bodies written as a binding's own annotation may give
+    // field initializers to a fields-only class.
+    std::map<std::string, SymbolId, std::less<>> structural_classes_;
+    std::map<const Declaration*, SymbolId> occurrence_classes_;
+    std::set<const Declaration*> binding_bodies_;
+    std::vector<SymbolId> pending_anonymous_;
+    void mark_binding_annotation(const TypeSyntax& syntax);
+    IrType anonymous_class(const TypeSyntax& syntax, const Context& context);
+    std::string structural_key(SymbolId cls) const;
+    bool structural_class(const IrType& type) const;
+    IrNode construct(const Expr& expr, Context& context, const IrType* expected);
+    IrNode construct_structural(const Expr& expr, Context& context, const IrType& object,
+                                const Declaration* body);
+    IrNode destructure_source(const Statement& stmt, Context& context);
 
     Span name_span(SymbolId id) const;
     void record_names(SymbolId id, const Declaration& decl);
@@ -340,7 +366,7 @@ private:
     IrNode range(const Expr& expr, Context& context, const IrType* expected);
     IrType parameter_type(const Parameter& parameter, const Context& context);
     IrNode pack_argument(const Expr& expr, const IrType& argument, Context& context);
-    IrNode allocate(const Expr& expr, Context& context);
+    IrNode allocate(const Expr& expr, Context& context, const IrType* target = nullptr);
     IrNode binary(const Expr& expr, Context& context, const IrType* expected);
     IrNode comparison_chain(const Expr& expr, Context& context);
     IrNode conditional(const Expr& expr, Context& context, const IrType* expected, bool call_argument);
@@ -990,6 +1016,8 @@ IrType Lowering::type(const TypeSyntax& syntax, const Context& context) {
         std::vector<IrType> signature;
         for (const auto& part : syntax.arguments) signature.push_back(type(part, context));
         result = callable_type(std::move(signature), syntax.span);
+    } else if (syntax.anonymous) {
+        result = anonymous_class(syntax, context);
     } else if (syntax.name == "class") {
         result = symbol(root_class()).type;
     } else if (auto builtin = primitive(syntax.name)) {
@@ -1096,9 +1124,26 @@ bool Lowering::assignable(const IrType& actual, const IrType& expected) const {
 void Lowering::require_type(const IrType& actual, const IrType& expected, const Span& span,
                             const ExpectedOrigin* origin) const {
     if (assignable(actual, expected)) return;
-    auto error = Diagnostic(span, "expected " + describe(expected) + ", got " + describe(actual)).with_code("E0403")
-        .label("expected " + describe(expected) + ", found " + describe(actual));
+    // Two separately compiled modules can each write the same fields.
+    const bool copies = structural_class(actual) && structural_class(expected) && describe(actual) == describe(expected);
+    auto error = copies
+        ? Diagnostic(span, "two separately compiled copies of " + describe(expected) + " are different types")
+              .with_code("E0534").label("this value has the other module's copy")
+              .note("each separately compiled module that writes a fields-only anonymous class has its own copy "
+                    "of it")
+              .help("declare the shape as a named class in one module and use that class in both")
+        : Diagnostic(span, "expected " + describe(expected) + ", got " + describe(actual)).with_code("E0403")
+              .label("expected " + describe(expected) + ", found " + describe(actual));
     if (origin && !origin->span.file.empty()) error.label(origin->span, origin->text);
+    const auto distinct = [&](const IrType& type) {
+        return type.kind == TypeKind::Object && type.symbol < program_.symbols.size() && !structural_class(type) &&
+               has_attribute(symbol(type.symbol), AttributeId::ClassAnonymous);
+    };
+    if (!copies && (distinct(actual) || distinct(expected))) {
+        error.note("an anonymous class with methods, a constructor, a base, or interfaces is a type of its own at "
+                   "each place it is written")
+            .help("declare a named class and use it in both places");
+    }
     throw error;
 }
 
@@ -1443,6 +1488,7 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
         return;
     }
     if (!decl.type) throw Diagnostic(decl.span, "declaration needs a type or initializer").with_code("E0205");
+    if (decl.initializer) mark_binding_annotation(*decl.type);
     auto declared = type(*decl.type, ctx);
     if (declared.kind == TypeKind::Void) throw Diagnostic(decl.span, "a binding cannot have type void")
         .with_code("E0416");
@@ -1458,7 +1504,7 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     }
     symbol(id).type = declared;
     if (decl.initializer) {
-        expected_origin_ = ExpectedOrigin{decl.type->span, "expected because of this type"};
+        expected_origin_ = ExpectedOrigin{decl.type->span, "expected because of this type", &*decl.type, true};
         entries_[id].initializer = value(*decl.initializer, ctx, &declared);
     } else if (decl.static_member && !symbol(id).constant &&
                (declared.kind == TypeKind::Integer || declared.kind == TypeKind::Float ||
@@ -2076,8 +2122,12 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
     for (std::size_t i = 0; i < fixed; ++i) {
         auto expected = substitute(symbol(params[i + leading]).type, replacements);
         const auto& parameter = symbol(params[i + leading]);
-        if (!parameter.span.file.empty())
-            expected_origin_ = ExpectedOrigin{parameter.span, "parameter '" + parameter.name + "' is declared here"};
+        if (!parameter.span.file.empty()) {
+            const auto* function = entries_[target].declaration;
+            const auto index = i + leading;
+            expected_origin_ = ExpectedOrigin{parameter.span, "parameter '" + parameter.name + "' is declared here",
+                function && index < function->parameters.size() ? &function->parameters[index].type : nullptr};
+        }
         call.operands.push_back(value(expr.operands[i + first], context, &expected, true));
     }
     if (!rest) return;
@@ -2384,8 +2434,8 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     return qualifier ? discard_before(std::move(*qualifier), std::move(result)) : std::move(result);
 }
 
-IrNode Lowering::allocate(const Expr& expr, Context& context) {
-    auto object = type(*expr.type, context);
+IrNode Lowering::allocate(const Expr& expr, Context& context, const IrType* target_type) {
+    auto object = target_type ? *target_type : type(*expr.type, context);
     if (object.kind != TypeKind::Object || symbol(object.symbol).kind != SymbolKind::Class)
         throw Diagnostic(expr.span, "new requires a class type").with_code("E0505");
     const auto id = object.symbol;
@@ -2528,9 +2578,12 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
 
     // Lower ordinary expressions once. Contextual literal trees can be
     // checked against each signature without creating bindings or calls.
-    const auto contextual = [](const Expr& input) {
+    // A target-typed `new` is contextual too: it fits a parameter whose type
+    // is a class it can construct, and it is lowered once, for the chosen one.
+    const auto target_typed = [](const Expr& input) { return input.kind == ExprKind::New && !input.type; };
+    const auto contextual = [&](const Expr& input) {
         return numeric_literal(input) || input.kind == ExprKind::Nil ||
-            (input.kind == ExprKind::Collection && literal_tree(input));
+            (input.kind == ExprKind::Collection && literal_tree(input)) || target_typed(input);
     };
     std::vector<std::optional<IrNode>> inputs;
     std::vector<std::optional<IrType>> defaults;
@@ -2540,7 +2593,7 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         defaults.emplace_back();
         if (!contextual(input)) {
             inputs.back() = value(input, context);
-        } else if (input.kind != ExprKind::Nil) {
+        } else if (input.kind != ExprKind::Nil && !target_typed(input)) {
             // Lowered again below with the chosen parameter type.
             SpeculativeDiagnostics speculative;
             try {
@@ -2581,6 +2634,12 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
                 } else {
                     break;
                 }
+            } else if (target_typed(input)) {
+                const auto& object = expected;
+                if (object.kind != TypeKind::Object || symbol(object.symbol).kind != SymbolKind::Class ||
+                    object.symbol == root_class_ || entries_[object.symbol].singleton_instance != no_symbol)
+                    break;
+                rank = Rank::Contextual;
             } else {
                 SpeculativeDiagnostics speculative;
                 try {
@@ -3030,7 +3089,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::Range:
         return range(expr, context, expected);
     case ExprKind::New:
-        return allocate(expr, context);
+        return construct(expr, context, expected);
     case ExprKind::NamedVariant: {
         const auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||
@@ -3081,6 +3140,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
 
 IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
     const auto origin = std::exchange(expected_origin_, std::nullopt);
+    if (expr.kind == ExprKind::New && origin) new_origin_.emplace(&expr, *origin);
     auto result = expression(expr, context, expected, call_argument);
     if (expected && is_primitive_reference(*expected))
         return bind_reference(std::move(result), *expected);
@@ -3625,12 +3685,15 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
 
         std::optional<IrType> declared;
         if (declaration.type) {
+            mark_binding_annotation(*declaration.type);
             declared = type(*declaration.type, context);
             if (declared->kind == TypeKind::Void) {
                 throw Diagnostic(declaration.type->span, "a binding cannot have type void").with_code("E0416");
             }
         }
-        if (declared) expected_origin_ = ExpectedOrigin{declaration.type->span, "expected because of this type"};
+        if (declared)
+            expected_origin_ = ExpectedOrigin{declaration.type->span, "expected because of this type",
+                                              &*declaration.type, true};
         auto initializer = value(*declaration.initializer, context, declared ? &*declared : nullptr);
         auto id = add(SymbolKind::Local, declaration.name, declaration.span, context.owner);
         record_names(id, declaration);
@@ -3758,8 +3821,11 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
                 error.help("declare the result type with '-> T' after the parameters, or return without a value");
                 throw error;
             }
-            if (result_span != result_spans_.end())
-                expected_origin_ = ExpectedOrigin{result_span->second, "expected because of this result type"};
+            if (result_span != result_spans_.end()) {
+                const auto* function = entries_[context.function].declaration;
+                expected_origin_ = ExpectedOrigin{result_span->second, "expected because of this result type",
+                                                  function && function->type ? &*function->type : nullptr};
+            }
             result.operands.push_back(value(stmt.expressions.front(), context, &expected));
             if (scope_bound(result.operands.back().type))
                 throw Diagnostic(result.operands.back().span,
@@ -4061,9 +4127,7 @@ void Lowering::append_statement(std::vector<IrNode>& instructions, const Stateme
 
 void Lowering::destructure(std::vector<IrNode>& instructions, const Statement& stmt, Context& context,
                            const std::vector<SymbolId>* globals) {
-    const auto& initializer = stmt.expressions.front();
-    auto source = initializer.kind == ExprKind::Collection
-        ? tuple(initializer, context, nullptr) : value(initializer, context);
+    auto source = destructure_source(stmt, context);
     const auto tuple_type = source.type;
     if (tuple_type.kind != TypeKind::Tuple || tuple_type.arguments.size() != stmt.bindings.size())
         throw Diagnostic(stmt.span, "destructuring requires a tuple with one element per binding").with_code("E0426");
@@ -4514,6 +4578,14 @@ void Lowering::seed(LinkedImports linked) {
         if (group != no_symbol && symbol(group).kind == SymbolKind::Function)
             entries_[group].overloads.push_back(id);
     }
+    // A fields-only anonymous class from a linked module is the class that
+    // the same fields written here denote. Separately compiled modules that
+    // each wrote it keep their own copies; the first one is used here, and
+    // mixing them is E0534.
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        if (structural_class(symbol(id).type) && symbol(id).type.symbol == id)
+            structural_classes_.emplace(structural_key(id), id);
+    }
 }
 
 IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports linked) {
@@ -4590,12 +4662,349 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
         }
         if (!instructions.empty()) program_.bodies.push_back({id, std::move(instructions)});
     }
+    // Classes written in type positions, including those their own bodies
+    // write.
+    for (std::size_t i = 0; i < pending_anonymous_.size(); ++i) lower_declaration(pending_anonymous_[i]);
     std::set<SymbolId> singletons;
     for (const auto& entry : entries_) {
         if (entry.singleton_instance != no_symbol) singletons.insert(entry.singleton_instance);
     }
     lower_static_initializers(program_, singletons, linked_symbols, linked_bodies);
     return std::move(program_);
+}
+
+// Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
+// ObjectLifecycle.md, Target-typed new).
+
+bool plain_anonymous(const TypeSyntax& syntax) {
+    return syntax.anonymous && syntax.collections.empty() && !syntax.reference;
+}
+
+// A body whose members are all instance fields denotes a structural class.
+bool fields_only(const Declaration& body) {
+    if (body.base || !body.interfaces.empty()) return false;
+    return std::ranges::all_of(body.members, [](const Declaration& member) {
+        return member.kind == DeclKind::Binding && !member.static_member && !member.override_member &&
+               !member.promote_import && !member.cast_target && member.overloads.empty() &&
+               member.name != "_" && member.name != "init" && member.name != "deinit" &&
+               !(member.initializer && member.initializer->kind == ExprKind::Import);
+    });
+}
+
+bool has_type_parameter(const IrType& type) {
+    return type.kind == TypeKind::TypeParameter || std::ranges::any_of(type.arguments, has_type_parameter);
+}
+
+// The identity of a type in a structural key: its symbol, not its name.
+std::string identity_key(const IrType& type) {
+    std::string result = std::to_string(static_cast<int>(type.kind)) + ":" + type.name + "#" +
+                         (type.symbol == no_symbol ? std::string("-") : std::to_string(type.symbol));
+    if (!type.arguments.empty()) {
+        result += "<";
+        for (const auto& argument : type.arguments) result += identity_key(argument) + ",";
+        result += ">";
+    }
+    return result;
+}
+
+std::string field_key(bool constant, const std::string& name, const IrType& type) {
+    return (constant ? "const " : "let ") + name + ":" + identity_key(type) + ";";
+}
+
+Span join_spans(const Span& first, const Span& last) {
+    auto result = first;
+    result.length = last.offset + last.length - first.offset;
+    return result;
+}
+
+void Lowering::mark_binding_annotation(const TypeSyntax& syntax) {
+    if (plain_anonymous(syntax)) binding_bodies_.insert(syntax.anonymous.get());
+}
+
+bool Lowering::structural_class(const IrType& type) const {
+    if (type.kind != TypeKind::Object || type.symbol >= program_.symbols.size()) return false;
+    const auto* found = find_attribute(symbol(type.symbol), AttributeId::ClassAnonymous);
+    return found && found->value.kind == AttributeValueKind::List && !found->value.items.empty() &&
+           found->value.items.front().kind == AttributeValueKind::Bool && found->value.items.front().integer != 0;
+}
+
+std::string Lowering::structural_key(SymbolId cls) const {
+    std::string result;
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        const auto& field = symbol(id);
+        if (field.owner == cls && field.kind == SymbolKind::Field)
+            result += field_key(field.constant, field.name, field.type);
+    }
+    return result;
+}
+
+IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& context) {
+    auto& body = *syntax.anonymous;
+    if (const auto found = occurrence_classes_.find(&body); found != occurrence_classes_.end())
+        return symbol(found->second).type;
+    // The body sees the names of the module or file that encloses it.
+    auto owner = lexical_owner(context);
+    while (owner != no_symbol && symbol(owner).kind != SymbolKind::File &&
+           (symbol(owner).kind != SymbolKind::Module || is_static_scope(symbol(owner))))
+        owner = symbol(owner).owner;
+    const bool structural = fields_only(body);
+    const bool binding = binding_bodies_.contains(&body);
+    std::string fields;
+    std::string key;
+    std::vector<std::pair<const Declaration*, IrType>> resolved;
+    for (const auto& member : body.members) {
+        if (member.kind != DeclKind::Binding || member.static_member || member.cast_target) continue;
+        const auto at = member.name_span.value_or(member.span);
+        if (structural) {
+            if (!member.type)
+                throw Diagnostic(at, "field '" + member.name + "' of a fields-only anonymous class needs a type")
+                    .with_code("E0535")
+                    .label("'" + member.name + "' has no type annotation")
+                    .note("the types of its fields are what identify a fields-only anonymous class")
+                    .help("write the type after the name, as in '" + member.name + ": int'");
+            if (!member.exported)
+                throw Diagnostic(at, "field '" + member.name + "' of a fields-only anonymous class is not exported")
+                    .with_code("E0532")
+                    .label("nothing can read or write '" + member.name + "'")
+                    .note("only the methods of a class can use its unexported fields, and this class has none")
+                    .suggest("export the field",
+                             Span{member.span.file, member.span.line, member.span.column, member.span.offset, 0},
+                             "export ", Applicability::MachineApplicable);
+            if (member.constant)
+                throw Diagnostic(at, "field '" + member.name + "' of a fields-only anonymous class cannot be const")
+                    .with_code("E0536")
+                    .label("declared with 'const'")
+                    .note("'new' gives the fields of a fields-only anonymous class their values after it allocates "
+                          "the object, and only a class's own field initializers can give a const field its value")
+                    .help("declare the field with 'let', or declare a named class for the shape");
+            if (member.initializer && !binding)
+                throw Diagnostic(member.initializer->span,
+                                 "this field initializer of a fields-only anonymous class never runs")
+                    .with_code("E0530")
+                    .label("never evaluated")
+                    .label(syntax.span, "this class is not the annotation of a binding that 'new' initializes")
+                    .note("a fields-only anonymous class takes its field initializers from the annotation of the "
+                          "'let' or 'const' binding that a 'new' initializes; written anywhere else, they would "
+                          "never run")
+                    .help("remove the initializer, and write it where a binding declared with this class is "
+                          "initialized with 'new'");
+        }
+        if (member.type && member.initializer) mark_binding_annotation(*member.type);
+        std::optional<IrType> field;
+        if (member.type) {
+            field = type(*member.type, context);
+            if (has_type_parameter(*field))
+                throw Diagnostic(member.type->span,
+                                 "an anonymous class cannot use a type parameter of an enclosing declaration")
+                    .with_code("E0531")
+                    .label("the type of '" + member.name + "' uses a type parameter")
+                    .note("an anonymous class is not generic, and it is not part of the generic declaration "
+                          "that encloses it")
+                    .help("declare a generic class, as in 'let Box = class<T> ( ... );', and use 'Box<T>' here");
+            if (field->kind == TypeKind::Void)
+                throw Diagnostic(member.type->span, "a field cannot have type void").with_code("E0416");
+        }
+        fields += (fields.empty() ? "" : ", ") + std::string(member.constant ? "const " : "") + member.name +
+                  (field ? ": " + describe(*field) : std::string());
+        if (structural) {
+            key += field_key(member.constant, member.name, *field);
+            resolved.emplace_back(&member, *field);
+        }
+    }
+    auto name = "class(" + fields + ")";
+    if (structural) {
+        if (const auto found = structural_classes_.find(key); found != structural_classes_.end()) {
+            occurrence_classes_.emplace(&body, found->second);
+            return symbol(found->second).type;
+        }
+        auto file = owner;
+        while (file != no_symbol && symbol(file).kind != SymbolKind::File) file = symbol(file).owner;
+        const auto cls = add(SymbolKind::Class, name, body.span, file);
+        symbol(cls).type = {TypeKind::Object, name, cls, {}};
+        symbol(cls).base = root_class();
+        name_spans_.emplace(cls, body.name_span.value_or(body.span));
+        for (const auto& [member, field_type] : resolved) {
+            const auto field = add(SymbolKind::Field, member->name, member->span, cls);
+            symbol(field).type = field_type;
+            symbol(field).constant = member->constant;
+            symbol(field).exported = true;
+            name_spans_.emplace(field, member->name_span.value_or(member->span));
+            if (const auto [earlier, added] = entries_[cls].names.emplace(member->name, field); !added)
+                throw Diagnostic(member->name_span.value_or(member->span),
+                                 "duplicate declaration of '" + member->name + "'")
+                    .with_code("E0302")
+                    .label("'" + member->name + "' is declared again here")
+                    .label(name_span(earlier->second), "'" + member->name + "' is first declared here")
+                    .help("rename one of them");
+        }
+        add_attribute(symbol(cls), AttributeId::ClassAnonymous, anonymous_class_payload(true, name, body.span));
+        structural_classes_.emplace(std::move(key), cls);
+        occurrence_classes_.emplace(&body, cls);
+        return symbol(cls).type;
+    }
+    // Any other body is a class of its own, named after where it is written.
+    auto file_name = std::string_view(body.span.file);
+    if (const auto slash = file_name.find_last_of("/\\"); slash != std::string_view::npos)
+        file_name.remove_prefix(slash + 1);
+    name += "@" + std::string(file_name) + ":" + std::to_string(body.span.line) + ":" +
+            std::to_string(body.span.column);
+    body.name = name;
+    const auto id = declare(body, owner, SymbolKind::Class);
+    entries_[owner].names.erase(name);
+    occurrence_classes_.emplace(&body, id);
+    add_attribute(symbol(id), AttributeId::ClassAnonymous, anonymous_class_payload(false, name, body.span));
+    for (const auto& member : body.members) {
+        if (!member.cast_target) prepare_promotions(member, id);
+    }
+    resolve(id);
+    pending_anonymous_.push_back(id);
+    return symbol(id).type;
+}
+
+IrNode Lowering::construct(const Expr& expr, Context& context, const IrType* expected) {
+    std::optional<ExpectedOrigin> origin;
+    if (new_origin_ && new_origin_->first == &expr) origin = std::move(new_origin_->second);
+    new_origin_.reset();
+    if (expr.type) {
+        // `new class ( ... )()`: the body written here is constructed.
+        mark_binding_annotation(*expr.type);
+        auto object = type(*expr.type, context);
+        if (structural_class(object))
+            return construct_structural(expr, context, object,
+                                        plain_anonymous(*expr.type) ? expr.type->anonymous.get() : nullptr);
+        return allocate(expr, context, &object);
+    }
+    const auto problem = [&]() -> std::string {
+        if (!expected) return {};
+        if (expected->kind == TypeKind::TypeParameter) return "a type parameter";
+        if (expected->kind != TypeKind::Object) return "not a class";
+        if (expected->symbol == root_class_) return "the umbrella type 'class'";
+        if (symbol(expected->symbol).kind == SymbolKind::Interface) return "an interface";
+        if (symbol(expected->symbol).kind != SymbolKind::Class) return "not a class";
+        if (entries_[expected->symbol].singleton_instance != no_symbol) return "a singleton";
+        return {};
+    }();
+    if (!expected || !problem.empty()) {
+        auto error = Diagnostic(expr.span, "target-typed 'new' needs a concrete class type here").with_code("E0420");
+        if (!expected) {
+            error.label("nothing here gives 'new' a type to construct")
+                .note("'new' without a class takes the type that its value must have: the annotation of the "
+                      "binding or field it initializes, the place it is assigned to, the declared result type "
+                      "of a 'return', the parameter of a call argument, or the element type of a typed "
+                      "collection");
+        } else {
+            error.label("this would construct " + describe(*expected) + ", which is " + problem);
+            if (origin && !origin->span.file.empty()) error.label(origin->span, origin->text);
+        }
+        error.help("name the class to construct, as in 'new T(...)'");
+        throw error;
+    }
+    if (structural_class(*expected)) {
+        const Declaration* body = nullptr;
+        if (origin && origin->syntax && plain_anonymous(*origin->syntax)) {
+            const auto found = occurrence_classes_.find(origin->syntax->anonymous.get());
+            if (found != occurrence_classes_.end() && found->second == expected->symbol)
+                body = origin->syntax->anonymous.get();
+        }
+        const bool initialized = body && std::ranges::any_of(body->members, [](const Declaration& member) {
+            return member.initializer.has_value();
+        });
+        if (!body || (initialized && !origin->initializes)) {
+            auto error = Diagnostic(expr.span, "this 'new' cannot tell which field initializers of " +
+                                               describe(*expected) + " to run")
+                .with_code("E0533")
+                .label("constructs a fields-only anonymous class");
+            if (origin && !origin->span.file.empty()) error.label(origin->span, origin->text);
+            error.note("a fields-only anonymous class takes its field initializers from the class body written in "
+                       "the annotation of the 'let' or 'const' binding that 'new' initializes, and here the type "
+                       "arrives without that body");
+            error.help("declare a binding with the class and initialize it with 'new', as in "
+                       "'let value: class ( ... ) = new;', or write the body after 'new', as in "
+                       "'new class ( ... )()'");
+            throw error;
+        }
+        return construct_structural(expr, context, *expected, origin->initializes ? body : nullptr);
+    }
+    return allocate(expr, context, expected);
+}
+
+IrNode Lowering::construct_structural(const Expr& expr, Context& context, const IrType& object,
+                                      const Declaration* body) {
+    auto allocation = allocate(expr, context, &object);
+    if (!body || std::ranges::none_of(body->members, [](const Declaration& member) {
+            return member.initializer.has_value();
+        }))
+        return allocation;
+    // Allocate, then run the initializers of this body in field order.
+    auto result = node(IrOp::ScopedValue, expr.span, object);
+    auto instance = save_temporary(std::move(allocation), result.body, context, "$object");
+    for (const auto& member : body->members) {
+        if (!member.initializer) continue;
+        const auto field = own_member(object.symbol, member.name);
+        auto place = node(IrOp::Field, member.initializer->span, symbol(field).type);
+        place.symbol = field;
+        place.operands.push_back(instance);
+        expected_origin_ = ExpectedOrigin{member.type->span, "expected because of this type", &*member.type, true};
+        auto initial = value(*member.initializer, context, &symbol(field).type);
+        auto store = node(IrOp::Store, member.span);
+        store.operands.push_back(std::move(place));
+        store.operands.push_back(std::move(initial));
+        result.body.push_back(std::move(store));
+    }
+    result.body.push_back(std::move(instance));
+    return result;
+}
+
+IrNode Lowering::destructure_source(const Statement& stmt, Context& context) {
+    const auto names = stmt.bindings.size();
+    const auto names_span = join_spans(stmt.bindings.front().span, stmt.bindings.back().span);
+    const auto names_text = plural(names, "name");
+    const auto* annotation = stmt.binding_type ? &*stmt.binding_type : nullptr;
+    if (annotation && annotation->arguments.size() != names) {
+        throw Diagnostic(annotation->span, "the annotation has " + plural(annotation->arguments.size(), "type") +
+                                           " for " + names_text)
+            .with_code("E0436")
+            .label(plural(annotation->arguments.size(), "type"))
+            .label(names_span, names_text)
+            .help("write one type for each name");
+    }
+    if (stmt.expressions.size() == 1) {
+        const auto& initializer = stmt.expressions.front();
+        if (!annotation) {
+            return initializer.kind == ExprKind::Collection
+                ? tuple(initializer, context, nullptr) : value(initializer, context);
+        }
+        const auto declared = type(*annotation, context);
+        if (initializer.kind == ExprKind::Collection) return tuple(initializer, context, &declared);
+        expected_origin_ = ExpectedOrigin{annotation->span, "expected because of this type", annotation};
+        return value(initializer, context, &declared);
+    }
+    const auto values_span = join_spans(stmt.expressions.front().span, stmt.expressions.back().span);
+    if (stmt.expressions.size() != names) {
+        throw Diagnostic(values_span, plural(stmt.expressions.size(), "value") + " for " + names_text)
+            .with_code("E0436")
+            .label(plural(stmt.expressions.size(), "value"))
+            .label(names_span, names_text)
+            .note("a list of values after '=' gives one value to each name, in order")
+            .help("write one value for each name, or a single tuple value");
+    }
+    // Each value is lowered in order, before any of the names is bound.
+    auto result = node(IrOp::Tuple, values_span, IrType{TypeKind::Tuple, {}, no_symbol, {}});
+    for (std::size_t i = 0; i < names; ++i) {
+        std::optional<IrType> declared;
+        if (annotation) {
+            const auto& element = annotation->arguments[i];
+            mark_binding_annotation(element);
+            declared = type(element, context);
+            if (declared->kind == TypeKind::Void)
+                throw Diagnostic(element.span, "a binding cannot have type void").with_code("E0416");
+            expected_origin_ = ExpectedOrigin{element.span, "expected because of this type", &element, true};
+        }
+        auto element = value(stmt.expressions[i], context, declared ? &*declared : nullptr);
+        result.type.arguments.push_back(declared ? *declared : element.type);
+        result.operands.push_back(std::move(element));
+    }
+    return result;
 }
 
 } // namespace
