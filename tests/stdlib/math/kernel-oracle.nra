@@ -1,0 +1,227 @@
+let math = import:Std.Math.Math;
+let random = import:Std.Random.Random;
+let reference = import:ReferenceMath;
+let test = import:Std.Test;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). Std.Math.Math runs
+// the neura.math.* kernels; ReferenceMath (support/) is the Neura port of
+// fdlibm they replaced, unchanged. The two must agree bit for bit on a fixed
+// edge corpus (signed zeros, infinities, NaNs with and without a payload,
+// subnormals, the limits of the normal range, and the domain and overflow
+// edges of each function) and on seeded random inputs: arbitrary bit
+// patterns and values spread over every binade. The vector tests
+// (math-vector-tests.nra) check both against fdlibm's own results.
+let MathKernelOracle = module (
+    // Bit patterns that every function sees.
+    let edge_bits: uint64[] = [
+        0,                     // +0.0
+        9223372036854775808,   // -0.0
+        9218868437227405312,   // +inf
+        18442240474082181120,  // -inf
+        9221120237041090560,   // the canonical NaN
+        18444492273895866368,  // a negative NaN
+        9218868437227405313,   // a signalling NaN with payload 1
+        9221120237041090567,   // a quiet NaN with a payload
+        1,                     // the smallest subnormal
+        4503599627370495,      // the largest subnormal
+        9227875636482146303,   // the largest negative subnormal
+        4503599627370496,      // the smallest normal
+        9218868437227405311,   // the largest finite value
+        18442240474082181119,  // the most negative finite value
+        4607182418800017408,   // 1.0
+        13830554455654793216,  // -1.0
+        4607182418800017409,   // the next value above 1.0
+        4607182418800017407,   // the next value below 1.0
+        13830554455654793217,  // the next value below -1.0
+        4602678819172646912,   // 0.5
+        4611686018427387904,   // 2.0
+        4605249457297304856,   // pi/4
+        4609753056924675352,   // pi/2
+        4614256656552045848,   // pi
+        4618760256179416344,   // 2 pi
+        4652218415073722368,   // 1024.0
+        4656722014701092864,   // 2048.0
+        4656722014701092865,   // the next value above 2048.0
+        4936209963552724370,   // 1e22
+        6103021453049119613,   // 1e100
+        9199863512903218227,   // 1e307
+        118622047889322841,    // 1e-300
+        4649454530587146735,   // 709.782712893384, near the largest exp argument
+        4649454530587146736,   // the next value, where exp overflows
+        13873137513782915153,  // -745.1332191019411, near the smallest exp argument
+        4294967296,            // a subnormal with only its high word set
+        4336966441157787648,   // 2^-60
+        4877398396442247168,   // 2^60
+        4363988038922010624,   // 2^-54
+        4832362400168542208    // 2^50
+    ];
+
+    // Values for the second argument of a binary function.
+    let second_bits: uint64[] = [
+        0, 9223372036854775808, 9218868437227405312, 18442240474082181120, 9221120237041090560,
+        1, 4607182418800017408, 13830554455654793216, 4602678819172646912, 13826050856027422720,
+        4611686018427387904, 4613937818241073152, 13837309855095848960, 4636737291354636288,
+        4877398396442247168, 4607182418800017409
+    ];
+
+    // Agreement by bit pattern; a failure names the function and the operand bits.
+    let agree = func(name: string, x: uint64, expected: float64, actual: float64) {
+        if (expected.to_bits() != actual.to_bits()) {
+            test.fail(name + " of bits " + x.to_string() + ": reference bits " + expected.to_bits().to_string()
+                + ", kernel bits " + actual.to_bits().to_string());
+        }
+    };
+
+    let agree2 = func(name: string, x: uint64, y: uint64, expected: float64, actual: float64) {
+        if (expected.to_bits() != actual.to_bits()) {
+            test.fail(name + " of bits " + x.to_string() + ", " + y.to_string() + ": reference bits "
+                + expected.to_bits().to_string() + ", kernel bits " + actual.to_bits().to_string());
+        }
+    };
+
+    // Seeded inputs: arbitrary bit patterns, then values whose exponent is
+    // drawn from -40 through 40 binades around 1 (where every function has
+    // ordinary results), each with a random sign.
+    let inputs = func(seed: uint64, count: int) -> uint64[list] {
+        let source = random.seeded(seed);
+        let bits: uint64[list] = [];
+        for (let i = 0; i < count; i++) {
+            bits.append(source.next_uint64());
+            let mantissa = source.next_uint64() & 4503599627370495;
+            let exponent = (1023 - 40 + source.next_int_below(81)) as uint64;
+            let sign: uint64 = source.next_bool() ? 9223372036854775808 : 0;
+            bits.append(sign | (exponent << 52) | mantissa);
+        }
+        return bits;
+    };
+
+    let check_unary = func(name: string, kernel: func(float64) -> float64, oracle: func(float64) -> float64,
+                           seed: uint64) {
+        for (let x in edge_bits) {
+            let value = float64.from_bits(x);
+            agree(name, x, oracle(value), kernel(value));
+        }
+        for (let x in inputs(seed, 48)) {
+            let value = float64.from_bits(x);
+            agree(name, x, oracle(value), kernel(value));
+        }
+    };
+
+    let check_binary = func(name: string, kernel: func(float64, float64) -> float64,
+                            oracle: func(float64, float64) -> float64, seed: uint64) {
+        for (let x in edge_bits) {
+            for (let y in second_bits) {
+                let [a, b] = float64.from_bits(x), float64.from_bits(y);
+                agree2(name, x, y, oracle(a, b), kernel(a, b));
+                agree2(name, y, x, oracle(b, a), kernel(b, a));
+            }
+        }
+        last firsts = inputs(seed, 48);
+        last seconds = inputs(seed + 1, 48);
+        for (let i = 0; i < firsts.length; i++) {
+            let [a, b] = float64.from_bits(firsts[i]), float64.from_bits(seconds[i]);
+            agree2(name, firsts[i], seconds[i], oracle(a, b), kernel(a, b));
+        }
+    };
+
+    export let test_sqrt = func {
+        check_unary("sqrt", math.sqrt, reference.sqrt, 1);
+    };
+
+    export let test_cbrt = func {
+        check_unary("cbrt", math.cbrt, reference.cbrt, 2);
+    };
+
+    export let test_hypot = func {
+        check_binary("hypot", math.hypot, reference.hypot, 3);
+    };
+
+    export let test_exp = func {
+        check_unary("exp", math.exp, reference.exp, 4);
+    };
+
+    export let test_expm1 = func {
+        check_unary("expm1", math.expm1, reference.expm1, 5);
+    };
+
+    export let test_log = func {
+        check_unary("log", math.log, reference.log, 6);
+    };
+
+    export let test_log1p = func {
+        check_unary("log1p", math.log1p, reference.log1p, 7);
+    };
+
+    export let test_log10 = func {
+        check_unary("log10", math.log10, reference.log10, 8);
+    };
+
+    export let test_log2 = func {
+        check_unary("log2", math.log2, reference.log2, 9);
+    };
+
+    export let test_pow = func {
+        check_binary("pow", math.pow, reference.pow, 10);
+    };
+
+    export let test_sin = func {
+        check_unary("sin", math.sin, reference.sin, 11);
+    };
+
+    export let test_cos = func {
+        check_unary("cos", math.cos, reference.cos, 12);
+    };
+
+    export let test_tan = func {
+        check_unary("tan", math.tan, reference.tan, 13);
+    };
+
+    export let test_asin = func {
+        check_unary("asin", math.asin, reference.asin, 14);
+    };
+
+    export let test_acos = func {
+        check_unary("acos", math.acos, reference.acos, 15);
+    };
+
+    export let test_atan = func {
+        check_unary("atan", math.atan, reference.atan, 16);
+    };
+
+    export let test_atan2 = func {
+        check_binary("atan2", math.atan2, reference.atan2, 17);
+    };
+
+    export let test_sinh = func {
+        check_unary("sinh", math.sinh, reference.sinh, 18);
+    };
+
+    export let test_cosh = func {
+        check_unary("cosh", math.cosh, reference.cosh, 19);
+    };
+
+    export let test_tanh = func {
+        check_unary("tanh", math.tanh, reference.tanh, 20);
+    };
+
+    export let test_to_radians = func {
+        check_unary("to_radians", math.to_radians, reference.to_radians, 21);
+    };
+
+    export let test_to_degrees = func {
+        check_unary("to_degrees", math.to_degrees, reference.to_degrees, 22);
+    };
+
+    // Large arguments of the trigonometric functions take the multi-word
+    // reduction of k_rem_pio2.c: every binade from 2^20 to 2^1023.
+    export let test_trig_reduction = func {
+        let source = random.seeded(23);
+        for (let exponent = 1043; exponent < 2047; exponent += 7) {
+            let x = ((exponent as uint64) << 52) | (source.next_uint64() & 4503599627370495);
+            let value = float64.from_bits(x);
+            agree("sin", x, reference.sin(value), math.sin(value));
+            agree("cos", x, reference.cos(value), math.cos(value));
+            agree("tan", x, reference.tan(value), math.tan(value));
+        }
+    };
+);
