@@ -1420,6 +1420,10 @@ private:
         return position;
     }
 
+    // The reference is into heap_.entries, a vector: any allocation, and so
+    // any evaluated call or method, can move the entries and invalidate it.
+    // Take it only after every operand is evaluated, and read the entry again
+    // after calling back into the evaluator.
     HeapEntry& entry(const Value& value, const IrNode& node) {
         if (value.kind == Value::Kind::Reference && value.handle == nil_handle) {
             fault(node, "nil class reference");
