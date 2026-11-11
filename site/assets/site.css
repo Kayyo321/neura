@@ -46,7 +46,14 @@
   --raised: #121017;
   --rule: #2d2a32;
   --quiet: #98929d;
-  --wordmark: #1a171f;
+
+  /* The closing poster's panel, which the light theme prints in its dark blue. */
+  --poster-ground: var(--ground);
+  --poster-text: var(--pale);
+  --poster-accent: var(--ink);
+  --shadow: rgb(0 0 0 / 0.45);
+  /* The logo's color: the reading color on the dark page, the logo's own slate on the light one. */
+  --logo-color: var(--pale);
 
   /* Three voices: tall headlines, wide reading text, condensed capitals for labels. Code has its own face. */
   --display: "Big Shoulders", "Arial Narrow", "Roboto Condensed", sans-serif;
@@ -63,6 +70,27 @@
 
   color-scheme: dark;
   scrollbar-color: var(--rule) var(--ground);
+}
+
+/* The light theme, for a reader whose system or browser asks for one: a blueprint. Paper, dark blue text, and a
+   dark gritty blue for the plates and the field around the front page, with the logo in its own slate. The plates
+   have light versions in assets/plates/light/ (artwork/site/plates.py). */
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f2f1ee;
+    --pale: #0f1460;
+    --ink: #1f29c9;
+    --blue: #768092;
+    --raised: #e8e7e3;
+    --rule: #cfd0d8;
+    --quiet: #4a5170;
+    --poster-ground: #161bb4;
+    --poster-text: #f2f1ee;
+    --poster-accent: #b9c2ff;
+    --shadow: rgb(15 20 96 / 0.18);
+    --logo-color: #768092;
+    color-scheme: light;
+  }
 }
 
 *,
@@ -112,7 +140,8 @@ body.front::after {
 }
 
 img,
-svg {
+svg,
+picture {
   display: block;
   max-width: 100%;
 }
@@ -297,7 +326,7 @@ figcaption,
   display: block;
   width: var(--logo, 7.5rem);
   aspect-ratio: 5 / 4;
-  background-color: var(--pale);
+  background-color: var(--logo-color);
   -webkit-mask: url("logo-mask.png") center / contain no-repeat;
   mask: url("logo-mask.png") center / contain no-repeat;
 }
@@ -491,8 +520,8 @@ figcaption {
   width: var(--canvas);
   margin: 8rem auto 0;
   padding-top: 18px;
-  background: url("band.png") left top / 1440px 18px repeat-x, var(--ground);
-  color: var(--pale);
+  background: url("band.png") left top / 1440px 18px repeat-x, var(--poster-ground);
+  color: var(--poster-text);
   overflow: hidden;
 }
 
@@ -512,7 +541,7 @@ figcaption {
   left: -0.02em;
   top: -0.2em;
   margin: 0;
-  color: var(--wordmark);
+  color: color-mix(in srgb, var(--poster-ground) 92%, var(--poster-text));
   font-family: var(--display);
   font-weight: 400;
   /* "NEURA" in Big Shoulders Regular is 2.083 em wide: this sets it across the reading grid. */
@@ -559,7 +588,19 @@ figcaption {
 }
 
 .poster a:hover {
-  color: var(--ink);
+  color: var(--poster-accent);
+}
+
+.poster :focus-visible {
+  outline-color: var(--poster-accent);
+}
+
+.identity .logo-mark {
+  background-color: var(--poster-text);
+}
+
+.identity .logo:hover .logo-mark {
+  background-color: var(--poster-accent);
 }
 
 .baseline {
@@ -844,7 +885,7 @@ figcaption {
   overflow-y: auto;
   border: 1px solid var(--rule);
   background: var(--raised);
-  box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.45);
+  box-shadow: 0 0.75rem 2rem var(--shadow);
 }
 
 .results a {
@@ -1626,3 +1667,41 @@ pre.numbered .line:target > a {
     display: block;
   }
 }
+
+/* ------------------------------------------------------------ light theme */
+
+/* On the light front page the field outside the canvas is the dark gritty blue, and the canvas is paper, as a
+   sheet laid on a blueprint table. The frame of ink and the paper grain are left out. */
+@media (prefers-color-scheme: light) {
+  body.front {
+    background: #161bb4 url("grit-light.png");
+  }
+
+  body.front::after {
+    display: none;
+  }
+
+  .front .masthead,
+  .front main {
+    width: var(--canvas);
+    margin-inline: auto;
+  }
+
+  .front .masthead {
+    background: url("band-light.png") left bottom / 1440px 18px repeat-x, var(--ground);
+  }
+
+  .front main {
+    padding-bottom: 7rem;
+    background: var(--ground);
+  }
+
+  .front .poster {
+    margin-top: 0;
+    background-image: url("band-light.png");
+    background-position: left top;
+    background-size: 1440px 18px;
+    background-repeat: repeat-x;
+  }
+}
+

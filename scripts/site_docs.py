@@ -572,8 +572,11 @@ class Assembly:
             return ""
         width, height = png_size(path)
         loading = "" if eager else ' loading="lazy"'
-        return (f'<img class="plate" src="{relative(page, f"assets/plates/{name}.png")}" width="{width}" '
-                f'height="{height}" alt=""{loading}>')
+        # Each plate has a version for the light theme in plates/light/, which the check requires to exist.
+        light = relative(page, f"assets/plates/light/{name}.png")
+        return (f'<picture><source media="(prefers-color-scheme: light)" srcset="{light}" width="{width}" '
+                f'height="{height}"><img class="plate" src="{relative(page, f"assets/plates/{name}.png")}" '
+                f'width="{width}" height="{height}" alt=""{loading}></picture>')
 
     def document_page(self, index: int, documents: list[Document]) -> str:
         document = documents[index]

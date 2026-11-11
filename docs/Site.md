@@ -149,6 +149,16 @@ gh run list --workflow pages.yml --limit 5
 
 A maintainer can run the workflow again without a new commit from the Actions tab or with `gh workflow run pages.yml --ref main`.
 
+### Publish without waiting for Tier 1
+
+Tier 1 builds and tests the whole compiler, which takes several minutes, and a change to the site cannot affect it. A maintainer with the repository's `admin` role can merge such a pull request before the checks finish:
+
+```sh
+gh pr merge <number> --admin --merge
+```
+
+The merge publishes the site as any merge does, and the Pages workflow still refuses to deploy a site that fails the check. [GOVERNANCE.md](../GOVERNANCE.md#merging-before-the-checks-finish) states who may do this and what they answer for. Run `python3 scripts/build-site.py --check` before merging this way.
+
 To undo a change to the site, revert it in a new pull request. Merging the revert publishes the earlier site.
 
 ## Repository settings the site depends on

@@ -33,6 +33,10 @@ A button is ground on ink, at 5.1 to 1. Strings and numbers in code mix the read
 
 Add no other hue. A new tone is a mixture of these, and text in it reaches 4.5 to 1 against what is behind it.
 
+### The light theme
+
+A reader whose system or browser asks for a light theme gets a blueprint instead of the stain: paper `#f2f1ee`, dark blue text `#0f1460` (14.4 to 1), a blue ink `#1f29c9` for links and controls (8.4 to 1), the logo's own slate `#768092` as the second hue and the logo's color, and quiet text `#4a5170` (6.9 to 1). The plates have light versions in `site/assets/plates/light/`, drawn by the same script with a dark gritty blue `#161bb4` as their darkest tone and the ink dithered between slate and a bright blue `#4f63ff`; each page offers them with `<picture>` and `prefers-color-scheme`. On the front page the field around the canvas is that blue, broken by an ordered dither (`grit-light.png`), the canvas is paper, and the closing poster is the blue panel. The custom properties are redefined in one `@media (prefers-color-scheme: light)` block at the top of the stylesheet, and the front page's light rules sit at its end. There is no switch on the page: the site follows the reader's setting.
+
 ## Type
 
 The fonts are files in [`site/assets/fonts/`](../site/assets/fonts/), each under the SIL Open Font License 1.1, with its license text beside it. No font is loaded from another host.

@@ -15,8 +15,9 @@ colors. Each one is drawn in two steps:
 docs/SiteDesign.md describes the rules the plates follow. Run this script from
 the repository root to draw every plate again, or name the plates to draw:
 
-    python3 artwork/site/plates.py
+    python3 artwork/site/plates.py                      # both themes
     python3 artwork/site/plates.py neuron-slide eye-scan
+    python3 artwork/site/plates.py --light caliper      # one theme
 
 The script needs Pillow and pycairo. It is not part of the site's build: the
 PNG files it writes into `site/assets/plates/` are committed. The drawing is
@@ -34,7 +35,10 @@ import cairo
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "site" / "assets" / "plates"
+ASSETS = ROOT / "site" / "assets"
+PLATES_DIR = ASSETS / "plates"
+# Where plates are written: PLATES_DIR for the dark theme, a directory in it for another (see `use_theme`).
+OUT = PLATES_DIR
 FONTS = ROOT / "site" / "assets" / "fonts"
 EYE = ROOT / "artwork" / "logo-source.png"
 
@@ -42,10 +46,19 @@ EYE = ROOT / "artwork" / "logo-source.png"
 # properties in site/assets/site.css. The subjects are drawn in GROUND, PALE,
 # and INK; when a plate is saved, its ink is dithered between INK (pink) and
 # BLUE, so the two read together as the violet of a Nissl stain.
-GROUND = (0x09, 0x07, 0x0E)
-INK = (0xD9, 0x4C, 0x8A)
-BLUE = (0x4A, 0x5E, 0xE0)
-PALE = (0xE8, 0xE0, 0xEE)
+#
+# The site has a dark and a light theme, and each plate is drawn in both. The
+# dark plates go to site/assets/plates/, the light ones to plates/light/.
+THEMES = {
+    # A Nissl stain: violet-black, with ink dithered between pink and blue.
+    "dark": {"GROUND": (0x09, 0x07, 0x0E), "INK": (0xD9, 0x4C, 0x8A), "BLUE": (0x4A, 0x5E, 0xE0),
+             "PALE": (0xE8, 0xE0, 0xEE)},
+    # A blueprint: a dark gritty blue, with ink dithered between the logo's slate and a bright blue, on paper.
+    "light": {"GROUND": (0x16, 0x1B, 0xB4), "INK": (0x76, 0x80, 0x92), "BLUE": (0x4F, 0x63, 0xFF),
+              "PALE": (0xF2, 0xF1, 0xEE)},
+}
+THEME = "dark"
+GROUND, INK, BLUE, PALE = (THEMES[THEME][key] for key in ("GROUND", "INK", "BLUE", "PALE"))
 
 # An 8 by 8 Bayer matrix: the thresholds of ordered dithering, from 0 to 1.
 BAYER = [[(v + 0.5) / 64 for v in row] for row in (
@@ -139,8 +152,10 @@ def linearize(image: Image.Image) -> Image.Image:
 
 
 class Plate:
-    def __init__(self, width: int, height: int, ground: tuple[int, int, int] | None = GROUND) -> None:
-        """A plate on a `ground` color, or on nothing when `ground` is None."""
+    def __init__(self, width: int, height: int, ground: tuple[int, int, int] | None | str = "ground") -> None:
+        """A plate on a `ground` color (the theme's GROUND by default), or on nothing when `ground` is None."""
+        if ground == "ground":
+            ground = GROUND
         self.width, self.height = width, height
         self.surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
         self.c = cairo.Context(self.surface)
@@ -619,7 +634,8 @@ def neuron_engraving(name: str = "neuron-engraving") -> None:
     aura = ImageChops.multiply(aura, fade.image())
     plate = Plate(width, height, None)
     lines(plate, Tone(aura), 6.4, -62, INK, lambda value: clamp(value * 0.9) ** 1.25, gain=0.46, wave=(1.4, 52))
-    plate.color(PALE)
+    # The cell is printed in the lightest color on a dark page and in the darkest on a light one.
+    plate.color(PALE if THEME == "dark" else GROUND)
     neuron.draw(plate.c, spines=True)
     plate.save(name)
 
@@ -1074,7 +1090,7 @@ def logo() -> None:
     shape, and its darkness becomes its opacity. `logo-mask.png` is that opacity, in white; the stylesheet paints
     it in a color of the palette with `mask-image`, so the logo follows the palette without being drawn again.
     """
-    assets = OUT.parent
+    assets = ASSETS
     source = Image.open(LOGO).convert("RGBA")
     width, height = source.size
     # The darkest tone of the drawing is the slate of its lines; white is its lightest.
@@ -1117,8 +1133,28 @@ def band() -> None:
             blue = 0.5 + 0.5 * math.sin(x / width * TAU)
             other = BAYER[(y // cell + 3) % 8][(x // cell + 5) % 8]
             pixels[x, y] = (BLUE if other < blue else INK) + (255,)
-    image.save(OUT.parent / "band.png", optimize=True)
-    print(f"site/assets/band.png  {(OUT.parent / 'band.png').stat().st_size // 1024} KB")
+    name = "band.png" if THEME == "dark" else f"band-{THEME}.png"
+    image.save(ASSETS / name, optimize=True)
+    print(f"site/assets/{name}  {(ASSETS / name).stat().st_size // 1024} KB")
+
+
+def grit() -> None:
+    """A tile of the light theme's outer field: the dark blue, broken by an ordered dither of brighter blue."""
+    size, cell = 64, 2
+    rng = random.Random(11)
+    image = Image.new("RGB", (size, size), GROUND)
+    pixels = image.load()
+    for y in range(size):
+        for x in range(size):
+            threshold = BAYER[(y // cell) % 8][(x // cell) % 8]
+            value = 0.18 + 0.22 * rng.random()
+            if threshold < value * 0.55:
+                pixels[x, y] = BLUE
+            elif threshold > 1 - value * 0.12:
+                pixels[x, y] = tuple(round(g * 0.72) for g in GROUND)
+    name = "grit.png" if THEME == "dark" else f"grit-{THEME}.png"
+    image.save(ASSETS / name, optimize=True)
+    print(f"site/assets/{name}")
 
 
 def grain() -> None:
@@ -1133,8 +1169,8 @@ def grain() -> None:
             pixels[x, y] = PALE + (rng.randrange(5, 15),)
         else:
             pixels[x, y] = (0, 0, 0, rng.randrange(14, 40))
-    image.save(OUT.parent / "grain.png", optimize=True)
-    print(f"site/assets/grain.png  {(OUT.parent / 'grain.png').stat().st_size // 1024} KB")
+    image.save(ASSETS / "grain.png", optimize=True)
+    print(f"site/assets/grain.png  {(ASSETS / 'grain.png').stat().st_size // 1024} KB")
 
 
 # ----------------------------------------------------------------------------
@@ -1156,18 +1192,36 @@ PLATES = {
     "cores": cores,
     "logo": logo,
     "band": band,
+    "grit": grit,
     "grain": grain,
 }
+# What the light theme needs: every plate, and its own band and grit. The logo, its icon, and the grain serve both.
+LIGHT = [name for name in PLATES if name not in ("logo", "grain")]
+
+
+def use_theme(theme: str) -> None:
+    """Draw in `theme`'s colors from now on, into its directory."""
+    global THEME, GROUND, INK, BLUE, PALE, OUT
+    THEME = theme
+    GROUND, INK, BLUE, PALE = (THEMES[theme][key] for key in ("GROUND", "INK", "BLUE", "PALE"))
+    OUT = PLATES_DIR if theme == "dark" else PLATES_DIR / theme
 
 
 def main() -> int:
-    names = sys.argv[1:] or list(PLATES)
+    arguments = sys.argv[1:]
+    themes = ["dark", "light"]
+    if arguments[:1] in (["--dark"], ["--light"]):
+        themes = [arguments.pop(0)[2:]]
+    names = arguments or list(PLATES)
     unknown = [name for name in names if name not in PLATES]
     if unknown:
         print(f"unknown plate: {', '.join(unknown)}; the plates are {', '.join(PLATES)}")
         return 1
-    for name in names:
-        PLATES[name]()
+    for theme in themes:
+        use_theme(theme)
+        for name in names:
+            if theme == "dark" or name in LIGHT:
+                PLATES[name]()
     return 0
 
 

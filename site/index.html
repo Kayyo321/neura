@@ -21,15 +21,17 @@
   <main id="main">
     <section class="hero">
       <picture class="hero-plate">
+        <source media="(prefers-color-scheme: light) and (max-width: 46rem)" srcset="assets/plates/light/neuron-slide.png" width="720" height="480">
+        <source media="(prefers-color-scheme: light)" srcset="assets/plates/light/neuron-hero.png" width="2160" height="780">
         <source media="(max-width: 46rem)" srcset="assets/plates/neuron-slide.png" width="720" height="480">
-        <img src="assets/plates/neuron-hero.png" width="2160" height="780" alt="A single neuron, stained black on an amber ground. Its branches run on as square-cornered wires into the layers of a circuit.">
+        <img src="assets/plates/neuron-hero.png" width="2160" height="780" alt="A single stained neuron in a lit field of dithered ink. Its branches run on as pale, square-cornered wires into the layers of a circuit.">
       </picture>
       <div class="hero-body">
         <h1>Neura</h1>
         <div class="hero-copy">
 <!-- markdown: README.md# -->
           <p class="actions">
-            <a class="button" href="docs/README.html#getting-started">Install</a>
+            <a class="button" href="docs/Install.html">Install</a>
             <a class="button pale" href="docs/lang/Tutorial.html">Learn</a>
             <a href="docs/">Reading Room</a>
           </p>
@@ -42,7 +44,10 @@
 <!-- markdown: README.md#compilation-and-execution -->
       </div>
       <figure class="wide">
-        <img src="assets/plates/neuron-slide.png" width="720" height="480" loading="lazy" alt="A stained neuron whose branches continue as wires into a three-layer circuit.">
+        <picture>
+          <source media="(prefers-color-scheme: light)" srcset="assets/plates/light/neuron-slide.png" width="720" height="480">
+          <img src="assets/plates/neuron-slide.png" width="720" height="480" loading="lazy" alt="A stained neuron whose branches continue as wires into a three-layer circuit.">
+        </picture>
       </figure>
     </section>
 
@@ -59,12 +64,15 @@
     }
 );</code></pre>
       </div>
-      <p class="listing-next"><a href="docs/lang/Tutorial.html">Tutorial</a> <a href="docs/lang/Overview.html">Language overview</a> <a href="docs/README.html#getting-started">Install</a></p>
+      <p class="listing-next"><a href="docs/lang/Tutorial.html">Tutorial</a> <a href="docs/lang/Overview.html">Language overview</a> <a href="docs/Install.html">Install</a></p>
     </section>
 
     <section class="section spread flipped" id="documentation">
       <figure class="wide">
-        <img src="assets/plates/type-tree.png" width="720" height="480" loading="lazy" alt="Three lines of metal type, set mirrored in a composing stick, with the syntax tree of the statement hanging below.">
+        <picture>
+          <source media="(prefers-color-scheme: light)" srcset="assets/plates/light/type-tree.png" width="720" height="480">
+          <img src="assets/plates/type-tree.png" width="720" height="480" loading="lazy" alt="Three lines of metal type, set mirrored in a composing stick, with the syntax tree of the statement hanging below.">
+        </picture>
       </figure>
       <div class="narrow prose">
 <!-- markdown: README.md#documentation -->
@@ -73,7 +81,10 @@
   </main>
 
   <footer class="poster">
-    <img class="poster-art" src="assets/plates/eye-poster.png" width="2160" height="900" loading="lazy" alt="">
+    <picture>
+      <source media="(prefers-color-scheme: light)" srcset="assets/plates/light/eye-poster.png" width="2160" height="900">
+      <img class="poster-art" src="assets/plates/eye-poster.png" width="2160" height="900" loading="lazy" alt="">
+    </picture>
     <div class="poster-body">
       <p class="wordmark" aria-hidden="true">Neura</p>
       <div class="poster-grid">
@@ -83,7 +94,7 @@
         <nav aria-label="Learn">
           <h2>Learn</h2>
           <ul>
-            <li><a href="docs/README.html#getting-started">Install</a></li>
+            <li><a href="docs/Install.html">Install</a></li>
             <li><a href="docs/lang/Tutorial.html">Tutorial</a></li>
             <li><a href="docs/lang/Overview.html">Language overview</a></li>
             <li><a href="stdlib/">Standard library</a></li>

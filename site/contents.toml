@@ -28,6 +28,7 @@ title = "Start here"
 plate = "eye-iris"
 pages = [
   { source = "README.md", title = "Neura", label = "Introduction" },
+  { source = "docs/Install.md", label = "Install" },
   { source = "docs/lang/Tutorial.md", label = "Tutorial" },
   { source = "docs/lang/Status.md", label = "Feature status" },
 ]
@@ -110,6 +111,8 @@ plate = "cores"
 pages = [
   { source = "CHANGELOG.md", label = "Changelog" },
   { source = "docs/Release.md", label = "Release checklist" },
+  { source = "docs/ReleaseProcess.md", label = "Release process" },
+  { source = "docs/CodeSigning.md", label = "Code signing" },
   { source = "docs/ContinuousIntegration.md", label = "Continuous integration" },
   { source = "docs/RepositorySettings.md", label = "Repository settings" },
   { source = "docs/Wiki.md", label = "Wiki maintenance" },
