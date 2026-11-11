@@ -4,13 +4,24 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <charconv>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
+
+#ifdef __APPLE__
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+extern char** environ;
+#endif
 
 namespace neura {
 namespace {
@@ -47,6 +58,75 @@ NeuraLibclang& libclang(const CImportOptions& options, const Span& site) {
     return *loaded;
 }
 
+#ifdef __APPLE__
+// What `xcrun --sdk macosx --show-sdk-path` prints, run without a shell; empty
+// if xcrun is missing, fails, or prints nothing.
+std::string xcrun_sdk_path() {
+    int pipe_ends[2];
+    if (::pipe(pipe_ends) != 0) return {};
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, pipe_ends[1], 1);
+    posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addclose(&actions, pipe_ends[0]);
+    posix_spawn_file_actions_addclose(&actions, pipe_ends[1]);
+    char program[] = "xcrun";
+    char sdk_flag[] = "--sdk";
+    char sdk_name[] = "macosx";
+    char query[] = "--show-sdk-path";
+    char* argv[] = {program, sdk_flag, sdk_name, query, nullptr};
+    pid_t child = 0;
+    const int spawned = ::posix_spawnp(&child, "xcrun", &actions, nullptr, argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    ::close(pipe_ends[1]);
+    std::string output;
+    if (spawned == 0) {
+        char buffer[512];
+        for (;;) {
+            const auto count = ::read(pipe_ends[0], buffer, sizeof buffer);
+            if (count <= 0) break;
+            output.append(buffer, static_cast<std::size_t>(count));
+            if (output.size() > 4096) break;
+        }
+    }
+    ::close(pipe_ends[0]);
+    if (spawned != 0) return {};
+    int status = 0;
+    while (::waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return {};
+    while (!output.empty() && (output.back() == '\n' || output.back() == '\r')) output.pop_back();
+    return output;
+}
+
+// The macOS SDK that holds the C headers (ForeignInterop.md, C imports): the
+// SDKROOT environment variable, then the SDKs of the developer directory and
+// of the Command Line Tools, and only then `xcrun`.
+fs::path macos_sdk() {
+    static const fs::path sdk = [] {
+        const auto usable = [](const fs::path& candidate) {
+            std::error_code ignored;
+            return !candidate.empty() && fs::is_regular_file(candidate / "usr/include/stdlib.h", ignored);
+        };
+        const auto environment = [](const char* name) {
+            const char* value = std::getenv(name);
+            return value != nullptr ? std::string(value) : std::string{};
+        };
+        constexpr auto platform_sdk = "Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
+        std::vector<fs::path> candidates;
+        if (const auto root = environment("SDKROOT"); !root.empty()) candidates.emplace_back(root);
+        if (const auto developer = environment("DEVELOPER_DIR"); !developer.empty())
+            candidates.push_back(fs::path(developer) / platform_sdk);
+        candidates.emplace_back("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk");
+        candidates.push_back(fs::path("/Applications/Xcode.app/Contents/Developer") / platform_sdk);
+        for (const auto& candidate : candidates)
+            if (usable(candidate)) return candidate;
+        if (const auto printed = xcrun_sdk_path(); usable(printed)) return fs::path(printed);
+        return fs::path{};
+    }();
+    return sdk;
+}
+#endif
+
 // libclang finds its builtin headers (stddef.h, stdarg.h) relative to where it
 // is installed; Debian's layout needs the directory named.
 std::string clang_resource_dir(const NeuraLibclang& lib) {
@@ -58,6 +138,22 @@ std::string clang_resource_dir(const NeuraLibclang& lib) {
         std::error_code ignored;
         if (fs::exists(candidate / "include/stddef.h", ignored)) return candidate.string();
     }
+#ifdef __APPLE__
+    // Apple's toolchains name the directory by their own version, which an
+    // older Xcode writes in full (15.0.0). Take the highest one that has the
+    // builtin headers, beside the libclang that was loaded.
+    if (lib.path[0] != '\0') {
+        std::error_code ignored;
+        std::vector<fs::path> found;
+        for (const auto& entry : fs::directory_iterator(fs::path(lib.path).parent_path() / "clang", ignored)) {
+            if (fs::exists(entry.path() / "include/stddef.h", ignored)) found.push_back(entry.path());
+        }
+        std::ranges::sort(found, [](const fs::path& left, const fs::path& right) {
+            return left.filename().string() < right.filename().string();
+        });
+        if (!found.empty()) return found.back().string();
+    }
+#endif
     return {};
 }
 
@@ -69,13 +165,22 @@ public:
           options_(options), site_(site) {}
 
     CImportResult run() {
-        arguments_ = {"-x", "c", "-std=gnu11", "-I" + header_.parent_path().string()};
+        arguments_ = {"-x", "c", "-std=gnu11"};
+        if (!is_system_header_directory(header_.parent_path()))
+            arguments_.push_back("-I" + header_.parent_path().string());
         for (const auto& dir : options_.include_dirs) arguments_.push_back("-I" + dir);
         for (const auto& define : options_.defines) arguments_.push_back("-D" + define);
         if (const auto resource = resource_dir(); !resource.empty()) {
             arguments_.push_back("-resource-dir");
             arguments_.push_back(resource);
         }
+#ifdef __APPLE__
+        // The C headers are in the SDK, which libclang does not look for.
+        if (const auto sdk = macos_sdk(); !sdk.empty()) {
+            arguments_.push_back("-isysroot");
+            arguments_.push_back(sdk.string());
+        }
+#endif
         index_ = lib_.clang_createIndex(0, 0);
         unit_ = parse(header_.string(), nullptr);
         const auto root = lib_.clang_getTranslationUnitCursor(unit_);
@@ -948,6 +1053,31 @@ private:
 };
 
 } // namespace
+
+std::vector<std::filesystem::path> system_header_directories() {
+#ifdef __APPLE__
+    // The C headers are in the SDK; there is no /usr/include.
+    std::vector<fs::path> directories{"/usr/local/include"};
+    if (const auto sdk = macos_sdk(); !sdk.empty()) directories.push_back(sdk / "usr/include");
+    return directories;
+#else
+    return {"/usr/local/include", "/usr/include/x86_64-linux-gnu", "/usr/include/aarch64-linux-gnu", "/usr/include"};
+#endif
+}
+
+bool is_system_header_directory(const std::filesystem::path& directory) {
+#ifdef __APPLE__
+    // clang drops a -I directory that is also a system directory. Naming the
+    // SDK's usr/include with -I would put it ahead of the builtin headers.
+    std::error_code ignored;
+    const auto canonical = fs::weakly_canonical(directory, ignored);
+    for (const auto& system : system_header_directories())
+        if (canonical == fs::weakly_canonical(system, ignored)) return true;
+#else
+    (void)directory;
+#endif
+    return false;
+}
 
 LibclangStatus probe_libclang(const CImportOptions& options) {
     LibclangStatus status;
