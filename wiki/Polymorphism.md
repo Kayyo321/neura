@@ -1,7 +1,7 @@
+<!-- Generated from docs/lang/Polymorphism.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Polymorphism
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
-
 
 Polymorphism lets one piece of code work with values of different types. This document develops the language design illustrated by [polymorphism.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/polymorphism.nra). The frontend represents inheritance, overrides, generic types, and dynamic calls in NeuraIR. Runtime representation and dispatch behavior remain part of the execution design.
 
@@ -9,7 +9,7 @@ Polymorphism lets one piece of code work with values of different types. This do
 
 A derived class is a subtype of its base. A value of a derived class can be passed to a parameter of the base type. The parameter exposes the base interface, while calls to overridden methods use the actual object's implementation. For example, `display(Renderable item)` calls `item.framed()`. The inherited `framed` method calls `render()` on that same object, so passing an `Alert` produces `[Alert: Attention]`, even though `framed` is defined on `Renderable`.
 
-An override uses `let.override` or `const.override` and must match the inherited method's parameter and return types. Calls through the base and calls from inherited methods dispatch to the most-derived override. Classes inherit fields and [overload groups](https://github.com/Kayyo321/neura/wiki/CoreLanguage#function-overloads). Overload groups support calls through the declaring class or a subclass. Override and interface declarations currently require a single signature per name.
+An override uses `let.override` or `const.override` and must match the inherited method's parameter and return types. Calls through the base and calls from inherited methods dispatch to the most-derived override. Classes inherit fields and [overload groups](CoreLanguage#function-overloads). Overload groups support calls through the declaring class or a subclass. Override and interface declarations currently require a single signature per name.
 
 A bodyless class method declares a requirement. A class with an unimplemented requirement is abstract and cannot be instantiated; a concrete subclass must implement every inherited requirement. An intermediate subclass may remain abstract. The example's `Renderable` is abstract, `Text` implements `render`, and `Alert` overrides it again. This extends the existing use of bodyless function signatures in module interfaces to classes.
 
@@ -59,7 +59,7 @@ These restrictions apply:
 
 `Box<Alert>` is not a subtype of `Box<Renderable>`; mutable boxes would make such a conversion unsafe. These rules do not specify ownership, nullability, or lifetime behavior.
 
-For proposed constructor and destructor behavior, including cleanup through a base-typed reference, see [Object lifecycle](https://github.com/Kayyo321/neura/wiki/ObjectLifecycle).
+For proposed constructor and destructor behavior, including cleanup through a base-typed reference, see [Object lifecycle](ObjectLifecycle).
 
 ## Interfaces
 

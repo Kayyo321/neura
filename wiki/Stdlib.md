@@ -47,7 +47,7 @@ The [full design and implementation decisions](Stdlib-Design) preserve the histo
 
 ### `Std.Concurrent`
 
-Tasks, channels, cancellation, timers, and shared-state handles. The [concurrency specification](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) defines the language forms these modules serve, and the [overview](StandardLibrary#stdconcurrent) lists their contracts side by side.
+Tasks, channels, cancellation, timers, and shared-state handles. The [concurrency specification](Concurrency) defines the language forms these modules serve, and the [overview](StandardLibrary#stdconcurrent) lists their contracts side by side.
 
 | Module | Detailed contracts | Exported declarations |
 | --- | --- | --- |

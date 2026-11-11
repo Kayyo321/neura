@@ -1,7 +1,7 @@
+<!-- Generated from docs/lang/Types.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Types
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
-
 
 Types describe values used in declarations, parameters, and return values.
 Bindings and function parameters put the type after the name.
@@ -15,7 +15,7 @@ let advance = func(count: int32) -> int32 {
 
 ## Built-in types
 
-The built-in types are listed below. [Numbers](https://github.com/Kayyo321/neura/wiki/Numbers) specifies the numeric types' representation, literals, arithmetic, overflow, rounding, and conversions.
+The built-in types are listed below. [Numbers](Numbers) specifies the numeric types' representation, literals, arithmetic, overflow, rounding, and conversions.
 
 | Type | Purpose |
 | --- | --- |
@@ -33,7 +33,7 @@ The built-in types are listed below. [Numbers](https://github.com/Kayyo321/neura
 
 Low-precision formats such as FP8 and packed integer formats are not part of the language. Every numeric operation is computed by neuron circuits, so no type depends on hardware support.
 
-Arrays and lists are built-in collection types, written `string[]` and `string[list]` respectively. Arrays have a fixed length; lists can grow and shrink. Suffixes can be combined for nested collections. See [Arrays and lists](https://github.com/Kayyo321/neura/wiki/Collections) for their syntax and safety rules.
+Arrays and lists are built-in collection types, written `string[]` and `string[list]` respectively. Arrays have a fixed length; lists can grow and shrink. Suffixes can be combined for nested collections. See [Arrays and lists](Collections) for their syntax and safety rules.
 
 ### Text primitives
 
@@ -41,7 +41,7 @@ String equality compares UTF-8 bytes. `text.byte_length` returns the byte count 
 
 ### Primitive companions
 
-Booleans, sized integers and floats, and strings have [standard library companions](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#7-primitive-companion-modules). A primitive-qualified call such as `int32.parse("42")` looks up an exported function in that companion. A call on a value passes it as the first argument to a function whose first parameter has the same primitive type.
+Booleans, sized integers and floats, and strings have [standard library companions](Stdlib-Design#7-primitive-companion-modules). A primitive-qualified call such as `int32.parse("42")` looks up an exported function in that companion. A call on a value passes it as the first argument to a function whose first parameter has the same primitive type.
 
 ```neura
 let score: int16 = -7;
@@ -149,7 +149,7 @@ let NamedEntry = class:LogEntry (
 );
 ```
 
-The derived class extends the base class's interface. A derived instance can be passed where its base type is expected, and an overridden method dispatches to the implementation for the actual instance. Declare an override with `let.override` or `const.override`. See [Polymorphism](https://github.com/Kayyo321/neura/wiki/Polymorphism) for interfaces and generics and [Object lifecycle](https://github.com/Kayyo321/neura/wiki/ObjectLifecycle) for construction and cleanup.
+The derived class extends the base class's interface. A derived instance can be passed where its base type is expected, and an overridden method dispatches to the implementation for the actual instance. Declare an override with `let.override` or `const.override`. See [Polymorphism](Polymorphism) for interfaces and generics and [Object lifecycle](ObjectLifecycle) for construction and cleanup.
 
 ### Static members
 
@@ -259,7 +259,7 @@ members. Construction of a nested singleton at startup follows its
 declaration position. Reading that singleton alone is a passive use of the
 enclosing class. A singleton may implement interfaces. It cannot be
 subclassed, constructed with `new`, or destroyed. See
-[Object lifecycle](https://github.com/Kayyo321/neura/wiki/ObjectLifecycle#singleton-lifecycle) for its
+[Object lifecycle](ObjectLifecycle#singleton-lifecycle) for its
 initialization rules.
 
 ### Umbrella class and nil
@@ -366,7 +366,7 @@ patterns, guards, and derives are open language decisions.
 
 ## Scope-bound and transferable types
 
-[Tasks](https://github.com/Kayyo321/neura/wiki/CoreLanguage#tasks-scopes-and-select) are isolated: a task's mutable objects, arrays, and lists stay with it, and another task can affect them only by sending a message. Three rules of the type system enforce this. The compiler checks them on the whole linked program, including prebuilt NeuraIR modules, and reports a violation at the span of the offending expression. [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#5-isolation-between-tasks) specifies them with the runtime.
+[Tasks](CoreLanguage#tasks-scopes-and-select) are isolated: a task's mutable objects, arrays, and lists stay with it, and another task can affect them only by sending a message. Three rules of the type system enforce this. The compiler checks them on the whole linked program, including prebuilt NeuraIR modules, and reports a violation at the span of the offending expression. [Concurrency](Concurrency#5-isolation-between-tasks) specifies them with the runtime.
 
 ### Scope-bound types
 
@@ -404,7 +404,7 @@ A value given to another task through `spawn` (the callee value, a method's rece
 let total = func(items: int[]) -> int => items.length;
 ```
 
-`spawn total(items)` is rejected at `items` with `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A channel opened as `channels.open<result.Result<int>>(1)` is rejected with `a value of type Result<int32> is not transferable, so it cannot be a channel's element type`. An error is sent as its transferable copy, `Std.Core.Error.PortableError` ([Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary)). A task returns its result to the task that joins it whatever the result's type, because nothing else can reach what the finished task built.
+`spawn total(items)` is rejected at `items` with `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A channel opened as `channels.open<result.Result<int>>(1)` is rejected with `a value of type Result<int32> is not transferable, so it cannot be a channel's element type`. An error is sent as its transferable copy, `Std.Core.Error.PortableError` ([Standard library](StandardLibrary)). A task returns its result to the task that joins it whatever the result's type, because nothing else can reach what the finished task built.
 
 ### Task-safe calls
 
@@ -416,12 +416,12 @@ A value check is not enough: a function can reach shared mutable state without b
 
 For a virtual call or a call through a function value, the compiler takes the union over every override and over every function value of that type that code which can run creates (the program's own functions, initializers, and what they reach), so it can reject a call because of an implementation that never runs. Narrow the type, or pass the needed value as an argument. The diagnostic lists the chain of calls from the `spawn` to the offending operation. `neura check --task-safety` prints the verdict for every function of the program. The task that runs `main` is not restricted.
 
-Under the last rule a program cannot both use tasks and use `Std.DynamicForeign` or `import:c(...)`. The compiler rejects the combination for any scheduler operation, not only a `spawn`: a scope, a channel, a timer, a guard, a select, or a parallel map. A parallel map's worker must also issue no host request, use no scheduler operation, and not use an object's identity; [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#12-multicore-parallelmap) gives the rule.
+Under the last rule a program cannot both use tasks and use `Std.DynamicForeign` or `import:c(...)`. The compiler rejects the combination for any scheduler operation, not only a `spawn`: a scope, a channel, a timer, a guard, a select, or a parallel map. A parallel map's worker must also issue no host request, use no scheduler operation, and not use an object's identity; [Concurrency](Concurrency#12-multicore-parallelmap) gives the rule.
 
 ## Inference, conversions, equality, and absence
 
-The proposed initial inference rule is local: an initialized binding without an annotation takes the initializer's type when that type is unambiguous. Public APIs should use explicit parameter and return types. Integer literal default types, inference across generic calls, and ambiguous literals need a precise specification. Empty collection literals require an expected type as described in [Collections](https://github.com/Kayyo321/neura/wiki/Collections).
+The proposed initial inference rule is local: an initialized binding without an annotation takes the initializer's type when that type is unambiguous. Public APIs should use explicit parameter and return types. Integer literal default types, inference across generic calls, and ambiguous literals need a precise specification. Empty collection literals require an expected type as described in [Collections](Collections).
 
-There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](https://github.com/Kayyo321/neura/wiki/Numbers#conversions). Floating-point equality follows IEEE 754. Equality for classes, collections, and strings needs a defined contract; do not assume structural equality or identity equality for these values. Basic scalar comparisons are illustrated in [core.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/core.nra).
+There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](Numbers#conversions). Floating-point equality follows IEEE 754. Equality for classes, collections, and strings needs a defined contract; do not assume structural equality or identity equality for these values. Basic scalar comparisons are illustrated in [core.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/core.nra).
 
-Nullability, optional values, and their syntax are open. No implicit null value or null check should be assumed. Generic syntax and its limitations are described in [Polymorphism](https://github.com/Kayyo321/neura/wiki/Polymorphism).
+Nullability, optional values, and their syntax are open. No implicit null value or null check should be assumed. Generic syntax and its limitations are described in [Polymorphism](Polymorphism).

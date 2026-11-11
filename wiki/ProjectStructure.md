@@ -1,9 +1,9 @@
+<!-- Generated from docs/lang/ProjectStructure.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Project structure
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-
-The [frontend](https://github.com/Kayyo321/neura/wiki/Tooling) uses this layout to find project-local modules. Give it one or more source roots with `-I`. It also searches beside the importing file and the explicit input files. If multiple files match an import, the frontend reports an ambiguity.
+The [frontend](Tooling) uses this layout to find project-local modules. Give it one or more source roots with `-I`. It also searches beside the importing file and the explicit input files. If multiple files match an import, the frontend reports an ambiguity.
 
 ## Project-local modules
 
@@ -22,8 +22,8 @@ multi-file/                  # source root
 
 The imported file's named module is the value returned by the import. Only its `export` members are accessible to the importer. Imports are explicit in each file; an alias in one file is not available in another. The example prints `Hello, Neura!`.
 
-See [the complete example](https://github.com/Kayyo321/neura/blob/main/examples/modules/multi-file/main.nra). Its `Std.Io.Console` and `Std.Program` imports resolve in the installed standard library, separately from the project-local mapping above ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#standard-library-imports)).
+See [the complete example](https://github.com/Kayyo321/neura/blob/main/examples/modules/multi-file/main.nra). Its `Std.Io.Console` and `Std.Program` imports resolve in the installed standard library, separately from the project-local mapping above ([Modules](Modules#standard-library-imports)).
 
 ## Packages and open questions
 
-The `Acme` namespace illustrates how a project can group its own modules. It does not imply a package manifest, dependency installation, or a published package format. Package and dependency management and entry-point discovery remain open. The frontend converts PascalCase components to kebab-case and resolves them in the supplied source roots. See [Modules](https://github.com/Kayyo321/neura/wiki/Modules) for exports, imports, and module inheritance.
+The `Acme` namespace illustrates how a project can group its own modules. It does not imply a package manifest, dependency installation, or a published package format. Package and dependency management and entry-point discovery remain open. The frontend converts PascalCase components to kebab-case and resolves them in the supplied source roots. See [Modules](Modules) for exports, imports, and module inheritance.

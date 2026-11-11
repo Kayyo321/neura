@@ -1,11 +1,11 @@
+<!-- Generated from docs/lang/Errors.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Errors and failure handling
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-
 Neura distinguishes expected failures, which a program handles, from runtime failures, which end the run.
 
-**Expected failures are returned values.** A function that can fail returns a value that says so, such as an enum variant or an object describing the failure, and its caller inspects it. There is no exception mechanism and no implicit propagation. The [standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary) provides `Std.Core.Result` and `Std.Core.Optional` for this; a program can also declare its own enums and classes for outcomes.
+**Expected failures are returned values.** A function that can fail returns a value that says so, such as an enum variant or an object describing the failure, and its caller inspects it. There is no exception mechanism and no implicit propagation. The [standard library](StandardLibrary) provides `Std.Core.Result` and `Std.Core.Optional` for this; a program can also declare its own enums and classes for outcomes.
 
 ```neura
 export let Parse = enum (Ok, Empty, TooLong);
@@ -21,9 +21,9 @@ let check = func(words: string[], limit: int) -> Parse {
 };
 ```
 
-**Runtime failures trap.** Integer overflow, a zero divisor, an out-of-range conversion ([Numbers](https://github.com/Kayyo321/neura/wiki/Numbers)), a negative index, a list modified during for-each, a failed console write, and a failed test assertion are program traps with documented reason codes. An index at or past a collection's length, a read of an uninitialized field or global, use of a destroyed object, and exhausted run limits are faults that NVM detects. Both end the run immediately with a diagnostic that names the source location when the image has a source map ([NVM](https://github.com/Kayyo321/neura/wiki/NVM)). A trap cannot be caught, and no cleanup runs after it.
+**Runtime failures trap.** Integer overflow, a zero divisor, an out-of-range conversion ([Numbers](Numbers)), a negative index, a list modified during for-each, a failed console write, and a failed test assertion are program traps with documented reason codes. An index at or past a collection's length, a read of an uninitialized field or global, use of a destroyed object, and exhausted run limits are faults that NVM detects. Both end the run immediately with a diagnostic that names the source location when the image has a source map ([NVM](NVM)). A trap cannot be caught, and no cleanup runs after it.
 
-The process status names the trap's class with the shell convention for a process that a signal ended, 128 plus the Linux signal number, and the matching [`Std.Program.ExitCode`](https://github.com/Kayyo321/neura/wiki/Modules#program-entry) variant:
+The process status names the trap's class with the shell convention for a process that a signal ended, 128 plus the Linux signal number, and the matching [`Std.Program.ExitCode`](Modules#program-entry) variant:
 
 | Trap | Status | `ExitCode` variant |
 | --- | --- | --- |
@@ -39,9 +39,9 @@ A message trap or failed assertion in any task has the status of its class, and 
 
 ## Tasks
 
-Concurrency ([Core language](https://github.com/Kayyo321/neura/wiki/CoreLanguage#tasks-scopes-and-select)) adds no way to catch a failure and does not change the error model.
+Concurrency ([Core language](CoreLanguage#tasks-scopes-and-select)) adds no way to catch a failure and does not change the error model.
 
-**Expected failures are still returned values.** A task's function returns its failures as values. If it returns `Result<User>`, `task.join()` is that `Result<User>`, and the caller reads it. Closure and cancellation are expected events of channels, timers, and selects and are returned as typed outcomes, such as `Closed` and `Cancelled`, not raised. A host operation that is cancelled while its task waits returns an `Io` error of kind `Cancelled`. An `Error` crosses a channel as its transferable copy, `PortableError` ([Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary)).
+**Expected failures are still returned values.** A task's function returns its failures as values. If it returns `Result<User>`, `task.join()` is that `Result<User>`, and the caller reads it. Closure and cancellation are expected events of channels, timers, and selects and are returned as typed outcomes, such as `Closed` and `Cancelled`, not raised. A host operation that is cancelled while its task waits returns an `Io` error of kind `Cancelled`. An `Error` crosses a channel as its transferable copy, `PortableError` ([Standard library](StandardLibrary)).
 
 **A trap in any task ends the run.** The run stops at once with that trap's status. No other task runs afterwards, no scope waits for its tasks, no cleanup runs, and effects that have already happened stay visible. The diagnostic names the task, the place it was spawned, and the chain of spawns up to the root task, which is task 0. For a task that divides by zero two spawns below `main`:
 

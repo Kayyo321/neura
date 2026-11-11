@@ -1,4 +1,7 @@
+<!-- Generated from docs/Backend.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Neuron conversion and execution
+
+[Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
 This page describes the implemented back half of the toolchain: `IRtoNeuronConversion`, the NVR writer and loader, and the Neura Virtual Machine. [NVM](NVM) and [NVR](NVR) define the contracts. This page records how the implementation meets them, the decisions it takes where the language is still open, and what the tests establish.
 
@@ -80,7 +83,7 @@ The build stops with a source diagnostic, before any output is written, for:
 
 ## Tasks
 
-An image with tasks is NVR 1.5. The converter marks the image concurrent when it emits a scheduler exit or a poll, and then writes the `TRNS` table: the layouts of transferable classes (`Std.Concurrent` handles, capture layouts, and function signature layouts whose closures are all transferable), of payload enums, and of tuples, closed under parents. Task bodies are ordinary functions: a spawned task starts in the `$invoke` method of a generated capture layout, whose fields hold the callee value, receiver, and arguments the parent evaluated. A block that only polls and continues is kept, because the poll is an effect of its exit. Because the poll rides on the exit, the number of polls a task counts follows the language operations and is the same for optimized and unoptimized builds. The runtime part (queues, quantum, limits, statuses 137, 132, and 134) is in [NVR](NVR#scheduler-operations-15) and [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#10-runtime). The evidence is `backend-concurrency`, which builds every concurrent fixture with the real pipeline, optimized and not, runs it on the NVM, and requires the same host requests, exit status or trap class, and schedule as an independent evaluator extended with the same scheduler, a repeat on a clean state, and the same result for each member of a fleet.
+An image with tasks is NVR 1.5. The converter marks the image concurrent when it emits a scheduler exit or a poll, and then writes the `TRNS` table: the layouts of transferable classes (`Std.Concurrent` handles, capture layouts, and function signature layouts whose closures are all transferable), of payload enums, and of tuples, closed under parents. Task bodies are ordinary functions: a spawned task starts in the `$invoke` method of a generated capture layout, whose fields hold the callee value, receiver, and arguments the parent evaluated. A block that only polls and continues is kept, because the poll is an effect of its exit. Because the poll rides on the exit, the number of polls a task counts follows the language operations and is the same for optimized and unoptimized builds. The runtime part (queues, quantum, limits, statuses 137, 132, and 134) is in [NVR](NVR#scheduler-operations-15) and [Concurrency](Concurrency#10-runtime). The evidence is `backend-concurrency`, which builds every concurrent fixture with the real pipeline, optimized and not, runs it on the NVM, and requires the same host requests, exit status or trap class, and schedule as an independent evaluator extended with the same scheduler, a repeat on a clean state, and the same result for each member of a fleet.
 
 ## Generics
 
@@ -207,7 +210,7 @@ The embedding API is `nvm::Execution`. `advance()` runs until the run completes,
 
 The NVM library defaults to the reference evaluator. `nvm::Execution`, `nvm::run`, `nvm::record`, `nvm::replay`, and `nvm::Fleet` use a graph device only when the caller supplies one. Declined jobs use the reference evaluator. With no usable device, CLI auto and always modes fall back to the reference evaluator without a diagnostic unless `--require-gpu` is set. In that case startup fails before entry. `nvm::Fleet` advances independent executions of one validated image and offers each round as a batch to an optional device. `nvm::run_fleet` drives host requests and callbacks in member order. `neura run --each` takes argument lists from a file. The CLI supports automatic placement, an explicit Vulkan mode, and CPU-only evaluation. Its `--stats` report includes placement and fallback information. [NVM fleets](NVM#fleets) [Tooling](Tooling#run-an-image-over-argument-lists)
 
-A packaged executable starts the CPU runner with its recorded limits and capabilities. The default launcher provides native interop under its recorded capability. The static launcher supplies Unsupported for those imports, and the packager rejects images that use them. [Native executables](https://github.com/Kayyo321/neura/blob/main/docs/lang/Standalone.md)
+A packaged executable starts the CPU runner with its recorded limits and capabilities. The default launcher provides native interop under its recorded capability. The static launcher supplies Unsupported for those imports, and the packager rejects images that use them. [Native executables](Standalone)
 
 ## Tests and the limits of the evidence
 
