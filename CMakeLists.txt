@@ -93,10 +93,26 @@ add_library(neura_nvm STATIC ${neura_nvm_sources})
 target_link_libraries(neura_nvm PUBLIC neura_nvr)
 # Std.DynamicForeign calls native functions through libffi and loads
 # libraries with the platform loader.
+#
+# A release archive must run on machines that have neither a C++ runtime as
+# new as the build's nor libffi installed. With NEURA_PORTABLE_RELEASE the
+# programs that link the NVM carry libffi, and neura carries the C++ runtime,
+# as the default launcher always does. They then need only the C library and
+# the loader from their host.
+option(NEURA_PORTABLE_RELEASE "Link libffi and the C++ runtime into neura statically, for release archives" OFF)
+if(NEURA_PORTABLE_RELEASE AND WIN32)
+    message(FATAL_ERROR "NEURA_PORTABLE_RELEASE is not supported on Windows")
+endif()
 if(NOT WIN32)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBFFI REQUIRED IMPORTED_TARGET libffi)
-    target_link_libraries(neura_nvm PRIVATE PkgConfig::LIBFFI ${CMAKE_DL_LIBS})
+    if(NEURA_PORTABLE_RELEASE)
+        find_library(NEURA_PORTABLE_LIBFFI NAMES libffi.a HINTS ${LIBFFI_LIBRARY_DIRS} REQUIRED)
+        target_include_directories(neura_nvm PRIVATE ${LIBFFI_INCLUDE_DIRS})
+        target_link_libraries(neura_nvm PRIVATE "${NEURA_PORTABLE_LIBFFI}" ${CMAKE_DL_LIBS})
+    else()
+        target_link_libraries(neura_nvm PRIVATE PkgConfig::LIBFFI ${CMAKE_DL_LIBS})
+    endif()
 endif()
 neura_target_defaults(neura_nvm)
 
@@ -260,6 +276,9 @@ neura_target_defaults(neura_decompiler)
 
 add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp src/launcher/descriptor.cpp)
 target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler neura_lifecycle)
+if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(neura PRIVATE -static-libstdc++ -static-libgcc)
+endif()
 target_include_directories(neura PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 if(TARGET neura_launcher)
     add_dependencies(neura neura_launcher)
