@@ -191,7 +191,12 @@
           setTimeout(() => (button.textContent = "Copy"), 1600);
         });
       });
-      block.append(button);
+      // The block scrolls sideways when its lines are long; a wrapper that does not scroll holds the button, so the
+      // button stays in the corner however far the code is scrolled.
+      const frame = document.createElement("div");
+      frame.className = "code-frame";
+      block.replaceWith(frame);
+      frame.append(block, button);
     });
   }
 
