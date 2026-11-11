@@ -22,69 +22,91 @@ export let Math = module (
 
     /// @brief Correctly rounded square root, to nearest with ties to even. sqrt(-0.0) is -0.0; other negatives
     /// give NaN.
+    #[Pure, ThreadSafe]
     export let sqrt = func(x: float64) -> float64 kernel("neura.math.sqrt", 1);
 
     /// @brief The cube root (s_cbrt.c).
+    #[Pure, ThreadSafe]
     export let cbrt = func(x: float64) -> float64 kernel("neura.math.cbrt", 1);
 
     /// @brief sqrt(x*x + y*y) without undue overflow or underflow (e_hypot.c).
+    #[Pure, ThreadSafe]
     export let hypot = func(x: float64, y: float64) -> float64 kernel("neura.math.hypot", 1);
 
     /// @brief e raised to x (e_exp.c).
+    #[Pure, ThreadSafe]
     export let exp = func(x: float64) -> float64 kernel("neura.math.exp", 1);
 
     /// @brief exp(x) - 1, accurate near zero (s_expm1.c).
+    #[Pure, ThreadSafe]
     export let expm1 = func(x: float64) -> float64 kernel("neura.math.expm1", 1);
 
     /// @brief The natural logarithm (e_log.c).
+    #[Pure, ThreadSafe]
     export let log = func(x: float64) -> float64 kernel("neura.math.log", 1);
 
     /// @brief log(1 + x), accurate near zero (s_log1p.c).
+    #[Pure, ThreadSafe]
     export let log1p = func(x: float64) -> float64 kernel("neura.math.log1p", 1);
 
     /// @brief The base-10 logarithm (e_log10.c).
+    #[Pure, ThreadSafe]
     export let log10 = func(x: float64) -> float64 kernel("neura.math.log10", 1);
 
     /// @brief The base-2 logarithm, shaped like e_log10.c: for x = 2^k * m it returns (k + i) + log(m') / ln 2,
     /// where m' is m or m/2 so that the logarithm is taken near 1, and exactly k for a power of two.
+    #[Pure, ThreadSafe]
     export let log2 = func(x: float64) -> float64 kernel("neura.math.log2", 1);
 
     /// @brief x raised to y (e_pow.c, 2004). pow(±1, ±∞) and pow(1, NaN) are NaN, as in fdlibm.
+    #[Pure, ThreadSafe]
     export let pow = func(x: float64, y: float64) -> float64 kernel("neura.math.pow", 1);
 
     /// @brief The sine (s_sin.c, with the argument reduction of e_rem_pio2.c and k_rem_pio2.c).
+    #[Pure, ThreadSafe]
     export let sin = func(x: float64) -> float64 kernel("neura.math.sin", 1);
 
     /// @brief The cosine (s_cos.c).
+    #[Pure, ThreadSafe]
     export let cos = func(x: float64) -> float64 kernel("neura.math.cos", 1);
 
     /// @brief The tangent (s_tan.c).
+    #[Pure, ThreadSafe]
     export let tan = func(x: float64) -> float64 kernel("neura.math.tan", 1);
 
     /// @brief The arc sine (e_asin.c).
+    #[Pure, ThreadSafe]
     export let asin = func(x: float64) -> float64 kernel("neura.math.asin", 1);
 
     /// @brief The arc cosine (e_acos.c).
+    #[Pure, ThreadSafe]
     export let acos = func(x: float64) -> float64 kernel("neura.math.acos", 1);
 
     /// @brief The arc tangent (s_atan.c).
+    #[Pure, ThreadSafe]
     export let atan = func(x: float64) -> float64 kernel("neura.math.atan", 1);
 
     /// @brief The angle of the point (x, y): the arc tangent of y/x in the point's quadrant (e_atan2.c).
+    #[Pure, ThreadSafe]
     export let atan2 = func(y: float64, x: float64) -> float64 kernel("neura.math.atan2", 1);
 
     /// @brief The hyperbolic sine (e_sinh.c).
+    #[Pure, ThreadSafe]
     export let sinh = func(x: float64) -> float64 kernel("neura.math.sinh", 1);
 
     /// @brief The hyperbolic cosine (e_cosh.c).
+    #[Pure, ThreadSafe]
     export let cosh = func(x: float64) -> float64 kernel("neura.math.cosh", 1);
 
     /// @brief The hyperbolic tangent (s_tanh.c).
+    #[Pure, ThreadSafe]
     export let tanh = func(x: float64) -> float64 kernel("neura.math.tanh", 1);
 
     /// @brief Degrees to radians: x times the nearest float64 to pi/180.
+    #[Pure, ThreadSafe]
     export let to_radians = func(degrees: float64) -> float64 kernel("neura.math.to_radians", 1);
 
     /// @brief Radians to degrees: x times the nearest float64 to 180/pi.
+    #[Pure, ThreadSafe]
     export let to_degrees = func(radians: float64) -> float64 kernel("neura.math.to_degrees", 1);
 );

@@ -39,6 +39,7 @@ export let BigDecimal = module (
         };
 
         /// @brief Returns minus one, zero, or one according to the coefficient's sign.
+        #Pure
         export let sign = func -> int => unscaled.sign();
 
         /// @brief Reverses the sign and preserves the scale.
@@ -264,6 +265,7 @@ export let BigDecimal = module (
         new(big_integer.of_int64(value), 0);
 
     /// @brief Constructs a decimal from its unscaled integer and scale.
+    #Pure
     export let of_big_integer = func(value: BigInteger, scale: int) -> BigDecimal =>
         new(value, scale);
 

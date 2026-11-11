@@ -46,12 +46,15 @@ export let Error = module (
         };
 
         /// @brief Returns the stored error code.
+        #Pure
         export let.override code = func -> string => code_text;
 
         /// @brief Returns the stored detail message.
+        #Pure
         export let.override message = func -> string => message_text;
 
         /// @brief Two simple details are equal when their code and message are.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is SimpleDetail)) {
                 return false;
@@ -61,10 +64,12 @@ export let Error = module (
         };
 
         /// @brief Combines the hashes of the code and message.
+        #Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(17, code_text.hash_code()), message_text.hash_code());
 
         /// @brief Returns the formatted custom error detail.
+        #Pure
         export let.override to_string = func -> string => code_text + ": " + message_text;
     );
 
@@ -92,10 +97,12 @@ export let Error = module (
     );
 
     /// @brief A Custom error holding a SimpleDetail.
+    #[Pure, ThreadSafe]
     export let custom = func(code: string, text: string) -> Error =>
         Error.Custom(new SimpleDetail(code, text));
 
     /// @brief Wraps an error with a message that describes the operation that failed.
+    #[Pure, ThreadSafe]
     export let context = func(cause: Error, text: string) -> Error =>
         Error.Context { message: text, cause: cause };
 
@@ -113,6 +120,7 @@ export let Error = module (
 
     /// @brief The error a portable copy stands for. A Custom copy comes back holding a SimpleDetail with the
     /// same code and message, so message(from_portable(to_portable(e))) equals message(e).
+    #[Pure, ThreadSafe]
     export let from_portable = func(p: PortableError) -> Error => match (p) {
         PortableError.Io { kind, message: text, path } => Error.Io { kind: kind, message: text, path: path },
         PortableError.Parse { kind, offset, message: text } =>
@@ -124,9 +132,11 @@ export let Error = module (
     };
 
     /// @brief Returns the spelling of an I/O error category.
+    #[Pure, ThreadSafe]
     export let io_kind_name = func(kind: IoErrorKind) -> string => kind.to_string();
 
     /// @brief Returns the spelling of a parse error category.
+    #[Pure, ThreadSafe]
     export let parse_kind_name = func(kind: ParseErrorKind) -> string => kind.to_string();
 
     /// @brief Formats an error with its category and context.
@@ -147,6 +157,7 @@ export let Error = module (
     };
 
     /// @brief Follows Context causes to the end.
+    #[Pure, ThreadSafe]
     export let root_cause = func(e: Error) -> Error {
         let current = e;
         do {
@@ -162,6 +173,7 @@ export let Error = module (
     };
 
     /// @brief The error, then each cause in order.
+    #[Pure, ThreadSafe]
     export let chain = func(e: Error) -> Error[list] {
         last result: Error[list] = [];
         let current = e;

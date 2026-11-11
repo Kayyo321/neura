@@ -11,7 +11,7 @@ let result = import:Std.Core.Result;
 #Since("0.1.0")
 export let LocalDate = module (
     /// @brief An immutable Gregorian date within the supported year range.
-    #[Final, NoDiscard]
+    #[Final, NoDiscard, Immutable, ThreadSafe]
     export let LocalDate = class implements Comparable<LocalDate> (
         /// @brief The Gregorian year, using astronomical year numbering: -999,999 through 999,999.
         export last year: int;
@@ -28,15 +28,18 @@ export let LocalDate = module (
         };
 
         /// @brief Returns the signed number of days since 1970-01-01.
+        #Pure
         export let to_epoch_day = func -> int64 {
             return calendar.epoch_day_of(year as int64, month, day);
         };
 
         /// @brief These trap with "invalid argument: date out of range" when the result's year is outside
         /// -999,999 through 999,999.
+        #Pure
         export let plus_days = func(days: int64) -> LocalDate => of_epoch_day(to_epoch_day() + days);
 
         /// @brief Month and year changes clamp the day to the end of the target month.
+        #Pure
         export let plus_months = func(months: int64) -> LocalDate {
             last total = (year as int64) * 12 + ((month - 1) as int64) + months;
             last target_month = (calendar.floor_mod(total, 12) + 1) as int;
@@ -45,32 +48,39 @@ export let LocalDate = module (
 
         /// @brief Adds whole calendar years and clamps the day to the last day of the target month when
         /// necessary.
+        #Pure
         export let plus_years = func(years: int64) -> LocalDate {
             return clamped((year as int64) + years, month, day);
         };
 
         /// @brief other's epoch day minus this one's.
+        #Pure
         export let days_until = func(other: LocalDate) -> int64 => other.to_epoch_day() - to_epoch_day();
 
         /// @brief Returns the weekday of this date in ISO order.
+        #Pure
         export let day_of_week = func -> weekdays.DayOfWeek {
             // Epoch day 0 is a Thursday, ordinal 3.
             return weekdays.of_ordinal(calendar.floor_mod(to_epoch_day() + 3, 7) as int);
         };
 
         /// @brief 1 through 366.
+        #Pure
         export let day_of_year = func -> int {
             last first = calendar.epoch_day_of(year as int64, 1, 1);
             return (to_epoch_day() - first + 1) as int;
         };
 
         /// @brief Reports whether this date falls in a Gregorian leap year.
+        #Pure
         export let is_leap_year = func -> bool => calendar.is_leap(year as int64);
 
         /// @brief Returns the number of days in this date's month.
+        #Pure
         export let length_of_month = func -> int => calendar.month_length(year as int64, month);
 
         /// @brief Orders dates by year, month, and then day.
+        #Pure
         export let compare_to = func(other: LocalDate) -> Ordering {
             if (year != other.year) {
                 return order(year < other.year);
@@ -85,6 +95,7 @@ export let LocalDate = module (
         };
 
         /// @brief Tests whether the year, month, and day all agree.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is LocalDate)) {
                 return false;
@@ -94,6 +105,7 @@ export let LocalDate = module (
         };
 
         /// @brief Combines the hashes of the year, month, and day.
+        #Pure
         export let.override hash_code = func -> uint32 {
             let hash = hashing.combine(17, year.hash_code());
             hash = hashing.combine(hash, month.hash_code());
@@ -101,6 +113,7 @@ export let LocalDate = module (
         };
 
         /// @brief YYYY-MM-DD; a year outside 0000 through 9999 has a sign and at least four digits.
+        #Pure
         export let.override to_string = func -> string {
             return calendar.date_text(year as int64, month, day);
         };
@@ -108,6 +121,7 @@ export let LocalDate = module (
 
     /// @brief Traps with "invalid argument: invalid date" for a year outside -999,999 through 999,999, a month
     /// outside 1 through 12, or a day outside the month.
+    #[Pure, ThreadSafe]
     export let of = func(year: int, month: int, day: int) -> LocalDate {
         if (!valid(year, month, day)) {
             trap_with_message("invalid argument: invalid date");
@@ -116,6 +130,7 @@ export let LocalDate = module (
     };
 
     /// @brief nil for invalid components.
+    #[Pure, ThreadSafe]
     export let try_of = func(year: int, month: int, day: int) -> LocalDate {
         if (!valid(year, month, day)) {
             return nil;
@@ -124,6 +139,7 @@ export let LocalDate = module (
     };
 
     /// @brief Traps with "invalid argument: date out of range" outside -999999-01-01 through 999999-12-31.
+    #[Pure, ThreadSafe]
     export let of_epoch_day = func(epoch_day: int64) -> LocalDate {
         if (epoch_day < calendar.MinEpochDay || epoch_day > calendar.MaxEpochDay) {
             trap_with_message("invalid argument: date out of range");
@@ -136,7 +152,7 @@ export let LocalDate = module (
     ///
     /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the
     /// first byte of a year beyond 999,999, a month outside 1 through 12, or a day outside the month.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let parse = func(text: string) -> result.Result<LocalDate> {
         last scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);

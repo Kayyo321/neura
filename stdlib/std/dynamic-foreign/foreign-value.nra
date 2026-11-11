@@ -30,6 +30,7 @@ export let ForeignValue = module (
     };
 
     /// @brief The value of a Bool result.
+    #Pure
     export let as_bool = func(value: ForeignValue) -> bool {
         match (value) {
             ForeignValue.Bool(v) => { return v; },
@@ -38,9 +39,11 @@ export let ForeignValue = module (
     };
 
     /// @brief The value of any signed or unsigned integer result that fits in an int32.
+    #Pure
     export let as_int32 = func(value: ForeignValue) -> int32 => as_int64(value) as int32;
 
     /// @brief The value of any integer result that fits in an int64, or of a Bool as 0 or 1.
+    #Pure
     export let as_int64 = func(value: ForeignValue) -> int64 {
         match (value) {
             ForeignValue.Bool(v) => { return v ? 1 : 0; },
@@ -57,6 +60,7 @@ export let ForeignValue = module (
     };
 
     /// @brief The value of a UInt64 result, or of any non-negative integer result.
+    #Pure
     export let as_uint64 = func(value: ForeignValue) -> uint64 {
         match (value) {
             ForeignValue.UInt64(v) => { return v; },
@@ -65,6 +69,7 @@ export let ForeignValue = module (
     };
 
     /// @brief The value of a Float32 result.
+    #Pure
     export let as_float32 = func(value: ForeignValue) -> float32 {
         match (value) {
             ForeignValue.Float32(v) => { return v; },
@@ -73,6 +78,7 @@ export let ForeignValue = module (
     };
 
     /// @brief The value of a Float32 or Float64 result as a float64.
+    #Pure
     export let as_float64 = func(value: ForeignValue) -> float64 {
         match (value) {
             ForeignValue.Float32(v) => { return v as float64; },
@@ -91,6 +97,7 @@ export let ForeignValue = module (
     };
 
     /// @brief A short description such as `Int32(8)`.
+    #Pure
     export let describe = func(value: ForeignValue) -> string => match (value) {
         ForeignValue.Void => "Void",
         ForeignValue.Bool(v) => "Bool(" + v.to_string() + ")",

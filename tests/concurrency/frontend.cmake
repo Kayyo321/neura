@@ -747,12 +747,25 @@ let scopes = import:Std.Concurrent.Scope;
         let [sender, receiver, closer] = channels.open<scopes.Scope>(1);
 ]=] "7:56" "a value of type Scope cannot leave its scope: it cannot be a type argument")
 
-check_rejection(channel_of_duration [=[
+check_rejection(channel_of_big_integer [=[
+let channels = import:Std.Concurrent.Channel;
+let big_integers = import:Std.Math.BigInteger;
+]=] [=[
+        let [sender, receiver, closer] = channels.open<big_integers.BigInteger>(1);
+]=] "7:42" "a value of type BigInteger is not transferable, so it cannot be a channel's element type")
+
+# Duration is #Immutable, so tasks share its instances (Types.md, immutable classes).
+check_accepted(channel_of_duration [=[
 let channels = import:Std.Concurrent.Channel;
 let durations = import:Std.Time.Duration;
 ]=] [=[
         let [sender, receiver, closer] = channels.open<durations.Duration>(1);
-]=] "7:42" "a value of type Duration is not transferable, so it cannot be a channel's element type")
+        let _ = sender.send(durations.of_millis(1500));
+        match (receiver.receive()) {
+            channels.Received.Value(span) => { console.print_line(span.to_string()); },
+            _ => { console.print_line("none"); },
+        }
+]=] "PT1.5S\n")
 
 # A function value is transferable when every function value of its type that the program can create captures
 # only transferable values (5.1, 5.2), so a channel of functions is accepted until the program makes a closure

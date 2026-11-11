@@ -6,7 +6,7 @@
 export let Parallel = module (
     /// @brief The limits each item of a map runs under, the same under any number of workers. An item that
     /// exceeds one traps as that item. The fields are read-only.
-    #Final
+    #[Final, Immutable, ThreadSafe]
     export let ItemLimits = class (
         /// @brief The most steps one item may execute.
         export last max_steps: int64;

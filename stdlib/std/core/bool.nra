@@ -7,14 +7,15 @@ let.promote _ = import:Std.Core.Result;
 #Since("0.1.0")
 export let Bool = module (
     /// @brief 1 for true, 0 for false.
-    #Inline
+    #[Inline, Pure, ThreadSafe]
     export let to_int = func(v: bool) -> int => v ? 1 : 0;
 
     /// @brief Returns true when exactly one operand is true.
-    #Inline
+    #[Inline, Pure, ThreadSafe]
     export let xor = func(a: bool, b: bool) -> bool => a != b;
 
     /// @brief The natural order: false before true. Usable as a comparator.
+    #[Pure, ThreadSafe]
     export let compare = func(a: bool, b: bool) -> Ordering {
         if (a == b) {
             return Ordering.Equal;
@@ -26,9 +27,11 @@ export let Bool = module (
     };
 
     /// @brief 1231 for true and 1237 for false (section 5.2).
+    #[Pure, ThreadSafe]
     export let hash = func(v: bool) -> uint32 => v.hash_code();
 
     /// @brief Returns the lowercase text `true` or `false`.
+    #[Pure, ThreadSafe]
     export let to_string = func(v: bool) -> string {
         if (v) {
             return "true";
@@ -40,7 +43,7 @@ export let Bool = module (
     ///
     /// The empty text fails with Empty; a proper prefix of either word with UnexpectedEnd at its length; any
     /// other text with InvalidCharacter at the first byte that matches neither word.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<bool> {
         if (text == "true") {
             return Result<bool>.Ok(true);

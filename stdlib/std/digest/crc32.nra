@@ -29,6 +29,7 @@ export let Crc32 = module (
 
         /// @brief The checksum of every byte added since creation or the last reset. Reading it does not end
         /// the computation.
+        #Pure
         export let value = func -> uint32 => register ^ AllOnes;
 
         /// @brief Restores the initial register and discards the previous checksum state.
@@ -38,9 +39,10 @@ export let Crc32 = module (
     );
 
     /// @brief A new checksum with no bytes added.
+    #[Pure, ThreadSafe]
     export let create = func -> Crc32 => new;
 
     /// @brief The checksum of the bytes.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let of = func(bytes: uint8[list]) -> uint32 => kernels.crc32(bytes);
 );

@@ -10,7 +10,7 @@ export let Semaphore = module (
 
     /// @brief A fixed number of permits. A permit is a place in a channel: taking one is a receive, so tasks
     /// that wait are served first come, first served, and a wait can be cancelled.
-    #Final
+    #[Final, ThreadSafe]
     export let Semaphore = class (
         last free: channels.Receiver<bool>;
         last returned: channels.Sender<bool>;

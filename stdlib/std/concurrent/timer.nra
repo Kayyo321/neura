@@ -12,7 +12,7 @@ export let Timer = module (
     export let TimerOutcome = enum (Fired, Cancelled);
 
     /// @brief A timer that fires once, at a reading of the monotonic clock.
-    #Final
+    #[Final, ThreadSafe]
     export let Timer = class (
         /// @brief A timer that fires when the monotonic clock reads `at` nanoseconds. Use after or at.
         export let init = func(at: int64) {

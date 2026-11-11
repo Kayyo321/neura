@@ -20,7 +20,7 @@ export let Csv = module (
     /// - Syntax, "text after closing quote": at the first byte after the
     /// closing quote that is not a comma or a line break.
     /// - UnexpectedEnd, "unterminated quoted field": at the text's length.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<string[list][list]> {
         last records: string[list][list] = [];
         last count = text.byte_length;
@@ -86,7 +86,7 @@ export let Csv = module (
     ///
     /// A field is quoted, with each quote doubled, only when it contains a comma, a quote, a CR, or an LF. A
     /// row with no fields is written as an empty line, which parses as one empty field.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let write = func(rows: string[list][list]) -> string {
         last out = builders.create();
         for (let row in rows) {

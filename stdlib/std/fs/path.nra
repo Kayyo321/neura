@@ -11,7 +11,7 @@ let.promote _ = import:Std.Core.Ordering;
 #Since("0.1.0")
 export let Path = module (
     /// @brief An immutable normalized path with lexical operations independent of the filesystem.
-    #Final
+    #[Final, Immutable, ThreadSafe]
     export let Path = class implements Comparable<Path> (
         /// @brief The normalized slash-separated path text.
         last text: string;
@@ -27,6 +27,7 @@ export let Path = module (
         };
 
         /// @brief This path followed by `other`; an absolute `other` replaces it.
+        #Pure
         export let join = func(other: string) -> Path =>
             absolute_text(other) ? new(other) : new(text + "/" + other);
 
@@ -45,6 +46,7 @@ export let Path = module (
         };
 
         /// @brief The last component; None for the root, `.`, and a path ending in `..`.
+        #Pure
         export let file_name = func -> optional.Optional<string> {
             last parts = split(text);
             if (parts.length == 0 || parts[parts.length - 1] == "..") {
@@ -54,6 +56,7 @@ export let Path = module (
         };
 
         /// @brief The file name without its extension.
+        #Pure
         export let stem = func -> optional.Optional<string> {
             return match (file_name()) {
                 optional.Optional.Some(name) => optional.Optional<string>.Some(name.slice(0, stem_end(name))),
@@ -63,6 +66,7 @@ export let Path = module (
 
         /// @brief The text after the last `.` of the file name, when that dot is not the name's first
         /// character.
+        #Pure
         export let extension = func -> optional.Optional<string> {
             match (file_name()) {
                 optional.Optional.Some(name) => {
@@ -79,6 +83,7 @@ export let Path = module (
         };
 
         /// @brief The components in order, starting with "/" for an absolute path. The path `.` has none.
+        #Pure
         export let components = func -> string[list] {
             last parts = split(text);
             if (!is_absolute) {
@@ -93,6 +98,7 @@ export let Path = module (
 
         /// @brief Removes each `..` together with the component before it, without consulting the file system.
         /// `..` directly below the root is removed; leading `..` of a relative path are kept.
+        #Pure
         export let resolve_lexically = func -> Path {
             last kept: string[list] = [];
             for (let part in split(text)) {
@@ -111,6 +117,7 @@ export let Path = module (
 
         /// @brief True when both paths are absolute or both relative and every component of `other` begins this
         /// path.
+        #Pure
         export let starts_with = func(other: Path) -> bool {
             if (is_absolute != other.is_absolute) {
                 return false;
@@ -132,6 +139,7 @@ export let Path = module (
 
         /// @brief A relative path that joined to `base` names this path, or nil when one is absolute and the
         /// other relative or when `base` has a `..` component after the common part.
+        #Pure
         export let relative_to = func(base: Path) -> Path {
             if (is_absolute != base.is_absolute) {
                 return nil;
@@ -160,9 +168,11 @@ export let Path = module (
         };
 
         /// @brief Orders paths lexicographically by their normalized UTF-8 bytes.
+        #Pure
         export let compare_to = func(other: Path) -> Ordering => compare_text(text, other.to_string());
 
         /// @brief Tests equality of the normalized path text.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is Path)) {
                 return false;
@@ -171,13 +181,16 @@ export let Path = module (
         };
 
         /// @brief Hashes the normalized path text.
+        #Pure
         export let.override hash_code = func -> uint32 => text.hash_code();
 
         /// @brief Returns the normalized path text.
+        #Pure
         export let.override to_string = func -> string => text;
     );
 
     /// @brief Constructs a path and normalizes its separators and dot components.
+    #[Pure, ThreadSafe]
     export let of = func(text: string) -> Path => new(text);
 
     /// @brief Tests whether the raw text begins with a slash.

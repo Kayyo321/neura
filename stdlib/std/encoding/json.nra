@@ -36,12 +36,14 @@ export let Json = module (
     const MaxDepth: int = 512;
 
     /// @brief A Number with the integer's decimal text.
+    #[Pure, ThreadSafe]
     export let number_of_int64 = func(v: int64) -> JsonValue => JsonValue.Number(v.to_string());
 
     /// @brief A Number with the float's shortest round-trip text (Stdlib.md section 7.5), which is valid JSON
     /// number text.
     ///
     /// NaN and the infinities trap with "invalid argument: number is not finite".
+    #[Pure, ThreadSafe]
     export let number_of_float64 = func(v: float64) -> JsonValue {
         if (v != v || v - v != 0.0) {
             trap_with_message("invalid argument: number is not finite");
@@ -50,7 +52,7 @@ export let Json = module (
     };
 
     /// @brief The value of the first member with the name.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let member = func(members: [string, JsonValue][list], name: string) -> Optional<JsonValue> {
         for (let entry in members) {
             if (entry[0] == name) {
@@ -62,6 +64,7 @@ export let Json = module (
 
     /// @brief Some(the value) when the text is a JSON number with no fraction and no exponent whose value fits
     /// in int64; otherwise None, including for text that is not a JSON number.
+    #[Pure, ThreadSafe]
     export let number_to_int64 = func(text: string) -> Optional<int64> {
         last count = text.byte_length;
         if (scan_number(text, 0) != count) {
@@ -97,6 +100,7 @@ export let Json = module (
 
     /// @brief The float64 nearest the number, ties to even (Float64.parse). Text that is not a JSON number
     /// traps with "invalid argument: number text".
+    #ThreadSafe
     export let number_to_float64 = func(text: string) -> float64 {
         require_number(text);
         return match (float64s.parse(text)) {
@@ -133,7 +137,7 @@ export let Json = module (
     /// "unpaired surrogate" at the escape's backslash.
     /// - OutOfRange, "nesting deeper than 512": at the bracket that opens the
     /// 513th level.
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let parse = func(text: string) -> Result<JsonValue> {
         last parser = new Parser();
         parser.document(text);
@@ -149,7 +153,7 @@ export let Json = module (
 
     /// @brief The value's JSON text with no whitespace. A Number whose text is not a JSON number traps with
     /// "invalid argument: number text".
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let write = func(value: JsonValue) -> string {
         last out: uint8[list] = [];
         write_value(out, value, -1, 0);
@@ -161,7 +165,7 @@ export let Json = module (
     ///
     /// Empty arrays and objects are [] and {}. A negative indent traps with "invalid argument: negative
     /// indent".
-    #NoDiscard
+    #[NoDiscard, ThreadSafe]
     export let write_pretty = func(value: JsonValue, indent: int) -> string {
         if (indent < 0) {
             trap_with_message("invalid argument: negative indent");
@@ -177,6 +181,7 @@ export let Json = module (
     /// value. Arrays compare element by element. Objects are equal when they have the same number of members
     /// and each member of either has a member with the same name and an equal value in the other, in any order.
     /// A Number whose text is not a JSON number traps with "invalid argument: number text".
+    #[Pure, ThreadSafe]
     export let equals = func(a: JsonValue, b: JsonValue) -> bool {
         match (a) {
             JsonValue.Null => {
@@ -227,6 +232,7 @@ export let Json = module (
     /// canonical text of a number is "0" for zero and otherwise an optional "-", the significant digits without
     /// leading or trailing zeros, "e", and the decimal exponent that makes them an integer: 120.50 is
     /// "1205e-1".
+    #ThreadSafe
     export let hash = func(value: JsonValue) -> uint32 => match (value) {
         JsonValue.Null => 1,
         JsonValue.Boolean(b) => hashing.combine(2, hashing.of_bool(b)),
@@ -238,6 +244,7 @@ export let Json = module (
 
     /// @brief A StringMap from each member name to its value, in member order. For a repeated name the last
     /// value wins and the name keeps its first position, as in parse.
+    #ThreadSafe
     export let index = func(members: [string, JsonValue][list]) -> StringMap<JsonValue> {
         last map = string_maps.create<JsonValue>();
         for (let entry in members) {

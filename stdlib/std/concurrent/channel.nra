@@ -24,7 +24,7 @@ export let Channel = module (
     );
 
     /// @brief The sending end of a channel of T.
-    #Final
+    #[Final, ThreadSafe]
     export let Sender = class<T> (
         last state: State;
 
@@ -66,7 +66,7 @@ export let Channel = module (
     );
 
     /// @brief The receiving end of a channel of T.
-    #Final
+    #[Final, ThreadSafe]
     export let Receiver = class<T> (
         last state: State;
 
@@ -109,7 +109,7 @@ export let Channel = module (
     );
 
     /// @brief Closes a channel. A coordinator keeps the closer, so a task that only sends or receives cannot.
-    #Final
+    #[Final, ThreadSafe]
     export let Closer = class<T> (
         last state: State;
 

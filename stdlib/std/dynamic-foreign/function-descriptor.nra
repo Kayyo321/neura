@@ -24,9 +24,11 @@ export let FunctionDescriptor = module (
         };
 
         /// @brief The result layout, or None for void.
+        #Pure
         export let return_layout = func -> Optional<MemoryLayout> => result;
 
         /// @brief A copy of the argument layouts.
+        #Pure
         export let argument_layouts = func -> MemoryLayout[list] {
             last copy: MemoryLayout[list] = [];
             for (let layout in arguments) {
@@ -45,6 +47,7 @@ export let FunctionDescriptor = module (
         };
 
         /// @brief Descriptors with the same layouts are equal.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is FunctionDescriptor)) {
                 return false;
@@ -53,9 +56,11 @@ export let FunctionDescriptor = module (
         };
 
         /// @brief Hashes the text form.
+        #Pure
         export let.override hash_code = func -> uint32 => to_string().hash_code();
 
         /// @brief A form such as `(i32i32)i32` or `(a)v`.
+        #Pure
         export let.override to_string = func -> string {
             let text = "(";
             for (let layout in arguments) {

@@ -7,12 +7,14 @@ export let DayOfWeek = module (
     export let DayOfWeek = enum (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday);
 
     /// @brief The day `days` after `day`; negative counts go back.
+    #[Pure, ThreadSafe]
     export let plus = func(day: DayOfWeek, days: int64) -> DayOfWeek {
         last index = ((day as int64) + days % 7 + 7) % 7;
         return of_ordinal(index as int);
     };
 
     /// @brief 0 for Monday through 6 for Sunday; anything else traps with "invalid argument: day of week".
+    #[Pure, ThreadSafe]
     export let of_ordinal = func(ordinal: int) -> DayOfWeek {
         if (ordinal < 0 || ordinal > 6) {
             trap_with_message("invalid argument: day of week");

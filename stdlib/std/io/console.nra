@@ -67,6 +67,7 @@ export let Console = module (
     );
 
     /// @brief Writes the text and one LF. A failed write traps with "console write failed".
+    #ThreadSafe
     export let print_line = func(s: string) {
         match (write_line(s)) {
             WriteOutcome.Ok => {},

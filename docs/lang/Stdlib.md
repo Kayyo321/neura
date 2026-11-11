@@ -359,12 +359,13 @@ These are the intended source-module contracts. Compiler support for the operati
 
 ### 5.8 Task safety
 
-A function that a spawned task calls must be task-safe ([Concurrency](Concurrency.md#52-task-safe-calls)). For library code that means: no reassignable binding at module or file level, no module constant that is an object on the path of a function a task should be able to call, and no first-use static initialization. State that a function needs between calls belongs in an instance or in an argument.
+A function that a spawned task calls must be task-safe ([Concurrency](Concurrency.md#52-task-safe-calls)). For library code that means: no reassignable binding at module or file level, no module constant that is an object of a class that is not `#Immutable` on the path of a function a task should be able to call, and no first-use static initialization. State that a function needs between calls belongs in an instance or in an argument.
 
 - **How to check.** `neura check --task-safety <files>` lists every function of the linked program with `task-safe`, `task-safe; not for a parallel map: <reason>`, or `not task-safe: <reason>`, grouped by source file. Run it on a program that imports the module.
 - **What is pinned.** The `concurrency-frontend` test runs the report over a program that links `Console`, `HashMap`, `ArrayList`, `TreeMap`, `Float64`, `Duration`, `SystemClock`, `Instant`, `Logger`, `TcpStream`, `TcpListener`, `Strings`, `Regex`, `Random`, and `Json`, and fails when a function other than console input is not task-safe.
-- **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`); `Hex.decode` and the four fixed-alphabet `Base64` decoders; and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](StandardLibrary.md#task-safety) gives the reason for each and the statement for every area.
+- **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`) and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](StandardLibrary.md#task-safety) gives the reason for each and the statement for every area.
 - **Changes made for it.** A collection's text conversion keeps its self-containment flag in the instance ([section 5.2](#52-equality-hashing-and-text)). Float parsing reads no module state. The `BigInteger` and `BigDecimal` methods build the small values they need and do not read the exported constants `Zero`, `One`, and `Ten`, which stay for the root task's use.
+- **Checked tags.** The library states these properties with [tags](Tags.md) that the compiler checks. `#Immutable` marks the value classes `Duration`, `Instant`, `LocalDate`, `LocalTime`, `LocalDateTime`, `ZoneOffset`, `IntRange`, `Uuid`, `Path`, `FileMetadata`, and `ItemLimits`, so tasks share their instances and may read constants such as `Duration.Zero`; each is also `#ThreadSafe`. `BigInteger`, `BigDecimal`, `RegexMatch`, `MemoryLayout`, `FunctionDescriptor`, and the immutable collections keep their contents in lists, so they are not `#Immutable` and are not transferable. `#ThreadSafe` marks the module functions of `Std.Core`, `Std.Math`, `Std.Text`, `Std.Encoding`, `Std.Digest`, and `Std.Time`, the `Std.Concurrent` handles, the `Cancellation` functions, and `Console.print_line`; a function that calls a method a program may override, such as `Error.message`, which calls `ErrorDetail.message`, is left untagged because a program's override decides whether it is task-safe. `#Pure` marks the functions and methods of those modules that compute their result from their arguments alone, such as every `Math` function, the integer and float companions, and the arithmetic and queries of the time value types. A function that builds its result through a helper that fills a `StringBuilder` or a list, such as `Json.write`, `Float64.to_fixed`, or the `BigInteger` arithmetic, is not `#Pure`: the check accepts writes only to objects that the tagged function allocates itself.
 
 
 ## 6. `Std.Core` types
@@ -641,7 +642,7 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 | `split(input)` | A built-in list of strings, with the rules of `Strings.split`. |
 | `group_count: int`, `pattern: string` | Get-only fields ([accessors](Types.md#accessors)), set at compilation. |
 
-`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
+`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match. Its capture positions are kept in a list, so it is not marked `#Immutable` and tasks cannot share it.
 
 ## 9. `Std.Collections`
 
@@ -883,7 +884,7 @@ Map<K, V> ── MutableMap<K, V>
 
 - Read-only and mutable interfaces are separate. A function that only reads takes the read-only interface, and no member simulates immutability by trapping.
 - Members that need only other members (`is_empty`, `first`, `contains_all`, `for_each`) become default methods written once in the interface.
-- `ImmutableList<T>`, `ImmutableSet<T>`, and `ImmutableMap<K, V>` are classes that copy their contents at construction and implement only the read-only interfaces. Their module functions `of` take a built-in list (for the map, a list of `[K, V]`; a duplicate key traps).
+- `ImmutableList<T>`, `ImmutableSet<T>`, and `ImmutableMap<K, V>` are classes that copy their contents at construction and implement only the read-only interfaces. Their module functions `of` take a built-in list (for the map, a list of `[K, V]`; a duplicate key traps). They hold their contents in a list or a library collection, so they are not marked `#Immutable` and are not transferable.
 - Members that an interface declares, such as `size()` and `is_empty()`, stay methods in every class, because an interface cannot require an [accessor](Types.md#accessors); `ArrayList.items()` stays a method with them. The immutable classes and `Sequence` are `#Final` and `#NoDiscard`, and every query that returns an `Optional` (`get`, `first_or_none`, `peek`, `floor`, and the like) is `#NoDiscard` ([Tags](Tags.md)).
 - `Lists.same_elements`, `Sets.same_elements`, and `Maps.same_entries` compare collections of different classes through the read-only interfaces. They also need G3.
 - For-each accepts an `Iterable<T>` through G5.
@@ -958,7 +959,7 @@ Every function binds its `neura.math.*` kernel (P2a, [Kernels](../runtime/Kernel
 
 ### 10.2 `BigInteger`
 
-An immutable arbitrary-precision integer. Parsing uses T1 and conversion to `float64` uses N1.
+An immutable arbitrary-precision integer. Its magnitude is a list of limbs, so the class is not marked `#Immutable`, and a task cannot be given one or read the constants `Zero`, `One`, and `Ten`. Parsing uses T1 and conversion to `float64` uses N1.
 
 - **Layout.** `sign` (`int`: -1, 0, or 1) and `magnitude`, a built-in `uint32` list of limbs, least significant first, with no zero limb at the top. Zero has sign 0 and an empty magnitude. The form is unique, so equality compares the fields. No method changes the list after construction.
 - **Limits.** At most 2^26 limbs; a larger result traps with `invalid argument: magnitude too large`.
@@ -1038,7 +1039,7 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 Needs P2 for every host operation and T1 for `Path`.
 
-**`Path`** is an immutable class holding normalized text.
+**`Path`** is an `#Immutable` class holding normalized text.
 
 - The separator is `/` on every host. The host service translates.
 - **Normalization at construction:** repeated separators collapse; `.` components are removed; a trailing separator is removed except for the root; an empty result is `.`. `..` components are kept, because removing them is not correct in the presence of links.
@@ -1088,7 +1089,7 @@ The library has no UDP, TLS, HTTP, or name-resolution APIs.
 
 ### 12.1 `Std.Time`
 
-The value types are immutable classes with `compare_to`, `equals`, `hash_code`, and `to_string`. Their arithmetic is checked integer arithmetic and their text is digits and punctuation joined by concatenation. Each `parse` needs T1.
+The value types are `#Immutable` classes with `compare_to`, `equals`, `hash_code`, and `to_string`. Their arithmetic is checked integer arithmetic and their text is digits and punctuation joined by concatenation. Each `parse` needs T1.
 
 **`Duration`** is a signed count of nanoseconds in one `int64` (about ±292 years).
 
@@ -1141,7 +1142,7 @@ There is no time zone database, no named zones, and no daylight-saving rules. Co
 
 The same seed gives the same sequence of results from every member, on every runtime, in every library version with the same major number. `Random` is not suitable for secrets, and the library offers no cryptographic generator.
 
-**`Uuid`** is an immutable value of 16 bytes. The module function `random(random: Random)` makes a version 4 identifier from `fill_bytes`, then sets the version and variant bits. `to_string` writes the 36-character hyphenated form in lowercase. `parse(text) → Result<Uuid>` accepts either case and needs T1. It has `compare_to`, `equals`, and `hash_code` over its bytes.
+**`Uuid`** is an `#Immutable` value of 16 bytes. The module function `random(random: Random)` makes a version 4 identifier from `fill_bytes`, then sets the version and variant bits. `to_string` writes the 36-character hyphenated form in lowercase. `parse(text) → Result<Uuid>` accepts either case and needs T1. It has `compare_to`, `equals`, and `hash_code` over its bytes.
 
 ## 13. Data formats
 
@@ -1387,7 +1388,7 @@ These rules complete the contracts of the earlier sections. Where a rule here is
 - **Helper errors.** `tasks.cancelled` and `tasks.empty` are the codes of the two `Custom` errors the `Tasks` helpers make themselves.
 - **A group needs a scope.** `WorkerGroup` has no `create`: a group exists only inside `with_workers`, which owns the scope its workers run in and drains the queue before it returns. The handle's constructor is exported only so that `with_workers` can be written in the library.
 - **A semaphore is a channel.** Its permits are places in a channel of `bool`, so waiting tasks are served first come, first served and a wait can be cancelled, with no scheduler operation of its own.
-- **Errors across tasks.** `Error` stays as it is and gains a transferable copy, `PortableError`; immutable classes are not transferable.
+- **Errors across tasks.** `Error` stays as it is and gains a transferable copy, `PortableError`: its `Custom` detail is an object of the open class `ErrorDetail`, which is not transferable.
 - **Scoped helpers.** The two helpers word their combined error differently, as [section 5.5](#55-resources) gives. `Closeable.release` is exported so that a program can apply the rule to a resource of its own.
 - **Trap details.** `workers` and `capacity` (`WorkerGroup`, `Channel`), `permits` (`Semaphore`), `steps` and `heap_cells` (`Parallel`) after `invalid argument: `; `released more permits than were created` and `guard already held` after `invalid state: `.
 

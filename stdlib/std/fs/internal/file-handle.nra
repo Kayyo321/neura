@@ -2,7 +2,7 @@
 /// never leaves the library.
 export let FileHandle = module (
     /// @brief Pairs a provider file identifier with its opening path.
-    #Final
+    #[Final, Immutable]
     export let FileHandle = class (
         /// @brief The provider's identifier for the open file.
         export last id: int64;

@@ -4,21 +4,26 @@
 #Since("0.1.0")
 export let Hash = module (
     /// @brief 31 * seed + value, modulo 2^32. The product is below 2^37 in uint64.
+    #[Pure, ThreadSafe]
     export let combine = func(seed: uint32, value: uint32) -> uint32 {
         last sum = (seed as uint64) * 31 + (value as uint64);
         return (sum & 4294967295) as uint32;
     };
 
     /// @brief Mixes the high half into the low half before a table masks the hash.
+    #[Pure, ThreadSafe]
     export let spread = func(hash: uint32) -> uint32 => hash ^ (hash >> 16);
 
     /// @brief 1231 for true and 1237 for false.
+    #[Pure, ThreadSafe]
     export let of_bool = func(value: bool) -> uint32 => value ? 1231 : 1237;
 
     /// @brief The low 32 bits exclusive-or the high 32 bits of the two's complement pattern.
+    #[Pure, ThreadSafe]
     export let of_int64 = func(value: int64) -> uint32 => value.hash_code();
 
     /// @brief Folds the high and low halves of an unsigned 64-bit value into a 32-bit hash.
+    #[Pure, ThreadSafe]
     export let of_uint64 = func(value: uint64) -> uint32 =>
         ((value & 4294967295) ^ (value >> 32)) as uint32;
 );

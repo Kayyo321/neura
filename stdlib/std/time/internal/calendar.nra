@@ -32,12 +32,15 @@ export let Calendar = module (
     export const MaxOffsetSeconds: int = 64800;
 
     /// @brief Divides with rounding toward negative infinity.
+    #Pure
     export let floor_div = func(a: int64, b: int64) -> int64 => int64s.floor_div(a, b);
 
     /// @brief Returns the remainder associated with division rounded toward negative infinity.
+    #Pure
     export let floor_mod = func(a: int64, b: int64) -> int64 => int64s.floor_mod(a, b);
 
     /// @brief Tests the Gregorian leap-year rule, including century exceptions.
+    #Pure
     export let is_leap = func(year: int64) -> bool {
         // The rule repeats every 400 years, and 4 and 100 divide 400.
         last in_cycle = floor_mod(year, 400) as int;
@@ -45,6 +48,7 @@ export let Calendar = module (
     };
 
     /// @brief Returns the number of days in the selected Gregorian month.
+    #Pure
     export let month_length = func(year: int64, month: int) -> int {
         if (month == 2) {
             if (is_leap(year)) {
@@ -62,6 +66,7 @@ export let Calendar = module (
     ///
     /// The year is shifted to start in March, so the leap day ends it; the shifted year splits into a 400-year
     /// cycle of 146,097 days and a year of the cycle, with floor division so that negative years work.
+    #Pure
     export let epoch_day_of = func(year: int64, month: int, day: int) -> int64 {
         let shifted = year;
         let march_month = month - 3;
@@ -78,6 +83,7 @@ export let Calendar = module (
     };
 
     /// @brief The inverse of epoch_day_of: [year, month, day].
+    #Pure
     export let civil_of = func(epoch_day: int64) -> [int64, int, int] {
         last shifted_day = epoch_day + 719468;
         last cycle = floor_div(shifted_day, 146097);
@@ -99,6 +105,7 @@ export let Calendar = module (
     };
 
     /// @brief Decimal digits of a non-negative value, left-padded with zeros.
+    #Pure
     export let padded = func(value: int64, width: int) -> string {
         let text = value.to_string();
         let count = text.byte_length;
@@ -110,6 +117,7 @@ export let Calendar = module (
     };
 
     /// @brief Four digits for 0000 through 9999; otherwise a sign and at least four digits.
+    #Pure
     export let year_text = func(year: int64) -> string {
         if (year < 0) {
             return "-" + padded(-year, 4);
@@ -121,11 +129,13 @@ export let Calendar = module (
     };
 
     /// @brief Formats a Gregorian date with a signed extended year when required.
+    #Pure
     export let date_text = func(year: int64, month: int, day: int) -> string {
         return year_text(year) + "-" + padded(month as int64, 2) + "-" + padded(day as int64, 2);
     };
 
     /// @brief Empty for zero; otherwise a point and the shortest of 3, 6, or 9 digits that is exact.
+    #Pure
     export let fraction_text = func(nanos: int) -> string {
         if (nanos == 0) {
             return "";
@@ -140,6 +150,7 @@ export let Calendar = module (
     };
 
     /// @brief HH:MM:SS and the fraction of fraction_text.
+    #Pure
     export let time_text = func(nano_of_day: int64) -> string {
         last whole = floor_div(nano_of_day, NanosPerSecond);
         last nanos = (nano_of_day - whole * NanosPerSecond) as int;
@@ -149,6 +160,7 @@ export let Calendar = module (
     };
 
     /// @brief Z for zero; otherwise a sign and HH:MM. Offsets are whole minutes.
+    #Pure
     export let offset_text = func(total_seconds: int) -> string {
         if (total_seconds == 0) {
             return "Z";
@@ -189,15 +201,19 @@ export let Calendar = module (
         };
 
         /// @brief Reports whether scanning has yet to record a failure.
+        #Pure
         export let ok = func -> bool => !failed;
 
         /// @brief Returns the scanner's next byte offset.
+        #Pure
         export let position = func -> int => cursor;
 
         /// @brief Tests whether the scanner is at the end of the text.
+        #Pure
         export let at_end = func -> bool => cursor >= source.byte_length;
 
         /// @brief The byte at the cursor, or -1 at the end or after a failure.
+        #Pure
         export let peek = func -> int {
             if (failed || cursor >= source.byte_length) {
                 return -1;
@@ -206,6 +222,7 @@ export let Calendar = module (
         };
 
         /// @brief Tests whether the next byte is an ASCII decimal digit.
+        #Pure
         export let peek_digit = func -> bool {
             last b = peek();
             return b >= 48 && b <= 57;
@@ -312,6 +329,7 @@ export let Calendar = module (
         };
 
         /// @brief Builds a parse error from the recorded failure.
+        #Pure
         export let failure = func -> error.Error {
             return error.Error.Parse { kind: failure_kind, offset: failure_offset, message: failure_message };
         };

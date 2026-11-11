@@ -4,7 +4,7 @@
 #Since("0.1.0")
 export let Guarded = module (
     /// @brief A guard around one mutable T.
-    #Final
+    #[Final, ThreadSafe]
     export let Guarded = class<T> (
         /// @brief A guard that owns the state. Use create, which builds the state inside the guard.
         export let init = func(state: T) {
