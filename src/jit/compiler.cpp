@@ -13,9 +13,9 @@
 //   the width), and the same failure conditions, tested with the
 //   processor's carry and overflow flags where they are exactly those
 //   conditions.
-// - Everything else of a lowered instruction (float operations, division,
-//   widths outside 1 to 64) calls lift::evaluate itself, so it is the
-//   interpreter's code by construction.
+// - Everything else of a lowered instruction (float operations, widths
+//   outside 1 to 64, and a signed division by -1) calls lift::evaluate
+//   itself, so it is the interpreter's code by construction.
 // - Budget, Poll, CheckRef, and State do what the interpreter does, the
 //   last three through helpers that run the interpreter's own code.
 #include "assembler.hpp"
@@ -347,6 +347,8 @@ private:
         case lift::Opcode::ShiftLeft:
         case lift::Opcode::ShiftRight:
         case lift::Opcode::Index:
+        case lift::Opcode::Divide:
+        case lift::Opcode::Remainder:
             return true;
         case lift::Opcode::ConvertInteger:
             return in.to_width >= 1 && in.to_width <= 64;
@@ -363,17 +365,55 @@ private:
         check_register(op.b);
         const auto fail = stub(op.block, Outcome::Checks);
         if (!inline_instruction(in)) {
-            m_.load(T0, op.a);
-            m_.load(T1, op.b);
-            m_.call(offsets::lift, op.index);
-            m_.load_context_byte(T1, offsets::status);
-            m_.branch_if_nonzero(T1, fail);
-            m_.store(op.dst, T0);
+            evaluate(op, fail);
+        } else if (in.op == lift::Opcode::Divide || in.op == lift::Opcode::Remainder) {
+            division(in, op, fail);
         } else {
             const auto result = integer(in, op, fail);
             m_.store(op.dst, result);
         }
         if (op.flags & nvm::tier2::defines) m_.set_initialized(op.dst);
+    }
+
+    // dst = lift::evaluate(instruction, a, b) through the helper.
+    void evaluate(const Op& op, Label fail) {
+        m_.load(T0, op.a);
+        m_.load(T1, op.b);
+        m_.call(offsets::lift, op.index);
+        m_.load_context_byte(T1, offsets::status);
+        m_.branch_if_nonzero(T1, fail);
+        m_.store(op.dst, T0);
+    }
+
+    // Division and remainder as lift::evaluate computes them:
+    //   b == 0 fails;
+    //   unsigned: a / b and a % b of the whole registers, unmasked;
+    //   signed: x / y and x % y of the sign-extended values, masked. A
+    //   divisor of -1 (MIN / -1 fails, a remainder by -1 is 0) is left to
+    //   the helper.
+    void division(const lift::Instruction& in, const Op& op, Label fail) {
+        const bool remainder = in.op == lift::Opcode::Remainder;
+        const unsigned w = in.width;
+        const auto slow = m_.label();
+        const auto done = m_.label();
+        m_.load(T0, op.a);
+        m_.load(T1, op.b);
+        m_.branch_if_zero(T1, fail);
+        if (in.is_signed) {
+            sign_extend(T0, w);
+            sign_extend(T1, w);
+            m_.move_immediate(T3, ~std::uint64_t{0});
+            m_.branch_if(Cond::Eq, T1, T3, slow);
+        }
+        m_.divide(in.is_signed, remainder);
+        if (in.is_signed) mask(T0, w);
+        m_.store(op.dst, T0);
+        if (in.is_signed) {
+            m_.jump(done);
+            m_.bind(slow);
+            evaluate(op, fail);
+            m_.bind(done);
+        }
     }
 
     // The integer instruction `in` on registers op.a and op.b, as

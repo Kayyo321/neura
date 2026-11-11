@@ -108,6 +108,13 @@ void Emitter::eor(Reg to, Reg a, Reg b) { three(0xCA000000, to, a, b); }
 void Emitter::mul(Reg to, Reg a, Reg b) { three(0x9B007C00, to, a, b); }
 void Emitter::umulh(Reg to, Reg a, Reg b) { three(0x9BC07C00, to, a, b); }
 void Emitter::smulh(Reg to, Reg a, Reg b) { three(0x9B407C00, to, a, b); }
+void Emitter::udiv(Reg to, Reg a, Reg b) { three(0x9AC00800, to, a, b); }
+void Emitter::sdiv(Reg to, Reg a, Reg b) { three(0x9AC00C00, to, a, b); }
+
+void Emitter::msub(Reg to, Reg a, Reg b, Reg minuend) {
+    emit(0x9B008000 | (std::uint32_t{b} << 16) | (std::uint32_t{minuend} << 10) | (std::uint32_t{a} << 5) | to);
+}
+
 void Emitter::lslv(Reg to, Reg a, Reg b) { three(0x9AC02000, to, a, b); }
 void Emitter::lsrv(Reg to, Reg a, Reg b) { three(0x9AC02400, to, a, b); }
 void Emitter::asrv(Reg to, Reg a, Reg b) { three(0x9AC02800, to, a, b); }
@@ -418,6 +425,18 @@ public:
             e_.cmp_asr(ip0, d, 63);
             fixups_.emplace_back(e_.b_cond(ne), target.id);
         }
+    }
+
+    void divide(bool is_signed, bool remainder) override {
+        const auto a = scratch(Scratch::T0);
+        const auto b = scratch(Scratch::T1);
+        const auto quotient = remainder ? scratch(Scratch::T2) : a;
+        if (is_signed) {
+            e_.sdiv(quotient, a, b);
+        } else {
+            e_.udiv(quotient, a, b);
+        }
+        if (remainder) e_.msub(a, quotient, b, a);
     }
 
     void load_context(Scratch to, std::uint32_t offset) override { e_.ldr(scratch(to), context, offset); }

@@ -55,6 +55,10 @@ public:
     void mul(Reg to, Reg a, Reg b);
     void umulh(Reg to, Reg a, Reg b);
     void smulh(Reg to, Reg a, Reg b);
+    void udiv(Reg to, Reg a, Reg b);
+    void sdiv(Reg to, Reg a, Reg b);
+    // to = minuend - a * b
+    void msub(Reg to, Reg a, Reg b, Reg minuend);
     void lslv(Reg to, Reg a, Reg b);
     void lsrv(Reg to, Reg a, Reg b);
     void asrv(Reg to, Reg a, Reg b);

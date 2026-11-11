@@ -108,6 +108,9 @@ std::map<std::string, std::function<void(X86&)>> x86_cases() {
     c["imul rax, rcx"] = [](X86& e) { e.imul(rax, rcx); };
     c["imul rdx, rcx"] = [](X86& e) { e.imul(rdx, rcx); };
     c["mul rcx"] = [](X86& e) { e.mul(rcx); };
+    c["div rcx"] = [](X86& e) { e.div(rcx); };
+    c["idiv rcx"] = [](X86& e) { e.idiv(rcx); };
+    c["cqo"] = [](X86& e) { e.cqo(); };
     c["shl rax, cl"] = [](X86& e) { e.shift_cl(ShiftOp::shl, rax); };
     c["shr rax, cl"] = [](X86& e) { e.shift_cl(ShiftOp::shr, rax); };
     c["sar rdx, cl"] = [](X86& e) { e.shift_cl(ShiftOp::sar, rdx); };
@@ -185,6 +188,9 @@ std::map<std::string, std::function<void(A64&)>> aarch64_cases() {
     c["mul x9, x9, x10"] = [](A64& e) { e.mul(9, 9, 10); };
     c["umulh x16, x9, x10"] = [](A64& e) { e.umulh(16, 9, 10); };
     c["smulh x16, x9, x10"] = [](A64& e) { e.smulh(16, 9, 10); };
+    c["udiv x9, x9, x10"] = [](A64& e) { e.udiv(9, 9, 10); };
+    c["sdiv x11, x9, x10"] = [](A64& e) { e.sdiv(11, 9, 10); };
+    c["msub x9, x11, x10, x9"] = [](A64& e) { e.msub(9, 11, 10, 9); };
     c["lslv x9, x9, x10"] = [](A64& e) { e.lslv(9, 9, 10); };
     c["lsrv x9, x9, x10"] = [](A64& e) { e.lsrv(9, 9, 10); };
     c["asrv x11, x11, x10"] = [](A64& e) { e.asrv(11, 11, 10); };
@@ -440,19 +446,18 @@ void check_instruction(const lift::Instruction& in, const std::string& label) {
         const auto region = instruction_region(in, pinned);
         const auto program = compile_or_fail(region, label);
         if (!program) return;
-        auto values = edge_values(std::clamp<unsigned>(in.width, 1, 64));
-        if (in.op == lift::Opcode::Divide || in.op == lift::Opcode::Remainder) {
-            // lift::evaluate divides sign-extended values, so it needs
-            // operands that fit their width (as every region's do): with
-            // bits above it, MIN / -1 could reach the hardware.
-            std::vector<std::uint64_t> fitting;
-            for (const auto v : values) {
-                if ((v & lift::mask_of(in.width)) == v) fitting.push_back(v);
-            }
-            values = fitting;
-        }
+        const auto values = edge_values(std::clamp<unsigned>(in.width, 1, 64));
+        const bool division = in.op == lift::Opcode::Divide || in.op == lift::Opcode::Remainder;
         for (const auto a : values) {
             for (const auto b : values) {
+                // lift::evaluate divides sign-extended values. Operands with
+                // bits above their width (no region's are) can make that the
+                // hardware's INT64_MIN / -1, which the oracle itself cannot
+                // evaluate.
+                if (division && in.is_signed && in.width < 64 &&
+                    lift::sign_extend(a, in.width) == INT64_MIN && lift::sign_extend(b, in.width) == -1) {
+                    continue;
+                }
                 std::vector<std::uint64_t> regs(region.register_count, 0x5EED5EED5EED5EEDULL);
                 std::vector<std::uint8_t> init(region.register_count, 0);
                 regs[0] = a;
@@ -576,10 +581,11 @@ namespace {
 
 lift::Instruction random_instruction(std::mt19937_64& rng) {
     using lift::Opcode;
-    static const Opcode ops[] = {Opcode::Add,       Opcode::Subtract,   Opcode::Multiply,    Opcode::Negate,     Opcode::AddWrapping, Opcode::Equal,
-                                 Opcode::Less,      Opcode::GreaterEqual, Opcode::And,       Opcode::Not,
-                                 Opcode::BitAnd,    Opcode::BitXor,     Opcode::BitNot,      Opcode::ShiftLeft,
-                                 Opcode::ShiftRight, Opcode::Index,     Opcode::ConvertInteger, Opcode::FloatAdd};
+    static const Opcode ops[] = {
+        Opcode::Add,    Opcode::Subtract,  Opcode::Multiply,     Opcode::Divide,     Opcode::Remainder,
+        Opcode::Negate, Opcode::AddWrapping, Opcode::Equal,      Opcode::Less,       Opcode::GreaterEqual,
+        Opcode::And,    Opcode::Not,       Opcode::BitAnd,       Opcode::BitXor,     Opcode::BitNot,
+        Opcode::ShiftLeft, Opcode::ShiftRight, Opcode::Index,    Opcode::ConvertInteger, Opcode::FloatAdd};
     static const unsigned widths[] = {1, 8, 16, 32, 63, 64};
     lift::Instruction in;
     in.op = ops[rng() % std::size(ops)];
@@ -587,6 +593,10 @@ lift::Instruction random_instruction(std::mt19937_64& rng) {
     in.is_signed = rng() % 2;
     in.to_width = static_cast<std::uint8_t>(widths[rng() % std::size(widths)]);
     in.to_signed = rng() % 2;
+    // Random registers have bits above narrow widths, which can make a signed
+    // division the hardware's INT64_MIN / -1 in lift::evaluate itself (no
+    // region's operands do); at 64 bits that case is a failed check.
+    if ((in.op == Opcode::Divide || in.op == Opcode::Remainder) && in.is_signed) in.width = 64;
     if (in.op == Opcode::FloatAdd) {
         in.format = rng() % 2 ? lift::FloatType::Binary32 : lift::FloatType::Binary64;
         in.width = in.format == lift::FloatType::Binary32 ? 32 : 64;
@@ -822,7 +832,9 @@ void check_same(const Captured& actual, const Captured& expected, const std::str
 
 // Whether this process runs regions at all, and as native code.
 bool regions_run() { return nvm::tier_ceiling() >= 2; }
-bool native_enabled() { return regions_run() && jit::availability(jit::combine(jit::Mode::On, jit::environment_mode())).enabled; }
+bool native_enabled() {
+    return regions_run() && jit::availability(jit::combine(jit::Mode::On, jit::environment_mode())).enabled;
+}
 
 // Runs `image` at tier 0, at tier 2 on the interpreter, and at tier 2 with
 // native code (each with eager regions in its own cache), under `adjust`,
@@ -998,8 +1010,8 @@ NEURA_TEST(jit, native_regions_deoptimize_at_every_check_like_the_interpreter) {
     if (native_enabled()) {
         const auto statistics = native.statistics();
         check(statistics.jit_compiled > 0, "regions were compiled");
-        check(statistics.region_counts.native > 0 && statistics.region_counts.native == statistics.region_counts.entries,
-              "every region entry ran native code");
+        const auto& counts = statistics.region_counts;
+        check(counts.native > 0 && counts.native == counts.entries, "every region entry ran native code");
         check(statistics.region_counts.checks > 0, "native code deoptimized at failed checks");
         check(statistics.region_counts.state_traps > 0, "native code deoptimized at trapping state operations");
         check(interpreted.statistics().region_counts.native == 0, "--jit=off ran no native code");
@@ -1111,6 +1123,51 @@ NEURA_TEST(jit, regions_fall_back_to_the_interpreter_when_code_cannot_be_mapped)
     nvm::TierCache off(image, eager());
     check_same(run_captured(image, limits(2, jit::Mode::Off, &off)), reference, "--jit=off");
     check_equal(off.statistics().jit_compiled, std::uint64_t{0}, "--jit=off compiles nothing");
+}
+
+NEURA_TEST(jit, an_exception_in_a_helper_leaves_native_code_as_it_leaves_the_interpreter) {
+    // A task dump is served at a poll, inside a region too. Its writer
+    // asks for the next dump each time and throws at the nth: the
+    // exception must leave the run at the same poll in every mode, which in
+    // native code means through the poll helper's status and a rethrow.
+    if (!regions_run()) return;
+    // Programs whose tasks loop, so that regions poll.
+    for (const auto* name : {"worker-group", "select-rotation", "collect-parked"}) {
+        const auto image = build_program(
+            {environment.source_dir / "tests" / "concurrency" / "programs" / (std::string(name) + ".nra")});
+        nvm::TierCache interpreted(image, eager());
+        nvm::TierCache native(image, eager());
+        for (const int nth : {1, 2, 3, 5, 10, 40, 200}) {
+            const auto run = [&](std::uint8_t tier, jit::Mode mode, nvm::TierCache* cache) {
+                nvm::TaskDumpRequest request;
+                request.requested = true;
+                int writes = 0;
+                request.write = [&](const std::string&) {
+                    if (++writes == nth) throw std::runtime_error("dump writer failed at " + std::to_string(writes));
+                    request.requested = true;
+                };
+                auto l = limits(tier, mode, cache);
+                l.task_dump = &request;
+                std::string what = "no exception";
+                try {
+                    run_captured(image, l);
+                } catch (const std::runtime_error& error) {
+                    what = error.what();
+                }
+                return std::make_pair(what, writes);
+            };
+            const auto reference = run(0, jit::Mode::Off, nullptr);
+            const auto label = std::string(name) + ": a dump writer failing at write " + std::to_string(nth);
+            const auto off = run(2, jit::Mode::Off, &interpreted);
+            check_equal(off.first, reference.first, label + " (interpreter)");
+            check_equal(off.second, reference.second, label + " writes (interpreter)");
+            if (!jit::availability(jit::Mode::On).enabled) continue;
+            const auto on = run(2, jit::Mode::On, &native);
+            check_equal(on.first, reference.first, label + " (native)");
+            check_equal(on.second, reference.second, label + " writes (native)");
+        }
+        if (native_enabled()) check(native.statistics().region_counts.native > 0, "the tasks ran natively");
+    }
 }
 
 NEURA_TEST(jit, modes_parse_and_combine) {

@@ -46,6 +46,11 @@ public:
     void imul(Reg to, Reg from);
     // rdx:rax = rax * from, unsigned
     void mul(Reg from);
+    // rax = rdx:rax / from, rdx = the remainder, unsigned and signed
+    void div(Reg from);
+    void idiv(Reg from);
+    // rdx:rax = rax sign-extended
+    void cqo();
     void shift_cl(ShiftOp op, Reg value);
     void shift_immediate(ShiftOp op, Reg value, std::uint8_t count);
     void neg(Reg value);

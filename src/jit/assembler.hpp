@@ -22,6 +22,8 @@ namespace neura::jit {
 // - shift() takes its count in T1 (x86-64 shifts by CL).
 // - multiply_or_branch(Unsigned) needs its destination in T0 and its source
 //   in T1, and clobbers T2 (x86-64 multiplies into RDX:RAX).
+// - divide() works on T0 and T1 only (x86-64 divides RDX:RAX) and clobbers
+//   T2.
 // - call() takes `a` in T0 and `b` in T1 and returns in T0. It clobbers T1
 //   to T3. Pinned registers keep their values across it.
 enum class Scratch : std::uint8_t { T0, T1, T2, T3 };
@@ -92,6 +94,10 @@ public:
     // to = the low 64 bits of to * from; branches when the exact product
     // does not fit 64 bits as unsigned or as signed.
     virtual void multiply_or_branch(Overflow kind, Scratch to, Scratch from, Label target) = 0;
+    // T0 = T0 / T1, or T0 % T1 with `remainder`, as unsigned or signed
+    // 64-bit values. T1 must not be zero, and a signed division must not
+    // be of the smallest value by -1. Clobbers T2.
+    virtual void divide(bool is_signed, bool remainder) = 0;
 
     virtual void load_context(Scratch to, std::uint32_t offset) = 0;
     virtual void load_context_byte(Scratch to, std::uint32_t offset) = 0;

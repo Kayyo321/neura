@@ -126,6 +126,23 @@ void Emitter::mul(Reg from) {
     byte(static_cast<std::uint8_t>(0xC0 | (4U << 3) | (from & 7U)));
 }
 
+void Emitter::div(Reg from) {
+    rex(true, 0, from);
+    byte(0xF7);
+    byte(static_cast<std::uint8_t>(0xC0 | (6U << 3) | (from & 7U)));
+}
+
+void Emitter::idiv(Reg from) {
+    rex(true, 0, from);
+    byte(0xF7);
+    byte(static_cast<std::uint8_t>(0xC0 | (7U << 3) | (from & 7U)));
+}
+
+void Emitter::cqo() {
+    byte(0x48);
+    byte(0x99);
+}
+
 void Emitter::shift_cl(ShiftOp op, Reg value) {
     rex(true, 0, value);
     byte(0xD3);
@@ -409,6 +426,17 @@ public:
             e_.imul(scratch(to), scratch(from));
         }
         fixups_.emplace_back(e_.jcc(o), target.id);
+    }
+
+    void divide(bool is_signed, bool remainder) override {
+        if (is_signed) {
+            e_.cqo();
+            e_.idiv(rcx);
+        } else {
+            e_.mov_immediate(rdx, 0);
+            e_.div(rcx);
+        }
+        if (remainder) e_.mov(rax, rdx);
     }
 
     void load_context(Scratch to, std::uint32_t offset) override {
