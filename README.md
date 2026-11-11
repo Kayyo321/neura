@@ -6,14 +6,14 @@
 
 <p align="center">
   <a href="https://kayyo321.github.io/neura/"><img src="https://img.shields.io/badge/website-kayyo321.github.io%2Fneura-1f29c9" alt="Website: kayyo321.github.io/neura"></a>
-  <a href="#getting-started"><img src="https://img.shields.io/badge/compiler-C%2B%2B20-bf2e70" alt="Compiler: C++20"></a>
+  <a href="#build-from-source"><img src="https://img.shields.io/badge/compiler-C%2B%2B20-bf2e70" alt="Compiler: C++20"></a>
   <a href="docs/runtime/NVM.md"><img src="https://img.shields.io/badge/runtime-NVM-087c77" alt="Runtime: Neura Virtual Machine"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-965b0c" alt="License: Apache 2.0"></a>
 </p>
 
 <p align="center">
   <a href="https://kayyo321.github.io/neura/">Website</a>&nbsp;·
-  <a href="#getting-started">Quickstart</a>&nbsp;·
+  <a href="#install">Install</a>&nbsp;·
   <a href="docs/lang/Overview.md">Language</a>&nbsp;·
   <a href="docs/lang/StandardLibrary.md">Standard&nbsp;library</a>&nbsp;·
   <a href="examples/">Examples</a>&nbsp;·
@@ -32,7 +32,17 @@ The compiler checks source semantics before producing typed NeuraIR. Optimizatio
 
 Pure computations can use feedforward circuits. Stateful execution carries mutable data and control state across steps. Classes share method circuits while each instance holds its own fields. Decompilation recovers behavior from supported artifacts and can use optional metadata to improve readability. Verification compares the recovered representation with the circuit over a defined input and state domain.
 
-## Getting started
+## Install
+
+On Linux, and on Windows inside a WSL 2 distribution, one command installs a release:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases/latest/download/install.sh | sh
+```
+
+It downloads the archive for your machine, verifies it, and installs `neura` under your home directory without `sudo`. That one installation compiles, runs, tests, and decompiles Neura programs. [Install and update](docs/Install.md) lists the supported platforms and describes each step, `neura update`, and `neura uninstall`.
+
+## Build from source
 
 Clone the repository with its submodule. [`third_party/neura-libclang`](https://github.com/Kayyo321/neura-libclang) holds the libclang C API headers that C header imports are built against, and the build stops with the commands to fetch it if it is missing.
 

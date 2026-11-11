@@ -64,6 +64,12 @@ def main() -> int:
 Supported platforms, system requirements, and every step are in [Install and update]({DOCS}/{tag}/docs/Install.md).
 
 ```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/{REPOSITORY}/releases/download/{tag}/install.sh | sh -s -- --version {full}
+```
+
+That command works on Linux and inside WSL 2. To install by hand instead:
+
+```sh
 # Download the archive for your platform and SHA256SUMS from this page, then:
 sha256sum --check --ignore-missing SHA256SUMS
 gh attestation verify neura-{full}-<target>.tar.gz --repo {REPOSITORY}   # optional: build provenance

@@ -22,7 +22,7 @@ A `v*` tag cannot be moved or deleted ([repository settings](RepositorySettings.
 | Check the tag | The tag has one of the two forms above, names the version in `VERSION`, and points at a commit on `main`. A final tag also needs a dated `## [<VERSION>]` section in `CHANGELOG.md`. |
 | Build and test, once for each target | Builds from the tagged commit with `NEURA_PORTABLE_RELEASE=ON`. Fails on a compiler warning in Neura's sources, on a failed, skipped, or missing test, on a file that needs a library other than the C library or a glibc newer than 2.39, or when `neura --version` does not report the tag's version, target, and commit. Packs the archive. |
 | Qualify the archive, once for each target | On a new runner that has built nothing, runs [`packaging/qualify.sh`](../packaging/qualify.sh) on the packed archive with an empty environment and a new home directory. |
-| Publish | Runs in the protected `release` environment after a maintainer approves it. Writes `SHA256SUMS` and `neura-release.txt`, attests the build provenance of each file, creates the release, then downloads the release's files again and checks them against the checksums, the built files, and the attestations. |
+| Publish | Runs in the protected `release` environment after a maintainer approves it. Writes `SHA256SUMS` and `neura-release.txt`, attests the build provenance of each file, creates the release, then downloads the release's files again and checks them against the checksums, the built files, and the attestations. For a release candidate it then runs the documented [one-line install command](Install.md#install-with-one-command) against the published candidate and checks that the installed `neura` reports the tagged version and commit. |
 
 The qualification script runs ten checks and prints `PASS`, `FAIL`, or `NOT RUN` for each:
 
@@ -108,5 +108,7 @@ Publish the final version only when all of these hold. Otherwise fix the problem
    (cd check && sha256sum --check SHA256SUMS)
    gh attestation verify check/neura-<VERSION>-x86_64-linux-gnu.tar.gz --repo Kayyo321/neura
    ```
+
+   Then run the [one-line install command](Install.md#install-with-one-command) in a new home directory and check `neura --version`. The workflow cannot do this for a final version, which is a draft until this step.
 
    An installation of the last candidate must then report the new version with `neura update --check` (exit status 4) and install it with `neura update`.
