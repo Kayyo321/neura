@@ -73,7 +73,13 @@ GENERATED: dict[str, str] = {
 }
 
 # Docs pages that deliberately have no wiki page.
-REPOSITORY_ONLY = ("docs/Wiki.md",)
+REPOSITORY_ONLY = (
+    "docs/Wiki.md",
+    "docs/design/Concurrency.md",
+    "docs/design/GpuExecution.md",
+    "docs/design/Standalone.md",
+    "docs/design/Stdlib.md",
+)
 
 # Wiki pages written by hand. The standard-library module pages, which
 # `update-stdlib-wiki-api.py` maintains, are matched by MODULE_PAGE.
