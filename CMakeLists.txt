@@ -1,5 +1,55 @@
 cmake_minimum_required(VERSION 3.20)
-project(Neura LANGUAGES CXX)
+
+# The version of the tool and the standard library has one source: VERSION.
+# stdlib/std/core/version.nra must agree, which the version-consistency test
+# checks.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" NEURA_VERSION_CORE LIMIT_COUNT 1)
+if(NOT NEURA_VERSION_CORE MATCHES "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")
+    message(FATAL_ERROR "VERSION must hold MAJOR.MINOR.PATCH, not '${NEURA_VERSION_CORE}'")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+
+# A local build reports a "dev" prerelease. Only a release build passes an
+# empty prerelease or a release candidate such as rc.1.
+set(NEURA_VERSION_PRERELEASE "dev" CACHE STRING "Prerelease label of the version: empty for a release, else dev, rc.N, ...")
+set(NEURA_BUILD_COMMIT "unknown" CACHE STRING "Commit that `neura --version` reports")
+if(NOT NEURA_VERSION_PRERELEASE MATCHES "^[0-9A-Za-z.-]*$")
+    message(FATAL_ERROR "NEURA_VERSION_PRERELEASE may hold only letters, digits, '.' and '-'")
+endif()
+if(NOT NEURA_BUILD_COMMIT MATCHES "^[0-9A-Za-z._-]+$")
+    message(FATAL_ERROR "NEURA_BUILD_COMMIT may hold only letters, digits, '.', '_' and '-'")
+endif()
+if(NEURA_VERSION_PRERELEASE STREQUAL "")
+    set(NEURA_VERSION_FULL "${NEURA_VERSION_CORE}")
+else()
+    set(NEURA_VERSION_FULL "${NEURA_VERSION_CORE}-${NEURA_VERSION_PRERELEASE}")
+endif()
+
+project(Neura VERSION ${NEURA_VERSION_CORE} LANGUAGES CXX)
+
+# The host target triple names launchers and release archives.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" neura_host_arch)
+if(neura_host_arch MATCHES "^(x86_64|amd64)$")
+    set(neura_host_arch x86_64)
+elseif(neura_host_arch MATCHES "^(aarch64|arm64)$")
+    set(neura_host_arch aarch64)
+elseif(neura_host_arch MATCHES "^i[3-6]86$")
+    set(neura_host_arch i386)
+elseif(neura_host_arch MATCHES "^arm")
+    set(neura_host_arch arm)
+elseif(NOT neura_host_arch STREQUAL "riscv64")
+    set(neura_host_arch unknown)
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(NEURA_HOST_TRIPLE "${neura_host_arch}-linux-gnu")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(NEURA_HOST_TRIPLE "${neura_host_arch}-apple-darwin")
+elseif(WIN32)
+    set(NEURA_HOST_TRIPLE "${neura_host_arch}-windows-msvc")
+else()
+    set(NEURA_HOST_TRIPLE "${neura_host_arch}-unknown")
+endif()
+configure_file(src/cli/version.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/version.hpp" @ONLY)
 
 function(neura_target_defaults target)
     target_compile_features(${target} PUBLIC cxx_std_20)
@@ -62,25 +112,14 @@ if(NOT NEURA_STATIC_LAUNCHER MATCHES "^(AUTO|ON|OFF)$")
 endif()
 set(NEURA_HAS_STATIC_LAUNCHER OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" neura_launcher_arch)
-    if(neura_launcher_arch MATCHES "^(x86_64|amd64)$")
-        set(neura_launcher_arch x86_64)
-    elseif(neura_launcher_arch MATCHES "^(aarch64|arm64)$")
-        set(neura_launcher_arch aarch64)
-    elseif(neura_launcher_arch MATCHES "^i[3-6]86$")
-        set(neura_launcher_arch i386)
-    elseif(neura_launcher_arch MATCHES "^arm")
-        set(neura_launcher_arch arm)
-    elseif(NOT neura_launcher_arch STREQUAL "riscv64")
-        set(neura_launcher_arch unknown)
-    endif()
-    set(neura_launcher_triple "${neura_launcher_arch}-linux-gnu")
+    set(neura_launcher_triple "${NEURA_HOST_TRIPLE}")
     set(neura_launcher_directory "lib/neura/launchers/${neura_launcher_triple}")
     find_library(NEURA_STATIC_LIBFFI NAMES libffi.a HINTS ${LIBFFI_LIBRARY_DIRS} REQUIRED)
     function(neura_add_launcher target name flavor)
         add_executable(${target} src/launcher/main.cpp)
         target_compile_definitions(${target} PRIVATE
             NEURA_LAUNCHER_TRIPLE="${neura_launcher_triple}" NEURA_LAUNCHER_FLAVOR=${flavor})
+        target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
         target_link_options(${target} PRIVATE -s)
         set_target_properties(${target} PROPERTIES OUTPUT_NAME "${name}"
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${neura_launcher_directory}")
@@ -167,6 +206,16 @@ if(NEURA_HAS_GPU)
     neura_target_defaults(neura_gpu)
 endif()
 
+# The data side of the install lifecycle (docs/Install.md): SHA-256, version
+# precedence, and the marker and release metadata formats. It has no
+# dependency on the rest of the tool, so the unit tests link only this.
+add_library(neura_lifecycle STATIC
+    src/cli/install_layout.cpp
+    src/util/sha256.cpp
+)
+target_include_directories(neura_lifecycle PUBLIC src)
+neura_target_defaults(neura_lifecycle)
+
 add_library(neura_compiler STATIC
     src/c-import/c_import.cpp
     src/cli/source_loader.cpp
@@ -209,8 +258,9 @@ add_library(neura_decompiler STATIC
 target_link_libraries(neura_decompiler PUBLIC neura_compiler neura_nvm)
 neura_target_defaults(neura_decompiler)
 
-add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run.cpp src/launcher/descriptor.cpp)
-target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler)
+add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp src/launcher/descriptor.cpp)
+target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler neura_lifecycle)
+target_include_directories(neura PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 if(TARGET neura_launcher)
     add_dependencies(neura neura_launcher)
 endif()
@@ -226,6 +276,7 @@ neura_target_defaults(neura)
 # The compiler and the runner ship as one executable: `neura run` loads
 # images through the same NVM library as any other embedder.
 install(TARGETS neura RUNTIME DESTINATION bin)
+install(FILES LICENSE DESTINATION share/doc/neura)
 install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL
     FILES_MATCHING PATTERN "*.nra")
 
@@ -563,6 +614,21 @@ if(BUILD_TESTING)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/ir-optimization-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ir-optimization/cli.cmake"
+    )
+
+    # The install lifecycle (docs/Install.md): version source, the data
+    # formats, and the commands against an install made from a release
+    # archive. None needs the network, root, or a terminal.
+    add_executable(neura_lifecycle_tests tests/lifecycle/unit_tests.cpp)
+    target_link_libraries(neura_lifecycle_tests PRIVATE neura_lifecycle)
+    neura_target_defaults(neura_lifecycle_tests)
+    foreach(suite IN ITEMS sha256 semver release-metadata marker)
+        add_test(NAME lifecycle-unit-${suite} COMMAND neura_lifecycle_tests ${suite})
+    endforeach()
+    add_test(NAME version-consistency COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/version.cmake"
     )
 
     get_property(neura_tests DIRECTORY PROPERTY TESTS)
