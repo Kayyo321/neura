@@ -9,24 +9,22 @@ let result = import:Std.Core.Result;
 /// @see [Std.Time.ZoneOffset](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-ZoneOffset)
 export let ZoneOffset = module (
     /// @brief An immutable fixed offset from UTC with whole-minute resolution.
+    #[Final, NoDiscard]
     export let ZoneOffset = class implements Comparable<ZoneOffset> (
-        /// @brief The signed offset in seconds east of UTC.
-        let seconds: int;
+        /// @brief The signed offset in seconds east of UTC: -64,800 through 64,800, a multiple of 60.
+        export last total_seconds: int;
 
         /// @brief Stores the supplied offset in seconds.
         export let init = func(total: int) {
-            seconds = total;
+            total_seconds = total;
         };
-
-        /// @brief -64,800 through 64,800, a multiple of 60.
-        export let total_seconds = func -> int => seconds;
 
         /// @brief By total seconds, west before east.
         export let compare_to = func(other: ZoneOffset) -> Ordering {
-            if (seconds < other.seconds) {
+            if (total_seconds < other.total_seconds) {
                 return Ordering.Less;
             }
-            if (seconds > other.seconds) {
+            if (total_seconds > other.total_seconds) {
                 return Ordering.Greater;
             }
             return Ordering.Equal;
@@ -34,14 +32,14 @@ export let ZoneOffset = module (
 
         /// @brief Tests equality of offsets in seconds.
         export let.override equals = func(other: class) -> bool {
-            return other is ZoneOffset && seconds == (other as ZoneOffset).seconds;
+            return other is ZoneOffset && total_seconds == (other as ZoneOffset).total_seconds;
         };
 
         /// @brief Hashes the offset in seconds.
-        export let.override hash_code = func -> uint32 => hashing.combine(17, seconds.hash_code());
+        export let.override hash_code = func -> uint32 => hashing.combine(17, total_seconds.hash_code());
 
         /// @brief Z for zero; otherwise +HH:MM or -HH:MM.
-        export let.override to_string = func -> string => calendar.offset_text(seconds);
+        export let.override to_string = func -> string => calendar.offset_text(total_seconds);
     );
 
     /// @brief The zero offset from UTC.

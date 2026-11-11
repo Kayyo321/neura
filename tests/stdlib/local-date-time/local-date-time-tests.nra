@@ -38,7 +38,7 @@ let LocalDateTimeTests = module (
         let date = local_date.of(2024, 2, 29);
         let time = local_time.of(12, 0, 0, 0);
         let moment = local_date_time.of(date, time);
-        test.assert(moment.date().equals(date) && moment.time().equals(time));
+        test.assert(moment.date.equals(date) && moment.time.equals(time));
         test.assert_equal_string("2024-02-29T12:00:00", moment.to_string());
         test.assert_equal_string("-0044-03-15T00:00:00.000001", at(-44, 3, 15, 0, 0, 0, 1000).to_string());
     };
@@ -94,12 +94,12 @@ let LocalDateTimeTests = module (
     export let test_at_offset = func() -> void {
         let moment = at(1970, 1, 1, 5, 30, 0, 7);
         let east = moment.at_offset(zone_offset.of_hours_minutes(5, 30));
-        test.assert_equal_int64(0, east.epoch_seconds());
-        test.assert_equal_int32(7, east.nanos());
-        test.assert_equal_int64(21600, moment.at_offset(zone_offset.of_hours_minutes(0, -30)).epoch_seconds());
-        test.assert_equal_int64(19800, moment.at_offset(zone_offset.Utc).epoch_seconds());
-        test.assert_equal_int64(-62167219200, at(0, 1, 1, 0, 0, 0, 0).at_offset(zone_offset.Utc).epoch_seconds());
-        test.assert_equal_int64(31494784780799, at(999999, 12, 31, 23, 59, 59, 0).at_offset(zone_offset.Utc).epoch_seconds());
+        test.assert_equal_int64(0, east.epoch_seconds);
+        test.assert_equal_int32(7, east.nanos);
+        test.assert_equal_int64(21600, moment.at_offset(zone_offset.of_hours_minutes(0, -30)).epoch_seconds);
+        test.assert_equal_int64(19800, moment.at_offset(zone_offset.Utc).epoch_seconds);
+        test.assert_equal_int64(-62167219200, at(0, 1, 1, 0, 0, 0, 0).at_offset(zone_offset.Utc).epoch_seconds);
+        test.assert_equal_int64(31494784780799, at(999999, 12, 31, 23, 59, 59, 0).at_offset(zone_offset.Utc).epoch_seconds);
     };
 
     export let test_parse = func() -> void {

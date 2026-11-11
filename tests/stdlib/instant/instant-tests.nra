@@ -12,8 +12,8 @@ let zone_offset = import:Std.Time.ZoneOffset;
 
 let InstantTests = module (
     let check_parts = func(seconds: int64, nanos: int, moment: instant.Instant) -> void {
-        test.assert_equal_int64(seconds, moment.epoch_seconds());
-        test.assert_equal_int32(nanos, moment.nanos());
+        test.assert_equal_int64(seconds, moment.epoch_seconds);
+        test.assert_equal_int32(nanos, moment.nanos);
     };
 
     // Text computed with Python: dates through datetime, shifted by whole
@@ -203,7 +203,7 @@ let InstantTests = module (
             let offset = zone_offset.of_hours_minutes(r.next_int_between(-17, 18), 0);
             let local = at.to_local(offset);
             test.assert(local.at_offset(offset).equals(at));
-            test.assert(local.date().to_epoch_day() == local_date.of_epoch_day(local.date().to_epoch_day()).to_epoch_day());
+            test.assert(local.date.to_epoch_day() == local_date.of_epoch_day(local.date.to_epoch_day()).to_epoch_day());
         }
         let last = local_date_time.of(local_date.of(999999, 12, 31), local_time.of(23, 59, 59, 999999999));
         test.assert(last.at_offset(zone_offset.Utc).to_local(zone_offset.Utc).equals(last));

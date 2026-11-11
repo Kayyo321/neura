@@ -10,6 +10,7 @@ let result = import:Std.Core.Result;
 /// @see [Std.Time.LocalTime](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-LocalTime)
 export let LocalTime = module (
     /// @brief An immutable wall-clock time within a 24-hour day.
+    #[Final, NoDiscard]
     export let LocalTime = class implements Comparable<LocalTime> (
         /// @brief The nanosecond offset from midnight.
         let nanos_of_day: int64;
