@@ -630,6 +630,17 @@ if(BUILD_TESTING)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/version.cmake"
     )
+    foreach(suite IN ITEMS install update uninstall)
+        add_test(NAME lifecycle-${suite} COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=$<TARGET_FILE:neura>"
+            "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/lifecycle-${suite}-tests"
+            "-DCONFIG=$<CONFIG>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/${suite}.cmake"
+        )
+        set_tests_properties(lifecycle-${suite} PROPERTIES TIMEOUT 600)
+    endforeach()
 
     get_property(neura_tests DIRECTORY PROPERTY TESTS)
     list(REMOVE_ITEM neura_tests gpu-device gpu-cli)
