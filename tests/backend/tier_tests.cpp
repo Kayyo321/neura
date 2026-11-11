@@ -13,6 +13,16 @@
 namespace neura::testing {
 namespace {
 
+// Lifts every block the first time it runs, so that small programs exercise
+// tier 1. The thresholds change only when blocks are lifted.
+nvm::TierOptions eager() {
+    nvm::TierOptions options;
+    options.hint_after = 1;
+    options.search_after = 1;
+    options.minimum_proof_work = std::uint64_t{1} << 30;
+    return options;
+}
+
 nvm::RunLimits tier_limits(std::uint8_t tier, nvm::TierCache* cache = nullptr) {
     nvm::RunLimits limits;
     limits.max_steps = 20'000'000;
@@ -35,7 +45,7 @@ void check_same_capture(const Captured& actual, const Captured& expected, const 
 nvm::TierStatistics compare_tiers(const nvr::Image& image, const std::string& label,
                                   const std::vector<std::string>& arguments = {}) {
     const auto reference = run_captured(image, tier_limits(0), std::nullopt, arguments);
-    nvm::TierCache cache(image);
+    nvm::TierCache cache(image, eager());
     const auto lifted = run_captured(image, tier_limits(1, &cache), std::nullopt, arguments);
     check_same_capture(lifted, reference, label);
     return cache.statistics();
@@ -92,7 +102,7 @@ NEURA_TEST(tier, programs_match_the_reference_tier) {
         const auto statistics = compare_tiers(image, name);
         lifted += statistics.steps.lifted;
         hinted += statistics.lifted_by_hint;
-        check_equal(statistics.steps.declined + statistics.steps.lifted + statistics.steps.wired +
+        if (nvm::tier_ceiling() >= 1) check_equal(statistics.steps.declined + statistics.steps.lifted + statistics.steps.wired +
                         statistics.steps.empty + statistics.steps.reference,
                     run_captured(image, tier_limits(0)).result.steps, std::string(name) + " steps by tier");
     }
@@ -112,7 +122,7 @@ NEURA_TEST(tier, traps_and_limits_match_the_reference_tier) {
             auto limits0 = tier_limits(0);
             limits0.max_steps = steps;
             const auto reference = run_captured(image, limits0);
-            nvm::TierCache cache(image);
+            nvm::TierCache cache(image, eager());
             auto limits1 = tier_limits(1, &cache);
             limits1.max_steps = steps;
             check_same_capture(run_captured(image, limits1), reference,
@@ -133,8 +143,15 @@ NEURA_TEST(tier, a_wrong_hint_falls_back_to_the_reference) {
         for (auto& [lane, value] : changed.order) value = tampered(value, done);
         for (auto& value : changed.schedule) value = tampered(value, done);
         changed.condition = tampered(changed.condition, done);
+        // Keep only forms the swap changed: one without a binary operation
+        // is still true and may lift its block.
+        if (lift::encode_hints({{key.first, key.second, changed}}).data ==
+            lift::encode_hints({{key.first, key.second, *form}}).data) {
+            continue;
+        }
         wrong.push_back({key.first, key.second, std::move(changed)});
     }
+    check(!wrong.empty(), "some hints were changed");
     const auto forged = with_section(image, lift::encode_hints(std::move(wrong)).data);
     const auto statistics = compare_tiers(forged, "forged hints");
     check(statistics.hints_rejected > 0 || nvm::tier_ceiling() == 0, "the forged hints were rejected");
@@ -175,7 +192,7 @@ NEURA_TEST(tier, fleets_and_parallel_items_use_tier_1) {
     const std::vector<std::vector<std::string>> arguments{{}, {"one"}, {"two", "three"}, {"four"}};
     std::vector<Captured> reference;
     for (const auto& member : arguments) reference.push_back(run_captured(image, tier_limits(0), std::nullopt, member));
-    nvm::TierCache cache(image);
+    nvm::TierCache cache(image, eager());
     nvm::Fleet fleet(image, {tier_limits(1, &cache), nullptr, 2});
     for (const auto& member : arguments) fleet.add(image.entry, member);
     CapturingConsole console;
@@ -199,7 +216,7 @@ NEURA_TEST(tier, fleets_and_parallel_items_use_tier_1) {
     const auto parallel = build_program({environment.source_dir / "tests" / "concurrency" / "parallel" / "map.nra"});
     const auto expected = run_captured(parallel, tier_limits(0));
     for (const std::uint32_t workers : {1U, 4U}) {
-        nvm::TierCache shared(parallel);
+        nvm::TierCache shared(parallel, eager());
         auto limits = tier_limits(1, &shared);
         limits.parallel_workers = workers;
         check_same_capture(run_captured(parallel, limits), expected,
@@ -210,7 +227,7 @@ NEURA_TEST(tier, fleets_and_parallel_items_use_tier_1) {
 
 NEURA_TEST(tier, tier_0_lifts_nothing) {
     const auto image = computation(environment);
-    nvm::TierCache cache(image);
+    nvm::TierCache cache(image, eager());
     run_captured(image, tier_limits(0, &cache));
     const auto statistics = cache.statistics();
     check_equal(statistics.attempted + statistics.steps.lifted + statistics.steps.reference, std::uint64_t{0},

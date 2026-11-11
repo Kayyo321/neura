@@ -25,22 +25,26 @@ namespace neura::nvm {
 // alone.
 struct TierOptions {
     // Executions of a block with a LIFT hint before the hint is proven, and
-    // of a block without one before its form is searched for. Counted per
-    // execution (each fleet member and parallel item counts its own).
-    std::uint32_t hint_after = 2;
+    // of a block without one before its form is searched for, counted over
+    // every run that shares the cache (the tests of `neura test`, the
+    // members of a fleet or of `run --each`, and parallel items). Proving a
+    // hint (regenerating the block and the unrefined overflow analysis)
+    // costs about as much as a few hundred reference steps of its graph.
+    std::uint32_t hint_after = 256;
     std::uint32_t search_after = 2000;
     // What lifting a block may cost, in proportion to the time the block
     // has already spent on tier 0 (about 1.6 ns per graph edge per step):
-    // a proof or search that uses its whole allowance costs an eighth of
-    // that, so lifting adds at most about an eighth to a run that never
-    // repays it. When an attempt runs out, the block is tried again once it
-    // has run eight times as often, with eight times the allowance.
+    // the refined overflow analysis may spend about half of that, and a
+    // search an eighth, so a block that never repays its proof costs a
+    // bounded share more than it would on tier 0. When an attempt runs out,
+    // the block is tried again once it has run eight times as often, with
+    // eight times the allowance.
     //
     // The overflow analysis counts its work in units of about 15 ns
     // (lift/overflow.hpp): one unit per `steps_per_work` edge-steps. A
     // search is given `search_picoseconds` of wall time per edge-step.
     std::uint64_t steps_per_work = 16;
-    std::uint64_t minimum_proof_work = 1U << 14;
+    std::uint64_t minimum_proof_work = 256;
     std::uint64_t search_picoseconds = 200;
     // Wall time the searches of one image may take in total.
     std::chrono::milliseconds search_budget{250};
@@ -97,7 +101,7 @@ public:
     const TierOptions& options() const { return options_; }
     bool hinted(std::uint32_t function, std::uint32_t block) const;
     // Executions of a block with neurons before it is first lifted.
-    std::uint32_t threshold(std::uint32_t function, std::uint32_t block) const;
+    std::uint64_t threshold(std::uint32_t function, std::uint32_t block) const;
 
     struct Resolution {
         // The proven block, or null: the block stays on tier 0.
@@ -116,6 +120,11 @@ public:
     // The settled result of a block, without lifting it.
     Resolution lookup(std::uint32_t function, std::uint32_t block) const;
 
+    // Counts one more execution of a block that is not settled yet.
+    std::uint64_t count(std::uint32_t function, std::uint32_t block) {
+        return counts_[first_entry_[function] + block].fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
     void add_steps(const TierSteps& steps);
     void add_reference_steps(std::uint32_t function, std::uint32_t block, std::uint64_t steps);
     TierStatistics statistics() const;
@@ -132,6 +141,9 @@ private:
         // The hint failed a proof; the block may still be searched for.
         bool hint_failed = false;
         bool attempted = false;
+        // The count of executions at which to try again: every run sharing
+        // the cache waits for it.
+        std::uint64_t next_attempt = 0;
     };
     using Key = std::pair<std::uint32_t, std::string>;
 
@@ -143,6 +155,7 @@ private:
     lift::HintTable hints_;
     std::vector<std::size_t> first_entry_;
     std::vector<Entry> entries_;
+    std::unique_ptr<std::atomic<std::uint64_t>[]> counts_;
     mutable std::mutex mutex_;
     // Accepted results by (graph, lift key), and keys whose search failed.
     std::map<Key, std::shared_ptr<const lift::LoweredBlock>> accepted_;
@@ -164,5 +177,9 @@ std::uint8_t tier_ceiling();
 // NEURA_TIER_CHECK=1: run every block that tier 1 evaluates on the
 // reference evaluator too and abort with a report on any difference.
 bool tier_check_enabled();
+// NEURA_TIER_EAGER=1: lift every block when it first runs, with ample proof
+// work and search time, so that short test runs exercise tier 1. It changes
+// only which blocks run lifted, and when.
+bool tier_eager();
 
 } // namespace neura::nvm

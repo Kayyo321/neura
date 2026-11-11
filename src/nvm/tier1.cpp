@@ -108,8 +108,22 @@ std::string describe(const TierStatistics& s) {
     return out;
 }
 
+bool tier_eager() {
+    static const bool enabled = [] {
+        const char* text = std::getenv("NEURA_TIER_EAGER");
+        return text && std::strcmp(text, "1") == 0;
+    }();
+    return enabled;
+}
+
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
+    if (tier_eager()) {
+        options_.hint_after = 1;
+        options_.search_after = 1;
+        options_.minimum_proof_work = std::uint64_t{1} << 32;
+        options_.search_budget = std::chrono::milliseconds(60'000);
+    }
     first_entry_.reserve(image.functions.size());
     std::size_t total = 0;
     for (const auto& function : image.functions) {
@@ -117,6 +131,7 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
         total += function.blocks.size();
     }
     entries_ = std::vector<Entry>(total);
+    counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     statistics_.blocks = total;
     statistics_.hinted = hints_.size();
 }
@@ -135,8 +150,10 @@ bool TierCache::hinted(std::uint32_t function, std::uint32_t block) const {
     return hints_.contains({function, block});
 }
 
-std::uint32_t TierCache::threshold(std::uint32_t function, std::uint32_t block) const {
-    return hinted(function, block) ? options_.hint_after : options_.search_after;
+std::uint64_t TierCache::threshold(std::uint32_t function, std::uint32_t block) const {
+    const std::lock_guard lock(mutex_);
+    const std::uint64_t base = hints_.contains({function, block}) ? options_.hint_after : options_.search_after;
+    return std::max(base, entry(function, block).next_attempt);
 }
 
 TierCache::Resolution TierCache::lookup(std::uint32_t function, std::uint32_t block) const {
@@ -167,6 +184,7 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         if (found.state == Entry::State::Settled) return {found.lowered.get(), true};
         // Another thread is lifting the block; ask again later.
         if (found.state == Entry::State::Lifting) return {nullptr, false, std::max<std::uint64_t>(runs * 2, 2)};
+        if (runs < found.next_attempt) return {nullptr, false, found.next_attempt};
         key = {decoded.graph, lift::lift_key(image_, decoded)};
         if (const auto it = accepted_.find(key); it != accepted_.end()) {
             found.lowered = it->second;
@@ -255,7 +273,8 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         ++statistics_.deferred;
         statistics_.block_reasons[{function, block}] =
             "deferred after " + std::to_string(runs) + " runs: the proof or search needs more work";
-        return {nullptr, false, std::max<std::uint64_t>(runs * 8, 256)};
+        found.next_attempt = std::max<std::uint64_t>(runs * 8, 256);
+        return {nullptr, false, found.next_attempt};
     }
     // A failure is final for its source: a failed hint is not tried again
     // (the block may still be searched for), and a failed search is not
@@ -275,7 +294,8 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         const bool searchable = wrong_form && searched_.find(key) == searched_.end() && search_spent_ < budget;
         if (searchable) {
             found.state = Entry::State::Unknown;
-            return {nullptr, false, std::max<std::uint64_t>(runs + 1, options_.search_after)};
+            found.next_attempt = std::max<std::uint64_t>(runs + 1, options_.search_after);
+            return {nullptr, false, found.next_attempt};
         }
     } else {
         searched_.emplace(key, reason_class(result.rejection));

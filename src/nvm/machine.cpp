@@ -2803,12 +2803,12 @@ private:
         // How tier 1 evaluates the block (src/nvm/tier1.hpp). Empty and
         // Wired graphs have no neurons: no outputs, or outputs that are
         // input lanes, starting at `first_wire` in wire_sources_. Lifted
-        // runs `lifted`. Counting blocks run by reference until `runs`
-        // reaches the cache's threshold; Reference blocks stay there.
+        // runs `lifted`. Counting blocks run by reference until the image's
+        // count of their executions (TierCache::count) reaches `threshold`;
+        // Reference blocks stay there.
         enum class Tier : std::uint8_t { Reference, Counting, Lifted, Wired, Empty };
         Tier tier = Tier::Reference;
-        std::uint32_t runs = 0;
-        std::uint32_t threshold = 0;
+        std::uint64_t threshold = 0;
         std::size_t first_wire = 0;
         const lift::LoweredBlock* lifted = nullptr;
         std::uint64_t reference_steps = 0;

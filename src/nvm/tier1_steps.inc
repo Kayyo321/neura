@@ -75,11 +75,12 @@
             ++tier_steps_.wired;
             return finish_tier_step(TierLanes::Wired, 0);
         case BlockPlan::Tier::Counting: {
-            if (++plan.runs < plan.threshold) break;
             const auto& frame = frames_.back();
-            const auto resolved = tier_->resolve(frame.function, frame.block, plan.runs);
+            const auto runs = tier_->count(frame.function, frame.block);
+            if (runs < plan.threshold) break;
+            const auto resolved = tier_->resolve(frame.function, frame.block, runs);
             if (!resolved.settled) {
-                plan.threshold = static_cast<std::uint32_t>(std::min<std::uint64_t>(resolved.retry_after, 0xffffffffU));
+                plan.threshold = resolved.retry_after;
                 break;
             }
             use_lowered(plan, resolved.block);
