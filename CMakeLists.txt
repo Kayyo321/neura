@@ -414,6 +414,7 @@ if(BUILD_TESTING)
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
         tests/ir-optimization/main.cpp
+        tests/ir-optimization/pass_tests.cpp
         tests/ir-optimization/structure_tests.cpp
         tests/ir-optimization/support.cpp
         tests/ir-optimization/verifier_tests.cpp

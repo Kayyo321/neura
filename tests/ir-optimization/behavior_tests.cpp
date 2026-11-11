@@ -4,9 +4,12 @@
 // structure; see structure_tests.cpp for those.
 #include "evaluator.hpp"
 #include "neura-ir/host_binding.hpp"
+#include "neura-ir/reference_storage.hpp"
+#include "neura-ir/specialize.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <limits>
@@ -95,9 +98,26 @@ std::string join(const std::vector<Value>& values) {
     return text;
 }
 
+// Empty when the runs agree. Inlining removes calls, which the evaluator's
+// budget counts, so with `calls_removed` an optimized run may get further
+// before the budget or the depth limit ends it: when the unoptimized run
+// reached a limit, the optimized run must have requested the same effects
+// first, and what it does after the budget is not compared.
+std::string bounded_difference(const Outcome& expected, const Outcome& actual, bool calls_removed) {
+    if (!calls_removed || expected.status != Status::LimitReached) {
+        return difference(expected, actual);
+    }
+    if (actual.effects.size() < expected.effects.size() ||
+        !std::equal(expected.effects.begin(), expected.effects.end(), actual.effects.begin())) {
+        return "the optimized run did not request the effects of the unoptimized run before its limit";
+    }
+    return {};
+}
+
 // Runs every initializer body and every function in both programs over the
 // sampled argument domain and requires identical outcomes.
-Tally compare_programs(const IrProgram& original, const IrProgram& optimized, const std::string& label) {
+Tally compare_programs(const IrProgram& original, const IrProgram& optimized, const std::string& label,
+                       bool calls_removed = false, std::string_view only = {}) {
     constexpr std::size_t max_inputs = 70'000;
     Tally tally;
     Evaluator before(original);
@@ -112,7 +132,7 @@ Tally compare_programs(const IrProgram& original, const IrProgram& optimized, co
     }
     for (const auto& body : original.bodies) {
         const auto& function = original.symbols[body.owner];
-        if (function.kind != SymbolKind::Function) {
+        if (function.kind != SymbolKind::Function || (!only.empty() && qualified_name(original, body.owner) != only)) {
             continue;
         }
         // Standard library functions are exercised by the library's own
@@ -148,7 +168,7 @@ Tally compare_programs(const IrProgram& original, const IrProgram& optimized, co
             }
             const auto expected = before.call(body.owner, arguments);
             const auto actual = after.call(body.owner, arguments);
-            const auto diff = difference(expected, actual);
+            const auto diff = bounded_difference(expected, actual, calls_removed);
             check(diff.empty(), label + ": " + qualified_name(original, body.owner) + "(" + join(arguments) +
                                     ") " + diff + "\n  unoptimized: " + describe(expected) +
                                     "\n  optimized:   " + describe(actual));
@@ -186,11 +206,23 @@ Tally merge(Tally total, const Tally& part) {
     return total;
 }
 
-Tally differential(const std::vector<fs::path>& files, const std::vector<fs::path>& roots, const std::string& label) {
-    auto original = lower_files(files, roots);
+// Lowers `files` and, when `specialized`, prepares them as a build does
+// before optimization, so that module calls have fixed targets.
+IrProgram prepared(const std::vector<fs::path>& files, const std::vector<fs::path>& roots, bool specialized) {
+    auto program = lower_files(files, roots);
+    if (specialized) {
+        materialize_reference_storage(program);
+        specialize(program);
+    }
+    return program;
+}
+
+Tally differential(const std::vector<fs::path>& files, const std::vector<fs::path>& roots, const std::string& label,
+                   bool specialized = false, const OptimizationOptions& options = {}) {
+    const auto original = prepared(files, roots, specialized);
     auto optimized = original;
-    optimize(optimized);
-    auto tally = compare_programs(original, optimized, label);
+    const auto result = optimize(optimized, options);
+    auto tally = compare_programs(original, optimized, label, result.rewrites("inline-calls") > 0);
     report(label, tally);
     return tally;
 }
@@ -201,6 +233,8 @@ NEURA_TEST(behavior, fixtures_match_unoptimized) {
     Tally total;
     for (const auto& file : fixture_files(environment)) {
         total = merge(total, differential({file}, {}, file.filename().string()));
+        // As a build prepares it, where module calls can be inlined.
+        total = merge(total, differential({file}, {}, file.filename().string() + " specialized", true));
     }
     check_equal(total.skipped, std::size_t{0}, "fixture functions skipped by the evaluator");
     for (const auto status : {Status::Returned, Status::Trapped, Status::LimitReached}) {
@@ -432,6 +466,138 @@ NEURA_TEST(behavior, hand_derived_expectations) {
     failure.location = keep_failure.front().operands.front().operands.front().operands.front().span;
     const IrType int32{TypeKind::Integer, "int32", no_symbol, {}};
     check_call("short-circuit.nra", "ShortCircuit.keep_failure", {integer_value(int32, false, 0)}, failure);
+}
+
+// Each pass over the values of locals, and inlining, alone on the fixture
+// written for it, prepared as a build prepares it, against the unoptimized
+// program. The fixture must make the pass rewrite something.
+NEURA_TEST(behavior, value_passes_alone_match_unoptimized) {
+    const std::array<std::pair<const char*, const char*>, 5> cases{{
+        {"propagate-copies", "dataflow.nra"},
+        {"eliminate-common-subexpressions", "dataflow.nra"},
+        {"hoist-loop-invariants", "dataflow.nra"},
+        {"remove-dead-stores", "dataflow.nra"},
+        {"inline-calls", "inlining.nra"},
+    }};
+    for (const auto& [pass, file] : cases) {
+        const auto original = prepared({environment.fixtures() / file}, {}, true);
+        auto optimized = original;
+        OptimizationOptions options;
+        options.passes = {pass};
+        const auto result = optimize(optimized, options);
+        check(result.rewrites(pass) > 0, std::string(pass) + " made no rewrite in " + file);
+        const auto label = std::string(file) + " with " + pass + " alone";
+        report(label, compare_programs(original, optimized, label, result.rewrites("inline-calls") > 0));
+    }
+}
+
+namespace {
+
+bool noticed(const IrProgram& original, const IrProgram& broken, std::string_view function) {
+    try {
+        compare_programs(original, broken, "deliberately broken", false, function);
+    } catch (const Failure&) {
+        return true;
+    }
+    return false;
+}
+
+IrNode load_of(const IrProgram& program, SymbolId symbol, const Span& span) {
+    return {IrOp::Load, program.symbols[symbol].type, span, symbol, {}, {}, {}, {}, {}};
+}
+
+} // namespace
+
+// The comparison can fail: each rewrite below breaks one precondition of a
+// pass and changes a result or a trap on the sampled domain.
+NEURA_TEST(behavior, the_comparison_notices_unsafe_rewrites) {
+    const auto original = lower_fixture(environment, "dataflow.nra");
+    {
+        // Reusing `left + right` after `left` changed.
+        auto broken = original;
+        auto& body = body_of(broken, "Dataflow.keep_after_operand_write");
+        auto& value = body.at(2).operands.front();
+        value = load_of(broken, body.at(0).symbol, value.span);
+        check(noticed(original, broken, "Dataflow.keep_after_operand_write"),
+              "reuse after an operand write went unnoticed");
+    }
+    {
+        // Removing a dead store together with the trap of its value.
+        auto broken = original;
+        auto& body = body_of(broken, "Dataflow.keep_dead_wide_product");
+        body.erase(body.begin() + 1);
+        check(noticed(original, broken, "Dataflow.keep_dead_wide_product"),
+              "a dropped trapping store went unnoticed");
+    }
+    {
+        // Hoisting a trapping invariant out of a loop that may not run.
+        auto broken = original;
+        auto& body = body_of(broken, "Dataflow.keep_zero_trip_trap");
+        auto& loop = body.at(2);
+        check(loop.op == IrOp::Loop && loop.body.front().op == IrOp::Initialize, "unexpected keep_zero_trip_trap");
+        auto hoisted = loop.body.front();
+        loop.body.erase(loop.body.begin());
+        body.insert(body.begin() + 2, std::move(hoisted));
+        check(noticed(original, broken, "Dataflow.keep_zero_trip_trap"),
+              "a hoisted trapping invariant went unnoticed");
+    }
+    {
+        // Evaluating an inlined argument twice.
+        const auto inlining = prepared({environment.fixtures() / "inlining.nra"}, {}, true);
+        auto broken = inlining;
+        OptimizationOptions options;
+        options.passes = {"inline-calls"};
+        optimize(broken, options);
+        auto& body = body_of(broken, "Inlining.argument_once");
+        auto& block = body.at(0);
+        check(block.op == IrOp::Block && block.body.front().op == IrOp::Initialize, "argument_once was not inlined");
+        auto again = block.body.front().operands.front();
+        const IrType void_type{TypeKind::Void, "void", no_symbol, {}};
+        IrNode discard{IrOp::Discard, void_type, again.span, no_symbol, {}, {}, {}, {}, {}};
+        discard.operands.push_back(std::move(again));
+        block.body.insert(block.body.begin(), std::move(discard));
+        check(noticed(inlining, broken, "Inlining.argument_once"), "an argument evaluated twice went unnoticed");
+    }
+}
+
+// Ordered effects worked out from the fixture source: the trace global
+// records the order of the marks.
+NEURA_TEST(behavior, value_passes_keep_effect_order) {
+    const IrType int16{TypeKind::Integer, "int16", no_symbol, {}};
+    const IrType uint8{TypeKind::Integer, "uint8", no_symbol, {}};
+    const IrType int64{TypeKind::Integer, "int64", no_symbol, {}};
+    struct Case {
+        const char* file;
+        const char* function;
+        std::vector<Value> arguments;
+        Value result;
+        std::uint64_t trace;
+    };
+    const std::vector<Case> cases{
+        // The product is reused across the call; the call still runs.
+        {"dataflow.nra", "Dataflow.reuse_across_call",
+         {integer_value(int16, false, 3), integer_value(int16, false, 4)},
+         integer_value(int16, false, 0), 501},
+        // Both arguments are marked in order, then the body picks one.
+        {"inlining.nra", "Inlining.argument_order", {integer_value(uint8, false, 5), integer_value(uint8, false, 9)},
+         integer_value(uint8, false, 9), 5009},
+        // The argument is marked once although the body reads it twice.
+        {"inlining.nra", "Inlining.argument_once", {integer_value(uint8, false, 52)}, bool_value(true), 52},
+    };
+    for (const auto& item : cases) {
+        auto program = prepared({environment.fixtures() / item.file}, {}, true);
+        const auto report = optimize(program);
+        check(report.total_rewrites() > 0, std::string(item.function) + ": nothing was optimized");
+        Evaluator evaluator(program);
+        evaluator.initialize();
+        const auto outcome = evaluator.call(find_symbol(program, item.function), item.arguments);
+        check(outcome.status == Status::Returned && outcome.result == item.result,
+              std::string(item.function) + ": " + describe(outcome));
+        const auto trace = find_symbol(program, std::string(item.file) == "dataflow.nra" ? "Dataflow.trace"
+                                                                                         : "Inlining.trace");
+        check(outcome.globals.at(trace) == integer_value(int64, false, item.trace),
+              std::string(item.function) + ": trace " + describe(outcome.globals.at(trace)));
+    }
 }
 
 } // namespace neura::testing

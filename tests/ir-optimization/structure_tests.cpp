@@ -38,7 +38,24 @@ void expect_unchanged(const Environment& environment, std::string_view file,
     }
 }
 
-constexpr std::string_view observe_call = "(virtual_call observe (receiver ShortCircuit) (load value))";
+// Optimization keeps every symbol. Only inlining adds symbols: locals named
+// "$inline.<callee>.<name>", owned by a function, after the original table.
+bool keeps_symbols(const IrProgram& original, const IrProgram& optimized) {
+    if (optimized.symbols.size() < original.symbols.size()) return false;
+    IrProgram prefix = optimized;
+    prefix.symbols.resize(original.symbols.size());
+    if (!same_symbols(original, prefix)) return false;
+    for (auto id = original.symbols.size(); id < optimized.symbols.size(); ++id) {
+        const auto& added = optimized.symbols[id];
+        if (added.kind != SymbolKind::Local || !added.name.starts_with("$inline.") ||
+            added.owner >= original.symbols.size() || original.symbols[added.owner].kind != SymbolKind::Function) {
+            return false;
+        }
+    }
+    return true;
+}
+
+constexpr std::string_view observe_call ="(virtual_call observe (receiver ShortCircuit) (load value))";
 
 std::string with_call(std::string_view format) {
     std::string result(format);
@@ -204,7 +221,17 @@ NEURA_TEST(structure, enabled_passes_run_in_pipeline_order) {
     for (const auto& pass : optimization_passes()) {
         names.emplace_back(pass.name);
     }
-    check_equal(names.size(), std::size_t{5}, "number of passes");
+    const std::vector<std::string> order{"fold-constants",
+                                         "simplify-short-circuit",
+                                         "propagate-copies",
+                                         "eliminate-common-subexpressions",
+                                         "hoist-loop-invariants",
+                                         "simplify-control-flow",
+                                         "remove-unreachable",
+                                         "remove-dead-stores",
+                                         "remove-pure-discards",
+                                         "inline-calls"};
+    check(names == order, "the pipeline order");
     check(names == OptimizationOptions{}.passes, "all passes are enabled by default");
 
     auto program = lower_fixture(environment, "control-flow.nra");
@@ -270,7 +297,7 @@ NEURA_TEST(structure, optimization_is_deterministic_and_preserves_symbols) {
         optimize(second);
         const auto label = files.size() == 1 ? files.front().filename().string() : "all examples";
         check(printed(first) == printed(second), label + ": repeated optimization printed different IR");
-        check(same_symbols(original, first), label + ": optimization changed the symbol table");
+        check(keeps_symbols(original, first), label + ": optimization changed the symbol table");
         check_equal(first.bodies.size(), original.bodies.size(), label + ": body count");
         for (std::size_t i = 0; i < first.bodies.size(); ++i) {
             check_equal(first.bodies[i].owner, original.bodies[i].owner, label + ": body order");
@@ -280,13 +307,17 @@ NEURA_TEST(structure, optimization_is_deterministic_and_preserves_symbols) {
 
 // The examples contain no constant expressions or literal conditions. If one
 // gains them, update this expectation to the intended optimized form.
-// The examples' own code is already in the form the optimizer leaves alone.
-// Standard library bodies that the examples import are not part of this
-// check.
+// The examples' own code is already in the form the five structural passes
+// leave alone; the passes over the values of locals do rewrite it, for
+// example by propagating a range's literal step. Standard library bodies
+// that the examples import are not part of this check.
 NEURA_TEST(structure, examples_are_unchanged) {
     const auto original = lower_files(example_files(environment));
     auto optimized = original;
-    optimize(optimized);
+    OptimizationOptions options;
+    options.passes = {"fold-constants", "simplify-short-circuit", "simplify-control-flow", "remove-unreachable",
+                      "remove-pure-discards"};
+    optimize(optimized, options);
     const auto examples = environment.examples().generic_string() + "/";
     check_equal(optimized.bodies.size(), original.bodies.size(), "body count");
     std::size_t compared = 0;

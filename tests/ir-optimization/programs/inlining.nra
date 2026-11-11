@@ -1,0 +1,72 @@
+// Calls that the optimizer inlines, in statements, conditions, loops, and
+// short-circuit operands, next to calls it keeps. tests/ir-optimization/cli.cmake
+// builds it with and without optimization and compares the runs.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Inlined = module:program.Entry (
+    let seen: bool = false;
+
+    let is_digit = func(code: uint8) -> bool {
+        return code >= 48 && code <= 57;
+    };
+
+    let is_lower = func(code: uint8) -> bool {
+        return code >= 97 && code <= 122;
+    };
+
+    let larger = func(left: int32, right: int32) -> int32 {
+        if (left > right) {
+            return left;
+        }
+        return right;
+    };
+
+    let remember = func(flag: bool) {
+        if (flag) {
+            seen = true;
+        }
+    };
+
+    let classify = func(code: uint8) -> uint8 {
+        if (is_digit(code)) {
+            return 1;
+        }
+        if (is_lower(code)) {
+            return 2;
+        }
+        return 0;
+    };
+
+    // May trap, so it stays a call.
+    let add = func(left: int32, right: int32) -> int32 {
+        return left + right;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let text: string = "a1b2-c3 zz9";
+        if (args.length > 0) {
+            text = args[0];
+        }
+        let digits: int32 = 0;
+        let lowers: int32 = 0;
+        let widest: int32 = 0;
+        let index: int32 = 0;
+        while (index < text.byte_length) {
+            let code: uint8 = text.byte_at(index);
+            let kind: uint8 = classify(code);
+            if (kind == 1 || is_digit(code ^ 16)) {
+                digits = add(digits, 1);
+            }
+            if (is_lower(code) && !is_digit(code)) {
+                lowers = lowers + 1;
+            }
+            widest = larger(widest, larger(digits, lowers));
+            remember(kind == 2);
+            index = index + 1;
+        }
+        console.print_line("digits " + digits.to_string() + " lowers " + lowers.to_string());
+        console.print_line("widest " + widest.to_string() + " seen " + seen.to_string());
+        return program.ExitCode.Ok;
+    };
+);
