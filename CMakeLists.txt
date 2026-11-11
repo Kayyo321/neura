@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Neura's static libraries name each other, so one can reach a link line more
+# than once. Apple's linker warns about each repeat ("ignoring duplicate
+# libraries"), and the release build fails on a warning. From CMake 3.29 this
+# policy removes the repeats on the platforms whose linkers do not need them.
+if(POLICY CMP0156)
+    cmake_policy(SET CMP0156 NEW)
+endif()
+
 # The version of the tool and the standard library has one source: VERSION.
 # stdlib/std/core/version.nra must agree, which the version-consistency test
 # checks.
