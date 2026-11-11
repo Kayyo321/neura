@@ -4,7 +4,7 @@ let Counter = class (
     export let value: int32 = 0;
     export let deinit = func() -> void {
         // Release resources owned by this object here.
-    }
+    };
 );
 let counter = new Counter();
 counter.value = counter.value + 1;

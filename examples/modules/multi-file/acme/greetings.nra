@@ -3,5 +3,5 @@ let punctuation = import:Acme.Greetings.Punctuation;
 let Greetings = module (
     export let message = func(name: string) -> string {
         return "Hello, " + name + punctuation.exclamation;
-    }
+    };
 );
