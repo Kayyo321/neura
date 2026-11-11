@@ -608,6 +608,7 @@ private:
                         member = declaration(result.kind);
                     } catch (const Diagnostic& error) {
                         recover(error, member_start);
+                        skip_accessor_clauses();
                         continue;
                     }
                     if (member.cast_target) {
@@ -693,6 +694,31 @@ private:
             }
             clause.span = span_from(start);
             member.accessors.push_back(std::move(clause));
+        }
+    }
+
+    // After an error in a member, skips the accessor clauses that follow it,
+    // each through its ';', so that they are not read as members of their own.
+    void skip_accessor_clauses() {
+        while (at("|")) {
+            advance();
+            std::size_t depth = 0;
+            while (!at_end()) {
+                const auto& token = current();
+                if (token.kind == TokenKind::Symbol) {
+                    const auto& text = token.text;
+                    if (text == "(" || text == "[" || text == "{") {
+                        ++depth;
+                    } else if (text == ")" || text == "]" || text == "}") {
+                        if (depth == 0) return;
+                        --depth;
+                    } else if (text == ";" && depth == 0) {
+                        advance();
+                        break;
+                    }
+                }
+                advance();
+            }
         }
     }
 

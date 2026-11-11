@@ -1,0 +1,12 @@
+// After a syntax error in a field, its accessor clauses are skipped rather than read as members (E0204).
+let Handler = class (
+    export let first: int = ;
+        | get: first;
+        | set: {
+            first = value;
+        };
+    export let second: int = 2;
+        | get: second;
+    export let third: int = * 3;
+        | get: third;
+);
