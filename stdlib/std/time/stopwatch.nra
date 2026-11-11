@@ -31,7 +31,7 @@ export let Stopwatch = module (
         /// failed clock read is returned and leaves it stopped.
         export let start = func -> result.Result<Unit> {
             if (is_running) {
-                trap_with_message("invalid state: stopwatch is is_running");
+                trap_with_message("invalid state: stopwatch is running");
             }
             match (source.monotonic()) {
                 result.Result.Ok(reading) => {
