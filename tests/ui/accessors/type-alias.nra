@@ -1,0 +1,5 @@
+// Accessors on a member that names a type (E0518).
+let Shape = class (
+    export let Unit = int;
+        | get: Unit;
+);

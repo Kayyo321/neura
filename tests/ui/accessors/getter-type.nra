@@ -1,0 +1,5 @@
+// A getter whose expression does not have the field's type (E0403).
+let Counter = class (
+    export let count: int = 0;
+        | get: "zero";
+);

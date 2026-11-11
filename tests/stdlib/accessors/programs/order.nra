@@ -1,0 +1,67 @@
+// Accessors (Types.md, Accessors): outside access calls the getter and the
+// setter; the receiver of a read-modify-write is evaluated once, then the
+// getter runs, the new value is computed, and the setter runs.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Counter = class (
+    export let count: int = 0;
+        | get: {
+            console.print_line("get count " + count.to_string());
+            return count;
+        };
+        | set: {
+            console.print_line("set count " + value.to_string());
+            count = value;
+        };
+
+    export let total: int64 = 0;
+        | get: total;
+        | set: total = value;
+);
+
+let Holder = class (
+    export let counter = new Counter();
+        | get: {
+            console.print_line("get counter");
+            return counter;
+        };
+);
+
+let pick = func(counter: Counter, label: string) -> Counter {
+    console.print_line("receiver " + label);
+    return counter;
+};
+
+let operand = func(number: int) -> int {
+    console.print_line("operand " + number.to_string());
+    return number;
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let counter = new Counter();
+        console.print_line("-- assignment");
+        pick(counter, "a").count = operand(5);
+        console.print_line("-- read");
+        console.print_line(pick(counter, "b").count.to_string());
+        console.print_line("-- compound");
+        pick(counter, "c").count += operand(3);
+        console.print_line("-- postfix");
+        let old = pick(counter, "d").count++;
+        console.print_line("old " + old.to_string());
+        console.print_line("-- prefix");
+        let new_value = --pick(counter, "e").count;
+        console.print_line("new " + new_value.to_string());
+        console.print_line("-- chain");
+        let holder = new Holder();
+        holder.counter.count = 40;
+        holder.counter.count *= 2;
+        console.print_line(holder.counter.count.to_string());
+        console.print_line("-- wide");
+        counter.total = 9000000000;
+        counter.total <<= 2;
+        console.print_line(counter.total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -205,3 +205,81 @@ let first = import:"first.nir";
 let second = import:"changed.nir".Second;
 ]=])
 reject("incompatible definitions of.*shared.nra" check "${artifacts}/conflict.nra")
+
+# Accessors (Types.md, Accessors) survive a .nir round trip: the importing
+# program reaches the fields through the hidden accessor methods, a generic
+# class's accessors specialize, a write to a get-only field is still
+# rejected, and the image is the one built from source.
+set(accessor_sources "${TEST_DIR}/accessors")
+file(MAKE_DIRECTORY "${accessor_sources}")
+file(WRITE "${accessor_sources}/gadget.nra" [=[
+let console = import:Std.Io.Console;
+
+let Gadget = module (
+    export let Meter = class (
+        export let reading: int = 0;
+            | get: {
+                console.print_line("get reading");
+                return reading;
+            };
+            | set: {
+                console.print_line("set reading " + value.to_string());
+                reading = value;
+            };
+        export let serial = "G-1";
+            | get: serial;
+    );
+
+    export let Cell = class<T> (
+        export let item: T;
+            | get: item;
+            | set: item = value;
+
+        export let init = func(item: T) {
+            instance.item = item;
+        };
+    );
+);
+]=])
+set(accessor_app [=[
+let gadget = import:GADGET;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let meter = new gadget.Meter();
+        meter.reading = 4;
+        meter.reading += 3;
+        console.print_line(meter.serial + " " + meter.reading.to_string());
+        let cell = new gadget.Cell<int>(1);
+        cell.item++;
+        console.print_line(cell.item.to_string());
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+string(REPLACE "GADGET" "Gadget" source_app "${accessor_app}")
+file(WRITE "${accessor_sources}/app.nra" "${source_app}")
+neura(emit-ir "${accessor_sources}/gadget.nra" -o "${artifacts}/gadget.nir")
+string(REPLACE "GADGET" "\"gadget.nir\"" artifact_app "${accessor_app}")
+file(WRITE "${artifacts}/accessor-app.nra" "${artifact_app}")
+set(expected "set reading 4\nget reading\nset reading 7\nget reading\nG-1 7\n2\n")
+neura(build --no-source-map "${artifacts}/accessor-app.nra" -o "${TEST_DIR}/accessor-artifact.nvr")
+neura(run "${TEST_DIR}/accessor-artifact.nvr")
+if(NOT output STREQUAL expected)
+    message(FATAL_ERROR "accessors through .nir produced:\n${output}")
+endif()
+neura(build --no-source-map "${accessor_sources}/app.nra" -o "${TEST_DIR}/accessor-source.nvr")
+file(SHA256 "${TEST_DIR}/accessor-artifact.nvr" from_artifact)
+file(SHA256 "${TEST_DIR}/accessor-source.nvr" from_source)
+if(NOT from_artifact STREQUAL from_source)
+    message(FATAL_ERROR "the image built through gadget.nir differs from the one built from source")
+endif()
+file(WRITE "${artifacts}/accessor-read-only.nra" [=[
+let gadget = import:"gadget.nir";
+let meter = new gadget.Meter();
+meter.serial = "G-2";
+]=])
+reject("accessor-read-only.nra:3:1: error\\[E0510\\]: 'serial' is read-only outside its class"
+    check "${artifacts}/accessor-read-only.nra")

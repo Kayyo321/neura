@@ -1,0 +1,7 @@
+// A write from outside the class to a field that has only a getter (E0510).
+let Ticket = class (
+    export let code = "XY729H08";
+        | get: code;
+);
+let ticket = new Ticket();
+ticket.code = "AB12";

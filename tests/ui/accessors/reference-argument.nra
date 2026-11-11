@@ -1,0 +1,11 @@
+// A field with accessors passed where a reference aliases storage (E0524).
+let bump = func(target: &int) {
+    target += 1;
+};
+let Counter = class (
+    export let count: int = 0;
+        | get: count;
+        | set: count = value;
+);
+let counter = new Counter();
+bump(counter.count);

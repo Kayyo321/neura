@@ -1,0 +1,12 @@
+error[E0521]: a constant field cannot have a setter
+ --> $DIR/constant-setter.nra:5:11
+  |
+3 |     export const name = "default";
+  |                  ---- 'name' is declared with 'const'
+4 |         | get: name;
+5 |         | set: name = value;
+  |           ^^^ setter of a constant field
+  |
+  = help: declare the field with 'let', or remove the setter
+
+For more information about this error, try `neura explain E0521`.

@@ -1,0 +1,5 @@
+// Accessors on a method (E0518).
+let Shape = class (
+    export let area = func -> int => 4;
+        | get: 4;
+);

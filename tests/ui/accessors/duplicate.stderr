@@ -1,0 +1,12 @@
+error[E0520]: duplicate 'get' accessor for 'count'
+ --> $DIR/duplicate.nra:6:11
+  |
+4 |         | get: count;
+  |           --- the first 'get' accessor is here
+5 |         | set: count = value;
+6 |         | get: count + 1;
+  |           ^^^ a second 'get' accessor
+  |
+  = help: remove one of them; a field has at most one 'get' and one 'set' accessor
+
+For more information about this error, try `neura explain E0520`.

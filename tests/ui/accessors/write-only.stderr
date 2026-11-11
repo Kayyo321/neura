@@ -1,0 +1,13 @@
+error[E0515]: 'level' is write-only outside its class
+ --> $DIR/write-only.nra:7:15
+  |
+4 |         | set: level = value;
+  |         --------------------- 'level' declares only a setter
+...
+7 | let current = sink.level;
+  |               ^^^^^^^^^^ cannot read 'level' here
+  |
+  = note: 'level' has no 'get' accessor, so only code inside 'Sink' can read it
+  = help: add a getter to the field, such as '| get: level;'
+
+For more information about this error, try `neura explain E0515`.

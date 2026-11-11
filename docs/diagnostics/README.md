@@ -4,7 +4,7 @@ Each error that the compiler reports has a code: `E` and four digits, whose hund
 
 A page states the rule, shows a program that breaks it with the error it gets, and shows the program fixed. The examples are compiled by the `doc-examples` test: a failing example must fail with its code, and a fixed one must compile. A few errors cannot be caused by a single source file; their pages say why, and show only the fix.
 
-E0420, E0510, and the E09xx range (tags) are reserved and not in use.
+E0420 and the E09xx range (tags) are reserved and not in use.
 
 ## E01xx: Lexer
 
@@ -106,7 +106,7 @@ Errors about types, values, calls, and statements.
 
 ## E05xx: Classes and lifecycle
 
-Errors about inheritance, interfaces, construction, and destruction.
+Errors about inheritance, interfaces, construction, destruction, and field accessors.
 
 | Code | Error |
 | --- | --- |
@@ -119,10 +119,21 @@ Errors about inheritance, interfaces, construction, and destruction.
 | [E0507](E0507.md) | inaccessible constructor |
 | [E0508](E0508.md) | member needs a receiver |
 | [E0509](E0509.md) | invalid lifecycle function |
+| [E0510](E0510.md) | field is read-only outside its class |
 | [E0511](E0511.md) | invalid singleton |
 | [E0512](E0512.md) | invalid cast declaration |
 | [E0513](E0513.md) | reference field not definitely bound |
 | [E0514](E0514.md) | invalid destroy |
+| [E0515](E0515.md) | field is write-only outside its class |
+| [E0516](E0516.md) | accessor on a field that is not exported |
+| [E0517](E0517.md) | accessor on a static field |
+| [E0518](E0518.md) | accessor on a member that is not a field |
+| [E0519](E0519.md) | accessor outside a class |
+| [E0520](E0520.md) | duplicate accessor |
+| [E0521](E0521.md) | setter on a constant field |
+| [E0522](E0522.md) | setter on a field named value |
+| [E0523](E0523.md) | accessor on a primitive reference field |
+| [E0524](E0524.md) | reference to a field with accessors |
 
 ## E06xx: Concurrency
 

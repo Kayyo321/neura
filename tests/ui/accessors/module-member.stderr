@@ -1,0 +1,11 @@
+error[E0519]: accessors are only allowed on class fields
+ --> $DIR/module-member.nra:4:9
+  |
+3 |     export let retries = 3;
+  |                ------- 'retries' is a member of a module
+4 |         | get: retries;
+  |         ^^^^^^^^^^^^^^^ accessor clause outside a class
+  |
+  = help: move the field into a class, or declare a function that computes the value
+
+For more information about this error, try `neura explain E0519`.
