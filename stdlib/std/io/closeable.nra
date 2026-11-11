@@ -7,6 +7,7 @@ let.promote _ = import:Std.Core.Unit;
 /// Closing again does nothing and returns Ok; if close reports an error the resource is still closed. File,
 /// TcpStream, and TcpListener implement it.
 /// @see [Std.Io.Closeable](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-Closeable)
+#Since("0.1.0")
 export let Closeable = module (
     /// @brief The contract for a resource that callers release explicitly.
     export let Closeable = interface (
@@ -20,6 +21,7 @@ export let Closeable = module (
     /// it fails after an Err, the result is a Context error whose cause is the outcome's error and whose
     /// message carries the close error's message. Call it exactly once, after the work, on every ordinary
     /// completion.
+    #NoDiscard
     export let release = func<T>(resource: Closeable, outcome: Result<T>) -> Result<T> {
         return match (resource.close()) {
             Result.Ok(_) => outcome,
