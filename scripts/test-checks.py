@@ -147,6 +147,22 @@ def wiki(label: str, change, problem: str | None) -> None:
         expect(f"generate-wiki: {label}", [sys.executable, script, "--root", directory, "--check"], problem)
 
 
+def examples(label: str, files: dict[str, str], problem: str | None) -> None:
+    """Run check-doc-examples.py --directives-only, which needs no compiler."""
+    with tempfile.TemporaryDirectory() as directory:
+        for name, text in files.items():
+            path = Path(directory) / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        expect(f"doc examples: {label}", [sys.executable, str(SCRIPTS / "check-doc-examples.py"), "--root", directory,
+                                          "--directives-only"], problem)
+
+
+def block(directive: str | None, blank: str = "") -> str:
+    comment = f"<!-- example: {directive} -->\n{blank}" if directive else ""
+    return f"# Page\n\n{comment}```neura\nlet x = 1;\n```\n"
+
+
 def report(label: str, cases: str | None, minimum: int, problem: str | None) -> None:
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "junit.xml"
@@ -261,6 +277,26 @@ def main() -> int:
         page = generator.generate("docs/lang/Status.md", "\n# Title\n\nBody [a](Types.md).\n", root, "example/project")
         same("generate-wiki: the generated page", page, generator.COMMENT.format(path="docs/lang/Status.md")
              + "\n# Title\n\n" + generator.NAVIGATION + "\n\nBody [a](Types).\n")
+
+    examples("every directive", {
+        "README.md": block("check"),
+        "docs/A.md": block("run") + "\n```text\nhi\n```\n" + block("test") + block("rejected: unknown name")
+                     + block("fragment: a single declaration", "\n"),
+    }, None)
+    examples("a block that is not Neura", {"docs/A.md": "```text\nplain\n```\n```sh\nls\n```\n"}, None)
+    examples("a missing directive", {"docs/A.md": block(None)}, "docs/A.md:3: a ```neura block has no")
+    examples("a missing directive in the README", {"README.md": block(None)}, "README.md:3: a ```neura block has no")
+    examples("a directive two lines above", {"docs/A.md": "<!-- example: check -->\n\n\n```neura\nlet x = 1;\n```\n"},
+             "docs/A.md:4: a ```neura block has no")
+    examples("a directive in a nested directory", {"docs/lang/B.md": block(None)}, "docs/lang/B.md:3:")
+    examples("an unknown directive", {"docs/A.md": block("compile")}, "unknown example directive `compile`")
+    examples("a fragment without a reason", {"docs/A.md": block("fragment")}, "`example: fragment` needs a reason")
+    examples("a fragment with an empty reason", {"docs/A.md": block("fragment:  ")}, "`example: fragment` needs a reason")
+    examples("a rejected block without text", {"docs/A.md": block("rejected")}, "`example: rejected` needs")
+    examples("a check with an argument", {"docs/A.md": block("check: yes")}, "`example: check` takes no argument")
+    examples("a run without expected output", {"docs/A.md": block("run")}, "must be followed by a ```text block")
+    examples("a run followed by another kind of block", {"docs/A.md": block("run") + "\n```sh\nls\n```\n"},
+             "must be followed by a ```text block")
 
     ran = '<testcase name="a" status="run"/><testcase name="b" status="run"/>'
     report("every test ran", ran, 2, None)
