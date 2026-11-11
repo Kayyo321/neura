@@ -3,11 +3,13 @@ let hashing = import:Std.Core.Hash;
 /// @brief Returned failures (Stdlib.md section 6.3). An Error is an ordinary value read with match; adding a
 /// variant is a major-version change.
 /// @see [Std.Core.Error](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Error)
+#Since("0.1.0")
 export let Error = module (
     /// @brief Host error codes 1 through 14 map to the first fourteen kinds in order. The library produces
     /// Closed and InvalidData itself. Host error code 15 maps to Cancelled, the answer of a cancellable host
     /// request (a read, write, accept, connect, or sleep in a task whose scope was cancelled) that was cancelled
     /// before it finished. Cancelled comes last so that the kinds before it keep their order.
+    #Since("0.1.0")
     export let IoErrorKind = enum (
         NotFound, PermissionDenied, AlreadyExists, InvalidInput, Interrupted, UnexpectedEnd, NotADirectory,
         IsADirectory, DirectoryNotEmpty, ConnectionRefused, ConnectionReset, TimedOut, Unsupported,
@@ -15,10 +17,12 @@ export let Error = module (
     );
 
     /// @brief Classifies malformed text, premature endings, and out-of-range values.
+    #Since("0.1.0")
     export let ParseErrorKind = enum (Empty, InvalidCharacter, OutOfRange, UnexpectedEnd, Syntax);
 
     /// @brief The base of errors defined outside the library. `code` is a stable identifier such as
     /// billing.card_declined.
+    #Since("0.1.0")
     export let ErrorDetail = class (
         /// @brief Returns the detail's application-defined code.
         export let code = func() -> string;
@@ -27,11 +31,12 @@ export let Error = module (
     );
 
     /// @brief Stores a custom error's code and message as strings.
+    #[Final, Since("0.1.0")]
     export let SimpleDetail = class:ErrorDetail (
         /// @brief The application-defined error code.
-        let code_text: string;
+        last code_text: string;
         /// @brief The human-readable detail.
-        let message_text: string;
+        last message_text: string;
 
         /// @brief Initializes both parts of the error detail.
         export let init = func(code_value: string, message_value: string) {
@@ -51,7 +56,7 @@ export let Error = module (
             if (!(other is SimpleDetail)) {
                 return false;
             }
-            let detail = other as SimpleDetail;
+            last detail = other as SimpleDetail;
             return code_text == detail.code() && message_text == detail.message();
         };
 
@@ -64,6 +69,7 @@ export let Error = module (
     );
 
     /// @brief Represents an expected failure and its category-specific context.
+    #Since("0.1.0")
     export let Error = enum (
         Io { kind: IoErrorKind, message: string, path: string },
         Parse { kind: ParseErrorKind, offset: int, message: string },
@@ -76,6 +82,7 @@ export let Error = module (
     /// (Concurrency.md section 5.1). It mirrors Error with one change: Custom, which holds an ErrorDetail
     /// object, is flattened to the detail's code and message texts. Convert with to_portable before sending and
     /// from_portable after receiving.
+    #Since("0.1.0")
     export let PortableError = enum (
         Io { kind: IoErrorKind, message: string, path: string },
         Parse { kind: ParseErrorKind, offset: int, message: string },
@@ -156,7 +163,7 @@ export let Error = module (
 
     /// @brief The error, then each cause in order.
     export let chain = func(e: Error) -> Error[list] {
-        let result: Error[list] = [];
+        last result: Error[list] = [];
         let current = e;
         let more = true;
         while (more) {

@@ -5,8 +5,10 @@ let.promote _ = import:Std.Core.Optional;
 /// @brief The one representation of a fallible outcome (Stdlib.md section 6.2). An operation with no value
 /// returns Result<Unit>.
 /// @see [Std.Core.Result](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Result)
+#Since("0.1.0")
 export let Result = module (
     /// @brief Represents a successful payload (Ok) or an expected failure (Err).
+    #Since("0.1.0")
     export let Result = enum<T> (Ok(T), Err(Error));
 
     /// @brief Reports whether the result holds a success payload.
@@ -40,30 +42,35 @@ export let Result = module (
     };
 
     /// @brief Returns Some for success and discards an error by returning None.
+    #NoDiscard
     export let to_optional = func<T>(r: Result<T>) -> Optional<T> => match (r) {
         Result.Ok(value) => Optional<T>.Some(value),
         Result.Err(_) => Optional<T>.None,
     };
 
     /// @brief Wraps an Err in a Context error; returns an Ok unchanged.
+    #NoDiscard
     export let with_context = func<T>(r: Result<T>, message: string) -> Result<T> => match (r) {
         Result.Ok(_) => r,
         Result.Err(failure) => Result<T>.Err(error.context(failure, message)),
     };
 
     /// @brief Transforms only a successful payload, preserving an error unchanged.
+    #NoDiscard
     export let map = func<T, U>(r: Result<T>, f: func(T) -> U) -> Result<U> => match (r) {
         Result.Ok(value) => Result<U>.Ok(f(value)),
         Result.Err(failure) => Result<U>.Err(failure),
     };
 
     /// @brief Calls the function on success and returns its result, or propagates the original error.
+    #NoDiscard
     export let and_then = func<T, U>(r: Result<T>, f: func(T) -> Result<U>) -> Result<U> => match (r) {
         Result.Ok(value) => f(value),
         Result.Err(failure) => Result<U>.Err(failure),
     };
 
     /// @brief Transforms only the error payload, preserving success unchanged.
+    #NoDiscard
     export let map_error = func<T>(r: Result<T>, f: func(Error) -> Error) -> Result<T> => match (r) {
         Result.Ok(_) => r,
         Result.Err(failure) => Result<T>.Err(f(failure)),

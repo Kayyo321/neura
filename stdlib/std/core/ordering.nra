@@ -1,8 +1,10 @@
 /// @brief Comparison results (Stdlib.md section 5.3). Comparators return Ordering, never an integer, so the
 /// overflowing subtraction idiom cannot be written.
 /// @see [Std.Core.Ordering](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Ordering)
+#Since("0.1.0")
 export let Ordering = module (
     /// @brief The three outcomes of comparing a left operand to a right operand.
+    #Since("0.1.0")
     export let Ordering = enum (Less, Equal, Greater);
 
     /// @brief Swaps Less and Greater while preserving Equal.

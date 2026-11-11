@@ -10,6 +10,7 @@ let.promote _ = import:Std.Core.Result;
 /// Every operation uses checked arithmetic; the wrapping forms follow the recipes of section 7.2, so no
 /// intermediate value leaves its type.
 /// @see [Std.Core.UInt64](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-UInt64)
+#Since("0.1.0")
 export let UInt64 = module (
     /// @brief The smallest value representable by this integer type.
     export const Min: uint64 = 0;
@@ -80,7 +81,7 @@ export let UInt64 = module (
         let x = a;
         let y = b;
         while (y != 0) {
-            let remainder = x % y;
+            last remainder = x % y;
             x = y;
             y = remainder;
         }
@@ -88,6 +89,7 @@ export let UInt64 = module (
     };
 
     /// @brief None where the operator would trap. Each test runs before the operation, so nothing overflows.
+    #NoDiscard
     export let checked_add = func(a: uint64, b: uint64) -> Optional<uint64> {
         if (b > Max - a) {
             return Optional<uint64>.None;
@@ -96,6 +98,7 @@ export let UInt64 = module (
     };
 
     /// @brief Returns the difference in Some, or None when it falls outside the type's range.
+    #NoDiscard
     export let checked_sub = func(a: uint64, b: uint64) -> Optional<uint64> {
         if (a < b) {
             return Optional<uint64>.None;
@@ -104,6 +107,7 @@ export let UInt64 = module (
     };
 
     /// @brief Returns the product in Some, or None when it falls outside the type's range.
+    #NoDiscard
     export let checked_mul = func(a: uint64, b: uint64) -> Optional<uint64> {
         if (a != 0 && b > Max / a) {
             return Optional<uint64>.None;
@@ -112,6 +116,7 @@ export let UInt64 = module (
     };
 
     /// @brief Returns the quotient in Some, or None when the divisor is zero.
+    #NoDiscard
     export let checked_div = func(a: uint64, b: uint64) -> Optional<uint64> {
         if (b == 0) {
             return Optional<uint64>.None;
@@ -120,6 +125,7 @@ export let UInt64 = module (
     };
 
     /// @brief Returns the remainder in Some, or None when the divisor is zero.
+    #NoDiscard
     export let checked_rem = func(a: uint64, b: uint64) -> Optional<uint64> {
         if (b == 0) {
             return Optional<uint64>.None;
@@ -130,7 +136,7 @@ export let UInt64 = module (
     /// @brief The result modulo 2^64 (section 7.2). `room` is Max - a, which cannot underflow; when b exceeds
     /// it, b - room - 1 is the wrapped sum.
     export let wrapping_add = func(a: uint64, b: uint64) -> uint64 {
-        let room = Max - a;
+        last room = Max - a;
         if (b > room) {
             return b - room - 1;
         }
@@ -149,11 +155,11 @@ export let UInt64 = module (
     /// are masked to 32 bits before they are added (their sum is below 2^33), and the shift discards the bits
     /// above 64.
     export let wrapping_mul = func(a: uint64, b: uint64) -> uint64 {
-        let a_low = a & 4294967295;
-        let a_high = a >> 32;
-        let b_low = b & 4294967295;
-        let b_high = b >> 32;
-        let cross = ((a_high * b_low) & 4294967295) + ((a_low * b_high) & 4294967295);
+        last a_low = a & 4294967295;
+        last a_high = a >> 32;
+        last b_low = b & 4294967295;
+        last b_high = b >> 32;
+        last cross = ((a_high * b_low) & 4294967295) + ((a_low * b_high) & 4294967295);
         return wrapping_add(a_low * b_low, cross << 32);
     };
 
@@ -276,7 +282,7 @@ export let UInt64 = module (
     /// @brief `n` is reduced to 0 through Bits - 1 first. A rotation by 0 returns `v`; otherwise both shift
     /// counts are between 1 and Bits - 1.
     export let rotate_left = func(v: uint64, n: int) -> uint64 {
-        let count = rotation(n);
+        last count = rotation(n);
         if (count == 0) {
             return v;
         }
@@ -285,7 +291,7 @@ export let UInt64 = module (
 
     /// @brief Rotates the bits right, reducing the distance modulo the bit width.
     export let rotate_right = func(v: uint64, n: int) -> uint64 {
-        let count = rotation(n);
+        last count = rotation(n);
         if (count == 0) {
             return v;
         }
@@ -323,6 +329,7 @@ export let UInt64 = module (
 
     /// @brief Parses a base-10 integer, returning an error for invalid text or a value outside the type's
     /// range.
+    #NoDiscard
     export let parse = func(text: string) -> Result<uint64> => parse_radix(text, 10);
 
     /// @brief An optional `+` or `-`, then one or more digits of the radix in either case.
@@ -332,6 +339,7 @@ export let UInt64 = module (
     /// for zero. A radix outside 2 through 36 traps.
     ///
     /// The neura.integer.parse_u64 kernel parses the text.
+    #NoDiscard
     export let parse_radix = func(text: string, radix: int) -> Result<uint64> {
         let [status, offset, value] = integer_kernels.parse_u64(text, radix as int64);
         if (status != kernel_status.Ok) {
@@ -342,7 +350,7 @@ export let UInt64 = module (
 
     /// @brief `n` modulo Bits, between 0 and Bits - 1.
     let rotation = func(n: int) -> int {
-        let count = n % Bits;
+        last count = n % Bits;
         if (count < 0) {
             return count + Bits;
         }

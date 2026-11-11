@@ -38,7 +38,7 @@ export let IntegerText = module (
 
     /// @brief The text of digits stored least significant first, with a leading `-` when `negative` is set.
     export let digits_text = func(reversed: uint8[list], negative: bool) -> string {
-        let bytes: uint8[list] = [];
+        last bytes: uint8[list] = [];
         if (negative) {
             bytes.append(45);
         }
@@ -52,11 +52,11 @@ export let IntegerText = module (
     /// @brief Left-pads `text` with copies of `pad` to `min_width` characters. A `0` pad goes after a leading
     /// `-`. `pad` must be one scalar value.
     export let pad_number = func(text: string, min_width: int, pad: string) -> string {
-        let pad_length = pad.byte_length;
+        last pad_length = pad.byte_length;
         if (pad_length == 0 || sequence_length(pad.byte_at(0)) != pad_length) {
             trap_with_message("invalid argument: pad is not one scalar value");
         }
-        let missing = min_width - text.byte_length;
+        last missing = min_width - text.byte_length;
         if (missing <= 0) {
             return text;
         }
@@ -73,11 +73,11 @@ export let IntegerText = module (
     /// @brief The first error of the grammar: an optional `+` or `-`, then one or more digits of the radix.
     /// None when the text matches.
     export let syntax_error = func(text: string, radix: int) -> Optional<Error> {
-        let length = text.byte_length;
+        last length = text.byte_length;
         if (length == 0) {
             return Optional<Error>.Some(parse_error(ParseErrorKind.Empty, 0, "empty input"));
         }
-        let start = sign_length(text);
+        last start = sign_length(text);
         if (start == length) {
             return Optional<Error>.Some(
                 parse_error(ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
@@ -93,7 +93,7 @@ export let IntegerText = module (
 
     /// @brief 1 when the text starts with `+` or `-`, otherwise 0.
     export let sign_length = func(text: string) -> int {
-        let first = text.byte_at(0);
+        last first = text.byte_at(0);
         if (first == 43 || first == 45) {
             return 1;
         }

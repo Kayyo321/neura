@@ -10,16 +10,18 @@ let hash_kernels = import:Std.Internal.Kernels.Hash;
 /// its factory fills in. Builders are made with the module function `create`; the constructor takes a token
 /// that only this module can name.
 /// @see [Std.Core.StringBuilder](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-StringBuilder)
+#Since("0.1.0")
 export let StringBuilder = module (
     /// @brief Restricts construction to the module's factories.
     let Seal = enum (Token);
 
     /// @brief Accumulates mutable UTF-8 bytes and produces immutable string snapshots.
+    #[Final, Since("0.1.0")]
     export let StringBuilder = class (
         /// @brief Stores the current UTF-8 bytes.
         let bytes: uint8[list] = [];
         /// @brief Tracks the builder through a shared cell for bound operations that need its identity.
-        let link: Cell<StringBuilder>;
+        last link: Cell<StringBuilder>;
 
         /// @brief Initializes a builder with the supplied backing bytes and construction token.
         export let init = func(seal: Seal, owner: Cell<StringBuilder>) {
@@ -28,7 +30,7 @@ export let StringBuilder = module (
 
         /// @brief Appends the bytes of `s` and returns this builder.
         export let append = func(s: string) -> StringBuilder {
-            let count = s.byte_length;
+            last count = s.byte_length;
             for (let i = 0; i < count; i++) {
                 bytes.append(s.byte_at(i));
             }
@@ -100,8 +102,11 @@ export let StringBuilder = module (
         /// @brief Appends `value.to_string()`.
         export let append_value = func<T>(value: T) -> StringBuilder => append(value.to_string());
 
-        /// @brief Returns the number of accumulated UTF-8 bytes.
-        export let byte_length = func -> int => bytes.length;
+        /// @brief The number of accumulated UTF-8 bytes. The getter reads the byte list, so the field itself
+        /// holds nothing.
+        #Since("0.2.0")
+        export let byte_length: int;
+            | get: bytes.length;
 
         /// @brief Reports whether there are any accumulated bytes.
         export let is_empty = func -> bool => bytes.length == 0;
@@ -109,7 +114,7 @@ export let StringBuilder = module (
         /// @brief Keeps the first `new_length` bytes. The length must be between 0 and the current byte length
         /// and fall on a character boundary.
         export let truncate = func(new_length: int) {
-            let length = bytes.length;
+            last length = bytes.length;
             if (new_length < 0 || new_length > length) {
                 trap_with_message("invalid argument: byte length out of range");
             }
@@ -123,8 +128,8 @@ export let StringBuilder = module (
                 bytes = copy_prefix(new_length);
                 return;
             }
-            for (let last = length - 1; last >= new_length; last--) {
-                bytes.remove_at(last);
+            for (let index = length - 1; index >= new_length; index--) {
+                bytes.remove_at(index);
             }
         };
 
@@ -138,7 +143,7 @@ export let StringBuilder = module (
             if (!(other is StringBuilder)) {
                 return false;
             }
-            let builder = other as StringBuilder;
+            last builder = other as StringBuilder;
             return bytes === builder.bytes;
         };
 
@@ -156,7 +161,7 @@ export let StringBuilder = module (
 
         /// @brief Copies the requested prefix of the backing bytes.
         let copy_prefix = func(count: int) -> uint8[list] {
-            let kept: uint8[list] = [];
+            last kept: uint8[list] = [];
             for (let i = 0; i < count; i++) {
                 kept.append(bytes[i]);
             }
@@ -165,9 +170,10 @@ export let StringBuilder = module (
     );
 
     /// @brief A new, empty builder.
+    #[NoDiscard, Since("0.1.0")]
     export let create = func -> StringBuilder {
-        let owner = cell.of<StringBuilder>(nil);
-        let builder = new StringBuilder(Seal.Token, owner);
+        last owner = cell.of<StringBuilder>(nil);
+        last builder: StringBuilder = new(Seal.Token, owner);
         owner.value = builder;
         return builder;
     };

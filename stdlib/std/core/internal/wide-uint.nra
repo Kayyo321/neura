@@ -14,6 +14,7 @@ export let WideUint = module (
     const FivePower13: uint32 = 1220703125;
 
     /// @brief A mutable nonnegative integer stored in normalized little-endian limbs.
+    #Final
     export let WideUint = class (
         /// @brief No zero limb at the top; zero has no limbs.
         export let limbs: uint32[list] = [];
@@ -26,8 +27,8 @@ export let WideUint = module (
 
         /// @brief Copies the limbs into an independent value.
         export let copy = func -> WideUint {
-            let duplicate = new WideUint();
-            let target = duplicate.limbs;
+            last duplicate = new WideUint();
+            last target = duplicate.limbs;
             for (let limb in limbs) {
                 target.append(limb);
             }
@@ -36,7 +37,7 @@ export let WideUint = module (
 
         /// @brief Returns the number of significant bits, or zero for zero.
         export let bit_length = func -> int {
-            let count = limbs.length;
+            last count = limbs.length;
             if (count == 0) {
                 return 0;
             }
@@ -51,8 +52,8 @@ export let WideUint = module (
 
         /// @brief -1, 0, or 1 as this value is below, equal to, or above `other`.
         export let compare = func(other: WideUint) -> int {
-            let a = limbs;
-            let b = other.limbs;
+            last a = limbs;
+            last b = other.limbs;
             if (a.length != b.length) {
                 if (a.length < b.length) {
                     return -1;
@@ -72,7 +73,7 @@ export let WideUint = module (
 
         /// @brief The value when it is below 2^64; traps otherwise.
         export let to_uint64 = func -> uint64 {
-            let count = limbs.length;
+            last count = limbs.length;
             if (count > 2) {
                 trap_with_message("invalid state: wide integer exceeds uint64");
             }
@@ -88,8 +89,8 @@ export let WideUint = module (
 
         /// @brief Adds another magnitude in place and propagates carries across limbs.
         export let add = func(other: WideUint) {
-            let a = limbs;
-            let b = other.limbs;
+            last a = limbs;
+            last b = other.limbs;
             let count = b.length;
             if (a.length > count) {
                 count = a.length;
@@ -103,7 +104,7 @@ export let WideUint = module (
                 if (i < b.length) {
                     sum += (b[i] as uint64);
                 }
-                let low = (sum & LimbMask) as uint32;
+                last low = (sum & LimbMask) as uint32;
                 if (i < a.length) {
                     a[i] = low;
                 } else {
@@ -121,8 +122,8 @@ export let WideUint = module (
             if (compare(other) < 0) {
                 trap_with_message("invalid state: wide integer subtraction below zero");
             }
-            let a = limbs;
-            let b = other.limbs;
+            last a = limbs;
+            last b = other.limbs;
             let borrow: uint64 = 0;
             for (let i = 0; i < a.length; i++) {
                 if (i >= b.length && borrow == 0) {
@@ -132,7 +133,7 @@ export let WideUint = module (
                 if (i < b.length) {
                     subtrahend += (b[i] as uint64);
                 }
-                let current = a[i] as uint64;
+                last current = a[i] as uint64;
                 if (current >= subtrahend) {
                     a[i] = (current - subtrahend) as uint32;
                     borrow = 0;
@@ -147,7 +148,7 @@ export let WideUint = module (
 
         /// @brief Adds a single limb in place, extending storage on a final carry.
         export let add_small = func(value: uint32) {
-            let a = limbs;
+            last a = limbs;
             let carry = value as uint64;
             let i = 0;
             while (carry != 0) {
@@ -155,7 +156,7 @@ export let WideUint = module (
                     a.append(carry as uint32);
                     return;
                 }
-                let sum = (a[i] as uint64) + carry;
+                last sum = (a[i] as uint64) + carry;
                 a[i] = (sum & LimbMask) as uint32;
                 carry = sum >> 32;
                 i++;
@@ -168,11 +169,11 @@ export let WideUint = module (
                 limbs = [];
                 return;
             }
-            let a = limbs;
-            let wide_factor = factor as uint64;
+            last a = limbs;
+            last wide_factor = factor as uint64;
             let carry: uint64 = 0;
             for (let i = 0; i < a.length; i++) {
-                let product = (a[i] as uint64) * wide_factor + carry;
+                last product = (a[i] as uint64) * wide_factor + carry;
                 a[i] = (product & LimbMask) as uint32;
                 carry = product >> 32;
             }
@@ -187,12 +188,12 @@ export let WideUint = module (
         /// high half never discards a bit. The remainder is recovered by a multiplication, which costs far less
         /// than a second division.
         export let divide_small = func(divisor: uint32) -> uint32 {
-            let a = limbs;
-            let wide_divisor = divisor as uint64;
+            last a = limbs;
+            last wide_divisor = divisor as uint64;
             let remainder: uint64 = 0;
             for (let i = a.length - 1; i >= 0; i--) {
-                let current = (remainder << 32) | (a[i] as uint64);
-                let quotient = current / wide_divisor;
+                last current = (remainder << 32) | (a[i] as uint64);
+                last quotient = current / wide_divisor;
                 a[i] = quotient as uint32;
                 remainder = current - quotient * wide_divisor;
             }
@@ -234,9 +235,9 @@ export let WideUint = module (
             if (count == 0 || limbs.length == 0) {
                 return;
             }
-            let whole = count / 32;
-            let part = count % 32;
-            let shifted: uint32[list] = [];
+            last whole = count / 32;
+            last part = count % 32;
+            last shifted: uint32[list] = [];
             for (let i = 0; i < whole; i++) {
                 shifted.append(0);
             }
@@ -247,7 +248,7 @@ export let WideUint = module (
             } else {
                 let carry: uint64 = 0;
                 for (let limb in limbs) {
-                    let wide = ((limb as uint64) << part) | carry;
+                    last wide = ((limb as uint64) << part) | carry;
                     shifted.append((wide & LimbMask) as uint32);
                     carry = wide >> 32;
                 }
@@ -263,14 +264,14 @@ export let WideUint = module (
             if (count == 0) {
                 return;
             }
-            let whole = count / 32;
-            let part = count % 32;
-            let a = limbs;
+            last whole = count / 32;
+            last part = count % 32;
+            last a = limbs;
             if (whole >= a.length) {
                 limbs = [];
                 return;
             }
-            let shifted: uint32[list] = [];
+            last shifted: uint32[list] = [];
             for (let i = whole; i < a.length; i++) {
                 let value = (a[i] as uint64) >> part;
                 if (part != 0 && i + 1 < a.length) {
@@ -285,9 +286,9 @@ export let WideUint = module (
         /// @brief Compares the value of the low `count` bits (count >= 1) with 2^(count - 1): -1 below, 0
         /// equal, 1 above.
         export let low_bits_versus_half = func(count: int) -> int {
-            let a = limbs;
-            let index = (count - 1) / 32;
-            let bit = (count - 1) % 32;
+            last a = limbs;
+            last index = (count - 1) / 32;
+            last bit = (count - 1) % 32;
             if (index >= a.length || ((a[index] >> bit) & 1) == 0) {
                 return -1;
             }
@@ -306,14 +307,14 @@ export let WideUint = module (
 
         /// @brief Whether the low `count` bits are all zero.
         export let low_bits_zero = func(count: int) -> bool {
-            let a = limbs;
-            let whole = count / 32;
+            last a = limbs;
+            last whole = count / 32;
             for (let i = 0; i < whole && i < a.length; i++) {
                 if (a[i] != 0) {
                     return false;
                 }
             }
-            let part = count % 32;
+            last part = count % 32;
             if (part > 0 && whole < a.length) {
                 let mask: uint32 = 1;
                 mask = (mask << part) - 1;
@@ -329,12 +330,12 @@ export let WideUint = module (
             if (limbs.length == 0) {
                 return "0";
             }
-            let work = copy();
-            let groups: uint32[list] = [];
+            last work = copy();
+            last groups: uint32[list] = [];
             while (!work.is_zero()) {
                 groups.append(work.divide_small(Billion));
             }
-            let bytes: uint8[list] = [];
+            last bytes: uint8[list] = [];
             append_group(bytes, groups[groups.length - 1], false);
             for (let i = groups.length - 2; i >= 0; i--) {
                 append_group(bytes, groups[i], true);
@@ -345,7 +346,7 @@ export let WideUint = module (
 
         /// @brief Removes high zero limbs to restore the canonical representation.
         let normalize = func {
-            let a = limbs;
+            last a = limbs;
             while (a.length > 0 && a[a.length - 1] == 0) {
                 a.remove_at(a.length - 1);
             }
@@ -353,7 +354,7 @@ export let WideUint = module (
 
         /// @brief The digits of one base-10^9 group, padded to nine when `full`.
         let append_group = func(bytes: uint8[list], group: uint32, full: bool) {
-            let digits: uint8[list] = [];
+            last digits: uint8[list] = [];
             let rest = group;
             while (rest != 0) {
                 digits.append((48 + rest % 10) as uint8);
@@ -371,14 +372,14 @@ export let WideUint = module (
     );
 
     /// @brief Creates a fresh zero magnitude with no limbs.
-    export let zero = func -> WideUint => new WideUint();
+    export let zero = func -> WideUint => new;
 
     /// @brief Splits an unsigned 64-bit value into up to two limbs.
     export let of = func(value: uint64) -> WideUint {
-        let result_value = new WideUint();
+        last result_value = new WideUint();
         if (value != 0) {
             result_value.limbs.append((value & LimbMask) as uint32);
-            let high = value >> 32;
+            last high = value >> 32;
             if (high != 0) {
                 result_value.limbs.append(high as uint32);
             }

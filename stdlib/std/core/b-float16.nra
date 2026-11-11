@@ -7,6 +7,7 @@ let.promote _ = import:Std.Core.Result;
 /// Format: binary32's 8-bit exponent with a 7-bit fraction. Bit-level operations use the exact encoding (N1);
 /// text conversion follows section 7.5.
 /// @see [Std.Core.BFloat16](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-BFloat16)
+#Since("0.1.0")
 export let BFloat16 = module (
     /// @brief The largest finite value.
     export const Max: bfloat16 = bfloat16.from_bits(32639);
@@ -118,8 +119,8 @@ export let BFloat16 = module (
     /// @brief The total order of section 5.3: -Infinity, negative values, -0.0, 0.0, positive values, Infinity,
     /// then every NaN (all NaNs equal).
     export let total_compare = func(a: bfloat16, b: bfloat16) -> Ordering {
-        let a_nan = a != a;
-        let b_nan = b != b;
+        last a_nan = a != a;
+        last b_nan = b != b;
         if (a_nan || b_nan) {
             if (a_nan && b_nan) {
                 return Ordering.Equal;
@@ -135,7 +136,7 @@ export let BFloat16 = module (
         if (a > b) {
             return Ordering.Greater;
         }
-        let a_negative = is_negative(a);
+        last a_negative = is_negative(a);
         if (a_negative == is_negative(b)) {
             return Ordering.Equal;
         }
@@ -166,6 +167,7 @@ export let BFloat16 = module (
 
     /// @brief The grammar of section 7.5, converted exactly and rounded once, ties to even. Too large becomes
     /// an infinity and too small a signed zero.
+    #NoDiscard
     export let parse = func(text: string) -> Result<bfloat16> => match (float_text.parse(text, 7, 8)) {
         float_text.Parsed.Failure(failure) => Result<bfloat16>.Err(failure),
         float_text.Parsed.Bits(bits) => Result<bfloat16>.Ok(bfloat16.from_bits(bits as uint16)),

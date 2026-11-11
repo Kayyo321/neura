@@ -11,6 +11,7 @@ let unsigned = import:Std.Core.UInt64;
 /// Every operation uses checked arithmetic; the wrapping forms follow the recipes of section 7.2, so no
 /// intermediate value leaves its type.
 /// @see [Std.Core.Int64](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Int64)
+#Since("0.1.0")
 export let Int64 = module (
     /// @brief The smallest value representable by this integer type.
     export const Min: int64 = -9223372036854775808;
@@ -99,7 +100,7 @@ export let Int64 = module (
             y = -y;
         }
         while (y != 0) {
-            let remainder = x % y;
+            last remainder = x % y;
             x = y;
             y = remainder;
         }
@@ -107,6 +108,7 @@ export let Int64 = module (
     };
 
     /// @brief None where the operator would trap. Each test runs before the operation, so nothing overflows.
+    #NoDiscard
     export let checked_add = func(a: int64, b: int64) -> Optional<int64> {
         if ((b > 0 && a > Max - b) || (b < 0 && a < Min - b)) {
             return Optional<int64>.None;
@@ -115,6 +117,7 @@ export let Int64 = module (
     };
 
     /// @brief Returns the difference in Some, or None when it falls outside the type's range.
+    #NoDiscard
     export let checked_sub = func(a: int64, b: int64) -> Optional<int64> {
         if ((b < 0 && a > Max + b) || (b > 0 && a < Min + b)) {
             return Optional<int64>.None;
@@ -123,6 +126,7 @@ export let Int64 = module (
     };
 
     /// @brief Returns the product in Some, or None when it falls outside the type's range.
+    #NoDiscard
     export let checked_mul = func(a: int64, b: int64) -> Optional<int64> {
         if (multiply_overflows(a, b)) {
             return Optional<int64>.None;
@@ -131,6 +135,7 @@ export let Int64 = module (
     };
 
     /// @brief None for a zero divisor and for Min / -1.
+    #NoDiscard
     export let checked_div = func(a: int64, b: int64) -> Optional<int64> {
         if (b == 0 || (a == Min && b == -1)) {
             return Optional<int64>.None;
@@ -139,6 +144,7 @@ export let Int64 = module (
     };
 
     /// @brief None for a zero divisor. Min % -1 is 0, as for the operator.
+    #NoDiscard
     export let checked_rem = func(a: int64, b: int64) -> Optional<int64> {
         if (b == 0) {
             return Optional<int64>.None;
@@ -202,7 +208,7 @@ export let Int64 = module (
     /// multiplication, which cannot overflow because |quotient * b| <= |a|; a multiplication circuit is several
     /// times smaller than a second divider.
     export let floor_div = func(a: int64, b: int64) -> int64 {
-        let quotient = a / b;
+        last quotient = a / b;
         if (quotient * b != a && (a < 0) != (b < 0)) {
             return quotient - 1;
         }
@@ -217,7 +223,7 @@ export let Int64 = module (
         if (b == -1) {
             return 0;
         }
-        let remainder = a - a / b * b;
+        last remainder = a - a / b * b;
         if (remainder != 0 && (remainder < 0) != (b < 0)) {
             return remainder + b;
         }
@@ -273,6 +279,7 @@ export let Int64 = module (
 
     /// @brief Parses a base-10 integer, returning an error for invalid text or a value outside the type's
     /// range.
+    #NoDiscard
     export let parse = func(text: string) -> Result<int64> => parse_radix(text, 10);
 
     /// @brief An optional `+` or `-`, then one or more digits of the radix in either case.
@@ -282,6 +289,7 @@ export let Int64 = module (
     /// through 36 traps.
     ///
     /// The neura.integer.parse_i64 kernel parses the text.
+    #NoDiscard
     export let parse_radix = func(text: string, radix: int) -> Result<int64> {
         let [status, offset, value] = integer_kernels.parse_i64(text, radix as int64);
         if (status != kernel_status.Ok) {
