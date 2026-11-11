@@ -16,7 +16,17 @@ public:
         ParsedFile result;
         result.file = current().span.file;
         while (!at_end()) {
-            result.statements.push_back(statement());
+            const auto start = cursor_;
+            try {
+                result.statements.push_back(statement());
+            } catch (const Diagnostic& error) {
+                recover(error, start);
+            }
+        }
+        if (!errors_.empty()) {
+            auto first = errors_.front();
+            for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
+            throw first;
         }
         result.untyped_variadic = std::move(untyped_variadic_);
         return result;
@@ -25,6 +35,13 @@ public:
 private:
     const std::vector<Token>& tokens_;
     std::size_t cursor_{};
+    // Syntax errors found so far (Tooling.md, Diagnostics): the parser
+    // records an error, skips to the end of the statement or member that
+    // failed, and goes on, up to error_limit() errors.
+    std::vector<Diagnostic> errors_;
+    // Set when skipping after an error reached the end of the file. Later
+    // errors there only restate that something was left open.
+    bool skipped_to_end_ = false;
     unsigned block_depth_ = 0;
     std::optional<Span> untyped_variadic_;
 
@@ -49,13 +66,12 @@ private:
     void expect(std::string_view text) {
         if (!match(text)) {
             if (text == ";" && cursor_ > 0) missing_semicolon();
-            throw Diagnostic(current().span, "expected '" + std::string(text) + "'").with_code("E0202");
+            expected("'" + std::string(text) + "'", text);
         }
     }
 
-    // A missing ';' is reported where it belongs, immediately after the
-    // previous token, with an insertion that `neura check --fix` applies.
-    [[noreturn]] void missing_semicolon() const {
+    // The span just after the previous token, where a missing token belongs.
+    Span after_previous() const {
         const auto& previous = tokens_[cursor_ - 1].span;
         Span after{previous.file, previous.line, previous.column, previous.offset + previous.length, 0};
         // Columns count code points, and lines end as the lexer ends them.
@@ -70,6 +86,121 @@ private:
                 ++after.column;
             }
         }
+        return after;
+    }
+
+    std::string found_text(const Token& token) const {
+        return token.kind == TokenKind::End ? "found the end of the file" : "found '" + token.text + "'";
+    }
+
+    // The index of the unclosed opening delimiter that `close` would end,
+    // searching back from the current token, or none.
+    std::optional<std::size_t> unclosed(std::string_view close) const {
+        const std::string_view open = close == ")" ? "(" : close == "]" ? "[" : close == "}" ? "{" : "";
+        if (open.empty()) return std::nullopt;
+        std::size_t depth = 0;
+        for (auto i = cursor_; i-- > 0;) {
+            if (tokens_[i].kind != TokenKind::Symbol) continue;
+            if (tokens_[i].text == close) {
+                ++depth;
+            } else if (tokens_[i].text == open) {
+                if (depth == 0) return i;
+                --depth;
+            }
+        }
+        return std::nullopt;
+    }
+
+    // Reports that `what` was expected at the current token. When that token
+    // starts a later line (or is the end of the file), the error points just
+    // after the previous token, where the missing text belongs. A missing
+    // closing delimiter is labelled at the delimiter it would close.
+    [[noreturn]] void expected(const std::string& what, std::string_view token = {}) const {
+        const auto& next = current();
+        const bool later_line = cursor_ > 0 &&
+            (next.kind == TokenKind::End || next.span.line > tokens_[cursor_ - 1].span.line);
+        auto error = Diagnostic(later_line ? after_previous() : next.span, "expected " + what);
+        const auto open = token.empty() ? std::nullopt : unclosed(token);
+        error.with_code(open ? "E0203" : "E0202");
+        if (later_line) {
+            error.label("expected " + what + " here");
+            error.label(next.span, found_text(next));
+        } else {
+            error.label(next.kind == TokenKind::End ? "expected " + what + " before the end of the file"
+                                                    : "expected " + what + ", " + found_text(next));
+        }
+        if (open) error.label(tokens_[*open].span, "unclosed '" + tokens_[*open].text + "' opened here");
+        throw error;
+    }
+
+    // Records `error` and skips past the statement or member that began at
+    // token `start`: to its terminating ';' at the same depth, to a closing
+    // delimiter of the enclosing construct (which is left for the caller), or
+    // to a keyword that begins the next statement. A speculative parse
+    // never reaches here: it catches errors itself.
+    void recover(const Diagnostic& error, std::size_t start) {
+        if (!(skipped_to_end_ && error.span.offset >= tokens_.back().span.offset)) errors_.push_back(error);
+        if (errors_.size() >= error_limit()) {
+            auto first = errors_.front();
+            for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
+            throw first;
+        }
+        std::size_t depth = 0;
+        for (auto i = start; i < cursor_; ++i) {
+            if (tokens_[i].kind != TokenKind::Symbol) continue;
+            const auto& text = tokens_[i].text;
+            if (text == "(" || text == "[" || text == "{") ++depth;
+            else if ((text == ")" || text == "]" || text == "}") && depth > 0) --depth;
+        }
+        // A keyword that begins a statement cannot continue this one, and a
+        // ';' outside a for header ends it, even inside an unclosed
+        // delimiter: stop there rather than skip the statements that follow.
+        if (cursor_ > start && current().kind == TokenKind::Keyword && statement_keyword(current().text)) return;
+        if (cursor_ > start && at(";")) {
+            bool header = false;
+            for (auto i = start; i < cursor_ && !header; ++i)
+                header = tokens_[i].kind == TokenKind::Keyword && tokens_[i].text == "for";
+            if (!header) {
+                advance();
+                return;
+            }
+        }
+        if (cursor_ == start && !at_end()) {
+            const auto& text = current().text;
+            if (current().kind == TokenKind::Symbol && (text == "(" || text == "[" || text == "{")) ++depth;
+            advance();
+        }
+        while (!at_end()) {
+            const auto& token = current();
+            if (token.kind == TokenKind::Symbol) {
+                const auto& text = token.text;
+                if (text == "(" || text == "[" || text == "{") {
+                    ++depth;
+                } else if (text == ")" || text == "]" || text == "}") {
+                    if (depth == 0) return;
+                    --depth;
+                } else if (text == ";" && depth == 0) {
+                    advance();
+                    return;
+                }
+            } else if (depth == 0 && cursor_ > start && token.kind == TokenKind::Keyword && statement_keyword(token.text)) {
+                return;
+            }
+            advance();
+        }
+        skipped_to_end_ = true;
+    }
+
+    static bool statement_keyword(std::string_view text) {
+        return text == "let" || text == "const" || text == "export" || text == "static" || text == "return" ||
+               text == "if" || text == "while" || text == "for" || text == "do" || text == "break" ||
+               text == "continue" || text == "destroy";
+    }
+
+    // A missing ';' is reported where it belongs, immediately after the
+    // previous token, with an insertion that `neura check --fix` applies.
+    [[noreturn]] void missing_semicolon() const {
+        const auto after = after_previous();
         const auto& next = current();
         auto error = Diagnostic(after, "expected ';'").with_code("E0201").label("expected ';' here");
         if (next.span.offset != after.offset)
@@ -80,7 +211,11 @@ private:
 
     const Token& identifier() {
         if (current().kind != TokenKind::Identifier) {
-            throw Diagnostic(current().span, "expected an identifier").with_code("E0202");
+            if (current().kind == TokenKind::Keyword) {
+                throw Diagnostic(current().span, "expected an identifier").with_code("E0202")
+                    .label("'" + current().text + "' is a keyword");
+            }
+            expected("an identifier");
         }
         return advance();
     }
@@ -448,7 +583,14 @@ private:
                 }
                 expect("(");
                 while (!at_end() && !at(")")) {
-                    auto member = declaration(result.kind);
+                    const auto member_start = cursor_;
+                    Declaration member;
+                    try {
+                        member = declaration(result.kind);
+                    } catch (const Diagnostic& error) {
+                        recover(error, member_start);
+                        continue;
+                    }
                     if (member.cast_target) {
                         auto more_casts = std::exchange(member.overloads, {});
                         result.members.push_back(std::move(member));
@@ -488,7 +630,12 @@ private:
         ++block_depth_;
         std::vector<Statement> result;
         while (!at_end() && !at("}")) {
-            result.push_back(statement());
+            const auto start = cursor_;
+            try {
+                result.push_back(statement());
+            } catch (const Diagnostic& error) {
+                recover(error, start);
+            }
         }
         expect("}");
         --block_depth_;
