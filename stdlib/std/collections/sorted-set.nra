@@ -4,6 +4,7 @@ let.promote _ = import:Std.Collections.Set;
 /// @brief A set ordered by its comparator (TreeSet). Positions are by the
 /// comparator, never by equals.
 /// @see [Std.Collections.SortedSet](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-SortedSet)
+#Since("0.1.0")
 export let SortedSet = module (
     /// @brief Read-only element navigation and range queries in comparator order.
     export let SortedSet = interface<T>:Set<T> (
@@ -17,12 +18,16 @@ export let SortedSet = module (
         /// @brief Copies the elements into a new list in descending order.
         let descending = func -> T[list];
         /// @brief Returns the greatest element at most `value` as `Some`, or `None` when absent.
+        #NoDiscard
         let floor = func(value: T) -> optional.Optional<T>;
         /// @brief Returns the least element at least `value` as `Some`, or `None` when absent.
+        #NoDiscard
         let ceiling = func(value: T) -> optional.Optional<T>;
         /// @brief Returns the greatest element strictly below `value` as `Some`, or `None` when absent.
+        #NoDiscard
         let lower = func(value: T) -> optional.Optional<T>;
         /// @brief Returns the least element strictly above `value` as `Some`, or `None` when absent.
+        #NoDiscard
         let higher = func(value: T) -> optional.Optional<T>;
     );
 );

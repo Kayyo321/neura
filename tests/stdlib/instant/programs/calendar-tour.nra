@@ -21,7 +21,7 @@ export let CalendarTour = module:program.Entry (
         clock.advance(duration.of_minutes(150));
         let now = result.expect<instant.Instant>(clock.now(), "now");
         let local = now.to_local(zone_offset.of_hours_minutes(9, 0));
-        console.print_line(local.to_string() + " " + local.date().day_of_week().to_string());
+        console.print_line(local.to_string() + " " + local.date.day_of_week().to_string());
         console.print_line(result.expect<duration.Duration>(watch.elapsed(), "elapsed").to_string());
         let date = local_date.of(2024, 1, 31);
         for (let i = 1; i <= 3; i = i + 1) {

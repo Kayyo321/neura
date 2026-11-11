@@ -504,8 +504,8 @@ let JsonTests = module (
 
     let check_decimal = func(text: string, unscaled: string, scale: int, plain: string) -> void {
         let value = json.number_to_big_decimal(text);
-        test.assert_equal_string(unscaled, value.unscaled().to_string());
-        test.assert_equal_int32(scale, value.scale());
+        test.assert_equal_string(unscaled, value.unscaled.to_string());
+        test.assert_equal_int32(scale, value.scale);
         test.assert_equal_string(plain, value.to_string());
     };
 

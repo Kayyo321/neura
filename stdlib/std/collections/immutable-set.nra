@@ -5,14 +5,16 @@ let.promote _ = import:Std.Collections.Set;
 /// @brief Sets whose membership is fixed at construction. Elements use `equals` and
 /// `hash_code`. Iteration follows the order of first occurrence.
 /// @see [Std.Collections.ImmutableSet](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-ImmutableSet)
+#Since("0.1.0")
 export let ImmutableSet = module (
     /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
 
     /// @brief A read-only hash set with elements in first-occurrence order.
+    #[Final, NoDiscard]
     export let ImmutableSet = class<T> implements Set<T> (
         /// @brief The private hash set storing distinct elements in first-occurrence order.
-        let elements: hash_set.HashSet<T>;
+        last elements: hash_set.HashSet<T>;
 
         /// @brief Copies the supplied elements into a private hash set, dropping later duplicates.
         export let init = func(seal: Seal, values: T[list]) {
@@ -46,12 +48,12 @@ export let ImmutableSet = module (
             if (!(other is ImmutableSet<T>)) {
                 return false;
             }
-            let that = other as ImmutableSet<T>;
+            last that = other as ImmutableSet<T>;
             if (that.size() != elements.size()) {
                 return false;
             }
-            let items = that.to_list();
-            let count = items.length;
+            last items = that.to_list();
+            last count = items.length;
             let i = 0;
             while (i < count) {
                 if (!elements.contains(items[i])) {
@@ -71,5 +73,5 @@ export let ImmutableSet = module (
     );
 
     /// @brief Creates a set from a shallow copy of `items`, dropping later duplicates.
-    export let of = func<T>(items: T[list]) -> ImmutableSet<T> => new ImmutableSet<T>(Seal.Token, items);
+    export let of = func<T>(items: T[list]) -> ImmutableSet<T> => new(Seal.Token, items);
 );

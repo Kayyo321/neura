@@ -10,11 +10,13 @@ let uint64s = import:Std.Core.UInt64;
 /// Every wrapping operation follows the uint64 recipes of section 7.2. The same seed gives the same results
 /// from every member on every runtime. Not suitable for secrets.
 /// @see [Std.Random.Random](https://github.com/Kayyo321/neura/wiki/Stdlib-Random-Random)
+#Since("0.1.0")
 export let Random = module (
     /// @brief Restricts construction to factories that initialize the generator state.
     let Seal = enum (Token);
 
     /// @brief A deterministic xoshiro256** generator with an optional cached normal sample.
+    #Final
     export let Random = class (
         /// @brief The first word of the xoshiro256** state.
         let s0: uint64;
@@ -39,8 +41,8 @@ export let Random = module (
 
         /// @brief One step: rotate_left(s1 * 5, 7) * 9, then the state transition.
         export let next_uint64 = func -> uint64 {
-            let output = times9(rotate(times5(s1), 7));
-            let t = s1 << 17;
+            last output = times9(rotate(times5(s1), 7));
+            last t = s1 << 17;
             s2 ^= s0;
             s3 ^= s1;
             s1 ^= s2;
@@ -73,7 +75,7 @@ export let Random = module (
             if (low >= high) {
                 trap_with_message("invalid argument: low must be below high");
             }
-            let span = (high as int64) - (low as int64);
+            last span = (high as int64) - (low as int64);
             return ((low as int64) + (below(span as uint32) as int64)) as int;
         };
 
@@ -97,7 +99,7 @@ export let Random = module (
                 v = next_float64() * 2.0 - 1.0;
                 s = u * u + v * v;
             } while (!(s < 1.0 && s != 0.0));
-            let factor = maths.sqrt(-2.0 * maths.log(s) / s);
+            last factor = maths.sqrt(-2.0 * maths.log(s) / s);
             spare = v * factor;
             has_spare = true;
             return u * factor;
@@ -111,7 +113,7 @@ export let Random = module (
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
             }
-            let bytes: uint8[list] = [];
+            last bytes: uint8[list] = [];
             while (bytes.length < count) {
                 let word = next_uint64();
                 let k = 0;
@@ -128,8 +130,8 @@ export let Random = module (
         export let shuffle = func<T>(items: T[list]) {
             let i = items.length - 1;
             while (i >= 1) {
-                let j = next_int_below(i + 1);
-                let held = items[i];
+                last j = next_int_below(i + 1);
+                last held = items[i];
                 items[i] = items[j];
                 items[j] = held;
                 i--;
@@ -153,7 +155,7 @@ export let Random = module (
             mask |= (mask >> 8);
             mask |= (mask >> 16);
             do {
-                let candidate = next_uint32() & mask;
+                last candidate = next_uint32() & mask;
                 if (candidate < bound) {
                     return candidate;
                 }
@@ -165,14 +167,14 @@ export let Random = module (
     export let seeded = func(seed: uint64) -> Random {
         let state = seed;
         state = uint64s.wrapping_add(state, 11400714819323198485);
-        let a = mix(state);
+        last a = mix(state);
         state = uint64s.wrapping_add(state, 11400714819323198485);
-        let b = mix(state);
+        last b = mix(state);
         state = uint64s.wrapping_add(state, 11400714819323198485);
-        let c = mix(state);
+        last c = mix(state);
         state = uint64s.wrapping_add(state, 11400714819323198485);
-        let d = mix(state);
-        return new Random(Seal.Token, a, b, c, d);
+        last d = mix(state);
+        return new(Seal.Token, a, b, c, d);
     };
 
     /// @brief Carries the provider's entropy bytes or error code.
@@ -182,6 +184,7 @@ export let Random = module (
 
     /// @brief Seeds with 8 bytes from neura.entropy.fill, read as a little-endian uint64. Needs the entropy
     /// capability; a denied or failed request is an Io error (CapabilityDenied when denied).
+    #NoDiscard
     export let from_entropy = func -> Result<Random> => match (fill_entropy(8)) {
         FillOutcome.Ok(bytes) => seeded_from(bytes),
         FillOutcome.Error(code) => Result<Random>.Err(host_error.io(code, "entropy request failed", "")),
@@ -190,7 +193,7 @@ export let Random = module (
     /// @brief Interprets eight entropy bytes as a little-endian seed.
     let seeded_from = func(bytes: uint8[list]) -> Result<Random> {
         if (bytes.length != 8) {
-            let wrong = Error.Io {
+            last wrong = Error.Io {
                 kind: IoErrorKind.InvalidData, message: "entropy source returned " + bytes.length.to_string() + " bytes",
                 path: ""
             };

@@ -78,14 +78,14 @@ let ClockTests = module (
     export let test_stopwatch = func() -> void {
         let fixed = fixed_clock.of(instant.Epoch);
         let watch = stopwatch.create(fixed);
-        test.assert(!watch.is_running());
+        test.assert(!watch.is_running);
         test.assert_equal_int64(0, elapsed_of(watch));
         test.assert_ok<unit.Unit>(watch.start());
-        test.assert(watch.is_running());
+        test.assert(watch.is_running);
         fixed.advance(duration.of_millis(300));
         test.assert_equal_int64(300000000, elapsed_of(watch));
         test.assert_ok<unit.Unit>(watch.stop());
-        test.assert(!watch.is_running());
+        test.assert(!watch.is_running);
         fixed.advance(duration.of_seconds(10));
         test.assert_equal_int64(300000000, elapsed_of(watch));
         // A second run adds to the first.
@@ -98,15 +98,15 @@ let ClockTests = module (
         fixed.set(instant.of_epoch_seconds(-100, 0));
         test.assert_equal_int64(500000000, elapsed_of(watch));
         watch.reset();
-        test.assert(!watch.is_running());
+        test.assert(!watch.is_running);
         test.assert_equal_int64(0, elapsed_of(watch));
         test.assert_ok<unit.Unit>(watch.start());
         fixed.advance(duration.of_nanos(7));
         watch.reset();
-        test.assert(!watch.is_running());
+        test.assert(!watch.is_running);
         test.assert_equal_int64(0, elapsed_of(watch));
         test.assert_ok<unit.Unit>(watch.start());
-        test.assert(watch.is_running());
+        test.assert(watch.is_running);
     };
 
     export let test_stopwatch_clock_failures = func() -> void {
@@ -114,7 +114,7 @@ let ClockTests = module (
         let watch = stopwatch.create(flaky);
         let failed_start = test.assert_err<unit.Unit>(watch.start());
         test.assert_equal_string("CapabilityDenied: clock denied", error.message(failed_start));
-        test.assert(!watch.is_running());
+        test.assert(!watch.is_running);
         // A stopped stopwatch does not read the clock.
         test.assert_equal_int64(0, elapsed_of(watch));
         flaky.working = true;
@@ -123,7 +123,7 @@ let ClockTests = module (
         flaky.working = false;
         test.assert_err<duration.Duration>(watch.elapsed());
         test.assert_err<unit.Unit>(watch.stop());
-        test.assert(watch.is_running());
+        test.assert(watch.is_running);
         flaky.working = true;
         flaky.reading = 1500;
         test.assert_equal_int64(500, elapsed_of(watch));

@@ -120,9 +120,9 @@ let FsTests = module (
         test.assert(!(file_data === unknown));
         test.assert_equal_string("Other(0, nil)", unknown.to_string());
         // Modified after 2020-01-01 and before 2200-01-01.
-        test.assert(file_data.modified.epoch_seconds() > 1577836800);
-        test.assert(file_data.modified.epoch_seconds() < 7258118400);
-        test.assert(file_data.modified.nanos() >= 0 && file_data.modified.nanos() < 1000000000);
+        test.assert(file_data.modified.epoch_seconds > 1577836800);
+        test.assert(file_data.modified.epoch_seconds < 7258118400);
+        test.assert(file_data.modified.nanos >= 0 && file_data.modified.nanos < 1000000000);
         let dir_data = test.assert_ok<fs.FileMetadata>(fs.metadata(dir));
         test.assert(dir_data.kind == fs.FileKind.Directory);
         let failure = test.assert_err<fs.FileMetadata>(fs.metadata(dir.join("none")));

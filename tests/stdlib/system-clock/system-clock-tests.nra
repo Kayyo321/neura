@@ -12,9 +12,9 @@ let SystemClockTests = module (
     export let test_now_reads_the_wall_clock = func() -> void {
         let now = test.assert_ok<instant.Instant>(system_clock.create().now());
         // After 2020-01-01 and before 2200-01-01.
-        test.assert(now.epoch_seconds() > 1577836800);
-        test.assert(now.epoch_seconds() < 7258118400);
-        test.assert(now.nanos() >= 0 && now.nanos() < 1000000000);
+        test.assert(now.epoch_seconds > 1577836800);
+        test.assert(now.epoch_seconds < 7258118400);
+        test.assert(now.nanos >= 0 && now.nanos < 1000000000);
     };
 
     export let test_monotonic_covers_a_sleep = func() -> void {

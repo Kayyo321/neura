@@ -48,18 +48,18 @@ let BigDecimalTests = module (
 
     export let test_factories_and_accessors = func() -> void {
         check("-42", decimals.of_int64(-42));
-        test.assert_equal_int32(0, decimals.of_int64(7).scale());
+        test.assert_equal_int32(0, decimals.of_int64(7).scale);
         let value = decimals.of_big_integer(big.of_int64(12345), 3);
         check("12.345", value);
-        test.assert_equal_int32(3, value.scale());
-        test.assert_equal_string("12345", value.unscaled().to_string());
+        test.assert_equal_int32(3, value.scale);
+        test.assert_equal_string("12345", value.unscaled.to_string());
         check("123450000", decimals.of_big_integer(big.of_int64(12345), -4));
         check("0.000", decimals.of_big_integer(big.Zero, 3));
         check("0.5", decimals.of_float64(0.5));
         check("2", decimals.of_float64(2.0));
         check("0", decimals.of_float64(-0.0));
         check("-0.125", decimals.of_float64(-0.125));
-        test.assert_equal_int32(1074, decimals.of_float64(5.0e-324).scale());
+        test.assert_equal_int32(1074, decimals.of_float64(5.0e-324).scale);
     };
 
     export let test_parse_and_text = func() -> void {
@@ -75,8 +75,8 @@ let BigDecimalTests = module (
         check("0", of("0e5"));
         check("0", of("0E+1"));
         check("0", of("-0e3"));
-        test.assert_equal_int32(-3, of("1E+3").scale());
-        test.assert_equal_int32(2, of("0.00").scale());
+        test.assert_equal_int32(-3, of("1E+3").scale);
+        test.assert_equal_int32(2, of("0.00").scale);
         check("12345678901234567890.123456789", of("12345678901234567890.123456789"));
     };
 
@@ -158,16 +158,16 @@ let BigDecimalTests = module (
         check("0", of("1E-1000").set_scale(0, decimals.RoundingMode.HalfUp));
         check("1", of("1E-1000").set_scale(0, decimals.RoundingMode.Ceiling));
         check("1000", of("999.9").round(3, decimals.RoundingMode.HalfUp));
-        test.assert_equal_int32(-1, of("999.9").round(3, decimals.RoundingMode.HalfUp).scale());
+        test.assert_equal_int32(-1, of("999.9").round(3, decimals.RoundingMode.HalfUp).scale);
         check("123.4567", of("123.4567").round(0, decimals.RoundingMode.Up));
         check("123.4567", of("123.4567").round(7, decimals.RoundingMode.Up));
         check("123.46", of("123.4567").round(5, decimals.RoundingMode.HalfEven));
         check("0.0012", of("0.0012345").round(2, decimals.RoundingMode.HalfDown));
         check("12.345", of("12.3450000").strip_trailing_zeros());
         check("1200", of("1200.00").strip_trailing_zeros());
-        test.assert_equal_int32(-2, of("1200.00").strip_trailing_zeros().scale());
+        test.assert_equal_int32(-2, of("1200.00").strip_trailing_zeros().scale);
         check("0", of("0.000").strip_trailing_zeros());
-        test.assert_equal_int32(0, of("0.000").strip_trailing_zeros().scale());
+        test.assert_equal_int32(0, of("0.000").strip_trailing_zeros().scale);
     };
 
     export let test_compare_equals_hash = func() -> void {

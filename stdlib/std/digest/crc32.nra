@@ -7,11 +7,13 @@ let kernels = import:Std.Internal.Kernels.Digest;
 /// crc32_update compute it (docs/runtime/Kernels.md). The Neura implementation they replaced is the oracle of
 /// tests/stdlib/crc32/kernel-oracle.nra.
 /// @see [Std.Digest.Crc32](https://github.com/Kayyo321/neura/wiki/Stdlib-Digest-Crc32)
+#Since("0.1.0")
 export let Crc32 = module (
     /// @brief The initial register value and final XOR mask.
     const AllOnes: uint32 = 4294967295;
 
     /// @brief A running checksum. A new one, or one after reset, has the value 0, the checksum of no bytes.
+    #Final
     export let Crc32 = class (
         /// @brief The running reflected register before the final XOR.
         let register: uint32 = 4294967295;
@@ -36,8 +38,9 @@ export let Crc32 = module (
     );
 
     /// @brief A new checksum with no bytes added.
-    export let create = func -> Crc32 => new Crc32();
+    export let create = func -> Crc32 => new;
 
     /// @brief The checksum of the bytes.
+    #NoDiscard
     export let of = func(bytes: uint8[list]) -> uint32 => kernels.crc32(bytes);
 );

@@ -40,7 +40,7 @@ export let Calendar = module (
     /// @brief Tests the Gregorian leap-year rule, including century exceptions.
     export let is_leap = func(year: int64) -> bool {
         // The rule repeats every 400 years, and 4 and 100 divide 400.
-        let in_cycle = floor_mod(year, 400) as int;
+        last in_cycle = floor_mod(year, 400) as int;
         return (in_cycle & 3) == 0 && (in_cycle % 100 != 0 || in_cycle == 0);
     };
 
@@ -69,24 +69,24 @@ export let Calendar = module (
             shifted = year - 1;
             march_month = month + 9;
         }
-        let cycle = floor_div(shifted, 400);
+        last cycle = floor_div(shifted, 400);
         // Within the cycle: year 0 through 399, day 0 through 146,096.
-        let year_of_cycle = (shifted - cycle * 400) as int;
-        let day_of_year = (153 * march_month + 2) / 5 + day - 1;
-        let day_of_cycle = year_of_cycle * 365 + (year_of_cycle >> 2) - year_of_cycle / 100 + day_of_year;
+        last year_of_cycle = (shifted - cycle * 400) as int;
+        last day_of_year = (153 * march_month + 2) / 5 + day - 1;
+        last day_of_cycle = year_of_cycle * 365 + (year_of_cycle >> 2) - year_of_cycle / 100 + day_of_year;
         return cycle * 146097 + (day_of_cycle as int64) - 719468;
     };
 
     /// @brief The inverse of epoch_day_of: [year, month, day].
     export let civil_of = func(epoch_day: int64) -> [int64, int, int] {
-        let shifted_day = epoch_day + 719468;
-        let cycle = floor_div(shifted_day, 146097);
+        last shifted_day = epoch_day + 719468;
+        last cycle = floor_div(shifted_day, 146097);
         // Within the cycle: day 0 through 146,096, year 0 through 399.
-        let day_of_cycle = (shifted_day - cycle * 146097) as int;
-        let year_of_cycle = (day_of_cycle - day_of_cycle / 1460 + day_of_cycle / 36524 - day_of_cycle / 146096) / 365;
-        let day_of_year = day_of_cycle - (365 * year_of_cycle + (year_of_cycle >> 2) - year_of_cycle / 100);
-        let march_month = (5 * day_of_year + 2) / 153;
-        let day = day_of_year - (153 * march_month + 2) / 5 + 1;
+        last day_of_cycle = (shifted_day - cycle * 146097) as int;
+        last year_of_cycle = (day_of_cycle - day_of_cycle / 1460 + day_of_cycle / 36524 - day_of_cycle / 146096) / 365;
+        last day_of_year = day_of_cycle - (365 * year_of_cycle + (year_of_cycle >> 2) - year_of_cycle / 100);
+        last march_month = (5 * day_of_year + 2) / 153;
+        last day = day_of_year - (153 * march_month + 2) / 5 + 1;
         let month = march_month + 3;
         if (march_month >= 10) {
             month = march_month - 9;
@@ -141,9 +141,9 @@ export let Calendar = module (
 
     /// @brief HH:MM:SS and the fraction of fraction_text.
     export let time_text = func(nano_of_day: int64) -> string {
-        let whole = floor_div(nano_of_day, NanosPerSecond);
-        let nanos = (nano_of_day - whole * NanosPerSecond) as int;
-        let seconds = whole as int;
+        last whole = floor_div(nano_of_day, NanosPerSecond);
+        last nanos = (nano_of_day - whole * NanosPerSecond) as int;
+        last seconds = whole as int;
         return padded((seconds / 3600) as int64, 2) + ":" + padded((seconds / 60 % 60) as int64, 2) + ":" +
             padded((seconds % 60) as int64, 2) + fraction_text(nanos);
     };
@@ -168,7 +168,7 @@ export let Calendar = module (
     /// at the end. Offsets are byte offsets (Stdlib.md section 6.3).
     export let Scanner = class (
         /// @brief The UTF-8 text being parsed.
-        let source: string;
+        last source: string;
         /// @brief The byte offset of the next input byte.
         let cursor: int = 0;
         /// @brief Whether a failure has been recorded.
@@ -207,7 +207,7 @@ export let Calendar = module (
 
         /// @brief Tests whether the next byte is an ASCII decimal digit.
         export let peek_digit = func -> bool {
-            let b = peek();
+            last b = peek();
             return b >= 48 && b <= 57;
         };
 
@@ -319,7 +319,7 @@ export let Calendar = module (
 
     /// @brief A year: exactly four digits, or a sign and at least four digits; -999999 through 999999.
     export let read_year = func(scan: Scanner) -> int64 {
-        let start = scan.position();
+        last start = scan.position();
         let negative = false;
         let signed = false;
         if (scan.accept(43)) {
@@ -351,8 +351,8 @@ export let Calendar = module (
 
     /// @brief Two digits from `low` through `high`; OutOfRange at the field.
     export let read_field = func(scan: Scanner, low: int64, high: int64, name: string) -> int {
-        let start = scan.position();
-        let value = scan.fixed_digits(2);
+        last start = scan.position();
+        last value = scan.fixed_digits(2);
         if (scan.ok() && (value < low || value > high)) {
             scan.out_of_range(start, name + " out of range");
         }
@@ -361,12 +361,12 @@ export let Calendar = module (
 
     /// @brief YYYY-MM-DD as [year, month, day].
     export let read_date = func(scan: Scanner) -> [int64, int, int] {
-        let year = read_year(scan);
+        last year = read_year(scan);
         scan.expect(45, "'-'");
-        let month = read_field(scan, 1, 12, "month");
+        last month = read_field(scan, 1, 12, "month");
         scan.expect(45, "'-'");
-        let start = scan.position();
-        let day = scan.fixed_digits(2) as int;
+        last start = scan.position();
+        last day = scan.fixed_digits(2) as int;
         if (scan.ok() && (day < 1 || day > month_length(year, month))) {
             scan.out_of_range(start, "day out of range");
         }
@@ -375,11 +375,11 @@ export let Calendar = module (
 
     /// @brief HH:MM:SS with an optional fraction of one through nine digits, as nanoseconds of the day.
     export let read_time = func(scan: Scanner) -> int64 {
-        let hour = read_field(scan, 0, 23, "hour");
+        last hour = read_field(scan, 0, 23, "hour");
         scan.expect(58, "':'");
-        let minute = read_field(scan, 0, 59, "minute");
+        last minute = read_field(scan, 0, 59, "minute");
         scan.expect(58, "':'");
-        let second = read_field(scan, 0, 59, "second");
+        last second = read_field(scan, 0, 59, "second");
         let nanos = 0;
         if (scan.accept(46)) {
             nanos = scan.fraction();
@@ -395,7 +395,7 @@ export let Calendar = module (
         if (scan.accept(90)) {
             return 0;
         }
-        let start = scan.position();
+        last start = scan.position();
         let negative = false;
         if (scan.accept(45)) {
             negative = true;
@@ -403,13 +403,13 @@ export let Calendar = module (
             scan.unexpected("'Z', '+', or '-'");
             return 0;
         }
-        let hours = read_field(scan, 0, 18, "offset hour");
+        last hours = read_field(scan, 0, 18, "offset hour");
         scan.expect(58, "':'");
-        let minutes = read_field(scan, 0, 59, "offset minute");
+        last minutes = read_field(scan, 0, 59, "offset minute");
         if (!scan.ok()) {
             return 0;
         }
-        let total = hours * 3600 + minutes * 60;
+        last total = hours * 3600 + minutes * 60;
         if (total > MaxOffsetSeconds) {
             scan.out_of_range(start, "zone offset out of range");
             return 0;

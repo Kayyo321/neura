@@ -3,6 +3,7 @@ let.promote _ = import:Std.Collections.Set;
 
 /// @brief Interface for mutable collections that reject duplicate elements.
 /// @see [Std.Collections.MutableSet](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-MutableSet)
+#Since("0.1.0")
 export let MutableSet = module (
     /// @brief A collection of distinct elements that supports insertion and removal.
     export let MutableSet = interface<T>:Set<T>, MutableCollection<T> ();

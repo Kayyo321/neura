@@ -3,6 +3,7 @@ let optional = import:Std.Core.Optional;
 
 /// @brief A read-only sequence with positions (ArrayList, LinkedList, ImmutableList).
 /// @see [Std.Collections.List](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-List)
+#Since("0.1.0")
 export let List = module (
     /// @brief Read-only access to elements by zero-based position.
     export let List = interface<T>:Collection<T> (
@@ -13,8 +14,10 @@ export let List = module (
         /// @brief Returns the last element. Traps with `no such element` when empty.
         let last = func -> T;
         /// @brief Returns the first element as `Some`, or `None` when empty.
+        #NoDiscard
         let first_or_none = func -> optional.Optional<T>;
         /// @brief Returns the last element as `Some`, or `None` when empty.
+        #NoDiscard
         let last_or_none = func -> optional.Optional<T>;
         /// @brief Returns the lowest index where `value.equals(element)` is true, or -1 when absent.
         let index_of = func(value: T) -> int;

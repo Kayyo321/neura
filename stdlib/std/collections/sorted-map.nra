@@ -4,6 +4,7 @@ let optional = import:Std.Core.Optional;
 /// @brief Read-only access to a map in comparator order. Navigation can return the
 /// qualifying key or its full entry.
 /// @see [Std.Collections.SortedMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-SortedMap)
+#Since("0.1.0")
 export let SortedMap = module (
     /// @brief Read-only key navigation and range queries in comparator order.
     export let SortedMap = interface<K, V>:Map<K, V> (
@@ -17,20 +18,28 @@ export let SortedMap = module (
         /// @brief Copies entries into a new list in descending key order.
         let descending = func -> [K, V][list];
         /// @brief Returns the greatest key at most `key` as `Some`, or `None` when absent.
+        #NoDiscard
         let floor = func(key: K) -> optional.Optional<K>;
         /// @brief Returns the least key at least `key` as `Some`, or `None` when absent.
+        #NoDiscard
         let ceiling = func(key: K) -> optional.Optional<K>;
         /// @brief Returns the greatest key strictly below `key` as `Some`, or `None` when absent.
+        #NoDiscard
         let lower = func(key: K) -> optional.Optional<K>;
         /// @brief Returns the least key strictly above `key` as `Some`, or `None` when absent.
+        #NoDiscard
         let higher = func(key: K) -> optional.Optional<K>;
         /// @brief Returns the entry with the greatest key at most `key`, or `None` when absent.
+        #NoDiscard
         let floor_entry = func(key: K) -> optional.Optional<[K, V]>;
         /// @brief Returns the entry with the least key at least `key`, or `None` when absent.
+        #NoDiscard
         let ceiling_entry = func(key: K) -> optional.Optional<[K, V]>;
         /// @brief Returns the entry with the greatest key strictly below `key`, or `None` when absent.
+        #NoDiscard
         let lower_entry = func(key: K) -> optional.Optional<[K, V]>;
         /// @brief Returns the entry with the least key strictly above `key`, or `None` when absent.
+        #NoDiscard
         let higher_entry = func(key: K) -> optional.Optional<[K, V]>;
     );
 );

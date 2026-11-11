@@ -1,5 +1,6 @@
 /// @brief Interfaces for forward traversal. Mutable collection iterators can detect structural changes before advancing.
 /// @see [Std.Collections.Iterator](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Iterator)
+#Since("0.1.0")
 export let Iterator = module (
     /// @brief A single forward traversal over elements of type `T`.
     export let Iterator = interface<T> (

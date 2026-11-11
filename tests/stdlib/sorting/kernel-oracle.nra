@@ -1,0 +1,167 @@
+let float64s = import:Std.Core.Float64;
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let random = import:Std.Random.Random;
+let sorting = import:Std.Collections.Sorting;
+let test = import:Std.Test;
+let uint32s = import:Std.Core.UInt32;
+let uint64s = import:Std.Core.UInt64;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles") of
+// Sorting.sort_ascending, which runs the neura.sort.* kernels. Its oracle is
+// Sorting.sort, the stable merge sort in Neura, with the element type's
+// compare (Float64.total_compare for float64): the two must leave the same
+// list, element for element and floats by bit pattern, and neither may change
+// the list's version. The corpus covers the empty list, one element, the
+// 16-element block boundary, runs that are already sorted or reversed, many
+// duplicates, and the extremes of each type; seeded lists of random lengths
+// follow.
+let SortingKernelOracle = module (
+    // The lengths around the insertion-sort block and the first merges.
+    let lengths: int[] = [0, 1, 2, 15, 16, 17, 31, 32, 33, 64, 100, 257];
+
+    let check_int64 = func(items: int64[list]) {
+        let expected: int64[list] = [];
+        for (let item in items) {
+            expected.append(item);
+        }
+        sorting.sort<int64>(expected, int64s.compare);
+        let version = items.version;
+        sorting.sort_ascending(items);
+        test.assert_equal_uint64(version, items.version);
+        test.assert_equal_int32(expected.length, items.length);
+        for (let i = 0; i < items.length; i++) {
+            test.assert_equal_int64(expected[i], items[i]);
+        }
+    };
+
+    let check_uint64 = func(items: uint64[list]) {
+        let expected: uint64[list] = [];
+        for (let item in items) {
+            expected.append(item);
+        }
+        sorting.sort<uint64>(expected, uint64s.compare);
+        let version = items.version;
+        sorting.sort_ascending(items);
+        test.assert_equal_uint64(version, items.version);
+        test.assert_equal_int32(expected.length, items.length);
+        for (let i = 0; i < items.length; i++) {
+            test.assert_equal_uint64(expected[i], items[i]);
+        }
+    };
+
+    let check_float64 = func(items: float64[list]) {
+        let expected: float64[list] = [];
+        for (let item in items) {
+            expected.append(item);
+        }
+        sorting.sort<float64>(expected, float64s.total_compare);
+        let version = items.version;
+        sorting.sort_ascending(items);
+        test.assert_equal_uint64(version, items.version);
+        test.assert_equal_int32(expected.length, items.length);
+        for (let i = 0; i < items.length; i++) {
+            test.assert_equal_uint64(expected[i].to_bits(), items[i].to_bits());
+        }
+    };
+
+    let check_int32 = func(items: int32[list]) {
+        let expected: int32[list] = [];
+        for (let item in items) {
+            expected.append(item);
+        }
+        sorting.sort<int32>(expected, int32s.compare);
+        let version = items.version;
+        sorting.sort_ascending(items);
+        test.assert_equal_uint64(version, items.version);
+        test.assert_equal_int32(expected.length, items.length);
+        for (let i = 0; i < items.length; i++) {
+            test.assert_equal_int32(expected[i], items[i]);
+        }
+    };
+
+    let check_uint32 = func(items: uint32[list]) {
+        let expected: uint32[list] = [];
+        for (let item in items) {
+            expected.append(item);
+        }
+        sorting.sort<uint32>(expected, uint32s.compare);
+        let version = items.version;
+        sorting.sort_ascending(items);
+        test.assert_equal_uint64(version, items.version);
+        test.assert_equal_int32(expected.length, items.length);
+        for (let i = 0; i < items.length; i++) {
+            test.assert_equal_uint64(expected[i] as uint64, items[i] as uint64);
+        }
+    };
+
+    // Float64 values that the total order must place: signed zeros, the
+    // infinities, NaNs of both signs and several payloads (equal to each
+    // other, so they keep their order), subnormals, and the finite extremes.
+    let float_edges: uint64[] = [
+        0, 9223372036854775808, 9218868437227405312, 18442240474082181120, 9221120237041090560,
+        18444492273895866368, 9218868437227405313, 9221120237041090567, 1, 9223372036854775809,
+        4503599627370495, 9218868437227405311, 18442240474082181119, 4607182418800017408,
+        13830554455654793216, 0, 9223372036854775808, 9221120237041090560
+    ];
+
+    export let test_edge_corpus = func {
+        for (let length in lengths) {
+            let [ascending, descending]: [int64[list], int64[list]] = [], [];
+            let [repeated, unsigned]: [int64[list], uint64[list]] = [], [];
+            for (let i = 0; i < length; i++) {
+                ascending.append(i as int64);
+                descending.append((length - i) as int64);
+                repeated.append((i % 3) as int64);
+                unsigned.append(18446744073709551615 - (i as uint64));
+            }
+            check_int64(ascending);
+            check_int64(descending);
+            check_int64(repeated);
+            check_uint64(unsigned);
+        }
+        check_int64([9223372036854775807, -9223372036854775808, 0, -1, 1, -9223372036854775808]);
+        check_uint64([18446744073709551615, 0, 9223372036854775808, 9223372036854775807, 1]);
+        check_int32([2147483647, -2147483648, 0, -1, 1, 2147483647]);
+        check_uint32([4294967295, 0, 2147483648, 2147483647, 1]);
+        let floats: float64[list] = [];
+        for (let bits in float_edges) {
+            floats.append(float64.from_bits(bits));
+        }
+        check_float64(floats);
+    };
+
+    export let test_seeded_random = func {
+        let source = random.seeded(20261111);
+        for (let round = 0; round < 24; round++) {
+            let length = source.next_int_below(300);
+            // A small range gives long runs of duplicates; the full range gives few.
+            let narrow = round % 2 == 0;
+            let [signed, unsigned]: [int64[list], uint64[list]] = [], [];
+            let [floats, small]: [float64[list], int32[list]] = [], [];
+            let small_unsigned: uint32[list] = [];
+            for (let i = 0; i < length; i++) {
+                let word = source.next_uint64();
+                if (narrow) {
+                    word %= 8;
+                }
+                // The high half for the 32-bit lists, centred on zero for int32.
+                last high = narrow ? word : word >> 32;
+                signed.append(narrow ? word as int64 : ((word >> 1) as int64) - 4611686018427387904);
+                unsigned.append(word);
+                small.append(narrow ? word as int32 : ((high as int64) - 2147483648) as int32);
+                small_unsigned.append(high as uint32);
+                if (source.next_int_below(8) == 0) {
+                    floats.append(float64.from_bits(word));
+                } else {
+                    floats.append((source.next_float64() - 0.5) * 1000.0);
+                }
+            }
+            check_int64(signed);
+            check_uint64(unsigned);
+            check_float64(floats);
+            check_int32(small);
+            check_uint32(small_unsigned);
+        }
+    };
+);
