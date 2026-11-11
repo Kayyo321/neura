@@ -34,6 +34,24 @@ let describe = func(value: int32) -> string {
 
 `last x = e;` and `last x: T = e;` behave like a local `const`: assigning `x` again is error `E0401`. `last x: T;` declares `x` without a value; its type is required (`E0444`). `last` is a contextual word, not a keyword. It introduces a declaration only where a statement or member can start and an identifier follows it, as in `last x`, `export last x`, and `static last x`. Elsewhere it is an ordinary name, so `let last = func ...;`, `last = 3;`, `last(x);`, `last.next`, and `last[0] = 1;` keep their meaning. A destructuring `last [a, b] = e;` is not a declaration: it reads as an assignment to an element of `last`.
 
+An annotation names the type, so the value need not repeat it. `new` without a class constructs the annotated type ([target-typed `new`](ObjectLifecycle.md#target-typed-new)), a destructuring declaration can annotate its names with a tuple type and give each name its own value ([typed and listed destructuring](Types.md#typed-and-listed-destructuring)), and a class body can be written where a type is expected ([anonymous classes](Types.md#anonymous-classes)).
+
+<!-- example: check -->
+```neura
+let Counter = class (
+    export let count: int = 0;
+);
+
+let first: Counter = new;
+let [low, high]: [Counter, int] = new, 10;
+let point: class (
+    export let x: int = 0;
+    export let y: int = 0;
+) = new;
+```
+
+Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. A nested block, and a function body, may declare a name that an enclosing scope or a parameter already has; the new binding hides the outer one for the rest of its block. Whether shadowing stays allowed is an open language decision ([Status](Status.md#open-language-decisions)). Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. Visibility and inheritance rules beyond these are not specified.
+
 ### Deferred assignment
 
 A local `last x: T;` is assigned by a plain assignment `x = value;`. The compiler checks each such binding with a definite-assignment analysis over the function body, before lowering. At each point the binding is unassigned, assigned, or assigned on some paths but not others. Branches merge as follows: after an `if` with an `else`, a `match`, or a `select`, a binding is assigned when every arm that can reach the end of the statement assigned it. An arm that ends in `return`, `break`, `continue`, or `trap_with_message(...)` does not reach the end. An `if` without an `else` merges with the path on which its condition is false. A Boolean literal condition selects one arm, so `while (true)` without a `break` does not end. A loop leaves the state as it was before the loop.
@@ -47,8 +65,6 @@ A local `last x: T;` is assigned by a plain assignment `x = value;`. The compile
 The analysis follows the syntax, not values: it treats every condition other than a Boolean literal as possibly true and possibly false, and a `&&` or `||` right operand as possibly skipped. A binding that is declared and never read need not be assigned. NeuraIR records a deferred local as a declaration without a value ([NeuraIR 1.10](../NirFormat.md#deferred-initialization)); the runtime traps a read before the first store in a frame, which the analysis rules out.
 
 A `last` instance field follows the same rules within each `init`; [Object lifecycle](ObjectLifecycle.md#last-fields) states them. A module, file, or static binding cannot be deferred (`E0447`).
-
-Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. A nested block, and a function body, may declare a name that an enclosing scope or a parameter already has; the new binding hides the outer one for the rest of its block. Whether shadowing stays allowed is an open language decision ([Status](Status.md#open-language-decisions)). Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. Visibility and inheritance rules beyond these are not specified.
 
 ### Documentation comments
 

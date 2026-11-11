@@ -898,3 +898,123 @@ let f = func() -> int {
     return 0;
 };
 ]=] "3:5" "\\[E0404\\]")
+# Target-typed new (ObjectLifecycle.md, Target-typed new): the expected type
+# must be a concrete class, and constructor errors are those of new T(...).
+set(pair_class "let Pair = class (\n    export let left: int = 0;\n    export let init = func(a: int) { left = a; };\n);\n")
+check_rejection(new-no-expected-type "let a = new;" "2:9" "E0420.*target-typed 'new' needs a concrete class type")
+check_rejection(new-umbrella "let a: class = new;" "2:16" "E0420")
+check_rejection(new-primitive "let a: int = new;" "2:14" "E0420")
+check_rejection(new-type-parameter "let make = func<T>() -> T { return new; };" "2:36" "E0420")
+check_rejection(new-singleton "let one = singleton (); let a: one = new;" "2:38" "E0420")
+check_rejection(new-interface [=[
+let Shape = interface (
+    let area = func() -> int;
+);
+let a: Shape = new;
+]=] "5:16" "E0420")
+check_rejection(new-unknown-member "let a = new.left;" "2:9" "E0420")
+check_rejection(new-argument-count "${pair_class}let a: Pair = new;" "6:15" "E0407.*expected 1 argument")
+check_rejection(new-argument-type "${pair_class}let a: Pair = new(\"x\");" "6:19" "E0403.*expected int32, got string")
+check_rejection(new-parenthesized-type "${pair_class}let a = new (Pair)(1);" "6:9" "E0435")
+check_rejection(new-ambiguous-overload [=[
+let A = class ( export let x: int = 0; );
+let B = class ( export let y: int = 0; );
+let pick = func(a: A) -> int => 1 or func(b: B) -> int => 2;
+let chosen = pick(new);
+]=] "5:14" "E0409.*ambiguous overload")
+check_rejection(new-abstract [=[
+let Shape = class (
+    export let area = func() -> int;
+);
+let a: Shape = new;
+]=] "5:16" "E0505.*cannot instantiate abstract class")
+check_rejection(new-hidden-constructor [=[
+let Locked = class (
+    let init = func() { };
+);
+let a: Locked = new;
+]=] "5:17" "E0507.*constructor is not exported")
+check_rejection(new-in-untyped-list "let items = [new];" "2:14" "E0420")
+
+# Typed multi-binding (Types.md, Tuples).
+check_rejection(multi-binding-value-count "let [a, b] = 1, 2, 3;" "2:14" "E0436.*3 values for 2 names")
+check_rejection(multi-binding-type-count "let [a, b]: [int] = 1, 2;" "2:13" "E0436.*1 type for 2 names")
+check_rejection(multi-binding-annotation "let [a, b]: int[] = 1, 2;" "2:13" "E0437")
+check_rejection(multi-binding-element-type "let [a, b]: [int, string] = 1, 2;" "2:32" "E0403.*expected string, got int32")
+check_rejection(multi-binding-tuple-type "let [a, b]: [int, string] = [1, 2];" "2:33" "E0403.*expected string, got int32")
+check_rejection(multi-binding-names-not-in-scope [=[
+let f = func() -> int {
+    let [a, b] = 1, a;
+    return b;
+};
+]=] "3:21" "E0304.*unknown name 'a'")
+check_rejection(multi-binding-duplicate [=[
+let f = func() -> int {
+    let [a, a] = 1, 2;
+    return a;
+};
+]=] "3:13" "E0301.*duplicate local binding 'a'")
+
+# Anonymous classes (Types.md, Anonymous classes).
+check_rejection(anonymous-distinct-occurrences [=[
+let first: class (export let n: int = 0; export let get = func() -> int => n;) = new;
+let second: class (export let n: int = 0; export let get = func() -> int => n;) = first;
+]=] "3:83" "E0403.*expected class[(]n: int32[)]@anonymous-distinct-occurrences[.]nra:3:13, got class[(]n: int32[)]@anonymous-distinct-occurrences[.]nra:2:12")
+check_rejection(anonymous-field-order [=[
+let point: class (export let x: int = 0; export let label: string = "";) = new;
+let swapped: class (export let label: string; export let x: int;) = point;
+]=] "3:69" "E0403.*expected class[(]label: string, x: int32[)], got class[(]x: int32, label: string[)]")
+check_rejection(anonymous-field-type [=[
+let point: class (export let x: int = 0;) = new;
+let wide: class (export let x: int64;) = point;
+]=] "3:42" "E0403.*expected class[(]x: int64[)], got class[(]x: int32[)]")
+check_rejection(anonymous-initializer-in-parameter "let f = func(p: class (export let x: int = 1;)) -> int => p.x;" "2:44" "E0530")
+check_rejection(anonymous-initializer-in-result "let f = func() -> class (export let x: int = 1;) { return new; };" "2:46" "E0530")
+check_rejection(anonymous-initializer-in-element "let items: class (export let x: int = 1;)[] = [];" "2:39" "E0530")
+check_rejection(anonymous-type-parameter "let f = func<T>(v: T) -> int { let b: class (export let item: T;) = new; return 0; };" "2:63" "E0531")
+check_rejection(anonymous-unexported "let p: class (let x: int = 1;) = new;" "2:19" "E0532")
+check_rejection(anonymous-assignment-new [=[
+let p: class (export let x: int = 1;) = new;
+let reset = func() { p = new; };
+]=] "3:26" "E0533")
+check_rejection(anonymous-element-new "let items: class (export let x: int;)[] = [new];" "2:44" "E0533")
+check_rejection(anonymous-untyped "let p: class (export let x = 1;) = new;" "2:26" "E0534")
+check_rejection(anonymous-const "let p: class (export const x: int = 1;) = new;" "2:28" "E0535")
+check_rejection(anonymous-duplicate-field "let p: class (export let x: int; export let x: int;) = new;" "2:45" "E0302.*duplicate declaration of 'x'")
+check_rejection(anonymous-unknown-field "let p: class (export let x: int = 1;) = new; let y = p.y;" "2:54" "E0305.*unknown or inaccessible member 'y'")
+check_rejection(anonymous-arguments "let p: class (export let x: int;) = new(1);" "2:37" "E0407.*expected 0 argument")
+check_rejection(anonymous-new-structural-arguments "let p = new class (export let x: int = 1;)(2);" "2:9" "E0407")
+check_rejection(anonymous-unexported-method-field [=[
+let p: class (
+    let x: int = 1;
+    export let get = func() -> int => x;
+) = new;
+let y = p.x;
+]=] "6:9" "E0305.*unknown or inaccessible member 'x'")
+check_rejection(anonymous-hidden-init [=[
+let p: class (
+    export let x: int = 1;
+    let init = func() { };
+) = new;
+]=] "5:5" "E0507.*constructor is not exported")
+check_rejection(anonymous-not-a-base [=[
+let Tools = module ( );
+let p: class : Tools (export let x: int = 1;) = new;
+]=] "3:16" "E0503.*base must have the same declaration kind")
+check_rejection(anonymous-umbrella-construct "let value = new class();" "2:13" "class is an umbrella type and cannot be constructed")
+
+# The umbrella type keeps its meaning where a class body could not begin, and
+# a class body with a base or interfaces is accepted in a type position.
+file(WRITE "${TEST_DIR}/umbrella.nra" [=[
+let Point = class ( export let x: int = 0; );
+let Named = interface ( let name = func() -> string; );
+let thing: class = new Point();
+let tested = thing is class;
+let back = thing as class;
+let pick = func(c: bool, a: Point, b: class) -> class => c ? a as class : b;
+let empty: class () = new;
+let derived: class : Point implements Named ( export let name = func() -> string => "d"; ) = new;
+let named: class implements Named ( export let name = func() -> string => "n"; ) = new;
+let generic = func<T: class>(value: T) -> T => value;
+]=])
+run_success(unused check "${TEST_DIR}/umbrella.nra")

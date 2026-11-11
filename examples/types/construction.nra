@@ -1,0 +1,50 @@
+// Target-typed new, typed destructuring, and anonymous classes.
+// backend-cli builds and runs it; see docs/lang/ObjectLifecycle.md and
+// docs/lang/Types.md.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Account = class (
+    export let owner: string = "nobody";
+    export let balance: int = 0;
+
+    export let init = func() {
+    } or func(name: string, opening: int) {
+        owner = name;
+        balance = opening;
+    };
+);
+
+// A parameter can repeat the fields of an anonymous class: every
+// fields-only body with the same fields is the same class.
+let summary = func(totals: class (export let count: int; export let sum: int;)) -> string {
+    return totals.count.to_string() + " accounts, " + totals.sum.to_string() + " in total";
+};
+
+let open_account = func(name: string) -> Account {
+    // The result type names the class.
+    return new(name, 10);
+};
+
+let Construction = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // The annotation names the class, so `new` does not repeat it.
+        let empty: Account = new;
+        let savings: Account = new("Ada", 250);
+        let [checking, spare]: [Account, Account] = open_account("Grace"), new;
+
+        // An anonymous class: its field initializers run when `new` creates it.
+        let totals: class (
+            export let count: int = 0;
+            export let sum: int = 0;
+        ) = new;
+        for (let account: Account in [empty, savings, checking, spare]) {
+            totals.count += 1;
+            totals.sum += account.balance;
+        }
+        console.print_line(savings.owner + " has " + savings.balance.to_string());
+        console.print_line(checking.owner + " has " + checking.balance.to_string());
+        console.print_line(summary(totals));
+        return program.ExitCode.Ok;
+    };
+);

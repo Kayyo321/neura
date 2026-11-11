@@ -1,0 +1,5 @@
+// A field initializer in an anonymous class that only types a parameter
+// (E0530): it would never run.
+let describe = func(point: class (export let x: int = 0;)) -> int {
+    return point.x;
+};

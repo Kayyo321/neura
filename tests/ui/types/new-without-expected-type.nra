@@ -1,0 +1,5 @@
+// A target-typed 'new' with no expected type (E0420).
+let Point = class (
+    export let x: int = 0;
+);
+let origin = new;

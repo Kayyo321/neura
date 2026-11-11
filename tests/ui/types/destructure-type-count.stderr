@@ -1,0 +1,10 @@
+error[E0436]: the annotation has 2 types for 3 names
+ --> $DIR/destructure-type-count.nra:2:24
+  |
+2 | let [low, high, step]: [int, int] = 1, 9, 2;
+  |                        ^^^^^^^^^^ 2 types
+  |      --------------- 3 names
+  |
+  = help: write one type for each name
+
+For more information about this error, try `neura explain E0436`.

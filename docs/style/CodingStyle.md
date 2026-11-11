@@ -204,6 +204,21 @@ export let format_log = func(log_message: string, log_level: int) -> string {
 - Leave a blank line after a field's last clause when another member follows.
 - Prefer a get-only field (`| get: field;`) to a method that only returns a field, such as `export let code = func -> string => code_value;`. Keep a method when the value is computed, takes arguments, or does work a reader would not expect from a field read.
 - Add a setter only when the class checks or reacts to a write. A setter that only stores, `| set: field = value;`, is worth writing only together with a getter that does more, or to keep the field write-only outside the class.
+### Construction and anonymous classes
+- When an annotation already names the class, construct it with `new` alone, `= new;` or `= new(arguments);`, rather than repeating the class. Name the class after `new` where nothing else does:
+  <!-- example: fragment: style illustration: Point is a class declared elsewhere -->
+  ```neura
+  let origin: Point = new;
+  let corner = new Point(3, 4);
+  ```
+- Use an anonymous class for a small group of fields that one or two places pass around, and a named class for anything with methods or used across modules. Lay out a multi-line anonymous class like a class definition, with the closing parenthesis on its own line:
+  <!-- example: check -->
+  ```neura
+  let settings: class (
+      export let retries: int = 3;
+      export let verbose: bool = false;
+  ) = new;
+  ```
 
 ### Comments
 - Use `//` for single-line comments.
@@ -292,4 +307,5 @@ Running check for: auth_service:8080
 | `last timeout: int;` assigned once in each branch | `let timeout: int = 0;` overwritten in each branch | A value chosen once is a `last` binding. |
 | `func(target_host: string)` | `func(targetHost: string)` | Parameters use `snake_case`. |
 | `program.ExitCode.Ok` | `program.exit_code.ok` | Enums and variants use `PascalCase`. |
+| `let origin: Point = new;` | `let origin: Point = new Point();` | The annotation already names the class. |
 

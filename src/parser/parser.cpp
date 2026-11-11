@@ -270,6 +270,8 @@ private:
             expect(")");
             expect("->");
             result.arguments.push_back(type());
+        } else if (at_anonymous_class()) {
+            result = anonymous_class();
         } else if (match("class")) {
             result.name = "class";
         } else {
@@ -290,6 +292,92 @@ private:
         if (reference && result.reference)
             throw Diagnostic(result.span, "a type can have only one reference prefix").with_code("E0206");
         result.reference |= reference;
+        return result;
+    }
+
+    // Anonymous classes (Types.md, Anonymous classes). In a type
+    // position, `class` begins a class body only when what follows cannot
+    // continue the umbrella type `class`:
+    //   class ( )            class ( <member> ...
+    //   class implements I, J ( ...
+    //   class : Base ( <member> ...      class : Base implements I ( ...
+    // Bare `class` stays the umbrella type. `class : Base ( )` with an empty
+    // body is not recognized, because `c ? x as class : f()` already means
+    // a conditional expression.
+    bool at_class_member(std::size_t offset) const {
+        if (cursor_ + offset >= tokens_.size()) return false;
+        const auto& token = tokens_[cursor_ + offset];
+        // The words that begin a class member declaration. Extension point:
+        // a member start added to declaration() (such as a contextual
+        // `last` binding or a `#` tag) belongs here too.
+        return token.kind == TokenKind::Keyword &&
+               (token.text == "export" || token.text == "static" || token.text == "let" || token.text == "const");
+    }
+
+    bool next_keyword(std::size_t offset, std::string_view text) const {
+        if (cursor_ + offset >= tokens_.size()) return false;
+        const auto& token = tokens_[cursor_ + offset];
+        return token.kind == TokenKind::Keyword && token.text == text;
+    }
+
+    bool at_anonymous_class() const {
+        if (!at("class")) return false;
+        if (next_is(1, "(")) return next_is(2, ")") || at_class_member(2);
+        if (next_keyword(1, "implements")) return true;
+        if (!next_is(1, ":")) return false;
+        // A qualified base name, then a body with a member or an
+        // implements clause.
+        std::size_t offset = 2;
+        while (true) {
+            if (cursor_ + offset >= tokens_.size() || tokens_[cursor_ + offset].kind != TokenKind::Identifier)
+                return false;
+            ++offset;
+            if (!next_is(offset, ".")) break;
+            ++offset;
+        }
+        return next_keyword(offset, "implements") || (next_is(offset, "(") && at_class_member(offset + 1));
+    }
+
+    // `class [: Base] [implements I, ...] ( members )` in a type position.
+    // The members use the grammar of a class declaration's body.
+    TypeSyntax anonymous_class() {
+        const auto start = cursor_;
+        expect("class");
+        auto body = std::make_shared<Declaration>();
+        body->kind = Declaration::Kind::Class;
+        if (match(":")) body->base = type();
+        if (match("implements")) {
+            do {
+                body->interfaces.push_back(type());
+            } while (match(","));
+        }
+        expect("(");
+        // A method of the body is a named function wherever the type is
+        // written, as it is in a class declaration at file level.
+        // An error in a member ends the type: the statement that contains
+        // it recovers, and a speculative parse of type arguments sees it.
+        const auto depth = std::exchange(block_depth_, 0u);
+        struct Restore {
+            unsigned& depth;
+            unsigned saved;
+            ~Restore() { depth = saved; }
+        } restore{block_depth_, depth};
+        while (!at_end() && !at(")")) {
+            auto member = declaration(Declaration::Kind::Class);
+            if (member.cast_target) {
+                auto more_casts = std::exchange(member.overloads, {});
+                body->members.push_back(std::move(member));
+                for (auto& cast : more_casts) body->members.push_back(std::move(cast));
+            } else {
+                body->members.push_back(std::move(member));
+            }
+        }
+        expect(")");
+        body->span = span_from(start);
+        body->name_span = tokens_[start].span;
+        TypeSyntax result{};
+        result.name = "[anonymous class]";
+        result.anonymous = std::move(body);
         return result;
     }
 
@@ -775,9 +863,7 @@ private:
                 result.bindings.push_back(identifier());
             } while (match(",") && !at("]"));
             expect("]");
-            expect("=");
-            result.expressions.push_back(expression());
-            expect(";");
+            destructure_tail(result);
         } else if (at_declaration()) {
             result.kind = Statement::Kind::Binding;
             result.declaration = std::make_unique<Declaration>(declaration());
@@ -843,6 +929,32 @@ private:
         }
         result.span = span_from(start);
         return result;
+    }
+
+    // After the names of a destructuring declaration (Types.md, Tuples):
+    //   let [a, b] = tuple;
+    //   let [a, b]: [A, B] = tuple;
+    //   let [a, b] = x, y;            let [a, b]: [A, B] = x, y;
+    // A comma after the first initializer makes a list with one
+    // initializer per name. Lowering checks the counts.
+    void destructure_tail(Statement& result) {
+        if (match(":")) {
+            result.binding_type = type();
+            if (result.binding_type->name != "[tuple]" || !result.binding_type->collections.empty() ||
+                result.binding_type->reference) {
+                const auto names = result.bindings.size();
+                throw Diagnostic(result.binding_type->span, "a destructuring annotation must be a tuple type")
+                    .with_code("E0437")
+                    .label("expected a tuple type with " + std::to_string(names) + " element" +
+                           (names == 1 ? "" : "s"))
+                    .help("write one type per name in brackets, as in 'let [a, b]: [int, string] = ...'");
+            }
+        }
+        expect("=");
+        do {
+            result.expressions.push_back(expression());
+        } while (match(","));
+        expect(";");
     }
 
     // The contextual words of Concurrency.md section 4.4 stay identifiers.
@@ -1293,15 +1405,7 @@ private:
             result.span = span_from(start);
             return result;
         }
-        if (match("new")) {
-            auto object_type = type();
-            expect("(");
-            auto arguments = expression_list(")");
-            auto result = make_expression(Expr::Kind::New, span_from(start));
-            result.type = std::move(object_type);
-            result.operands = std::move(arguments);
-            return result;
-        }
+        if (match("new")) return new_expression(start);
         if (match("import")) {
             expect(":");
             if (current().kind == TokenKind::Identifier && current().text == "c" &&
@@ -1353,6 +1457,58 @@ private:
         throw Diagnostic(token.span, "expected an expression").with_code("E0204")
             .label(token.kind == TokenKind::End ? std::string("expected an expression before the end of the file")
                                                 : "expected an expression, found '" + token.text + "'");
+    }
+
+    // After `new` (ObjectLifecycle.md, Construction):
+    //   new T(arguments)     the class T
+    //   new(arguments)       target-typed: `(` always begins arguments
+    //   new                  target-typed, no arguments: `new` followed by
+    //                        anything that cannot begin a type, such as
+    //                        `;`, `,`, `)`, `]`, or `}`
+    // A target-typed `new` has no type; lowering takes the expected type.
+    Expr new_expression(std::size_t start) {
+        const bool type_start = current().kind == TokenKind::Identifier || at("&") || at("[") ||
+                                at("func") || at("class");
+        if (!at("(") && !type_start) return make_expression(Expr::Kind::New, span_from(start));
+        std::optional<TypeSyntax> object_type;
+        if (at("class") && next_is(1, "(") && next_is(2, ")") && !next_is(3, "(")) {
+            // `new class()` names the umbrella type and passes no arguments;
+            // the empty anonymous class is constructed with `new class()()`.
+            object_type = TypeSyntax{advance().span, "class", {}, {}};
+        } else if (!at("(")) {
+            object_type = type();
+        }
+        const auto open = current().span;
+        const auto open_index = cursor_;
+        expect("(");
+        auto arguments = expression_list(")");
+        if (!object_type && at("(")) {
+            // `new (T)(x)` once parenthesized the type. The first list is
+            // now the arguments of a target-typed `new`.
+            auto error = Diagnostic(span_from(start), "a type after 'new' is not parenthesized").with_code("E0435")
+                .label("the class cannot be written in parentheses here")
+                .label(open, "this '(' begins the arguments of a target-typed 'new'")
+                .label(current().span, "a second argument list follows");
+            if (arguments.size() == 1 && (arguments.front().kind == Expr::Kind::Name ||
+                                          arguments.front().kind == Expr::Kind::Member)) {
+                std::string name;
+                for (auto i = open_index + 1; i + 1 < cursor_; ++i) name += tokens_[i].text;
+                const auto& close = tokens_[cursor_ - 1].span;
+                error.suggest("write the class without parentheses",
+                              Span{open.file, open.line, open.column, open.offset,
+                                   close.offset + close.length - open.offset},
+                              name, Applicability::MaybeIncorrect);
+                error.help("where the type is expected, the class can be left out: 'new(x)'");
+            } else {
+                error.help("write 'new T(arguments)', or 'new(arguments)' where the type is expected");
+            }
+            throw error;
+        }
+        auto result = make_expression(Expr::Kind::New, span_from(start));
+        result.type = std::move(object_type);
+        result.operands = std::move(arguments);
+        result.open = open;
+        return result;
     }
 
     Expr token_expression(Expr::Kind kind) {

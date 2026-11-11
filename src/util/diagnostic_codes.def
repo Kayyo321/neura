@@ -9,9 +9,9 @@
 //   E04xx  types and bindings  E09xx  tags
 //   E05xx  classes             W####  warnings
 //
-// E0420 and the E09xx range are reserved by the 0.2.0 plan (target-typed
-// new and tags). E0899 is the one code for errors that only a compiler
-// defect or a hand-edited artifact can cause.
+// The E09xx range is reserved by the 0.2.0 plan (tags). E0899 is the one
+// code for errors that only a compiler defect or a hand-edited artifact can
+// cause.
 //
 // Include this file after defining NEURA_DIAGNOSTIC; it undefines the macro.
 
@@ -54,7 +54,7 @@ NEURA_DIAGNOSTIC(E0309, "cyclic declaration")
 NEURA_DIAGNOSTIC(E0310, "misuse of the discard name '_'")
 NEURA_DIAGNOSTIC(E0311, "reserved name")
 
-// Types and bindings (E0420 is reserved for target-typed new)
+// Types and bindings
 NEURA_DIAGNOSTIC(E0401, "assignment to a constant binding")
 NEURA_DIAGNOSTIC(E0402, "invalid assignment target")
 NEURA_DIAGNOSTIC(E0403, "mismatched types")
@@ -74,6 +74,7 @@ NEURA_DIAGNOSTIC(E0416, "void in a value position")
 NEURA_DIAGNOSTIC(E0417, "wrong number of type arguments")
 NEURA_DIAGNOSTIC(E0418, "type argument does not satisfy its bound")
 NEURA_DIAGNOSTIC(E0419, "explicit type arguments required")
+NEURA_DIAGNOSTIC(E0420, "target-typed new without a class to construct")
 NEURA_DIAGNOSTIC(E0421, "not a type of the required kind")
 NEURA_DIAGNOSTIC(E0422, "expected a value")
 NEURA_DIAGNOSTIC(E0423, "expression is not callable")
@@ -88,6 +89,9 @@ NEURA_DIAGNOSTIC(E0431, "statement outside its context")
 NEURA_DIAGNOSTIC(E0432, "invalid for loop header")
 NEURA_DIAGNOSTIC(E0433, "invalid overload group")
 NEURA_DIAGNOSTIC(E0434, "function without a body")
+NEURA_DIAGNOSTIC(E0435, "parenthesized type after new")
+NEURA_DIAGNOSTIC(E0436, "destructuring count mismatch")
+NEURA_DIAGNOSTIC(E0437, "destructuring annotation is not a tuple type")
 // `last` bindings and definite assignment
 NEURA_DIAGNOSTIC(E0440, "a deferred 'last' binding assigned twice")
 NEURA_DIAGNOSTIC(E0441, "a deferred 'last' binding read before it is assigned")
@@ -123,6 +127,12 @@ NEURA_DIAGNOSTIC(E0521, "setter on a constant field")
 NEURA_DIAGNOSTIC(E0522, "setter on a field named value")
 NEURA_DIAGNOSTIC(E0523, "accessor on a primitive reference field")
 NEURA_DIAGNOSTIC(E0524, "reference to a field with accessors")
+NEURA_DIAGNOSTIC(E0530, "anonymous class field initializer that never runs")
+NEURA_DIAGNOSTIC(E0531, "anonymous class uses an enclosing type parameter")
+NEURA_DIAGNOSTIC(E0532, "unexported field in a fields-only anonymous class")
+NEURA_DIAGNOSTIC(E0533, "new without the field initializers of an anonymous class")
+NEURA_DIAGNOSTIC(E0534, "untyped field in a fields-only anonymous class")
+NEURA_DIAGNOSTIC(E0535, "const field in a fields-only anonymous class")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

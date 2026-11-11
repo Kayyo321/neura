@@ -13,12 +13,19 @@ namespace neura {
 
 enum class CollectionKind { Array, List };
 
+struct Declaration;
+
 struct TypeSyntax {
     Span span;
     std::string name;
     std::vector<TypeSyntax> arguments;
     std::vector<CollectionKind> collections;
     bool reference{};
+    // An anonymous class written in a type position, `class ( members )`:
+    // the name is "[anonymous class]" and this is its class declaration.
+    // Copies of the type share the declaration, which identifies the
+    // occurrence (Types.md, Anonymous classes).
+    std::shared_ptr<Declaration> anonymous{};
 };
 
 struct GenericParameter {
@@ -108,6 +115,9 @@ struct Statement {
     std::string assignment_operator{};
     // Documentation shared by all bindings in a destructuring declaration.
     std::shared_ptr<const DocComment> documentation{};
+    // A destructuring declaration's tuple annotation, `let [a, b]: [A, B]`.
+    // Its `expressions` hold one initializer, or one per name.
+    std::optional<TypeSyntax> binding_type{};
 };
 
 struct MatchArm {

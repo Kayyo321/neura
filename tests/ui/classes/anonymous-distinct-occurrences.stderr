@@ -1,0 +1,13 @@
+error[E0403]: expected class(count: int32)@anonymous-distinct-occurrences.nra:7:13, got class(count: int32)@anonymous-distinct-occurrences.nra:3:12
+  --> $DIR/anonymous-distinct-occurrences.nra:10:5
+   |
+ 7 | let second: class (
+   |             -------... expected because of this type
+...
+10 | ) = first;
+   |     ^^^^^ expected class(count: int32)@anonymous-distinct-occurrences.nra:7:13, found class(count: int32)@anonymous-distinct-occurrences.nra:3:12
+   |
+   = note: an anonymous class with methods, a constructor, a base, or interfaces is a type of its own at each place it is written
+   = help: declare a named class and use it in both places
+
+For more information about this error, try `neura explain E0403`.

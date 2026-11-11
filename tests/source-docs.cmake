@@ -209,3 +209,28 @@ list(LENGTH stub_newlines stub_count)
 if(NOT original_count EQUAL stub_count OR NOT stubs MATCHES "/// Read-only outside the class[.]\nNeuraValue code;")
     message(FATAL_ERROR "Doxygen filter mishandled accessor clauses\n${stubs}")
 endif()
+
+# An anonymous class is summarized by its fields with their written types,
+# and a typed destructuring declaration gives each name its element type.
+set(anonymous "${TEST_DIR}/anonymous.nra")
+file(WRITE "${anonymous}" [=[
+/// A point.
+let point: class (
+    export let x: int = 1;
+    export let label: string = "p";
+) = new;
+/// Shows a point.
+let show = func(p: class (export let x: int; export let label: string;)) -> string => p.label;
+/// A pair.
+let [count, items]: [int, class (export let v: int;)[]] = 1, [];
+]=])
+run_docs(index "${anonymous}")
+expect_json("let point: class(x: int, label: string)" files 0 symbols 0 signature)
+expect_json("show = func(p: class(x: int, label: string)) -> string" files 0 symbols 1 signature)
+expect_json("let count: int" files 0 symbols 2 signature)
+expect_json("let items: class(v: int)[]" files 0 symbols 3 signature)
+run_docs(stubs --doxygen "${anonymous}")
+if(NOT stubs MATCHES "/// A point[.]\nNeuraObject point;" OR
+   NOT stubs MATCHES "/// Shows a point[.]\nstring show[(]NeuraObject p[)];")
+    message(FATAL_ERROR "Doxygen filter lost an anonymous class type\n${stubs}")
+endif()

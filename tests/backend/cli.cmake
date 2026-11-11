@@ -194,6 +194,11 @@ foreach(quantum IN ITEMS 1 64 1024)
         --task-quantum ${quantum})
 endforeach()
 
+# Target-typed new, typed destructuring, and an anonymous class.
+build_image("${TEST_DIR}/construction.nvr" "${SOURCE_DIR}/examples/types/construction.nra")
+expect_run("construction example" "${TEST_DIR}/construction.nvr"
+    "Ada has 250\nGrace has 10\n4 accounts, 260 in total\n" 0 "")
+
 # Library examples run through drivers that import them.
 foreach(driver IN ITEMS core overlay classes collections polymorphism errors)
     # The errors driver shows a denied read, so it runs with files denied.
@@ -276,7 +281,7 @@ endforeach()
 # The new source constructs produce the same image after a NIR round trip.
 foreach(name IN ITEMS operators closures aggregates class-nil generic-closures generic-enums interfaces
                       stdlib-primitives control-and-updates ranges-and-variadics overloads primitive-references
-                      last-bindings)
+                      last-bindings target-typed-new anonymous-classes)
     neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
     if(NOT emit_status STREQUAL "0")
         message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")
@@ -297,6 +302,30 @@ if(NOT ranges_assembled_status STREQUAL "0")
 endif()
 same_bytes("range image reassembly" "${TEST_DIR}/ranges-and-variadics.nvr"
            "${TEST_DIR}/ranges-and-variadics-reassembled.nvr")
+
+# Anonymous classes are named by their fields (and, for a class of its own,
+# where it is written). The tools read those names from the image.
+neura(anonymous_text "${TEST_DIR}" disassemble "${TEST_DIR}/anonymous-classes.nvr"
+      -o "${TEST_DIR}/anonymous-classes.nvra")
+neura(anonymous_assembled "${TEST_DIR}" assemble "${TEST_DIR}/anonymous-classes.nvra"
+      -o "${TEST_DIR}/anonymous-classes-reassembled.nvr")
+if(NOT anonymous_text_status STREQUAL "0" OR NOT anonymous_assembled_status STREQUAL "0")
+    message(FATAL_ERROR "anonymous class image round trip failed: ${anonymous_text_stderr}${anonymous_assembled_stderr}")
+endif()
+same_bytes("anonymous class image reassembly" "${TEST_DIR}/anonymous-classes.nvr"
+           "${TEST_DIR}/anonymous-classes-reassembled.nvr")
+foreach(provenance IN ITEMS "" --no-provenance)
+    neura(anonymous_decompiled "${TEST_DIR}" decompile ${provenance} "${TEST_DIR}/anonymous-classes.nvr"
+          -o "${TEST_DIR}/anonymous-classes${provenance}.decompiled")
+    if(NOT anonymous_decompiled_status STREQUAL "0")
+        message(FATAL_ERROR "decompiling anonymous classes${provenance} failed: ${anonymous_decompiled_stderr}")
+    endif()
+endforeach()
+file(READ "${TEST_DIR}/anonymous-classes.decompiled" anonymous_decompiled)
+if(NOT anonymous_decompiled MATCHES "provenance: class[(]x: int32, label: string[)]" OR
+   NOT anonymous_decompiled MATCHES "provenance: Main[.]class[(]count: int32[)]@anonymous-classes[.]nra:42:18")
+    message(FATAL_ERROR "decompiled anonymous classes lack their names\n${anonymous_decompiled}")
+endif()
 
 # Runtime traps: stdout up to the trap, a diagnostic, and the status of the
 # trap's class.

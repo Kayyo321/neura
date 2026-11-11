@@ -1,0 +1,6 @@
+// An anonymous class whose field uses the enclosing function's type
+// parameter (E0531).
+let wrap = func<T>(value: T) -> int {
+    let box: class (export let item: T;) = new;
+    return 0;
+};

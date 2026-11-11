@@ -1,0 +1,2 @@
+// A field of a fields-only anonymous class without a type (E0534).
+let point: class (export let x = 0;) = new;

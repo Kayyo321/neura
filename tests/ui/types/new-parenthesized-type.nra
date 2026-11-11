@@ -1,0 +1,6 @@
+// A parenthesized class after 'new' (E0435): '(' begins the arguments of a
+// target-typed 'new'.
+let Point = class (
+    export let x: int = 0;
+);
+let origin = new (Point)();
