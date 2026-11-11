@@ -31,7 +31,7 @@ Optional features need more, and `neura doctor` reports each one:
 
 | Platform | State |
 | --- | --- |
-| macOS | Neura builds from source on macOS 15, on Apple silicon and Intel. 97 of the 108 tests CMake registers there pass. The failures are in file-system services, native interop, C imports, and tests that read Linux's `/proc`, so no macOS archive is published. `neura build --native` has no macOS launcher. |
+| macOS | Neura builds from source on macOS 15, on Apple silicon and Intel. The first run there passed 97 of the 108 tests CMake registered; the failures were in C imports (the SDK's headers, and linking with GNU linker flags), native interop (Linux library names), file-system tests (case-insensitive names, non-UTF-8 names), and tests that read Linux's `/proc`. Changes for each have been made but have not been run on macOS, so no macOS archive is published. `neura build --native` has no macOS launcher and says so. The release scripts need GNU tar as `gtar` (`brew install gnu-tar`). |
 | Windows without WSL | Not supported. No Windows build has been compiled or tested. |
 
 ## Install from a release archive

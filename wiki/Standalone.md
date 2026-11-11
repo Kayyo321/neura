@@ -98,6 +98,7 @@ Errors are printed as `neura: error: <text>` and exit with status 1. No output f
 | A `.nvr` input without `--native` | `build takes sources or one .nir file; packaging a .nvr needs --native` |
 | `--no-optimize` or `--no-source-map` with a `.nvr` input | `<option> cannot be applied to an image that is already built` |
 | No launcher found | `--native: no launcher for <triple> in <directory>; pass --launcher or install one` |
+| No launcher found, and the target is a macOS triple (`*-apple-darwin`) | `--native: Neura has no native launcher for macOS (<triple>); native executables are built for Linux targets only. Run the image with 'neura run' instead` |
 | The file is not a launcher | `--native: <file> is not a Neura launcher` |
 | The image needs a newer runtime | `--native: the image is NVR 1.<m>; this launcher runs up to 1.<n>` |
 | The image's native library is for another target (N12) | `--native: the image's native library is for <triple>; the launcher is for <triple>` |

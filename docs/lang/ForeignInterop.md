@@ -44,6 +44,10 @@ console.print_line(values.as_int32(add.invoke(5, 3)).to_string());  // 8
 arena.close();
 ```
 
+### Library names
+
+`library_lookup(path, arena)` hands `path` to the platform's dynamic loader (`dlopen`), so the platform's rules for names and search paths apply and the same name does not work everywhere. Linux names the C and math libraries `libc.so.6` and `libm.so.6`. macOS has one system library for both, `/usr/lib/libSystem.B.dylib`, which the loader resolves from the dyld shared cache although no file of that name exists on disk. A loader that cannot open the name reports `NotFound: cannot load native library`. The loader ignores a file's suffix, so a library built for a test may keep the name `libmathops.so` on macOS.
+
 ### Arenas and segments
 
 An arena owns native memory. Allocation returns zeroed memory aligned as requested, up to 4,096 bytes. Closing a confined arena frees its memory and unloads the libraries loaded through it. The global arena is never closed; its memory and libraries are released when the run ends. Neura has one thread, so `of_shared()` is the same as `of_confined()`. There is no automatic arena: explicit closing follows the [resource rules](Stdlib.md#55-resources) of the standard library.
@@ -86,7 +90,7 @@ console.print_line(mathops.MATHOPS_NAME);           // #define MATHOPS_NAME "mat
 console.print_line(clib.abs(-9).to_string());
 ```
 
-The module is named after the header in PascalCase, so `math-ops.h` becomes `MathOps`. The compiler finds the header beside the importing file, in its `-I` roots, in `--c-include` directories, and in the system include directories. Libraries are found beside the importing file. Shared libraries are rejected: load them with `SymbolLookup.library_lookup`.
+The module is named after the header in PascalCase, so `math-ops.h` becomes `MathOps`. The compiler finds the header beside the importing file, in its `-I` roots, in `--c-include` directories, and in the system include directories. On Linux those are `/usr/local/include` and `/usr/include`. On macOS they are `/usr/local/include` and `usr/include` in the SDK, which is the one `SDKROOT` names, else the SDK of `DEVELOPER_DIR`, of the Command Line Tools, or of `/Applications/Xcode.app`, else the one `xcrun --sdk macosx --show-sdk-path` prints; the header is parsed with that SDK as `-isysroot`. Libraries are found beside the importing file. Shared libraries are rejected: load them with `SymbolLookup.library_lookup`.
 
 ### How it works
 
@@ -131,7 +135,7 @@ Native code may call a stub only while a downcall from the same program is in pr
 
 ## Runtime services and tooling
 
-C imports need libclang 14 or newer and its builtin headers at compile time (`libclang1-19` and `libclang-common-19-dev` on Debian and Ubuntu), found as [Tooling](Tooling.md#c-imports) describes, and a C compiler to link libraries. Running an image needs neither.
+C imports need libclang 14 or newer and its builtin headers at compile time (`libclang1-19` and `libclang-common-19-dev` on Debian and Ubuntu; the Xcode Command Line Tools on macOS, which also provide the SDK with the C headers), found as [Tooling](Tooling.md#c-imports) describes, and a C compiler to link libraries. Running an image needs neither.
 
 
 The library binds the `neura.ffi.*` host services ([NVM](../runtime/NVM.md#host-services)). Arguments and results travel as packed bytes in native byte order, described by a signature that names each C type. The runner calls native functions through libffi and loads libraries with the platform's loader.

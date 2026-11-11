@@ -98,7 +98,7 @@ jobs:
 
       - name: Install the build dependencies
         run: |
-          brew install libffi pkgconf
+          brew install libffi pkgconf gnu-tar
           echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Describe the machine
@@ -119,6 +119,13 @@ jobs:
         run: >
           ctest --test-dir build --parallel "$(sysctl -n hw.ncpu)" --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
+
+      # 117 = the 123 tests Tier 1 requires on Linux without a GPU, less the 6
+      # that need the Linux native launcher (native-build, native-run,
+      # native-container, native-policy, native-install, native-c-import).
+      - name: Require every test to have run
+        if: ${{ !cancelled() }}
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 117
 
       - name: Upload the build log and the test report
         if: ${{ !cancelled() }}
