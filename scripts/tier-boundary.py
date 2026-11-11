@@ -104,19 +104,39 @@ def integer_program(name, width, signed):
     return "\n".join(lines) + "\n", cases
 
 
-FLOAT_VALUES = {
-    "float32": [0x00000000, 0x80000000, 0x3f800000, 0xbf800000, 0x3f000000, 0x7f7fffff, 0xff7fffff, 0x00800000,
-                0x00000001, 0x007fffff, 0x80000001, 0x7f800000, 0xff800000, 0x7fc00000, 0x7fc00123, 0xffc00000,
-                0x7f800001, 0x7fa00000, 0x4b800000, 0x4b800001, 0x33800000, 0x33800001, 0x3f800001, 0x4f000000,
-                0xcf000000, 0x5f000000],
-    "float64": [0x0000000000000000, 0x8000000000000000, 0x3ff0000000000000, 0xbff0000000000000,
-                0x3fe0000000000000, 0x7fefffffffffffff, 0xffefffffffffffff, 0x0010000000000000,
-                0x0000000000000001, 0x000fffffffffffff, 0x8000000000000001, 0x7ff0000000000000,
-                0xfff0000000000000, 0x7ff8000000000000, 0x7ff8000000000123, 0xfff8000000000000,
-                0x7ff0000000000001, 0x7ff4000000000000, 0x4340000000000000, 0x4340000000000001,
-                0x3ca0000000000000, 0x3ca0000000000001, 0x3ff0000000000001, 0x43e0000000000000,
-                0xc3e0000000000000, 0x41e0000000000000, 0x3fb999999999999a],
-}
+def dense_float_values(width):
+    """Boundary bit patterns of a binary format: signed zeros, the smallest
+    and largest subnormals, the smallest normal, 1 and its neighbours, the
+    largest finite value, infinities, quiet and signalling NaNs with
+    payloads, powers whose exponents differ from 1's by 0, 1, 2, p - 1, p,
+    and p + 1 (p the significand's width) with mantissas that make rounding
+    ties and near-cancellation, and products near overflow and underflow."""
+    fraction = 23 if width == 32 else 52
+    exponent_bits = width - 1 - fraction
+    bias = (1 << (exponent_bits - 1)) - 1
+    sign = 1 << (width - 1)
+    infinity = ((1 << exponent_bits) - 1) << fraction
+    ones = (1 << fraction) - 1
+    half = 1 << (fraction - 1)
+
+    def value(power, mantissa=0):
+        return ((bias + power) << fraction) | (mantissa & ones)
+
+    magnitudes = {0, 1, ones, 1 << fraction, value(0), value(0, 1), value(0, ones), value(0, half), value(-1, ones),
+                  value(1), value(bias, ones), value(bias, ones - 1), infinity,
+                  infinity | half, infinity | half | 0x123, infinity | 1, infinity | 0x2a,
+                  value(bias // 2), value(bias // 2 + 1), value(-(bias // 2) - fraction // 2), value(1 - bias, ones),
+                  value(fraction), value(fraction + 1, 1), value(0, 0x5555555555555555)}
+    for d in (1, 2, fraction, fraction + 1, fraction + 2):
+        for mantissa in (0, 1, half | 1):
+            magnitudes.add(value(-d, mantissa))
+    values = []
+    for magnitude in sorted(magnitudes):
+        values += [magnitude, magnitude | sign]
+    return values
+
+
+FLOAT_VALUES = {"float32": dense_float_values(32), "float64": dense_float_values(64)}
 
 FLOAT_BINARY = ["+", "-", "*", "/", "==", "!=", "<", "<=", ">", ">="]
 

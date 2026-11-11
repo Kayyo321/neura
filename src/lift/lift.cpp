@@ -19,15 +19,24 @@ LiftResult rejected(std::string why) {
 // Overflow freedom, and every output lane (each is read by some exit or is
 // the selector) exactly 0 or 1. The unrefined analysis first: its intervals
 // are sound but wider, and it settles most graphs at a fraction of the cost.
-std::string prove_graph(const nvr::Graph& graph, std::uint64_t work) {
+std::string prove_graph(const nvr::Graph& graph, std::uint64_t work, double* progress = nullptr,
+                        std::shared_ptr<const OverflowProof>* partial = nullptr) {
     std::vector<std::uint32_t> lanes(graph.outputs.size());
     std::iota(lanes.begin(), lanes.end(), 0U);
     if (const auto quick = prove_no_overflow(graph, false);
         quick.safe && lanes_are_bits(quick, graph, lanes, nullptr, false)) {
         return {};
     }
-    const auto overflow = prove_no_overflow(graph, true, &work);
+    // An earlier attempt that ran out of work: resume it, or, when it
+    // settled every node and ran out on the lanes, take its intervals.
+    const auto* earlier = partial ? partial->get() : nullptr;
+    const auto overflow = earlier && earlier->safe ? *earlier : prove_no_overflow(graph, true, &work, earlier);
+    if (partial && (overflow.exhausted || overflow.safe)) *partial = std::make_shared<const OverflowProof>(overflow);
     if (overflow.exhausted) {
+        if (progress) {
+            *progress = static_cast<double>(overflow.node) /
+                        static_cast<double>(std::max<std::size_t>(graph.nodes.size(), 1));
+        }
         return exhausted_work;
     }
     if (!overflow.safe) {
@@ -41,20 +50,29 @@ std::string prove_graph(const nvr::Graph& graph, std::uint64_t work) {
 
 } // namespace
 
-std::string GraphProofs::verdict(const nvr::Graph& graph, std::uint32_t index, std::uint64_t work) {
+std::string GraphProofs::verdict(const nvr::Graph& graph, std::uint32_t index, std::uint64_t work, double* progress) {
+    // An analysis that ran out of work is resumed where it stopped, so
+    // attempts with more work (or another block of the same graph) pay only
+    // for the nodes not yet settled. Two threads may prove one graph at
+    // once; they reach the same verdict, and the furthest partial analysis
+    // is kept.
+    std::shared_ptr<const OverflowProof> partial;
     {
         const std::lock_guard lock(mutex_);
         if (const auto it = verdicts_.find(index); it != verdicts_.end()) return it->second;
-        if (const auto it = exhausted_.find(index); it != exhausted_.end() && it->second >= work) return exhausted_work;
+        if (const auto it = partials_.find(index); it != partials_.end()) partial = it->second;
     }
-    // Two threads may prove one graph at once; they reach the same verdict.
-    auto verdict = prove_graph(graph, work);
+    auto verdict = prove_graph(graph, work, progress, &partial);
     const std::lock_guard lock(mutex_);
     if (verdict == exhausted_work) {
-        auto& most = exhausted_[index];
-        most = std::max(most, work);
+        auto& kept = partials_[index];
+        const auto reach = [](const OverflowProof& p) {
+            return p.safe ? std::numeric_limits<std::size_t>::max() : p.node;
+        };
+        if (partial && (!kept || reach(*partial) > reach(*kept))) kept = partial;
         return verdict;
     }
+    partials_.erase(index);
     return verdicts_.emplace(index, std::move(verdict)).first->second;
 }
 
@@ -108,11 +126,14 @@ LiftResult lift_and_prove(const nvr::Image& image, std::uint32_t function, std::
         return rejected("structural proof failed");
     }
 
-    if (auto failure = proofs ? proofs->verdict(graph, block.graph, work) : prove_graph(graph, work);
+    double progress = 1.0;
+    if (auto failure = proofs ? proofs->verdict(graph, block.graph, work, &progress)
+                              : prove_graph(graph, work, &progress);
         !failure.empty()) {
         auto result = rejected(std::move(failure));
         if (result.rejection == exhausted_work) {
             result.exhausted = true;
+            result.progress = progress;
             result.form = std::make_shared<const LiftedForm>(std::move(form));
         }
         return result;

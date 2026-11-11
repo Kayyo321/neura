@@ -642,7 +642,7 @@ if(BUILD_TESTING)
     target_link_libraries(neura_lift_tests PRIVATE neura_lift neura_compiler neura_nvm)
     target_include_directories(neura_lift_tests PRIVATE tests)
     neura_target_defaults(neura_lift_tests)
-    foreach(suite IN ITEMS proof overflow execute corpus)
+    foreach(suite IN ITEMS proof overflow execute corpus floats)
         add_test(NAME lift-${suite} COMMAND neura_lift_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 

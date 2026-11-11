@@ -2,38 +2,14 @@
 
 #include "lift/lift.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
-#include <set>
 
 namespace neura::nvm {
 namespace {
-
-// Whether a form adds, subtracts, or multiplies floats. The overflow analysis
-// cannot yet show that those circuits' output lanes are bits (docs/runtime/
-// NVM.md, "Execution tiers"), and trying costs much work, so such a hint is
-// not proven. A wrong claim here only leaves its block on tier 0.
-bool float_arithmetic(const nvr::Image& image, const lift::LiftedForm& form) {
-    std::vector<const lift::Expression*> pending;
-    for (const auto& e : form.schedule) pending.push_back(e.get());
-    for (const auto& [lane, e] : form.values) pending.push_back(e.get());
-    if (form.condition) pending.push_back(form.condition.get());
-    std::set<const lift::Expression*> seen;
-    while (!pending.empty()) {
-        const auto* e = pending.back();
-        pending.pop_back();
-        if (!e || !seen.insert(e).second) continue;
-        if (e->kind == lift::Expression::Kind::Binary && (e->op == "+" || e->op == "-" || e->op == "*") &&
-            !e->operands.empty() && e->operands[0] && e->operands[0]->type < image.types.size() &&
-            lift::is_floating(image.types[e->operands[0]->type])) {
-            return true;
-        }
-        for (const auto& operand : e->operands) pending.push_back(operand.get());
-    }
-    return false;
-}
 
 std::uint64_t microseconds(std::chrono::steady_clock::duration duration) {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
@@ -238,9 +214,7 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
     std::chrono::steady_clock::duration time{};
     std::string hint_rejection;
     const auto start = std::chrono::steady_clock::now();
-    if (hint && float_arithmetic(image_, *hint)) {
-        result.rejection = "float addition, subtraction, or multiplication";
-    } else if (hint) {
+    if (hint) {
         result = lift::lift_and_prove(image_, function, block, hint, std::chrono::steady_clock::time_point::max(),
                                       &graph_proofs_, work);
     } else {
@@ -273,7 +247,14 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         ++statistics_.deferred;
         statistics_.block_reasons[{function, block}] =
             "deferred after " + std::to_string(runs) + " runs: the proof or search needs more work";
-        found.next_attempt = std::max<std::uint64_t>(runs * 8, 256);
+        // The analysis's work grows about in proportion to the nodes it
+        // settles, so the share it reached says how much more the rest
+        // needs: the next attempt waits until the block's allowance has
+        // grown that much (at least eightfold), so a run too short to repay
+        // the proof does not pay for attempts that cannot finish.
+        const auto share = std::max(result.progress, 1.0 / 256);
+        const auto factor = std::clamp<std::uint64_t>(static_cast<std::uint64_t>(std::ceil(2.0 / share)), 8, 512);
+        found.next_attempt = std::max<std::uint64_t>(runs * factor, 256);
         return {nullptr, false, found.next_attempt};
     }
     // A failure is final for its source: a failed hint is not tried again

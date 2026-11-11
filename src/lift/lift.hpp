@@ -2,6 +2,7 @@
 
 #include "expression.hpp"
 #include "lowered_block.hpp"
+#include "overflow.hpp"
 #include "nvr/image.hpp"
 
 #include <chrono>
@@ -38,6 +39,10 @@ struct LiftResult {
     // retry need not search again.
     bool exhausted = false;
     std::shared_ptr<const LiftedForm> form;
+    // When exhausted: the share of the graph's nodes the overflow analysis
+    // settled before it ran out (1 when it ran out on the output lanes), so
+    // that a retry can be given enough work.
+    double progress = 1.0;
 };
 
 inline constexpr const char* exhausted_work = "the overflow analysis ran out of work";
@@ -49,15 +54,19 @@ class GraphProofs {
 public:
     // Empty when the graph's proofs hold, else the rejection. With `work`,
     // the case analysis is bounded (overflow.hpp); a verdict that ran out of
-    // work is exhausted_work and is not remembered.
+    // work is exhausted_work and is not remembered, but what the analysis
+    // settled is, and the next call resumes it.
+    // `progress`, when given, receives the share of the graph's nodes an
+    // exhausted analysis settled.
     std::string verdict(const nvr::Graph& graph, std::uint32_t index,
-                        std::uint64_t work = std::numeric_limits<std::uint64_t>::max());
+                        std::uint64_t work = std::numeric_limits<std::uint64_t>::max(), double* progress = nullptr);
 
 private:
     std::mutex mutex_;
     std::map<std::uint32_t, std::string> verdicts_;
-    // The most work a graph's analysis has run out of: less cannot decide it.
-    std::map<std::uint32_t, std::uint64_t> exhausted_;
+    // The furthest analysis of each graph that ran out of work, resumed by
+    // the next attempt (overflow.hpp).
+    std::map<std::uint32_t, std::shared_ptr<const OverflowProof>> partials_;
 };
 
 // Lifts, proves, and lowers block `block` of function `function` of a loaded,

@@ -41,6 +41,20 @@ struct Interval {
 // - Case analysis: a node still wider than [0, 1] is evaluated for every
 //   assignment of a small cut of wires below it, each over its interval and
 //   each whole group as one variable, which covers every input.
+// - Elimination: when enumerating the cut's assignments together is too
+//   costly (a carry chain links every bit of an adder, so a test of its sum
+//   reads a cut as wide as the adder), the same range is computed by dynamic
+//   programming along the cone in stored order: a state assigns values to
+//   the frontier (free wires introduced so far and computed nodes a later
+//   node still reads) and carries the range of the part of the node's sum
+//   already known; a wire leaves the frontier after its last reader and
+//   states that agree on the rest merge, keeping the union of their ranges.
+//   Each node's edges are added one at a time to a running sum, so a free
+//   wire read only by that node is summed out at once. The result is the
+//   range enumeration would find, at a cost that grows with the frontier.
+//   The float circuits' sums and selections, whose correlations intervals
+//   lose stage after stage, are narrowed this way, node by node, and their
+//   output lanes then follow.
 //
 // The checks of each node in reference order use its sources' refined
 // bounds, which are sound, so the overflow proof stays exact in the sense
@@ -54,7 +68,8 @@ struct WireGroup {
 struct OverflowProof {
     bool safe = false;
     // When not safe: the case analysis ran out of the work it was given, so
-    // nothing was decided. More work may prove the graph.
+    // nothing was decided. More work may prove the graph; `wires`, `groups`,
+    // and `group_of` then hold what the nodes before `node` settled.
     bool exhausted = false;
     // When not safe: the first node whose arithmetic was not proven in range.
     std::size_t node = 0;
@@ -74,13 +89,20 @@ struct OverflowProof {
 // one assignment costs one unit, taken from *work. When it runs out, the
 // proof stops as `exhausted`. The bound changes only whether an answer is
 // found, never which: a proof found within it is the proof found without.
-OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine = true, std::uint64_t* work = nullptr);
+//
+// `resume`, when given, is an earlier refined analysis of the same graph
+// that ran out of work: it kept the intervals and groups of every node it
+// settled (`wires` then ends before `node`), and the analysis continues
+// from there. A resumed proof is the proof an unbounded analysis finds.
+OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine = true, std::uint64_t* work = nullptr,
+                                const OverflowProof* resume = nullptr);
 
 // How lanes_are_bits established each lane.
 struct BitEvidence {
     std::size_t intervals = 0;
     std::size_t one_hot = 0;
     std::size_t cases = 0;
+    std::size_t eliminated = 0;
 };
 
 // Whether each of the given output lanes is exactly 0 or 1 on every input
