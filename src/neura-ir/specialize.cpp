@@ -3,6 +3,7 @@
 #include "attributes.hpp"
 
 #include "monitors.hpp"
+#include "purity.hpp"
 #include "tags.hpp"
 #include "task_analysis.hpp"
 #include "nominal.hpp"
@@ -757,6 +758,11 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // Concurrency.md section 5 need the concrete types that exist only now:
     // a generic function is checked at each specialization.
     insert_polls(program);
+    // #Pure on a generic function holds when each specialization is pure:
+    // a call through a type parameter has its targets only now. The whole
+    // program is checked, so a function whose callee is a specialization, or
+    // an implementation in another module, is checked with it too.
+    check_pure_tags(program, {}, true);
     // Synchronized methods take their receiver's guard only in a program that
     // spawns; the guard operations are then part of what the isolation
     // checks see.

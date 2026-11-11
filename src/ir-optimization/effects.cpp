@@ -1,6 +1,7 @@
 #include "effects.hpp"
 
 #include "neura-ir/integer.hpp"
+#include "neura-ir/kernel_signature.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -425,6 +426,21 @@ void EffectAnalysis::add(const IrNode& node, Effects& effects) const {
         effects.closure_calls = true;
         break;
     case IrOp::ExternalCall:
+        if (node.symbol < program_.symbols.size() && kernel_bound(program_.symbols[node.symbol])) {
+            // A kernel runs inside the NVM: it reads the elements of its
+            // arguments, writes the elements of the lists it receives for
+            // writable-view and state parameters (neura-ir/kernel_signature.hpp,
+            // the same rule the purity analysis applies), allocates its
+            // result, and may trap. It calls nothing back.
+            effects.element_reads = true;
+            const auto writes = kernel_writes(program_.symbols[node.symbol]);
+            if (!writes || std::ranges::any_of(*writes, [](bool written) { return written; })) {
+                effects.element_writes = true;
+            }
+            effects.allocates = true;
+            effects.may_trap = true;
+            break;
+        }
         // A host service may call back into the program.
         effects.merge(unknown_);
         effects.host = true;

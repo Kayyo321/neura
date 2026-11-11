@@ -87,10 +87,12 @@ SymbolId fixed_callee(const IrProgram& program, const EffectAnalysis& effects, c
     if (node.op == IrOp::Call) return node.symbol;
     if (node.op != IrOp::VirtualCall || node.operands.empty()) return no_symbol;
     if (node.operands.front().type.kind == TypeKind::Module) return effects.dispatch().target(node);
-    // A method that nothing overrides runs its own body for every receiver.
-    if (node.operands.front().type.kind == TypeKind::Object && node.symbol < program.symbols.size() &&
-        program.symbols[node.symbol].has_body && !purity.overridden(node.symbol)) {
-        return node.symbol;
+    // A method call that can run only one body: its own, when no class that
+    // can be the receiver overrides or implements it by another
+    // (neura-ir/dispatch.hpp).
+    if (node.operands.front().type.kind == TypeKind::Object && node.symbol < program.symbols.size()) {
+        const auto targets = purity.targets(node);
+        if (targets.size() == 1 && targets.front() == node.symbol) return node.symbol;
     }
     return no_symbol;
 }

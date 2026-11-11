@@ -82,6 +82,21 @@ std::optional<std::pair<std::string, std::uint32_t>> kernel_binding(const IrSymb
     return std::pair{found->value.items[0].text, static_cast<std::uint32_t>(found->value.items[1].integer)};
 }
 
+std::optional<std::vector<bool>> kernel_writes(const IrSymbol& function) {
+    const auto binding = kernel_binding(function);
+    if (!binding) return std::nullopt;
+    const auto* info = kernels::find_kernel(binding->first, binding->second);
+    if (!info) return std::nullopt;
+    const auto plan = kernels::plan_binding(*info);
+    if (plan.problem) return std::nullopt;
+    std::vector<bool> result;
+    for (const auto param : plan.arguments) {
+        const auto kind = info->params[param];
+        result.push_back(kernels::mut_kind(kind) || kind == Kind::State);
+    }
+    return result;
+}
+
 bool kernel_known(const std::string& name, std::uint32_t version) {
     return kernels::find_kernel(name, version) != nullptr;
 }

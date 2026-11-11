@@ -1144,6 +1144,102 @@ check_rejection(tag-immutable-target "let C = class (\n    #Immutable\n    let x
 check_rejection(tag-pure-global "let total: int32 = 0;\n#Pure\nlet f = func() -> int32 {\n    return total;\n};" "3:1" "error\\[E0917\\]: #Pure function 'f' is not pure: it reads the reassignable binding 'total'")
 check_rejection(tag-pure-host "let console = import:Std.Io.Console;\n#Pure\nlet f = func() {\n    console.print_line(\"x\");\n};" "3:1" "error\\[E0917\\]: #Pure function 'f' is not pure: it reaches '[a-z_]+', which makes the host request neura[.]console")
 check_rejection(tag-pure-closure "#Pure\nlet f = func(g: func(int32) -> int32) -> int32 {\n    return g(1);\n};" "2:1" "E0917.*calls a function value")
+# A kernel writes the list it receives for a writable view or a state, so a
+# #Pure function may pass it only a list it allocated (docs/lang/Tags.md).
+check_rejection(tag-pure-kernel-write "let sorting = import:Std.Collections.Sorting;\n#Pure\nlet f = func(items: int64[list]) -> int64 {\n    sorting.sort_ascending(items);\n    return items[0];\n};" "3:1" "E0917.*it reaches 'sort_ascending', which passes a list it did not allocate to the kernel neura[.]sort[.]i64, which writes it")
+check_rejection(tag-pure-kernel-state "let sha = import:Std.Digest.Sha256;\n#Pure\nlet feed = func(hasher: sha.Sha256, data: uint8[list]) -> int {\n    hasher.update(data);\n    return 0;\n};" "3:1" "E0917.*it reaches 'update', which passes a list it did not allocate to the kernel neura[.]digest[.]sha256_update")
+# A callee that writes only its parameter's objects keeps a caller pure that
+# passes it objects of its own, and makes impure one that passes its own
+# parameter or a value stored into one of its objects.
+file(WRITE "${TEST_DIR}/tag-pure-fresh.nra" [=[
+let sorting = import:Std.Collections.Sorting;
+
+let Box = class (
+    export let items: int64[list] = [];
+);
+
+let fill = func(box: Box, value: int64) {
+    box.items.append(value);
+};
+
+#Pure
+let smallest = func(a: int64, b: int64) -> int64 {
+    let items: int64[list] = [a, b];
+    sorting.sort_ascending(items);
+    return items[0];
+};
+
+#Pure
+let filled = func(value: int64) -> int64 {
+    let box = new Box();
+    fill(box, value);
+    fill(box, value);
+    return box.items.length as int64;
+};
+]=])
+run_success(unused check tag-pure-fresh.nra)
+check_rejection(tag-pure-helper-write "let Box = class (\n    export let items: int64[list] = [];\n);\nlet fill = func(box: Box, value: int64) {\n    box.items.append(value);\n};\n#Pure\nlet f = func(box: Box) -> int64 {\n    fill(box, 1);\n    return 0;\n};" "8:1" "E0917.*it reaches 'fill', which changes a list it did not allocate")
+check_rejection(tag-pure-stored-argument "let Box = class (\n    export let inner: int64[list] = [];\n);\n#Pure\nlet f = func(items: int64[list]) -> int64 {\n    let box = new Box();\n    box.inner = items;\n    box.inner.append(1);\n    return 0;\n};" "5:1" "E0917.*changes a list it did not allocate")
+# #Pure on a generic function holds for each specialization, which is checked
+# when the program is built: a call through a type parameter reaches the type
+# argument's member.
+file(WRITE "${TEST_DIR}/tag-pure-generic.nra" [=[
+let program = import:Std.Program;
+
+let counter: int64 = 0;
+
+let Box = class (
+    export let.override to_string = func -> string {
+        counter = counter + 1;
+        return "box";
+    };
+);
+
+let Lib = module (
+    #Pure
+    export let text = func<T>(item: T) -> string {
+        return item.to_string();
+    };
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let plain = Lib.text<int32>(3);
+        let boxed = Lib.text<Box>(new Box());
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+foreach(command IN ITEMS check build)
+    set(arguments ${command} tag-pure-generic.nra)
+    if(command STREQUAL "build")
+        list(APPEND arguments -o tag-pure-generic.nvr)
+    endif()
+    run_status(output status ${arguments})
+    if(status STREQUAL "0" OR NOT output MATCHES "error\\[E0917\\]: #Pure function 'text<Box>' is not pure: it reaches 'to_string', which assigns the binding 'counter'"
+       OR NOT output MATCHES "tag-pure-generic[.]nra:13:5" OR NOT output MATCHES "in the specialization 'text<Box>'")
+        message(FATAL_ERROR "Expected ${command} to reject the specialization text<Box>\n${output}")
+    endif()
+endforeach()
+file(WRITE "${TEST_DIR}/tag-pure-generic-pure.nra" [=[
+let program = import:Std.Program;
+
+let Lib = module (
+    #Pure
+    export let text = func<T>(item: T) -> string {
+        return item.to_string();
+    };
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let plain = Lib.text<int32>(3);
+        let pair = Lib.text<[int32, string]>([1, "a"]);
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+run_success(unused build tag-pure-generic-pure.nra -o tag-pure-generic-pure.nvr)
 check_rejection(tag-immutable-let "#Immutable\nlet P = class (\n    export let x: int32 = 0;\n);" "4:16" "error\\[E0918\\]")
 check_rejection(tag-immutable-list "#Immutable\nlet P = class (\n    export const xs: int32[] = [1];\n);" "4:18" "error\\[E0919\\]")
 check_rejection(tag-immutable-base "let B = class (\n    export let x: int32 = 0;\n);\n#Immutable\nlet P = class:B ();" "5:1" "error\\[E0920\\]: #Immutable class 'P' extends 'B'")

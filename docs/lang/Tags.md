@@ -148,12 +148,15 @@ let save = func() -> void {
 
 `#Pure` on a function or method says that a call of it can be observed only through its result or its trap: the same arguments, with the same state reachable from them, give the same result or the same trap, and nothing else changes. The compiler checks it. A pure function:
 
-- writes no module, file, or static binding, and no field or element of an object it did not allocate during the call. It may build and fill objects, arrays, and lists of its own, in locals that only ever hold such new objects, and return them; a constructor and a field initializer may write the object they build;
+- writes no module, file, or static binding, and no field or element of an object it did not allocate during the call. It may build and fill objects, arrays, and lists of its own and return them; a constructor and a field initializer may write the object they build. An object it allocated stays its own wherever it is held, but what is stored into one of its objects is reachable from it: a list it received and stored in a field of a new object is still not its own;
 - reads no reassignable binding, and no `const` binding whose type is mutable (an array, a list, or a class that is not `#Immutable`); a `const` of an [immutable type](Types.md#immutable-classes) is fine;
-- makes no host request, uses no scheduler operation, and uses no object's identity (`hash_code` and `to_string` of the root class). A call of a [kernel](../runtime/Kernels.md) is pure;
-- calls no function value, and calls only pure functions. A call of a method is pure when the method and every override of it in the program are.
+- makes no host request, uses no scheduler operation, and uses no object's identity (`hash_code` and `to_string` of the root class);
+- calls no function value, and calls only functions that are pure for the arguments it passes. A function that writes only the objects of its parameters, and nothing else, is pure for a call that passes objects the caller allocated: a pure function may fill a `StringBuilder` or a list of its own through a helper. A [kernel](../runtime/Kernels.md) writes the list it receives for a writable view or a state, such as the list `Sorting.sort_ascending` sorts or a `Sha256`'s running state, and only reads its other arguments, so a pure function may pass it only lists of its own for those;
+- counts every function a call can run: for a method, the implementation in every class that can be the receiver, including an implementation of an interface requirement, which needs no `.override`; for `==` through `equals`, `hash_code`, and `to_string` of a value, those members of every class inside it, as the elements of a list or the parts of a tuple.
 
 A pure function may allocate, may trap (overflow, a bounds check, a failed cast), and may loop. A function that breaks a rule is error `E0917` at the tag, with a label at each call on the way to the first operation that breaks it, as a task-safety error labels its chain.
+
+A generic function is checked with each set of type arguments it is used with, after specialization, because a call through a type parameter, such as `item.to_string()`, reaches the member of the type argument. `neura build`, and `neura check` of a program with an entry point, report a specialization that is not pure as `E0917` at the tag, with a note naming the specialization, such as `text<Box>`; the check of the generic declaration alone counts such a call as pure. The whole-program check also sees implementations in other modules, so a library function marked `#Pure` that calls an interface method can be rejected for an implementation in the program that uses it.
 
 <!-- example: check -->
 ```neura

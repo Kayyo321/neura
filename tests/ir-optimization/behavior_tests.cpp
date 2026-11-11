@@ -578,6 +578,36 @@ NEURA_TEST(behavior, the_comparison_notices_unsafe_rewrites) {
         value = load_of(broken, body.at(2).symbol, value.span);
         check(noticed(purity, broken, "Purity.keep_after_write"), "reuse after a write went unnoticed");
     }
+    {
+        // Reusing a read of a list after a kernel sorted it in place.
+        auto broken = purity;
+        auto& body = body_of(broken, "Purity.reread_after_kernel_write");
+        check(body.size() == 5 && body.at(3).op == IrOp::Initialize, "unexpected reread_after_kernel_write");
+        auto& value = body.at(3).operands.front();
+        value = load_of(broken, body.at(1).symbol, value.span);
+        check(noticed(purity, broken, "Purity.reread_after_kernel_write"),
+              "reuse of a read across a kernel write went unnoticed");
+    }
+    {
+        // Reusing the result of a call that writes its argument through a
+        // kernel.
+        auto broken = purity;
+        auto& body = body_of(broken, "Purity.keep_kernel_writer_calls");
+        check(body.size() == 5 && body.at(3).op == IrOp::Initialize, "unexpected keep_kernel_writer_calls");
+        auto& value = body.at(3).operands.front();
+        value = load_of(broken, body.at(2).symbol, value.span);
+        check(noticed(purity, broken, "Purity.keep_kernel_writer_calls"),
+              "reuse of a call that writes through a kernel went unnoticed");
+    }
+    {
+        // Removing an unused call that writes its argument through a kernel.
+        auto broken = purity;
+        auto& body = body_of(broken, "Purity.keep_unused_kernel_writer");
+        check(body.size() == 4 && body.at(2).op == IrOp::Discard, "unexpected keep_unused_kernel_writer");
+        body.erase(body.begin() + 2);
+        check(noticed(purity, broken, "Purity.keep_unused_kernel_writer"),
+              "a dropped call that writes through a kernel went unnoticed");
+    }
 }
 
 // Ordered effects worked out from the fixture source: the trace global

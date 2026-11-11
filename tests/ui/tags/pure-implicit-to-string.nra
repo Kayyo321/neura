@@ -1,0 +1,16 @@
+// A #Pure function that turns a list of objects into text (E0917): the text
+// of a list calls the to_string of each element, which here writes a module
+// binding.
+let calls: int64 = 0;
+
+let Tag = class (
+    export let.override to_string = func -> string {
+        calls = calls + 1;
+        return "tag";
+    };
+);
+
+#Pure
+let describe = func(tags: Tag[list]) -> string {
+    return tags.to_string();
+};
