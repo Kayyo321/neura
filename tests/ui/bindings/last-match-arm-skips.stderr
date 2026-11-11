@@ -1,0 +1,15 @@
+error[E0441]: 'result' may be used before it is assigned
+  --> $DIR/last-match-arm-skips.nra:13:12
+   |
+ 5 |     last result: int;
+   |          ------ declared here without a value
+...
+10 |         Shape.Dot => {
+   |         --------- 'result' is not assigned in this arm
+...
+13 |     return result;
+   |            ^^^^^^ used here, but 'result' is not assigned on every path to it
+   |
+   = help: assign 'result' exactly once before this use
+
+For more information about this error, try `neura explain E0441`.

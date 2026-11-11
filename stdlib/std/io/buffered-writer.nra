@@ -8,6 +8,7 @@ let.promote _ = import:Std.Core.Unit;
 /// write of at least the capacity goes straight to the sink after the buffer. It never closes anything. When
 /// the sink fails, the buffered bytes are discarded and the error is returned.
 /// @see [Std.Io.BufferedWriter](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-BufferedWriter)
+#Since("0.1.0")
 export let BufferedWriter = module (
     /// @brief The default buffer capacity in bytes.
     export const DefaultCapacity: int = 8192;
@@ -15,13 +16,19 @@ export let BufferedWriter = module (
     export const MinimumCapacity: int = 16;
 
     /// @brief Wraps a byte sink and batches small writes.
+    #[Final, NotThreadSafe]
     export let BufferedWriter = class (
         /// @brief The destination that receives the outgoing bytes.
-        let sink: func(uint8[list]) -> Result<Unit>;
+        last sink: func(uint8[list]) -> Result<Unit>;
         /// @brief The configured maximum buffer size in bytes.
-        let capacity: int = 8192;
+        last capacity: int;
         /// @brief Stores the buffered bytes.
         let buffer: uint8[list] = [];
+
+        /// @brief The number of bytes waiting for flush. Read-only.
+        #Since("0.2.0")
+        export let buffered: int;
+            | get: buffer.length;
 
         /// @brief Use create or with_capacity.
         export let init = func(output: func(uint8[list]) -> Result<Unit>, size: int) {
@@ -33,6 +40,7 @@ export let BufferedWriter = module (
         };
 
         /// @brief Buffers small writes and forwards larger ones after flushing pending bytes.
+        #NoDiscard
         export let write = func(data: uint8[list]) -> Result<Unit> {
             if (buffer.length + data.length > capacity) {
                 match (flush()) {
@@ -50,25 +58,25 @@ export let BufferedWriter = module (
         };
 
         /// @brief Passes the buffered bytes to the sink.
+        #NoDiscard
         export let flush = func -> Result<Unit> {
             if (buffer.length == 0) {
                 return bytes.ok();
             }
-            let full = buffer;
-            let empty: uint8[list] = [];
+            last full = buffer;
+            last empty: uint8[list] = [];
             buffer = empty;
             return sink(full);
         };
-
-        /// @brief The number of bytes waiting for flush.
-        export let buffered = func -> int => buffer.length;
     );
 
     /// @brief A writer collecting up to 8,192 bytes.
+    #[Pure, ThreadSafe]
     export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> BufferedWriter =>
-        new BufferedWriter(sink, DefaultCapacity);
+        new(sink, DefaultCapacity);
 
     /// @brief A capacity below 16 traps with "invalid argument: capacity below 16".
+    #[Pure, ThreadSafe]
     export let with_capacity = func(sink: func(uint8[list]) -> Result<Unit>, capacity: int) -> BufferedWriter =>
-        new BufferedWriter(sink, capacity);
+        new(sink, capacity);
 );

@@ -7,20 +7,21 @@ One executable compiles, runs, tests, packages, and decompiles Neura programs. S
 - [Install and check the tool](#install-and-check-the-tool)
 - [Everyday workflow](#everyday-workflow)
 - [check](#check)
+- [Diagnostics: explain, formats, warnings, and --fix](#diagnostics-explain-formats-warnings-and---fix)
 - [build and run](#build-and-run)
 - [Capabilities](#capabilities)
-- [Run limits and diagnostics](#run-limits-and-diagnostics)
+- [Run limits, tiers, and devices](#run-limits-tiers-and-devices)
 - [test](#test)
 - [Native executables](#native-executables)
 - [NeuraIR, images, and decompiling](#neurair-images-and-decompiling)
-- [Documentation export](#documentation-export)
+- [Documentation export and the tag catalogue](#documentation-export-and-the-tag-catalogue)
 - [Exit statuses](#exit-statuses)
 
 ## Install and check the tool
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases/latest/download/install.sh | sh
-neura --version        # neura 0.1.0 (x86_64-linux-gnu, commit ...)
+neura --version        # neura 0.2.0 (x86_64-linux-gnu, commit ...)
 neura doctor           # ok / warn / FAIL for the install and optional tools
 neura update --check   # status 4 when a newer release exists
 ```
@@ -37,13 +38,37 @@ neura test tests/app-tests.nra -I src         # run tests
 neura build --native app.nra -o app           # single native executable (Linux)
 ```
 
-Every command that takes sources accepts several `.nra` files and `-I <source-root>` (repeatable) for project imports. Diagnostics go to standard error as `path:line:column: error: message`, and the command exits with status 1.
+Every command that takes sources accepts several `.nra` files and `-I <source-root>` (repeatable) for project imports. Diagnostics go to standard error with a code, the source line, and labels; a command with an error exits with status 1, and warnings alone do not fail it. Add `--error-format=short` for one line per diagnostic ([below](#diagnostics-explain-formats-warnings-and---fix)).
 
 ## check
 
 `neura check [-I root] file.nra...` parses, resolves, and type-checks without optimizing or building. Use it after every edit.
 
 `neura check --task-safety file.nra` prints, for every function of the linked program, whether a spawned task may call it and why not, then exits 0.
+
+`neura check --fix file.nra...` applies every machine-applicable suggestion to the files in place (a missing `;`, a misspelled tag, a `#Deprecated` replacement), repeats until none applies, reports `check --fix applied N edits to M files`, and checks the result. It never edits standard library files. `--fix` and `--task-safety` cannot be combined.
+
+## Diagnostics: explain, formats, warnings, and --fix
+
+```sh
+neura explain E0441                 # the rule, a failing program, and the fix
+neura explain unused-result         # a warning by name
+neura explain --list                # every code and title
+neura check --error-format=short app.nra   # app.nra:3:5: error[E0441]: 'x' may be used before it is assigned
+neura check --error-format=json app.nra    # one JSON object per diagnostic
+neura check -Werror -Wno-deprecated app.nra
+```
+
+| Option | Commands | Meaning |
+| --- | --- | --- |
+| `--error-format=human\|short\|json` | all | `human` (default) renders snippets with `^` and `-` labels and `help:` fixes; `short` is the stable one-line form for scripts; `json` is one object per line ([errors-and-diagnostics.md](errors-and-diagnostics.md#diagnostics-for-agents---error-format)). |
+| `--color=auto\|always\|never` | all | Color the human form; `auto` colors a terminal unless `NO_COLOR` is set or `TERM=dumb`. |
+| `--max-errors N` | `check`, `emit-ir`, `build`, `test` | Stop after N syntax errors (default 20). Later stages stop at the first error. |
+| `-W<name>`, `-Wno-<name>` | `check`, `emit-ir`, `build`, `test` | Enable or disable a warning by name: `deprecated`, `experimental`, `unused-result`, `inline`, `setter-never-stores`. An unknown name is an error. |
+| `-Werror` | `check`, `emit-ir`, `build`, `test` | Every warning becomes an error. |
+| `--warn-library` | `check`, `emit-ir`, `build`, `test` | Also report warnings inside the standard library. |
+| `--fix` | `check` | Apply machine-applicable fixes in place. |
+| `--explain <CODE>` | `neura --explain` | Same as `neura explain <CODE>`. |
 
 ## build and run
 
@@ -52,6 +77,7 @@ neura build app.nra -o app.nvr                # sources -> image
 neura build lib.nir -o app.nvr                # prebuilt NeuraIR -> image
 neura build --no-optimize app.nra -o app.nvr  # skip the optimizer
 neura build --no-source-map app.nra -o app.nvr  # omit source locations
+neura build --no-lift-hints app.nra -o app.nvr  # omit the optional LIFT hints for tier 1
 neura run app.nvr -- a b c
 neura run --stats app.nvr                     # steps, heap peak, host requests, graph sizes
 neura run --profile app.nvr                   # steps per function
@@ -80,7 +106,7 @@ Everything a program does outside itself is a host service. `run`, `test`, and t
 
 Options apply left to right: `neura run --deny-all --allow-fs=data app.nvr` grants only files below `data`. Run untrusted images with `--deny-all` plus what they need.
 
-## Run limits and diagnostics
+## Run limits, tiers, and devices
 
 | Option | Default | Exceeding it |
 | --- | --- | --- |
@@ -89,6 +115,8 @@ Options apply left to right: `neura run --deny-all --allow-fs=data app.nvr` gran
 | `--max-heap-cells N` | 67,108,864 cells | status 137 |
 
 Raise `--max-steps` for long computations: a loop that runs past the default ends with `trap: step limit exceeded: 100000000 steps`. Concurrency options (`--max-tasks`, `--task-quantum`, `--parallel-workers`, `--task-dump`, `--trace-events`, `--virtual-time`) are in [concurrency.md](concurrency.md#running-and-testing-concurrent-programs).
+
+Execution tiers: tier 0 evaluates every block by reference; tier 1 also runs blocks it has proven to compute typed operations natively; tier 2, the default, also runs regions of proven blocks of one function together. The output, steps, traps, and traces are identical at every tier. `--tier=0` forces the reference tier (as does `NEURA_TIER=0` in the environment), `--tier=1` stops at lifted blocks, and `--tier-stats` prints the blocks lifted, the regions, and the steps each tier ran. `--jit=auto` (default) compiles tier 2 regions to machine code on x86-64 Linux and interprets them elsewhere, `--jit=on` compiles them wherever the runner has a code generator (x86-64 and AArch64 on Linux and macOS; experimental off x86-64 Linux) and fails the run at its start where it cannot, and `--jit=off` interprets them; `NEURA_JIT=off|on|auto` sets it for every run. Results are identical in every mode, and `--deny-native` does not affect it. `run` and `test` take these options; `NEURA_RUN_OPTIONS` may lower a native executable's tier and set `--jit`.
 
 GPU execution: `--gpu=auto` (default) uses a Vulkan device only when it is predicted to be faster; `--gpu=off` or `--no-gpu` forces the CPU; `--require-gpu` fails without a device. Release archives are built without the GPU backend. Results never depend on the device.
 
@@ -100,7 +128,7 @@ neura test -I src tests/math-tests.nra tests/text-tests.nra
 
 - Runs every exported zero-argument `void` function named `test_*` in a module of each listed file (imported files contribute no tests), each in a fresh execution after normal program initialization.
 - Prints `PASS Module.test_name` or `FAIL Module.test_name: <message> at file.nra:line:col`, then `N test(s), P passed, F failed`. Exits 0 only when every test passes, and 1 when any fails, none is found, or the build fails.
-- Accepts the capability options, `--max-steps`/`--max-frames`/`--max-heap-cells` (per test), `--stats`, `--no-optimize`, and the concurrency options, plus `--virtual-time`, `--schedules N`, `--schedule-seed S`, `--save-schedule FILE`, and `--schedule FILE`.
+- Accepts the capability options, `--max-steps`/`--max-frames`/`--max-heap-cells` (per test), `--stats`, `--tier=0|1|2`, `--jit=off|on|auto`, `--tier-stats`, `--no-optimize`, the diagnostic options, and the concurrency options, plus `--virtual-time`, `--schedules N`, `--schedule-seed S`, `--save-schedule FILE`, and `--schedule FILE`.
 - No fixtures, mocks, timeouts, or parallel test execution. A test file does not need an entry module.
 
 ## Native executables
@@ -128,9 +156,11 @@ neura decompile --no-provenance app.nvr   # ignore optional names and source map
 neura c-bindings header.h                 # show the module a C import would generate
 ```
 
-## Documentation export
+## Documentation export and the tag catalogue
 
-`neura docs file.nra -o index.json` exports `///` documentation as JSON for editors; `neura docs --doxygen file.nra` is a Doxygen input filter (`INPUT_FILTER = "neura docs --doxygen"`, `EXTENSION_MAPPING = nra=C++`).
+`neura tags` prints every `#` tag with its arguments, targets, status, and meaning; `neura tags NoDiscard` prints one ([tags.md](tags.md)).
+
+`neura docs file.nra -o index.json` exports `///` documentation, with each declaration's tags, `last`, and accessors (`{ get; set }`), as JSON for editors; `#Hidden` declarations are left out; `neura docs --doxygen file.nra` is a Doxygen input filter (`INPUT_FILTER = "neura docs --doxygen"`, `EXTENSION_MAPPING = nra=C++`).
 
 ## Exit statuses
 

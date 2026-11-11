@@ -1,0 +1,9 @@
+error[E0909]: tags cannot apply to a destructuring declaration
+ --> $DIR/tags-before-destructuring.nra:7:1
+  |
+6 | #Todo("name the parts")
+  | ----------------------- these tags need a declaration to apply to
+7 | let [first, second] = pair();
+  | ^^^ a destructuring declaration takes no tags
+
+For more information about this error, try `neura explain E0909`.

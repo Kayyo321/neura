@@ -30,7 +30,11 @@ namespace neura::testing {
 // lists with lengths, indexing, append, remove_at, and structural versions;
 // and external calls, which are recorded as effects whose response is
 // `void`, or for a standard library host binding, the success variant `Ok`
-// when it carries no payload. `neura.process.exit` ends the run with
+// when it carries no payload. A call of a kernel-bound function
+// (docs/runtime/Kernels.md) is not an effect: it runs the runtime's own
+// kernel through the generated kernel table, with the arguments, writes to
+// writable arguments, result, outcome tuple, and trap message NVM gives it;
+// its step charge is not modeled. `neura.process.exit` ends the run with
 // Status::Exited.
 //
 // Scoped tasks (docs/lang/Concurrency.md sections 4 and 10.2): TaskScope,

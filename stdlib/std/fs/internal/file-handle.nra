@@ -2,11 +2,12 @@
 /// never leaves the library.
 export let FileHandle = module (
     /// @brief Pairs a provider file identifier with its opening path.
+    #[Final, Immutable]
     export let FileHandle = class (
         /// @brief The provider's identifier for the open file.
-        export let id: int64 = 0;
+        export last id: int64;
         /// @brief The opening path retained for diagnostics.
-        export let path: string = "";
+        export last path: string;
 
         /// @brief Stores the provider identifier and path.
         export let init = func(host_id: int64, path_text: string) {

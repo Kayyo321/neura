@@ -1,22 +1,25 @@
 /// @brief The days of the week in ISO order (Stdlib.md section 12.1). The ordinal (`as int`) is 0 for Monday
 /// through 6 for Sunday; epoch day 0, 1970-01-01, is a Thursday.
 /// @see [Std.Time.DayOfWeek](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-DayOfWeek)
+#Since("0.1.0")
 export let DayOfWeek = module (
     /// @brief The seven weekdays in ISO order, with Monday at ordinal zero.
     export let DayOfWeek = enum (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday);
 
     /// @brief The day `days` after `day`; negative counts go back.
+    #[Pure, ThreadSafe]
     export let plus = func(day: DayOfWeek, days: int64) -> DayOfWeek {
-        let index = ((day as int64) + days % 7 + 7) % 7;
+        last index = ((day as int64) + days % 7 + 7) % 7;
         return of_ordinal(index as int);
     };
 
     /// @brief 0 for Monday through 6 for Sunday; anything else traps with "invalid argument: day of week".
+    #[Pure, ThreadSafe]
     export let of_ordinal = func(ordinal: int) -> DayOfWeek {
         if (ordinal < 0 || ordinal > 6) {
             trap_with_message("invalid argument: day of week");
         }
-        let days: DayOfWeek[] = [
+        last days: DayOfWeek[] = [
             DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday,
             DayOfWeek.Saturday, DayOfWeek.Sunday
         ];

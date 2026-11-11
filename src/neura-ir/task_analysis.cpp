@@ -1,6 +1,10 @@
 #include "task_analysis.hpp"
 
+#include "attributes.hpp"
 #include "host_binding.hpp"
+#include "kernel_signature.hpp"
+#include "monitors.hpp"
+#include "tags.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -47,13 +51,6 @@ std::string display(const IrType& type) {
     return type.name.empty() ? std::string("value") : type.name;
 }
 
-std::string location(const Span& span) {
-    if (span.file.empty()) return {};
-    const auto slash = span.file.find_last_of("/\\");
-    return (slash == std::string::npos ? span.file : span.file.substr(slash + 1)) + ':' +
-           std::to_string(span.line) + ':' + std::to_string(span.column);
-}
-
 } // namespace
 
 bool has_spawn(const IrProgram& program) {
@@ -86,7 +83,7 @@ void insert_polls(IrProgram& program) {
     }
 }
 
-TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program) {
+TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program), dispatch_(program) {
     for (const auto& body : program.bodies) bodies_.emplace(body.owner, &body);
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
         const auto& item = program.symbols[id];
@@ -105,6 +102,7 @@ TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program) {
         }
     }
     find_created_closures();
+    find_stray_accesses();
     summarize();
 }
 
@@ -191,11 +189,100 @@ bool TaskAnalysis::fields_transferable(SymbolId cls) const {
     return std::ranges::all_of(fields, [&](SymbolId field) { return transferable(symbol(field).type); });
 }
 
-bool TaskAnalysis::transferable_class(SymbolId cls) const {
+// Section 8.1: the state of a monitor is reached only by its own methods,
+// through their receiver, so holding the receiver's guard covers it. A field
+// read or written through any other object, and a call of a hidden method on
+// one, is a stray access.
+void TaskAnalysis::find_stray_accesses() {
+    const auto declared_monitor = [&](SymbolId cls) {
+        return valid(cls) && symbol(cls).kind == SymbolKind::Class &&
+               has_attribute(symbol(cls), AttributeId::ClassShareable);
+    };
+    const auto describe = [&](SymbolId owner) {
+        if (!valid(owner)) return std::string("code");
+        if (symbol(owner).name == "$invoke") return std::string("a function value");
+        // The body of a synchronized method runs as its locked copy.
+        auto name = symbol(owner).name;
+        if (name.starts_with("$locked.")) name = name.substr(8);
+        return "'" + name + "'";
+    };
+    for (const auto& body : program_.bodies) {
+        const auto owner = body.owner;
+        // A method or a field initializer, whose receiver is the instance.
+        const bool method = valid(owner) && (symbol(owner).kind == SymbolKind::Class ||
+                                             (symbol(owner).kind == SymbolKind::Function && valid(symbol(owner).owner) &&
+                                              symbol(symbol(owner).owner).kind == SymbolKind::Class &&
+                                              !capture_layout(symbol(owner).owner)));
+        each_node(body.instructions, [&](const IrNode& node) {
+            const bool through_receiver = method && !node.operands.empty() && node.operands.front().op == IrOp::Receiver;
+            if (node.op == IrOp::Field && valid(node.symbol) && symbol(node.symbol).kind == SymbolKind::Field) {
+                const auto cls = symbol(node.symbol).owner;
+                if (!declared_monitor(cls) || through_receiver || stray_access_.contains(cls)) return;
+                stray_access_.emplace(cls, Problem{describe(owner) + " uses the field '" + symbol(node.symbol).name +
+                                                       "' of an instance other than its receiver, without that "
+                                                       "instance's guard",
+                                                   node.span});
+            }
+            if ((node.op == IrOp::Call || node.op == IrOp::VirtualCall) && valid(node.symbol)) {
+                const auto& target = symbol(node.symbol);
+                const auto cls = target.owner;
+                if (target.kind != SymbolKind::Function || !declared_monitor(cls) || target.exported ||
+                    synchronized_method(target) || target.name == "init" || target.name == "deinit" ||
+                    through_receiver || stray_access_.contains(cls))
+                    return;
+                stray_access_.emplace(cls, Problem{describe(owner) + " calls the hidden method '" + target.name +
+                                                       "' of an instance other than its receiver, without that "
+                                                       "instance's guard",
+                                                   node.span});
+            }
+        });
+    }
+}
+
+std::optional<TaskAnalysis::Problem> TaskAnalysis::shareable_problem(SymbolId cls) const {
+    if (!valid(cls) || symbol(cls).kind != SymbolKind::Class) return Problem{"it is not a class", {}};
+    const auto& item = symbol(cls);
+    if (const auto marked = not_thread_safe_class(cls); marked != no_symbol) {
+        return Problem{marked == cls ? "it is marked #NotThreadSafe"
+                                     : "it extends '" + symbol(marked).name + "', which is marked #NotThreadSafe",
+                       tag_span(symbol(marked), TagId::NotThreadSafe).value_or(symbol(marked).span)};
+    }
+    if (!has_attribute(item, AttributeId::ClassShareable)) {
+        if (const auto problem = monitor_problem(program_, cls)) return Problem{problem->text, problem->span};
+        return Problem{"it is not a monitor", item.span};
+    }
+    for (const auto field : all_fields(cls)) {
+        if (transferable(symbol(field).type)) continue;
+        return Problem{"its field '" + symbol(field).name + "' has the type " + display(symbol(field).type) +
+                           ", which is not transferable",
+                       symbol(field).span};
+    }
+    std::set<SymbolId> seen;
+    for (auto scope = cls; valid(scope) && seen.insert(scope).second; scope = symbol(scope).base) {
+        if (const auto found = stray_access_.find(scope); found != stray_access_.end()) return found->second;
+    }
+    if (const auto found = derived_.find(cls); found != derived_.end()) {
+        for (const auto derived : found->second) {
+            if (const auto problem = shareable_problem(derived)) {
+                return Problem{"its subclass '" + symbol(derived).name + "' is not shareable: " + problem->text,
+                               problem->span};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+bool TaskAnalysis::class_transferable(SymbolId cls, bool item) const {
     if (!valid(cls) || symbol(cls).kind != SymbolKind::Class) return false;
-    if (const auto known = class_cache_.find(cls); known != class_cache_.end()) return known->second;
+    auto& cache = class_cache_[item ? 1 : 0];
+    if (const auto known = cache.find(cls); known != cache.end()) return known->second;
     // A type that reaches itself is transferable when its other parts are.
-    class_cache_[cls] = true;
+    cache[cls] = true;
+    const auto parts = [&](SymbolId layout) {
+        return std::ranges::all_of(all_fields(layout), [&](SymbolId field) {
+            return transferable_in(symbol(field).type, item);
+        });
+    };
     bool result = false;
     if (signature_layout(cls)) {
         // Section 5.2's union rule, applied to values: a function value is
@@ -204,17 +291,34 @@ bool TaskAnalysis::transferable_class(SymbolId cls) const {
         result = true;
         if (const auto found = derived_.find(cls); found != derived_.end()) {
             result = std::ranges::all_of(found->second, [&](SymbolId layout) {
-                return !created_.contains(layout) || fields_transferable(layout);
+                return !created_.contains(layout) || parts(layout);
             });
         }
     } else if (capture_layout(cls) || concurrent_handle(cls)) {
-        result = fields_transferable(cls);
+        result = parts(cls);
+    } else if (not_thread_safe_class(cls) != no_symbol) {
+        result = false;
+    } else if (has_tag(symbol(cls), TagId::Immutable)) {
+        // No field changes after construction, so a task that receives the
+        // instance shares nothing that can change, and an item receives a
+        // copy. A specialization of a generic class is transferable when its
+        // fields are. Every subclass is #Immutable too.
+        result = parts(cls);
+        if (const auto found = derived_.find(cls); result && found != derived_.end()) {
+            result = std::ranges::all_of(found->second, [&](SymbolId derived) {
+                return class_transferable(derived, item);
+            });
+        }
+    } else if (!item && has_attribute(symbol(cls), AttributeId::ClassShareable)) {
+        // A monitor is shared, not copied: an isolated item, which has its
+        // own heap and no scheduler, cannot receive one.
+        result = !shareable_problem(cls);
     }
-    class_cache_[cls] = result;
+    cache[cls] = result;
     return result;
 }
 
-bool TaskAnalysis::transferable(const IrType& type) const {
+bool TaskAnalysis::transferable_in(const IrType& type, bool item) const {
     switch (type.kind) {
     case TypeKind::Bool:
     case TypeKind::Integer:
@@ -222,28 +326,66 @@ bool TaskAnalysis::transferable(const IrType& type) const {
     case TypeKind::String:
         return true;
     case TypeKind::Tuple:
-        return std::ranges::all_of(type.arguments, [&](const IrType& part) { return transferable(part); });
+        return std::ranges::all_of(type.arguments, [&](const IrType& part) { return transferable_in(part, item); });
     case TypeKind::Enum: {
         if (!valid(type.symbol)) return false;
-        if (const auto known = enum_cache_.find(type.symbol); known != enum_cache_.end()) return known->second;
-        enum_cache_[type.symbol] = true;
+        auto& cache = enum_cache_[item ? 1 : 0];
+        if (const auto known = cache.find(type.symbol); known != cache.end()) return known->second;
+        cache[type.symbol] = true;
         bool result = true;
         if (const auto found = variants_.find(type.symbol); found != variants_.end()) {
             for (const auto variant : found->second) {
                 result = result && std::ranges::all_of(symbol(variant).payload_types, [&](const IrType& payload) {
-                    return transferable(payload);
+                    return transferable_in(payload, item);
                 });
             }
         }
-        enum_cache_[type.symbol] = result;
+        cache[type.symbol] = result;
         return result;
     }
     case TypeKind::Object:
-        return transferable_class(type.symbol);
+        return class_transferable(type.symbol, item);
     default:
         // Arrays and lists can be assigned through; a module, a type
         // parameter, and an unspecialized callable are not values here.
         return false;
+    }
+}
+
+void TaskAnalysis::explain_class(Diagnostic& error, const IrType& type) const {
+    if (type.kind != TypeKind::Object || !valid(type.symbol)) return;
+    const auto cls = type.symbol;
+    const auto& item = symbol(cls);
+    if (item.kind != SymbolKind::Class) return;
+    if (const auto marked = not_thread_safe_class(cls); marked != no_symbol) {
+        error.label(tag_span(symbol(marked), TagId::NotThreadSafe).value_or(symbol(marked).span),
+                    "'" + symbol(marked).name + "' is marked #NotThreadSafe here");
+        error.note("the instances of a #NotThreadSafe class, and of a class that extends one, stay in the task that "
+                   "holds them");
+        return;
+    }
+    if (has_tag(item, TagId::Immutable)) {
+        for (const auto field : all_fields(cls)) {
+            if (transferable(symbol(field).type)) continue;
+            error.label(symbol(field).span, "'" + item.name + "' holds a value of type " +
+                                                display(symbol(field).type) + " here");
+            return;
+        }
+        return;
+    }
+    if (!has_synchronized_methods(program_, cls)) {
+        // A class of the program's own, which its author could make shareable.
+        if (!library_code(cls) && !signature_layout(cls) && !capture_layout(cls) && !concurrent_handle(cls)) {
+            error.note("tasks may share an instance of a class marked #Immutable, or of a monitor, whose exported "
+                       "methods are #Synchronized");
+        }
+        return;
+    }
+    if (const auto problem = shareable_problem(cls)) {
+        error.label(problem->span, "'" + item.name + "' is not shareable: " + problem->text);
+        error.note("tasks may share an instance of a monitor: a class whose exported methods are all #Synchronized, "
+                   "whose fields are transferable, and whose state only its own methods reach through their "
+                   "receiver");
     }
 }
 
@@ -269,6 +411,10 @@ std::optional<TaskAnalysis::Reason> TaskAnalysis::direct(const IrNode& node) con
 std::optional<TaskAnalysis::Reason> TaskAnalysis::isolated_reason(const IrNode& node) const {
     switch (node.op) {
     case IrOp::ExternalCall:
+        // A kernel runs inside the NVM like a heap operation: it reads its
+        // arguments and writes only the storage it is given, so a task or an
+        // isolated item may call it (docs/runtime/Kernels.md).
+        if (valid(node.symbol) && kernel_bound(symbol(node.symbol))) return std::nullopt;
         return Reason{"issues a host request", node.span, no_symbol};
     case IrOp::Spawn:
     case IrOp::TaskScope:
@@ -297,16 +443,30 @@ void TaskAnalysis::callees(const IrNode& node, std::vector<std::pair<SymbolId, S
     case IrOp::Call:
         add(node.symbol);
         break;
-    case IrOp::VirtualCall:
-        // The union over every implementation the call can reach.
-        add(node.symbol);
+    case IrOp::VirtualCall: {
+        // The union over every implementation the call can reach: every
+        // override, and every implementation of an interface method, which
+        // needs no `.override` (dispatch.hpp).
+        std::set<SymbolId> reached{node.symbol};
         if (const auto found = overriders_.find(node.symbol); found != overriders_.end()) {
-            for (const auto id : found->second) {
-                // Only a closure that some reachable code creates can be
-                // what the call runs.
-                if (const auto layout = closure_of(id); layout != no_symbol && !created_.contains(layout)) continue;
-                add(id);
-            }
+            reached.insert(found->second.begin(), found->second.end());
+        }
+        for (const auto id : dispatch_.of(node)) reached.insert(id);
+        for (const auto id : reached) {
+            // Only a closure that some reachable code creates can be what
+            // the call runs.
+            if (const auto layout = closure_of(id); layout != no_symbol && !created_.contains(layout)) continue;
+            add(id);
+        }
+        break;
+    }
+    case IrOp::ValueEquals:
+    case IrOp::ValueHash:
+    case IrOp::ValueText:
+        // The members that equality, hashing, and text of the value run.
+        if (!node.operands.empty()) {
+            bool deferred = false;
+            for (const auto id : dispatch_.value_members(node.operands.front().type, node.op, deferred)) add(id);
         }
         break;
     case IrOp::BaseInitialize:
@@ -351,6 +511,16 @@ void TaskAnalysis::summarize() {
     // of each owner. A class owner stands for its field initializers.
     std::map<SymbolId, std::vector<std::pair<SymbolId, Span>>> edges;
     std::map<SymbolId, std::vector<SymbolId>> callers;
+    // #NotThreadSafe on a function or method: the author declines to promise
+    // task safety for it. On a class it keeps the instances in one task
+    // (class_transferable), and a task may use an instance of its own.
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        const auto& item = symbol(id);
+        if (item.kind != SymbolKind::Function) continue;
+        if (const auto tag = tag_span(item, TagId::NotThreadSafe)) {
+            unsafe_.emplace(id, Reason{"is marked #NotThreadSafe", *tag, no_symbol});
+        }
+    }
     for (const auto& body : program_.bodies) {
         auto& out = edges[body.owner];
         each_node(body.instructions, [&](const IrNode& node) {
@@ -387,6 +557,14 @@ void TaskAnalysis::summarize() {
     };
     propagate(unsafe_);
     propagate(impure_);
+}
+
+SymbolId TaskAnalysis::not_thread_safe_class(SymbolId cls) const {
+    std::set<SymbolId> seen;
+    for (auto scope = cls; valid(scope) && seen.insert(scope).second; scope = symbol(scope).base) {
+        if (symbol(scope).kind == SymbolKind::Class && has_tag(symbol(scope), TagId::NotThreadSafe)) return scope;
+    }
+    return no_symbol;
 }
 
 bool TaskAnalysis::library_code(SymbolId owner) const {
@@ -445,9 +623,9 @@ void TaskAnalysis::check() const {
     SymbolId first_operation_owner = no_symbol;
     // For a function type that is not transferable, the capture that makes it
     // so: under the union rule the reason is a closure somewhere else in the
-    // program, which the type alone does not show.
-    const auto capture_note = [&](const IrType& type) -> std::string {
-        if (type.kind != TypeKind::Object || !valid(type.symbol)) return {};
+    // program, which the type alone does not show. Labelled at the capture.
+    const auto capture_note = [&](Diagnostic& error, const IrType& type) {
+        if (type.kind != TypeKind::Object || !valid(type.symbol)) return;
         std::vector<SymbolId> layouts;
         if (signature_layout(type.symbol)) {
             if (const auto found = derived_.find(type.symbol); found != derived_.end()) layouts = found->second;
@@ -458,16 +636,34 @@ void TaskAnalysis::check() const {
             if (!created_.contains(layout)) continue;
             for (const auto field : all_fields(layout)) {
                 if (transferable(symbol(field).type)) continue;
-                return ": a function value of this type captures a value of type " + display(symbol(field).type) +
-                       " at " + location(symbol(field).span);
+                error.label(symbol(field).span, "a function value of this type captures a value of type " +
+                                                    display(symbol(field).type) + " here");
+                return;
             }
         }
-        return {};
     };
     // A check that fails inside a library helper is reported where the
-    // user's code calls into the library, and says where the task starts.
-    const auto started_by_library = [&](SymbolId owner, const Span& span) -> std::string {
-        return library_code(owner) ? " (the library starts the task at " + location(span) + ")" : std::string();
+    // user's code calls into the library, and labels where the task starts.
+    const auto started_by_library = [&](Diagnostic& error, SymbolId owner, const Span& span) {
+        if (library_code(owner)) error.label(span, "the library starts the task here");
+    };
+    // A task-safety error: the rule's first clause and, in the message, the
+    // function that breaks it and what it does; each call on the way from the
+    // checked call is a label, as is the operation itself.
+    const auto unsafe_error = [&](const Span& at, std::string rule, const Unsafe& reason) {
+        std::vector<std::pair<SymbolId, Span>> hops;
+        for (const auto& [callee, span] : reason.calls) {
+            if (symbol(callee).name == "$invoke" || symbol(callee).kind != SymbolKind::Function) continue;
+            hops.emplace_back(callee, span);
+        }
+        auto text = std::move(rule) + ": ";
+        text += hops.empty() ? "it " + reason.operation
+                             : "it reaches '" + symbol(hops.back().first).name + "', which " + reason.operation;
+        auto error = Diagnostic(at, std::move(text)).with_code("E0601").label("this call must be task-safe");
+        for (const auto& [callee, span] : hops) error.label(span, "calls '" + symbol(callee).name + "'");
+        error.label(reason.span, reason.operation + " here");
+        error.note("`neura check --task-safety` reports for every function whether it is task-safe, and why not");
+        return error;
     };
     for (const auto& body : program_.bodies) {
         each_node(body.instructions, [&](const IrNode& node) {
@@ -478,11 +674,18 @@ void TaskAnalysis::check() const {
             }
             if (node.op == IrOp::SchedulerCall) {
                 // What a channel carries is given to another task (5.1).
-                const auto require = [&](const IrType& type, const char* role) {
-                    if (transferable(type)) return;
-                    throw Diagnostic(user_site(body.owner, node.span),
-                                     "a value of type " + display(type) + " is not transferable, so it cannot be " + role +
-                                     capture_note(type));
+                const auto require = [&](const IrType& type, const char* role, bool item = false) {
+                    if (transferable_in(type, item)) return;
+                    auto error = Diagnostic(user_site(body.owner, node.span),
+                                            "a value of type " + display(type) + " is not transferable, so it cannot be " +
+                                            role).with_code("E0602").label("not transferable");
+                    capture_note(error, type);
+                    explain_class(error, type);
+                    if (item && transferable(type)) {
+                        error.note("tasks share an instance of a monitor, but a parallel item runs in a heap of its "
+                                   "own and receives copies, so a monitor cannot enter one");
+                    }
+                    throw error;
                 };
                 if (node.text == "transfer.check" && node.operands.size() == 1) {
                     require(node.operands.front().type, "used where a transferable value is required");
@@ -491,28 +694,22 @@ void TaskAnalysis::check() const {
                     // An isolated item: its captures enter another heap, its
                     // result returns from one, and it may touch nothing else.
                     const auto layout = symbol(node.operands.front().symbol).owner;
-                    for (const auto field : all_fields(layout)) require(symbol(field).type, "given to a parallel item");
+                    for (const auto field : all_fields(layout)) require(symbol(field).type, "given to a parallel item", true);
                     SymbolId invoke = no_symbol;
                     for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
                         const auto& item = symbol(id);
                         if (item.kind == SymbolKind::Function && item.owner == layout && item.name == "$invoke") invoke = id;
                     }
-                    if (invoke == no_symbol) throw Diagnostic(node.span, "an isolated function value has no body");
-                    require(symbol(invoke).type, "the result of a parallel item");
-                    const auto describe_chain = [&](const Unsafe& reason, const char* rule) {
-                        std::string text = std::string("the worker of a parallel map ") + rule + ": ";
-                        for (const auto& [callee, span] : reason.calls) {
-                            if (symbol(callee).name == "$invoke" || symbol(callee).kind != SymbolKind::Function) continue;
-                            text += "it reaches '" + symbol(callee).name + "' (called at " + location(span) + "), and ";
-                        }
-                        return text + "that code " + reason.operation + " at " + location(reason.span);
-                    };
+                    if (invoke == no_symbol) throw Diagnostic(node.span, "an isolated function value has no body")
+                        .with_code("E0899");
+                    require(symbol(invoke).type, "the result of a parallel item", true);
                     if (const auto reason = chain(unsafe_, invoke)) {
-                        throw Diagnostic(user_site(body.owner, node.span), describe_chain(*reason, "is not task-safe"));
+                        throw unsafe_error(user_site(body.owner, node.span),
+                                           "the worker of a parallel map is not task-safe", *reason);
                     }
                     if (const auto reason = chain(impure_, invoke)) {
-                        throw Diagnostic(user_site(body.owner, node.span),
-                                         describe_chain(*reason, "must compute in isolation"));
+                        throw unsafe_error(user_site(body.owner, node.span),
+                                           "the worker of a parallel map must compute in isolation", *reason);
                     }
                 } else if (node.text == "channel.open" && !node.type_arguments.empty()) {
                     require(node.type_arguments.front(), "a channel's element type");
@@ -531,17 +728,21 @@ void TaskAnalysis::check() const {
             if (!first_spawn) first_spawn = &node;
             if (node.operands.size() != 1 || node.operands.front().op != IrOp::Allocate ||
                 !valid(node.operands.front().symbol)) {
-                throw Diagnostic(node.span, "spawn must be checked after specialization");
+                throw Diagnostic(node.span, "spawn must be checked after specialization").with_code("E0899");
             }
             const auto layout = symbol(node.operands.front().symbol).owner;
             // The captures are the callee value, a receiver, and the
             // arguments, each at the span of the expression it came from.
             for (const auto field : all_fields(layout)) {
                 if (!transferable(symbol(field).type)) {
-                    throw Diagnostic(user_site(body.owner, symbol(field).span),
-                                     "a value of type " + display(symbol(field).type) +
-                                     " is not transferable, so it cannot be given to a spawned task" +
-                                     capture_note(symbol(field).type) + started_by_library(body.owner, node.span));
+                    auto error = Diagnostic(user_site(body.owner, symbol(field).span),
+                                            "a value of type " + display(symbol(field).type) +
+                                            " is not transferable, so it cannot be given to a spawned task")
+                        .with_code("E0602").label("not transferable");
+                    capture_note(error, symbol(field).type);
+                    explain_class(error, symbol(field).type);
+                    started_by_library(error, body.owner, node.span);
+                    throw error;
                 }
             }
             SymbolId invoke = no_symbol;
@@ -549,15 +750,12 @@ void TaskAnalysis::check() const {
                 const auto& item = symbol(id);
                 if (item.kind == SymbolKind::Function && item.owner == layout && item.name == "$invoke") invoke = id;
             }
-            if (invoke == no_symbol) throw Diagnostic(node.span, "a spawned function value has no body");
+            if (invoke == no_symbol) throw Diagnostic(node.span, "a spawned function value has no body")
+                .with_code("E0899");
             if (const auto reason = unsafe(invoke)) {
-                std::string text = "the spawned call is not task-safe: ";
-                for (const auto& [callee, span] : reason->calls) {
-                    if (symbol(callee).name == "$invoke" || symbol(callee).kind != SymbolKind::Function) continue;
-                    text += "it reaches '" + symbol(callee).name + "' (called at " + location(span) + "), and ";
-                }
-                text += "that code " + reason->operation + " at " + location(reason->span);
-                throw Diagnostic(user_site(body.owner, node.span), text + started_by_library(body.owner, node.span));
+                auto error = unsafe_error(user_site(body.owner, node.span), "the spawned call is not task-safe", *reason);
+                started_by_library(error, body.owner, node.span);
+                throw error;
             }
         });
     }
@@ -573,12 +771,80 @@ void TaskAnalysis::check() const {
     if (native && first_spawn) {
         throw Diagnostic(first_spawn->span,
                          "a program that spawns a task cannot use Std.DynamicForeign or import:c(...): "
-                         "tasks and native calls cannot share an image yet");
+                         "tasks and native calls cannot share an image yet").with_code("E0604");
     }
     if (native) {
         throw Diagnostic(user_site(first_operation_owner, first_operation->span),
                          "a program that uses a scope, a channel, or another scheduler operation cannot use "
-                         "Std.DynamicForeign or import:c(...): tasks and native calls cannot share an image yet");
+                         "Std.DynamicForeign or import:c(...): tasks and native calls cannot share an image yet")
+            .with_code("E0604");
+    }
+}
+
+void TaskAnalysis::check_tags() const {
+    // A generic declaration is checked in each of its specializations.
+    const auto in_template = [&](SymbolId id) {
+        std::set<SymbolId> seen;
+        for (auto scope = id; valid(scope) && seen.insert(scope).second; scope = symbol(scope).owner) {
+            if (!symbol(scope).generics.empty()) return true;
+        }
+        return false;
+    };
+    const auto not_task_safe = [&](const Span& at, std::string subject, const Unsafe& reason) {
+        std::vector<std::pair<SymbolId, Span>> hops;
+        for (const auto& [callee, span] : reason.calls) {
+            if (symbol(callee).name == "$invoke" || symbol(callee).kind != SymbolKind::Function) continue;
+            hops.emplace_back(callee, span);
+        }
+        auto text = std::move(subject) + " is not task-safe: ";
+        text += hops.empty() ? "it " + reason.operation
+                             : "it reaches '" + symbol(hops.back().first).name + "', which " + reason.operation;
+        auto error = Diagnostic(at, std::move(text)).with_code("E0608").label("#ThreadSafe promises task safety");
+        for (const auto& [callee, span] : hops) error.label(span, "calls '" + symbol(callee).name + "'");
+        error.label(reason.span, reason.operation + " here");
+        error.note("`neura check --task-safety` reports for every function whether it is task-safe, and why not");
+        error.help("remove #ThreadSafe, or remove the use of shared state");
+        return error;
+    };
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        const auto& item = symbol(id);
+        const auto tag = tag_span(item, TagId::ThreadSafe);
+        if (!tag || in_template(id)) continue;
+        if (item.kind == SymbolKind::Function) {
+            if (const auto reason = unsafe(id)) {
+                throw not_task_safe(*tag, "#ThreadSafe function '" + item.name + "'", *reason);
+            }
+            continue;
+        }
+        if (item.kind != SymbolKind::Class) continue;
+        if (!transferable_class(id)) {
+            auto error = Diagnostic(*tag, "#ThreadSafe class '" + item.name + "' cannot be shared between tasks")
+                .with_code("E0609").label("#ThreadSafe promises that tasks may share its instances");
+            if (has_tag(item, TagId::Immutable)) {
+                for (const auto field : all_fields(id)) {
+                    if (transferable(symbol(field).type)) continue;
+                    error.label(symbol(field).span, "this field has the type " + display(symbol(field).type) +
+                                                        ", which is not transferable");
+                    break;
+                }
+            } else if (const auto problem = shareable_problem(id)) {
+                error.label(problem->span, problem->text);
+            }
+            error.note("tasks may share an instance of an #Immutable class, or of a monitor: a class whose exported "
+                       "methods are all #Synchronized, whose fields are transferable, and whose state only its own "
+                       "methods reach through their receiver");
+            error.help("mark the class #Immutable or #Synchronized, or remove #ThreadSafe");
+            throw error;
+        }
+        // Every exported method, on a shared instance, from any task.
+        for (SymbolId member = 0; member < program_.symbols.size(); ++member) {
+            const auto& function = symbol(member);
+            if (function.kind != SymbolKind::Function || function.owner != id || !function.exported) continue;
+            if (const auto reason = unsafe(member)) {
+                throw not_task_safe(*tag, "method '" + function.name + "' of #ThreadSafe class '" + item.name + "'",
+                                    *reason);
+            }
+        }
     }
 }
 

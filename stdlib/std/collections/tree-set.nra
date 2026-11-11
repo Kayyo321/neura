@@ -12,16 +12,18 @@ let unit = import:Std.Core.Unit;
 /// ascending. Iterators and callbacks fail fast with "collection modified
 /// during iteration".
 /// @see [Std.Collections.TreeSet](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-TreeSet)
+#Since("0.1.0")
 export let TreeSet = module (
     /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
 
     /// @brief A mutable set that identifies and orders elements using its comparator.
+    #NotThreadSafe
     export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T> (
         /// @brief The backing tree with one unit-valued entry per element.
-        let map: tree_map.TreeMap<T, unit.Unit>;
+        last map: tree_map.TreeMap<T, unit.Unit>;
         /// @brief The comparator reused when constructing set operation results.
-        let compare: func(T, T) -> ordering.Ordering;
+        last compare: func(T, T) -> ordering.Ordering;
         /// @brief Whether this instance's text conversion is running.
         let printing: bool = false;
 
@@ -48,14 +50,14 @@ export let TreeSet = module (
         /// @brief False when the set already holds an element the comparator calls
         /// Equal. The set keeps the element it holds.
         export let add = func(value: T) -> bool {
-            let before = map.size();
+            last before = map.size();
             map.set(value, unit.Unit.Value);
             return map.size() != before;
         };
 
         /// @brief Adds each element in order.
         export let add_all = func(items: T[list]) {
-            let total = items.length;
+            last total = items.length;
             let i = 0;
             while (i < total) {
                 map.set(items[i], unit.Unit.Value);
@@ -131,15 +133,19 @@ export let TreeSet = module (
         export let descending = func -> T[list] => map.descending_keys();
 
         /// @brief Returns the greatest element at most `value` as `Some`, or `None` when absent.
+        #NoDiscard
         export let floor = func(value: T) -> optional.Optional<T> => map.floor(value);
 
         /// @brief Returns the least element at least `value` as `Some`, or `None` when absent.
+        #NoDiscard
         export let ceiling = func(value: T) -> optional.Optional<T> => map.ceiling(value);
 
         /// @brief Returns the greatest element strictly below `value` as `Some`, or `None` when absent.
+        #NoDiscard
         export let lower = func(value: T) -> optional.Optional<T> => map.lower(value);
 
         /// @brief Returns the least element strictly above `value` as `Some`, or `None` when absent.
+        #NoDiscard
         export let higher = func(value: T) -> optional.Optional<T> => map.higher(value);
 
         /// @brief Whether every element of this set is in `other`, by the other
@@ -148,8 +154,8 @@ export let TreeSet = module (
             if (map.size() > other.size()) {
                 return false;
             }
-            let items = map.keys();
-            let total = items.length;
+            last items = map.keys();
+            last total = items.length;
             let i = 0;
             while (i < total) {
                 if (!other.contains(items[i])) {
@@ -162,8 +168,8 @@ export let TreeSet = module (
 
         /// @brief Reports whether none of this set's elements pass `other`'s membership test.
         export let is_disjoint_from = func(other: TreeSet<T>) -> bool {
-            let items = map.keys();
-            let total = items.length;
+            last items = map.keys();
+            last total = items.length;
             let i = 0;
             while (i < total) {
                 if (other.contains(items[i])) {
@@ -176,7 +182,7 @@ export let TreeSet = module (
 
         /// @brief A new set with this set's comparator holding the elements of both.
         export let union = func(other: TreeSet<T>) -> TreeSet<T> {
-            let result = new TreeSet<T>(Seal.Token, compare);
+            last result = new TreeSet<T>(Seal.Token, compare);
             result.add_all(map.keys());
             result.add_all(other.to_list());
             return result;
@@ -199,12 +205,12 @@ export let TreeSet = module (
             if (!(other is TreeSet<T>)) {
                 return false;
             }
-            let that = other as TreeSet<T>;
+            last that = other as TreeSet<T>;
             if (that.size() != map.size()) {
                 return false;
             }
-            let items = that.to_list();
-            let total = items.length;
+            last items = that.to_list();
+            last total = items.length;
             let i = 0;
             while (i < total) {
                 if (!map.contains_key(items[i])) {
@@ -218,8 +224,8 @@ export let TreeSet = module (
         /// @brief The wrapping sum of the element hashes.
         export let.override hash_code = func -> uint32 {
             let total: uint64 = 0;
-            let items = map.keys();
-            let count = items.length;
+            last items = map.keys();
+            last count = items.length;
             let i = 0;
             while (i < count) {
                 total = (total + (items[i].hash_code() as uint64)) & 4294967295;
@@ -235,16 +241,16 @@ export let TreeSet = module (
                 return "(this collection)";
             }
             printing = true;
-            let text = map.keys().to_string();
+            last text = map.keys().to_string();
             printing = false;
             return "{" + text.slice(1, text.byte_length - 1) + "}";
         };
 
         /// @brief Copies elements whose membership in `other` matches `present`, ordered by this set's comparator.
         let selected = func(other: TreeSet<T>, present: bool) -> TreeSet<T> {
-            let result = new TreeSet<T>(Seal.Token, compare);
-            let items = map.keys();
-            let total = items.length;
+            last result = new TreeSet<T>(Seal.Token, compare);
+            last items = map.keys();
+            last total = items.length;
             let i = 0;
             while (i < total) {
                 if (other.contains(items[i]) == present) {

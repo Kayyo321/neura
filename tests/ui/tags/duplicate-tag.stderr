@@ -1,0 +1,11 @@
+error[E0906]: #Stable is given twice
+ --> $DIR/duplicate-tag.nra:4:19
+  |
+3 | #Stable
+  | ------- first given here
+4 | #[Since("0.2.0"), Stable]
+  |                   ^^^^^^ given again here
+  |
+  = help: remove one of them
+
+For more information about this error, try `neura explain E0906`.

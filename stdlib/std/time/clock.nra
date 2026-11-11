@@ -6,12 +6,15 @@ let.promote _ = import:Std.Core.Unit;
 /// @brief A source of time (Stdlib.md section 12.1). Library code that needs time takes a Clock, so tests can
 /// pass a FixedClock; SystemClock reads the host.
 /// @see [Std.Time.Clock](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-Clock)
+#Since("0.1.0")
 export let Clock = module (
     /// @brief Defines wall time, monotonic elapsed time, and waiting for a duration.
     export let Clock = interface (
         /// @brief The current point on the UTC time line.
+        #NoDiscard
         let now = func -> result.Result<Instant>;
         /// @brief Elapsed time from an arbitrary fixed origin; never decreases.
+        #NoDiscard
         let monotonic = func -> result.Result<duration.Duration>;
         /// @brief Waits for the duration; a zero or negative duration returns at once.
         let sleep = func(span: duration.Duration) -> result.Result<Unit>;

@@ -1,11 +1,14 @@
 #include "optimizer.hpp"
 
+#include "neura-ir/tags.hpp"
 #include "neura-ir/verifier.hpp"
 #include "passes.hpp"
 
 #include <algorithm>
 #include <iterator>
+#include <set>
 #include <stdexcept>
+#include <tuple>
 
 namespace neura {
 namespace {
@@ -15,6 +18,9 @@ using PassFunction = std::size_t (*)(IrProgram&);
 struct RegisteredPass {
     OptimizationPass info;
     PassFunction run;
+    // Runs once each time the other passes reach a fixed point, instead of
+    // in the rounds.
+    bool between_rounds = false;
 };
 
 const std::vector<RegisteredPass>& registry() {
@@ -25,30 +31,73 @@ const std::vector<RegisteredPass>& registry() {
          fold_constants},
         {{"simplify-short-circuit", "simplify && and || with a literal operand without evaluating more"},
          simplify_short_circuits},
+        {{"propagate-copies", "replace reads of a local assigned once from a literal or an unchanged local"},
+         propagate_copies},
+        {{"eliminate-common-subexpressions",
+          "reuse a local's value for a later identical expression, or pure call, whose inputs are unchanged"},
+         eliminate_common_subexpressions},
+        {{"hoist-loop-invariants", "move a loop's pure and total invariant local initializations before it"},
+         hoist_loop_invariants},
         {{"simplify-control-flow", "select branches with literal conditions, remove while (false) and empty blocks"},
          simplify_control_flow},
         {{"remove-unreachable", "remove statements after a statement that never completes"},
          remove_unreachable},
-        {{"remove-pure-discards", "remove discarded expressions that have no effect and cannot fail"},
+        {{"remove-dead-stores", "remove stores to value-typed locals that are never read or are overwritten"},
+         remove_dead_stores},
+        {{"remove-pure-discards", "remove discarded expressions, and unused calls of pure and total functions, that cannot fail"},
          remove_pure_discards},
+        {{"inline-calls", "inline small calls of functions that cannot trap, call, allocate, or touch the heap"},
+         inline_calls, true},
     };
     return passes;
 }
 
-std::size_t count_nodes(const std::vector<IrNode>& nodes) {
-    std::size_t count = nodes.size();
+// The termination measures: the rounds decrease the number of nodes, then
+// the sum over nodes of the loops around them, lexicographically; inlining
+// decreases the number of calls, which no pass increases.
+struct Measure {
+    std::size_t nodes = 0;
+    std::size_t loop_weight = 0;
+    std::size_t calls = 0;
+};
+
+void measure(const std::vector<IrNode>& nodes, std::size_t depth, Measure& result) {
     for (const auto& node : nodes) {
-        count += count_nodes(node.operands) + count_nodes(node.body) + count_nodes(node.alternative);
+        ++result.nodes;
+        result.loop_weight += depth;
+        if (node.op == IrOp::Call || node.op == IrOp::VirtualCall || node.op == IrOp::CallClosure) ++result.calls;
+        const auto inner = node.op == IrOp::Loop ? depth + 1 : depth;
+        measure(node.operands, inner, result);
+        measure(node.body, inner, result);
+        measure(node.alternative, inner, result);
     }
-    return count;
 }
 
-std::size_t count_nodes(const IrProgram& program) {
-    std::size_t count = 0;
-    for (const auto& body : program.bodies) {
-        count += count_nodes(body.instructions);
+// W0004 for each #Inline(always: true) function that inline-calls refuses,
+// once per tag (specialized copies share their tag). Under #Deny it is an
+// error.
+void report_inline_refusals(IrProgram& program) {
+    std::set<std::pair<std::string, std::size_t>> seen;
+    for (const auto& refusal : optimization::inline_refusals(program)) {
+        const auto& function = program.symbols[refusal.function];
+        const auto at = tag_span(function, TagId::Inline);
+        if (!at || !seen.emplace(at->file, at->offset).second) continue;
+        auto warning = Diagnostic::warning(*at, "inline", "cannot inline '" + function.name + "': " + refusal.reason)
+            .with_code("W0004").label("inlining is required here");
+        warning.note("#Inline(always: true) lifts only the size budget of inline-calls; its other rules still apply");
+        auto scoped = scoped_tag_warning(program, refusal.function, std::move(warning));
+        if (!scoped) continue;
+        if (scoped->severity() == Severity::Error) throw *scoped;
+        report_warning(std::move(*scoped));
     }
-    return count;
+}
+
+Measure measure(const IrProgram& program) {
+    Measure result;
+    for (const auto& body : program.bodies) {
+        measure(body.instructions, 0, result);
+    }
+    return result;
 }
 
 } // namespace
@@ -104,29 +153,55 @@ OptimizationReport optimize(IrProgram& program, const OptimizationOptions& optio
     }
 
     require_valid_ir(program, "before optimization");
-    // Every rewrite removes at least one node, so each round that changes the
-    // program strictly decreases its node count. The loop therefore ends after
-    // at most as many changing rounds as the program had nodes; the check
-    // below enforces that measure rather than trusting it.
-    auto size = count_nodes(program);
-    for (bool changed = true; changed;) {
-        changed = false;
-        ++report.rounds;
+    if (std::ranges::any_of(enabled, [](const RegisteredPass* pass) { return pass->info.name == "inline-calls"; }))
+        report_inline_refusals(program);
+    // Every rewrite in a round removes at least one node, or keeps the node
+    // count and moves nodes out of a loop, so each round that changes the
+    // program strictly decreases (nodes, loop weight) lexicographically.
+    // The rounds therefore end; the check below enforces that measure rather
+    // than trusting it. A pass that runs between rounds (inlining) adds nodes
+    // but removes at least one call per rewrite and never adds one, so the
+    // alternation of rounds and inlining ends too.
+    auto size = measure(program);
+    for (bool inlined = true; inlined;) {
+        for (bool changed = true; changed;) {
+            changed = false;
+            ++report.rounds;
+            for (std::size_t i = 0; i < enabled.size(); ++i) {
+                if (enabled[i]->between_rounds) continue;
+                const auto rewrites = enabled[i]->run(program);
+                if (rewrites == 0) {
+                    continue;
+                }
+                const auto stage = "after pass '" + report.passes[i].name + "' in round " +
+                                   std::to_string(report.rounds);
+                require_valid_ir(program, stage);
+                const auto new_size = measure(program);
+                if (std::tie(new_size.nodes, new_size.loop_weight) >= std::tie(size.nodes, size.loop_weight)) {
+                    throw std::logic_error("pass reported rewrites without shrinking the program " + stage);
+                }
+                size = new_size;
+                report.passes[i].rewrites += rewrites;
+                changed = true;
+            }
+        }
+        inlined = false;
         for (std::size_t i = 0; i < enabled.size(); ++i) {
+            if (!enabled[i]->between_rounds) continue;
             const auto rewrites = enabled[i]->run(program);
             if (rewrites == 0) {
                 continue;
             }
-            const auto stage = "after pass '" + report.passes[i].name + "' in round " +
+            const auto stage = "after pass '" + report.passes[i].name + "' following round " +
                                std::to_string(report.rounds);
             require_valid_ir(program, stage);
-            const auto new_size = count_nodes(program);
-            if (new_size >= size) {
-                throw std::logic_error("pass reported rewrites without shrinking the program " + stage);
+            const auto new_size = measure(program);
+            if (new_size.calls >= size.calls) {
+                throw std::logic_error("pass reported rewrites without removing a call " + stage);
             }
             size = new_size;
             report.passes[i].rewrites += rewrites;
-            changed = true;
+            inlined = true;
         }
     }
     return report;

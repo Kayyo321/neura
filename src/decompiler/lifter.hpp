@@ -1,38 +1,19 @@
 #pragma once
 
+#include "lift/expression.hpp"
 #include "nvr/image.hpp"
 
 #include <cstddef>
 #include <cstdint>
-#include <map>
-#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace neura::decompiler {
 
-// A typed operation recovered from a block's graph. Leaves are block inputs
-// and immediates; inner nodes are the operations of docs/lang/Numbers.md.
-struct Expression {
-    enum class Kind { Input, Immediate, Unary, Binary, Convert };
-
-    Kind kind = Kind::Input;
-    // Image type of the result.
-    std::uint32_t type = 0;
-    // "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||",
-    // "!", "neg", "index" (a signed index widened to uint64 after a bounds
-    // check), and "+~", an addition whose overflow is not checked, as in
-    // generated code that proves it cannot overflow.
-    std::string op;
-    std::vector<std::shared_ptr<const Expression>> operands;
-    // Input: position in the block's input list.
-    std::size_t input = 0;
-    // Immediate: the value's slot encoding.
-    std::uint64_t bits = 0;
-};
-
-using ExpressionPtr = std::shared_ptr<const Expression>;
+// The typed operations recovered from a block's graph (src/lift).
+using lift::Expression;
+using lift::ExpressionPtr;
 
 // How the meaning of a block's graph was established.
 enum class Evidence {
@@ -47,21 +28,10 @@ enum class Evidence {
     Circuit,
 };
 
-struct LiftedBlock {
+// The lifted form of a block (values, condition, checks, dispatch) and the
+// evidence the decompiler reports for it.
+struct LiftedBlock : lift::LiftedForm {
     Evidence evidence = Evidence::None;
-    // The operation behind each value an exit reads from the graph, keyed by
-    // the value's first output lane.
-    std::map<std::uint32_t, ExpressionPtr> values;
-    // For a block that selects among exits by a condition: the exit taken
-    // when the condition holds, and the condition. Exits not covered, such
-    // as traps, are taken when their checks fail.
-    std::optional<std::size_t> exit_when_true;
-    ExpressionPtr condition;
-    // Checks whose failure selects a trap exit: (reason, operation whose
-    // failure it is), in evaluation order.
-    std::vector<std::pair<std::uint32_t, ExpressionPtr>> checks;
-    // Dispatch blocks: the layout each Call exit is taken for.
-    std::map<std::size_t, std::vector<std::uint32_t>> dispatch;
     // Number of input lanes an exhaustive check covered.
     std::size_t lanes_checked = 0;
 };

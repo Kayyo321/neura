@@ -1,6 +1,6 @@
 # Neura syntax and semantics
 
-The complete language as of Neura 0.1.0, in the order you need it. The specification is [docs/lang/](https://github.com/Kayyo321/neura/tree/main/docs/lang); this page condenses it and adds what the compiler actually reports.
+The complete language as of Neura 0.2.0, in the order you need it. The specification is [docs/lang/](https://github.com/Kayyo321/neura/tree/main/docs/lang); this page condenses it and adds what the compiler actually reports.
 
 ## Contents
 
@@ -18,6 +18,7 @@ The complete language as of Neura 0.1.0, in the order you need it. The specifica
 - [Tuples and destructuring](#tuples-and-destructuring)
 - [Enums and `match`](#enums-and-match)
 - [Classes](#classes)
+- [Fields, accessors, construction, and anonymous classes](#fields-accessors-construction-and-anonymous-classes)
 - [Static members and singletons](#static-members-and-singletons)
 - [Inheritance and abstract classes](#inheritance-and-abstract-classes)
 - [Interfaces](#interfaces)
@@ -28,35 +29,57 @@ The complete language as of Neura 0.1.0, in the order you need it. The specifica
 - [Primitive companions](#primitive-companions)
 - [Object lifecycle](#object-lifecycle)
 - [Type overlays](#type-overlays)
+- [Tags](#tags)
 - [Documentation comments](#documentation-comments)
 
 ## Lexical rules
 
 - Source is UTF-8. `//` starts a line comment; `///` starts a documentation comment. There are no block comments.
 - Identifiers: ASCII letters, digits, and `_`, not starting with a digit.
-- Reserved words include `let`, `const`, `func`, `return`, `if`, `else`, `while`, `do`, `for`, `in`, `break`, `continue`, `module`, `class`, `interface`, `implements`, `enum`, `singleton`, `match`, `new`, `destroy`, `import`, `export`, `static`, `super`, `as`, `is`, `nil`, `true`, `false`, `and`, `or`. `scope`, `spawn`, and `select` are contextual: they are forms only in specific positions and ordinary names elsewhere.
+- Reserved words include `let`, `const`, `func`, `return`, `if`, `else`, `while`, `do`, `for`, `in`, `break`, `continue`, `module`, `class`, `interface`, `implements`, `enum`, `singleton`, `match`, `new`, `destroy`, `import`, `export`, `static`, `super`, `as`, `is`, `nil`, `true`, `false`, `and`, `or`. `last`, `scope`, `spawn`, and `select` are contextual: they are forms only in specific positions and ordinary names elsewhere (`last` declares only when a name follows it). `get`, `set`, and `value` are contextual inside accessor clauses.
 - Integer literals are decimal digits only. No hexadecimal, octal, binary, digit separators, or suffixes. A leading `-` belongs to the literal, so `-128` is a valid `int8`.
 - Float literals need a fraction or exponent: `1.5`, `1e3`, `2.5e-4`. There are no literals for infinity or NaN (`1.0 / 0.0` and `0.0 / 0.0` produce them).
 - String literals use double quotes with escapes `\"`, `\\`, `\t`, `\r`, `\n`. There are no character literals and no string interpolation; use `+` with `to_string()`, or `Console.format`.
-- Statements end with `;`. Blocks use `{ }`. Class, module, interface, and enum bodies use `( )`.
+- **Every declaration ends with `;`**, including one whose value is a block or `( )` body: `let f = func { ... };`, `let C = class ( ... );`, an overload group after its last alternative. A missing one is `E0201`; `neura check --fix` inserts it.
+- **Statement blocks take no `;`**: `if`/`else`, `while`, `do`, `for`, `match` statements, `scope`, `select`, and a bare `{ }`. A `;` after one is `E0204`. Blocks use `{ }`. Class, module, interface, and enum bodies use `( )`.
+- `#Name` before a declaration is a [tag](#tags).
 
 ## Bindings
 
 <!-- example: check -->
 ```neura
-let count: int32 = 0;          // mutable, annotated
+let count: int32 = 0;          // reassignable, annotated
 let total = 5;                 // type inferred: int32
-const Limit: int32 = 3;        // cannot be reassigned
+const Limit: int32 = 3;        // a named constant: PascalCase, module or file level
 count = count + 1;
 count += Limit;
 
 let _ = total * 2;             // evaluate and discard; `_` can repeat
 let _ = 4;
+
+let describe = func(value: int32) -> string {
+    last doubled = value * 2;  // assigned once: last
+    last sign: string;         // deferred: assigned exactly once on every path
+    if (value < 0) {
+        sign = "negative";
+    } else {
+        sign = "not negative";
+    }
+    return sign + " " + doubled.to_string();
+};
 ```
 
-- A local binding needs an initializer (`a local binding requires an initializer`). Module, class, and file members may omit one (fields start uninitialized; see [Classes](#classes)).
+| Introducer | Assigned | Use for |
+| --- | --- | --- |
+| `let` | at its declaration, then any number of times | values that change; every function, class, module, and enum declaration |
+| `last` | exactly once: at its declaration, or later on every path before it is read | **every local or field that never changes after its first assignment** |
+| `const` | once, at its declaration | named constants at module, file, or static level (`PascalCase`) |
+
+- `last x = e;` cannot be assigned again (`E0401`). `last x: T;` needs its type (`E0444`) and exactly one assignment on every path before a read: reading it where a path skipped the assignment is `E0441`, a second assignment `E0440`, an assignment in a loop to a `last` declared outside it `E0442`, a lambda created before it is assigned `E0443`. Module, file, and static bindings cannot be deferred (`E0447`).
+- `last` does not destructure (`E0536`): write `const [a, b] = pair;`.
+- A local `let` or `const` needs an initializer (`E0404` `a local binding requires an initializer`); use a deferred `last` when a branch chooses the value. Module, class, and file members may omit one (fields start uninitialized; see [Classes](#classes)).
 - Duplicate names in one scope are errors. A nested block or function body may shadow an outer name; whether shadowing stays allowed is an open decision, so avoid relying on it.
-- `const` fixes the binding. An object held in a `const` can still be mutated.
+- `const` and `last` fix the binding. An object held in one can still be mutated.
 
 ## Types at a glance
 
@@ -111,7 +134,7 @@ let reset = func {                                  // void: -> void optional
 
 ### Overloads
 
-Join alternatives with `or func`. They share the name and visibility. The group may end at a block body; end an expression-bodied final alternative with `;`.
+Join alternatives with `or func`. They share the name and visibility. The group is one declaration and ends with `;` after its final alternative.
 
 <!-- example: check -->
 ```neura
@@ -121,7 +144,7 @@ let write = func(text: string) {
     write(text, text.byte_length);
 } or func(text: string, byte_count: int) {
     console.print_line(text.slice(0, byte_count));
-}
+};
 ```
 
 Resolution filters by arity, then ranks each argument: exact type, then assignable (a more specific class wins), then binding a primitive reference, then a literal that fits, then one visible object cast. The unique best candidate wins; otherwise the call is ambiguous. Alternatives must differ in resolved parameter types (`int` and `int32` are the same type). Overloads cannot be generic themselves. Constructors (`init`) overload the same way.
@@ -257,7 +280,7 @@ let Point = class (
     export let init = func(px: int, py: int) {
         x = px;
         y = py;
-    }
+    };
 
     export let.override equals = func(other: class) -> bool {
         if (other is Point) {
@@ -265,7 +288,7 @@ let Point = class (
             return x == point.x && y == point.y;
         }
         return false;
-    }
+    };
 
     export let.override hash_code = func -> uint32 => (x * 31 + y) as uint32;
 );
@@ -378,9 +401,11 @@ let [count, weight] = measure();
 const [label, _] = ["answer", count];   // `_` skips an element
 let pair: [string, float64] = [label, weight];
 let description = pair[0];              // index with an integer literal
+let [width, height] = 640, 480;         // one value per name
+let [name, scale]: [string, float64] = "zoom", 2.0;   // each value gets its element type
 ```
 
-Tuple elements are immutable. A bracket literal is a tuple when the expected type is a tuple or it is on the right of a destructuring declaration; otherwise it is an array.
+With two or more values after `=`, there is one per name (`E0436` otherwise), evaluated left to right before any name is bound. Tuple elements are immutable. A bracket literal is a tuple when the expected type is a tuple or it is on the right of a destructuring declaration; otherwise it is an array.
 
 ## Enums and `match`
 
@@ -441,37 +466,81 @@ let five = Optional<int>.Some(5);                       // generic constructor n
 <!-- example: check -->
 ```neura
 let LogEntry = class (
+    export last message: string;              // assigned once by every init
     export let level: string = "INFO";        // field with initializer
-    export let message: string;               // uninitialized until stored
-    let sequence: int = 0;                    // private to the class
+    let sequence: int = 0;                    // private, reassignable
 
     export let init = func(text: string) {    // constructor
         message = text;
     } or func(text: string, entry_level: string) {
         message = text;
         level = entry_level;
-    }
+    };
 
     export let format = func -> string {
         return "[" + level + "] " + message;
-    }
+    };
 
     export let renumber = func(value: int) -> LogEntry {
         instance.sequence = value;            // `instance` is the receiver
         return instance;
-    }
+    };
 );
 
-let entry = new LogEntry("started");
-let warning = new LogEntry("disk", "WARN");
+let entry: LogEntry = new("started");         // target-typed new: the annotation names the class
+let warning = new LogEntry("disk", "WARN");   // nothing names it: write the class
 let line = warning.format();
 ```
 
-- Members in a class body are separated by `;` or simply follow a block body's `}`; both styles compile. Fields and methods are private unless `export`ed.
+- Every member in a class body ends with `;`, including a method whose block body ends at `}` (`};`). Fields and methods are private unless `export`ed.
 - Inside methods, fields and methods are in scope unqualified; `instance` is the receiver when no other binding has that name.
 - A class without `init` gets a zero-argument constructor (if its base can be built with none), and code can set exported fields after `new`.
 - Reading a field before anything stored to it traps at run time (`read of an uninitialized field`).
 - `new` with the wrong arguments: `expected 2 argument(s)`. Several standard library classes have private constructors (a `Seal` parameter): use their module's `create`/`of` functions.
+
+## Fields, accessors, construction, and anonymous classes
+
+These are covered in full, with their rules and error codes, in [classes.md](classes.md). In short:
+
+<!-- example: check -->
+```neura
+let Gauge = class (
+    export last unit: string = "C";           // set once: read-only outside
+    export let readings: int = 0;             // changed by the class, read by callers
+        | get: readings;
+
+    export let level: int = 0;                // checked on every write from outside
+        | get: level;
+        | set: {
+            if (value < 0) {
+                trap_with_message("level must not be negative");
+            }
+            level = value;                    // inside the class: the storage
+        };
+
+    export let record = func(reading: int) {
+        readings++;
+        level = reading;
+    };
+);
+
+let gauge: Gauge = new;                       // target-typed new
+let bump = func -> int {
+    gauge.level = 5;                          // calls the setter: no call syntax
+    gauge.record(7);
+    return gauge.readings;                    // calls the getter
+};
+
+let [low, high]: [Gauge, int] = new, 10;      // typed, listed destructuring
+let point: class (
+    export let x: int = 0;
+    export let y: int = 0;
+) = new;                                      // an anonymous class
+```
+
+- `obj.field` and `obj.field = v` call the accessors from outside the class; inside it a bare name is the storage. Get-only fields are read-only outside (`E0510`).
+- `= new;` / `= new(args);` construct the type the annotation, assignment, result type, or parameter names; `let a = new;` is `E0420`.
+- A `class ( ... )` body in a type position is an anonymous class; a body of plain exported typed `let` fields is the same type wherever it is written.
 
 ## Static members and singletons
 
@@ -514,7 +583,7 @@ let Renderable = class (
 
     export let framed = func -> string {
         return "[" + render() + "]";                  // dispatches to the override
-    }
+    };
 );
 
 let Text = class:Renderable (                         // `class:Base`
@@ -522,18 +591,18 @@ let Text = class:Renderable (                         // `class:Base`
 
     export let.override render = func -> string {
         return value;
-    }
+    };
 );
 
 let Alert = class:Text (
     export let init = func(text: string) {
         super.init();                                 // first statement
         value = text;
-    }
+    };
 
     export let.override render = func -> string {
         return "Alert: " + value;
-    }
+    };
 );
 
 let display = func(item: Renderable) -> string => item.framed();
@@ -577,8 +646,8 @@ let Rank = class implements Comparable<Rank>, Labeled (
 let best = func<T: Comparable<T>>(a: T, b: T) -> T => a.compare_to(b) >= 0 ? a : b;
 
 let pick = func -> string {
-    let low = new Rank();
-    let high = new Rank();
+    let low: Rank = new;
+    let high: Rank = new;
     high.value = 5;
     high.title = "five";
     let shown: Labeled = best<Rank>(low, high);
@@ -610,7 +679,7 @@ let Box = class<T> (
     export let value: T;
 
     export let pair = func<U>(other: U) -> Pair<T, U> {  // generic method
-        let result = new Pair<T, U>();
+        let result: Pair<T, U> = new;                    // target-typed new
         result.first = value;
         result.second = other;
         return result;
@@ -631,7 +700,7 @@ let largest = func<T: Shape>(items: T[list]) -> float64 {   // bound
     return best;
 };
 
-let box = new Box<int>();
+let box: Box<int> = new;
 ```
 
 - Type arguments are never inferred: `identity(7)` fails with `expected 1 type argument(s)`.
@@ -677,7 +746,7 @@ let Reading = class (
 
     export let init = func(initial: int16) {
         instance.value = initial;
-    }
+    };
 
     export let.as int16 = func -> int16 => value
         or as int64 = func -> int64 => value as int64;
@@ -738,11 +807,11 @@ let Resource = class (
 
     export let init = func(label: string) {
         name = label;
-    }
+    };
 
     let deinit = func {                    // runs on `destroy`, most-derived first
         // release what this class owns
-    }
+    };
 );
 
 let use = func {
@@ -771,6 +840,28 @@ let Types = module (
 );
 ```
 
+## Tags
+
+A `#` tag on the lines above a declaration tells the compiler how to treat it; [tags.md](tags.md) has the catalogue.
+
+<!-- example: check -->
+```neura
+/// Doc comment first, then the tags, then the declaration.
+#[Final, Since("0.2.0")]
+let Temperature = class (
+    export last celsius: float64;
+
+    export let init = func(degrees: float64) {
+        celsius = degrees;
+    };
+
+    #NoDiscard
+    export let to_fahrenheit = func -> float64 => celsius * 9.0 / 5.0 + 32.0;
+);
+```
+
+The implemented tags are `#Deprecated`, `#Experimental`, `#Internal`, `#Hidden`, `#NoDiscard`, `#Final`, `#Sealed`, `#Inline`, `#NoInline`, `#Allow`, `#Deny`, and the checked `#Pure`, `#Immutable`, `#ThreadSafe`, `#NotThreadSafe`, and `#Synchronized`. Informational tags such as `#Since`, `#Note`, and `#Unit` change nothing. Reserved tags (`#Memoize`, `#Test`, `#Total`, ...) are error `E0908`. Tags cannot precede statements or destructuring (`E0909`).
+
 ## Documentation comments
 
 <!-- example: check -->
@@ -781,4 +872,4 @@ let Types = module (
 let twice = func(value: int) -> int => value + value;
 ```
 
-`///` lines directly above a declaration form its documentation (Doxygen-style `@param`, `@return` are recognized). A blank line or `//` comment ends the block. `neura docs file.nra` exports the documentation as JSON; `neura docs --doxygen` is a Doxygen input filter.
+`///` lines directly above a declaration, or above its tags, form its documentation (Doxygen-style `@param`, `@return` are recognized). A blank line or `//` comment ends the block. `neura docs file.nra` exports the documentation as JSON; `neura docs --doxygen` is a Doxygen input filter.

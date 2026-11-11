@@ -123,6 +123,62 @@ void write_comment(std::ostream& output, const DocComment& comment) {
     output << "]}";
 }
 
+std::string_view argument_kind(TagArgumentSyntax::Kind kind) {
+    switch (kind) {
+    case TagArgumentSyntax::Kind::String: return "string";
+    case TagArgumentSyntax::Kind::Integer: return "integer";
+    case TagArgumentSyntax::Kind::Float: return "float";
+    case TagArgumentSyntax::Kind::Boolean: return "bool";
+    case TagArgumentSyntax::Kind::Name: return "name";
+    case TagArgumentSyntax::Kind::List: return "list";
+    }
+    return {};
+}
+
+void write_argument(std::ostream& output, const TagArgumentSyntax& argument) {
+    output << "{\"kind\":";
+    quote(output, argument_kind(argument.kind));
+    if (!argument.name.empty()) {
+        output << ",\"name\":";
+        quote(output, argument.name);
+    }
+    if (argument.kind == TagArgumentSyntax::Kind::List) {
+        output << ",\"items\":[";
+        for (std::size_t i = 0; i < argument.items.size(); ++i) {
+            if (i != 0) output.put(',');
+            write_argument(output, argument.items[i]);
+        }
+        output.put(']');
+    } else {
+        output << ",\"value\":";
+        quote(output, argument.text);
+    }
+    output.put('}');
+}
+
+// The tags written before a declaration (docs/lang/Tags.md), as written.
+void write_tags(std::ostream& output, const std::vector<TagSyntax>& tags) {
+    output.put('[');
+    for (std::size_t i = 0; i < tags.size(); ++i) {
+        if (i != 0) output.put(',');
+        output << "{\"name\":";
+        quote(output, tags[i].name);
+        output << ",\"range\":";
+        range(output, tags[i].span);
+        output << ",\"arguments\":[";
+        for (std::size_t j = 0; j < tags[i].arguments.size(); ++j) {
+            if (j != 0) output.put(',');
+            write_argument(output, tags[i].arguments[j]);
+        }
+        output << "]}";
+    }
+    output.put(']');
+}
+
+bool hidden(const Declaration& declaration) {
+    return std::ranges::any_of(declaration.tags, [](const TagSyntax& tag) { return tag.name == "Hidden"; });
+}
+
 std::string_view kind_name(const Declaration& declaration, bool variant) {
     if (variant) return "variant";
     if (declaration.cast_target) return "cast";
@@ -147,10 +203,64 @@ public:
     }
 
 private:
-    std::string_view type_text(const TypeSyntax& type) const {
+    static bool has_anonymous_class(const TypeSyntax& type) {
+        return type.anonymous || std::ranges::any_of(type.arguments, has_anonymous_class);
+    }
+
+    std::string type_text(const TypeSyntax& type) const {
         if (type.name == "void" && type.collections.empty() && !type.reference) return "void";
         if (type.name == "[variadic argument]") return {};
-        return source_.substr(type.span.offset, type.span.length);
+        if (!has_anonymous_class(type)) return std::string(source_.substr(type.span.offset, type.span.length));
+        // An anonymous class is summarized by its fields, as diagnostics
+        // print it: class(x: int, y: string).
+        std::string result = type.reference ? "&" : "";
+        const auto list = [&](const std::vector<TypeSyntax>& types, std::size_t count) {
+            for (std::size_t i = 0; i < count; ++i) result += (i == 0 ? "" : ", ") + type_text(types[i]);
+        };
+        if (type.anonymous) {
+            const auto& body = *type.anonymous;
+            result += "class";
+            if (body.base) result += ":" + type_text(*body.base);
+            if (!body.interfaces.empty()) {
+                result += " implements ";
+                list(body.interfaces, body.interfaces.size());
+            }
+            result += '(';
+            bool first = true;
+            for (const auto& member : body.members) {
+                if (member.kind != DeclKind::Binding || member.static_member || member.cast_target) continue;
+                result += std::string(first ? "" : ", ") +
+                          (member.last ? "last " : member.constant ? "const " : "") + member.name;
+                if (member.type) result += ": " + type_text(*member.type);
+                result += accessor_text(member);
+                first = false;
+            }
+            result += ')';
+        } else if (type.name == "[tuple]") {
+            result += '[';
+            list(type.arguments, type.arguments.size());
+            result += ']';
+        } else if (type.name == "[function]") {
+            result += "func(";
+            list(type.arguments, type.arguments.size() - 1);
+            result += ") -> " + type_text(type.arguments.back());
+        } else {
+            result += type.name + '<';
+            list(type.arguments, type.arguments.size());
+            result += '>';
+        }
+        for (const auto suffix : type.collections) result += suffix == CollectionKind::Array ? "[]" : "[list]";
+        return result;
+    }
+
+    // A field's accessor clauses (Types.md, Accessors), getter first.
+    static std::string accessor_text(const Declaration& declaration) {
+        const auto has = [&](bool setter) {
+            return std::ranges::any_of(declaration.accessors,
+                                       [&](const AccessorClause& clause) { return clause.setter == setter; });
+        };
+        if (!has(false) && !has(true)) return {};
+        return has(false) ? (has(true) ? " { get; set }" : " { get }") : " { set }";
     }
 
     std::string signature(const Declaration& declaration, std::string_view kind) const {
@@ -162,12 +272,13 @@ private:
             result += type_text(*declaration.cast_target);
             result += " = func";
         } else if (declaration.kind == DeclKind::Binding) {
-            result = declaration.constant ? "const " : "let ";
+            result = declaration.last ? "last " : declaration.constant ? "const " : "let ";
             result += declaration.name;
             if (declaration.type) {
                 result += ": ";
                 result += type_text(*declaration.type);
             }
+            result += accessor_text(declaration);
             return result;
         } else {
             result = declaration.name + " = ";
@@ -212,7 +323,8 @@ private:
     }
 
     void symbol(std::string_view name, std::string_view kind, std::string_view signature,
-                const Span& declaration, const Span& selection, const DocComment& comment) {
+                const Span& declaration, const Span& selection, const DocComment& comment,
+                const std::vector<TagSyntax>& tags = {}) {
         if (!first_) output_ << ",\n";
         first_ = false;
         output_ << "{\"name\":";
@@ -232,14 +344,18 @@ private:
         range(output_, selection);
         output_ << ",\"documentation\":";
         write_comment(output_, comment);
+        output_ << ",\"tags\":";
+        write_tags(output_, tags);
         output_.put('}');
     }
 
     void declaration(const Declaration& declaration, bool variant = false) {
+        // #Hidden leaves the declaration and everything in it out.
+        if (hidden(declaration)) return;
         if (declaration.documentation && declaration.name_span && declaration.name != "_") {
             const auto kind = kind_name(declaration, variant);
             symbol(declaration.name, kind, signature(declaration, kind), declaration.span,
-                   *declaration.name_span, *declaration.documentation);
+                   *declaration.name_span, *declaration.documentation, declaration.tags);
         }
         if (!declaration.name.empty()) scope_.push_back(declaration.name);
         for (const auto& member : declaration.members) {
@@ -247,6 +363,10 @@ private:
         }
         if (declaration.initializer) expression(*declaration.initializer);
         statements(declaration.body);
+        for (const auto& clause : declaration.accessors) {
+            if (clause.expression) expression(*clause.expression);
+            statements(clause.body);
+        }
         if (!declaration.name.empty()) scope_.pop_back();
         for (const auto& overload : declaration.overloads) this->declaration(overload);
     }
@@ -260,12 +380,17 @@ private:
     void statement(const Statement& statement) {
         if (statement.declaration) declaration(*statement.declaration);
         if (statement.kind == Statement::Kind::Destructure && statement.documentation) {
-            for (const auto& binding : statement.bindings) {
+            for (std::size_t i = 0; i < statement.bindings.size(); ++i) {
+                const auto& binding = statement.bindings[i];
                 if (binding.text == "_") continue;
                 const auto kind = statement.constant_bindings ? "constant" : "binding";
                 const auto prefix = statement.constant_bindings ? "const " : "let ";
-                symbol(binding.text, kind, prefix + binding.text, statement.span,
-                       binding.span, *statement.documentation);
+                // A typed destructuring declaration gives each name its element type.
+                const auto& annotation = statement.binding_type;
+                const auto typed = annotation && i < annotation->arguments.size();
+                symbol(binding.text, kind,
+                       prefix + binding.text + (typed ? ": " + type_text(annotation->arguments[i]) : std::string()),
+                       statement.span, binding.span, *statement.documentation);
             }
         }
         statements(statement.initializer);
@@ -305,7 +430,8 @@ std::string doxygen_type(const TypeSyntax& type) {
             doxygen_types(type.arguments, type.arguments.size() - 1) + ")>";
     } else if (type.name == "[variadic argument]") {
         result = "NeuraValue";
-    } else if (type.name == "class") {
+    } else if (type.name == "class" || type.anonymous) {
+        // An anonymous class has no name to give Doxygen.
         result = "NeuraObject";
     } else {
         for (const auto character : type.name) {

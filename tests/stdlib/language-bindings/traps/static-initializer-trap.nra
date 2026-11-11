@@ -17,5 +17,5 @@ let App = module:program.Entry (
         console.print_line("entered main");
         let _ = Deferred.value;
         return program.ExitCode.Ok;
-    }
+    };
 );

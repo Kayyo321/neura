@@ -1,0 +1,50 @@
+// References that live in slots across a tier 2 region's end at an
+// allocation (docs/runtime/NVM.md, "Execution tiers" and "Garbage
+// collection"). Each iteration reads a cell into a local inside a region
+// (an inline element read), replaces the list's element with a new cell
+// (an allocation, where the region ends and a collection may run), and then
+// uses the cell it read: it must still be alive, because the region wrote
+// the local back before the allocation. tests/backend/tier_tests.cpp runs it
+// under heap-cell limits from tight to loose and compares every tier.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let RegionGc = module:program.Entry (
+    let Cell = class (
+        export let value: int64 = 0;
+        export let payload: int64[list] = [];
+    );
+
+    let fill = func(cell: Cell, count: int32) -> void {
+        for (let i = 0; i < count; i = i + 1) {
+            cell.payload.append(i as int64);
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let rounds = 40;
+        if (args.length > 0) {
+            rounds = result.value_or<int32>(int32s.parse(args[0]), 40);
+        }
+        let cells: Cell[list] = [];
+        for (let i = 0; i < 8; i = i + 1) {
+            let cell = new Cell();
+            cell.value = i as int64;
+            cells.append(cell);
+        }
+        let sum: int64 = 0;
+        for (let round = 0; round < rounds; round = round + 1) {
+            let index = round % 8;
+            let old = cells[index];
+            let replacement = new Cell();
+            replacement.value = old.value + 1;
+            fill(replacement, 4);
+            cells[index] = replacement;
+            sum = sum + old.value + (old.payload.length as int64);
+        }
+        console.println("sum {}", sum);
+        return program.ExitCode.Ok;
+    };
+);

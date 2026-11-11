@@ -1,0 +1,12 @@
+error[E0914]: class 'Circle' implements the sealed interface 'Shape' outside module 'Shapes'
+  --> $DIR/sealed-type.nra:16:31
+   |
+ 4 |     #Sealed
+   |     ------- 'Shape' is marked #Sealed here
+...
+16 | let Circle = class implements Shapes.Shape (
+   |                               ^^^^^^^^^^^^ outside the declaring module
+   |
+   = note: a #Sealed type is extended or implemented only inside the module or file that declares it
+
+For more information about this error, try `neura explain E0914`.

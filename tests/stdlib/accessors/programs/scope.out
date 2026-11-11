@@ -1,0 +1,14 @@
+construct
+raise
+  get level
+read 14
+copy
+  get level
+closure 7
+subclass
+  get level
+  set level 2
+  get level
+as base 2
+7 ab
+p 2

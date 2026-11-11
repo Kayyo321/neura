@@ -1,0 +1,8 @@
+warning[W0005]: the setter of 'count' never stores 'count'
+ --> $DIR/setter-never-stores.nra:5:11
+  |
+5 |         | set: {
+  |           ^^^ this setter never assigns 'count'
+  |
+  = note: a write from outside the class calls the setter, so it has no effect on 'count'
+  = help: assign the field in the setter, such as 'count = value;', or remove the setter to make 'count' read-only outside its class

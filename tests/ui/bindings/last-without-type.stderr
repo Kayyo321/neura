@@ -1,0 +1,16 @@
+error[E0444]: a deferred 'last' binding needs a type
+ --> $DIR/last-without-type.nra:3:10
+  |
+3 |     last base;
+  |          ^^^^ 'base' has neither a type nor a value
+  |
+help: give it a type and assign it exactly once later
+  |
+3 |     last base: <type>;
+  |              ++++++++
+help: or give it its value now
+  |
+3 |     last base = <value>;
+  |              ++++++++++
+
+For more information about this error, try `neura explain E0444`.

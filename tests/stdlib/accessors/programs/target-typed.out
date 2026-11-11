@@ -1,0 +1,23 @@
+Account()
+Account(eve)
+anonymous eve
+Account(ada)
+Account()
+Account(bob)
+ada bob anonymous
+Account()
+set holder anonymous
+anonymous
+Account(zed)
+set holder zed
+zed
+get count 0
+set count 1
+get count 5
+set count 6
+get count 1
+get count 6
+1 6
+point 1,2
+Account(kay)
+T-seven 7 kay

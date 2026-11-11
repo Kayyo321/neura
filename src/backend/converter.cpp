@@ -1,14 +1,18 @@
 #include "converter.hpp"
 
-#include "block_synth.hpp"
-#include "circuit.hpp"
-#include "float_circuit.hpp"
+#include "circuit/block_synth.hpp"
+#include "circuit/circuit.hpp"
+#include "circuit/float_circuit.hpp"
 #include "ir-optimization/analysis.hpp"
+#include "lift/hints.hpp"
+#include "lift/lowered_block.hpp"
+#include "lift/proof.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/aggregate.hpp"
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/integer.hpp"
+#include "neura-ir/kernel_signature.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/scheduler_ops.hpp"
 #include "neura-ir/specialize.hpp"
@@ -47,6 +51,12 @@ struct OpenBlock {
     std::optional<Span> failure_span;
     std::optional<Span> operation_span;
     std::optional<Span> statement_span;
+    // The block's lifted form for its LIFT hint (lift/hints.hpp): every
+    // operation recorded in the order it was built, and the condition that
+    // chooses between two exits.
+    std::vector<lift::ExpressionPtr> schedule;
+    lift::ExpressionPtr condition;
+    std::size_t exit_when_true = 0;
 };
 
 // A virtual call or destruction whose targets depend on the classes the
@@ -118,6 +128,14 @@ private:
     void assign(std::uint32_t slot, Operand operand);
     void fail_when(const Signal& condition, std::uint32_t reason, const Span& span);
     void operation_at(const Span& span);
+    // LIFT hints: the form of an operand whose lanes the open block already
+    // uses, and a result described by `form`, recorded in the block's
+    // schedule. A null form leaves the result undescribed.
+    lift::ExpressionPtr form_of(const Operand& operand);
+    Operand described(Operand result, lift::ExpressionPtr form);
+    lift::ExpressionPtr unary_form(std::string op, std::uint32_t type, const Operand& operand);
+    lift::ExpressionPtr binary_form(std::string op, std::uint32_t type, const Operand& left, const Operand& right);
+    lift::ExpressionPtr convert_form(std::uint32_t type, const Operand& operand);
 
     // Effects that end a block.
     Operand state(nvr::StateOp operation, std::uint32_t immediate, std::vector<Operand> arguments,
@@ -162,6 +180,7 @@ private:
     Operand value_member(IrOp op, const IrType& type, std::vector<Operand> operands, const Span& span);
     Operand external_call(const IrNode& node);
     Operand bound_host_call(const IrNode& node);
+    Operand kernel_call(const IrNode& node);
     Operand allocate(const IrNode& node);
     Operand aggregate(const IrNode& node);
     Operand aggregate_value(const IrType& type, SymbolId variant, std::vector<Operand> fields,
@@ -242,6 +261,8 @@ public:
     // The import that an external function is bound to, or nothing when the
     // function has no runtime binding.
     std::optional<std::uint32_t> external_import(SymbolId function, const Span& where);
+    // The KERN entry of a kernel-bound function (NVR 1.6).
+    std::uint32_t kernel_entry(SymbolId function, const Span& where);
     std::uint32_t function(const FunctionOrigin& origin);
     FunctionOrigin constructor(SymbolId cls, SymbolId selected = no_symbol) const;
     FunctionOrigin value_function(IrOp op, const IrType& type, const Span& span);
@@ -276,6 +297,10 @@ public:
     void set_function(std::uint32_t index, nvr::Function function, std::vector<std::optional<Span>> spans,
                       std::vector<std::uint32_t> placeholders);
     void name_slots(std::uint32_t index, std::vector<std::string> names) { slot_names_[index] = std::move(names); }
+    bool lift_hints() const { return options_.lift_hints; }
+    void add_hint(std::uint32_t function, std::uint32_t block, lift::LiftedForm form) {
+        hints_[{function, block}] = std::move(form);
+    }
     const nvr::Function& converted(std::uint32_t index) const { return image_.functions.at(index); }
     const nvr::Type& type_at(std::uint32_t index) const { return image_.types.at(index); }
     const nvr::Global& global_at(std::uint32_t index) const { return image_.globals.at(index); }
@@ -289,6 +314,7 @@ private:
     void build_dispatch(const Dispatch& dispatch);
     void thread_jumps();
     void remove_unreachable_blocks();
+    void lift_hint_section();
     void source_map();
     void names();
     std::string label(const std::string& file) const;
@@ -310,12 +336,15 @@ private:
     std::map<SymbolId, std::uint32_t> globals_;
     std::map<std::string, std::uint32_t> graphs_;
     std::map<std::pair<std::string, std::uint32_t>, std::uint32_t> imports_;
+    std::map<std::pair<std::string, std::uint32_t>, std::uint32_t> kernels_;
     std::map<FunctionOrigin, std::uint32_t> functions_;
     std::vector<FunctionOrigin> origins_;
     std::size_t next_function_ = 0;
     std::vector<std::vector<std::optional<Span>>> spans_;
     std::vector<std::vector<std::uint32_t>> placeholders_;
     std::map<std::uint32_t, std::vector<std::string>> slot_names_;
+    // Lifted forms by (function, block) for the LIFT section.
+    std::map<std::pair<std::uint32_t, std::uint32_t>, lift::LiftedForm> hints_;
 
     std::map<std::pair<SymbolId, std::string>, SymbolId> members_;
     std::map<SymbolId, std::vector<SymbolId>> constructors_;
@@ -401,7 +430,8 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         if (!format) {
             throw Diagnostic(where, type.name == "byte"
                 ? "the signedness of 'byte' is not specified; use uint8 or int8"
-                : "the width of '" + type.name + "' is not specified; use a sized integer type such as int32");
+                : "the width of '" + type.name + "' is not specified; use a sized integer type such as int32")
+                .with_code("E0802");
         }
         return scalar(format->is_signed ? nvr::TypeKind::Signed : nvr::TypeKind::Unsigned, format->bits);
     }
@@ -410,7 +440,7 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
     case TypeKind::Float: {
         const auto format = float_format(type);
         if (!format) {
-            throw Diagnostic(where, "'" + type.name + "' is not a floating-point format");
+            throw Diagnostic(where, "'" + type.name + "' is not a floating-point format").with_code("E0802");
         }
         return scalar(*format == bfloat16 ? nvr::TypeKind::BFloat : nvr::TypeKind::Float, format->width());
     }
@@ -422,7 +452,8 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
     case TypeKind::Object:
         if (!type.arguments.empty() || !symbol(type.symbol).generics.empty()) {
             throw Diagnostic(where, "generic class '" + symbol(type.symbol).name +
-                                        "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                        "' is not supported: IRtoNeuronConversion does not specialize generics")
+                .with_code("E0801");
         }
         return type_index({nvr::TypeKind::Object, 0, layout(type.symbol, where)});
     case TypeKind::Tuple:
@@ -434,12 +465,13 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         return scalar(nvr::TypeKind::Unsigned, 32);
     case TypeKind::TypeParameter:
         throw Diagnostic(where, "type parameter '" + type.name +
-                                    "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                    "' is not supported: IRtoNeuronConversion does not specialize generics")
+            .with_code("E0801");
     case TypeKind::Module:
     case TypeKind::Callable:
         break;
     }
-    throw Diagnostic(where, "'" + type.name + "' is not a value type");
+    throw Diagnostic(where, "'" + type.name + "' is not a value type").with_code("E0802");
 }
 
 std::uint32_t Converter::constant(std::uint32_t type, std::vector<std::uint8_t> payload) {
@@ -453,7 +485,7 @@ std::uint32_t Converter::constant(std::uint32_t type, std::vector<std::uint8_t> 
 
 std::uint32_t Converter::text_constant(const std::string& text, const Span& where) {
     if (!nvr::valid_utf8(text)) {
-        throw Diagnostic(where, "string literal is not valid UTF-8");
+        throw Diagnostic(where, "string literal is not valid UTF-8").with_code("E0807");
     }
     return constant(scalar(nvr::TypeKind::Text), std::vector<std::uint8_t>(text.begin(), text.end()));
 }
@@ -465,7 +497,8 @@ std::uint32_t Converter::layout(SymbolId cls, const Span& where) {
     const auto& item = symbol(cls);
     if (!item.generics.empty()) {
         throw Diagnostic(where, "generic class '" + item.name +
-                                    "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                    "' is not supported: IRtoNeuronConversion does not specialize generics")
+            .with_code("E0801");
     }
     // Reserve the index first: a field may refer to its own class.
     const auto index = static_cast<std::uint32_t>(image_.layouts.size());
@@ -538,7 +571,7 @@ std::optional<std::uint64_t> Converter::literal(const IrNode& node, std::uint32_
     case IrOp::Integer: {
         const auto value = parse_integer_literal(node.text);
         if (!value) {
-            throw Diagnostic(node.span, "malformed integer literal '" + node.text + "'");
+            throw Diagnostic(node.span, "malformed integer literal '" + node.text + "'").with_code("E0807");
         }
         const auto bits = value->negative ? std::uint64_t{0} - value->magnitude : value->magnitude;
         return bits & width_mask(t.width);
@@ -551,7 +584,8 @@ std::optional<std::uint64_t> Converter::literal(const IrNode& node, std::uint32_
     case IrOp::Float: {
         const auto parsed = parse_float_literal(node.text, float_format(node.type).value());
         if (parsed.error) {
-            throw Diagnostic(node.span, "float literal '" + node.text + "' does not fit " + node.type.name);
+            throw Diagnostic(node.span, "float literal '" + node.text + "' does not fit " + node.type.name)
+                .with_code("E0807");
         }
         return parsed.bits;
     }
@@ -570,7 +604,7 @@ std::uint32_t Converter::global(SymbolId id, const Span& where) {
     const auto init = global_initializers_.find(id);
     if (init == global_initializers_.end()) {
         if (item.owner == no_symbol || !is_static_scope(symbol(item.owner)))
-            throw Diagnostic(where, "global '" + item.name + "' has no initializer");
+            throw Diagnostic(where, "global '" + item.name + "' has no initializer").with_code("E0899");
     } else {
         const auto& node = *init->second;
         if (node.op == IrOp::String) {
@@ -638,12 +672,37 @@ std::optional<std::uint32_t> Converter::external_import(SymbolId function, const
     const auto key = std::pair{import.name, import.interface_version};
     if (const auto found = imports_.find(key); found != imports_.end()) {
         if (image_.imports[found->second] != import)
-            throw Diagnostic(where, "conflicting signatures for host service '" + import.name + "'");
+            throw Diagnostic(where, "conflicting signatures for host service '" + import.name + "'").with_code("E0806");
         return found->second;
     }
     const auto index = static_cast<std::uint32_t>(image_.imports.size());
     image_.imports.push_back(std::move(import));
     imports_.emplace(key, index);
+    return index;
+}
+
+std::uint32_t Converter::kernel_entry(SymbolId function, const Span& where) {
+    // A kernel call is a state operation on its KERN entry: the kernel's
+    // name and ABI version with the Neura signature, which lowering checked
+    // against the kernel table (docs/runtime/Kernels.md).
+    const auto& item = symbol(function);
+    const auto binding = kernel_binding(item).value();
+    nvr::KernelEntry entry;
+    entry.name = binding.first;
+    entry.abi_version = binding.second;
+    for (const auto parameter : item.parameters) {
+        entry.parameter_types.push_back(type_of(symbol(parameter).type, where));
+    }
+    entry.result_type = type_of(item.type, where);
+    const auto key = std::pair{entry.name, entry.abi_version};
+    if (const auto found = kernels_.find(key); found != kernels_.end()) {
+        if (image_.kernels[found->second] != entry)
+            throw Diagnostic(where, "conflicting signatures for kernel '" + entry.name + "'").with_code("E0899");
+        return found->second;
+    }
+    const auto index = static_cast<std::uint32_t>(image_.kernels.size());
+    image_.kernels.push_back(std::move(entry));
+    kernels_.emplace(key, index);
     return index;
 }
 
@@ -904,7 +963,8 @@ void Converter::order_initialization() {
                 continue;
             }
             for (const auto& instruction : body.instructions) {
-                if (instruction.op == IrOp::Initialize && constant_initializer(instruction.operands.front())) {
+                if (instruction.op == IrOp::Initialize && !instruction.operands.empty() &&
+                    constant_initializer(instruction.operands.front())) {
                     continue;
                 }
                 Startup item{&instruction, kind == SymbolKind::Module ? body.owner : no_symbol};
@@ -942,7 +1002,8 @@ FunctionOrigin Converter::entry_point() const {
                 !item.generics.empty() || item.parameters.size() != 1 ||
                 symbol(item.parameters.front()).type != arguments ||
                 item.type.kind != TypeKind::Enum || !standard_exit_variants(item.type.symbol))
-                throw Diagnostic(item.span, "Std.Program.Entry.main must declare main(string[]) -> ExitCode");
+                throw Diagnostic(item.span, "Std.Program.Entry.main must declare main(string[]) -> ExitCode")
+                    .with_code("E0805");
             requirements.insert(id);
         }
     }
@@ -969,10 +1030,11 @@ FunctionOrigin Converter::entry_point() const {
         }
     }
     if (candidates.empty()) {
-        throw Diagnostic(where, "the program has no entry point: no module overrides Std.Program.Entry.main");
+        throw Diagnostic(where, "the program has no entry point: no module overrides Std.Program.Entry.main")
+            .with_code("E0803");
     }
     if (candidates.size() > 1) {
-        throw Diagnostic(symbol(candidates[1]).span, "the program has more than one entry point");
+        throw Diagnostic(symbol(candidates[1]).span, "the program has more than one entry point").with_code("E0804");
     }
     const auto main = candidates.front();
     return {Role::Function, main, symbol(main).owner};
@@ -1039,6 +1101,7 @@ Conversion Converter::run() {
     }
     thread_jumps();
     remove_unreachable_blocks();
+    if (options_.lift_hints) lift_hint_section();
     if (concurrent_) {
         mark_transferable_layouts();
     }
@@ -1192,6 +1255,17 @@ void Converter::build_dispatch(const Dispatch& dispatch) {
     if (exits.size() == 1) {
         block.selector_start = 0;
     }
+    if (exits.size() > 1) {
+        // The layouts each call exit is taken for.
+        lift::LiftedForm form;
+        for (const auto& [layout_index, cls] : classes) {
+            const auto callee = functions_.at(target(dispatch, cls));
+            for (std::size_t e = 0; e + 1 < exits.size(); ++e) {
+                if (exits[e].target == callee) form.dispatch[e].push_back(layout_index);
+            }
+        }
+        hints_[{dispatch.function, dispatch.block}] = std::move(form);
+    }
     block.exits = std::move(exits);
     block.graph = graph(circuit.finish());
     image_.functions[dispatch.function].blocks[dispatch.block] = std::move(block);
@@ -1307,7 +1381,38 @@ void Converter::remove_unreachable_blocks() {
         }
         function.blocks = std::move(blocks);
         spans_[f] = std::move(spans);
+        // Hints follow their blocks; those of removed blocks are dropped.
+        const auto first = hints_.lower_bound({static_cast<std::uint32_t>(f), 0});
+        const auto last = hints_.lower_bound({static_cast<std::uint32_t>(f) + 1, 0});
+        std::vector<std::pair<std::uint32_t, lift::LiftedForm>> kept;
+        for (auto it = first; it != last; ++it) {
+            const auto old = it->first.second;
+            if (std::binary_search(order.begin(), order.end(), old)) kept.emplace_back(position[old], std::move(it->second));
+        }
+        hints_.erase(first, last);
+        for (auto& [block, form] : kept) hints_.emplace(std::pair{static_cast<std::uint32_t>(f), block}, std::move(form));
     }
+}
+
+// The LIFT section (docs/runtime/NVR.md, "Lift hints"): the form recorded
+// for each block with neurons whose regeneration from that form reproduces
+// the block and its graph. The runtime proves every hint again before it
+// uses one; checking the structural proof here only keeps forms the
+// runtime would reject (a block built with an operation the converter does
+// not record) out of the image.
+void Converter::lift_hint_section() {
+    std::vector<lift::BlockHint> hints;
+    for (auto& [key, form] : hints_) {
+        const auto& block = image_.functions[key.first].blocks[key.second];
+        const auto& graph = image_.graphs[block.graph];
+        if (graph.nodes.empty() || !lift::prove_structure(image_, block, graph, form) ||
+            !lift::lower(image_, block, form).block) {
+            continue;
+        }
+        hints.push_back({key.first, key.second, std::move(form)});
+    }
+    hints_.clear();
+    if (!hints.empty()) image_.other_sections.push_back(lift::encode_hints(std::move(hints)));
 }
 
 } // namespace
@@ -1325,7 +1430,9 @@ std::string source_label(const IrProgram& program, const std::string& file) {
     }
     std::optional<fs::path> root;
     for (const auto& item : program.symbols) {
-        if (item.kind != SymbolKind::File || !item.library_path.empty()) {
+        // A generated file, such as the one of an anonymous class, is no
+        // source file and has no directory.
+        if (item.kind != SymbolKind::File || !item.library_path.empty() || item.name.starts_with('<')) {
             continue;
         }
         const auto directory = fs::path(item.name).parent_path();
@@ -1545,6 +1652,56 @@ void FunctionCompiler::operation_at(const Span& span) {
     current().operation_span = span;
 }
 
+lift::ExpressionPtr FunctionCompiler::form_of(const Operand& original) {
+    if (!c_.lift_hints()) return nullptr;
+    const auto operand = resolve(original);
+    switch (operand.kind) {
+    case Operand::Kind::Immediate:
+        return lift::immediate(operand.type,
+                               operand.bits & width_mask(nvr::lane_count(c_.type_at(operand.type))));
+    case Operand::Kind::Slot:
+    case Operand::Kind::Constant: {
+        const auto kind = operand.kind == Operand::Kind::Slot ? nvr::ValueKind::Slot : nvr::ValueKind::Constant;
+        const auto& inputs = current().synth.inputs();
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            if (inputs[i].kind == kind && inputs[i].index == operand.index) return lift::input(inputs[i].type, i);
+        }
+        return nullptr;
+    }
+    case Operand::Kind::Bits:
+        return operand.form;
+    case Operand::Kind::Void:
+        break;
+    }
+    return nullptr;
+}
+
+Operand FunctionCompiler::described(Operand result, lift::ExpressionPtr form) {
+    if (!form) return result;
+    // Every operation is recorded, even one folded to a constant: its
+    // regeneration builds the same gadgets and registers the same checks.
+    current().schedule.push_back(form);
+    if (result.kind == Operand::Kind::Bits) result.form = std::move(form);
+    return result;
+}
+
+lift::ExpressionPtr FunctionCompiler::unary_form(std::string op, std::uint32_t type, const Operand& operand) {
+    auto a = form_of(operand);
+    return a ? lift::unary(std::move(op), type, std::move(a)) : nullptr;
+}
+
+lift::ExpressionPtr FunctionCompiler::binary_form(std::string op, std::uint32_t type, const Operand& left,
+                                                  const Operand& right) {
+    auto a = form_of(left);
+    auto b = form_of(right);
+    return a && b ? lift::binary(std::move(op), type, std::move(a), std::move(b)) : nullptr;
+}
+
+lift::ExpressionPtr FunctionCompiler::convert_form(std::uint32_t type, const Operand& operand) {
+    auto a = form_of(operand);
+    return a ? lift::convert(type, std::move(a)) : nullptr;
+}
+
 void FunctionCompiler::fail_when(const Signal& condition, std::uint32_t reason, const Span& span) {
     if (current().synth.fail_when(condition, reason) && !current().failure_span) {
         current().failure_span = span;
@@ -1562,6 +1719,26 @@ void FunctionCompiler::close(std::vector<ExitSpec> exits) {
         }
     }
     auto block = open_block.synth.close(std::move(exits));
+    if (c_.lift_hints()) {
+        // The block's lifted form: each value an exit reads and, between two
+        // exits, the condition. The schedule fixes the order of the checks.
+        lift::LiftedForm form;
+        form.shared = true;
+        form.schedule = std::move(open_block.schedule);
+        bool complete = true;
+        for (const auto& [lane, value] : open_block.synth.value_forms()) {
+            complete = complete && value;
+            form.values[lane] = value;
+        }
+        std::size_t normal = 0;
+        for (const auto& exit : block.exits) normal += exit.kind != nvr::ExitKind::Trap || normal == 0 ? 1 : 0;
+        if (normal == 2) {
+            form.condition = open_block.condition;
+            form.exit_when_true = open_block.exit_when_true;
+            complete = complete && form.condition;
+        }
+        if (complete && normal <= 2) c_.add_hint(index_, open_block.index, std::move(form));
+    }
     for (const auto* candidate : {&open_block.failure_span, &open_block.operation_span, &open_block.statement_span}) {
         if (*candidate && !(*candidate)->file.empty()) {
             spans_[open_block.index] = **candidate;
@@ -1584,6 +1761,8 @@ void FunctionCompiler::jump(std::uint32_t target, bool poll) {
 
 void FunctionCompiler::branch(const Operand& condition, std::uint32_t when_true, std::uint32_t when_false) {
     const auto bit = lanes(condition).front();
+    current().condition = form_of(condition);
+    current().exit_when_true = 0;
     ExitSpec yes;
     yes.kind = nvr::ExitKind::Continue;
     yes.when = bit;
@@ -1714,6 +1893,9 @@ void FunctionCompiler::statement(const IrNode& node) {
         if (it == slots_.end()) {
             it = slots_.emplace(node.symbol, new_slot(c_.type_of(c_.symbol(node.symbol).type, node.span))).first;
         }
+        // A deferred declaration (NIR 1.10) only creates the slot. It stays
+        // uninitialized, so a read before the first store traps.
+        if (is_deferred_initialize(node)) return;
         const auto slot = it->second;
         assign(slot, expression(node.operands.front()));
         return;
@@ -1813,7 +1995,7 @@ void FunctionCompiler::statement(const IrNode& node) {
         destroy(node);
         return;
     default:
-        throw Diagnostic(node.span, "unsupported statement");
+        throw Diagnostic(node.span, "unsupported statement").with_code("E0801");
     }
 }
 
@@ -1847,7 +2029,7 @@ void FunctionCompiler::store(const IrNode& node) {
         return;
     }
     default:
-        throw Diagnostic(destination.span, "unsupported assignment destination");
+        throw Diagnostic(destination.span, "unsupported assignment destination").with_code("E0801");
     }
 }
 
@@ -2011,7 +2193,7 @@ std::vector<Operand> FunctionCompiler::sequence(const std::vector<IrNode>& nodes
 IntegerFormat FunctionCompiler::integer_format(const IrType& type, const Span& span) const {
     const auto& t = c_.type_at(c_.type_of(type, span));
     if (t.kind != nvr::TypeKind::Signed && t.kind != nvr::TypeKind::Unsigned) {
-        throw Diagnostic(span, "arithmetic requires an integer type");
+        throw Diagnostic(span, "arithmetic requires an integer type").with_code("E0899");
     }
     return {t.width, t.kind == nvr::TypeKind::Signed};
 }
@@ -2106,7 +2288,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         return call(node);
     case IrOp::MakeClosure:
     case IrOp::CallClosure:
-        throw Diagnostic(node.span, "function values must be specialized before conversion");
+        throw Diagnostic(node.span, "function values must be specialized before conversion").with_code("E0801");
     case IrOp::Spawn:
         return spawn(node);
     case IrOp::SchedulerCall:
@@ -2201,7 +2383,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
     default:
         break;
     }
-    throw Diagnostic(node.span, "this operation is not supported by IRtoNeuronConversion");
+    throw Diagnostic(node.span, "this operation is not supported by IRtoNeuronConversion").with_code("E0801");
 }
 
 Operand FunctionCompiler::load(const IrNode& node) {
@@ -2213,12 +2395,12 @@ Operand FunctionCompiler::load(const IrNode& node) {
         const auto global = c_.global(resolve_global(node), node.span);
         return state(nvr::StateOp::ReadGlobal, global, {}, c_.global_at(global).type, node.span);
     }
-    throw Diagnostic(node.span, "unsupported load");
+    throw Diagnostic(node.span, "unsupported load").with_code("E0801");
 }
 
 Operand FunctionCompiler::receiver_value(const IrNode& node) {
     if (self_slot_ == absent) {
-        throw Diagnostic(node.span, "a module is not a value");
+        throw Diagnostic(node.span, "a module is not a value").with_code("E0899");
     }
     return slot_operand(self_slot_);
 }
@@ -2237,7 +2419,7 @@ SymbolId FunctionCompiler::module_of(const IrNode& receiver) const {
         receiver_module_ != no_symbol) {
         return receiver_module_;
     }
-    throw Diagnostic(receiver.span, "unsupported module receiver");
+    throw Diagnostic(receiver.span, "unsupported module receiver").with_code("E0801");
 }
 
 SymbolId FunctionCompiler::resolve_global(const IrNode& node) {
@@ -2254,21 +2436,26 @@ SymbolId FunctionCompiler::resolve_global(const IrNode& node) {
 Operand FunctionCompiler::unary(const IrNode& node) {
     const auto operand = expression(node.operands.front());
     if (node.text == "!") {
-        return bits(c_.scalar(nvr::TypeKind::Bool), {Circuit::logical_not(lanes(operand).front())});
+        const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+        auto result = bits(boolean, {Circuit::logical_not(lanes(operand).front())});
+        return described(std::move(result), unary_form("!", boolean, operand));
     }
     if (node.text == "~") {
         auto word = lanes(operand);
         std::ranges::transform(word, word.begin(), Circuit::logical_not);
-        return bits(c_.type_of(node.type, node.span), std::move(word));
+        const auto type = c_.type_of(node.type, node.span);
+        return described(bits(type, std::move(word)), unary_form("~", type, operand));
     }
     if (node.type.kind == TypeKind::Float) {
-        return bits(c_.type_of(node.type, node.span), float_negate(lanes(operand)));
+        const auto type = c_.type_of(node.type, node.span);
+        return described(bits(type, float_negate(lanes(operand))), unary_form("neg", type, operand));
     }
     const auto format = integer_format(node.type, node.span);
     const auto input = lanes(operand);
     auto result = negate(current().synth.circuit(), input, format.is_signed);
     fail_when(result.failure, arithmetic_failure, node.span);
-    return bits(c_.type_of(node.type, node.span), std::move(result.value));
+    const auto type = c_.type_of(node.type, node.span);
+    return described(bits(type, std::move(result.value)), unary_form("neg", type, operand));
 }
 
 Operand FunctionCompiler::binary(const IrNode& node) {
@@ -2279,7 +2466,9 @@ Operand FunctionCompiler::binary(const IrNode& node) {
         const auto left = lanes(operands[0]);
         const auto right = lanes(operands[1]);
         const auto same = equal(current().synth.circuit(), left, right);
-        return bits(c_.scalar(nvr::TypeKind::Bool), {op == "==" ? same : Circuit::logical_not(same)});
+        const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+        return described(bits(boolean, {op == "==" ? same : Circuit::logical_not(same)}),
+                         binary_form(op, boolean, operands[0], operands[1]));
     }
     if (operand_type.kind == TypeKind::String) {
         auto operands = sequence(node.operands);
@@ -2298,15 +2487,18 @@ Operand FunctionCompiler::binary(const IrNode& node) {
     const auto b = lanes(operands[1]);
     auto& circuit = current().synth.circuit();
     const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+    // What the operation computes, for the block's LIFT hint.
+    const auto form = [&](std::uint32_t type) { return binary_form(op, type, operands[0], operands[1]); };
     if (operand_type.kind == TypeKind::Bool) {
         const auto same = Circuit::logical_not(circuit.logical_xor(a.front(), b.front()));
-        return bits(boolean, {op == "==" ? same : Circuit::logical_not(same)});
+        return described(bits(boolean, {op == "==" ? same : Circuit::logical_not(same)}), form(boolean));
     }
     const auto format = integer_format(operand_type, node.span);
+    const auto result_type = c_.type_of(node.type, node.span);
     if (is_shift(op)) {
         auto result = shift(circuit, a, b, op == ">>", format.is_signed);
         fail_when(result.failure, arithmetic_failure, node.span);
-        return bits(c_.type_of(node.type, node.span), std::move(result.value));
+        return described(bits(result_type, std::move(result.value)), form(result_type));
     }
     if (is_bitwise_binary(op)) {
         Word result;
@@ -2320,7 +2512,7 @@ Operand FunctionCompiler::binary(const IrNode& node) {
                 result.push_back(circuit.logical_xor(a[i], b[i]));
             }
         }
-        return bits(c_.type_of(node.type, node.span), std::move(result));
+        return described(bits(result_type, std::move(result)), form(result_type));
     }
     if (is_comparison(op)) {
         Signal result;
@@ -2337,7 +2529,7 @@ Operand FunctionCompiler::binary(const IrNode& node) {
         } else {
             result = Circuit::logical_not(less(circuit, a, b, format.is_signed));
         }
-        return bits(boolean, {result});
+        return described(bits(boolean, {result}), form(boolean));
     }
     Checked result;
     if (op == "+") {
@@ -2351,10 +2543,10 @@ Operand FunctionCompiler::binary(const IrNode& node) {
     } else if (op == "%") {
         result = remainder(circuit, a, b, format.is_signed);
     } else {
-        throw Diagnostic(node.span, "operator '" + op + "' is not supported");
+        throw Diagnostic(node.span, "operator '" + op + "' is not supported").with_code("E0801");
     }
     fail_when(result.failure, arithmetic_failure, node.span);
-    return bits(c_.type_of(node.type, node.span), std::move(result.value));
+    return described(bits(result_type, std::move(result.value)), form(result_type));
 }
 
 Operand FunctionCompiler::isolated_arithmetic(const IrNode& node, Operand left, Operand right,
@@ -2375,7 +2567,8 @@ Operand FunctionCompiler::isolated_arithmetic(const IrNode& node, Operand left, 
                   : node.text == "/" ? divide(circuit, a, b, format.is_signed)
                                      : remainder(circuit, a, b, format.is_signed);
     fail_when(result.failure, arithmetic_failure, node.span);
-    auto value = bits(c_.type_of(node.type, node.span), std::move(result.value));
+    const auto type = c_.type_of(node.type, node.span);
+    auto value = described(bits(type, std::move(result.value)), binary_form(node.text, type, left, right));
     spill(value);
     const auto next = new_block();
     jump(next);
@@ -2408,13 +2601,15 @@ Operand FunctionCompiler::float_binary(const IrNode& node, Operand left, Operand
                                            : FloatComparison::GreaterEqual;
         const auto a = lanes(left);
         const auto b = lanes(right);
-        return bits(c_.scalar(nvr::TypeKind::Bool), {float_compare(current().synth.circuit(), a, b, format, comparison)});
+        const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+        return described(bits(boolean, {float_compare(current().synth.circuit(), a, b, format, comparison)}),
+                         binary_form(op, boolean, left, right));
     }
     const auto type = c_.type_of(node.type, node.span);
     if (left.kind == Operand::Kind::Immediate || right.kind == Operand::Kind::Immediate) {
         const auto a = lanes(left);
         const auto b = lanes(right);
-        return bits(type, compute(current().synth.circuit(), a, b));
+        return described(bits(type, compute(current().synth.circuit(), a, b)), binary_form(op, type, left, right));
     }
     spill(left);
     spill(right);
@@ -2423,7 +2618,7 @@ Operand FunctionCompiler::float_binary(const IrNode& node, Operand left, Operand
     begin(own, node.span);
     const auto a = lanes(left);
     const auto b = lanes(right);
-    auto value = bits(type, compute(current().synth.circuit(), a, b));
+    auto value = described(bits(type, compute(current().synth.circuit(), a, b)), binary_form(op, type, left, right));
     spill(value);
     const auto next = new_block();
     jump(next);
@@ -2437,11 +2632,13 @@ Operand FunctionCompiler::convert(const IrNode& node) {
     auto& circuit = current().synth.circuit();
     const auto type = c_.type_of(node.type, node.span);
     if (source.type.kind == TypeKind::Float && node.type.kind == TypeKind::Float) {
-        return bits(type, float_convert(circuit, lanes(operand), float_of(source.type), float_of(node.type)));
+        auto result = bits(type, float_convert(circuit, lanes(operand), float_of(source.type), float_of(node.type)));
+        return described(std::move(result), convert_form(type, operand));
     }
     if (node.type.kind == TypeKind::Float) {
         const auto from = integer_format(source.type, source.span);
-        return bits(type, float_from_integer(circuit, lanes(operand), from.is_signed, float_of(node.type)));
+        auto result = bits(type, float_from_integer(circuit, lanes(operand), from.is_signed, float_of(node.type)));
+        return described(std::move(result), convert_form(type, operand));
     }
     const auto to = integer_format(node.type, node.span);
     Checked result;
@@ -2452,7 +2649,7 @@ Operand FunctionCompiler::convert(const IrNode& node) {
         result = convert_integer(circuit, lanes(operand), from.is_signed, to.bits, to.is_signed);
     }
     fail_when(result.failure, arithmetic_failure, node.span);
-    return bits(type, std::move(result.value));
+    return described(bits(type, std::move(result.value)), convert_form(type, operand));
 }
 
 Operand FunctionCompiler::scalar_member(IrOp op, const IrType& type, std::vector<Operand> operands,
@@ -2525,10 +2722,13 @@ Operand FunctionCompiler::short_circuit(const IrNode& node) {
     if (graph_only(node)) {
         // Evaluating the right operand cannot fail or have an effect, so the
         // graph may compute both operands.
-        const auto a = lanes(expression(node.operands.front())).front();
-        const auto b = lanes(expression(right)).front();
+        const auto left = expression(node.operands.front());
+        const auto a = lanes(left).front();
+        const auto right_value = expression(right);
+        const auto b = lanes(right_value).front();
         auto& circuit = current().synth.circuit();
-        return bits(boolean, {conjunction ? circuit.logical_and(a, b) : circuit.logical_or(a, b)});
+        return described(bits(boolean, {conjunction ? circuit.logical_and(a, b) : circuit.logical_or(a, b)}),
+                         binary_form(node.text, boolean, left, right_value));
     }
     const auto left = expression(node.operands.front());
     const auto result = new_slot(boolean);
@@ -2546,6 +2746,10 @@ Operand FunctionCompiler::short_circuit(const IrNode& node) {
     undecided.kind = nvr::ExitKind::Continue;
     undecided.when = Circuit::logical_not(decided.when);
     undecided.resume = evaluate_right;
+    // Exit 0 continues to the right operand when the left one is true for
+    // && and false for ||.
+    current().condition = form_of(left);
+    current().exit_when_true = conjunction ? 0 : 1;
     close({undecided, decided});
     begin(evaluate_right, right.span);
     auto value = expression(right);
@@ -2565,7 +2769,8 @@ Operand FunctionCompiler::call(const IrNode& node) {
     const auto& target = c_.symbol(node.symbol);
     if (!node.type_arguments.empty() || !target.generics.empty()) {
         throw Diagnostic(node.span, "generic function '" + target.name +
-                                        "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                        "' is not supported: IRtoNeuronConversion does not specialize generics")
+            .with_code("E0801");
     }
     if (node.op == IrOp::VirtualCall) {
         return virtual_call(node);
@@ -2573,7 +2778,7 @@ Operand FunctionCompiler::call(const IrNode& node) {
     const auto owner = target.owner;
     if (owner != no_symbol && (c_.symbol(owner).kind == SymbolKind::Class ||
                                c_.symbol(owner).kind == SymbolKind::Interface)) {
-        throw Diagnostic(node.span, "a method call requires a receiver");
+        throw Diagnostic(node.span, "a method call requires a receiver").with_code("E0899");
     }
     const auto receiver = owner != no_symbol && c_.symbol(owner).kind == SymbolKind::Module ? owner : no_symbol;
     auto arguments = sequence(node.operands);
@@ -2587,12 +2792,12 @@ Operand FunctionCompiler::call(const IrNode& node) {
 Operand FunctionCompiler::spawn(const IrNode& node, bool handle) {
     const auto& body = node.operands.front();
     if (body.op != IrOp::Allocate || body.symbol == no_symbol) {
-        throw Diagnostic(node.span, "function values must be specialized before conversion");
+        throw Diagnostic(node.span, "function values must be specialized before conversion").with_code("E0801");
     }
     const auto layout = c_.symbol(body.symbol).owner;
     const auto method = c_.member(layout, "$invoke");
     if (method == no_symbol || !c_.symbol(method).has_body) {
-        throw Diagnostic(node.span, "a spawned function value has no body");
+        throw Diagnostic(node.span, "a spawned function value has no body").with_code("E0899");
     }
     auto object = expression(body);
     spill(object);
@@ -2605,7 +2810,7 @@ Operand FunctionCompiler::scheduler_call(const IrNode& node) {
     const bool is_select = node.text == select_operation || node.text == select_with_default;
     const auto operation = scheduler_operation(node.text);
     if (!is_select && !operation) {
-        throw Diagnostic(node.span, "unknown scheduler operation '" + node.text + "'");
+        throw Diagnostic(node.span, "unknown scheduler operation '" + node.text + "'").with_code("E0899");
     }
     if (!is_select && operation->code == compile_time_operation) {
         // Checked when the program was analyzed; the value passes through.
@@ -2638,11 +2843,11 @@ Operand FunctionCompiler::scheduler_call(const IrNode& node) {
         // capture layout, as a spawn does, with that object as its argument.
         const auto& body = node.operands.front();
         if (body.op != IrOp::Allocate || body.symbol == no_symbol) {
-            throw Diagnostic(node.span, "function values must be specialized before conversion");
+            throw Diagnostic(node.span, "function values must be specialized before conversion").with_code("E0801");
         }
         const auto method = c_.member(c_.symbol(body.symbol).owner, "$invoke");
         if (method == no_symbol || !c_.symbol(method).has_body) {
-            throw Diagnostic(node.span, "an isolated function value has no body");
+            throw Diagnostic(node.span, "an isolated function value has no body").with_code("E0899");
         }
         target = c_.function({Role::Function, method, no_symbol});
     }
@@ -2661,7 +2866,7 @@ Operand FunctionCompiler::virtual_call(const IrNode& node) {
         const auto implementation = c_.resolve_member(module, node.symbol);
         if (!c_.symbol(implementation).has_body) {
             throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" +
-                                            c_.symbol(node.symbol).name + "'");
+                                            c_.symbol(node.symbol).name + "'").with_code("E0899");
         }
         auto arguments = sequence(node.operands, 1);
         return invoke({Role::Function, implementation, module}, std::move(arguments), result_type, node.span,
@@ -2669,7 +2874,7 @@ Operand FunctionCompiler::virtual_call(const IrNode& node) {
     }
     c_.type_of(receiver.type, receiver.span);
     if (receiver.type.kind != TypeKind::Object) {
-        throw Diagnostic(receiver.span, "unsupported method receiver");
+        throw Diagnostic(receiver.span, "unsupported method receiver").with_code("E0801");
     }
     return dispatch_call(receiver.type.symbol, node.symbol, sequence(node.operands), result_type, node.span,
                          node.poll);
@@ -2739,7 +2944,7 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
     if (!supports_value_members(c_.program(), type)) {
         const std::string member = equality ? "equals" : op == IrOp::ValueHash ? "hash_code" : "to_string";
         throw Diagnostic(span, "type " + describe_value_type(type) + " has no member '" + member +
-                                   "' in this specialization");
+                                   "' in this specialization").with_code("E0899");
     }
     const auto result_type = equality ? c_.scalar(nvr::TypeKind::Bool) :
         op == IrOp::ValueHash ? c_.scalar(nvr::TypeKind::Unsigned, 32) : c_.scalar(nvr::TypeKind::Text);
@@ -2749,11 +2954,12 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
 
     const auto cls = type.symbol;
     if (c_.symbol(cls).name.starts_with("$signature"))
-        throw Diagnostic(span, "function values do not support equality, hashing, or text members");
+        throw Diagnostic(span, "function values do not support equality, hashing, or text members").with_code("E0801");
     auto root = cls;
     while (c_.symbol(root).base != no_symbol) root = c_.symbol(root).base;
     const auto method = c_.member(root, equality ? "equals" : op == IrOp::ValueHash ? "hash_code" : "to_string");
-    if (method == no_symbol) throw Diagnostic(span, "this class reference has no value member contract");
+    if (method == no_symbol) throw Diagnostic(span, "this class reference has no value member contract")
+        .with_code("E0899");
     for (auto& operand : operands) spill(operand);
     const auto is_nil = [&](const Operand& operand) {
         const auto word = lanes(operand);
@@ -2788,9 +2994,19 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
 
 Operand FunctionCompiler::external_call(const IrNode& node) {
     if (c_.symbol(node.symbol).host_binding) return bound_host_call(node);
+    if (kernel_bound(c_.symbol(node.symbol))) return kernel_call(node);
     const auto& target = c_.symbol(node.symbol);
     throw Diagnostic(node.span, "external function '" + c_.symbol(target.owner).name + "." + target.name +
-                                    "' has no runtime binding");
+                                    "' has no runtime binding").with_code("E0806");
+}
+
+// A kernel call stays a state operation: its arguments and result cross the
+// circuit boundary like those of a heap operation, and the runtime computes
+// the result with the kernel instead of a graph.
+Operand FunctionCompiler::kernel_call(const IrNode& node) {
+    auto arguments = sequence(node.operands);
+    const auto entry = c_.kernel_entry(node.symbol, node.span);
+    return state(nvr::StateOp::Kernel, entry, std::move(arguments), c_.type_of(node.type, node.span), node.span);
 }
 
 Operand FunctionCompiler::bound_host_call(const IrNode& node) {
@@ -2919,7 +3135,8 @@ Operand FunctionCompiler::to_index(const Operand& index, const IrType& type, con
         fail_when(word.back(), bounds_failure, span);
     }
     word.resize(64, Signal::of(0));
-    return bits(c_.scalar(nvr::TypeKind::Unsigned, 64), std::move(word));
+    const auto u64 = c_.scalar(nvr::TypeKind::Unsigned, 64);
+    return described(bits(u64, std::move(word)), unary_form("index", u64, index));
 }
 
 // ---------------------------------------------------------------------------
@@ -2953,7 +3170,8 @@ void FunctionCompiler::compile_function() {
     const auto& function = c_.symbol(origin_.symbol);
     if (!function.generics.empty()) {
         throw Diagnostic(function.span, "generic function '" + function.name +
-                                            "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                            "' is not supported: IRtoNeuronConversion does not specialize generics")
+            .with_code("E0801");
     }
     const auto owner = function.owner;
     if (owner != no_symbol && (c_.symbol(owner).kind == SymbolKind::Class ||
@@ -3360,6 +3578,7 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     }
     ConversionOptions conversion;
     conversion.source_map = options.source_map;
+    conversion.lift_hints = options.lift_hints;
     return convert(program, conversion);
 }
 

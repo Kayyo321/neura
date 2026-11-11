@@ -1,0 +1,81 @@
+// A loop whose check fails at iteration k, for tier 2 regions (docs/runtime/
+// NVM.md, "Execution tiers"): the run must trap with the same kind, text,
+// function, block, and callers, after the same steps, at every tier. The
+// first argument picks the check, the second the iteration:
+//   0 overflow, 1 bounds, 2 nil field read, 3 modification during
+//   iteration, 4 division by zero, 5 class cast, 6 shift count,
+//   7 narrowing conversion, 8 none (the loop finishes).
+// tests/backend/tier_tests.cpp runs every check at every iteration from 0 to
+// 11.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let RegionGuards = module:program.Entry (
+    let Cell = class (
+        export let value: int32 = 1;
+    );
+
+    let Special = class:Cell ();
+
+    let accumulate = func(mode: int32, k: int32) -> int32 {
+        let values: int32[list] = [];
+        let cells: Cell[list] = [];
+        for (let i = 0; i < 12; i = i + 1) {
+            if (mode != 1 || i < k) {
+                values.append(i);
+            }
+            if (mode == 2 && i == k) {
+                cells.append(nil);
+            } else if (mode == 5 && i == k) {
+                cells.append(new Cell());
+            } else {
+                cells.append(new Special());
+            }
+        }
+        let total: int32 = 0;
+        let step: int32 = 1;
+        let i = 0;
+        for (let v in values) {
+            if (mode == 0 && i == k) {
+                step = 2147483647;
+            }
+            total = total + step;
+            if (mode == 0) {
+                total = total - step;
+            }
+            let cell = cells[i];
+            total = total + cell.value;
+            if (mode == 1) {
+                total = total + values[i + 1];
+            }
+            if (mode == 3 && i == k) {
+                values.append(v);
+            }
+            if (mode == 4) {
+                total = total + 100 / (k - i);
+            }
+            if (mode == 5) {
+                let special = cell as Special;
+                total = total + special.value;
+            }
+            if (mode == 6) {
+                total = total + (1 << (i + 31 - k));
+            }
+            if (mode == 7) {
+                let wide = (i as int64) + 2147483647 - (k as int64);
+                total = total + ((wide as int32) % 7);
+            }
+            i = i + 1;
+        }
+        return total;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let mode = result.value_or<int32>(int32s.parse(args[0]), 8);
+        let k = result.value_or<int32>(int32s.parse(args[1]), 0);
+        console.println("total {}", accumulate(mode, k));
+        return program.ExitCode.Ok;
+    };
+);

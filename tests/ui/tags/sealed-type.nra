@@ -1,0 +1,20 @@
+// Implementing a #Sealed interface outside its module (E0914). Classes inside
+// the module may implement it.
+let Shapes = module (
+    #Sealed
+    export let Shape = interface (
+        let area = func() -> int32;
+    );
+
+    export let Square = class implements Shape (
+        export let.override area = func() -> int32 {
+            return 4;
+        };
+    );
+);
+
+let Circle = class implements Shapes.Shape (
+    export let.override area = func() -> int32 {
+        return 3;
+    };
+);

@@ -7,5 +7,5 @@ let Main = module:program.Entry (
         let step = 0;
         let values = 0 .. 0 : step;
         return program.ExitCode.Ok;
-    }
+    };
 );

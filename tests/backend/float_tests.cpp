@@ -5,7 +5,7 @@
 // conversions; and on special, boundary, and pseudo-random operands for the
 // binary operations of the 16-, 32-, and 64-bit formats.
 
-#include "backend/float_circuit.hpp"
+#include "circuit/float_circuit.hpp"
 #include "fixtures.hpp"
 #include "ir-optimization/float_reference.hpp"
 #include "neura-ir/float.hpp"

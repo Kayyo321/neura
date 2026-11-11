@@ -17,8 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Failure** · [`export let trap = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/failure.nra#L6)
-  Stops execution and reports the supplied diagnostic message.
+- **Failure** · [`export let trap = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/failure.nra#L8)
+  Stops execution and reports the supplied diagnostic message. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -31,7 +31,7 @@ There are two kinds of failure and they never mix.
 
 **Returned errors.** A function whose failure depends on input text, input bytes, or the outside world returns `Result<T>` ([section 6.2](Stdlib-Design#62-resultt)). The caller reads it with `match`. There is no propagation shorthand and no exception; passing an error up is an explicit `match` arm that returns it.
 
-**Traps.** A function whose precondition is violated ends the run. The run stops at once with the process status of the trap's class, 134 (`Abort`) for a message trap; no library or user code runs afterwards; nothing can observe or recover it ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). The module `Failure` in `Std.Core` has one function:
+**Traps.** A function whose precondition is violated ends the run. The run stops at once with the process status of the trap's class, 134 (`Abort`) for a message trap; no library or user code runs afterwards; nothing can observe or recover it ([Errors](Errors)). The module `Failure` in `Std.Core` has one function:
 
 | Member | Behavior |
 | --- | --- |
@@ -87,4 +87,4 @@ This module replaces the built-in `Test` as described in [section 4.6](Stdlib-De
 
 - The typed assertions remain available for callers that prefer a concrete signature.
 - **There is no assertion that expects a trap.** A trap cannot be caught, so a test function cannot observe one and continue. Code that must trap is tested by a separate program with an expected diagnostic ([section 17](Stdlib-Design#17-verification)).
-- A failed assertion ends its test. Tests are discovered and run as [Testing](https://github.com/Kayyo321/neura/wiki/Testing) describes; only the import changes.
+- A failed assertion ends its test. Tests are discovered and run as [Testing](Testing) describes; only the import changes.

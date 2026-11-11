@@ -1,0 +1,4 @@
+// An argument of the wrong type (E0403), labelled at the parameter that
+// expects it.
+let repeat = func(text: string, times: int) -> int => times;
+let count = repeat("ab", "3");

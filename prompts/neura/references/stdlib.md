@@ -5,6 +5,7 @@ The standard library is Neura source installed with the tool and compiled with e
 ## Contents
 
 - [How the library is organized](#how-the-library-is-organized)
+- [Fields, `#NoDiscard`, and kernels](#fields-nodiscard-and-kernels)
 - [Console output and formatting](#console-output-and-formatting)
 - [Strings and text](#strings-and-text)
 - [Optional, Result, and Error](#optional-result-and-error)
@@ -26,6 +27,28 @@ The standard library is Neura source installed with the tool and compiled with e
 - Expected failures return `Result<T>` (an `Ok(T)` or `Err(Error)`); absent values are `Optional<T>` (`Some(T)` or `None`). Violated preconditions (a bad index, an invalid argument) trap.
 - Functions that touch the outside world (files, network, clock, environment, entropy) are host services. They are granted by default and can be denied with `--deny-*` options, in which case they return an `Io` error of kind `CapabilityDenied`.
 
+## Fields, `#NoDiscard`, and kernels
+
+**Stored values are fields.** In 0.2.0 these members are read as fields, without `()`; calling one is `E0423` `expression is not callable`, and assigning a read-only one is `E0510` or `E0445`:
+
+| Module | Fields |
+| --- | --- |
+| `Std.Core` | `StringBuilder.byte_length`; `IntRange.start`, `end`, `step` |
+| `Std.Text` | `Regex.pattern`, `group_count`; `RegexMatch.start`, `end` |
+| `Std.Io` | `ByteBuffer.size`; `BufferedWriter.buffered` |
+| `Std.Fs` | `Path.is_absolute`; `FileMetadata.kind`, `size`, `modified` |
+| `Std.Net` | `TcpListener.local_port`; `TcpStream.read_timeout`, assignable: `stream.read_timeout = durations.of_seconds(5);` (a negative duration traps) |
+| `Std.Log` | `Logger.level`, assignable: `log.level = loggers.LogLevel.Debug;` (there is no `set_level`) |
+| `Std.Time` | `Instant.epoch_seconds`, `nanos`; `LocalDate.year`, `month`, `day`; `LocalDateTime.date`, `time`; `ZoneOffset.total_seconds`; `Stopwatch.is_running` |
+| `Std.Math` | `BigDecimal.unscaled`, `scale` |
+| `Std.Concurrent` | `Parallel.ItemLimits.max_steps`, `max_heap_cells` |
+
+Everything else stays a method, notably `size()` and `is_empty()` of every collection (an accessor cannot implement an interface member) and `LocalTime.hour()`, `minute()`, `second()`, `nano()`, which are computed.
+
+**Results you must use.** I/O results, resource handles (`File`, `TcpStream`, `TcpListener`), `Result`- and `Optional`-returning queries, value classes such as `Duration` and `BigInteger`, and most value-returning functions are `#NoDiscard`: a statement that drops one warns `W0003`. Use the value, or write `let _ = file.write(bytes);`. [stdlib-api.md](stdlib-api.md) shows the tag before each signature. The value and resource classes are `#Final`: extend them by composition, not inheritance.
+
+**Kernels.** `Std.Digest`, `Std.Math.Math`, the searches, splits, trims, replacements, and case maps of `Std.Text.Strings` (and the `string` members built on them), integer radix text, `Std.Encoding.Utf8.validate`, `Base64`, `Hex`, and `Sorting.sort_ascending` run on built-in C kernels: the same results and traps as the Neura code they replaced, far fewer steps, no capability needed, and callable from tasks. For a list of `int32`, `uint32`, `int64`, `uint64`, or `float64`, prefer `sorting.sort_ascending(values)` to `sorting.sort<T>(values, comparator)`.
+
 ## Console output and formatting
 
 <!-- example: run -->
@@ -46,7 +69,7 @@ let App = module:program.Entry (
         console.print_line(text);
         console.eprintln("to stderr: {}", true);               // stderr
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -95,7 +118,7 @@ let App = module:program.Entry (
         }
         console.print_line(builder.to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -162,7 +185,7 @@ let App = module:program.Entry (
         let port = result.value_or<int>(parse_port("x"), 80);
         console.print_line(port.to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -201,7 +224,7 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         // Built-in list plus helpers
         let numbers: int[list] = [5, 3, 9, 1];
-        sorting.sort<int>(numbers, int32.compare);                 // in place
+        sorting.sort_ascending(numbers);                          // in place, on a kernel
         lists.insert_at<int>(numbers, 0, 0);
         console.println("{} {} {}", numbers[0], numbers[1], numbers.length);
 
@@ -238,7 +261,7 @@ let App = module:program.Entry (
         seen.add(3);
         console.println("set size {}", seen.size());
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -366,7 +389,7 @@ let App = module:program.Entry (
         members.append(["count", json.number_of_int64(3)]);
         console.print_line(json.write(json.JsonValue.Object(members)));
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -400,7 +423,7 @@ let wait_a_bit = func {
 };
 ```
 
-`Duration` (nanosecond precision) and `Instant` are classes with arithmetic methods; `LocalDate`, `LocalTime`, `LocalDateTime`, `ZoneOffset` (fixed offsets only, no time zones), and `DayOfWeek` cover calendars. `Clock` is an interface implemented by `SystemClock` and `FixedClock`; take a `Clock` parameter to make code testable. Reading the clock needs the clock capability.
+`Duration` (nanosecond precision) and `Instant` are `#Final`, `#NoDiscard` value classes with arithmetic methods; their stored components are fields (`instant.epoch_seconds`, `date.year`, `offset.total_seconds`); `LocalDate`, `LocalTime`, `LocalDateTime`, `ZoneOffset` (fixed offsets only, no time zones), and `DayOfWeek` cover calendars. `Clock` is an interface implemented by `SystemClock` and `FixedClock`; take a `Clock` parameter to make code testable. Reading the clock needs the clock capability.
 
 ## Randomness
 
@@ -420,7 +443,7 @@ let App = module:program.Entry (
         rng.shuffle<int>(deck);
         console.println("{}", deck.length);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -450,6 +473,7 @@ let home = func -> string {
 let log = loggers.create("app", func(line: string) { console.error_line(line); }, loggers.LogLevel.Info);
 
 let stop = func {
+    log.level = loggers.LogLevel.Debug;               // a field: no set_level
     log.info("stopping");
     program.Process.exit(program.ExitCode.Failure);   // or Process.exit(3)
 };

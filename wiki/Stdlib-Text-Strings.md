@@ -17,88 +17,88 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Strings** · [`export let byte_length = func(s: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L18)
-  Constant time.
-- **Strings** · [`export let scalar_count = func(s: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L21)
-  The number of bytes that are not continuation bytes. Linear.
-- **Strings** · [`export let is_empty = func(s: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L35)
-  Tests whether the string has zero bytes.
+- **Strings** · [`export let byte_length = func(s: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L26)
+  Constant time. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let scalar_count = func(s: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L30)
+  The number of bytes that are not continuation bytes. Linear. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let is_empty = func(s: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L34)
+  Tests whether the string has zero bytes. Tagged `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let byte_at = func(s: string, offset: int) -> uint8`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L38)
-  The byte at the offset; the built-in read traps outside the string.
-- **Strings** · [`export let scalar_at = func(s: string, offset: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L44)
-  The scalar value of the character starting at the offset. An offset outside the string is a built-in bounds trap; a continuation byte traps with "invalid argument: offset is not a character boundary".
-- **Strings** · [`export let is_boundary = func(s: string, offset: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L53)
-  True for 0, for the byte length, and for every offset whose byte is not a continuation byte; false outside 0 through the byte length.
-- **Strings** · [`export let scalars = func(s: string) -> uint32[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L61)
-  The scalar values in order.
-- **Strings** · [`export let scalar_offsets = func(s: string) -> [int, uint32][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L74)
-  Each character's starting offset with its scalar value.
-- **Strings** · [`export let slice = func(s: string, start: int, end: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L87)
-  The built-in slice: both ends on boundaries and start not above end.
-- **Strings** · [`export let slice_from = func(s: string, start: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L90)
-  Returns the suffix beginning at a UTF-8 byte boundary.
-- **Strings** · [`export let equals = func(a: string, b: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L93)
-  Same bytes (Stdlib.md section 5.2).
-- **Strings** · [`export let hash = func(s: string) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L96)
-  Start with 0; for each byte, 31 times the hash plus the byte, wrapping.
-- **Strings** · [`export let compare = func(a: string, b: string) -> ordering.Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L100)
-  Byte-wise lexicographic order; a proper prefix sorts first. This is also the order of the scalar values.
-- **Strings** · [`export let starts_with = func(s: string, prefix: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L129)
-  Tests whether the string starts with the literal prefix.
-- **Strings** · [`export let ends_with = func(s: string, suffix: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L132)
-  Tests whether the string ends with the literal suffix.
-- **Strings** · [`export let contains = func(s: string, needle: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L141)
-  Tests whether the literal needle occurs anywhere in the string.
-- **Strings** · [`export let index_of = func(s: string, needle: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L144)
-  The offset of the first occurrence, or -1. An empty needle matches at 0.
-- **Strings** · [`export let index_of_from = func(s: string, needle: string, from: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L148)
-  The offset of the first occurrence at or after `from`, or -1. An empty needle matches at `from`. `from` must be a boundary from 0 through the byte length.
-- **Strings** · [`export let last_index_of = func(s: string, needle: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L154)
-  The offset of the last occurrence, or -1. An empty needle matches at the byte length.
-- **Strings** · [`export let split = func(s: string, separator: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L174)
-  Every piece between non-overlapping occurrences of the separator, left to right. Empty pieces are kept; the empty string gives one piece. An empty separator traps with "invalid argument: empty separator".
-- **Strings** · [`export let split_limit = func(s: string, separator: string, limit: int) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L179)
-  As split, with at most `limit` pieces; the last piece holds the rest. A limit below 1 traps with "invalid argument: limit below 1".
-- **Strings** · [`export let lines = func(s: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L188)
-  Splits at LF. A CR immediately before an LF is removed, and the empty piece after a final LF is dropped. The empty string gives one empty line, as split does.
-- **Strings** · [`export let join = func(parts: string[list], separator: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L211)
-  The parts with the separator between each pair.
-- **Strings** · [`export let repeat = func(s: string, count: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L234)
-  `count` copies of the string. A negative count traps with "invalid argument: negative count".
-- **Strings** · [`export let trim = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L254)
-  Removes space, tab, LF, vertical tab, form feed, and CR from both ends.
-- **Strings** · [`export let trim_start = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L264)
-  Removes ASCII space and bytes 9 through 13 from the start.
-- **Strings** · [`export let trim_end = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L274)
-  Removes ASCII space and bytes 9 through 13 from the end.
-- **Strings** · [`export let strip_prefix = func(s: string, prefix: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L277)
-  The rest of the string when it starts with the prefix.
-- **Strings** · [`export let strip_suffix = func(s: string, suffix: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L285)
-  The start of the string when it ends with the suffix.
-- **Strings** · [`export let replace = func(s: string, target: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L295)
-  Replaces every non-overlapping occurrence, left to right. An empty target traps with "invalid argument: empty target".
-- **Strings** · [`export let replace_first = func(s: string, target: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L299)
-  Replaces the first occurrence. An empty target traps as in replace.
-- **Strings** · [`export let to_ascii_upper = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L303)
-  a through z become A through Z; every other byte is unchanged.
-- **Strings** · [`export let to_ascii_lower = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L306)
-  A through Z become a through z; every other byte is unchanged.
-- **Strings** · [`export let equals_ignore_ascii_case = func(a: string, b: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L309)
-  Equal after mapping A through Z to a through z in both strings.
-- **Strings** · [`export let pad_start = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L331)
-  Copies of `pad` before the string until it has `width` scalar values. `pad` must be exactly one scalar value; otherwise the call traps with "invalid argument: pad is not one scalar value".
-- **Strings** · [`export let pad_end = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L343)
-  Copies of `pad` after the string, with the rules of pad_start.
-- **Strings** · [`export let reverse = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L355)
-  The scalar values in reverse order.
-- **Strings** · [`export let to_bytes = func(s: string) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L371)
-  A copy of the UTF-8 bytes.
-- **Strings** · [`export let from_bytes = func(bytes: uint8[list]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L381)
-  The text the bytes encode, or an Encoding error whose offset is the start of the first ill-formed sequence (the length of the longest valid prefix). Its message is "invalid start byte", "invalid continuation byte", or "unexpected end of data".
-- **Strings** · [`export let from_bytes_lossy = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L403)
-  The text the bytes encode, with each maximal ill-formed subsequence (Unicode's "maximal subpart" practice) replaced by one U+FFFD.
-- **Strings** · [`export let from_scalars = func(values: uint32[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L431)
-  The text of the scalar values. A surrogate or a value above 0x10FFFF traps with "invalid argument: not a Unicode scalar value".
+  The byte at the offset; the built-in read traps outside the string. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let scalar_at = func(s: string, offset: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L45)
+  The scalar value of the character starting at the offset. An offset outside the string is a built-in bounds trap; a continuation byte traps with "invalid argument: offset is not a character boundary". Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let is_boundary = func(s: string, offset: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L55)
+  True for 0, for the byte length, and for every offset whose byte is not a continuation byte; false outside 0 through the byte length. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let scalars = func(s: string) -> uint32[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L64)
+  The scalar values in order. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let scalar_offsets = func(s: string) -> [int, uint32][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L78)
+  Each character's starting offset with its scalar value. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let slice = func(s: string, start: int, end: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L92)
+  The built-in slice: both ends on boundaries and start not above end. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let slice_from = func(s: string, start: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L96)
+  Returns the suffix beginning at a UTF-8 byte boundary. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let equals = func(a: string, b: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L100)
+  Same bytes (Stdlib.md section 5.2). Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let hash = func(s: string) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L104)
+  Start with 0; for each byte, 31 times the hash plus the byte, wrapping. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let compare = func(a: string, b: string) -> ordering.Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L109)
+  Byte-wise lexicographic order; a proper prefix sorts first. This is also the order of the scalar values. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let starts_with = func(s: string, prefix: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L122)
+  Tests whether the string starts with the literal prefix. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let ends_with = func(s: string, suffix: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L126)
+  Tests whether the string ends with the literal suffix. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let contains = func(s: string, needle: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L130)
+  Tests whether the literal needle occurs anywhere in the string. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let index_of = func(s: string, needle: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L134)
+  The offset of the first occurrence, or -1. An empty needle matches at 0. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let index_of_from = func(s: string, needle: string, from: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L142)
+  The offset of the first occurrence at or after `from`, or -1. An empty needle matches at `from`. `from` must be a boundary from 0 through the byte length. Linear in the distance searched: a loop that calls it with `from` after each occurrence is linear in the text. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let last_index_of = func(s: string, needle: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L146)
+  The offset of the last occurrence, or -1. An empty needle matches at the byte length. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let split = func(s: string, separator: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L154)
+  Every piece between non-overlapping occurrences of the separator, left to right. Empty pieces are kept; the empty string gives one piece. An empty separator traps with "invalid argument: empty separator". Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let split_limit = func(s: string, separator: string, limit: int) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L160)
+  As split, with at most `limit` pieces; the last piece holds the rest. A limit below 1 traps with "invalid argument: limit below 1". Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let lines = func(s: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L170)
+  Splits at LF. A CR immediately before an LF is removed, and the empty piece after a final LF is dropped. The empty string gives one empty line, as split does. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let join = func(parts: string[list], separator: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L190)
+  The parts with the separator between each pair. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let repeat = func(s: string, count: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L214)
+  `count` copies of the string. A negative count traps with "invalid argument: negative count". Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let trim = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L235)
+  Removes space, tab, LF, vertical tab, form feed, and CR from both ends. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let trim_start = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L246)
+  Removes ASCII space and bytes 9 through 13 from the start. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let trim_end = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L251)
+  Removes ASCII space and bytes 9 through 13 from the end. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let strip_prefix = func(s: string, prefix: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L255)
+  The rest of the string when it starts with the prefix. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let strip_suffix = func(s: string, suffix: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L264)
+  The start of the string when it ends with the suffix. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let replace = func(s: string, target: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L274)
+  Replaces every non-overlapping occurrence, left to right. An empty target traps with "invalid argument: empty target". Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let replace_first = func(s: string, target: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L279)
+  Replaces the first occurrence. An empty target traps as in replace. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let to_ascii_upper = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L284)
+  a through z become A through Z; every other byte is unchanged. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let to_ascii_lower = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L288)
+  A through Z become a through z; every other byte is unchanged. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let equals_ignore_ascii_case = func(a: string, b: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L292)
+  Equal after mapping A through Z to a through z in both strings. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let pad_start = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L299)
+  Copies of `pad` before the string until it has `width` scalar values. `pad` must be exactly one scalar value; otherwise the call traps with "invalid argument: pad is not one scalar value". Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let pad_end = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L312)
+  Copies of `pad` after the string, with the rules of pad_start. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let reverse = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L325)
+  The scalar values in reverse order. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let to_bytes = func(s: string) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L342)
+  A copy of the UTF-8 bytes. Tagged `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let from_bytes = func(bytes: uint8[list]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L353)
+  The text the bytes encode, or an Encoding error whose offset is the start of the first ill-formed sequence (the length of the longest valid prefix). Its message is "invalid start byte", "invalid continuation byte", or "unexpected end of data". Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let from_bytes_lossy = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L368)
+  The text the bytes encode, with each maximal ill-formed subsequence (Unicode's "maximal subpart" practice) replaced by one U+FFFD. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Strings** · [`export let from_scalars = func(values: uint32[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L397)
+  The text of the scalar values. A surrogate or a value above 0x10FFFF traps with "invalid argument: not a Unicode scalar value". Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -211,11 +211,11 @@ All of `Strings` needs T1. String operations are functions that take the string 
 
 Functions that return several strings return a built-in list, not an `ArrayList`: the built-in for-each works on it, and `Std.Text` then needs nothing from `Std.Collections`.
 
-**Search algorithm.** `index_of` scans for the needle's first byte and then compares the remaining bytes in place. Its worst case is the product of the two lengths. The simple scan has the smallest circuit and a predictable step count.
+**Search algorithm.** The searches, comparisons, trims, splits, `lines`, replacements, ASCII case mappings, `scalar_count`, and `hash` run on the `neura.text`, `neura.hash`, and `neura.encoding` kernels (P2a). The text searches use the two-way string-matching algorithm, so a search is linear in the length of the text it reads plus the needle's length, never their product. A kernel is charged by the work its arguments allow (P2a), so the steps of each member are linear: `index_of` and `index_of_from` search in windows that start at 128 bytes and double, so their steps grow with the distance from `from` to the occurrence rather than with the rest of the text, and a loop that calls `index_of_from` after each occurrence is linear in the text; `split`, `split_limit`, and `lines` find every separator in two kernel calls over the text (one counts, one writes the offsets) and then slice the pieces, so they are linear in the text plus the number of pieces.
 
-**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
+**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator, the `neura.encoding.utf8_check` and `utf8_validate` kernels, must agree with the validation NVM performs when constructing text; its Neura original is the oracle of the `strings` and `utf8` tests.
 
-**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 8.3 `Scalars`
 
@@ -240,9 +240,9 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 | `find_all(input)` | A built-in list of `RegexMatch`: successive non-overlapping matches. After an empty match the search resumes one scalar value later. |
 | `replace_all(input, replacement) → string`, `replace_first(...)` | `$0` through `$99` and `${name}` insert groups; `$$` is a dollar sign. A reference to a group that does not exist traps; a group that did not participate inserts nothing. |
 | `split(input)` | A built-in list of strings, with the rules of `Strings.split`. |
-| `group_count() → int`, `pattern() → string` | |
+| `group_count: int`, `pattern: string` | Get-only fields ([accessors](Types#accessors)), set at compilation. |
 
-`RegexMatch` is an immutable class: `start()`, `end()`, `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
+`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
 
 ### 9.6 Hash collections
 
@@ -311,9 +311,9 @@ When compaction happens:
 
 Everything here needs T1 except the `Json` value type itself.
 
-- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone.
-- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error).
-- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero.
+- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone. The kernel `neura.encoding.utf8_validate` computes it (P2a).
+- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error). The kernels `neura.encoding.hex_encode` and `hex_decode` compute it (P2a).
+- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero. The kernels `neura.encoding.base64_encode` and `base64_decode` compute every form (P2a).
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
 
 **`Json`** (RFC 8259).
@@ -368,7 +368,7 @@ The module `Json`:
 - **Json parse errors.** `Empty` for empty or all-whitespace text; `UnexpectedEnd` at the text length; `Syntax` for structure; `InvalidCharacter` inside a token, with escapes reported at the backslash; `OutOfRange` at the bracket that opens level 513. Top-level scalars are accepted.
 - **Json values.** Numbers compare by a canonical decimal text, including exponents beyond `int64`. `hash` starts each variant from its position (Null 1 through Object 6), and an object's hash combines its member count with the wrapping sum of its distinct member hashes, so it agrees with order-insensitive equality even when names repeat. `number_to_int64` is `None` for anything but a plain integer. `index` keeps the last value of a repeated name. A `StringMap<JsonValue>` supports lookups; its `equals` and `to_string` are rejected at build time because `JsonValue` has no built-in value members.
 - **Json traps.** `number is not finite`, `negative indent`, `number text`, and `number exponent out of range`, after `invalid argument: `.
-- **Sha256** keeps rolled loops: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB.
+- **Sha256** kept rolled loops while it was Neura code: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB. It now calls kernels (P2a), which cut the `sha256` benchmark from 163,795 steps and 861,597 image bytes to 31,043 steps (mostly building the input) and 600,765 bytes.
 
 ### 18.9 Hash collections, trees, and sequences
 

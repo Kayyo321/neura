@@ -14,16 +14,17 @@ let task_handles = import:Std.Concurrent.Task;
 /// cannot build an array whose length is known only at run time, and a function with type parameters cannot be
 /// overloaded for arrays as well.
 /// @see [Std.Concurrent.Tasks](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Tasks)
+#Since("0.1.0")
 export let Tasks = module (
     /// @brief Runs every call as a task and returns their results in the order of the calls. Waits for all of
     /// them; nothing is cancelled.
     export let all = func<T>(calls: (func() -> T)[list]) -> T[list] {
         scope {
-            let pending: task_handles.Task<T>[list] = [];
+            last pending: task_handles.Task<T>[list] = [];
             for (let call: func() -> T in calls) {
                 pending.append(spawn call());
             }
-            let values: T[list] = [];
+            last values: T[list] = [];
             for (let task: task_handles.Task<T> in pending) {
                 values.append(task.join());
             }
@@ -36,10 +37,10 @@ export let Tasks = module (
     /// running and waiting for every one of them to finish. If the calling task is cancelled while it waits, the
     /// calls are cancelled the same way and the result is an Err with the code tasks.cancelled.
     export let all_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T[list]> {
-        let count = calls.length;
+        last count = calls.length;
         let [done, completions, closer] = channels.open<int>(count);
         scope (group) {
-            let pending: task_handles.Task<result.Result<T>>[list] = [];
+            last pending: task_handles.Task<result.Result<T>>[list] = [];
             for (let call: func() -> result.Result<T> in calls) {
                 pending.append(spawn run_indexed<T>(call, pending.length, done));
             }
@@ -63,7 +64,7 @@ export let Tasks = module (
                     },
                 }
             }
-            let values: T[list] = [];
+            last values: T[list] = [];
             for (let task: task_handles.Task<result.Result<T>> in pending) {
                 match (task.join()) {
                     result.Result.Ok(value) => { values.append(value); },
@@ -81,17 +82,17 @@ export let Tasks = module (
     /// returns the Err of the one that completed last. With no calls, or if the calling task is cancelled while
     /// it waits, the result is an Err with the code tasks.empty or tasks.cancelled.
     export let first_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T> {
-        let count = calls.length;
+        last count = calls.length;
         if (count == 0) {
             return result.Result<T>.Err(error.custom("tasks.empty", "no calls to run"));
         }
         let [done, completions, closer] = channels.open<int>(count);
         scope (group) {
-            let pending: task_handles.Task<result.Result<T>>[list] = [];
+            last pending: task_handles.Task<result.Result<T>>[list] = [];
             for (let call: func() -> result.Result<T> in calls) {
                 pending.append(spawn run_indexed<T>(call, pending.length, done));
             }
-            let last = error.custom("tasks.cancelled", "cancelled before any call succeeded");
+            let latest = error.custom("tasks.cancelled", "cancelled before any call succeeded");
             let remaining = count;
             while (remaining > 0) {
                 match (completions.receive()) {
@@ -103,24 +104,24 @@ export let Tasks = module (
                                 return result.Result<T>.Ok(value);
                             },
                             result.Result.Err(failure) => {
-                                last = failure;
+                                latest = failure;
                             },
                         }
                     },
                     _ => {
                         group.cancel();
-                        return result.Result<T>.Err(last);
+                        return result.Result<T>.Err(latest);
                     },
                 }
             }
-            return result.Result<T>.Err(last);
+            return result.Result<T>.Err(latest);
         }
     };
 
     // Runs a call and then reports its index on the channel, which has room for every call.
     let run_indexed = func<T>(call: func() -> result.Result<T>, index: int, done: channels.Sender<int>)
             -> result.Result<T> {
-        let outcome = call();
+        last outcome = call();
         done.send(index);
         return outcome;
     };

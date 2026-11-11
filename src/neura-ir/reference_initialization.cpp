@@ -115,7 +115,7 @@ private:
         for (std::size_t i = 0; i < fields_.size(); ++i) {
             if (flow.fields[i] != Binding::Bound)
                 throw Diagnostic(span, "constructor may exit before binding reference field '" +
-                                        fields_[i].name + "'");
+                                        fields_[i].name + "'").with_code("E0513");
         }
     }
 
@@ -123,7 +123,7 @@ private:
         if (!flow.reachable) return;
         if (const auto field = owned_field(expr); field && flow.fields[*field] != Binding::Bound) {
             throw Diagnostic(expr.span, "reference field '" + fields_[*field].name +
-                                        "' may be read before it is bound");
+                                        "' may be read before it is bound").with_code("E0513");
         }
         if (expr.kind == ExprKind::Lambda) return;
         if (expr.kind == ExprKind::Conditional) {
@@ -162,13 +162,13 @@ private:
         auto& state = flow.fields[*field];
         if (flow.reachable && state == Binding::MaybeBound) {
             throw Diagnostic(destination.span, "reference field '" + fields_[*field].name +
-                "' is bound on only some paths to this assignment");
+                "' is bound on only some paths to this assignment").with_code("E0513");
         }
         read(stmt.expressions[1], flow);
         if (state != Binding::Unbound) return;
         if (flow.reachable && in_loop) {
             throw Diagnostic(destination.span, "first binding of reference field '" + fields_[*field].name +
-                "' must be outside a loop body or step");
+                "' must be outside a loop body or step").with_code("E0513");
         }
         first_bindings_.insert(&stmt);
         state = Binding::Bound;

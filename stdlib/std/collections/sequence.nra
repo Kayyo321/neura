@@ -13,13 +13,15 @@ let sorting = import:Std.Collections.Sorting;
 /// but defers evaluation until elements are requested. A second traversal operation on the same
 /// sequence traps with `invalid state: sequence already used`. Equality and hashing use identity.
 /// @see [Std.Collections.Sequence](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Sequence)
+#Since("0.1.0")
 export let Sequence = module (
     /// @brief A lazy traversal that can be handed to a downstream operation only once.
+    #[Final, NoDiscard, NotThreadSafe]
     export let Sequence = class<T> implements Iterable<T> (
         /// @brief The availability check for the next output, which may fill a buffer from the upstream source.
-        let has_next: func() -> bool;
+        last has_next: func() -> bool;
         /// @brief The callback that pulls and consumes the next output.
-        let next: func() -> T;
+        last next: func() -> T;
         /// @brief Whether the pipeline has already been handed to an operation or iterator.
         let consumed: bool = false;
 
@@ -41,7 +43,7 @@ export let Sequence = module (
         /// @brief Returns a lazy sequence applying `f` once to each element as it is pulled.
         export let map = func<U>(f: func(T) -> U) -> Sequence<U> {
             begin();
-            let pull = next;
+            last pull = next;
             return new Sequence<U>(has_next, func() -> U {
                 return f(pull());
             });
@@ -50,12 +52,12 @@ export let Sequence = module (
         /// @brief The elements that pass `keep`.
         export let filter = func(keep: func(T) -> bool) -> Sequence<T> {
             begin();
-            let more = has_next;
-            let pull = next;
-            let buffer: T[list] = [];
+            last more = has_next;
+            last pull = next;
+            last buffer: T[list] = [];
             return buffered<T>(buffer, func() -> bool {
                 while (more()) {
-                    let value = pull();
+                    last value = pull();
                     if (keep(value)) {
                         buffer.append(value);
                         return true;
@@ -68,13 +70,13 @@ export let Sequence = module (
         /// @brief The elements of each list `f` returns, in order.
         export let flat_map = func<U>(f: func(T) -> U[list]) -> Sequence<U> {
             begin();
-            let more = has_next;
-            let pull = next;
-            let buffer: U[list] = [];
+            last more = has_next;
+            last pull = next;
+            last buffer: U[list] = [];
             return buffered<U>(buffer, func() -> bool {
                 while (more()) {
-                    let items = f(pull());
-                    let count = items.length;
+                    last items = f(pull());
+                    last count = items.length;
                     if (count > 0) {
                         let i = 0;
                         while (i < count) {
@@ -95,9 +97,9 @@ export let Sequence = module (
             if (n < 0) {
                 trap_with_message("invalid argument: negative count");
             }
-            let more = has_next;
-            let pull = next;
-            let remaining = cell.of<int>(n);
+            last more = has_next;
+            last pull = next;
+            last remaining = cell.of<int>(n);
             return new Sequence<T>(func() -> bool {
                 return remaining.value > 0 && more();
             }, func() -> T {
@@ -116,9 +118,9 @@ export let Sequence = module (
             if (n < 0) {
                 trap_with_message("invalid argument: negative count");
             }
-            let more = has_next;
-            let pull = next;
-            let skipped = cell.of<bool>(false);
+            last more = has_next;
+            last pull = next;
+            last skipped = cell.of<bool>(false);
             let ready = func -> bool {
                 if (!skipped.value) {
                     skipped.value = true;
@@ -141,16 +143,16 @@ export let Sequence = module (
         /// @brief Returns a sequence of leading elements accepted by `test` up to the first rejection.
         export let take_while = func(test: func(T) -> bool) -> Sequence<T> {
             begin();
-            let more = has_next;
-            let pull = next;
-            let done = cell.of<bool>(false);
-            let buffer: T[list] = [];
+            last more = has_next;
+            last pull = next;
+            last done = cell.of<bool>(false);
+            last buffer: T[list] = [];
             return buffered<T>(buffer, func() -> bool {
                 if (done.value) {
                     return false;
                 }
                 if (more()) {
-                    let value = pull();
+                    last value = pull();
                     if (test(value)) {
                         buffer.append(value);
                         return true;
@@ -164,15 +166,15 @@ export let Sequence = module (
         /// @brief The elements from the first that fails `test` on.
         export let skip_while = func(test: func(T) -> bool) -> Sequence<T> {
             begin();
-            let more = has_next;
-            let pull = next;
-            let started = cell.of<bool>(false);
-            let buffer: T[list] = [];
+            last more = has_next;
+            last pull = next;
+            last started = cell.of<bool>(false);
+            last buffer: T[list] = [];
             return buffered<T>(buffer, func() -> bool {
                 if (!started.value) {
                     started.value = true;
                     while (more()) {
-                        let value = pull();
+                        last value = pull();
                         if (!test(value)) {
                             buffer.append(value);
                             return true;
@@ -191,11 +193,11 @@ export let Sequence = module (
         /// @brief Each element with its position from 0.
         export let enumerate = func -> Sequence<[int, T]> {
             begin();
-            let pull = next;
-            let position = cell.of<int>(0);
+            last pull = next;
+            last position = cell.of<int>(0);
             return new Sequence<[int, T]>(has_next, func() -> [int, T] {
-                let value = pull();
-                let item: [int, T] = [position.value, value];
+                last value = pull();
+                last item: [int, T] = [position.value, value];
                 position.value = position.value + 1;
                 return item;
             });
@@ -205,15 +207,15 @@ export let Sequence = module (
         /// Uses `other` up as well.
         export let zip = func<U>(other: Sequence<U>) -> Sequence<[T, U]> {
             begin();
-            let more = has_next;
-            let pull = next;
-            let other_more = other.take_has_next();
-            let other_pull = other.take_next();
+            last more = has_next;
+            last pull = next;
+            last other_more = other.take_has_next();
+            last other_pull = other.take_next();
             return new Sequence<[T, U]>(func() -> bool {
                 return more() && other_more();
             }, func() -> [T, U] {
-                let first = pull();
-                let item: [T, U] = [first, other_pull()];
+                last first = pull();
+                last item: [T, U] = [first, other_pull()];
                 return item;
             });
         };
@@ -222,10 +224,10 @@ export let Sequence = module (
         /// as well.
         export let chain = func(other: Sequence<T>) -> Sequence<T> {
             begin();
-            let more = has_next;
-            let pull = next;
-            let other_more = other.take_has_next();
-            let other_pull = other.take_next();
+            last more = has_next;
+            last pull = next;
+            last other_more = other.take_has_next();
+            last other_pull = other.take_next();
             return new Sequence<T>(func() -> bool {
                 return more() || other_more();
             }, func() -> T {
@@ -239,9 +241,9 @@ export let Sequence = module (
         /// @brief Calls `action` with each element as it passes.
         export let peek = func(action: func(T) -> void) -> Sequence<T> {
             begin();
-            let pull = next;
+            last pull = next;
             return new Sequence<T>(has_next, func() -> T {
-                let value = pull();
+                last value = pull();
                 action(value);
                 return value;
             });
@@ -254,14 +256,14 @@ export let Sequence = module (
             if (n < 1) {
                 trap_with_message("invalid argument: chunk size");
             }
-            let more = has_next;
-            let pull = next;
-            let buffer: T[list][list] = [];
+            last more = has_next;
+            last pull = next;
+            last buffer: T[list][list] = [];
             return buffered<T[list]>(buffer, func() -> bool {
                 if (!more()) {
                     return false;
                 }
-                let chunk: T[list] = [];
+                last chunk: T[list] = [];
                 while (chunk.length < n && more()) {
                     chunk.append(pull());
                 }
@@ -278,10 +280,10 @@ export let Sequence = module (
             if (n < 1) {
                 trap_with_message("invalid argument: window size");
             }
-            let more = has_next;
-            let pull = next;
-            let window: T[list] = [];
-            let buffer: T[list][list] = [];
+            last more = has_next;
+            last pull = next;
+            last window: T[list] = [];
+            last buffer: T[list][list] = [];
             return buffered<T[list]>(buffer, func() -> bool {
                 if (window.length == n) {
                     if (!more()) {
@@ -297,7 +299,7 @@ export let Sequence = module (
                         window.append(pull());
                     }
                 }
-                let copy: T[list] = [];
+                last copy: T[list] = [];
                 let i = 0;
                 while (i < n) {
                     copy.append(window[i]);
@@ -312,10 +314,10 @@ export let Sequence = module (
         /// @pre The comparator defines a total order.
         export let sorted = func(c: func(T, T) -> ordering.Ordering) -> Sequence<T> {
             begin();
-            let more = has_next;
-            let pull = next;
-            let loaded = cell.of<bool>(false);
-            let buffer: T[list] = [];
+            last more = has_next;
+            last pull = next;
+            last loaded = cell.of<bool>(false);
+            last buffer: T[list] = [];
             return buffered<T>(buffer, func() -> bool {
                 if (loaded.value) {
                     return false;
@@ -332,10 +334,10 @@ export let Sequence = module (
         /// @brief Returns a sequence that buffers the entire input on first demand, then emits it in reverse order.
         export let reversed = func -> Sequence<T> {
             begin();
-            let more = has_next;
-            let pull = next;
-            let loaded = cell.of<bool>(false);
-            let buffer: T[list] = [];
+            last more = has_next;
+            last pull = next;
+            last loaded = cell.of<bool>(false);
+            last buffer: T[list] = [];
             return buffered<T>(buffer, func() -> bool {
                 if (loaded.value) {
                     return false;
@@ -347,7 +349,7 @@ export let Sequence = module (
                 let i = 0;
                 let j = buffer.length - 1;
                 while (i < j) {
-                    let value = buffer[i];
+                    last value = buffer[i];
                     buffer[i] = buffer[j];
                     buffer[j] = value;
                     i += 1;
@@ -360,13 +362,13 @@ export let Sequence = module (
         /// @brief Returns a sequence keeping only the first occurrence under the elements' equality and hash.
         export let distinct = func -> Sequence<T> {
             begin();
-            let more = has_next;
-            let pull = next;
-            let seen = hash_set.create<T>();
-            let buffer: T[list] = [];
+            last more = has_next;
+            last pull = next;
+            last seen = hash_set.create<T>();
+            last buffer: T[list] = [];
             return buffered<T>(buffer, func() -> bool {
                 while (more()) {
-                    let value = pull();
+                    last value = pull();
                     if (seen.add(value)) {
                         buffer.append(value);
                         return true;
@@ -379,7 +381,7 @@ export let Sequence = module (
         /// @brief Consumes the sequence into a new built-in list in traversal order.
         export let to_list = func -> T[list] {
             begin();
-            let result: T[list] = [];
+            last result: T[list] = [];
             while (has_next()) {
                 result.append(next());
             }
@@ -392,17 +394,17 @@ export let Sequence = module (
         /// @brief Consumes the sequence into two ArrayLists in input order. The first holds matches and the second holds nonmatches.
         export let partition = func(test: func(T) -> bool) -> [array_list.ArrayList<T>, array_list.ArrayList<T>] {
             begin();
-            let passed: T[list] = [];
-            let failed: T[list] = [];
+            last passed: T[list] = [];
+            last failed: T[list] = [];
             while (has_next()) {
-                let value = next();
+                last value = next();
                 if (test(value)) {
                     passed.append(value);
                 } else {
                     failed.append(value);
                 }
             }
-            let result: [array_list.ArrayList<T>, array_list.ArrayList<T>] = [array_list.wrap<T>(passed), array_list.wrap<T>(failed)];
+            last result: [array_list.ArrayList<T>, array_list.ArrayList<T>] = [array_list.wrap<T>(passed), array_list.wrap<T>(failed)];
             return result;
         };
 
@@ -469,6 +471,7 @@ export let Sequence = module (
         };
 
         /// @brief Combines elements from left to right, starting with the first. Returns `None` when empty.
+        #NoDiscard
         export let reduce = func(f: func(T, T) -> T) -> optional.Optional<T> {
             begin();
             if (!has_next()) {
@@ -482,6 +485,7 @@ export let Sequence = module (
         };
 
         /// @brief Returns the first element as `Some`, or `None` when empty. Pulls at most one element.
+        #NoDiscard
         export let first = func -> optional.Optional<T> {
             begin();
             if (!has_next()) {
@@ -491,6 +495,7 @@ export let Sequence = module (
         };
 
         /// @brief Consumes all elements and returns the last as `Some`, or `None` when empty.
+        #NoDiscard
         export let last = func -> optional.Optional<T> {
             begin();
             if (!has_next()) {
@@ -504,10 +509,11 @@ export let Sequence = module (
         };
 
         /// @brief Returns the first element accepted by `test` as `Some`, or `None` at exhaustion.
+        #NoDiscard
         export let find = func(test: func(T) -> bool) -> optional.Optional<T> {
             begin();
             while (has_next()) {
-                let value = next();
+                last value = next();
                 if (test(value)) {
                     return optional.Optional<T>.Some(value);
                 }
@@ -516,10 +522,12 @@ export let Sequence = module (
         };
 
         /// @brief Returns the first of the least elements according to `c`, or `None` when empty.
+        #NoDiscard
         export let min = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T> =>
             extreme(c, ordering.Ordering.Less);
 
         /// @brief Returns the first of the greatest elements according to `c`, or `None` when empty.
+        #NoDiscard
         export let max = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T> =>
             extreme(c, ordering.Ordering.Greater);
 
@@ -527,7 +535,7 @@ export let Sequence = module (
         /// hash_code.
         export let to_set = func -> hash_set.HashSet<T> {
             begin();
-            let result = hash_set.create<T>();
+            last result = hash_set.create<T>();
             while (has_next()) {
                 result.add(next());
             }
@@ -539,10 +547,10 @@ export let Sequence = module (
         /// elements give equal keys.
         export let to_map = func<K, V>(key: func(T) -> K, value: func(T) -> V) -> hash_map.HashMap<K, V> {
             begin();
-            let result = hash_map.create<K, V>();
+            last result = hash_map.create<K, V>();
             while (has_next()) {
-                let element = next();
-                let item_key = key(element);
+                last element = next();
+                last item_key = key(element);
                 if (result.contains_key(item_key)) {
                     trap_with_message("invalid argument: duplicate key");
                 }
@@ -555,10 +563,10 @@ export let Sequence = module (
         /// order and each group in sequence order.
         export let group_by = func<K>(key: func(T) -> K) -> hash_map.HashMap<K, array_list.ArrayList<T>> {
             begin();
-            let groups = hash_map.create<K, array_list.ArrayList<T>>();
+            last groups = hash_map.create<K, array_list.ArrayList<T>>();
             let make = func -> array_list.ArrayList<T> => array_list.create<T>();
             while (has_next()) {
-                let element = next();
+                last element = next();
                 groups.get_or_put(key(element), make).add(element);
             }
             return groups;
@@ -593,7 +601,7 @@ export let Sequence = module (
             }
             let best = next();
             while (has_next()) {
-                let value = next();
+                last value = next();
                 if (c(value, best) == wanted) {
                     best = value;
                 }
@@ -605,9 +613,9 @@ export let Sequence = module (
     /// @brief An iterator that owns the remaining traversal of a claimed sequence.
     let SequenceIterator = class<T> implements Iterator<T> (
         /// @brief The availability check for the next output.
-        let more: func() -> bool;
+        last more: func() -> bool;
         /// @brief The function that consumes and returns the next output.
-        let pull: func() -> T;
+        last pull: func() -> T;
 
         /// @brief Captures the two callbacks from the claimed sequence.
         export let init = func(has_more: func() -> bool, take: func() -> T) {
@@ -631,7 +639,7 @@ export let Sequence = module (
     /// to when it is used up. `refill` returns false at the end and true only
     /// after appending at least one element.
     let buffered = func<U>(buffer: U[list], refill: func() -> bool) -> Sequence<U> {
-        let position = cell.of<int>(0);
+        last position = cell.of<int>(0);
         let more = func -> bool {
             if (position.value < buffer.length) {
                 return true;
@@ -646,7 +654,7 @@ export let Sequence = module (
             if (!more()) {
                 trap_with_message("no such element");
             }
-            let value = buffer[position.value];
+            last value = buffer[position.value];
             position.value = position.value + 1;
             return value;
         });
@@ -656,8 +664,8 @@ export let Sequence = module (
     /// during iteration" when the list changes structurally, as the built-in
     /// for-each does.
     export let from_list = func<T>(items: T[list]) -> Sequence<T> {
-        let position = cell.of<int>(0);
-        let version = items.version;
+        last position = cell.of<int>(0);
+        last version = items.version;
         let more = func -> bool {
             if (items.version != version) {
                 trap_with_message("collection modified during iteration");
@@ -668,7 +676,7 @@ export let Sequence = module (
             if (!more()) {
                 trap_with_message("no such element");
             }
-            let value = items[position.value];
+            last value = items[position.value];
             position.value = position.value + 1;
             return value;
         });
@@ -703,8 +711,8 @@ export let Sequence = module (
     /// @brief Returns an infinite sequence starting with `seed` and repeatedly applying `step`. The step
     /// runs only when the next element is pulled.
     export let iterate = func<T>(seed: T, step: func(T) -> T) -> Sequence<T> {
-        let state = cell.of<T>(seed);
-        let started = cell.of<bool>(false);
+        last state = cell.of<T>(seed);
+        last started = cell.of<bool>(false);
         return new Sequence<T>(func() -> bool {
             return true;
         }, func() -> T {
@@ -719,14 +727,15 @@ export let Sequence = module (
 
     /// @brief Returns the integers in ascending order from `start` inclusive to `end` exclusive.
     /// The sequence is empty when `end` is at or below `start`.
+    #[Pure, ThreadSafe]
     export let range = func(start: int, end: int) -> Sequence<int> {
-        let position = cell.of<int>(start);
+        last position = cell.of<int>(start);
         let more = func -> bool => position.value < end;
         return new Sequence<int>(more, func() -> int {
             if (!more()) {
                 trap_with_message("no such element");
             }
-            let value = position.value;
+            last value = position.value;
             position.value = value + 1;
             return value;
         });
@@ -734,7 +743,7 @@ export let Sequence = module (
 
     /// @brief The strings with `separator` between consecutive ones.
     export let join = func(s: Sequence<string>, separator: string) -> string {
-        let items = s.iterator();
+        last items = s.iterator();
         let text = "";
         let first = true;
         while (items.has_next()) {
@@ -750,7 +759,7 @@ export let Sequence = module (
 
     /// @brief Consumes the sequence by adding from zero in order. Overflow traps with reason 1.
     export let sum_int32 = func(s: Sequence<int>) -> int {
-        let items = s.iterator();
+        last items = s.iterator();
         let total = 0;
         while (items.has_next()) {
             total = total + items.next();
@@ -760,7 +769,7 @@ export let Sequence = module (
 
     /// @brief Consumes the sequence by adding from zero in order. Overflow traps with reason 1.
     export let sum_int64 = func(s: Sequence<int64>) -> int64 {
-        let items = s.iterator();
+        last items = s.iterator();
         let total: int64 = 0;
         while (items.has_next()) {
             total = total + items.next();
@@ -770,7 +779,7 @@ export let Sequence = module (
 
     /// @brief Consumes the sequence by adding left to right starting from the first element. Returns 0.0 when empty.
     export let sum_float64 = func(s: Sequence<float64>) -> float64 {
-        let items = s.iterator();
+        last items = s.iterator();
         if (!items.has_next()) {
             return 0.0;
         }

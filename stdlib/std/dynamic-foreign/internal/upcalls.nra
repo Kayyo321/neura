@@ -28,17 +28,17 @@ export let Upcalls = module (
     /// argument is a copy that lives until the target returns. A result that does not match the descriptor traps
     /// with "invalid argument: ...".
     let dispatch = func(stub: int64, arguments: uint8[list]) -> uint8[list] {
-        let index = stub as int;
-        let descriptor = signatures[index];
-        let arena = of_confined();
-        let values: ForeignValue[list] = [];
+        last index = stub as int;
+        last descriptor = signatures[index];
+        last arena = of_confined();
+        last values: ForeignValue[list] = [];
         let offset = 0;
         for (let layout in descriptor.argument_layouts()) {
             values.append(codec.decode_value(arguments, offset, layout, arena));
             offset += codec.packed_size(layout) as int;
         }
-        let result = targets[index](values);
-        let bytes: uint8[list] = [];
+        last result = targets[index](values);
+        last bytes: uint8[list] = [];
         match (descriptor.return_layout()) {
             Optional.Some(layout) => {
                 codec.encode_value(bytes, result, layout);

@@ -1,0 +1,6 @@
+// A second binding of the same name in one scope (E0301).
+let total = func() -> int {
+    let count = 1;
+    let count = 2;
+    return count;
+};

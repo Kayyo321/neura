@@ -1,0 +1,2 @@
+// Two parameters with one name (E0303).
+let area = func(side: int, side: int) -> int => side * side;

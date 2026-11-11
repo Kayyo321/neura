@@ -1,23 +1,76 @@
 # Core language
 
-This page defines the initial core. See [Feature status](Status.md) for the frontend’s coverage and open semantic decisions.
+This page defines the core of the language: bindings, functions, control flow, tasks, and expressions. See [Feature status](Status.md) for what this release supports and the open semantic decisions.
 
 ## Source and bindings
 
-Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let` or `const`, with an optional type annotation. `let` permits reassignment; `const` prevents reassignment, not mutation through a reference. A binding must be initialized before it is read. The exact Unicode identifier and escape rules remain open.
+Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let`, `const`, or `last`, with an optional type annotation, and ends with `;`. The exact Unicode identifier and escape rules remain open.
+
+| Introducer | Assigned | Where |
+| --- | --- | --- |
+| `let` | at its declaration, then any number of times | everywhere |
+| `const` | once, at its declaration | everywhere; the form for module, file, and static constants |
+| `last` | exactly once: at its declaration, or later on every path before it is read | everywhere with a value; without one, only a local or an instance field |
+
+None of them prevents mutation through a reference: a `const` or `last` binding to an object can still change the object's fields. A binding must be assigned before it is read.
 
 <!-- example: check -->
 ```neura
 let count: int32 = 0;
 const Limit: int32 = 3;
 count = count + 1;
+
+let describe = func(value: int32) -> string {
+    last sign: string;
+    if (value < 0) {
+        sign = "negative";
+    } else {
+        sign = "not negative";
+    }
+    last text = sign + " " + value.to_string();
+    return text;
+};
 ```
+
+`last x = e;` and `last x: T = e;` behave like a local `const`: assigning `x` again is error `E0401`. `last x: T;` declares `x` without a value; its type is required (`E0444`). `last` is a contextual word, not a keyword. It introduces a declaration only where a statement or member can start and an identifier follows it, as in `last x`, `export last x`, and `static last x`. Elsewhere it is an ordinary name, so `let last = func ...;`, `last = 3;`, `last(x);`, `last.next`, and `last[0] = 1;` keep their meaning. `last` does not destructure: `last [a, b] = e;` and `last [a]: [T] = e;` are error `E0536`, because an index into a binding named `last` cannot contain `,` or be followed by `:`; destructure with `const [a, b] = e;` instead. `last [i] = e;` stays an assignment to an element of `last`.
+
+An annotation names the type, so the value need not repeat it. `new` without a class constructs the annotated type ([target-typed `new`](ObjectLifecycle.md#target-typed-new)), a destructuring declaration can annotate its names with a tuple type and give each name its own value ([typed and listed destructuring](Types.md#typed-and-listed-destructuring)), and a class body can be written where a type is expected ([anonymous classes](Types.md#anonymous-classes)).
+
+<!-- example: check -->
+```neura
+let Counter = class (
+    export let count: int = 0;
+);
+
+let first: Counter = new;
+let [low, high]: [Counter, int] = new, 10;
+let point: class (
+    export let x: int = 0;
+    export let y: int = 0;
+) = new;
+```
+
+A declaration may be preceded by [tags](Tags.md), such as `#Deprecated(use_instead: "next")` or `#[Inline(always: true), Since("0.2.0")]`, on the lines above it. A tag tells the compiler how to treat the declaration: to warn at its uses, to restrict who may extend or use it, to require that its result be used, or to inline it. Tags apply to `let`, `const`, and `last` declarations alike, including a field written with [accessor clauses](Types.md#accessors) (the tags go above the field, the clauses below it) and the members of an [anonymous class](Types.md#anonymous-classes). `neura tags` lists them.
 
 Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. A nested block, and a function body, may declare a name that an enclosing scope or a parameter already has; the new binding hides the outer one for the rest of its block. Whether shadowing stays allowed is an open language decision ([Status](Status.md#open-language-decisions)). Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. Visibility and inheritance rules beyond these are not specified.
 
+### Deferred assignment
+
+A local `last x: T;` is assigned by a plain assignment `x = value;`. The compiler checks each such binding with a definite-assignment analysis over the function body, before lowering. At each point the binding is unassigned, assigned, or assigned on some paths but not others. Branches merge as follows: after an `if` with an `else`, a `match`, or a `select`, a binding is assigned when every arm that can reach the end of the statement assigned it. An arm that ends in `return`, `break`, `continue`, or `trap_with_message(...)` does not reach the end. An `if` without an `else` merges with the path on which its condition is false. A Boolean literal condition selects one arm, so `while (true)` without a `break` does not end. A loop leaves the state as it was before the loop.
+
+- **Read.** Reading `x`, including in `x += 1`, `x++`, or `x.field`, requires `x` to be assigned on every path to the read (`E0441`). The error points at the declaration and names a branch that skips the assignment, such as an `if` condition that can be false or a `match` arm.
+- **Assign.** Assigning `x` where it is, or may be, already assigned is an error (`E0440`), and so is `x += value` or `x++` after the assignment.
+- **Loops.** An assignment inside a loop body, condition, or step to a `last` binding declared outside that loop is an error (`E0442`), because the loop could run it twice. This holds even when a `break` follows the assignment. A binding declared inside the loop body is a new binding on each iteration and can be assigned there.
+- **Closures.** A lambda copies the locals it captures when it is created, so a lambda that uses `x` must be created where `x` is assigned on every path (`E0443`). A lambda cannot assign a captured binding (`E0402`).
+- **Scope.** The rules apply from the declaration to the end of its block. A name declared in an inner block, a parameter of a nested lambda, a `match` arm binding, or a for-each element hides `x`.
+
+The analysis follows the syntax, not values: it treats every condition other than a Boolean literal as possibly true and possibly false, and a `&&` or `||` right operand as possibly skipped. A binding that is declared and never read need not be assigned. NeuraIR records a deferred local as a declaration without a value ([NeuraIR 1.10](../NirFormat.md#deferred-initialization)); the runtime traps a read before the first store in a frame, which the analysis rules out.
+
+A `last` instance field follows the same rules within each `init`; [Object lifecycle](ObjectLifecycle.md#last-fields) states them. A module, file, or static binding cannot be deferred (`E0447`).
+
 ### Documentation comments
 
-Start each line of a documentation comment with `///` and place it immediately above the definition it describes. Consecutive documentation lines form one block. An empty `///` line adds a paragraph break. A blank source line or an ordinary `//` comment ends the block. An inline comment after code has ordinary comment behavior.
+Start each line of a documentation comment with `///` and place it immediately above the definition it describes, or above its [tags](Tags.md); a comment between the tags and the definition documents it too. Consecutive documentation lines form one block. An empty `///` line adds a paragraph break. A blank source line or an ordinary `//` comment ends the block. An inline comment after code has ordinary comment behavior.
 
 <!-- example: check -->
 ```neura
@@ -67,7 +120,9 @@ let reset = func {
 };
 ```
 
-`=> expression` gives a function an expression body. The expression supplies the result of a non-`void` function. A `void` function evaluates the expression for its effects. A named declaration with an expression body ends with `;`.
+`=> expression` gives a function an expression body. The expression supplies the result of a non-`void` function. A `void` function evaluates the expression for its effects.
+
+Every declaration ends with `;`, whatever its value: an expression, a function with an expression or block body, a class, or a module. Statement blocks, such as the bodies of `if`, `while`, `for`, `match`, and `scope`, and a bare `{ }` block, do not take a `;`.
 
 ### Function overloads
 
@@ -81,10 +136,10 @@ let write = func(text: string) {
     write(text, text.byte_length);
 } or func(text: string, byte_count: int) {
     console.print_line(text.slice(0, byte_count));
-}
+};
 ```
 
-An overload group can end at a block body. End an expression-bodied final alternative with `;`.
+An overload group is one declaration, so it ends with `;` after its final alternative.
 
 The compiler first filters by argument count. With several candidates of the same arity, it ranks each argument's match in this order.
 
@@ -278,7 +333,7 @@ let Main = module:program.Entry (
         spare_sender.send(2);
         drain(inbox, spare);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

@@ -1,0 +1,13 @@
+error[E0533]: this 'new' cannot tell which field initializers of class(x: int32) to run
+ --> $DIR/anonymous-new-without-body.nra:5:13
+  |
+3 | let point: class (export let x: int = 1;) = new;
+  |     ----- 'point' is declared here with type class(x: int32)
+4 | let reset = func() {
+5 |     point = new;
+  |             ^^^ constructs a fields-only anonymous class
+  |
+  = note: a fields-only anonymous class takes its field initializers from the class body written in the annotation of the 'let', 'const', or 'last' binding that 'new' initializes, and here the type arrives without that body
+  = help: declare a binding with the class and initialize it with 'new', as in 'let value: class ( ... ) = new;', or write the body after 'new', as in 'new class ( ... )()'
+
+For more information about this error, try `neura explain E0533`.

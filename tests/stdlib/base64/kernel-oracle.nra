@@ -1,0 +1,87 @@
+let base64s = import:Std.Encoding.Base64;
+let error = import:Std.Core.Error;
+let random = import:Std.Random.Random;
+let reference = import:ReferenceBase64;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). Std.Encoding.Base64
+// runs the neura.encoding.base64_encode and base64_decode kernels;
+// ReferenceBase64 (support/) is the Neura implementation they replaced,
+// unchanged. Every encoder must give the same text, and every decoder the
+// same bytes or the same error at the same offset, for a fixed edge corpus
+// and for seeded random bytes and texts.
+let Base64KernelOracle = module (
+    let show = func(value: result.Result<uint8[list]>) -> string => match (value) {
+        result.Result.Ok(bytes) => "Ok(" + bytes.to_string() + ")",
+        result.Result.Err(failure) => "Err(" + error.message(failure) + ")",
+    };
+
+    // The four decoders agree on the text.
+    let agree_decode = func(text: string) {
+        test.assert_equal_string(show(reference.decode(text)), show(base64s.decode(text)));
+        test.assert_equal_string(show(reference.decode_unpadded(text)), show(base64s.decode_unpadded(text)));
+        test.assert_equal_string(show(reference.decode_url(text)), show(base64s.decode_url(text)));
+        test.assert_equal_string(show(reference.decode_url_unpadded(text)), show(base64s.decode_url_unpadded(text)));
+    };
+
+    // The four encoders agree on the bytes, and each text decodes the same.
+    let agree = func(bytes: uint8[list]) {
+        let texts = [
+            [reference.encode(bytes), base64s.encode(bytes)],
+            [reference.encode_unpadded(bytes), base64s.encode_unpadded(bytes)],
+            [reference.encode_url(bytes), base64s.encode_url(bytes)],
+            [reference.encode_url_unpadded(bytes), base64s.encode_url_unpadded(bytes)]
+        ];
+        for (let pair in texts) {
+            test.assert_equal_string(pair[0], pair[1]);
+            agree_decode(pair[1]);
+        }
+    };
+
+    // Bytes that differ from position to position: i * 31 + 7, modulo 256.
+    let pattern = func(length: int) -> uint8[list] {
+        let bytes: uint8[list] = [];
+        for (let i = 0; i < length; i++) {
+            bytes.append(((i * 31 + 7) % 256) as uint8);
+        }
+        return bytes;
+    };
+
+    // Every length around a group boundary, every byte value, and malformed
+    // texts: bad characters, padding in every position, short groups, and
+    // nonzero trailing bits.
+    export let test_edge_corpus = func {
+        for (let length = 0; length <= 13; length++) {
+            agree(pattern(length));
+        }
+        for (let b = 0; b < 256; b++) {
+            agree([b as uint8]);
+            agree([b as uint8, 255 - b as uint8]);
+        }
+        let texts = ["", "=", "==", "===", "====", "A", "AA", "AAA", "AAAA", "AA=", "AA==", "AAA=", "AB==", "AAB=",
+            "AA=A", "A===", "AAAA=", "AAAA==", "AA==AAAA", "AAA=A", "+/+/", "-_-_", "+/==", "-_==", "AA AA",
+            "AA\nA", "Zm9v", "Zm9vYg", "Zm9vYg==", "Zm9vYmE", "Zm9vYmE=", "Zm9vYmFy", "Zm9vYmF", "Zm9vYmG=",
+            "Zm9vYh==", "Zm9vYmE*", "*", "é", "AAé="];
+        for (let text in texts) {
+            agree_decode(text);
+        }
+    };
+
+    // Seeded random bytes, and random texts over the alphabets with padding.
+    export let test_seeded_random = func {
+        let source = random.seeded(20261111);
+        let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/-_=. ";
+        for (let round = 0; round < 60; round++) {
+            agree(source.fill_bytes(source.next_int_below(40)));
+            let text = "";
+            let length = source.next_int_below(14);
+            for (let i = 0; i < length; i++) {
+                let at = source.next_int_below(alphabet.byte_length);
+                text = text + strings.slice(alphabet, at, at + 1);
+            }
+            agree_decode(text);
+        }
+    };
+);

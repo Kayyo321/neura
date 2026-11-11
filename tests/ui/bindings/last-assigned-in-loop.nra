@@ -1,0 +1,9 @@
+// An assignment inside a loop to a `last` binding declared outside it (E0442).
+let first = func(values: int[]) -> int {
+    last found: int;
+    for (let value: int in values) {
+        found = value;
+        break;
+    }
+    return 0;
+};

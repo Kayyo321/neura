@@ -1,0 +1,19 @@
+error[E0917]: #Pure function 'area' is not pure: it reaches 'count_call', which assigns the binding 'calls'
+  --> $DIR/pure-not-pure.nra:14:1
+   |
+ 6 |     calls = calls + 1;
+   |     ----- assigns the binding 'calls' here
+...
+10 |     count_call();
+   |     ------------ calls 'count_call'
+...
+14 | #Pure
+   | ^^^^^ the function is marked #Pure here
+15 | let area = func(width: int64, height: int64) -> int64 {
+16 |     return scale(width) * height;
+   |            ------------ calls 'scale'
+   |
+   = note: a #Pure function may allocate and trap, but it writes only objects it allocates, reads no reassignable state, and calls only pure functions
+   = help: remove #Pure, or move the effect to the caller
+
+For more information about this error, try `neura explain E0917`.

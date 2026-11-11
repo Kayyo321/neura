@@ -6,13 +6,14 @@ let native = import:Std.DynamicForeign.Internal.Native;
 /// arena's memory and unloads its libraries; every later access through the scope traps.
 export let Scope = module (
     /// @brief One arena's lifetime. The global scope is never closed.
+    #Final
     export let Scope = class (
         /// @brief The host arena identifier: 0 for the global arena, -1 until a confined arena first allocates.
         let host_id: int64 = -1;
         /// @brief Whether the scope may still be used.
         let open_now: bool = true;
         /// @brief Whether this is the global scope.
-        let global_scope: bool = false;
+        last global_scope: bool;
 
         /// @brief A confined scope when `global` is false, otherwise the global scope.
         export let init = func(global: bool) {
@@ -23,12 +24,15 @@ export let Scope = module (
         };
 
         /// @brief Whether the scope is still open.
+        #Pure
         export let is_alive = func -> bool => open_now;
 
         /// @brief Whether this is the global scope.
+        #Pure
         export let is_global = func -> bool => global_scope;
 
         /// @brief Traps with "invalid state: arena closed" after close.
+        #Pure
         export let check_alive = func {
             if (!open_now) {
                 trap_with_message("invalid state: arena closed");
@@ -63,7 +67,7 @@ export let Scope = module (
     /// @brief The global scope, whose memory lives until the end of the run.
     export let global = func -> Scope {
         if (shared == nil) {
-            shared = new Scope(true);
+            shared = new(true);
         }
         return shared;
     };

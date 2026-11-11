@@ -77,7 +77,7 @@ function(expect_run label image expected expected_status stderr_pattern)
 endfunction()
 
 function(expect_build_failure label pattern image)
-    neura(result "${TEST_DIR}" build ${ARGN} -o "${image}")
+    neura(result "${TEST_DIR}" build --error-format=short ${ARGN} -o "${image}")
     if(result_status STREQUAL "0" OR NOT result_stderr MATCHES "${pattern}")
         message(FATAL_ERROR "${label}: expected a build failure matching '${pattern}', got status "
                             "${result_status}\n${result_stderr}")
@@ -178,6 +178,42 @@ build_image("${TEST_DIR}/multi-file.nvr" -I "${SOURCE_DIR}/examples/modules/mult
     "${SOURCE_DIR}/examples/modules/multi-file/main.nra")
 expect_run("multi-file" "${TEST_DIR}/multi-file.nvr" "Hello, Neura!\n" 0 "")
 
+# Field accessors (Types.md, Accessors), optimized and unoptimized.
+build_image("${TEST_DIR}/accessors.nvr" "${SOURCE_DIR}/examples/types/accessors.nra")
+build_image("${TEST_DIR}/accessors-unoptimized.nvr" --no-optimize "${SOURCE_DIR}/examples/types/accessors.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    expect_run("accessors example${variant}" "${TEST_DIR}/accessors${variant}.nvr" "payload\nXY729H08\nAB12\n1\n" 0 "")
+endforeach()
+
+# The same accessors on the fields of an anonymous class (Types.md, Anonymous
+# classes).
+build_image("${TEST_DIR}/anonymous-accessors.nvr" "${SOURCE_DIR}/examples/types/anonymous-accessors.nra")
+build_image("${TEST_DIR}/anonymous-accessors-unoptimized.nvr" --no-optimize
+    "${SOURCE_DIR}/examples/types/anonymous-accessors.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    expect_run("anonymous accessors example${variant}" "${TEST_DIR}/anonymous-accessors${variant}.nvr"
+        "payload\nXY729H08\n1\n" 0 "")
+endforeach()
+
+# Tags with `last` fields, accessors, and anonymous classes (Tags.md).
+build_image("${TEST_DIR}/download.nvr" "${SOURCE_DIR}/examples/tags/download.nra")
+build_image("${TEST_DIR}/download-unoptimized.nvr" --no-optimize "${SOURCE_DIR}/examples/tags/download.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    expect_run("tags download example${variant}" "${TEST_DIR}/download${variant}.nvr"
+        "https://example.com/data x5, legacy x3\n256/1024\n750\n" 0 "")
+endforeach()
+
+# The checked tags: a monitor shared by tasks, an #Immutable class, and #Pure
+# and #ThreadSafe functions. The same output under any quantum, optimized or not.
+build_image("${TEST_DIR}/monitor.nvr" "${SOURCE_DIR}/examples/concurrency/monitor.nra")
+build_image("${TEST_DIR}/monitor-unoptimized.nvr" --no-optimize "${SOURCE_DIR}/examples/concurrency/monitor.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    foreach(quantum IN ITEMS 1 64 1024)
+        expect_run("checked tags example${variant}, quantum ${quantum}" "${TEST_DIR}/monitor${variant}.nvr"
+            "greenhouse: 8 readings, average 22 C (71 F), warmest 26 C\n" 0 "" --task-quantum ${quantum})
+    endforeach()
+endforeach()
+
 # Scoped tasks, a cancellable operation, and shared state: the same output
 # under any quantum.
 build_image("${TEST_DIR}/service.nvr" "${SOURCE_DIR}/examples/concurrency/service.nra")
@@ -186,6 +222,11 @@ foreach(quantum IN ITEMS 1 64 1024)
         "tea 3, cake 5, soup -1\nfast answered; the others stopped early: true\nhome 400, about 200\n" 0 ""
         --task-quantum ${quantum})
 endforeach()
+
+# Target-typed new, typed destructuring, and an anonymous class.
+build_image("${TEST_DIR}/construction.nvr" "${SOURCE_DIR}/examples/types/construction.nra")
+expect_run("construction example" "${TEST_DIR}/construction.nvr"
+    "Ada has 250\nGrace has 10\n4 accounts, 260 in total\n" 0 "")
 
 # Library examples run through drivers that import them.
 foreach(driver IN ITEMS core overlay classes collections polymorphism errors)
@@ -245,7 +286,7 @@ foreach(library IN ITEMS guide/core guide/errors testing/math-tests types/classe
                          types/overlay types/polymorphism modules/multi-file/acme/greetings
                          modules/multi-file/acme/greetings/punctuation)
     get_filename_component(name "${library}" NAME)
-    expect_build_failure("${library}" "error: the program has no entry point" "${TEST_DIR}/${name}.nvr"
+    expect_build_failure("${library}" "error(\\[E0803\\])?: the program has no entry point" "${TEST_DIR}/${name}.nvr"
         ${roots} -I "${SOURCE_DIR}/examples/modules/multi-file" "${SOURCE_DIR}/examples/${library}.nra")
 endforeach()
 
@@ -268,7 +309,8 @@ endforeach()
 
 # The new source constructs produce the same image after a NIR round trip.
 foreach(name IN ITEMS operators closures aggregates class-nil generic-closures generic-enums interfaces
-                      stdlib-primitives control-and-updates ranges-and-variadics overloads primitive-references)
+                      stdlib-primitives control-and-updates ranges-and-variadics overloads primitive-references
+                      last-bindings target-typed-new anonymous-classes)
     neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
     if(NOT emit_status STREQUAL "0")
         message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")
@@ -289,6 +331,30 @@ if(NOT ranges_assembled_status STREQUAL "0")
 endif()
 same_bytes("range image reassembly" "${TEST_DIR}/ranges-and-variadics.nvr"
            "${TEST_DIR}/ranges-and-variadics-reassembled.nvr")
+
+# Anonymous classes are named by their fields (and, for a class of its own,
+# where it is written). The tools read those names from the image.
+neura(anonymous_text "${TEST_DIR}" disassemble "${TEST_DIR}/anonymous-classes.nvr"
+      -o "${TEST_DIR}/anonymous-classes.nvra")
+neura(anonymous_assembled "${TEST_DIR}" assemble "${TEST_DIR}/anonymous-classes.nvra"
+      -o "${TEST_DIR}/anonymous-classes-reassembled.nvr")
+if(NOT anonymous_text_status STREQUAL "0" OR NOT anonymous_assembled_status STREQUAL "0")
+    message(FATAL_ERROR "anonymous class image round trip failed: ${anonymous_text_stderr}${anonymous_assembled_stderr}")
+endif()
+same_bytes("anonymous class image reassembly" "${TEST_DIR}/anonymous-classes.nvr"
+           "${TEST_DIR}/anonymous-classes-reassembled.nvr")
+foreach(provenance IN ITEMS "" --no-provenance)
+    neura(anonymous_decompiled "${TEST_DIR}" decompile ${provenance} "${TEST_DIR}/anonymous-classes.nvr"
+          -o "${TEST_DIR}/anonymous-classes${provenance}.decompiled")
+    if(NOT anonymous_decompiled_status STREQUAL "0")
+        message(FATAL_ERROR "decompiling anonymous classes${provenance} failed: ${anonymous_decompiled_stderr}")
+    endif()
+endforeach()
+file(READ "${TEST_DIR}/anonymous-classes.decompiled" anonymous_decompiled)
+if(NOT anonymous_decompiled MATCHES "provenance: class[(]x: int32, label: string[)]" OR
+   NOT anonymous_decompiled MATCHES "provenance: Main[.]class[(]count: int32[)]@anonymous-classes[.]nra:42:18")
+    message(FATAL_ERROR "decompiled anonymous classes lack their names\n${anonymous_decompiled}")
+endif()
 
 # Runtime traps: stdout up to the trap, a diagnostic, and the status of the
 # trap's class.
@@ -314,7 +380,7 @@ file(GLOB unsupported "${tests}/unsupported/*.nra")
 foreach(source IN LISTS unsupported)
     get_filename_component(name "${source}" NAME_WE)
     file(STRINGS "${source}" expectation REGEX "^// expect: ")
-    string(REGEX REPLACE "^// expect: ([0-9]+:[0-9]+) (.*)$" "\\1: error: \\2" pattern "${expectation}")
+    string(REGEX REPLACE "^// expect: ([0-9]+:[0-9]+) (.*)$" "\\1: error(\\\\[[EW][0-9]+\\\\])?: \\2" pattern "${expectation}")
     string(REPLACE "." "[.]" pattern "${pattern}")
     expect_build_failure("unsupported ${name}" "${name}[.]nra:${pattern}" "${TEST_DIR}/${name}.nvr" "${source}")
 endforeach()
@@ -332,3 +398,22 @@ neura(help "${TEST_DIR}" --help)
 if(NOT help_stdout MATCHES "neura build [^\n]*-o <file[.]nvr>" OR NOT help_stdout MATCHES "neura run [^\n]*-- args")
     message(FATAL_ERROR "usage should document build and run\n${help_stdout}")
 endif()
+if(NOT help_stdout MATCHES "neura explain <code> [|] --explain <code> [|] explain --list" OR
+   NOT help_stdout MATCHES "--max-errors N")
+    message(FATAL_ERROR "usage should document explain and --max-errors\n${help_stdout}")
+endif()
+# neura explain prints a code's page, which is embedded in the binary; an
+# unknown code is an error that names the closest registered code.
+neura(explain "${TEST_DIR}" explain E0401)
+if(NOT explain_stdout MATCHES "^# E0401: assignment to a constant binding\n")
+    message(FATAL_ERROR "neura explain E0401 should print its page\n${explain_stdout}")
+endif()
+neura(explain_option "${TEST_DIR}" --explain e0401)
+if(NOT explain_option_stdout STREQUAL explain_stdout)
+    message(FATAL_ERROR "neura --explain e0401 should print the same page\n${explain_option_stdout}")
+endif()
+neura(explain_list "${TEST_DIR}" explain --list)
+if(NOT explain_list_stdout MATCHES "\nE0401  assignment to a constant binding\n")
+    message(FATAL_ERROR "neura explain --list should list the codes\n${explain_list_stdout}")
+endif()
+expect_failure("unknown code" "'E0499' is not a diagnostic code; did you mean E0409[?]" explain E0499)

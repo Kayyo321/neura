@@ -1,0 +1,4 @@
+// A deferred `last` field in a class without a constructor (E0446).
+let Box = class(
+    export last size: int;
+);

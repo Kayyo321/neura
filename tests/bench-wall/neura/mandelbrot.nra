@@ -1,0 +1,47 @@
+// sizes: quick 24 full 80
+// Escape-time Mandelbrot set over an n by n grid of [-1.5, 0.5] x [-1, 1]
+// with 50 iterations: the number of points inside and a checksum of the
+// bitmap in row order. The size is the first argument; java/Mandelbrot.java
+// prints the same line.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Mandelbrot = module:program.Entry (
+    const Iterations: int = 50;
+    const Mask: int64 = 1073741823;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let size = n as float64;
+        let inside = 0;
+        let checksum: int64 = 0;
+        for (let y = 0; y < n; y = y + 1) {
+            let ci = 2.0 * (y as float64) / size - 1.0;
+            for (let x = 0; x < n; x = x + 1) {
+                let cr = 2.0 * (x as float64) / size - 1.5;
+                let zr = 0.0;
+                let zi = 0.0;
+                let tr = 0.0;
+                let ti = 0.0;
+                let i = 0;
+                while (i < Iterations && tr + ti <= 4.0) {
+                    zi = 2.0 * zr * zi + ci;
+                    zr = tr - ti + cr;
+                    tr = zr * zr;
+                    ti = zi * zi;
+                    i = i + 1;
+                }
+                let bit: int64 = 0;
+                if (tr + ti <= 4.0) {
+                    bit = 1;
+                    inside = inside + 1;
+                }
+                checksum = (checksum * 31 + bit) & Mask;
+            }
+        }
+        console.println("mandelbrot {} {}", inside, checksum);
+        return program.ExitCode.Ok;
+    };
+);

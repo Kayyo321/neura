@@ -1,0 +1,12 @@
+error[E0602]: a value of type LineCursor is not transferable, so it cannot be given to a spawned task
+  --> $DIR/not-thread-safe-class-transfer.nra:18:23
+   |
+ 4 | #NotThreadSafe
+   | -------------- 'Cursor' is marked #NotThreadSafe here
+...
+18 |         spawn advance(cursor);
+   |                       ^^^^^^ not transferable
+   |
+   = note: the instances of a #NotThreadSafe class, and of a class that extends one, stay in the task that holds them
+
+For more information about this error, try `neura explain E0602`.

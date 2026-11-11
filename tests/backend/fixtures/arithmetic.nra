@@ -136,5 +136,5 @@ let Arithmetic = module (
 let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
-    }
+    };
 );

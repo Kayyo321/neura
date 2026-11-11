@@ -1,0 +1,13 @@
+// Overriding a #Final method (E0913).
+let Shape = class (
+    #Final
+    export let sides = func() -> int32 {
+        return 0;
+    };
+);
+
+let Square = class:Shape (
+    export let.override sides = func() -> int32 {
+        return 4;
+    };
+);

@@ -1,0 +1,13 @@
+error[E0911]: function 'raw_total' is internal to its library
+ --> $DIR/internal-use.nra:7:18
+  |
+7 | let raw: int32 = core.raw_total();
+  |                  ^^^^^^^^^^^^^^ used outside the library that declares it
+ ::: $DIR/acme/core.nra:2:5
+  |
+2 |     #Internal
+  |     --------- 'raw_total' is marked internal here
+  |
+  = note: an #Internal declaration is usable only from files in '$DIR/acme' and its subdirectories
+
+For more information about this error, try `neura explain E0911`.

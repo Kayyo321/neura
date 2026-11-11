@@ -5,7 +5,7 @@ let write = func(text: string) {
     write(text, text.byte_length);
 } or func(text: string, byte_count: int) {
     console.print_line(text.substring(0, byte_count));
-}
+};
 
 let MultiInt = class (
     let value: int64 = 0;
@@ -14,7 +14,7 @@ let MultiInt = class (
         instance.value = initial as int64;
     } or func(initial: int64) {
         instance.value = initial;
-    }
+    };
 
     export let.as int16 = func -> int16 => value as int16
         or as int64 = func -> int64 => value;
@@ -24,11 +24,11 @@ let MultiInt = class (
 
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let initial: int16 = 12;
-        let value = new MultiInt(initial);
+        last initial: int16 = 12;
+        last value: MultiInt = new(initial);   // target-typed new selects init(int16)
         write("Neura", 3);
         write(value);
         write((value as int64).to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );

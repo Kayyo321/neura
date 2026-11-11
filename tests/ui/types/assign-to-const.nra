@@ -1,0 +1,6 @@
+// An assignment to a constant binding (E0401).
+let next = func() -> int {
+    const start = 1;
+    start = 2;
+    return start;
+};

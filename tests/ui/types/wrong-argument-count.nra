@@ -1,0 +1,3 @@
+// A call with too few arguments (E0407), labelled at the function.
+let add = func(a: int, b: int) -> int => a + b;
+let three = add(1);

@@ -1,0 +1,21 @@
+// A #Pure function that calls an interface method (E0917): every class that
+// implements the interface is a possible target, including one that
+// implements the method without `.override`, which an interface requirement
+// does not need.
+let calls: int64 = 0;
+
+let Shape = interface (
+    let area = func -> int64;
+);
+
+let Square = class implements Shape (
+    export let area = func -> int64 {
+        calls = calls + 1;
+        return 4;
+    };
+);
+
+#Pure
+let total = func(shape: Shape) -> int64 {
+    return shape.area() + 1;
+};

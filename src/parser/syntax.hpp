@@ -13,12 +13,19 @@ namespace neura {
 
 enum class CollectionKind { Array, List };
 
+struct Declaration;
+
 struct TypeSyntax {
     Span span;
     std::string name;
     std::vector<TypeSyntax> arguments;
     std::vector<CollectionKind> collections;
     bool reference{};
+    // An anonymous class written in a type position, `class ( members )`:
+    // the name is "[anonymous class]" and this is its class declaration.
+    // Copies of the type share the declaration, which identifies the
+    // occurrence (Types.md, Anonymous classes).
+    std::shared_ptr<Declaration> anonymous{};
 };
 
 struct GenericParameter {
@@ -27,11 +34,38 @@ struct GenericParameter {
     std::vector<TypeSyntax> bounds;
 };
 
+// One argument of a tag: `literal` or `name: literal` (docs/lang/Tags.md).
+struct TagArgumentSyntax {
+    enum class Kind { String, Integer, Float, Boolean, Name, List };
+
+    Kind kind;
+    // The value, without the name of a named argument.
+    Span span;
+    // The argument's name when it is written `name: value`, otherwise empty.
+    std::string name;
+    std::optional<Span> name_span{};
+    // A string's decoded text; the spelling of a number, `true` or `false`,
+    // or a qualified name; empty for a list.
+    std::string text;
+    // The items of a list, which are not lists themselves.
+    std::vector<TagArgumentSyntax> items{};
+};
+
+// `#Name` or `#Name(arguments)`, written before a declaration. A group
+// `#[A, B]` gives one TagSyntax per tag.
+struct TagSyntax {
+    Span span;
+    Span name_span;
+    std::string name;
+    std::vector<TagArgumentSyntax> arguments;
+};
+
 struct Parameter {
     Span span;
     std::string name;
     TypeSyntax type;
     bool variadic{};
+    std::vector<TagSyntax> tags{};
 };
 
 struct Declaration;
@@ -108,6 +142,9 @@ struct Statement {
     std::string assignment_operator{};
     // Documentation shared by all bindings in a destructuring declaration.
     std::shared_ptr<const DocComment> documentation{};
+    // A destructuring declaration's tuple annotation, `let [a, b]: [A, B]`.
+    // Its `expressions` hold one initializer, or one per name.
+    std::optional<TypeSyntax> binding_type{};
 };
 
 struct MatchArm {
@@ -130,6 +167,22 @@ struct SelectArm {
     std::vector<Statement> body;
 };
 
+// An accessor clause after an exported instance field's ';' (Types.md,
+// Accessors): `| get: expression;`, `| get: { block };`, `| set: statement;`,
+// or `| set: { block };`. `get`, `set`, and `value` are contextual words.
+struct AccessorClause {
+    bool setter{};
+    // From the '|' through the clause's ';'.
+    Span span;
+    // The word `get` or `set`.
+    Span keyword;
+    // A getter's expression form. Empty for a block body or a setter.
+    std::optional<Expr> expression;
+    // A setter's single statement, or the statements of a block body.
+    std::vector<Statement> body;
+    bool block{};
+};
+
 struct Declaration {
     // An enum's variants are its members. Their parameters describe the payload.
     enum class Kind { Binding, Function, Class, Module, Enum, Interface };
@@ -138,6 +191,9 @@ struct Declaration {
     Span span;
     std::string name;
     bool constant{};
+    // `last`: an assign-once binding. It is also `constant`; without an
+    // initializer it is deferred and assigned exactly once later.
+    bool last{};
     bool exported{};
     bool override_member{};
     bool promote_import{};
@@ -160,6 +216,9 @@ struct Declaration {
     // `scheduler("operation")` in place of a body: a function the NVM
     // scheduler implements (trusted library only; Concurrency.md section 10.1).
     std::optional<std::string> scheduler_binding{};
+    // `kernel("neura.area.name", version)` in place of a body: a function a
+    // built-in C kernel implements (trusted library only; Kernels.md).
+    std::optional<std::pair<std::string, std::uint32_t>> kernel_binding{};
     std::vector<TypeSyntax> interfaces{};
     // Additional signatures in an `or func` declaration.
     std::vector<Declaration> overloads{};
@@ -167,6 +226,11 @@ struct Declaration {
     std::optional<TypeSyntax> cast_target{};
     std::shared_ptr<const DocComment> documentation{};
     std::optional<Span> name_span{};
+    // Accessor clauses after the member's ';', in source order.
+    std::vector<AccessorClause> accessors{};
+    // The tags written before the declaration, in source order. They apply
+    // to every branch of an `or func` group.
+    std::vector<TagSyntax> tags{};
 };
 
 struct ResolvedImport {

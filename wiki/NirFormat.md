@@ -5,7 +5,7 @@
 
 A `.nir` file holds a NeuraIR program as lowered, before optimization. `neura emit-ir <file.nra>... -o <file.nir>` writes one, and `neura build <file.nir> -o <file.nvr>` builds from it with the same verification, optimization, and conversion as a build from source. Source can also [import modules from it](Modules#prebuilt-neurair-modules). The reader and writer are in [`src/neura-ir/nir_format.cpp`](https://github.com/Kayyo321/neura/blob/main/src/neura-ir/nir_format.cpp).
 
-The file records every field of the in-memory program: symbols with their kinds, names, owners, inheritance and override links, types, parameters, generics, bounds, and flags, plus every body with its regions, operands, symbol references, literal text, type arguments, and source spans. A file that is written and then read yields a program equal to the original in every field. As a result, a build from `.nir` produces the same image bytes as a build from source. The human-readable listing printed by `neura emit-ir` without `-o` is a separate interface.
+The file records every field of the in-memory program: symbols with their kinds, names, owners, inheritance and override links, types, parameters, generics, bounds, flags, and attributes, plus every body with its regions, operands, symbol references, literal text, type arguments, and source spans. A file that is written and then read yields a program equal to the original in every field. As a result, a build from `.nir` produces the same image bytes as a build from source. The human-readable listing printed by `neura emit-ir` without `-o` is a separate interface.
 
 ## Encoding
 
@@ -15,13 +15,13 @@ All minor versions use the conventions of [NVR](NVR#encoding-and-compatibility).
 | --- | --- | --- |
 | Magic | 4 bytes | ASCII `NEIR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0 through 9 |
-| Files | vector<text> | Source paths used by spans, in order of first use: symbols first, then bodies depth first |
+| Minor | u16 | 0 through 10 |
+| Files | vector<text> | Source paths used by spans, in order of first use: symbols first (each symbol's span, then the spans in its attributes), then bodies depth first |
 | Symbols | vector<Symbol> | The symbol table in symbol-index order |
 | Bodies | vector<Body> | Bodies in program order |
 | Static constants | vector<StaticConstant> | Present starting with 1.6 |
 
-The reader accepts versions 1.0 through 1.9. The writer emits the earliest version that can encode the program. Version 1.1 adds loop latches and operation tags 31–33. Version 1.2 adds tuple types, enum payloads, aggregate and selection operations, comparison chains, and bitwise spellings on existing unary and binary nodes. Version 1.3 adds structural function types, generic enum applications, interfaces and intersection bounds, library and host bindings, nil references and class operations, universal value members, and text, float bit access, and message-trap operations. Version 1.4 adds repeated collection allocation, class static scopes and qualified static field access, and statements before a scoped value's result. Version 1.5 adds guarded static initialization using the existing operations. Version 1.6 preserves source linkage signatures and prepared static constants. Version 1.7 adds primitive reference layouts and operation tag 60. Version 1.8 adds host callbacks: a library function with a body and a host binding is a callback that the runtime calls back (NVR `CALB`). It also adds a trailing native library record after the static constants: a `u8` presence flag, then the target triple as text, the shared object as a byte count and bytes, and the symbol names as a counted list of text. A build copies the record into the image's `NATV` section. The reader rejects features newer than the file's declared version. Version 1.9 adds the task operations and the poll bit ([Revision 1.9](#revision-19-tasks)).
+The reader accepts versions 1.0 through 1.10. The writer emits the earliest version that can encode the program. Version 1.1 adds loop latches and operation tags 31–33. Version 1.2 adds tuple types, enum payloads, aggregate and selection operations, comparison chains, and bitwise spellings on existing unary and binary nodes. Version 1.3 adds structural function types, generic enum applications, interfaces and intersection bounds, library and host bindings, nil references and class operations, universal value members, and text, float bit access, and message-trap operations. Version 1.4 adds repeated collection allocation, class static scopes and qualified static field access, and statements before a scoped value's result. Version 1.5 adds guarded static initialization using the existing operations. Version 1.6 preserves source linkage signatures and prepared static constants. Version 1.7 adds primitive reference layouts and operation tag 60. Version 1.8 adds host callbacks: a library function with a body and a host binding is a callback that the runtime calls back (NVR `CALB`). It also adds a trailing native library record after the static constants: a `u8` presence flag, then the target triple as text, the shared object as a byte count and bytes, and the symbol names as a counted list of text. A build copies the record into the image's `NATV` section. The reader rejects features newer than the file's declared version. Version 1.9 adds the task operations and the poll bit ([Revision 1.9](#revision-19-tasks)). Version 1.10 adds symbol attributes and deferred initialization ([Revision 1.10](#revision-110-symbol-attributes-and-deferred-initialization)).
 
 ### Records
 
@@ -40,7 +40,7 @@ Symbol flags are bit 0 exported, bit 1 constant, bit 2 external, and bit 3 has a
 - Library file identity: nonempty library-relative path as `text`.
 - Interfaces and additional bounds: two `vector<Type>` fields, in that order. The first holds implemented or extended interface applications. The second holds the bounds after the first `bound` field. At least one vector is nonempty.
 
-In 1.6, each symbol ends with a `u8` linkage flag after the other optional fields. Bits 0–1 encode fixed arity (0), typed variadic (1), or untyped variadic (2). Bit 2 marks a user-defined object cast. Bit 3 marks an overload branch and adds a required symbol reference to the first branch. Bit 4 marks a singleton class and adds a required reference to its value. References follow in bit order. A prepared static constant records the typed value available at compile time without running its class's initializer.
+In 1.6, each symbol ends with a `u8` linkage flag after the other optional fields. Bits 0–1 encode fixed arity (0), typed variadic (1), or untyped variadic (2). Bit 2 marks a user-defined object cast. Bit 3 marks an overload branch and adds a required symbol reference to the first branch. Bit 4 marks a singleton class and adds a required reference to its value. References follow in bit order. In 1.10, bit 5 marks a nonempty attribute vector after the references ([Revision 1.10](#revision-110-symbol-attributes-and-deferred-initialization)). A prepared static constant records the typed value available at compile time without running its class's initializer.
 
 Earlier artifacts still build directly. When imported into new source, a variadic function from an older project artifact exposes its packed array signature. Rebuild the library to restore variadic calls or expose a static constant whose value was erased during older lowering.
 
@@ -93,13 +93,93 @@ A **poll** is stored in bit 7 (`0x80`) of the operation byte of a loop, call, vi
 
 A file is written as 1.9 only when a body contains a task scope, a spawn, a scheduler call, or a poll; any other program keeps the earliest version that can encode it, and its bytes are unchanged. A 1.8 reader rejects a 1.9 file with `NeuraIR format 1.9 is not supported; this reader accepts 1.0 through 1.8`, and a 1.9 reader reads every earlier file. A build from a 1.9 file produces the same image bytes as a build from the source that wrote it, including the `TRNS` table.
 
+### Revision 1.10: symbol attributes and deferred initialization
+
+Version 1.10 adds two things that the features of Neura 0.2.0 need to keep in NeuraIR: typed attributes on symbols, and a declaration of a local without a value.
+
+#### Symbol attributes
+
+An attribute is a registered fact about one declaration: a `u16` identifier and a payload. [`src/neura-ir/attributes.def`](https://github.com/Kayyo321/neura/blob/main/src/neura-ir/attributes.def) is the registry, and [`src/neura-ir/attributes.hpp`](https://github.com/Kayyo321/neura/blob/main/src/neura-ir/attributes.hpp) is the API that attaches, finds, and checks attributes. A symbol keeps its attributes in the order they were attached, and the file keeps that order.
+
+Bit 5 (`0x20`) of a symbol's linkage flag marks the attributes. They follow the overload and singleton references as a `vector<Attribute>` with at least one element.
+
+| Record | Fields in order |
+| --- | --- |
+| Attribute | `id:u16`, `value:Value` |
+| Value | `kind:u8`, then the payload of that kind |
+
+| Value kind | Payload |
+| --- | --- |
+| 0 bool | `u8`, 0 or 1 |
+| 1 signed | `u64`, a two's complement 64-bit integer |
+| 2 unsigned | `u64` |
+| 3 text | `text` |
+| 4 symbol | `u32`, a required symbol reference |
+| 5 type | `Type` |
+| 6 span | `Span`, whose file index refers to the Files table |
+| 7 list | `vector<Value>` |
+
+Each registered attribute has a stable identifier, the symbol kinds that may carry it, a rule for whether one symbol may carry it more than once, and a payload schema. A schema uses these letters: `b` bool, `i` signed, `u` unsigned (`uN` also requires a value of at most `N`), `t` text, `s` symbol, `y` type, `p` span, `a` any literal (bool, signed, unsigned, or text), `*X` a list whose items all match `X`, and `[X Y ...]` a list of exactly those items in order.
+
+| Id | Name | Carried by | Repeats | Schema | Payload |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `tag` | every kind except file | yes | `[u65535 t *[t a] p]` | A source tag ([Tags](Tags)): its identifier in the tag registry (`src/neura-ir/tags.def`), its name as written, its arguments as pairs of an argument name (empty when positional) and a literal value, and its span. The compiler writes each argument under its parameter's name, a repeated parameter as one pair per value, a floating-point number or a name as text, and a warning as its code |
+| 2 | `accessor.get` | field | no | `s` | The field's hidden getter function |
+| 3 | `accessor.set` | field | no | `s` | The field's hidden setter function |
+| 4 | `accessor.of` | function | no | `[s u1]` | On a hidden accessor function: the field it serves, and 0 for a getter or 1 for a setter |
+| 5 | `binding.last` | local, field | no | `b` | A `last` binding. True when it is declared without an initializer |
+| 6 | `class.anonymous` | class | no | `[b t p]` | An anonymous class: whether it is structural (fields only), its name (its canonical structural signature, such as `class(x: int32)`), and the occurrence's span, or for a structural class the start of its generated file ([Anonymous classes](#anonymous-classes)) |
+| 7 | `kernel.binding` | function | no | `[t u4294967295]` | A function implemented by a built-in C kernel: the kernel's name and ABI version |
+| 8 | `inline.directive` | function | no | `u2` | The optimizer's inlining directive: 0 automatic, 1 always, 2 never |
+| 9 | `synchronized` | function | no | `b` | A method that runs under its instance's guard: one marked `#Synchronized`, an exported method of a class marked `#Synchronized`, or an accessor of a class with synchronized methods ([Concurrency](Concurrency#81-monitors)) |
+| 10 | `class.shareable` | class | no | `b` | A monitor by its declaration: a class with synchronized methods whose exported methods are all synchronized, whose exported fields are `last` or `const` of an immutable type or have accessors, and whose base is such a class. The linked program shares its instances between tasks when the rules that depend on the whole program also hold ([Concurrency](Concurrency#81-monitors)) |
+
+Identifier 0 is reserved, and identifiers are never reused. A new attribute takes the next free identifier and is added to this table. Registering one does not require a new format version: the version describes the encoding, and a reader that predates an identifier rejects the file as it rejects any unknown identifier.
+
+The reader rejects an unknown identifier, an unknown value kind, a bool other than 0 or 1, an absent or out-of-range symbol reference, an attribute on a kind of symbol that the registry does not allow, a repeat of an attribute that does not repeat, and a payload that does not match its schema. The [NeuraIR verifier](IrOptimization#neurair-verifier) applies the same registry rules to programs built in memory. It also checks the following:
+
+- Symbol references in payloads exist.
+- A field's `accessor.get` or `accessor.set` names a function of the same owner, and that function's `accessor.of` names the field with the matching kind. The reverse also holds.
+- `synchronized` marks a function owned by a class.
+- A kernel binding names a kernel.
+
+Linking a prebuilt module renumbers the symbol references, types, and span files in attributes, as it does for the symbol's own fields. Two definitions coalesce only when their attributes are equal. As with the 1.6 linkage fields, an embedded standard library definition without attributes still links against an installed one that has them. Specialization copies the attributes of every symbol it copies. A reference to a member of the generic class then names the instance's copy, which specialization creates if needed. A reference to a parameter or local of the copied function names its copy.
+
+Only `synchronized` and `class.shareable` change the executable image, and only in a program that spawns a task: a synchronized method then takes its instance's guard, and the layout of a shareable class is marked transferable ([Concurrency](Concurrency#81-monitors)). That depends on the whole linked program, as polls do, so a module compiled alone is unaffected until it is linked into such a program. No other registered attribute changes the image; a `tag` attribute such as `#Pure` is a checked promise, and the optimizer infers the properties it uses whether or not a tag is present. A build from source and a build from the `.nir` file it wrote produce the same image bytes.
+
+#### Anonymous classes
+
+The frontend writes an [anonymous class](Types#anonymous-classes) as an ordinary class symbol with `class.anonymous`. A class written with methods, a constructor, accessors, `const` or `last` fields, a base, or interfaces belongs to the module or file that encloses the body, is named `class(<fields>)@<file name>:<line>:<column>`, and its attribute holds false and the span of the body.
+
+A structural (fields-only) class is identified by its fields, wherever they are written, so it belongs to no source file. The frontend declares it in a generated file symbol of its own, with no library path, named `<anonymous class H>`, where `H` is 16 lowercase hexadecimal digits of the 64-bit FNV-1a hash of a canonical description of its fields: their order, names, and types, with a declared class or enum identified by the path or library path of its file and its qualified name, never by a symbol number. The file has the class as its only child, and the class's fields as the class's children, in order. Every span of the class, its fields, and its attribute is line 1, column 1, offset 0, length 0 of the generated file, and the class is named `class(<name>: <type>, ...)`. A program and the prebuilt modules it links therefore declare the same file for the same fields, and linking coalesces it like any file that two artifacts share. Tools that label source files skip a file whose name begins with `<`.
+
+#### Deferred initialization
+
+An `initialize` node (operation 0) with no operand declares a local without a value. Its `symbol` is the local, its `text` is empty, and it has no regions. The local's slot exists from the declaration on, and holds no value until the first `store` to it. A read before that store traps with an uninitialized slot. The runtime tracks this state per frame, so it does not reset when the declaration runs again in a later loop iteration.
+
+The verifier checks the structure:
+
+- The target is a local, not a field or global. A deferred field has no `initialize` at all.
+- The local carries `binding.last` with the value true. A binding with that value has no `initialize` with a value.
+- A store to such a binding is allowed even when the binding is constant.
+- A primitive reference cannot bind to such a binding.
+- A comparison chain's subject is not deferred.
+- The usual scoping rules apply: the declaration puts the local in scope, and a load outside that scope is rejected.
+
+The verifier does no flow analysis. It does not check that a store precedes every read on every path, that the binding is assigned exactly once, that no assignment happens in a loop, or that no closure captures the binding before its assignment. The frontend's definite-assignment pass is responsible for these rules, and the runtime trap catches only a read before the first store in a frame. The optimizer treats the declaration as having no effect. It does not treat a load of such a binding as pure, because that load can trap.
+
+#### Versioning
+
+A file is written as 1.10 only when a symbol has an attribute or a body contains a deferred initialization. Every other program is written in the earliest version that can encode it, and its bytes are unchanged. A 1.9 reader rejects a 1.10 file with `NeuraIR format 1.10 is not supported; this reader accepts 1.0 through 1.9`. A 1.10 reader reads every earlier file. In a file that declares an earlier version, it rejects the attribute bit (`symbol attributes require NeuraIR format 1.10`) and deferred initialization (`deferred initialization requires NeuraIR format 1.10`).
+
 ## Reading
 
 The reader checks structure and leaves semantics to the [NeuraIR verifier](IrOptimization#neurair-verifier), which every build runs on the result. It rejects:
 
 - a missing magic, an unsupported version, or bytes after the last body
 - a truncated record, or a count larger than the remaining bytes could hold
-- an unknown type kind, symbol kind, or operation tag, a bound flag other than 0 or 1, or reserved flag bits
+- an unknown type kind, symbol kind, operation tag, attribute identifier, or attribute value kind, a bound flag other than 0 or 1, or reserved flag bits
+- an attribute that breaks a rule of the registry: its symbol kind, its repetition, or its payload schema
 - a symbol or file reference out of range, or an absent reference where one is required
 - type or node nesting deeper than 1,024 levels, which bounds the recursion of the reader and of the passes that walk the program afterward
 

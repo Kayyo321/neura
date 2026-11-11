@@ -1,0 +1,14 @@
+error[E0441]: 'x' may be used before it is assigned
+ --> $DIR/last-read-before-assignment.nra:7:12
+  |
+3 |     last x: int;
+  |          - declared here without a value
+4 |     if (flag) {
+  |         ---- 'x' is not assigned when this condition is false
+...
+7 |     return x;
+  |            ^ used here, but 'x' is not assigned on every path to it
+  |
+  = help: assign 'x' exactly once before this use
+
+For more information about this error, try `neura explain E0441`.

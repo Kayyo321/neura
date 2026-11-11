@@ -1,0 +1,13 @@
+error[E0443]: closure captures 'base' before it is assigned
+ --> $DIR/last-captured-early.nra:4:33
+  |
+3 |     last base: int;
+  |          ---- declared here without a value
+4 |     let read = func() -> int => base;
+  |                                 ^^^^ 'base' is captured here
+  |                ---- the closure is created here, before 'base' is assigned
+  |
+  = note: a closure copies the values it captures when it is created
+  = help: assign 'base' before creating the closure
+
+For more information about this error, try `neura explain E0443`.

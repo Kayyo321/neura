@@ -1,0 +1,9 @@
+// A block-bodied member function is a declaration, so it ends with ';'.
+let Counter = class (
+    let count: int = 0;
+
+    export let increment = func {
+        count += 1;
+    }
+    export let value = func -> int => count;
+);

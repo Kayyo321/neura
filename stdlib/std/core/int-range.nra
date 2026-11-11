@@ -8,88 +8,97 @@ let iterators = import:Std.Collections.Iterator;
 /// A negative step counts down while the value is greater than `end`. Positions and sizes are computed in
 /// int64, so no intermediate overflows.
 /// @see [Std.Core.IntRange](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-IntRange)
+#Since("0.1.0")
 export let IntRange = module (
     /// @brief An immutable half-open arithmetic progression with a nonzero stride.
+    #[Final, Since("0.1.0"), Immutable, ThreadSafe]
     export let IntRange = class implements iterables.Iterable<int> (
         /// @brief The inclusive start bound.
-        let first: int;
+        #Since("0.2.0")
+        export last start: int;
+            | get: start;
+
         /// @brief The exclusive end bound.
-        let limit: int;
-        /// @brief The signed stride between successive values.
-        let increment: int;
+        #Since("0.2.0")
+        export last end: int;
+            | get: end;
+
+        /// @brief The signed stride between successive values; never zero.
+        #Since("0.2.0")
+        export last step: int;
+            | get: step;
 
         /// @brief Stores the bounds and step. A zero step traps.
         export let init = func(start_value: int, end_value: int, step_value: int) {
             if (step_value == 0) {
                 trap_with_message("invalid argument: zero step");
             }
-            first = start_value;
-            limit = end_value;
-            increment = step_value;
+            start = start_value;
+            end = end_value;
+            step = step_value;
         };
 
-        /// @brief Returns the inclusive start bound.
-        export let start = func -> int => first;
-
-        /// @brief Returns the exclusive end bound.
-        export let end = func -> int => limit;
-
-        /// @brief Returns the signed stride between values.
-        export let step = func -> int => increment;
-
         /// @brief Progressions compare by their defining bounds and step.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is IntRange)) {
                 return false;
             }
-            let that = other as IntRange;
-            return first == that.first && limit == that.limit && increment == that.increment;
+            last that = other as IntRange;
+            return start == that.start && end == that.end && step == that.step;
         };
 
         /// @brief Combines the start, end, and step into a hash.
+        #Pure
         export let.override hash_code = func -> uint32 {
-            let start_hash = hashing.combine(17, first.hash_code());
-            let bounds_hash = hashing.combine(start_hash, limit.hash_code());
-            return hashing.combine(bounds_hash, increment.hash_code());
+            last start_hash = hashing.combine(17, start.hash_code());
+            last bounds_hash = hashing.combine(start_hash, end.hash_code());
+            return hashing.combine(bounds_hash, step.hash_code());
         };
 
         /// @brief Formats the progression as `start..end:step`.
+        #Pure
         export let.override to_string = func -> string =>
-            first.to_string() + ".." + limit.to_string() + ":" + increment.to_string();
+            start.to_string() + ".." + end.to_string() + ":" + step.to_string();
 
         /// @brief The number of values. Computed in int64; a range with more than Int32.Max values traps
         /// (reason 1) in the conversion to int.
+        #Pure
         export let size = func -> int => count() as int;
 
         /// @brief Reports whether the bounds leave no values in the stride's direction.
-        export let is_empty = func -> bool => (increment > 0) ? first >= limit : first <= limit;
+        #Pure
+        export let is_empty = func -> bool => (step > 0) ? start >= end : start <= end;
 
         /// @brief Tests whether the value lies within the bounds and on a stride boundary.
+        #Pure
         export let contains = func(value: int) -> bool {
-            let offset = (value as int64) - (first as int64);
-            let stride = increment as int64;
-            if (increment > 0) {
-                return value >= first && value < limit && offset % stride == 0;
+            last offset = (value as int64) - (start as int64);
+            last stride = step as int64;
+            if (step > 0) {
+                return value >= start && value < end && offset % stride == 0;
             }
-            return value <= first && value > limit && offset % stride == 0;
+            return value <= start && value > end && offset % stride == 0;
         };
 
         /// @brief The value at `index`. An index outside 0 through size() - 1 traps with "invalid argument:
         /// index out of range".
+        #Pure
         export let get = func(index: int) -> int {
             if (index < 0 || (index as int64) >= count()) {
                 trap_with_message("invalid argument: index out of range");
             }
-            return ((first as int64) + (index as int64) * (increment as int64)) as int;
+            return ((start as int64) + (index as int64) * (step as int64)) as int;
         };
 
         /// @brief A new built-in list of the values in order.
+        #Pure
         export let to_list = func -> int[list] {
-            let values: int[list] = [];
-            let current = first as int64;
-            let stop = limit as int64;
-            let stride = increment as int64;
-            if (increment > 0) {
+            last values: int[list] = [];
+            let current = start as int64;
+            last stop = end as int64;
+            last stride = step as int64;
+            if (step > 0) {
                 while (current < stop) {
                     values.append(current as int);
                     current += stride;
@@ -104,16 +113,17 @@ export let IntRange = module (
         };
 
         /// @brief An iterator over the values in order, for for-each and other Iterable consumers.
-        export let iterator = func -> iterators.Iterator<int> => new IntRangeIterator(first, limit, increment);
+        #Pure
+        export let iterator = func -> iterators.Iterator<int> => new IntRangeIterator(start, end, step);
 
         /// @brief The exact number of values as an int64.
         let count = func -> int64 {
             if (is_empty()) {
                 return 0;
             }
-            let distance = (limit as int64) - (first as int64);
-            let stride = increment as int64;
-            if (increment < 0) {
+            let distance = (end as int64) - (start as int64);
+            let stride = step as int64;
+            if (step < 0) {
                 distance = -distance;
                 stride = -stride;
             }
@@ -122,13 +132,14 @@ export let IntRange = module (
     );
 
     /// @brief Steps through a progression's values. Positions are int64, so the last step cannot overflow.
+    #Final
     let IntRangeIterator = class implements iterators.Iterator<int> (
         /// @brief The next value to return.
         let current: int64;
         /// @brief The exclusive end bound.
-        let stop: int64;
+        last stop: int64;
         /// @brief The signed stride.
-        let stride: int64;
+        last stride: int64;
 
         /// @brief Starts before the first value of `start_value..end_value:step_value`.
         export let init = func(start_value: int, end_value: int, step_value: int) {
@@ -138,6 +149,7 @@ export let IntRange = module (
         };
 
         /// @brief Reports whether another value remains.
+        #Pure
         export let has_next = func -> bool => (stride > 0) ? current < stop : current > stop;
 
         /// @brief Returns the next value and advances. Traps with `no such element` at exhaustion.
@@ -145,16 +157,17 @@ export let IntRange = module (
             if (!has_next()) {
                 trap_with_message("no such element");
             }
-            let value = current as int;
+            last value = current as int;
             current += stride;
             return value;
         };
     );
 
     /// @brief The values from `start` up to, but not including, `end`.
-    export let of = func(start: int, end: int) -> IntRange => new IntRange(start, end, 1);
+    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
+    export let of = func(start: int, end: int) -> IntRange => new(start, end, 1);
 
     /// @brief A zero step traps with "invalid argument: zero step".
-    export let stepped = func(start: int, end: int, step: int) -> IntRange =>
-        new IntRange(start, end, step);
+    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
+    export let stepped = func(start: int, end: int, step: int) -> IntRange => new(start, end, step);
 );

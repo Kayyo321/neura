@@ -1,0 +1,73 @@
+// A monitor shared by many tasks (Concurrency.md section 8.1). Every task adds
+// to the same Tally through its synchronized methods; each addition reads the
+// count, calls a hidden helper, and writes it back, and the helper's call is a
+// scheduling point. Without the guard a task could be switched out between the
+// read and the write and lose an update, so the exact total shows that the
+// guard serializes the methods under every quantum. add_twice calls add on its
+// own receiver while it holds the guard, which re-enters it.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+/// One contribution: immutable, so tasks may share it.
+#Immutable
+let Share = class (
+    export last owner: string;
+    export last amount: int64;
+
+    export let init = func(name: string, count: int64) {
+        owner = name;
+        amount = count;
+    };
+);
+
+/// A running total that tasks share.
+#Synchronized
+let Tally = class (
+    let count: int64 = 0;
+    let calls: int64 = 0;
+
+    /// The name printed with the total, read and written under the guard.
+    export let label: string = "tally";
+        | get: label;
+        | set: label = value;
+
+    export let add = func(share: Share) -> int64 {
+        for (let i: int64 = 0; i < share.amount; i++) {
+            let seen = count;
+            record_call();
+            count = seen + 1;
+        }
+        return count;
+    };
+
+    export let add_twice = func(share: Share) -> int64 {
+        add(share);
+        return instance.add(share);
+    };
+
+    export let total = func -> int64 => count;
+
+    export let call_count = func -> int64 => calls;
+
+    let record_call = func {
+        calls = calls + 1;
+    };
+);
+
+#ThreadSafe
+let contribute = func(tally: Tally, share: Share) -> int64 => tally.add_twice(share);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let tally = new Tally();
+        tally.label = "shared tally";
+        scope {
+            for (let i = 0; i < 8; i++) {
+                spawn contribute(tally, new Share("task " + i.to_string(), 25));
+            }
+        }
+        console.print_line(tally.label + ": " + tally.total().to_string());
+        console.print_line("helper calls: " + tally.call_count().to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -2,6 +2,7 @@ let.promote _ = import:Std.Collections.Collection;
 
 /// @brief Structural changes common to lists and sets. Set insertion reports duplicates.
 /// @see [Std.Collections.MutableCollection](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-MutableCollection)
+#Since("0.1.0")
 export let MutableCollection = module (
     /// @brief Common insertion and removal operations for lists and sets.
     export let MutableCollection = interface<T>:Collection<T> (

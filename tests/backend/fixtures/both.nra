@@ -14,5 +14,5 @@ let Main = module:program.Entry (
             console.print_line("both");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

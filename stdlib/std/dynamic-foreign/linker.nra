@@ -15,16 +15,19 @@ let strings = import:Std.Text.Strings;
 ///
 /// There is one linker, for the runner's platform C ABI. Needs the native capability.
 /// @see [Std.DynamicForeign.Linker](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-Linker)
+#Since("0.1.0")
 export let Linker = module (
     /// @brief The platform's C calling convention.
+    #[Final, NotThreadSafe]
     export let Linker = class (
         /// @brief Use native_linker.
         export let init = func {};
 
         /// @brief A handle that calls the function at `symbol` with the C signature `descriptor` (Java's
         /// Linker.downcallHandle).
+        #Pure
         export let downcall_handle = func(symbol: MemorySegment, descriptor: FunctionDescriptor) -> MethodHandle =>
-            new MethodHandle(symbol, descriptor, -1)
+            new(symbol, descriptor, -1)
         /// @brief A handle for a variadic C function such as printf. The descriptor lists every argument of the
         /// calls the handle makes; arguments from `first_variadic` on are the variadic ones and must be promoted
         /// layouts (int or wider integers, double, or addresses), as C's default argument promotions require.
@@ -32,7 +35,7 @@ export let Linker = module (
             if (first_variadic < 0) {
                 trap_with_message("invalid argument: negative first variadic index");
             }
-            return new MethodHandle(symbol, descriptor, first_variadic);
+            return new(symbol, descriptor, first_variadic);
         };
 
         /// @brief A native function pointer that calls `target` with the C signature `descriptor` (Java's
@@ -43,10 +46,10 @@ export let Linker = module (
         /// when the downcall returns. A variadic signature cannot be an upcall.
         export let upcall_stub = func(target: func(ForeignValue[list]) -> ForeignValue,
                                       descriptor: FunctionDescriptor, arena: Arena) -> MemorySegment {
-            let signature = codec.signature(descriptor, -1);
-            let stub = upcalls.register(target, descriptor);
-            let address = native.create_upcall(arena.scope().id(), stub, signature);
-            return new MemorySegment(address, 0, arena.scope());
+            last signature = codec.signature(descriptor, -1);
+            last stub = upcalls.register(target, descriptor);
+            last address = native.create_upcall(arena.scope().id(), stub, signature);
+            return new(address, 0, arena.scope());
         };
 
         /// @brief The libraries already loaded into the process, including the C library (Java's
@@ -57,7 +60,7 @@ export let Linker = module (
         /// "char", "short", "int", "long", "long long", "float", "double", "void*", "size_t", or "wchar_t".
         /// None for any other name.
         export let canonical_layout = func(name: string) -> Optional<MemoryLayout> {
-            let names = ["bool", "char", "short", "int", "long", "long long", "float", "double", "void*", "size_t",
+            last names = ["bool", "char", "short", "int", "long", "long long", "float", "double", "void*", "size_t",
                          "wchar_t"];
             for (let i = 0; i < names.length; i++) {
                 if (names[i] == name) {
@@ -69,8 +72,8 @@ export let Linker = module (
 
         /// @brief The layout of the C type at `index` in the provider's table.
         let canonical = func(index: int) -> MemoryLayout {
-            let size = native.c_size(index);
-            let alignment = native.c_alignment(index);
+            last size = native.c_size(index);
+            last alignment = native.c_alignment(index);
             let carrier = signed_of(size);
             if (index == 0) {
                 carrier = Carrier.Bool;
@@ -106,7 +109,7 @@ export let Linker = module (
     /// @brief The linker for the runner's platform C ABI.
     export let native_linker = func -> Linker {
         if (shared == nil) {
-            shared = new Linker();
+            shared = new;
         }
         return shared;
     };

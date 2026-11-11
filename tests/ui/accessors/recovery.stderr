@@ -1,0 +1,13 @@
+error[E0204]: expected an expression
+ --> $DIR/recovery.nra:3:29
+  |
+3 |     export let first: int = ;
+  |                             ^ expected an expression, found ';'
+
+error[E0204]: expected an expression
+  --> $DIR/recovery.nra:10:29
+   |
+10 |     export let third: int = * 3;
+   |                             ^ expected an expression, found '*'
+
+For more information about this error, try `neura explain E0204`.

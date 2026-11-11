@@ -1,0 +1,17 @@
+error[E0102]: invalid UTF-8
+ --> $DIR/invalid-utf8.nra:2:21
+  |
+2 | // reports both. Caf� is Latin-1 here.
+  |                     ^ this byte does not begin a valid UTF-8 sequence
+  |
+  = note: Neura source files are UTF-8 text
+
+error[E0102]: invalid UTF-8
+ --> $DIR/invalid-utf8.nra:3:16
+  |
+3 | let name = "Caf�";
+  |                ^ this byte does not begin a valid UTF-8 sequence
+  |
+  = note: Neura source files are UTF-8 text
+
+For more information about this error, try `neura explain E0102`.

@@ -41,7 +41,7 @@ let ServiceTests = module (
             Request.Ask { id, delay_ms, reply } => {
                 let code = timed_out;
                 scope (call) {
-                    call.cancel_after(durations.of_millis(50));
+                    let _ = call.cancel_after(durations.of_millis(50));
                     let work = spawn dependency(delay_ms);
                     code = work.join();
                 }

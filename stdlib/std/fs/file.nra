@@ -11,6 +11,7 @@ let.promote _ = import:Std.Core.Unit;
 /// Its bound read method is a byte source and its bound write method a byte sink. Needs the fs capability.
 /// After close every operation except close fails with Closed.
 /// @see [Std.Fs.File](https://github.com/Kayyo321/neura/wiki/Stdlib-Fs-File)
+#Since("0.1.0")
 export let File = module (
     /// @brief Read: must exist. Write: create or truncate. Append: create, and write at the end. ReadWrite:
     /// must exist. CreateNew: read and write a new file; fails with AlreadyExists.
@@ -38,9 +39,10 @@ export let File = module (
     let close_file = func(file: int64) -> DoneOutcome host("neura.fs.close", 1);
 
     /// @brief An unbuffered host file with an explicit, idempotent close operation.
+    #[Final, NoDiscard(reason: "an open file must be closed"), NotThreadSafe]
     export let File = class implements Closeable (
         /// @brief Holds the provider handle and the context used in error messages.
-        let handle: FileHandle = nil;
+        last handle: FileHandle;
         /// @brief Tracks whether the wrapper may still use the host handle.
         let open_now: bool = true;
 
@@ -51,6 +53,7 @@ export let File = module (
 
         /// @brief Up to `max` bytes from the current position; an empty list at the end of the file. A maximum
         /// below 1 traps.
+        #NoDiscard
         export let read = func(max: int) -> result.Result<uint8[list]> {
             bytes.check_maximum(max);
             if (!open_now) {
@@ -63,6 +66,7 @@ export let File = module (
         };
 
         /// @brief Writes every byte, repeating partial host writes.
+        #NoDiscard
         export let write = func(data: uint8[list]) -> result.Result<Unit> {
             if (!open_now) {
                 return result.Result<Unit>.Err(bytes.closed("file", handle.path));
@@ -88,6 +92,7 @@ export let File = module (
         };
 
         /// @brief Moves the position and returns it, counted from the start.
+        #NoDiscard
         export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64> {
             if (!open_now) {
                 return result.Result<int64>.Err(bytes.closed("file", handle.path));
@@ -99,8 +104,9 @@ export let File = module (
         };
 
         /// @brief The file's size in bytes. The position is unchanged.
+        #NoDiscard
         export let size = func -> result.Result<int64> {
-            let here: int64 = 0;
+            last here: int64;
             match (seek(0, SeekOrigin.Current)) {
                 result.Result.Ok(position) => {
                     here = position;
@@ -109,7 +115,7 @@ export let File = module (
                     return result.Result<int64>.Err(failure);
                 },
             }
-            let end: int64 = 0;
+            last end: int64;
             match (seek(0, SeekOrigin.End)) {
                 result.Result.Ok(position) => {
                     end = position;
@@ -139,8 +145,9 @@ export let File = module (
     );
 
     /// @brief Opens the normalized path using the selected mode and returns an owned file.
+    #NoDiscard
     export let open = func(path: Path, mode: OpenMode) -> result.Result<File> {
-        let text = path.to_string();
+        last text = path.to_string();
         return match (open_file(text, mode as int)) {
             IdOutcome.Ok(id) => result.Result<File>.Ok(new File(new FileHandle(id, text))),
             IdOutcome.Error(code) => result.Result<File>.Err(host_error.io(code, "file open failed", text)),
@@ -154,6 +161,7 @@ export let File = module (
     /// error's message, and a body Ok becomes the close error (Std.Io.Closeable.release does the combining). The
     /// file is closed even if the body closed it already, which reports no error. A trap in the body ends the run without cleanup, and the runner then
     /// closes the files the run left open. Needs the fs capability.
+    #NoDiscard
     export let with_open = func<T>(path: Path, mode: OpenMode,
             body: func(File) -> result.Result<T>) -> result.Result<T> {
         return match (open(path, mode)) {

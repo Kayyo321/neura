@@ -1,0 +1,27 @@
+error[E0201]: expected ';'
+ --> $DIR/missing-semicolon-in-function.nra:3:33
+  |
+3 |     let product = width * height
+  |                                 ^ expected ';' here
+4 |     return product
+  |     ------ found 'return'
+  |
+help: add the missing ';'
+  |
+3 |     let product = width * height;
+  |                                 +
+
+error[E0201]: expected ';'
+ --> $DIR/missing-semicolon-in-function.nra:4:19
+  |
+4 |     return product
+  |                   ^ expected ';' here
+5 | };
+  | - found '}'
+  |
+help: add the missing ';'
+  |
+4 |     return product;
+  |                   +
+
+For more information about this error, try `neura explain E0201`.

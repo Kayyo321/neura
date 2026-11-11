@@ -1,5 +1,10 @@
 #include "specialize.hpp"
 
+#include "attributes.hpp"
+
+#include "monitors.hpp"
+#include "purity.hpp"
+#include "tags.hpp"
 #include "task_analysis.hpp"
 #include "nominal.hpp"
 
@@ -95,10 +100,6 @@ std::string display(const std::vector<IrType>& arguments) {
     return result + ">";
 }
 
-std::string location(const Span& span) {
-    return span.file + ":" + std::to_string(span.line) + ":" + std::to_string(span.column);
-}
-
 class Specializer {
 public:
     Specializer(IrProgram& program, const SpecializationLimits& limits)
@@ -142,6 +143,8 @@ public:
                 auto rewritten_interface = type(interfaces[interface], context, span);
                 program_.symbols[id].interfaces[interface] = std::move(rewritten_interface);
             }
+            auto attributes = specialized_attributes(program_.symbols[id].attributes, context, span);
+            program_.symbols[id].attributes = std::move(attributes);
         }
         for (std::size_t i = 0; i < original_bodies_; ++i) {
             const auto owner = program_.bodies[i].owner;
@@ -207,16 +210,25 @@ private:
     }
 
     void check_limits(const std::string& name, std::size_t nesting, const Span& where, const Origin& origin) {
+        // The instantiation that the program wrote, where the chain starts.
+        const auto start = [&](Diagnostic& error) {
+            error.label(origin.span, origin.name.empty() ? "the chain of instantiations starts here"
+                                                         : "in this instantiation of '" + origin.name + "'");
+        };
         if (nesting > limits_.max_depth) {
-            throw Diagnostic(where, "generic specialization does not terminate: the type arguments of '" + name +
-                                        "' nest deeper than " + std::to_string(limits_.max_depth) +
-                                        " levels (the chain starts at " + location(origin.span) +
-                                        (origin.name.empty() ? "" : " with " + origin.name) + ")");
+            auto error = Diagnostic(where, "generic specialization does not terminate: the type arguments of '" + name +
+                                               "' nest deeper than " + std::to_string(limits_.max_depth) + " levels")
+                .with_code("E0808").label("instantiates '" + name + "'");
+            start(error);
+            error.note("each instantiation here instantiates a deeper one, so specialization would never finish");
+            throw error;
         }
         if (instances_.size() >= limits_.max_instances) {
-            throw Diagnostic(where, "generic specialization creates more than " +
-                                        std::to_string(limits_.max_instances) + " instances (the chain starts at " +
-                                        location(origin.span) + ")");
+            auto error = Diagnostic(where, "generic specialization creates more than " +
+                                               std::to_string(limits_.max_instances) + " instances")
+                .with_code("E0808").label("instantiates '" + name + "'");
+            start(error);
+            throw error;
         }
     }
 
@@ -244,6 +256,33 @@ private:
     SymbolId add(IrSymbol item) {
         program_.symbols.push_back(std::move(item));
         return program_.symbols.size() - 1;
+    }
+
+    // A copy's attributes (attributes.hpp): types are substituted like the
+    // copy's own, and a reference to a member of a generic class, or to a
+    // parameter or local of the function being copied, names that member's
+    // copy in the instance. A deferred method it names is copied now.
+    std::vector<IrAttribute> specialized_attributes(std::vector<IrAttribute> attributes, const Context& context,
+                                                    const Span& where) {
+        if (attributes.empty()) return attributes;
+        for_each_attribute_type(attributes, [&](IrType& item) { item = type(item, context, where); });
+        for_each_attribute_symbol(attributes, [&](SymbolId& item) {
+            if (context.symbols) {
+                if (const auto found = context.symbols->find(item); found != context.symbols->end()) {
+                    item = found->second;
+                    return;
+                }
+            }
+            if (context.instance != no_symbol && owned_by_generic_class(item)) item = member_of(item, context.instance);
+        });
+        return attributes;
+    }
+
+    void specialize_attributes(SymbolId id, const Context& context) {
+        if (program_.symbols[id].attributes.empty()) return;
+        const auto span = program_.symbols[id].span;
+        auto attributes = specialized_attributes(program_.symbols[id].attributes, context, span);
+        program_.symbols[id].attributes = std::move(attributes);
     }
 
     IrType callable_type(const IrType& signature, const Span& span) {
@@ -360,6 +399,15 @@ private:
                 }
             }
         }
+        // Every eager member exists now, so links between members resolve.
+        specialize_attributes(instance, inner);
+        std::vector<SymbolId> copies;
+        for (const auto& [member, copy] : member_map_[instance]) copies.push_back(copy);
+        for (const auto copy : copies) {
+            specialize_attributes(copy, inner);
+            for (const auto parameter : std::vector<SymbolId>(symbol(copy).parameters))
+                specialize_attributes(parameter, inner);
+        }
         if (const auto body = body_of_.find(generic); body != body_of_.end()) {
             work_.push_back({body->second, instance, substitution, {}, generic, instance, origin});
         }
@@ -387,6 +435,11 @@ private:
             symbol(function).parameters.push_back(id);
             item.symbols[parameter] = id;
         }
+        Context links = inner;
+        links.symbols = &item.symbols;
+        specialize_attributes(function, links);
+        for (const auto parameter : std::vector<SymbolId>(symbol(function).parameters))
+            specialize_attributes(parameter, links);
         if (const auto body = body_of_.find(original); body != body_of_.end()) {
             item.body = body->second;
             work_.push_back(std::move(item));
@@ -522,6 +575,7 @@ private:
             IrSymbol local = program_.symbols[node.symbol];
             local.owner = context.owner;
             local.type = type(local.type, context, local.span);
+            local.attributes = specialized_attributes(std::move(local.attributes), context, local.span);
             const auto copy = add(std::move(local));
             (*context.symbols)[node.symbol] = copy;
         }
@@ -583,6 +637,7 @@ private:
                 IrSymbol local = program_.symbols[node.symbol];
                 local.owner = context.owner;
                 local.type = type(local.type, context, local.span);
+                local.attributes = specialized_attributes(std::move(local.attributes), context, local.span);
                 result.symbol = add(std::move(local));
                 (*context.symbols)[node.symbol] = result.symbol;
             } else if (owned_by_generic_class(node.symbol)) {
@@ -703,7 +758,23 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // Concurrency.md section 5 need the concrete types that exist only now:
     // a generic function is checked at each specialization.
     insert_polls(program);
-    if (uses_tasks(program)) TaskAnalysis(program).check();
+    // #Pure on a generic function holds when each specialization is pure:
+    // a call through a type parameter has its targets only now. The whole
+    // program is checked, so a function whose callee is a specialization, or
+    // an implementation in another module, is checked with it too.
+    check_pure_tags(program, {}, true);
+    // Synchronized methods take their receiver's guard only in a program that
+    // spawns; the guard operations are then part of what the isolation
+    // checks see.
+    lower_synchronized(program);
+    const bool thread_safe_tags = std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
+        return has_tag(item, TagId::ThreadSafe);
+    });
+    if (uses_tasks(program) || thread_safe_tags) {
+        const TaskAnalysis analysis(program);
+        analysis.check_tags();
+        if (uses_tasks(program)) analysis.check();
+    }
 }
 
 } // namespace neura

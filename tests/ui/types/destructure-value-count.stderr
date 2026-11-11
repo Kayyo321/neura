@@ -1,0 +1,11 @@
+error[E0436]: 3 values for 2 names
+ --> $DIR/destructure-value-count.nra:2:23
+  |
+2 | let [width, height] = 640, 480, 3;
+  |                       ^^^^^^^^^^^ 3 values
+  |      ------------- 2 names
+  |
+  = note: a list of values after '=' gives one value to each name, in order
+  = help: write one value for each name, or a single tuple value
+
+For more information about this error, try `neura explain E0436`.

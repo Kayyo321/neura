@@ -118,5 +118,5 @@ let Generics = module:program.Entry (
         let flags: bool[list] = [];
         report(count<bool>(flags) == 0, "count<bool> of an empty list");
         return program.ExitCode.Ok;
-    }
+    };
 );

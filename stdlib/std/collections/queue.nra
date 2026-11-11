@@ -4,6 +4,7 @@ let optional = import:Std.Core.Optional;
 /// @brief First-in, first-out access (ArrayDeque, LinkedList), or least-first for
 /// PriorityQueue.
 /// @see [Std.Collections.Queue](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Queue)
+#Since("0.1.0")
 export let Queue = module (
     /// @brief A collection with a defined insertion and removal order.
     export let Queue = interface<T>:Collection<T> (
@@ -12,6 +13,7 @@ export let Queue = module (
         /// @brief Removes and returns the next element. Traps with `no such element` when empty.
         let dequeue = func -> T;
         /// @brief Returns the next element as `Some` without removing it, or `None` when empty.
+        #NoDiscard
         let peek = func -> optional.Optional<T>;
         /// @brief Removes the next element and returns it as `Some`, or returns `None` when empty.
         let try_dequeue = func -> optional.Optional<T>;

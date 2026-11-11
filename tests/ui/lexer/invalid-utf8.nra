@@ -1,0 +1,3 @@
+// A byte that is not UTF-8 in a comment and in a string (E0102); the lexer
+// reports both. Café is Latin-1 here.
+let name = "Café";

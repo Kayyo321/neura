@@ -1,0 +1,7 @@
+// Two getters for one field (E0520).
+let Counter = class (
+    export let count: int = 0;
+        | get: count;
+        | set: count = value;
+        | get: count + 1;
+);

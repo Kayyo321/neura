@@ -1,4 +1,6 @@
+let integer_kernels = import:Std.Internal.Kernels.IntegerText;
 let integer_text = import:Std.Core.Internal.IntegerText;
+let kernel_status = import:Std.Core.Internal.KernelStatus;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Ordering;
 let.promote _ = import:Std.Core.Result;
@@ -9,6 +11,7 @@ let unsigned = import:Std.Core.UInt64;
 /// Every operation uses checked arithmetic; the wrapping forms follow the recipes of section 7.2, so no
 /// intermediate value leaves its type.
 /// @see [Std.Core.Int64](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Int64)
+#Since("0.1.0")
 export let Int64 = module (
     /// @brief The smallest value representable by this integer type.
     export const Min: int64 = -9223372036854775808;
@@ -18,9 +21,11 @@ export let Int64 = module (
     export const Bits: int = 64;
 
     /// @brief Traps (reason 1) for Min, from the negation.
+    #[Pure, ThreadSafe]
     export let abs = func(v: int64) -> int64 => v < 0 ? -v : v;
 
     /// @brief Returns minus one, zero, or one according to the sign of the value.
+    #[Pure, ThreadSafe]
     export let sign = func(v: int64) -> int {
         if (v < 0) {
             return -1;
@@ -32,12 +37,15 @@ export let Int64 = module (
     };
 
     /// @brief Returns the smaller of the two operands.
+    #[Pure, ThreadSafe]
     export let min = func(a: int64, b: int64) -> int64 => b < a ? b : a;
 
     /// @brief Returns the larger of the two operands.
+    #[Pure, ThreadSafe]
     export let max = func(a: int64, b: int64) -> int64 => b > a ? b : a;
 
     /// @brief Traps with "invalid argument: low exceeds high".
+    #[Pure, ThreadSafe]
     export let clamp = func(v: int64, low: int64, high: int64) -> int64 {
         if (low > high) {
             trap_with_message("invalid argument: low exceeds high");
@@ -52,6 +60,7 @@ export let Int64 = module (
     };
 
     /// @brief The natural order; usable as a comparator.
+    #[Pure, ThreadSafe]
     export let compare = func(a: int64, b: int64) -> Ordering {
         if (a < b) {
             return Ordering.Less;
@@ -66,6 +75,7 @@ export let Int64 = module (
     ///
     /// The factor is squared only while exponent bits remain, so each intermediate divides the result. A
     /// negative exponent traps; pow(0, 0) is 1.
+    #[Pure, ThreadSafe]
     export let pow = func(base: int64, exponent: int) -> int64 {
         if (exponent < 0) {
             trap_with_message("invalid argument: negative exponent");
@@ -87,6 +97,7 @@ export let Int64 = module (
 
     /// @brief Euclid's algorithm in the negative range, where every magnitude fits. gcd(0, 0) is 0. Traps
     /// (reason 1) when the result, 2^(Bits - 1), does not fit.
+    #[Pure, ThreadSafe]
     export let gcd = func(a: int64, b: int64) -> int64 {
         let x = a;
         if (x > 0) {
@@ -97,7 +108,7 @@ export let Int64 = module (
             y = -y;
         }
         while (y != 0) {
-            let remainder = x % y;
+            last remainder = x % y;
             x = y;
             y = remainder;
         }
@@ -105,6 +116,7 @@ export let Int64 = module (
     };
 
     /// @brief None where the operator would trap. Each test runs before the operation, so nothing overflows.
+    #[NoDiscard, Pure, ThreadSafe]
     export let checked_add = func(a: int64, b: int64) -> Optional<int64> {
         if ((b > 0 && a > Max - b) || (b < 0 && a < Min - b)) {
             return Optional<int64>.None;
@@ -113,6 +125,7 @@ export let Int64 = module (
     };
 
     /// @brief Returns the difference in Some, or None when it falls outside the type's range.
+    #[NoDiscard, Pure, ThreadSafe]
     export let checked_sub = func(a: int64, b: int64) -> Optional<int64> {
         if ((b < 0 && a > Max + b) || (b > 0 && a < Min + b)) {
             return Optional<int64>.None;
@@ -121,6 +134,7 @@ export let Int64 = module (
     };
 
     /// @brief Returns the product in Some, or None when it falls outside the type's range.
+    #[NoDiscard, Pure, ThreadSafe]
     export let checked_mul = func(a: int64, b: int64) -> Optional<int64> {
         if (multiply_overflows(a, b)) {
             return Optional<int64>.None;
@@ -129,6 +143,7 @@ export let Int64 = module (
     };
 
     /// @brief None for a zero divisor and for Min / -1.
+    #[NoDiscard, Pure, ThreadSafe]
     export let checked_div = func(a: int64, b: int64) -> Optional<int64> {
         if (b == 0 || (a == Min && b == -1)) {
             return Optional<int64>.None;
@@ -137,6 +152,7 @@ export let Int64 = module (
     };
 
     /// @brief None for a zero divisor. Min % -1 is 0, as for the operator.
+    #[NoDiscard, Pure, ThreadSafe]
     export let checked_rem = func(a: int64, b: int64) -> Optional<int64> {
         if (b == 0) {
             return Optional<int64>.None;
@@ -146,22 +162,27 @@ export let Int64 = module (
 
     /// @brief The result modulo 2^Bits: the operation runs on the unsigned pattern and converts back (section
     /// 7.2).
+    #[Pure, ThreadSafe]
     export let wrapping_add = func(a: int64, b: int64) -> int64 =>
         unsigned.to_signed(unsigned.wrapping_add(to_unsigned(a), to_unsigned(b)));
 
     /// @brief Subtracts modulo two raised to the type's bit width.
+    #[Pure, ThreadSafe]
     export let wrapping_sub = func(a: int64, b: int64) -> int64 =>
         unsigned.to_signed(unsigned.wrapping_sub(to_unsigned(a), to_unsigned(b)));
 
     /// @brief Multiplies modulo two raised to the type's bit width.
+    #[Pure, ThreadSafe]
     export let wrapping_mul = func(a: int64, b: int64) -> int64 =>
         unsigned.to_signed(unsigned.wrapping_mul(to_unsigned(a), to_unsigned(b)));
 
     /// @brief Min wraps to itself.
+    #[Pure, ThreadSafe]
     export let wrapping_neg = func(a: int64) -> int64 =>
         unsigned.to_signed(unsigned.wrapping_neg(to_unsigned(a)));
 
     /// @brief Clamp to Min or Max instead of overflowing.
+    #[Pure, ThreadSafe]
     export let saturating_add = func(a: int64, b: int64) -> int64 {
         if (b > 0 && a > Max - b) {
             return Max;
@@ -173,6 +194,7 @@ export let Int64 = module (
     };
 
     /// @brief Subtracts and clamps an out-of-range result to the nearest representable bound.
+    #[Pure, ThreadSafe]
     export let saturating_sub = func(a: int64, b: int64) -> int64 {
         if (b < 0 && a > Max + b) {
             return Max;
@@ -184,6 +206,7 @@ export let Int64 = module (
     };
 
     /// @brief Multiplies and clamps an out-of-range result to the nearest representable bound.
+    #[Pure, ThreadSafe]
     export let saturating_mul = func(a: int64, b: int64) -> int64 {
         if (multiply_overflows(a, b)) {
             if ((a < 0) != (b < 0)) {
@@ -199,8 +222,9 @@ export let Int64 = module (
     /// A zero divisor and Min / -1 trap (reason 1) in the division. The remainder is recovered by
     /// multiplication, which cannot overflow because |quotient * b| <= |a|; a multiplication circuit is several
     /// times smaller than a second divider.
+    #[Pure, ThreadSafe]
     export let floor_div = func(a: int64, b: int64) -> int64 {
-        let quotient = a / b;
+        last quotient = a / b;
         if (quotient * b != a && (a < 0) != (b < 0)) {
             return quotient - 1;
         }
@@ -211,11 +235,12 @@ export let Int64 = module (
     ///
     /// A zero divisor traps (reason 1). Computed from the quotient, so floor_div and floor_mod share one
     /// divider circuit. A divisor of -1 always leaves 0 (Min / -1 would trap, while Min % -1 is 0).
+    #[Pure, ThreadSafe]
     export let floor_mod = func(a: int64, b: int64) -> int64 {
         if (b == -1) {
             return 0;
         }
-        let remainder = a - a / b * b;
+        last remainder = a - a / b * b;
         if (remainder != 0 && (remainder < 0) != (b < 0)) {
             return remainder + b;
         }
@@ -223,23 +248,29 @@ export let Int64 = module (
     };
 
     /// @brief Bit counts and rotations over the two's complement pattern.
+    #[Pure, ThreadSafe]
     export let count_ones = func(v: int64) -> int => unsigned.count_ones(to_unsigned(v));
 
     /// @brief Counts zero bits from the most significant end. Zero returns the full bit width.
+    #[Pure, ThreadSafe]
     export let leading_zeros = func(v: int64) -> int => unsigned.leading_zeros(to_unsigned(v));
 
     /// @brief Counts zero bits from the least significant end. Zero returns the full bit width.
+    #[Pure, ThreadSafe]
     export let trailing_zeros = func(v: int64) -> int => unsigned.trailing_zeros(to_unsigned(v));
 
     /// @brief Rotates the bits left, reducing the distance modulo the bit width.
+    #[Pure, ThreadSafe]
     export let rotate_left = func(v: int64, n: int) -> int64 =>
         unsigned.to_signed(unsigned.rotate_left(to_unsigned(v), n));
 
     /// @brief Rotates the bits right, reducing the distance modulo the bit width.
+    #[Pure, ThreadSafe]
     export let rotate_right = func(v: int64, n: int) -> int64 =>
         unsigned.to_signed(unsigned.rotate_right(to_unsigned(v), n));
 
     /// @brief The same-width unsigned type with the same bit pattern (section 7.2).
+    #[Pure, ThreadSafe]
     export let to_unsigned = func(v: int64) -> uint64 {
         if (v >= 0) {
             return v as uint64;
@@ -250,85 +281,49 @@ export let Int64 = module (
     };
 
     /// @brief The identity: every integer module has both conversions.
+    #[Pure, ThreadSafe]
     export let to_signed = func(v: int64) -> int64 => v;
 
     /// @brief Section 5.2: the two's complement pattern as a uint32; the 64-bit types fold the high half into
     /// the low half.
+    #[Pure, ThreadSafe]
     export let hash = func(v: int64) -> uint32 => v.hash_code();
 
     /// @brief Decimal, with `-` for negative values (section 5.2).
+    #[Pure, ThreadSafe]
     export let to_string = func(v: int64) -> string => v.to_string();
 
-    /// @brief Lowercase digits. The digits are produced in the negative range, so Min needs no negation. A
-    /// radix outside 2 through 36 traps.
-    export let to_string_radix = func(v: int64, radix: int) -> string {
-        integer_text.check_radix(radix);
-        if (radix == 10) {
-            return v.to_string();
-        }
-        let base = radix as int64;
-        let rest = v;
-        if (rest > 0) {
-            rest = -rest;
-        }
-        let digits: uint8[list] = [];
-        do {
-            digits.append(integer_text.digit_byte(-(rest % base) as int));
-            rest /= base;
-            if (rest == 0) {
-                break;
-            }
-        }
-        return integer_text.digits_text(digits, v < 0);
-    };
+    /// @brief Lowercase digits, with `-` for a negative value. A radix outside 2 through 36 traps. The
+    /// neura.integer.format_i64 kernel writes the digits.
+    #[Pure, ThreadSafe]
+    export let to_string_radix = func(v: int64, radix: int) -> string =>
+        integer_kernels.format_i64(v as int64, radix as int64);
 
     /// @brief to_string_radix, left-padded with copies of `pad` to `min_width` characters, sign included. A `0`
     /// pad goes after the sign. `pad` must be one scalar value.
+    #[Pure, ThreadSafe]
     export let format = func(v: int64, radix: int, min_width: int, pad: string) -> string =>
         integer_text.pad_number(to_string_radix(v, radix), min_width, pad);
 
     /// @brief Parses a base-10 integer, returning an error for invalid text or a value outside the type's
     /// range.
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<int64> => parse_radix(text, 10);
 
     /// @brief An optional `+` or `-`, then one or more digits of the radix in either case.
     ///
     /// Syntax errors are reported first (Empty, UnexpectedEnd at the end, InvalidCharacter at the offending
-    /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. The digits accumulate in
-    /// the negative range, so Min parses without overflow. A radix outside 2 through 36 traps.
+    /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. A radix outside 2
+    /// through 36 traps.
+    ///
+    /// The neura.integer.parse_i64 kernel parses the text.
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse_radix = func(text: string, radix: int) -> Result<int64> {
-        integer_text.check_radix(radix);
-        match (integer_text.syntax_error(text, radix)) {
-            Optional.Some(failure) => {
-                return Result<int64>.Err(failure);
-            },
-            Optional.None => {},
+        let [status, offset, value] = integer_kernels.parse_i64(text, radix as int64);
+        if (status != kernel_status.Ok) {
+            return Result<int64>.Err(kernel_status.parse_error(status, offset, "int64"));
         }
-        let start = integer_text.sign_length(text);
-        let negative = start == 1 && text.byte_at(0) == 45;
-        let limit = -Max;
-        if (negative) {
-            limit = Min;
-        }
-        let base = radix as int64;
-        let multiple_limit = limit / base;
-        let value: int64 = 0;
-        let length = text.byte_length;
-        for (let i = start; i < length; i++) {
-            let digit = integer_text.digit_value(text.byte_at(i)) as int64;
-            if (value < multiple_limit) {
-                return Result<int64>.Err(integer_text.out_of_range("int64"));
-            }
-            value *= base;
-            if (value < limit + digit) {
-                return Result<int64>.Err(integer_text.out_of_range("int64"));
-            }
-            value -= digit;
-        }
-        if (negative) {
-            return Result<int64>.Ok(value);
-        }
-        return Result<int64>.Ok(-value);
+        return Result<int64>.Ok(value);
     };
 
     /// @brief Whether a * b leaves the type, decided by division before multiplying.

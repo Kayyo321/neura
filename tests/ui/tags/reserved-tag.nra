@@ -1,0 +1,6 @@
+// A reserved tag (E0908): no analysis proves that a function never traps,
+// so the promise is rejected rather than trusted.
+#NoTrap
+let twice = func(value: int32) -> int32 {
+    return value + value;
+};

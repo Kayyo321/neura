@@ -1,0 +1,58 @@
+warning[W0001]: function 'rough_area' is deprecated since 0.2.0: it rounds the result
+  --> $DIR/deprecated-use.nra:28:16
+   |
+ 8 |     #Deprecated(as_of: "0.2.0", use_instead: area, reason: "it rounds the result")
+   |     ------------------------------------------------------------------------------ 'rough_area' is marked deprecated here
+...
+28 |         return rough_area(2);
+   |                ^^^^^^^^^^
+   |
+help: use 'area' instead
+   |
+28 |         return area(2);
+   |                ~~~~
+
+warning[W0001]: method 'name' overrides a deprecated method: describe() replaces it
+  --> $DIR/deprecated-use.nra:40:25
+   |
+33 |     #Deprecated(reason: "describe() replaces it")
+   |     --------------------------------------------- 'name' is marked deprecated here
+...
+40 |     export let.override name = func() -> string {
+   |                         ^^^^
+
+warning[W0001]: function 'rough_area' is deprecated since 0.2.0: it rounds the result
+  --> $DIR/deprecated-use.nra:45:20
+   |
+ 8 |     #Deprecated(as_of: "0.2.0", use_instead: area, reason: "it rounds the result")
+   |     ------------------------------------------------------------------------------ 'rough_area' is marked deprecated here
+...
+45 | let total: int32 = Shapes.rough_area(3);
+   |                    ^^^^^^^^^^^^^^^^^
+   |
+help: use 'area' instead
+   |
+45 | let total: int32 = Shapes.area(3);
+   |                           ~~~~
+
+warning[W0001]: class 'OldBox' is deprecated
+  --> $DIR/deprecated-use.nra:46:10
+   |
+17 |     #Deprecated(use_instead: "Shapes.Box")
+   |     -------------------------------------- 'OldBox' is marked deprecated here
+...
+46 | let box: Shapes.OldBox = new Shapes.OldBox();
+   |          ^^^^^^^^^^^^^
+   |
+   = help: use 'Shapes.Box' instead
+
+warning[W0001]: class 'OldBox' is deprecated
+  --> $DIR/deprecated-use.nra:46:30
+   |
+17 |     #Deprecated(use_instead: "Shapes.Box")
+   |     -------------------------------------- 'OldBox' is marked deprecated here
+...
+46 | let box: Shapes.OldBox = new Shapes.OldBox();
+   |                              ^^^^^^^^^^^^^
+   |
+   = help: use 'Shapes.Box' instead

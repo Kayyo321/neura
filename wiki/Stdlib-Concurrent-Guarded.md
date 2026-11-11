@@ -19,13 +19,13 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Guarded** · [`export let Guarded = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L6)
-  A guard around one mutable T.
-- **Guarded.Guarded** · [`export let init = func(state: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L8)
+- **Guarded** · [`export let Guarded = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L8)
+  A guard around one mutable T. Tagged `#Final`, `#ThreadSafe`.
+- **Guarded.Guarded** · [`export let init = func(state: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L10)
   A guard that owns the state. Use create, which builds the state inside the guard.
-- **Guarded.Guarded** · [`export let with = func<U>(body: func(T) -> U) -> U`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L15)
+- **Guarded.Guarded** · [`export let with = func<U>(body: func(T) -> U) -> U`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L17)
   Runs `body` with exclusive access to the state and returns its result. A second task that calls with waits until the first returns. The body's captures and its result are transferable, so no reference to the state escapes. Calling with on a guard the task already holds traps.
-- **Guarded** · [`export let create = func<T>(initializer: func() -> T) -> Guarded<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L26)
+- **Guarded** · [`export let create = func<T>(initializer: func() -> T) -> Guarded<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L28)
   A guard around the state that `initializer` builds. The initializer's captures are transferable, so the state it builds is reachable only through the guard.
 <!-- END SOURCE API -->
 

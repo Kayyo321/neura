@@ -1,0 +1,33 @@
+// A trap inside a synchronized method ends the run at once, as a trap in any
+// task does (Concurrency.md section 4.2): no other task runs afterwards, so the
+// guard the trapping task held is never waited on again. The diagnostic names
+// the trapping task and its spawn site.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+#Synchronized
+let Budget = class (
+    let left: int8 = 120;
+
+    export let spend = func(amount: int8) -> int8 {
+        left = left - amount;
+        return left;
+    };
+);
+
+let spend = func(budget: Budget, amount: int8) -> int8 => budget.spend(amount);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let budget = new Budget();
+        scope {
+            let first = spawn spend(budget, 100);
+            let second = spawn spend(budget, 100);
+            let third = spawn spend(budget, 100);
+            console.print_line(first.join().to_string());
+            console.print_line(second.join().to_string());
+            console.print_line(third.join().to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

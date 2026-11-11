@@ -1,0 +1,7 @@
+// A get-only field of an anonymous class is read-only outside its body (E0510).
+let my_data: class (
+    export let code = "XY729H08";
+        | get: code;
+) = new;
+
+my_data.code = "XY000000";

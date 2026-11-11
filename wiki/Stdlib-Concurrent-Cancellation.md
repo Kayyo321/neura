@@ -19,10 +19,10 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Cancellation** · [`export let requested = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/cancellation.nra#L12)
-  Whether cancellation was requested for the scope that started this task, or for any scope above it. The root task is never cancelled.
-- **Cancellation** · [`export let remaining = func -> optional.Optional<duration.Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/cancellation.nra#L16)
-  The time left until the task's deadline, or None when it has none or the clock cannot be read. The duration is negative once the deadline has passed.
+- **Cancellation** · [`export let requested = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/cancellation.nra#L14)
+  Whether cancellation was requested for the scope that started this task, or for any scope above it. The root task is never cancelled. Tagged `#ThreadSafe`.
+- **Cancellation** · [`export let remaining = func -> optional.Optional<duration.Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/cancellation.nra#L19)
+  The time left until the task's deadline, or None when it has none or the clock cannot be read. The duration is negative once the deadline has passed. Tagged `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

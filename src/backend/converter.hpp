@@ -15,6 +15,10 @@ struct ConversionOptions {
     // library files are labeled by their path below the library root (see
     // source_label), so the image carries no build-machine directories.
     bool source_map = true;
+    // Emit the optional LIFT section: the typed operations behind each block
+    // that the runtime may prove and run natively (docs/runtime/NVR.md,
+    // "Lift hints"). The runtime never trusts it.
+    bool lift_hints = true;
     // Functions to convert in addition to those reachable from the entry
     // point, for embedders and tests that call them directly. A module
     // function is specialized for the module that declares it.
@@ -75,6 +79,7 @@ Conversion convert(const IrProgram& program, const ConversionOptions& options = 
 struct BuildOptions {
     bool optimize = true;
     bool source_map = true;
+    bool lift_hints = true;
 };
 
 // The pipeline shared by `neura build` from source and from .nir: verify the

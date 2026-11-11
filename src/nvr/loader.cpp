@@ -1,5 +1,7 @@
 #include "format.hpp"
 
+#include "kernel_binding.hpp"
+
 #include <algorithm>
 #include <array>
 #include <map>
@@ -380,9 +382,10 @@ struct KnownSection {
     bool always = true;
 };
 
-constexpr std::array<KnownSection, 12> known_sections{{
+constexpr std::array<KnownSection, 13> known_sections{{
     {"CALB", true, false}, {"CONS", true}, {"FUNC", true}, {"GLOB", true}, {"GRPH", true}, {"IMPT", true},
-    {"LAYO", true}, {"META", true}, {"NATV", true, false}, {"SMAP", false, false}, {"TRNS", true, false}, {"TYPE", true},
+    {"KERN", true, false}, {"LAYO", true}, {"META", true}, {"NATV", true, false}, {"SMAP", false, false},
+    {"TRNS", true, false}, {"TYPE", true},
 }};
 
 const KnownSection* known(const std::array<char, 4>& tag) {
@@ -432,6 +435,8 @@ private:
     void globals();
     void graphs();
     void imports();
+    void kernel_entries();
+    bool kernel_type(std::uint32_t type, kernels::Kind kind, bool list_only) const;
     void functions();
     void block(std::uint32_t function, std::uint32_t index);
     void value(const Function& function, const Block& block, const Value& item, const std::string& where) const;
@@ -456,6 +461,7 @@ void Validator::run() {
     globals();
     graphs();
     imports();
+    kernel_entries();
     functions();
     entry();
     callbacks();
@@ -715,6 +721,77 @@ void Validator::imports() {
         }
         type(import.success_type, where + " success");
         type(import.error_type, where + " error");
+    }
+}
+
+// Whether an image type carries a kernel value of this kind: the scalar of
+// the same width, text, or an array or list of the scalar element (a list
+// only, when the runtime allocates it).
+bool Validator::kernel_type(std::uint32_t index, kernels::Kind kind, bool list_only) const {
+    using kernels::Kind;
+    const auto& t = image_.types[index];
+    if (kind == Kind::Text || kind == Kind::OutText) return t.kind == TypeKind::Text;
+    if (kernels::scalar_kind(kind)) {
+        if (kind == Kind::Bool) return t.kind == TypeKind::Bool;
+        const auto kind_of = kernels::float_kind(kind) ? TypeKind::Float
+                             : kernels::signed_kind(kind) ? TypeKind::Signed : TypeKind::Unsigned;
+        return t.kind == kind_of && t.width == kernels::scalar_width(kind);
+    }
+    const auto element = kind == Kind::OutBytes ? Kind::U8 : kernels::element_kind(kind);
+    if (t.kind != TypeKind::List && (list_only || t.kind != TypeKind::Array)) return false;
+    return kernel_type(t.reference, element, false);
+}
+
+// Every KERN entry names a kernel of this runtime's table, at its ABI
+// version, with the signature its kinds give (docs/runtime/Kernels.md).
+void Validator::kernel_entries() {
+    std::set<std::pair<std::string, std::uint32_t>> seen;
+    for (std::size_t i = 0; i < image_.kernels.size(); ++i) {
+        const auto& entry = image_.kernels[i];
+        const auto where = "KERN: kernel " + std::to_string(i);
+        if (!seen.emplace(entry.name, entry.abi_version).second) {
+            invalid(where + ": duplicate kernel " + entry.name + " version " + std::to_string(entry.abi_version));
+        }
+        for (auto parameter : entry.parameter_types) value_type(parameter, where + " parameter");
+        type(entry.result_type, where + " result");
+        const auto* info = kernels::find_kernel(entry.name, entry.abi_version);
+        if (!info) {
+            fail(Kind::Unsupported, where + ": this runtime has no kernel " + entry.name + " version " +
+                                        std::to_string(entry.abi_version));
+        }
+        const auto binding = kernels::plan_binding(*info);
+        if (binding.problem) {
+            fail(Kind::Unsupported, where + ": this runtime cannot bind kernel " + entry.name + ": " +
+                                        binding.problem);
+        }
+        bool matches = entry.parameter_types.size() == binding.arguments.size();
+        for (std::size_t p = 0; matches && p < binding.arguments.size(); ++p) {
+            matches = kernel_type(entry.parameter_types[p], info->params[binding.arguments[p]], false);
+        }
+        const auto& result = image_.types[entry.result_type];
+        switch (binding.result) {
+        case kernels::ResultShape::Void:
+            matches = matches && result.kind == TypeKind::Void;
+            break;
+        case kernels::ResultShape::Scalar:
+        case kernels::ResultShape::Text:
+        case kernels::ResultShape::Bytes:
+            matches = matches && kernel_type(entry.result_type, binding.value_kind, true);
+            break;
+        case kernels::ResultShape::Outcome: {
+            if (!matches || result.kind != TypeKind::Object) {
+                matches = false;
+                break;
+            }
+            const auto& fields = image_.layouts[result.reference].fields;
+            const std::size_t count = binding.value_kind == kernels::Kind::Status ? 2 : 3;
+            matches = fields.size() == count && is_unsigned(fields[0], 32) &&
+                      image_.types[fields[1]].kind == TypeKind::Signed && image_.types[fields[1]].width == 64 &&
+                      (count == 2 || kernel_type(fields[2], binding.value_kind, true));
+            break;
+        }
+        }
+        if (!matches) invalid(where + ": the signature does not match kernel " + entry.name);
     }
 }
 
@@ -1064,6 +1141,18 @@ void Validator::state(const Function& function, const Exit& exit,
     auto element_type = [&](std::size_t argument) { return image_.types[args[argument].type].reference; };
 
     switch (exit.operation) {
+    case StateOp::Kernel: {
+        if (exit.immediate >= image_.kernels.size()) {
+            invalid(where + ": kernel " + std::to_string(exit.immediate) + " is out of range");
+        }
+        const auto& kernel = image_.kernels[exit.immediate];
+        arity(kernel.parameter_types.size());
+        for (std::size_t i = 0; i < args.size(); ++i) {
+            assign(args[i].type, kernel.parameter_types[i], where + " argument " + std::to_string(i));
+        }
+        result_of(kernel.result_type);
+        break;
+    }
     case StateOp::AllocateObject:
         arity(0);
         if (exit.immediate >= image_.layouts.size()) {
@@ -1614,8 +1703,10 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
         }
         expected += entry.size;
         const bool required = (entry.flags & 1U) != 0;
-        // Before 1.5, an optional TRNS tag was opaque and round-trips as such.
-        const auto* section = name == "TRNS" && minor < 5 && !required ? nullptr : known(entry.tag);
+        // Before 1.5, an optional TRNS tag was opaque and round-trips as such,
+        // and so was an optional KERN tag before 1.6.
+        const bool opaque = (name == "TRNS" && minor < 5) || (name == "KERN" && minor < 6);
+        const auto* section = opaque && !required ? nullptr : known(entry.tag);
         if (section == nullptr) {
             if (required) {
                 fail(Kind::Unsupported, "directory: unknown required section " + name);
@@ -1718,6 +1809,18 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
     if (sections.contains("TRNS")) {
         section("TRNS", [&](Reader& in) { image.transferable_layouts = in.indices("transferable layout list"); });
     }
+    if (sections.contains("KERN")) {
+        section("KERN", [&](Reader& in) {
+            image.kernels = in.vector(16, "kernel table", [](Reader& r) {
+                KernelEntry kernel;
+                kernel.name = r.text("kernel name");
+                kernel.abi_version = r.u32();
+                kernel.parameter_types = r.indices("kernel parameter list");
+                kernel.result_type = r.u32();
+                return kernel;
+            });
+        });
+    }
     if (sections.contains("SMAP")) {
         section("SMAP", [&](Reader& in) {
             image.source_map = in.vector(location_size, "source map", [](Reader& r) {
@@ -1737,7 +1840,18 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
         fail(Kind::Malformed, "header: the image uses NVR 1." + std::to_string(required_minor) +
                                   " features but declares 1." + std::to_string(minor));
     }
-    if (required_minor == 5) {
+    if (sections.contains("KERN") && minor < 6) {
+        fail(Kind::Malformed, "directory: section KERN requires NVR 1.6");
+    }
+    const bool kernel_exits = std::ranges::any_of(image.functions, [](const Function& function) {
+        return std::ranges::any_of(function.blocks, [](const Block& block) {
+            return std::ranges::any_of(block.exits, [](const Exit& exit) {
+                return exit.kind == ExitKind::State && exit.operation == StateOp::Kernel;
+            });
+        });
+    });
+    if (kernel_exits && !sections.contains("KERN")) fail(Kind::Malformed, "directory: missing required section KERN");
+    if (concurrent_image(image)) {
         if (!image.transferable_layouts) fail(Kind::Malformed, "directory: missing required section TRNS");
         if (sections.contains("CALB") || sections.contains("NATV") ||
             std::ranges::any_of(image.imports, [](const Import& import) { return import.name.starts_with("neura.ffi."); })) {

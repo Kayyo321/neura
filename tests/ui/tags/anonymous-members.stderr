@@ -1,0 +1,13 @@
+error[E0403]: expected class(x: int32), got class(x: int32)@anonymous-members.nra:11:17
+  --> $DIR/anonymous-members.nra:15:17
+   |
+ 4 | let take = func(point: class (
+   |                 ----- parameter 'point' is declared here
+...
+15 |     return take(tagged);
+   |                 ^^^^^^ expected class(x: int32), found class(x: int32)@anonymous-members.nra:11:17
+   |
+   = note: an anonymous class with methods, a constructor, accessors, const or last fields, tagged members, a base, or interfaces is a type of its own at each place it is written
+   = help: declare a named class and use it in both places
+
+For more information about this error, try `neura explain E0403`.

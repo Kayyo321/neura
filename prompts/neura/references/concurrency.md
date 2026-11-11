@@ -1,6 +1,6 @@
 # Concurrency: tasks, channels, and select
 
-Neura has structured concurrency with no `async`/`await`. A call runs as a *task* with `spawn`, every task belongs to a `scope` that waits for it, and tasks share no mutable state except through channels and a few handle types. The compiler enforces the isolation. Specification: [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md).
+Neura has structured concurrency with no `async`/`await`. A call runs as a *task* with `spawn`, every task belongs to a `scope` that waits for it, and tasks share no mutable state except through channels, a few handle types, monitors (classes whose methods are `#Synchronized`), and `#Immutable` objects. The compiler enforces the isolation. Specification: [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md).
 
 ## Contents
 
@@ -11,6 +11,8 @@ Neura has structured concurrency with no `async`/`await`. A call runs as a *task
 - [Cancellation, deadlines, and timers](#cancellation-deadlines-and-timers)
 - [Isolation rules the compiler enforces](#isolation-rules-the-compiler-enforces)
 - [Shared state](#shared-state)
+- [Monitors](#monitors)
+- [Immutable objects](#immutable-objects)
 - [Helpers: `Tasks`, `WorkerGroup`, `Parallel.map`](#helpers-tasks-workergroup-parallelmap)
 - [Running and testing concurrent programs](#running-and-testing-concurrent-programs)
 
@@ -47,7 +49,7 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(report().to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -96,7 +98,7 @@ let App = module:program.Entry (
         }
         console.println("total {}", total);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -197,10 +199,11 @@ let wait_briefly = func {
 | Tuples of transferable elements | Every other class instance, including library collections and `StringBuilder` |
 | Function values whose closures capture only transferable values | Closures capturing an object, array, or list |
 | `Sender`, `Receiver`, `Closer`, `Timer`, `AtomicInt64`, `Semaphore`, `Guarded<T>`, `WorkerGroup<T>` handles | Primitive references, `MemorySegment`, native handles; `Task` and `Scope` |
+| Instances of `#Immutable` classes and of monitors ([below](#monitors)), shared without moving | Instances of `#NotThreadSafe` classes |
 
 Error: `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A `join` result may be any type.
 
-**Task-safe calls.** The spawned call and everything it can reach must not read or write a reassignable module, file, or static binding (or one whose type is not transferable; reading a transferable `const` is fine), must not trigger a class's static initializer (constructing such a class, calling its static functions), and must not call native code. Virtual calls and function values are judged over every implementation the program can create. The diagnostic lists the call chain. Pass what the task needs as arguments instead of reaching for globals. Library constants that are objects (`Duration.Zero`, `BigInteger.One`) cannot be read in a task; build them with factories (`of_nanos(0)`). `neura check --task-safety file.nra` prints the verdict for every function.
+**Task-safe calls.** The spawned call and everything it can reach must not read or write a reassignable module, file, or static binding (or one whose type is not transferable; reading a transferable `const` is fine), must not trigger a class's static initializer (constructing such a class, calling its static functions), and must not call native code. Virtual calls and function values are judged over every implementation the program can create. The diagnostic lists the call chain. Pass what the task needs as arguments instead of reaching for globals. Library constants that are objects (`Duration.Zero`, `BigInteger.One`) cannot be read in a task; build them with factories (`of_nanos(0)`). `neura check --task-safety file.nra` prints the verdict for every function. `#ThreadSafe` on a function turns that verdict into a compile-time check (`E0608`); `#NotThreadSafe` forbids spawning it (`E0601`). The digests, `Std.Math.Math`, `Std.Text`, and `Std.Encoding` run on kernels and are task-safe.
 
 ## Shared state
 
@@ -238,6 +241,94 @@ let tally = func -> int64 {
 - `AtomicInt64`: `load`, `store`, `add` (traps on overflow), `compare_exchange`.
 - `Semaphore`: `acquire()` (`Acquired` or `Cancelled`), `try_acquire()`, `release()`.
 
+## Monitors
+
+A *monitor* is a class whose instances tasks share and whose methods exclude one another. `#Synchronized` on the class marks every exported method with a body; each runs under a per-instance guard, first come, first served.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+/// A running total that tasks share.
+#Synchronized
+let Tally = class (
+    let count: int64 = 0;
+
+    export let add = func(amount: int64) -> int64 {
+        count = count + amount;
+        return count;
+    };
+
+    export let add_twice = func(amount: int64) -> int64 {
+        add(amount);                      // a call on its own receiver re-enters
+        return add(amount);
+    };
+
+    export let total = func -> int64 => count;
+);
+
+let contribute = func(tally: Tally) -> int64 => tally.add_twice(25);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let tally: Tally = new;
+        scope {
+            for (let i = 0; i < 8; i++) {
+                spawn contribute(tally);  // shared, not moved
+            }
+        }
+        console.print_line(tally.total().to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+400
+```
+
+The compiler lets tasks share an instance only when the class is a monitor (the **shared-object rule**):
+
+- every exported method of the class and its bases is `#Synchronized` (constructors, destructors, and bodyless requirements are exempt); accessors of such a class take the guard too;
+- every exported field is `last` or `const` of an immutable type, or has accessors;
+- **every field has a transferable type**: numbers, text, `#Immutable` objects, other monitors, `Std.Concurrent` handles. A monitor cannot hold a list, an array, or a map directly; keep one in a `Guarded<T>` field or with an owner task;
+- its state is reached only through `instance` (or a bare member name) inside its own methods; touching another instance's field is rejected;
+- every subclass is a monitor, and the class is not `#NotThreadSafe`.
+
+A spawn that shares a class breaking a rule is rejected with the reason as a label. Re-entry works only for calls on the receiver: calling back into the same instance through a function value or another reference while holding the guard traps with `invalid state: guard already held`. A synchronized method that waits (join, receive, timer, scope exit) holds its guard while it waits, so keep waits out of monitor methods. In a program without `spawn`, synchronized methods compile to plain methods. `#Synchronized` cannot go on a constructor, destructor, static, or bodyless method (`E0921`); an override of a synchronized method must be synchronized (`E0922`).
+
+Choose a monitor for an object with a few short operations that tasks call directly; choose `Guarded<T>` for a collection or any state whose methods you do not own; choose an owner task and a channel for anything that waits.
+
+## Immutable objects
+
+`#Immutable` on a class makes the compiler check that every instance field is `last` or `const` (`E0918`) of an immutable type: `bool`, a number, `string`, a tuple or enum of immutable parts, or another `#Immutable` class (`E0919`); bases and subclasses must be `#Immutable` too (`E0920`). Tasks may then share its instances freely.
+
+<!-- example: check -->
+```neura
+#[Immutable, Final]
+let Reading = class (
+    export last sensor: string;
+    export last celsius: int32;
+
+    export let init = func(name: string, degrees: int32) {
+        sensor = name;
+        celsius = degrees;
+    };
+);
+
+#ThreadSafe
+let describe = func(reading: Reading) -> string => reading.sensor + " " + reading.celsius.to_string();
+
+let report = func -> string {
+    let reading: Reading = new("greenhouse", 22);
+    scope {
+        let text = spawn describe(reading);   // an #Immutable object crosses to the task
+        return text.join();
+    }
+};
+```
+
 ## Helpers: `Tasks`, `WorkerGroup`, `Parallel.map`
 
 <!-- example: run -->
@@ -259,7 +350,7 @@ let App = module:program.Entry (
         let results = tasks.all<int>(calls);                   // results in call order
         console.println("{}", results[0] + results[1]);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

@@ -1,11 +1,12 @@
 /// @brief The library version. It equals the compiler's and changes its major number whenever a contract text,
 /// hash, order, or format changes.
 /// @see [Std.Core.Version](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Version)
+#Since("0.1.0")
 export let Version = module (
     /// @brief The major version component of the shipped library.
     export const Major: int = 0;
     /// @brief The minor version component of the shipped library.
-    export const Minor: int = 1;
+    export const Minor: int = 2;
     /// @brief The patch version component of the shipped library.
     export const Patch: int = 0;
 );

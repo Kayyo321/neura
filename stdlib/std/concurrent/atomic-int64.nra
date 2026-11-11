@@ -1,8 +1,10 @@
 /// @brief A 64-bit integer that tasks may share (Concurrency.md section 8). All operations on one atomic form
 /// a single order consistent with each task's program order, and each sees the latest earlier store.
 /// @see [Std.Concurrent.AtomicInt64](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-AtomicInt64)
+#Since("0.1.0")
 export let AtomicInt64 = module (
     /// @brief A shared signed 64-bit integer.
+    #[Final, ThreadSafe]
     export let AtomicInt64 = class (
         let cell: int64;
 
@@ -27,6 +29,7 @@ export let AtomicInt64 = module (
         };
 
         /// @brief Stores `desired` if the value equals `expected`, and reports whether it did.
+        #NoDiscard
         export let compare_exchange = func(expected: int64, desired: int64) -> bool {
             if (cell == expected) {
                 cell = desired;
@@ -37,5 +40,6 @@ export let AtomicInt64 = module (
     );
 
     /// @brief An atomic holding the initial value.
-    export let create = func(initial: int64) -> AtomicInt64 => new AtomicInt64(initial);
+    #[Pure, ThreadSafe]
+    export let create = func(initial: int64) -> AtomicInt64 => new(initial);
 );

@@ -1,0 +1,35 @@
+error[E0101]: invalid character '$'
+ --> $DIR/invalid-characters.nra:3:15
+  |
+3 | let total = 1 $ 2;
+  |               ^ not a token of the language
+
+error[E0101]: invalid source character
+ --> $DIR/invalid-characters.nra:4:13
+  |
+4 | let label = “ready”;
+  |             ^ U+201C is not valid here
+  |
+help: use an ASCII double quote
+  |
+4 | let label = "ready”;
+  |             ~
+
+error[E0101]: invalid source character
+ --> $DIR/invalid-characters.nra:4:19
+  |
+4 | let label = “ready”;
+  |                   ^ U+201D is not valid here
+  |
+help: use an ASCII double quote
+  |
+4 | let label = “ready";
+  |                   ~
+
+error[E0101]: invalid character '@'
+ --> $DIR/invalid-characters.nra:5:14
+  |
+5 | let mark = 3 @ 4;
+  |              ^ not a token of the language
+
+For more information about this error, try `neura explain E0101`.

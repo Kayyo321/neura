@@ -8,13 +8,15 @@ let.promote _ = import:Std.Core.Result;
 /// @brief An immutable 128-bit identifier (Stdlib.md section 12.2), held as its first and last 8 bytes in
 /// big-endian order, so comparing the halves compares the bytes.
 /// @see [Std.Random.Uuid](https://github.com/Kayyo321/neura/wiki/Stdlib-Random-Uuid)
+#Since("0.1.0")
 export let Uuid = module (
     /// @brief An immutable 128-bit identifier ordered by its unsigned big-endian bytes.
+    #[Final, NoDiscard, Immutable, ThreadSafe]
     export let Uuid = class implements Comparable<Uuid> (
         /// @brief The most significant eight bytes.
-        let high: uint64;
+        last high: uint64;
         /// @brief The least significant eight bytes.
-        let low: uint64;
+        last low: uint64;
 
         /// @brief Constructs an identifier from its big-endian halves.
         export let init = func(first: uint64, last: uint64) {
@@ -23,14 +25,16 @@ export let Uuid = module (
         };
 
         /// @brief The 16 bytes in order, as a new list.
+        #Pure
         export let to_bytes = func -> uint8[list] {
-            let bytes: uint8[list] = [];
+            last bytes: uint8[list] = [];
             append_word(bytes, high);
             append_word(bytes, low);
             return bytes;
         };
 
         /// @brief Lexicographic over the bytes, each unsigned.
+        #Pure
         export let compare_to = func(other: Uuid) -> Ordering {
             if (high != other.high) {
                 return order(high < other.high);
@@ -42,15 +46,17 @@ export let Uuid = module (
         };
 
         /// @brief Tests whether another UUID has the same two halves.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is Uuid)) {
                 return false;
             }
-            let id = other as Uuid;
+            last id = other as Uuid;
             return high == id.high && low == id.low;
         };
 
         /// @brief Starts from 17 and combines each byte in order.
+        #Pure
         export let.override hash_code = func -> uint32 {
             let hash: uint32 = 17;
             for (let b in to_bytes()) {
@@ -60,14 +66,15 @@ export let Uuid = module (
         };
 
         /// @brief The 36-character hyphenated form in lowercase.
+        #Pure
         export let.override to_string = func -> string {
             let text = "";
-            let bytes = to_bytes();
+            last bytes = to_bytes();
             for (let i = 0; i < 16; i++) {
                 if (i == 4 || i == 6 || i == 8 || i == 10) {
                     text += "-";
                 }
-                let b = bytes[i] as int;
+                last b = bytes[i] as int;
                 text = text + HexDigits.slice(b / 16, b / 16 + 1) + HexDigits.slice(b % 16, b % 16 + 1);
             }
             return text;
@@ -79,39 +86,41 @@ export let Uuid = module (
 
     /// @brief A version 4 identifier from 16 bytes of random.fill_bytes, with the version bits set to 0100 and
     /// the variant bits to 10.
+    #ThreadSafe
     export let random = func(source: Random) -> Uuid {
-        let bytes = source.fill_bytes(16);
+        last bytes = source.fill_bytes(16);
         bytes[6] = (bytes[6] & 15) | 64;
         bytes[8] = (bytes[8] & 63) | 128;
-        return new Uuid(word_at(bytes, 0), word_at(bytes, 8));
+        return new(word_at(bytes, 0), word_at(bytes, 8));
     };
 
     /// @brief The 36-character hyphenated form, hex digits in either case.
     ///
     /// Errors: Empty; InvalidCharacter at the first byte that is not a hex digit or a hyphen in its place, or
     /// at offset 36 when text follows; UnexpectedEnd at the length for shorter text.
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<Uuid> {
-        let length = text.byte_length;
+        last length = text.byte_length;
         if (length == 0) {
             return failed(ParseErrorKind.Empty, 0, "empty input");
         }
-        let words: uint64[] = [0, 0];
+        last words: uint64[] = [0, 0];
         let digit_count = 0;
         for (let i = 0; i < 36; i++) {
             if (i >= length) {
                 return failed(ParseErrorKind.UnexpectedEnd, length, "unexpected end of input");
             }
-            let b = text.byte_at(i) as int;
+            last b = text.byte_at(i) as int;
             if (i == 8 || i == 13 || i == 18 || i == 23) {
                 if (b != 45) {
                     return failed(ParseErrorKind.InvalidCharacter, i, "expected '-'");
                 }
             } else {
-                let value = hex_value(b);
+                last value = hex_value(b);
                 if (value < 0) {
                     return failed(ParseErrorKind.InvalidCharacter, i, "expected hex digit");
                 }
-                let w = digit_count / 16;
+                last w = digit_count / 16;
                 words[w] = (words[w] << 4) | (value as uint64);
                 digit_count++;
             }

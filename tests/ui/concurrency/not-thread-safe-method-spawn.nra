@@ -1,0 +1,26 @@
+// A spawned call that reaches a method marked #NotThreadSafe (E0601), on an
+// instance the task allocated itself: the tag on a method declines task
+// safety for the method, while its class's other methods stay usable.
+let Report = class (
+    export let lines: int64 = 0;
+
+    export let add = func() -> int64 {
+        lines = lines + 1;
+        return lines;
+    };
+
+    #NotThreadSafe
+    export let flush = func() -> int64 => lines;
+);
+
+let work = func() -> int64 {
+    let report = new Report();
+    report.add();
+    return report.flush();
+};
+
+let run = func() {
+    scope {
+        spawn work();
+    }
+};

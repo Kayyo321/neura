@@ -1,0 +1,9 @@
+// Extending a #Final class (E0912).
+#Final
+let Point = class (
+    export let x: int32 = 0;
+);
+
+let Point3 = class:Point (
+    export let z: int32 = 0;
+);

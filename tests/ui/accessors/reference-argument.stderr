@@ -1,0 +1,10 @@
+error[E0524]: &int32 cannot refer to 'count', which has accessors
+  --> $DIR/reference-argument.nra:11:6
+   |
+11 | bump(counter.count);
+   |      ^^^^^^^^^^^^^ 'count' is reached through its getter here, which yields a value and not storage
+   |
+   = note: outside its class, a field with accessors is read and written only through 'get' and 'set', so a reference cannot alias its storage
+   = help: copy the value into a local, pass that local, and assign the result back to 'count'
+
+For more information about this error, try `neura explain E0524`.

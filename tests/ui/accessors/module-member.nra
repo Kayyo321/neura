@@ -1,0 +1,5 @@
+// Accessors on a module member (E0519).
+let Settings = module (
+    export let retries = 3;
+        | get: retries;
+);

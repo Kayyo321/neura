@@ -9,5 +9,5 @@ let CollectionsDriver = module:program.Entry (
         collections.example();
         console.print_line("collections example finished");
         return program.ExitCode.Ok;
-    }
+    };
 );

@@ -22,7 +22,7 @@ function(check_rejection name source location message_pattern)
     set(file "${name}.nra")
     file(WRITE "${TEST_DIR}/${file}" "// Rejected frontend fixture.\n${source}\n")
     execute_process(
-        COMMAND "${NEURA}" check "${file}"
+        COMMAND "${NEURA}" check --error-format=short "${file}"
         WORKING_DIRECTORY "${TEST_DIR}"
         RESULT_VARIABLE status
         OUTPUT_VARIABLE stdout
@@ -31,7 +31,7 @@ function(check_rejection name source location message_pattern)
     if(NOT status MATCHES "^[1-9][0-9]*$")
         message(FATAL_ERROR "Expected ${name} to fail with a diagnostic, got ${status}\n${stdout}\n${stderr}")
     endif()
-    if(NOT stderr MATCHES "${name}[.]nra:${location}: error:" OR NOT stderr MATCHES "${message_pattern}")
+    if(NOT stderr MATCHES "${name}[.]nra:${location}: error(\\[[EW][0-9]+\\])?:" OR NOT stderr MATCHES "${message_pattern}")
         message(FATAL_ERROR "Missing diagnostic for ${name}\n${stderr}")
     endif()
 endfunction()
@@ -88,6 +88,54 @@ if(NOT ir STREQUAL repeated_ir)
 endif()
 
 check_rejection(lexical "let count = @;" "2:13" "[@]")
+
+# The lexer and the parser report every syntax error in source order, up to
+# --max-errors, and the first one is the one a single-error run reported.
+function(count_errors output)
+    execute_process(
+        COMMAND "${NEURA}" check --error-format=short ${ARGN}
+        WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status
+        ERROR_VARIABLE stderr
+    )
+    string(REGEX MATCHALL "error\\[E[0-9]+\\]" found "${stderr}")
+    list(LENGTH found count)
+    if(status STREQUAL "0")
+        message(FATAL_ERROR "Expected ${ARGN} to fail\n${stderr}")
+    endif()
+    set("${output}" "${count}" PARENT_SCOPE)
+    set("${output}_stderr" "${stderr}" PARENT_SCOPE)
+endfunction()
+file(WRITE "${TEST_DIR}/several-lexical.nra" "let a = 1 $ 2;\nlet b = 3 @ 4;\nlet c = 5 ` 6;\n")
+count_errors(lexical several-lexical.nra)
+if(NOT lexical EQUAL 3 OR NOT lexical_stderr MATCHES "^[^\n]*several-lexical[.]nra:1:11: error\\[E0101\\]")
+    message(FATAL_ERROR "Expected three lexical errors, the first at 1:11\n${lexical_stderr}")
+endif()
+count_errors(limited --max-errors 2 several-lexical.nra)
+if(NOT limited EQUAL 2)
+    message(FATAL_ERROR "--max-errors 2 should stop after two errors\n${limited_stderr}")
+endif()
+file(WRITE "${TEST_DIR}/several-syntax.nra" [=[
+let a = func() -> int {
+    let x = (1 + 2;
+    return x;
+};
+let b = ;
+let C = class (
+    export let size;
+    export let label: string = "c";
+);
+let d = 4
+let e = 5;
+]=])
+count_errors(syntax several-syntax.nra)
+if(NOT syntax EQUAL 4 OR NOT syntax_stderr MATCHES "2:19: error\\[E0203\\][^\n]*\n[^\n]*5:9: error\\[E0204\\][^\n]*\n[^\n]*7:20: error\\[E0205\\][^\n]*\n[^\n]*10:10: error\\[E0201\\]")
+    message(FATAL_ERROR "Expected four syntax errors with no cascade\n${syntax_stderr}")
+endif()
+count_errors(one --max-errors=1 several-syntax.nra)
+if(NOT one EQUAL 1)
+    message(FATAL_ERROR "--max-errors=1 should stop after one error\n${one_stderr}")
+endif()
 check_rejection(syntax "let count: int32 = ;" "2:20" "expected")
 check_rejection(old-parameter-syntax "let f = func(int value) {};" "2:18" "expected ':'")
 check_rejection(rest-position "let f = func(args: ..., last: int) {};" "2:23" "variadic parameter must be last")
@@ -132,7 +180,7 @@ let Derived = class:Base (
     export let init = func() -> void {
         super.init();
         super.init();
-    }
+    };
 );
 ]=] "6:[1-9][0-9]*" "super.init must be the first statement")
 
@@ -220,7 +268,7 @@ let View = class (
         if (bind) {
             value = storage;
         }
-    }
+    };
 );
 ]=] "4:[1-9][0-9]*" "exit before binding reference field 'value'")
 check_rejection(reference-field-ambiguous [=[
@@ -231,7 +279,7 @@ let View = class (
             value = storage;
         }
         value = storage;
-    }
+    };
 );
 ]=] "8:[1-9][0-9]*" "reference field.*value.*bound")
 check_rejection(reference-field-read [=[
@@ -240,7 +288,7 @@ let View = class (
     let snapshot: int = value;
     let init = func(storage: &int) {
         value = storage;
-    }
+    };
 );
 ]=] "4:[1-9][0-9]*" "reference field.*value.*bound")
 
@@ -442,13 +490,13 @@ let wrong = func(x: int) -> int {
 
 check_rejection(implicit-base-constructor [=[
 let Base = class (
-    export let init = func(value: int) -> void {}
+    export let init = func(value: int) -> void {};
 );
 let Middle = class:Base ();
 let Derived = class:Middle (
     export let init = func() -> void {
         super.init();
-    }
+    };
 );
 ]=] "8:9" "class 'Middle' needs a constructor to initialize its base")
 
@@ -489,6 +537,119 @@ let Record = class<T> (
 check_rejection(singleton-new "let one = singleton (); let another = new one();" "2:39" "singleton cannot be constructed")
 check_rejection(singleton-destroy "let one = singleton (); destroy one;" "2:33" "singleton cannot be destroyed")
 
+# Accessors of exported instance fields (Types.md, Accessors).
+check_rejection(accessor-read-only [=[
+let Ticket = class (
+    export let code = "XY";
+        | get: code;
+);
+let ticket = new Ticket();
+ticket.code = "AB";
+]=] "7:1" "E0510.*'code' is read-only outside its class")
+check_rejection(accessor-read-only-subclass [=[
+let Ticket = class (
+    export let code = "XY";
+        | get: code;
+);
+let Renewed = class:Ticket (
+    export let renew = func {
+        code = "AB";
+    };
+);
+]=] "8:9" "E0510.*'code' is read-only outside its class")
+check_rejection(accessor-write-only [=[
+let Sink = class (
+    export let level: int = 0;
+        | set: level = value;
+);
+let sink = new Sink();
+let current = sink.level;
+]=] "7:15" "E0515.*'level' is write-only outside its class")
+check_rejection(accessor-write-only-update [=[
+let Sink = class (
+    export let level: int = 0;
+        | set: level = value;
+);
+let sink = new Sink();
+sink.level--;
+]=] "7:1" "E0515.*'level' is write-only outside its class")
+check_rejection(accessor-not-exported [=[
+let Account = class (
+    let balance = 0;
+        | get: balance;
+);
+]=] "4:9" "E0516.*accessors require an exported field")
+check_rejection(accessor-static [=[
+let Limits = class (
+    export static let calls = 0;
+        | get: calls;
+);
+]=] "4:9" "E0517.*a static field cannot have accessors")
+check_rejection(accessor-method [=[
+let Shape = class (
+    export let area = func -> int => 4;
+        | get: 4;
+);
+]=] "4:9" "E0518.*'area' is a function")
+check_rejection(accessor-module [=[
+let Settings = module (
+    export let retries = 3;
+        | get: retries;
+);
+]=] "4:9" "E0519.*only allowed on class fields")
+check_rejection(accessor-interface [=[
+let Sized = interface (
+    let size = func -> int;
+        | get: 0;
+);
+]=] "4:9" "E0519.*an interface cannot declare accessors")
+check_rejection(accessor-duplicate [=[
+let Counter = class (
+    export let count = 0;
+        | set: count = value;
+        | set: count = value + 1;
+);
+]=] "5:11" "E0520.*duplicate 'set' accessor for 'count'")
+check_rejection(accessor-constant [=[
+let Config = class (
+    export const name = "default";
+        | set: name = value;
+);
+]=] "4:11" "E0521.*a .const. field cannot have a setter")
+check_rejection(accessor-value-field [=[
+let Cell = class (
+    export let value = 0;
+        | set: value = value;
+);
+]=] "4:11" "E0522.*a field named 'value' cannot have a setter")
+check_rejection(accessor-reference-field [=[
+let Tracker = class (
+    export let target: &int;
+        | get: target;
+);
+]=] "4:9" "E0523.*a primitive reference field cannot have accessors")
+check_rejection(accessor-reference-binding [=[
+let Counter = class (
+    export let count: int = 0;
+        | get: count;
+        | set: count = value;
+);
+let counter = new Counter();
+let alias: &int = counter.count;
+]=] "8:19" "E0524.*cannot refer to 'count', which has accessors")
+check_rejection(accessor-getter-type [=[
+let Counter = class (
+    export let count: int = 0;
+        | get: count > 0;
+);
+]=] "4:16" "E0403.*expected int32, got bool")
+check_rejection(accessor-clause-word [=[
+let Counter = class (
+    export let count = 0;
+        | put: count;
+);
+]=] "4:11" "E0202.*expected 'get' or 'set' after '[|]'")
+
 # Host callbacks are reserved for the trusted standard library.
 check_rejection(user-host-callback [=[
 let Tools = module (
@@ -497,3 +658,804 @@ let Tools = module (
     } callback("user.callback", 1);
 );
 ]=] "3:5" "host callbacks are only allowed in standard library modules")
+
+# `last` bindings (CoreLanguage.md, "Deferred assignment"). `last` is a
+# contextual word: it declares only when an identifier follows it.
+file(WRITE "${TEST_DIR}/last-accepted.nra" [=[
+let Collection = class (
+    export let last = func -> int => 3;
+    export last first: int;
+    export last size: int = 2;
+    static last limit: int = 9;
+    export let init = func(value: int) {
+        if (value > 0) {
+            first = value;
+        } else {
+            instance.first = 0;
+        }
+    };
+);
+let last = func(values: int[]) -> int => values[values.length - 1];
+let tail = func(values: int[]) -> int {
+    let last = [0, 0];
+    last[0] = values[0];
+    last = [1, 2];
+    return last[0];
+};
+let latest = func(items: Collection) -> int => items.last() + last([1, 2]);
+let choose = func(flag: bool, other: bool) -> int {
+    last value: int;
+    if (flag && other) {
+        value = 1;
+    } else if (flag || other) {
+        value = 2;
+    } else {
+        return 0;
+    }
+    last doubled = value * 2;
+    let read = func() -> int => doubled + value;
+    return read();
+};
+let guarded = func(flag: bool) -> int {
+    last value: int;
+    if (!flag) {
+        trap_with_message("unreachable");
+    }
+    value = 1;
+    while (true) {
+        last step: int;
+        step = value;
+        if (step > 0) {
+            break;
+        }
+    }
+    return value;
+};
+]=])
+run_success(unused check "${TEST_DIR}/last-accepted.nra")
+run_success(last_ir emit-ir --no-optimize "${TEST_DIR}/last-accepted.nra")
+if(NOT last_ir MATCHES "@binding[.]last[(]true[)]" OR NOT last_ir MATCHES "@binding[.]last[(]false[)]")
+    message(FATAL_ERROR "Expected binding.last attributes on the `last` bindings\n${last_ir}")
+endif()
+
+check_rejection(last-twice [=[
+let f = func() -> int {
+    last x: int;
+    x = 10;
+    x = 20;
+    return x;
+};
+]=] "5:5" "\\[E0440\\]: cannot assign twice to 'x'")
+check_rejection(last-maybe-twice [=[
+let f = func(flag: bool) -> int {
+    last x: int;
+    if (flag) {
+        x = 1;
+    }
+    x = 2;
+    return x;
+};
+]=] "7:5" "\\[E0440\\]: cannot assign twice to 'x'")
+check_rejection(last-update [=[
+let f = func() -> int {
+    last x: int;
+    x = 1;
+    x += 1;
+    return x;
+};
+]=] "5:5" "\\[E0440\\]: cannot assign twice to 'x'")
+check_rejection(last-unassigned-read [=[
+let f = func() -> int {
+    last x: int;
+    return x;
+};
+]=] "4:12" "\\[E0441\\]: 'x' is used before it is assigned")
+check_rejection(last-maybe-read [=[
+let f = func(flag: bool) -> int {
+    last x: int;
+    if (flag) {
+        x = 1;
+    }
+    return x;
+};
+]=] "7:12" "\\[E0441\\]: 'x' may be used before it is assigned")
+check_rejection(last-match-read [=[
+let Shape = enum(Circle(int), Dot);
+let f = func(shape: Shape) -> int {
+    last x: int;
+    match (shape) {
+        Shape.Circle(r) => {
+            x = r;
+        },
+        Shape.Dot => {
+        },
+    }
+    return x;
+};
+]=] "12:12" "\\[E0441\\]: 'x' may be used before it is assigned")
+check_rejection(last-short-circuit-read [=[
+let f = func(flag: bool) -> bool {
+    last x: bool;
+    return flag && x;
+};
+]=] "4:20" "\\[E0441\\]")
+check_rejection(last-in-loop [=[
+let f = func(count: int) -> int {
+    last x: int;
+    while (count > 0) {
+        x = count;
+        break;
+    }
+    return 0;
+};
+]=] "5:9" "\\[E0442\\]: 'x' is assigned inside a loop")
+check_rejection(last-early-capture [=[
+let f = func() -> int {
+    last x: int;
+    let read = func() -> int => x;
+    x = 1;
+    return read();
+};
+]=] "4:33" "\\[E0443\\]: closure captures 'x' before it is assigned")
+check_rejection(last-without-type [=[
+let f = func() -> int {
+    last x;
+    x = 1;
+    return x;
+};
+]=] "3:10" "\\[E0444\\]: a deferred 'last' binding needs a type")
+check_rejection(last-reassigned [=[
+let f = func() -> int {
+    last x = 10;
+    x = 20;
+    return x;
+};
+]=] "4:5" "\\[E0401\\]: cannot assign twice to 'x'")
+check_rejection(last-field-method [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        size = initial;
+    };
+    export let grow = func {
+        size = size + 1;
+    };
+);
+]=] "8:9" "\\[E0445\\]: cannot assign to 'last' field 'size' here")
+check_rejection(last-field-outside [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        size = initial;
+    };
+);
+let resize = func(box: Box) {
+    box.size = 3;
+};
+]=] "9:5" "\\[E0445\\]")
+check_rejection(last-field-skipped [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        if (initial > 0) {
+            size = initial;
+        }
+    };
+);
+]=] "4:16" "\\[E0446\\]: 'init' may end without assigning 'last' field 'size'")
+check_rejection(last-field-overload [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        size = initial;
+    } or func() {
+    };
+);
+]=] "6:10" "\\[E0446\\]")
+check_rejection(last-field-early-return [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        if (initial < 0) {
+            return;
+        }
+        size = initial;
+    };
+);
+]=] "6:13" "\\[E0446\\]: 'init' may return without assigning 'last' field 'size'")
+check_rejection(last-field-no-init [=[
+let Box = class (
+    export last size: int;
+);
+]=] "3:17" "\\[E0446\\]: class 'Box' has no 'init'")
+check_rejection(last-field-read-in-init [=[
+let Box = class (
+    export last size: int;
+    export let doubled: int = 0;
+    export let init = func(initial: int) {
+        doubled = instance.size * 2;
+        size = initial;
+    };
+);
+]=] "6:19" "\\[E0441\\]: 'size' is used before it is assigned")
+check_rejection(last-field-with-value [=[
+let Box = class (
+    export last size: int = 3;
+    export let init = func(initial: int) {
+        size = initial;
+    };
+);
+]=] "5:9" "\\[E0401\\]: cannot assign twice to 'size'")
+check_rejection(last-global-deferred "last limit: int;" "2:6" "\\[E0447\\]")
+check_rejection(last-static-deferred [=[
+let Counter = class (
+    static last limit: int;
+);
+]=] "3:17" "\\[E0447\\]")
+check_rejection(let-without-value-mentions-last [=[
+let f = func() -> int {
+    let x: int;
+    return 0;
+};
+]=] "3:5" "\\[E0404\\]")
+# Target-typed new (ObjectLifecycle.md, Target-typed new): the expected type
+# must be a concrete class, and constructor errors are those of new T(...).
+set(pair_class "let Pair = class (\n    export let left: int = 0;\n    export let init = func(a: int) { left = a; };\n);\n")
+check_rejection(new-no-expected-type "let a = new;" "2:9" "E0420.*target-typed 'new' needs a concrete class type")
+check_rejection(new-umbrella "let a: class = new;" "2:16" "E0420")
+check_rejection(new-primitive "let a: int = new;" "2:14" "E0420")
+check_rejection(new-type-parameter "let make = func<T>() -> T { return new; };" "2:36" "E0420")
+check_rejection(new-singleton "let one = singleton (); let a: one = new;" "2:38" "E0420")
+check_rejection(new-interface [=[
+let Shape = interface (
+    let area = func() -> int;
+);
+let a: Shape = new;
+]=] "5:16" "E0420")
+check_rejection(new-unknown-member "let a = new.left;" "2:9" "E0420")
+check_rejection(new-argument-count "${pair_class}let a: Pair = new;" "6:15" "E0407.*expected 1 argument")
+check_rejection(new-argument-type "${pair_class}let a: Pair = new(\"x\");" "6:19" "E0403.*expected int32, got string")
+check_rejection(new-parenthesized-type "${pair_class}let a = new (Pair)(1);" "6:9" "E0435")
+check_rejection(new-ambiguous-overload [=[
+let A = class ( export let x: int = 0; );
+let B = class ( export let y: int = 0; );
+let pick = func(a: A) -> int => 1 or func(b: B) -> int => 2;
+let chosen = pick(new);
+]=] "5:14" "E0409.*ambiguous overload")
+check_rejection(new-abstract [=[
+let Shape = class (
+    export let area = func() -> int;
+);
+let a: Shape = new;
+]=] "5:16" "E0505.*cannot instantiate abstract class")
+check_rejection(new-hidden-constructor [=[
+let Locked = class (
+    let init = func() { };
+);
+let a: Locked = new;
+]=] "5:17" "E0507.*constructor is not exported")
+check_rejection(new-in-untyped-list "let items = [new];" "2:14" "E0420")
+
+# Typed multi-binding (Types.md, Tuples).
+check_rejection(multi-binding-value-count "let [a, b] = 1, 2, 3;" "2:14" "E0436.*3 values for 2 names")
+check_rejection(multi-binding-type-count "let [a, b]: [int] = 1, 2;" "2:13" "E0436.*1 type for 2 names")
+check_rejection(multi-binding-annotation "let [a, b]: int[] = 1, 2;" "2:13" "E0437")
+check_rejection(multi-binding-element-type "let [a, b]: [int, string] = 1, 2;" "2:32" "E0403.*expected string, got int32")
+check_rejection(multi-binding-tuple-type "let [a, b]: [int, string] = [1, 2];" "2:33" "E0403.*expected string, got int32")
+check_rejection(multi-binding-names-not-in-scope [=[
+let f = func() -> int {
+    let [a, b] = 1, a;
+    return b;
+};
+]=] "3:21" "E0304.*unknown name 'a'")
+check_rejection(multi-binding-duplicate [=[
+let f = func() -> int {
+    let [a, a] = 1, 2;
+    return a;
+};
+]=] "3:13" "E0301.*duplicate local binding 'a'")
+
+# Anonymous classes (Types.md, Anonymous classes).
+check_rejection(anonymous-distinct-occurrences [=[
+let first: class (export let n: int = 0; export let get = func() -> int => n;) = new;
+let second: class (export let n: int = 0; export let get = func() -> int => n;) = first;
+]=] "3:83" "E0403.*expected class[(]n: int32[)]@anonymous-distinct-occurrences[.]nra:3:13, got class[(]n: int32[)]@anonymous-distinct-occurrences[.]nra:2:12")
+check_rejection(anonymous-field-order [=[
+let point: class (export let x: int = 0; export let label: string = "";) = new;
+let swapped: class (export let label: string; export let x: int;) = point;
+]=] "3:69" "E0403.*expected class[(]label: string, x: int32[)], got class[(]x: int32, label: string[)]")
+check_rejection(anonymous-field-type [=[
+let point: class (export let x: int = 0;) = new;
+let wide: class (export let x: int64;) = point;
+]=] "3:42" "E0403.*expected class[(]x: int64[)], got class[(]x: int32[)]")
+check_rejection(anonymous-initializer-in-parameter "let f = func(p: class (export let x: int = 1;)) -> int => p.x;" "2:44" "E0530")
+check_rejection(anonymous-initializer-in-result "let f = func() -> class (export let x: int = 1;) { return new; };" "2:46" "E0530")
+check_rejection(anonymous-initializer-in-element "let items: class (export let x: int = 1;)[] = [];" "2:39" "E0530")
+check_rejection(anonymous-type-parameter "let f = func<T>(v: T) -> int { let b: class (export let item: T;) = new; return 0; };" "2:63" "E0531")
+check_rejection(anonymous-unexported "let p: class (let x: int = 1;) = new;" "2:19" "E0532")
+check_rejection(anonymous-assignment-new [=[
+let p: class (export let x: int = 1;) = new;
+let reset = func() { p = new; };
+]=] "3:26" "E0533")
+check_rejection(anonymous-element-new "let items: class (export let x: int;)[] = [new];" "2:44" "E0533")
+check_rejection(anonymous-untyped "let p: class (export let x = 1;) = new;" "2:26" "E0534")
+# A `const` or `last` field, or an accessor clause, makes a body a class of its
+# own: its own field initializers run, and two such bodies are distinct.
+check_rejection(anonymous-const-distinct [=[
+let p: class (export const x: int = 1;) = new;
+let q: class (export const x: int = 1;) = p;
+]=] "3:43" "E0403.*expected class[(]const x: int32[)]@anonymous-const-distinct[.]nra:3:8")
+check_rejection(anonymous-last-distinct [=[
+let p: class (export last x: int = 1;) = new;
+let q: class (export last x: int = 1;) = p;
+]=] "3:42" "E0403.*expected class[(]last x: int32[)]@anonymous-last-distinct[.]nra:3:8")
+check_rejection(anonymous-const-assigned "let p: class (export const x: int = 1;) = new; let f = func() { p.x = 2; };" "2:65" "E0401")
+check_rejection(anonymous-last-outside-init [=[
+let p: class (
+    export last id: int;
+    export let init = func() {
+        id = 4;
+    };
+) = new;
+let f = func() { p.id = 3; };
+]=] "8:18" "E0445")
+check_rejection(anonymous-last-destructuring "let f = func() { last [a, b] = 1, 2; };" "2:18" "E0536")
+file(WRITE "${TEST_DIR}/anonymous-behaviour.nra" [=[
+let p: class ( export last id: int = 1; ) = new;
+let limits: class (
+    last hidden: int = 2;
+    export const most: int = 10;
+    export last least: int;
+    export let init = func() {
+        least = hidden;
+    };
+) = new;
+let named: class ( export let code = "XY"; | get: code; ) = new;
+let code = named.code;
+let total = p.id + limits.most + limits.least;
+]=])
+run_success(unused check "${TEST_DIR}/anonymous-behaviour.nra")
+check_rejection(anonymous-duplicate-field "let p: class (export let x: int; export let x: int;) = new;" "2:45" "E0302.*duplicate declaration of 'x'")
+check_rejection(anonymous-unknown-field "let p: class (export let x: int = 1;) = new; let y = p.y;" "2:54" "E0305.*unknown or inaccessible member 'y'")
+check_rejection(anonymous-arguments "let p: class (export let x: int;) = new(1);" "2:37" "E0407.*expected 0 argument")
+check_rejection(anonymous-new-structural-arguments "let p = new class (export let x: int = 1;)(2);" "2:9" "E0407")
+check_rejection(anonymous-unexported-method-field [=[
+let p: class (
+    let x: int = 1;
+    export let get = func() -> int => x;
+) = new;
+let y = p.x;
+]=] "6:9" "E0305.*unknown or inaccessible member 'x'")
+check_rejection(anonymous-hidden-init [=[
+let p: class (
+    export let x: int = 1;
+    let init = func() { };
+) = new;
+]=] "5:5" "E0507.*constructor is not exported")
+check_rejection(anonymous-not-a-base [=[
+let Tools = module ( );
+let p: class : Tools (export let x: int = 1;) = new;
+]=] "3:16" "E0503.*base must have the same declaration kind")
+check_rejection(anonymous-umbrella-construct "let value = new class();" "2:13" "class is an umbrella type and cannot be constructed")
+
+# The umbrella type keeps its meaning where a class body could not begin, and
+# a class body with a base or interfaces is accepted in a type position.
+file(WRITE "${TEST_DIR}/umbrella.nra" [=[
+let Point = class ( export let x: int = 0; );
+let Named = interface ( let name = func() -> string; );
+let thing: class = new Point();
+let tested = thing is class;
+let back = thing as class;
+let pick = func(c: bool, a: Point, b: class) -> class => c ? a as class : b;
+let empty: class () = new;
+let derived: class : Point implements Named ( export let name = func() -> string => "d"; ) = new;
+let named: class implements Named ( export let name = func() -> string => "n"; ) = new;
+let generic = func<T: class>(value: T) -> T => value;
+]=])
+run_success(unused check "${TEST_DIR}/umbrella.nra")
+
+# Tags (docs/lang/Tags.md).
+function(run_status output status_output)
+    execute_process(
+        COMMAND "${NEURA}" ${ARGN}
+        WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+    )
+    set("${output}" "${stdout}${stderr}" PARENT_SCOPE)
+    set("${status_output}" "${status}" PARENT_SCOPE)
+endfunction()
+
+file(WRITE "${TEST_DIR}/tag-warnings.nra" [=[
+let Api = module (
+    #Deprecated(as_of: "0.2.0", use_instead: fresh)
+    export let stale = func() -> int32 {
+        return 1;
+    };
+
+    export let fresh = func() -> int32 {
+        return 2;
+    };
+
+    #Experimental
+    export let preview = func() -> int32 {
+        return 3;
+    };
+);
+
+let a: int32 = Api.stale();
+let b: int32 = Api.preview();
+]=])
+# Warnings print on success; -Wno-<name> hides one; -Werror fails the run.
+run_status(output status check --error-format=short tag-warnings.nra)
+if(NOT status STREQUAL "0" OR NOT output MATCHES "tag-warnings[.]nra:17:16: warning\\[W0001\\]: function 'stale' is deprecated since 0[.]2[.]0"
+   OR NOT output MATCHES "tag-warnings[.]nra:18:16: warning\\[W0002\\]")
+    message(FATAL_ERROR "Expected W0001 and W0002 on a successful check (${status})\n${output}")
+endif()
+run_status(output status check --error-format=short -Wno-deprecated tag-warnings.nra)
+if(NOT status STREQUAL "0" OR output MATCHES "W0001" OR NOT output MATCHES "W0002")
+    message(FATAL_ERROR "Expected -Wno-deprecated to hide only W0001 (${status})\n${output}")
+endif()
+run_status(output status check --error-format=short -Wno-experimental -Wno-deprecated tag-warnings.nra)
+if(NOT status STREQUAL "0" OR NOT output STREQUAL "")
+    message(FATAL_ERROR "Expected no output with both warnings disabled (${status})\n${output}")
+endif()
+run_status(output status check --error-format=short -Werror tag-warnings.nra)
+if(NOT status STREQUAL "1" OR NOT output MATCHES "error\\[W0001\\]" OR NOT output MATCHES "error\\[W0002\\]")
+    message(FATAL_ERROR "Expected -Werror to fail with both warnings as errors (${status})\n${output}")
+endif()
+# --fix applies the machine-applicable replacement and the tag spelling.
+file(WRITE "${TEST_DIR}/tag-fix.nra" [=[
+let Api = module (
+    #Depricated(use_instead: fresh)
+    export let stale = func() -> int32 {
+        return 1;
+    };
+
+    export let fresh = func() -> int32 {
+        return 2;
+    };
+);
+
+let a: int32 = Api.stale();
+]=])
+run_success(unused check --fix tag-fix.nra)
+file(READ "${TEST_DIR}/tag-fix.nra" fixed)
+if(NOT fixed MATCHES "#Deprecated[(]use_instead: fresh[)]" OR NOT fixed MATCHES "let a: int32 = Api[.]fresh[(][)];")
+    message(FATAL_ERROR "check --fix did not fix the tag and the deprecated use\n${fixed}")
+endif()
+
+# Tag validation: each rule's code at its span.
+check_rejection(tag-unknown "#Depricated\nlet f = func() -> int32 {\n    return 1;\n};" "2:2" "unknown tag #Depricated")
+check_rejection(tag-target "#Inline\nlet Shape = class ();" "2:2" "#Inline does not apply to a class")
+check_rejection(tag-variant-target "let Color = enum (\n    #Final Red\n);" "3:6" "#Final does not apply to an enum variant")
+check_rejection(tag-parameter-target "let f = func(#Deprecated value: int32) -> int32 {\n    return value;\n};" "2:15" "#Deprecated does not apply to a parameter")
+check_rejection(tag-local-target "let f = func() -> int32 {\n    #Stable\n    let value: int32 = 1;\n    return value;\n};" "3:6" "#Stable does not apply to a local binding")
+check_rejection(tag-lambda-parameter "let f = func() -> int32 {\n    let g = func(#Unit(1) value: int32) -> int32 {\n        return value;\n    };\n    return g(1);\n};" "3:24" "#Unit expects a string")
+check_rejection(tag-too-many "#Since(\"0.1.0\", \"0.2.0\")\nlet x: int32 = 1;" "2:17" "#Since takes 1 argument")
+check_rejection(tag-no-arguments "#Stable(true)\nlet x: int32 = 1;" "2:9" "#Stable takes no arguments")
+check_rejection(tag-list "#Since([\"0.1.0\"])\nlet x: int32 = 1;" "2:8" "found a list")
+check_rejection(tag-integer-range "#Unit(\"ms\")\n#Range(min: 0, max: 99999999999999999999)\nlet x: int32 = 1;" "3:21" "does not fit in 64 bits")
+check_rejection(tag-reserved-memoize "#Memoize\nlet f = func() -> int32 {\n    return 1;\n};" "2:1" "#Memoize is reserved")
+check_rejection(tag-reserved-checked "let C = class (\n    #Isolated\n    export let f = func() -> int32 {\n        return 1;\n    };\n);" "3:5" "#Isolated is reserved")
+# The checked tags (Tags.md): each rule's code at its span.
+check_rejection(tag-immutable-target "let C = class (\n    #Immutable\n    let x: int32 = 0;\n);" "3:6" "#Immutable does not apply to a field")
+check_rejection(tag-pure-global "let total: int32 = 0;\n#Pure\nlet f = func() -> int32 {\n    return total;\n};" "3:1" "error\\[E0917\\]: #Pure function 'f' is not pure: it reads the reassignable binding 'total'")
+check_rejection(tag-pure-host "let console = import:Std.Io.Console;\n#Pure\nlet f = func() {\n    console.print_line(\"x\");\n};" "3:1" "error\\[E0917\\]: #Pure function 'f' is not pure: it reaches '[a-z_]+', which makes the host request neura[.]console")
+check_rejection(tag-pure-closure "#Pure\nlet f = func(g: func(int32) -> int32) -> int32 {\n    return g(1);\n};" "2:1" "E0917.*calls a function value")
+# A kernel writes the list it receives for a writable view or a state, so a
+# #Pure function may pass it only a list it allocated (docs/lang/Tags.md).
+check_rejection(tag-pure-kernel-write "let sorting = import:Std.Collections.Sorting;\n#Pure\nlet f = func(items: int64[list]) -> int64 {\n    sorting.sort_ascending(items);\n    return items[0];\n};" "3:1" "E0917.*it reaches 'sort_ascending', which passes a list it did not allocate to the kernel neura[.]sort[.]i64, which writes it")
+check_rejection(tag-pure-kernel-state "let sha = import:Std.Digest.Sha256;\n#Pure\nlet feed = func(hasher: sha.Sha256, data: uint8[list]) -> int {\n    hasher.update(data);\n    return 0;\n};" "3:1" "E0917.*it reaches 'update', which passes a list it did not allocate to the kernel neura[.]digest[.]sha256_update")
+# A callee that writes only its parameter's objects keeps a caller pure that
+# passes it objects of its own, and makes impure one that passes its own
+# parameter or a value stored into one of its objects.
+file(WRITE "${TEST_DIR}/tag-pure-fresh.nra" [=[
+let sorting = import:Std.Collections.Sorting;
+
+let Box = class (
+    export let items: int64[list] = [];
+);
+
+let fill = func(box: Box, value: int64) {
+    box.items.append(value);
+};
+
+#Pure
+let smallest = func(a: int64, b: int64) -> int64 {
+    let items: int64[list] = [a, b];
+    sorting.sort_ascending(items);
+    return items[0];
+};
+
+#Pure
+let filled = func(value: int64) -> int64 {
+    let box = new Box();
+    fill(box, value);
+    fill(box, value);
+    return box.items.length as int64;
+};
+]=])
+run_success(unused check tag-pure-fresh.nra)
+check_rejection(tag-pure-helper-write "let Box = class (\n    export let items: int64[list] = [];\n);\nlet fill = func(box: Box, value: int64) {\n    box.items.append(value);\n};\n#Pure\nlet f = func(box: Box) -> int64 {\n    fill(box, 1);\n    return 0;\n};" "8:1" "E0917.*it reaches 'fill', which changes a list it did not allocate")
+check_rejection(tag-pure-stored-argument "let Box = class (\n    export let inner: int64[list] = [];\n);\n#Pure\nlet f = func(items: int64[list]) -> int64 {\n    let box = new Box();\n    box.inner = items;\n    box.inner.append(1);\n    return 0;\n};" "5:1" "E0917.*changes a list it did not allocate")
+# #Pure on a generic function holds for each specialization, which is checked
+# when the program is built: a call through a type parameter reaches the type
+# argument's member.
+file(WRITE "${TEST_DIR}/tag-pure-generic.nra" [=[
+let program = import:Std.Program;
+
+let counter: int64 = 0;
+
+let Box = class (
+    export let.override to_string = func -> string {
+        counter = counter + 1;
+        return "box";
+    };
+);
+
+let Lib = module (
+    #Pure
+    export let text = func<T>(item: T) -> string {
+        return item.to_string();
+    };
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let plain = Lib.text<int32>(3);
+        let boxed = Lib.text<Box>(new Box());
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+foreach(command IN ITEMS check build)
+    set(arguments ${command} tag-pure-generic.nra)
+    if(command STREQUAL "build")
+        list(APPEND arguments -o tag-pure-generic.nvr)
+    endif()
+    run_status(output status ${arguments})
+    if(status STREQUAL "0" OR NOT output MATCHES "error\\[E0917\\]: #Pure function 'text<Box>' is not pure: it reaches 'to_string', which assigns the binding 'counter'"
+       OR NOT output MATCHES "tag-pure-generic[.]nra:13:5" OR NOT output MATCHES "in the specialization 'text<Box>'")
+        message(FATAL_ERROR "Expected ${command} to reject the specialization text<Box>\n${output}")
+    endif()
+endforeach()
+file(WRITE "${TEST_DIR}/tag-pure-generic-pure.nra" [=[
+let program = import:Std.Program;
+
+let Lib = module (
+    #Pure
+    export let text = func<T>(item: T) -> string {
+        return item.to_string();
+    };
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let plain = Lib.text<int32>(3);
+        let pair = Lib.text<[int32, string]>([1, "a"]);
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+run_success(unused build tag-pure-generic-pure.nra -o tag-pure-generic-pure.nvr)
+check_rejection(tag-immutable-let "#Immutable\nlet P = class (\n    export let x: int32 = 0;\n);" "4:16" "error\\[E0918\\]")
+check_rejection(tag-immutable-list "#Immutable\nlet P = class (\n    export const xs: int32[] = [1];\n);" "4:18" "error\\[E0919\\]")
+check_rejection(tag-immutable-base "let B = class (\n    export let x: int32 = 0;\n);\n#Immutable\nlet P = class:B ();" "5:1" "error\\[E0920\\]: #Immutable class 'P' extends 'B'")
+check_rejection(tag-synchronized-interface "let I = interface (\n    #Synchronized\n    let f = func() -> int32;\n);" "3:5" "error\\[E0921\\].*interface method")
+check_rejection(tag-synchronized-static "let C = class (\n    #Synchronized\n    export static let f = func() -> int32 {\n        return 1;\n    };\n);" "3:5" "error\\[E0921\\]: #Synchronized method 'f' is static")
+check_rejection(tag-thread-safe-class "#ThreadSafe\nlet C = class (\n    export let x: int32 = 0;\n);" "2:1" "error\\[E0609\\]: #ThreadSafe class 'C' cannot be shared between tasks")
+check_rejection(tag-not-thread-safe-class "#NotThreadSafe\nlet P = class (\n    export const x: int32 = 0;\n);\nlet use = func(p: P) {};\nlet run = func() {\n    scope {\n        spawn use(new P());\n    }\n};" "9:19" "error\\[E0602\\]: a value of type P is not transferable")
+# #NotThreadSafe on a class keeps its instances in one task: it cannot be
+# #Immutable or #Synchronized (E0907), and no class that extends it can be
+# #ThreadSafe (E0610).
+check_rejection(tag-not-thread-safe-immutable "#NotThreadSafe\n#Immutable\nlet P = class (\n    export const x: int32 = 0;\n);" "3:1" "error\\[E0907\\]: #Immutable conflicts with #NotThreadSafe")
+check_rejection(tag-not-thread-safe-synchronized "#[NotThreadSafe, Synchronized]\nlet P = class (\n    let x: int32 = 0;\n);" "2:18" "error\\[E0907\\]: #Synchronized conflicts with #NotThreadSafe")
+check_rejection(tag-not-thread-safe-subclass "#NotThreadSafe\nlet B = class (\n    export let x: int32 = 0;\n);\n#ThreadSafe\nlet C = class:B ();" "6:1" "error\\[E0610\\]: class 'C' is #NotThreadSafe and cannot be #ThreadSafe")
+check_rejection(tag-not-thread-safe-monitor-base "#Synchronized\nlet Counter = class (\n    let n: int32 = 0;\n    export let bump = func() -> int32 {\n        n = n + 1;\n        return n;\n    };\n);\n#NotThreadSafe\nlet Local = class:Counter ();" "2:1" "error\\[E0610\\]: class 'Local' is #NotThreadSafe and cannot be a monitor: method 'bump' is #Synchronized")
+# A task may allocate and use an instance of a #NotThreadSafe class of its
+# own, and the task that runs main may call a #NotThreadSafe function in a
+# program that spawns other tasks: only what a spawned call or a parallel
+# worker can reach is restricted.
+file(WRITE "${TEST_DIR}/tag-not-thread-safe-own.nra" [=[
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+#NotThreadSafe
+let Bag = class (
+    let count: int64 = 0;
+
+    export let add = func(amount: int64) -> int64 {
+        count = count + amount;
+        return count;
+    };
+);
+
+#NotThreadSafe
+let report = func(value: int64) {
+    console.print_line(value.to_string());
+};
+
+let work = func(n: int64) -> int64 {
+    let bag = new Bag();
+    bag.add(n);
+    return bag.add(n);
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let mine = new Bag();
+        mine.add(1);
+        scope {
+            let task = spawn work(3);
+            report(task.join());
+        }
+        report(mine.add(1));
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+run_success(unused build tag-not-thread-safe-own.nra -o tag-not-thread-safe-own.nvr)
+run_success(own_output run tag-not-thread-safe-own.nvr)
+if(NOT own_output STREQUAL "6\n2\n")
+    message(FATAL_ERROR "Unexpected output of tag-not-thread-safe-own.nvr: ${own_output}")
+endif()
+check_rejection(tag-final-sealed "#[Final, Sealed]\nlet C = class ();" "2:10" "#Sealed conflicts with #Final")
+check_rejection(tag-hot-cold "#Hot\n#Cold\nlet f = func() -> int32 {\n    return 1;\n};" "3:1" "#Cold conflicts with #Hot")
+check_rejection(tag-discard-name "#Stable\nlet _ = 3;" "2:1" "tags cannot apply to '_'")
+check_rejection(tag-end-of-file "let x: int32 = 1;\n#Stable" "3:8" "expected a declaration after tags")
+check_rejection(tag-deny-code "let Api = module (\n    #Deprecated\n    export let old = func() -> int32 {\n        return 1;\n    };\n);\n#Deny(W0001)\nlet x: int32 = Api.old();" "9:16" "'old' is deprecated")
+# A #Sealed type at the top of a file may be extended anywhere in the file.
+file(WRITE "${TEST_DIR}/tag-sealed-file.nra" "#Sealed\nlet Base = class ();\nlet Holder = module (\n    export let Inner = class:Base ();\n);\n")
+run_success(unused check tag-sealed-file.nra)
+# A tag on an or-func group applies to every branch.
+file(WRITE "${TEST_DIR}/tag-overloads.nra" [=[
+let Convert = module (
+    #Deprecated
+    export let show = func(value: int32) -> string {
+        return value.to_string();
+    } or func(value: bool) -> string {
+        return value.to_string();
+    };
+);
+let a: string = Convert.show(1);
+let b: string = Convert.show(true);
+]=])
+run_status(output status check --error-format=short tag-overloads.nra)
+string(REGEX MATCHALL "warning\\[W0001\\]" overload_warnings "${output}")
+list(LENGTH overload_warnings overload_count)
+if(NOT status STREQUAL "0" OR NOT overload_count EQUAL 2)
+    message(FATAL_ERROR "Expected a W0001 for each call of a deprecated overload group (${status})\n${output}")
+endif()
+
+# #Internal: usable from the declaring file's directory and below, not from
+# a parent directory.
+file(MAKE_DIRECTORY "${TEST_DIR}/tag-library/acme")
+file(WRITE "${TEST_DIR}/tag-library/acme/core.nra" [=[
+let Core = module (
+    #Internal
+    export let raw = func() -> int32 {
+        return 1;
+    };
+    export let cooked = func() -> int32 {
+        return raw() + 1;
+    };
+);
+]=])
+file(WRITE "${TEST_DIR}/tag-library/acme/report.nra" [=[
+let core = import:Acme.Core;
+let Report = module (
+    export let total = func() -> int32 {
+        return core.raw() + core.cooked();
+    };
+);
+]=])
+file(WRITE "${TEST_DIR}/tag-library/app.nra" [=[
+let report = import:Acme.Report;
+let core = import:Acme.Core;
+let total: int32 = report.total() + core.cooked();
+]=])
+run_success(unused check -I tag-library tag-library/acme/report.nra)
+run_success(unused check -I tag-library tag-library/app.nra)
+file(APPEND "${TEST_DIR}/tag-library/app.nra" "let raw: int32 = core.raw();\n")
+run_status(output status check --error-format=short -I tag-library tag-library/app.nra)
+if(NOT status STREQUAL "1" OR NOT output MATCHES "app[.]nra:4:18: error\\[E0911\\]: function 'raw' is internal to its library")
+    message(FATAL_ERROR "Expected E0911 for a use from outside the library (${status})\n${output}")
+endif()
+
+# The catalogue and the explain pages of warnings.
+run_success(catalogue tags)
+if(NOT catalogue MATCHES "#Deprecated[(]as_of: string = \"\", use_instead: name = \"\", reason: string = \"\"[)]"
+   OR NOT catalogue MATCHES "status:  reserved" OR NOT catalogue MATCHES "[0-9]+ tags: [0-9]+ implemented")
+    message(FATAL_ERROR "neura tags did not print the catalogue\n${catalogue}")
+endif()
+run_success(one_tag tags Final)
+if(NOT one_tag MATCHES "^#Final\n    status:  implemented" OR NOT one_tag MATCHES "applies to classes and methods")
+    message(FATAL_ERROR "neura tags Final did not print the entry\n${one_tag}")
+endif()
+run_status(output status tags Depricated)
+if(NOT status STREQUAL "1" OR NOT output MATCHES "did you mean Deprecated")
+    message(FATAL_ERROR "Expected neura tags to reject an unknown tag with a suggestion (${status})\n${output}")
+endif()
+run_success(page explain deprecated)
+run_success(code_page explain W0001)
+if(NOT page MATCHES "^# W0001: use of a deprecated declaration" OR NOT page STREQUAL code_page)
+    message(FATAL_ERROR "neura explain did not print the W0001 page by name and by code\n${page}")
+endif()
+
+# A tag persists in the NeuraIR as the `tag` attribute and survives a .nir
+# round trip; inline.directive follows #Inline(always: true) and #NoInline.
+file(WRITE "${TEST_DIR}/tag-ir.nra" [=[
+let Lib = module (
+    #[Deprecated(as_of: "0.2.0"), Since("0.1.0")]
+    export let old = func() -> int32 {
+        return 1;
+    };
+    #Inline(always: true)
+    export let small = func(value: int32) -> bool {
+        return value > 0;
+    };
+    #NoInline
+    export let kept = func(value: int32) -> bool {
+        return value < 0;
+    };
+);
+]=])
+run_success(listing emit-ir --no-optimize tag-ir.nra)
+if(NOT listing MATCHES "function \"old\"[^\n]*@tag[(]\\[1u, \"Deprecated\", \\[\\[\"as_of\", \"0[.]2[.]0\"\\]\\]"
+   OR NOT listing MATCHES "@tag[(]\\[5u, \"Since\""
+   OR NOT listing MATCHES "function \"small\"[^\n]*@inline[.]directive[(]1u[)]"
+   OR NOT listing MATCHES "function \"kept\"[^\n]*@inline[.]directive[(]2u[)]")
+    message(FATAL_ERROR "Expected tag and inline.directive attributes in the listing\n${listing}")
+endif()
+run_success(unused emit-ir tag-ir.nra -o tag-ir.nir)
+run_success(round_trip emit-ir --no-optimize tag-ir.nir)
+string(REGEX MATCHALL "@tag[(][^\n]*" source_tags "${listing}")
+string(REGEX MATCHALL "@tag[(][^\n]*" artifact_tags "${round_trip}")
+if(NOT source_tags OR NOT source_tags STREQUAL artifact_tags)
+    message(FATAL_ERROR "The tags differ after a .nir round trip\n${listing}\n---\n${round_trip}")
+endif()
+# The catalogue in docs/lang/Tags.md lists every registered tag.
+file(READ "${SOURCE_DIR}/docs/lang/Tags.md" tags_page)
+string(REGEX MATCHALL "\n#[A-Za-z]+" registered_tags "\n${catalogue}")
+list(LENGTH registered_tags registered_count)
+if(registered_count LESS 60)
+    message(FATAL_ERROR "Expected at least 60 tags in neura tags, found ${registered_count}")
+endif()
+foreach(tag IN LISTS registered_tags)
+    string(STRIP "${tag}" tag)
+    string(FIND "${tags_page}" "| `${tag}" position)
+    if(position EQUAL -1)
+        message(FATAL_ERROR "docs/lang/Tags.md does not list ${tag}")
+    endif()
+endforeach()
+# -W and -Wno- take the name of a warning.
+run_status(output status check -Wdepricated tag-warnings.nra)
+if(NOT status STREQUAL "1" OR NOT output MATCHES "unknown warning 'depricated'; did you mean deprecated[?]")
+    message(FATAL_ERROR "Expected -Wdepricated to be rejected with a suggestion (${status})\n${output}")
+endif()
+# The accessors' setter-never-stores warning (W0005) is a named warning like
+# the others: -W and -Wno- take its name, and explain takes name or code.
+file(WRITE "${TEST_DIR}/setter-warning.nra" [=[
+let Gauge = class (
+    export let level: int32 = 0;
+        | get: level;
+        | set: {
+            let ignored = value;
+        };
+);
+]=])
+run_status(output status check --error-format=short -Wsetter-never-stores setter-warning.nra)
+if(NOT status STREQUAL "0" OR NOT output MATCHES "setter-warning[.]nra:4:11: warning\\[W0005\\]: the setter of 'level' never stores 'level'")
+    message(FATAL_ERROR "Expected W0005 under -Wsetter-never-stores (${status})\n${output}")
+endif()
+run_status(output status check --error-format=short -Wno-setter-never-stores setter-warning.nra)
+if(NOT status STREQUAL "0" OR NOT output STREQUAL "")
+    message(FATAL_ERROR "Expected -Wno-setter-never-stores to hide W0005 (${status})\n${output}")
+endif()
+run_success(setter_page explain setter-never-stores)
+run_success(setter_code_page explain W0005)
+if(NOT setter_page MATCHES "^# W0005: setter that never stores its field" OR NOT setter_page STREQUAL setter_code_page)
+    message(FATAL_ERROR "neura explain did not print the W0005 page by name and by code\n${setter_page}")
+endif()

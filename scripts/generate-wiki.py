@@ -36,6 +36,8 @@ DEFAULT_BRANCH = "main"
 # docs path (relative to the repository root) -> wiki page name.
 GENERATED: dict[str, str] = {
     "docs/Backend.md": "Backend",
+    "docs/Benchmarks.md": "Benchmarks",
+    "docs/diagnostics/README.md": "Diagnostics",
     "docs/ContinuousIntegration.md": "ContinuousIntegration",
     "docs/RepositorySettings.md": "RepositorySettings",
     "docs/Install.md": "Install",
@@ -62,12 +64,14 @@ GENERATED: dict[str, str] = {
     "docs/lang/Standalone.md": "Standalone",
     "docs/lang/StandardLibrary.md": "StandardLibrary",
     "docs/lang/Status.md": "Status",
+    "docs/lang/Tags.md": "Tags",
     "docs/lang/Stdlib.md": "Stdlib-Design",
     "docs/lang/Testing.md": "Testing",
     "docs/lang/Tooling.md": "Tooling",
     "docs/lang/Tutorial.md": "Tutorial",
     "docs/lang/Types.md": "Types",
     "docs/runtime/NVM.md": "NVM",
+    "docs/runtime/Kernels.md": "Kernels",
     "docs/runtime/NVR.md": "NVR",
     "docs/style/CodingStyle.md": "CodingStyle",
 }
@@ -83,6 +87,13 @@ REPOSITORY_ONLY = (
     "docs/design/GpuExecution.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
+)
+
+# Docs pages matched by these patterns have no wiki page either. The explain page of each diagnostic
+# code is published on the website and printed by `neura explain`; the wiki has the index of codes,
+# `Diagnostics`, whose links lead to the pages in the repository.
+REPOSITORY_ONLY_PATTERNS = (
+    re.compile(r"^docs/diagnostics/[EW][0-9]{4}[.]md$"),
 )
 
 # Wiki pages written by hand. The standard-library module pages, which
@@ -180,6 +191,10 @@ def rewrite_links(text: str, source: str, root: Path, repository: str) -> str:
 def generate(source: str, text: str, root: Path, repository: str = REPOSITORY) -> str:
     """The wiki page for the docs page `source` with the given text."""
     body = text.lstrip("\n")
+    # A comment before the title, such as the notice of a page that another script generates, is
+    # replaced by the wiki page's own comment.
+    while body.startswith("<!--") and "-->" in body:
+        body = body.split("-->", 1)[1].lstrip("\n")
     title, _, rest = body.partition("\n")
     if not title.startswith("# "):
         raise ValueError(f"{source}: the first line is not a `# ` title")
@@ -194,7 +209,8 @@ def check_names(root: Path, pages: set[str]) -> list[str]:
         if not (root / path).is_file():
             problems.append(f"{path}: listed in GENERATED but does not exist")
     docs = {p.relative_to(root).as_posix() for p in (root / "docs").rglob("*.md")}
-    for path in sorted(docs - set(GENERATED) - set(REPOSITORY_ONLY)):
+    unlisted = docs - set(GENERATED) - set(REPOSITORY_ONLY)
+    for path in sorted(p for p in unlisted if not any(pattern.match(p) for pattern in REPOSITORY_ONLY_PATTERNS)):
         problems.append(f"{path}: has no wiki page; add it to GENERATED or REPOSITORY_ONLY in scripts/generate-wiki.py")
     generated = set(GENERATED.values())
     for name in sorted(pages - generated):

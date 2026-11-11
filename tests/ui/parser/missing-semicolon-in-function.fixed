@@ -1,0 +1,5 @@
+// Two statements of a function body without semicolons; --fix adds both.
+let area = func(width: int, height: int) -> int {
+    let product = width * height;
+    return product;
+};

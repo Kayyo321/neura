@@ -1,0 +1,9 @@
+error[E0407]: expected 2 argument(s)
+ --> $DIR/wrong-argument-count.nra:3:13
+  |
+2 | let add = func(a: int, b: int) -> int => a + b;
+  |     --- 'add' takes 2 parameters
+3 | let three = add(1);
+  |             ^^^^^^ expected 2 arguments, found 1
+
+For more information about this error, try `neura explain E0407`.

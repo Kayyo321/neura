@@ -1,0 +1,5 @@
+// Accessors on an interface member (E0519).
+let Sized = interface (
+    let size = func -> int;
+        | get: 0;
+);

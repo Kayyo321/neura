@@ -26,8 +26,10 @@ let result = import:Std.Core.Result;
 /// can merge with the unfinished previous iteration; the match can then differ from every backtracking order.
 /// Loops whose body cannot match empty are exact.
 /// @see [Std.Text.Regex](https://github.com/Kayyo321/neura/wiki/Stdlib-Text-Regex)
+#Since("0.1.0")
 export let Regex = module (
     /// @brief Stores three matching options whose values participate in equality and hashing.
+    #[Final, Since("0.1.0")]
     export let RegexFlags = class (
         /// @brief Enables ASCII-only case-insensitive matching.
         export let ignore_ascii_case: bool = false;
@@ -37,71 +39,86 @@ export let Regex = module (
         export let dot_all: bool = false;
 
         /// @brief Compares flags by their three Boolean values.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is RegexFlags)) {
                 return false;
             }
-            let flags = other as RegexFlags;
+            last flags = other as RegexFlags;
             return ignore_ascii_case == flags.ignore_ascii_case &&
                 multi_line == flags.multi_line && dot_all == flags.dot_all;
         };
 
         /// @brief Encodes the enabled flags as a bit mask.
+        #Pure
         export let.override hash_code = func -> uint32 =>
             (ignore_ascii_case ? 1 : 0) | (multi_line ? 2 : 0) | (dot_all ? 4 : 0);
 
         /// @brief Formats the flags as a RegexFlags description.
+        #Pure
         export let.override to_string = func -> string =>
             "RegexFlags(ignore_ascii_case=" + ignore_ascii_case.to_string() +
                 ", multi_line=" + multi_line.to_string() + ", dot_all=" + dot_all.to_string() + ")";
     );
 
     /// @brief One match: group 0 is the whole match. Immutable.
+    #[Final, Since("0.1.0")]
     export let RegexMatch = class (
         /// @brief The original input retained by the match.
-        let input: string = "";
+        last input: string;
         /// @brief The capture start and end offsets in UTF-8 bytes. Unset captures use -1.
-        let slots: int[list] = [];
+        last slots: int[list];
         /// @brief The names of the capturing groups in capture order.
-        let names: string[list] = [];
+        last names: string[list];
+
+        /// @brief The inclusive byte offset of the whole match.
+        #Since("0.2.0")
+        export last start: int;
+            | get: start;
+
+        /// @brief The exclusive byte offset of the whole match.
+        #Since("0.2.0")
+        export last end: int;
+            | get: end;
 
         /// @brief Stores the original input, capture offsets, and capture names.
         export let init = func(text: string, captured: int[list], group_names: string[list]) {
             input = text;
             slots = captured;
             names = group_names;
+            start = captured[0];
+            end = captured[1];
         };
 
-        /// @brief Returns the inclusive byte offset of the whole match.
-        export let start = func -> int => slots[0];
-
-        /// @brief Returns the exclusive byte offset of the whole match.
-        export let end = func -> int => slots[1];
-
         /// @brief Returns the whole matched substring.
-        export let text = func -> string => input.slice(slots[0], slots[1]);
+        #[NoDiscard, Pure]
+        export let text = func -> string => input.slice(start, end);
 
         /// @brief Tests equality of input, capture offsets, and group names.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is RegexMatch)) {
                 return false;
             }
-            let found = other as RegexMatch;
+            last found = other as RegexMatch;
             return input == found.input && slots === found.slots && names === found.names;
         };
 
         /// @brief Combines the hashes of the input, capture offsets, and group names.
+        #Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(input.hash_code(), slots.hash_code()), names.hash_code());
 
         /// @brief Returns the whole matched substring.
+        #Pure
         export let.override to_string = func -> string => text();
 
         /// @brief The group's text, or None when the group did not participate. An index outside 0 through
-        /// group_count() traps with "invalid argument: no such group".
+        /// the Regex's group_count traps with "invalid argument: no such group".
+        #[NoDiscard, Pure]
         export let group = func(index: int) -> optional.Optional<string> {
             check_group(index);
-            let start_offset = slots[2 * index];
+            last start_offset = slots[2 * index];
             if (start_offset < 0) {
                 return optional.Optional<string>.None;
             }
@@ -109,6 +126,7 @@ export let Regex = module (
         };
 
         /// @brief The group's start offset, or -1 when it did not participate.
+        #Pure
         export let group_start = func(index: int) -> int {
             check_group(index);
             return slots[2 * index];
@@ -116,6 +134,7 @@ export let Regex = module (
 
         /// @brief The named group's text, or None when it did not participate. A name the pattern does not
         /// define traps with "invalid argument: no such group".
+        #[NoDiscard, Pure]
         export let named_group = func(name: string) -> optional.Optional<string> =>
             group(group_index(names, name));
 
@@ -128,19 +147,29 @@ export let Regex = module (
     );
 
     /// @brief Stores a compiled pattern and provides matching, replacement, and splitting.
+    #[Final, Since("0.1.0"), NotThreadSafe]
     export let Regex = class (
-        /// @brief The original pattern text.
-        let source: string = "";
         /// @brief The compiled program and its reusable execution state.
-        let program: machine.Program = nil;
+        last program: machine.Program;
         /// @brief The names of the capturing groups in capture order.
-        let names: string[list] = [];
+        last names: string[list];
+
+        /// @brief The original pattern text.
+        #Since("0.2.0")
+        export last pattern: string;
+            | get: pattern;
+
+        /// @brief The number of capturing groups, not counting group 0.
+        #Since("0.2.0")
+        export last group_count: int;
+            | get: group_count;
 
         /// @brief Called by compile_with; the program type is internal to the library.
         export let init = func(text: string, compiled: machine.Program, group_names: string[list]) {
-            source = text;
+            pattern = text;
             program = compiled;
             names = group_names;
+            group_count = group_names.length;
         };
 
         /// @brief Tests whether the pattern matches anywhere in the input.
@@ -167,11 +196,11 @@ export let Regex = module (
         /// @brief Successive non-overlapping matches. After an empty match the search resumes one scalar value
         /// later.
         export let find_all = func(input: string) -> RegexMatch[list] {
-            let matches: RegexMatch[list] = [];
-            let length = input.byte_length;
+            last matches: RegexMatch[list] = [];
+            last length = input.byte_length;
             let pos = 0;
             while (pos <= length) {
-                let slots = machine.search(program, input, pos, machine.Leftmost);
+                last slots = machine.search(program, input, pos, machine.Leftmost);
                 if (slots.length == 0) {
                     break;
                 }
@@ -198,8 +227,8 @@ export let Regex = module (
 
         /// @brief Replaces the first match, with the rules of replace_all.
         export let replace_first = func(input: string, replacement: string) -> string {
-            let matches: RegexMatch[list] = [];
-            let first = find(input);
+            last matches: RegexMatch[list] = [];
+            last first = find(input);
             if (first != nil) {
                 matches.append(first);
             }
@@ -209,60 +238,57 @@ export let Regex = module (
         /// @brief The pieces between the matches of find_all, with the rules of Strings.split: empty pieces are
         /// kept, and an input without a match gives one piece.
         export let split = func(input: string) -> string[list] {
-            let pieces: string[list] = [];
+            last pieces: string[list] = [];
             let start = 0;
             for (let found in find_all(input)) {
-                pieces.append(input.slice(start, found.start()));
-                start = found.end();
+                pieces.append(input.slice(start, found.start));
+                start = found.end;
             }
             pieces.append(input.slice(start, input.byte_length));
             return pieces;
         };
 
-        /// @brief The number of capturing groups, not counting group 0.
-        export let group_count = func -> int => names.length;
-
-        /// @brief Returns the original pattern text.
-        export let pattern = func -> string => source;
-
         /// @brief Tests equality of the original pattern and recorded compilation options.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is Regex)) {
                 return false;
             }
-            let expression = other as Regex;
-            return source == expression.source && compile_options() == expression.compile_options();
+            last expression = other as Regex;
+            return pattern == expression.pattern && compile_options() == expression.compile_options();
         };
 
         /// @brief Hashes the original pattern and recorded compilation options.
+        #Pure
         export let.override hash_code = func -> uint32 =>
-            hashing.combine(source.hash_code(), compile_options().hash_code());
+            hashing.combine(pattern.hash_code(), compile_options().hash_code());
 
         /// @brief Returns the original pattern text.
-        export let.override to_string = func -> string => source;
+        #Pure
+        export let.override to_string = func -> string => pattern;
 
         /// @brief Returns the option bits or -1 for an uninitialized program.
         let compile_options = func -> int => program == nil ? -1 : program.options;
 
         /// @brief Searches from a validated byte offset and wraps any matching capture offsets.
         let match_at = func(input: string, offset: int) -> RegexMatch {
-            let slots = machine.search(program, input, offset, machine.Leftmost);
+            last slots = machine.search(program, input, offset, machine.Leftmost);
             if (slots.length == 0) {
                 return nil;
             }
-            return new RegexMatch(input, slots, names);
+            return new(input, slots, names);
         };
 
         /// @brief Builds replacement output from the replacement template and supplied matches.
         let replace_matches = func(input: string, replacement: string, matches: RegexMatch[list]) -> string {
-            let segments = parse_replacement(replacement, names);
+            last segments = parse_replacement(replacement, names);
             if (matches.length == 0) {
                 return input;
             }
-            let bytes: uint8[list] = [];
+            last bytes: uint8[list] = [];
             let start = 0;
             for (let found in matches) {
-                append_bytes(bytes, input, start, found.start());
+                append_bytes(bytes, input, start, found.start);
                 for (let segment in segments) {
                     let [literal, index] = segment;
                     append_bytes(bytes, literal, 0, literal.byte_length);
@@ -275,7 +301,7 @@ export let Regex = module (
                         }
                     }
                 }
-                start = found.end();
+                start = found.end;
             }
             append_bytes(bytes, input, start, input.byte_length);
             let [valid, text] = string.from_utf8(bytes);
@@ -284,13 +310,14 @@ export let Regex = module (
     );
 
     /// @brief Compiles the pattern with every flag off.
-    export let compile = func(pattern: string) -> result.Result<Regex> =>
-        compile_with(pattern, new RegexFlags());
+    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
+    export let compile = func(pattern: string) -> result.Result<Regex> => compile_with(pattern, new RegexFlags());
 
     /// @brief Compiles the pattern; a syntax error or an exceeded limit is a Parse error at the offending
     /// pattern offset. The flags are read once.
+    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
     export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex> {
-        let syntax = new parser.Parser(pattern);
+        last syntax: parser.Parser = new(pattern);
         syntax.parse();
         if (syntax.failed) {
             return result.Result<Regex>.Err(error.Error.Parse {
@@ -299,7 +326,7 @@ export let Regex = module (
                 message: syntax.error_message,
             });
         }
-        let program = machine.compile(syntax.root, syntax.groups, flags.ignore_ascii_case, flags.multi_line,
+        last program = machine.compile(syntax.root, syntax.groups, flags.ignore_ascii_case, flags.multi_line,
             flags.dot_all);
         if (program.insts.length != syntax.size + 3) {
             trap_with_message("invalid state: regex instruction count differs from its estimate");
@@ -321,12 +348,12 @@ export let Regex = module (
 
     /// @brief The replacement as segments: literal text, then a group index or -1.
     let parse_replacement = func(replacement: string, names: string[list]) -> [string, int][list] {
-        let segments: [string, int][list] = [];
-        let length = replacement.byte_length;
+        last segments: [string, int][list] = [];
+        last length = replacement.byte_length;
         let literal: uint8[list] = [];
         let i = 0;
         while (i < length) {
-            let b = replacement.byte_at(i);
+            last b = replacement.byte_at(i);
             if (b != 36) {
                 literal.append(b);
                 i += 1;
@@ -335,7 +362,7 @@ export let Regex = module (
             if (i + 1 >= length) {
                 trap_with_message("invalid argument: malformed replacement");
             }
-            let next = replacement.byte_at(i + 1);
+            last next = replacement.byte_at(i + 1);
             if (next == 36) {
                 literal.append(36);
                 i += 2;
@@ -357,7 +384,7 @@ export let Regex = module (
                 if (close >= length || close == i + 2) {
                     trap_with_message("invalid argument: malformed replacement");
                 }
-                let reference = replacement.slice(i + 2, close);
+                last reference = replacement.slice(i + 2, close);
                 index = number_of(reference);
                 if (index < 0) {
                     index = group_index(names, reference);
@@ -381,7 +408,7 @@ export let Regex = module (
         let value = 0;
         let k = 0;
         while (k < reference.byte_length) {
-            let b = reference.byte_at(k);
+            last b = reference.byte_at(k);
             if (b < 48 || b > 57) {
                 return -1;
             }

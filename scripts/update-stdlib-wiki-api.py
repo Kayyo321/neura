@@ -4,7 +4,9 @@
 Run from any directory with `python3 scripts/update-stdlib-wiki-api.py`.
 Use `--check` to report pages that would change without writing them.
 Only the marked SOURCE API block is changed; surrounding prose is maintained
-by hand. Internal modules and members of non-exported classes are omitted.
+by hand. Internal modules, members of non-exported classes, and declarations
+tagged `#Hidden` are omitted; `#Deprecated` and `#Since` tags, and the tags that
+constrain callers, such as `#NoDiscard` and `#Final`, are shown in the notes.
 """
 
 import argparse
@@ -18,10 +20,112 @@ BEGIN = "<!-- BEGIN SOURCE API -->"
 END = "<!-- END SOURCE API -->"
 
 
+def split_tags(text):
+    """Split the tags written at the start of a line (docs/lang/Tags.md) from
+    the rest of it: (["Deprecated(as_of: \"0.2.0\")", "Since(\"0.1.0\")"], rest).
+    A group `#[A, B]` gives one entry per tag."""
+    tags = []
+    rest = text.lstrip()
+    while rest.startswith("#"):
+        depth, quote, index = 0, False, 1
+        while index < len(rest):
+            char = rest[index]
+            if quote:
+                if char == "\\":
+                    index += 1
+                elif char == '"':
+                    quote = False
+            elif char == '"':
+                quote = True
+            elif char in "([":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+            elif depth == 0 and (char.isspace() or char == "#"):
+                break
+            index += 1
+        body = rest[1:index]
+        if body.startswith("[") and body.endswith("]"):
+            depth, quote, start = 0, False, 1
+            for position in range(1, len(body) - 1):
+                char = body[position]
+                if quote:
+                    quote = char != '"' or body[position - 1] == "\\"
+                elif char == '"':
+                    quote = True
+                elif char in "([":
+                    depth += 1
+                elif char in ")]":
+                    depth -= 1
+                elif char == "," and depth == 0:
+                    tags.append(body[start:position].strip())
+                    start = position + 1
+            if body[start:-1].strip():
+                tags.append(body[start:-1].strip())
+        elif body:
+            tags.append(body)
+        rest = rest[index:].lstrip()
+    return tags, rest
+
+
+def tag_name(tag):
+    """The name of a tag as split_tags returns it."""
+    return re.match(r"[A-Za-z_]\w*", tag)[0] if re.match(r"[A-Za-z_]\w*", tag) else ""
+
+
+def tags_above(lines, start):
+    """The tags on the declaration at `start`: on its own line and on the tag
+    lines directly above it, which may be mixed with comment lines."""
+    tags = split_tags(lines[start])[0]
+    for index in range(start - 1, -1, -1):
+        text = lines[index].strip()
+        if text.startswith("#"):
+            tags = split_tags(text)[0] + tags
+        elif not text.startswith("//"):
+            break
+    return tags
+
+
+# Tags that change how a caller may use a declaration, listed after its notes as they are written.
+CALLER_TAGS = ("Experimental", "NoDiscard", "Final", "Sealed", "Pure", "Immutable", "ThreadSafe",
+               "NotThreadSafe", "Synchronized")
+
+
+def tag_notes(tags):
+    """Notes for the tags a reader of the API needs: deprecation, the tags that
+    constrain callers (docs/lang/Tags.md), and since."""
+    notes = []
+    shown = [f"`#{tag}`" for tag in tags if tag_name(tag) in CALLER_TAGS]
+    if shown:
+        notes.append("Tagged " + ", ".join(shown) + ".")
+    for tag in tags:
+        name = tag_name(tag)
+        arguments = dict(re.findall(r'(\w+):\s*"([^"]*)"', tag))
+        positional = re.findall(r'\(\s*"([^"]*)"', tag)
+        if name == "Deprecated":
+            note = "Deprecated"
+            if arguments.get("as_of"):
+                note += f" since {arguments['as_of']}"
+            if arguments.get("reason"):
+                note += f": {arguments['reason']}"
+            instead = arguments.get("use_instead") or (re.findall(r"use_instead:\s*([\w.]+)", tag) or [""])[0]
+            if instead:
+                note += f"; use `{instead}` instead"
+            notes.append(note + ".")
+        elif name == "Since":
+            version = arguments.get("version") or (positional[0] if positional else "")
+            if version:
+                notes.append(f"Since {version}.")
+    return notes
+
+
 def comment_notes(lines, start):
     """Read adjacent prose without exposing Doxygen markup in the wiki."""
     comments = []
     for index in range(start - 1, -1, -1):
+        if lines[index].strip().startswith("#"):
+            # A tag line between the comment and the declaration.
+            continue
         match = re.match(r"^\s*(///|//)\s?(.*)$", lines[index])
         if not match:
             break
@@ -42,7 +146,7 @@ def comment_notes(lines, start):
 
 def declaration(lines, start):
     """Return a declaration through its signature, excluding its body."""
-    text = lines[start].strip()
+    text = split_tags(lines[start])[1].strip()
     if re.search(r"=\s*(?:module|class|interface)\b", text):
         # The opening parenthesis starts the module/class/interface body.
         offset = start
@@ -54,8 +158,8 @@ def declaration(lines, start):
     paren = bracket = 0
     in_string = escaped = False
     out = []
-    for line in lines[start:]:
-        chunk = line.strip()
+    for number, line in enumerate(lines[start:]):
+        chunk = (split_tags(line)[1] if number == 0 else line).strip()
         index = 0
         while index < len(chunk):
             char = chunk[index]
@@ -93,6 +197,32 @@ def declaration(lines, start):
     raise ValueError(f"Unterminated declaration at line {start + 1}")
 
 
+ACCESSOR = re.compile(r"^\s*\|\s*(get|set)\s*:")
+
+
+def accessors(lines, start):
+    """The accessor summary of a field (Types.md, Accessors): its `| get:` and
+    `| set:` clause lines follow the declaration, more deeply indented."""
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    kinds = set()
+    clause_indent = None
+    for line in lines[start + 1:]:
+        if not line.strip() or line.lstrip().startswith("//"):
+            continue
+        depth = len(line) - len(line.lstrip())
+        if clause_indent is not None and (depth > clause_indent or
+                                          (depth == clause_indent and line.lstrip().startswith("}"))):
+            continue  # The block body of the previous clause.
+        clause = ACCESSOR.match(line)
+        if not clause or depth <= indent:
+            break
+        kinds.add(clause.group(1))
+        clause_indent = depth
+    if not kinds:
+        return ""
+    return " { " + "; ".join(kind for kind in ("get", "set") if kind in kinds) + " }"
+
+
 def area_name(directory):
     """The PascalCase area of a library directory: dynamic-foreign is DynamicForeign."""
     return "".join(word.capitalize() for word in directory.split("-"))
@@ -106,19 +236,27 @@ def exports(path, module):
         if not line.strip() or line.lstrip().startswith("//"):
             continue
         indent = len(line) - len(line.lstrip())
+        line = " " * indent + split_tags(line)[1]
+        if not line.strip():
+            # A line of tags only; they belong to the declaration below.
+            continue
+        tags = [tag_name(tag) for tag in tags_above(lines, index)]
         while owners and owners[-1][0] >= indent:
             owners.pop()
         container = re.match(
             r"^(\s*)(export\s+)?let(?:\.[A-Za-z_]+)*\s+(\w+)\s*=\s*(?:module|class|interface)\b", line
         )
-        match = re.match(r"^\s*export\s+(?:static\s+)?(?:let(?:\.[A-Za-z_]+)*|const)\s+(\w+)\b", line)
+        # `last` is contextual: it declares only when a name follows it.
+        match = re.match(r"^\s*export\s+(?:static\s+)?(?:let(?:\.[A-Za-z_]+)*|const|last(?=\s+[A-Za-z_]))\s+(\w+)\b", line)
         owner = ".".join(item[1] for item in owners)
         public = all(item[2] for item in owners)
+        hidden = "Hidden" in tags
         if container:
-            owners.append((indent, container.group(3), bool(container.group(2)) and public))
-        if not match or not public or (indent == 0 and match.group(1) == module):
+            owners.append((indent, container.group(3), bool(container.group(2)) and public and not hidden))
+        if not match or not public or hidden or (indent == 0 and match.group(1) == module):
             continue
-        yield index + 1, owner, declaration(lines, index), comment_notes(lines, index)
+        notes = comment_notes(lines, index) + tag_notes(tags_above(lines, index))
+        yield index + 1, owner, declaration(lines, index) + accessors(lines, index), notes
 
 
 def render(path, module):

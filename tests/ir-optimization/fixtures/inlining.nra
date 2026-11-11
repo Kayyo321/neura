@@ -1,0 +1,180 @@
+// Calls the optimizer inlines and calls it must keep.
+let console = import:Std.Io.Console;
+
+let Inlining = module (
+    export let trace: int64 = 0;
+    export let seen: bool = false;
+
+    // Records `tag` after the last few marks, then returns it.
+    export let mark = func(tag: uint8) -> uint8 {
+        trace = (trace % 1000000000000) * 1000 + (tag as int64);
+        return tag;
+    };
+
+    // Callees that cannot trap, call, or allocate.
+
+    let is_digit = func(code: uint8) -> bool {
+        return code >= 48 && code <= 57;
+    };
+
+    let larger = func(left: int8, right: int8) -> int8 {
+        if (left > right) {
+            return left;
+        }
+        return right;
+    };
+
+    let pick = func(flag: bool, left: uint8, right: uint8) -> uint8 {
+        if (flag) {
+            return left;
+        } else {
+            return right;
+        }
+    };
+
+    // Returns from inside a loop: only a returned call of it is inlined.
+    let lowest_set = func(value: uint8) -> uint8 {
+        while (true) {
+            if ((value & 1) != 0) {
+                return 1;
+            }
+            if ((value & 2) != 0) {
+                return 2;
+            }
+            return 0;
+        }
+    };
+
+    let remember = func(flag: bool) {
+        if (flag) {
+            seen = true;
+        }
+    };
+
+    let masked = func(value: uint8) -> uint8 {
+        let low: uint8 = value & 15;
+        let high: uint8 = value & 240;
+        return low | high ^ 255;
+    };
+
+    export let digits = func(code: uint8) -> bool {
+        return is_digit(code) || is_digit(code ^ 32);
+    };
+
+    export let maximum = func(left: int8, right: int8) -> int8 {
+        return larger(left, right);
+    };
+
+    export let maximum_in_expression = func(left: int8, right: int8) -> bool {
+        return larger(left, right) == left;
+    };
+
+    export let pick_in_condition = func(flag: bool, value: uint8) -> uint8 {
+        if (pick(flag, value, 0) > 10) {
+            return 1;
+        }
+        return 0;
+    };
+
+    export let lowest = func(value: uint8) -> uint8 {
+        return lowest_set(value);
+    };
+
+    export let remember_discarded = func(flag: bool) -> bool {
+        remember(flag);
+        pick(flag, 1, 2);
+        return seen;
+    };
+
+    export let masked_twice = func(value: uint8) -> uint8 {
+        let first: uint8 = masked(value);
+        return masked(first);
+    };
+
+    // Larger than the size budget: inlined only when its directive is
+    // Always.
+    let in_ranges = func(code: uint8) -> bool {
+        return (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102) ||
+            (code >= 192 && code <= 214) || (code >= 216 && code <= 246) || code == 95;
+    };
+
+    export let ranges = func(code: uint8) -> bool {
+        return in_ranges(code);
+    };
+
+    // Runs until the evaluator's budget: the inlined call no longer counts
+    // toward it, so the optimized run gets further.
+    export let spin = func(flag: bool) -> bool {
+        let state: bool = flag;
+        while (true) {
+            if (is_digit(52)) {
+                state = !state;
+            }
+        }
+    };
+
+    // Arguments are evaluated once each, left to right, before the body.
+    export let argument_order = func(left: uint8, right: uint8) -> uint8 {
+        return pick(left > right, mark(left), mark(right));
+    };
+
+    export let argument_once = func(code: uint8) -> bool {
+        return is_digit(mark(code));
+    };
+
+    export let loop_calls = func(limit: uint8) -> uint8 {
+        let count: uint8 = 0;
+        let code: uint8 = 40;
+        while (code < limit) {
+            if (is_digit(code)) {
+                count = count + 1;
+            }
+            code = code + 1;
+        }
+        return count;
+    };
+
+    // Callees that stay calls.
+
+    let add = func(left: int8, right: int8) -> int8 {
+        return left + right;
+    };
+
+    let countdown = func(value: uint8) -> uint8 {
+        if (value == 0) {
+            return 0;
+        }
+        return countdown(value - 1);
+    };
+
+    let noisy = func(flag: bool) -> bool {
+        console.print_line("noisy");
+        return flag;
+    };
+
+    export let Holder = class (
+        export let value: uint8 = 0;
+    );
+
+    // Cannot trap, call, or allocate, but its result is a reference.
+    let no_holder = func(flag: bool) -> Holder {
+        return nil;
+    };
+
+    export let keep_trapping_callee = func(left: int8, right: int8) -> int8 {
+        return add(left, right);
+    };
+
+    export let keep_recursive_callee = func(value: uint8) -> uint8 {
+        return countdown(value);
+    };
+
+    export let keep_effectful_callee = func(flag: bool) -> bool {
+        return noisy(flag);
+    };
+
+    export let keep_reference_result = func(flag: bool) -> bool {
+        let holder: Holder = no_holder(flag);
+        return flag;
+    };
+);

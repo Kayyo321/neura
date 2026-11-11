@@ -1,0 +1,10 @@
+// #Isolated is registered, and its target is checked, but it is reserved
+// until the compiler implements it (E0908).
+let Worker = class (
+    let value: int64 = 0;
+
+    #Isolated
+    export let increment = func() -> void {
+        value += 1;
+    };
+);

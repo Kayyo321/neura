@@ -3,6 +3,7 @@ let.promote _ = import:Std.Collections.Set;
 /// @brief Comparisons of sets of different classes through the read-only interface
 /// (Stdlib.md section 9.10).
 /// @see [Std.Collections.Sets](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Sets)
+#Since("0.1.0")
 export let Sets = module (
     /// @brief Whether the sets have the same size and `a` contains each element of
     /// `b`, by `a`'s own membership test.
@@ -10,7 +11,7 @@ export let Sets = module (
         if (a.size() != b.size()) {
             return false;
         }
-        let items = b.iterator();
+        last items = b.iterator();
         while (items.has_next()) {
             if (!a.contains(items.next())) {
                 return false;

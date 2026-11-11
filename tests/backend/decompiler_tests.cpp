@@ -74,7 +74,7 @@ NEURA_TEST(lossless, edited_images_round_trip) {
 
 NEURA_TEST(lossless, assembly_errors_name_their_line) {
     expect_assembly_error("type 0 void\n", "must start with an 'nvr' header", 1);
-    expect_assembly_error("nvr 1.6 profile 1\n", "NVR 1.6 is not supported", 1);
+    expect_assembly_error("nvr 1.7 profile 1\n", "NVR 1.7 is not supported", 1);
     expect_assembly_error("nvr 1.0 profile 2\n", "only graph profile 1", 1);
     expect_assembly_error("nvr 1.0 profile 1\nentry 0\ntype 1 void\n", "type 1 appears where type 0 belongs", 3);
     expect_assembly_error("nvr 1.0 profile 1\nentry 0\ntype 0 complex\n", "unknown type kind 'complex'", 3);
@@ -185,7 +185,9 @@ NEURA_TEST(lift, lifted_operations_match_the_source) {
     const auto image = build_program({backend_dir(environment) / "fixtures" / "shared-multiplier.nra"});
     const auto text = decompiler::decompile(image).text;
     check(text.find(" * ") != std::string::npos, "the shared multiplication is lifted:\n" + text);
-    const auto both = build_program({backend_dir(environment) / "fixtures" / "both.nra"});
+    // Built as written: the optimizer inlines `both(true, true)` and folds it,
+    // which leaves no conjunction in the image to lift.
+    const auto both = build_program({backend_dir(environment) / "fixtures" / "both.nra"}, {}, false);
     const auto both_text = decompiler::decompile(both).text;
     check(both_text.find("&&") != std::string::npos, "the conjunction is lifted:\n" + both_text);
     const auto loops = build_program({program_path(environment, "loops")});

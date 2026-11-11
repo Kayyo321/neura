@@ -138,18 +138,17 @@ let maps = import:Std.Collections.HashMap;
 ]=])
 function(check_rejection name declarations body location message_pattern)
     file(WRITE "${TEST_DIR}/${name}.nra" "${prelude}${declarations}export let Main = module : program.Entry (\n    export let.override main = func(arguments: string[]) -> program.ExitCode {\n${body}        return program.ExitCode.Ok;\n    };\n);\n")
-    neura(check check "${name}.nra")
-    string(FIND "${check_stderr}" "${name}.nra:${location}: error: " at)
-    if(check_status STREQUAL "0" OR at EQUAL -1 OR NOT check_stderr MATCHES "${message_pattern}")
+    neura(check check --error-format=short "${name}.nra")
+    if(check_status STREQUAL "0" OR NOT check_stderr MATCHES "${name}[.]nra:${location}: error(\\[[EW][0-9]+\\])?: " OR NOT check_stderr MATCHES "${message_pattern}")
         message(FATAL_ERROR "${name}: expected a diagnostic at ${location} matching '${message_pattern}'\n${check_stderr}")
     endif()
 endfunction()
 check_rejection(worker_prints "let noisy = func(x: int) -> int { console.print_line(\"x\"); return x; };\n"
     "        let out = parallel.map<int, int>([1, 2], noisy, parallel.limits(1000, 1000));\n"
-    "9:19" "must compute in isolation: it reaches 'noisy' \\(called at worker_prints.nra:9:50\\), and it reaches 'print_line' [^\n]*issues a host request")
+    "9:19" "the worker of a parallel map must compute in isolation: it reaches '[a-z_]+', which issues a host request")
 check_rejection(worker_writes_global "let hits: int = 0;\nlet counting = func(x: int) -> int { hits = hits + 1; return x; };\n"
     "        let out = parallel.map<int, int>([1, 2], counting, parallel.limits(1000, 1000));\n"
-    "10:19" "is not task-safe: it reaches 'counting' [^\n]*uses the reassignable binding 'hits'")
+    "10:19" "the worker of a parallel map is not task-safe: it reaches 'counting', which uses the reassignable binding 'hits'")
 check_rejection(worker_spawns "let nested = func(x: int) -> int { scope { let t = spawn nested(x); } return x; };\n"
     "        let out = parallel.map<int, int>([1, 2], nested, parallel.limits(1000, 1000));\n"
     "9:19" "must compute in isolation: [^\n]*starts or scopes tasks")

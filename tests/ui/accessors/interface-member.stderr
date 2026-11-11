@@ -1,0 +1,12 @@
+error[E0519]: an interface cannot declare accessors
+ --> $DIR/interface-member.nra:4:9
+  |
+3 |     let size = func -> int;
+  |         ---- 'size' is an interface member
+4 |         | get: 0;
+  |         ^^^^^^^^^ accessor clause in an interface
+  |
+  = note: interfaces cannot require accessors in this release
+  = help: declare the accessors on the field of a class that implements the interface, or require a method instead
+
+For more information about this error, try `neura explain E0519`.

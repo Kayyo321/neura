@@ -1,0 +1,6 @@
+// A local binding without a value (E0404): the help shows where the value
+// goes, with a placeholder.
+let count = func() -> int {
+    let total: int;
+    return 0;
+};

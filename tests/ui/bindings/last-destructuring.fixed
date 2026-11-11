@@ -1,0 +1,10 @@
+// `last` declares one name, so it cannot destructure (E0536); the fix
+// declares the names with `const`.
+let Counter = class (
+    export let count: int = 0;
+);
+
+let total = func() -> int {
+    const [first, second]: [Counter, Counter] = new, new;
+    return first.count + second.count;
+};

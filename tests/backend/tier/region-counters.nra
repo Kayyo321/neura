@@ -1,0 +1,60 @@
+// Counters at the top and bottom of their types, for the overflow checks a
+// tier 2 region removes (docs/runtime/NVM.md, "Execution tiers"): `i < n`
+// shows that `i + 1` cannot overflow, so the region does not check it;
+// `i <= n` does not, so with n at the type's largest value the increment
+// traps, at every tier, after the same steps. The arguments are the
+// distance below the largest value at which each loop starts and whether
+// the last, trapping, loop runs (1) or not (0).
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let RegionCounters = module:program.Entry (
+    let up = func(start: int32, limit: int32) -> int32 {
+        let count = 0;
+        for (let i = start; i < limit; i = i + 1) {
+            count = count + 1;
+        }
+        return count;
+    };
+
+    let down = func(start: int64, limit: int64) -> int64 {
+        let count: int64 = 0;
+        for (let i = start; i > limit; i = i - 1) {
+            count = count + 1;
+        }
+        return count;
+    };
+
+    let unsigned_up = func(start: uint8, limit: uint8) -> int32 {
+        let count = 0;
+        for (let i = start; i < limit; i = i + 1) {
+            count = count + 1;
+        }
+        return count;
+    };
+
+    let inclusive = func(start: int32, limit: int32) -> int32 {
+        let count = 0;
+        for (let i = start; i <= limit; i = i + 1) {
+            count = count + 1;
+        }
+        return count;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let distance = result.value_or<int32>(int32s.parse(args[0]), 10);
+        let trap = result.value_or<int32>(int32s.parse(args[1]), 0);
+        let top: int32 = 2147483647;
+        console.println("up {}", up(top - distance, top));
+        let bottom: int64 = -9223372036854775807 - 1;
+        console.println("down {}", down(bottom + (distance as int64), bottom));
+        console.println("unsigned {}", unsigned_up((255 - distance % 200) as uint8, 255 as uint8));
+        if (trap == 1) {
+            console.println("inclusive {}", inclusive(top - distance, top));
+        }
+        return program.ExitCode.Ok;
+    };
+);

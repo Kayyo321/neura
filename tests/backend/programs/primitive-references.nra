@@ -31,7 +31,7 @@ let Counter = class (
         } else {
             instance.alias = backing;
         }
-    }
+    };
 
     export let read = func -> int => backing;
 );
@@ -40,7 +40,7 @@ let Derived = class:Counter (
     export let init = func(seed: int) {
         super.init(seed, true);
         seed += 2;
-    }
+    };
 );
 
 let PrivateStorage = module (
@@ -104,10 +104,10 @@ let App = module:program.Entry (
         let private_alias: &int = HiddenStorage.borrow();
         private_alias += 1;
         console.print_line(private_alias.to_string());
-    }
+    };
 
     export let.override main = func(args: string[]) -> program.ExitCode {
         exercise();
         return program.ExitCode.Ok;
-    }
+    };
 );

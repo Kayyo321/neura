@@ -18,6 +18,7 @@
 - [Collections](Collections)
 - [Object lifecycle](ObjectLifecycle)
 - [Polymorphism](Polymorphism)
+- [Tags](Tags)
 - [Errors](Errors)
 - [Testing](Testing)
 - [Resources and concurrency](ResourcesConcurrency)
@@ -25,6 +26,7 @@
 - [GPU execution](GpuExecution)
 - [Foreign interop](ForeignInterop)
 - [Project structure](ProjectStructure)
+- [Diagnostic codes](Diagnostics)
 
 **Standard library**
 
@@ -40,6 +42,8 @@
 - [NeuraIR format](NirFormat)
 - [NVR format](NVR)
 - [Neura Virtual Machine](NVM)
+- [Kernels](Kernels)
+- [Wall-clock benchmarks](Benchmarks)
 - [Decompiler](Decompiler)
 - [Release checklist](Release)
 

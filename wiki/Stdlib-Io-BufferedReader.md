@@ -17,24 +17,24 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **BufferedReader** · [`export const DefaultCapacity: int = 8192`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L12)
+- **BufferedReader** · [`export const DefaultCapacity: int = 8192`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L13)
   The default buffer capacity in bytes.
-- **BufferedReader** · [`export const MinimumCapacity: int = 16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L14)
+- **BufferedReader** · [`export const MinimumCapacity: int = 16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L15)
   The smallest supported buffer capacity in bytes.
-- **BufferedReader** · [`export let BufferedReader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L17)
-  Wraps a byte source and retains unread bytes between reads.
-- **BufferedReader.BufferedReader** · [`export let init = func(input: func(int) -> Result<uint8[list]>, size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L28)
+- **BufferedReader** · [`export let BufferedReader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L19)
+  Wraps a byte source and retains unread bytes between reads. Tagged `#Final`, `#NotThreadSafe`.
+- **BufferedReader.BufferedReader** · [`export let init = func(input: func(int) -> Result<uint8[list]>, size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L30)
   Use create or with_capacity.
-- **BufferedReader.BufferedReader** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L37)
-  Up to `max` bytes, at least one unless the source has ended. A maximum below 1 traps.
-- **BufferedReader.BufferedReader** · [`export let read_exact = func(count: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L67)
-  Exactly `count` bytes; the source ending first fails with UnexpectedEnd. A negative count traps.
-- **BufferedReader.BufferedReader** · [`export let read_all = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L89)
-  Every remaining byte.
-- **BufferedReader** · [`export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L112)
-  A reader holding up to 8,192 bytes.
-- **BufferedReader** · [`export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L116)
-  A capacity below 16 traps with "invalid argument: capacity below 16".
+- **BufferedReader.BufferedReader** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L40)
+  Up to `max` bytes, at least one unless the source has ended. A maximum below 1 traps. Tagged `#NoDiscard`.
+- **BufferedReader.BufferedReader** · [`export let read_exact = func(count: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L71)
+  Exactly `count` bytes; the source ending first fails with UnexpectedEnd. A negative count traps. Tagged `#NoDiscard`.
+- **BufferedReader.BufferedReader** · [`export let read_all = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L94)
+  Every remaining byte. Tagged `#NoDiscard`.
+- **BufferedReader** · [`export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L118)
+  A reader holding up to 8,192 bytes. Tagged `#Pure`, `#ThreadSafe`.
+- **BufferedReader** · [`export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L123)
+  A capacity below 16 traps with "invalid argument: capacity below 16". Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -50,7 +50,7 @@ The following sections are taken from the [standard library specification](Stdli
 | `print_line(s: string)` | Writes the text and one LF through `neura.console.write_line`. A failed write traps with `console write failed`. | F1 for the message |
 | `try_print_line(s: string) → Result<Unit>` | The same write, returning the failure. | |
 | `write(s)`, `error_line(s)`, and their `try_` forms | Write raw text through `neura.console.write`, to output or to the error stream. | T1 (text to bytes) |
-| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](https://github.com/Kayyo321/neura/wiki/StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
+| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
 | `print`, `println`, `eprint`, `eprintln`, and their `try_` forms | Format first and then write to output or to the error stream. The newline forms append one LF. | T1, P2 |
 | `read_line() → Result<Optional<string>>` | A line without its terminator; `None` at the end of input. | T1 |
 | `output() → ByteSink`, `error() → ByteSink`, `input() → ByteSource` | The console as streams. | |
@@ -69,9 +69,9 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 | Class | Behavior | Needs |
 | --- | --- | --- |
-| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, `size()`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
+| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, the read-only field `size`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
 | `BufferedReader` | Built from a `ByteSource`. Holds up to 8,192 bytes (configurable, at least 16). `read` is a `ByteSource`; `read_exact(count) → Result<uint8[list]>` fails with kind `UnexpectedEnd`; `read_all()`. | None |
-| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`. It does not close anything. | None |
+| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`; the read-only field `buffered` is the number of bytes waiting. It does not close anything. | None |
 | `Utf8Reader` | Built from a `ByteSource`. `read_scalar() → Result<Optional<uint32>>`, `read_line() → Result<Optional<string>>`, `read_to_end() → Result<string>`. Invalid UTF-8 fails with kind `InvalidData`. | T1 |
 | `Utf8Writer` | Built from a `ByteSink`. `write` is a `TextSink`; `write_line(s)` adds one LF. | T1 |
 

@@ -1,0 +1,28 @@
+error[E0202]: expected ':'
+ --> $DIR/several-errors.nra:4:22
+  |
+4 | let scale = func(int value) -> int => value * 2;
+  |                      ^^^^^ expected ':', found 'value'
+
+error[E0204]: expected an expression
+ --> $DIR/several-errors.nra:5:20
+  |
+5 | let count: int32 = ;
+  |                    ^ expected an expression, found ';'
+
+error[E0202]: expected an identifier
+ --> $DIR/several-errors.nra:6:5
+  |
+6 | let in = 3;
+  |     ^^ 'in' is a keyword
+
+error[E0205]: expected a type annotation or an initializer
+ --> $DIR/several-errors.nra:8:20
+  |
+8 |     export let size;
+  |                    ^ 'size' needs a type, a value, or both
+  |
+  = help: write ': T' after the name for its type, and '= value' for its value
+
+Some errors have detailed explanations: E0202, E0204, E0205.
+For more information about an error, try `neura explain E0202`.

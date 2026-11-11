@@ -22,6 +22,7 @@ summary = "Every document in the Neura repository, rendered from the main branch
 # links lead to the published document in docs/ with the same name.
 [wiki]
 Stdlib-Design = "docs/lang/Stdlib.md"
+Diagnostics = "docs/diagnostics/README.md"
 
 [[sections]]
 title = "Start here"
@@ -45,6 +46,7 @@ pages = [
   { source = "docs/lang/Collections.md", label = "Collections" },
   { source = "docs/lang/ObjectLifecycle.md", label = "Object lifecycle" },
   { source = "docs/lang/Polymorphism.md", label = "Polymorphism" },
+  { source = "docs/lang/Tags.md", label = "Tags" },
   { source = "docs/lang/Errors.md", label = "Errors" },
   { source = "docs/lang/Testing.md", label = "Testing" },
   { source = "docs/lang/ResourcesConcurrency.md", label = "Resources and concurrency" },
@@ -75,6 +77,15 @@ pages = [
   { source = "docs/Decompiler.md", label = "Decompiler", plate = "eye-scan" },
 ]
 
+# The explain page of every diagnostic code, after the index.
+[[sections]]
+title = "Diagnostic codes"
+plate = "caliper"
+pages = [
+  { source = "docs/diagnostics/README.md", label = "Index of codes" },
+]
+modules = "docs/diagnostics/[EW]*.md"
+
 [[sections]]
 title = "Compiler and circuits"
 plate = "neuron-slide"
@@ -92,6 +103,8 @@ plate = "tape"
 pages = [
   { source = "docs/runtime/NVM.md", label = "Neura Virtual Machine" },
   { source = "docs/runtime/NVR.md", label = "NVR format" },
+  { source = "docs/runtime/Kernels.md", label = "Kernels" },
+  { source = "docs/Benchmarks.md", label = "Wall-clock benchmarks" },
 ]
 
 [[sections]]

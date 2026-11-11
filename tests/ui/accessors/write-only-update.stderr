@@ -1,0 +1,13 @@
+error[E0515]: 'level' is write-only outside its class
+ --> $DIR/write-only-update.nra:7:1
+  |
+4 |         | set: level = value;
+  |         --------------------- 'level' declares only a setter
+...
+7 | sink.level += 2;
+  | ^^^^^^^^^^ this updates 'level', which reads it first
+  |
+  = note: 'level' has no 'get' accessor, so code outside 'Sink' can assign it but not update it
+  = help: assign a new value with '=', or add a getter such as '| get: level;'
+
+For more information about this error, try `neura explain E0515`.

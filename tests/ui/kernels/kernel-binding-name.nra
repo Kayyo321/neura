@@ -1,0 +1,4 @@
+// A kernel binding whose name is not a string (E0783).
+export let Hashes = module (
+    export let crc32 = func(bytes: uint8[list]) -> uint32 kernel(crc32, 1);
+);

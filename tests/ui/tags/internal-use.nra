@@ -1,0 +1,7 @@
+// An #Internal declaration used outside its library (E0911). The library is
+// acme/core.nra (in internal-use.files), whose directory is the library; this
+// file is outside it. Its exported, non-internal member stays usable.
+let core = import:Acme.Core;
+
+let total: int32 = core.total();
+let raw: int32 = core.raw_total();

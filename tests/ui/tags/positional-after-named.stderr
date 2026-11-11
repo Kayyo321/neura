@@ -1,0 +1,9 @@
+error[E0902]: a positional argument of #Deprecated follows a named one
+ --> $DIR/positional-after-named.nra:2:29
+  |
+2 | #Deprecated(as_of: "0.1.0", "it rounds")
+  |                             ^^^^^^^^^^^ positional argument after a named argument
+  |
+  = help: name it, or move it before the named arguments
+
+For more information about this error, try `neura explain E0902`.

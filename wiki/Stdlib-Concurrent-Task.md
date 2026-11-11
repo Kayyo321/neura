@@ -19,16 +19,12 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Task** · [`export let Task = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L6)
-  A call running as a task, or its result once the call has returned.
-- **Task.Task** · [`export let join = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L15)
+- **Task** · [`export let Task = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L8)
+  A call running as a task, or its result once the call has returned. Tagged `#Final`.
+- **Task.Task** · [`export let join = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L17)
   Waits until the task has finished and returns its result. Joining again returns the same value. A join is never cancelled.
-- **Task.Task** · [`export let is_finished = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L18)
+- **Task.Task** · [`export let is_finished = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L20)
   Whether the task has finished. Never waits.
-- **Task.Task** · [`export let select_handle = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L21)
-  What a select waits on for this task. Used by the select statement.
-- **Task.Task** · [`export let join_selected = func(code: uint32) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L24)
-  The result of a join that a select committed. Used by the select statement.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

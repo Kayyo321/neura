@@ -73,17 +73,17 @@ let StreamsTests = module (
 
     export let test_byte_buffer_collects_and_copies = func() -> void {
         let buffer = byte_buffer.create();
-        test.assert_equal_int32(0, buffer.size());
+        test.assert_equal_int32(0, buffer.size);
         let sink = buffer.write;
         test.assert_ok<unit.Unit>(sink(bytes_of("abc")));
         test.assert_ok<unit.Unit>(buffer.write(bytes_of("de")));
-        test.assert_equal_int32(5, buffer.size());
+        test.assert_equal_int32(5, buffer.size);
         let copy = buffer.to_list();
         copy[0] = 90;
         test.assert_equal_string("abcde", text_of(buffer.to_list()));
         let source = buffer.reader();
         buffer.clear();
-        test.assert_equal_int32(0, buffer.size());
+        test.assert_equal_int32(0, buffer.size);
         test.assert_equal_string("ab", text_of(test.assert_ok<uint8[list]>(source(2))));
         test.assert_equal_string("cde", text_of(test.assert_ok<uint8[list]>(source(10))));
         test.assert_equal_int32(0, test.assert_ok<uint8[list]>(source(4)).length);
@@ -163,16 +163,16 @@ let StreamsTests = module (
         let target = byte_buffer.create();
         let writer = buffered_writer.with_capacity(target.write, 16);
         test.assert_ok<unit.Unit>(writer.write(bytes_of("0123456789")));
-        test.assert_equal_int32(0, target.size());
-        test.assert_equal_int32(10, writer.buffered());
+        test.assert_equal_int32(0, target.size);
+        test.assert_equal_int32(10, writer.buffered);
         test.assert_ok<unit.Unit>(writer.write(bytes_of("abcdef")));
-        test.assert_equal_int32(0, target.size());
+        test.assert_equal_int32(0, target.size);
         // The buffer would overflow: its 16 bytes pass on first.
         test.assert_ok<unit.Unit>(writer.write(bytes_of("x")));
-        test.assert_equal_int32(16, target.size());
+        test.assert_equal_int32(16, target.size);
         // A write of at least the capacity follows the buffered bytes.
         test.assert_ok<unit.Unit>(writer.write(numbers(20)));
-        test.assert_equal_int32(37, target.size());
+        test.assert_equal_int32(37, target.size);
         test.assert_ok<unit.Unit>(writer.write(bytes_of("yz")));
         test.assert_ok<unit.Unit>(writer.flush());
         test.assert_ok<unit.Unit>(writer.flush());
@@ -186,13 +186,13 @@ let StreamsTests = module (
         let target = byte_buffer.create();
         let writer = buffered_writer.create(target.write);
         test.assert_ok<unit.Unit>(writer.write(numbers(8192)));
-        test.assert_equal_int32(8192, target.size());
+        test.assert_equal_int32(8192, target.size);
         let failing = buffered_writer.with_capacity(func(data: uint8[list]) -> result.Result<unit.Unit> {
             return result.Result<unit.Unit>.Err(error.custom("test.sink", "sink failed"));
         }, 16);
         test.assert_ok<unit.Unit>(failing.write(bytes_of("abc")));
         test.assert_err<unit.Unit>(failing.flush());
-        test.assert_equal_int32(0, failing.buffered());
+        test.assert_equal_int32(0, failing.buffered);
         test.assert_err<unit.Unit>(failing.write(numbers(16)));
     };
 

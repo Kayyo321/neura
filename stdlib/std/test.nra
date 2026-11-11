@@ -8,8 +8,10 @@ let.promote _ = import:Std.Core.Result;
 /// Each builds its message in Neura and traps through Failure.trap; the runner reports the message at the
 /// failing assertion's call site in the test file.
 /// @see [Std.Test](https://github.com/Kayyo321/neura/wiki/Stdlib-Test)
+#Since("0.1.0")
 export let Test = module (
     /// @brief Traps with the default assertion diagnostic when the condition is false.
+    #[Pure, ThreadSafe]
     export let assert = func(condition: bool) {
         if (!condition) {
             failure.trap("assertion failed");
@@ -17,6 +19,7 @@ export let Test = module (
     };
 
     /// @brief Traps with the supplied diagnostic when the condition is false.
+    #[Pure, ThreadSafe]
     export let assert_with = func(condition: bool, message: string) {
         if (!condition) {
             failure.trap(message);
@@ -24,6 +27,7 @@ export let Test = module (
     };
 
     /// @brief Fails the current test with the supplied diagnostic.
+    #[Pure, ThreadSafe]
     export let fail = func(message: string) => failure.trap(message);
 
     /// @brief Formats the expected and actual values for an equality failure.
@@ -31,6 +35,7 @@ export let Test = module (
         failure.trap("expected <" + expected + ">, got <" + actual + ">");
 
     /// @brief Checks exact signed 32-bit equality.
+    #[Pure, ThreadSafe]
     export let assert_equal_int32 = func(expected: int32, actual: int32) {
         if (expected != actual) {
             mismatch(expected.to_string(), actual.to_string());
@@ -38,6 +43,7 @@ export let Test = module (
     };
 
     /// @brief Checks exact signed 64-bit equality.
+    #[Pure, ThreadSafe]
     export let assert_equal_int64 = func(expected: int64, actual: int64) {
         if (expected != actual) {
             mismatch(expected.to_string(), actual.to_string());
@@ -45,6 +51,7 @@ export let Test = module (
     };
 
     /// @brief Checks exact unsigned 64-bit equality.
+    #[Pure, ThreadSafe]
     export let assert_equal_uint64 = func(expected: uint64, actual: uint64) {
         if (expected != actual) {
             mismatch(expected.to_string(), actual.to_string());
@@ -52,6 +59,7 @@ export let Test = module (
     };
 
     /// @brief Checks that both Boolean values agree.
+    #[Pure, ThreadSafe]
     export let assert_equal_bool = func(expected: bool, actual: bool) {
         if (expected != actual) {
             mismatch(expected.to_string(), actual.to_string());
@@ -59,6 +67,7 @@ export let Test = module (
     };
 
     /// @brief Checks that both strings contain the same UTF-8 bytes.
+    #[Pure, ThreadSafe]
     export let assert_equal_string = func(expected: string, actual: string) {
         if (expected != actual) {
             mismatch(expected, actual);
@@ -67,6 +76,7 @@ export let Test = module (
 
     /// @brief Equal bit patterns, except that every NaN equals every NaN; 0.0 and -0.0 differ (Stdlib.md
     /// section 5.2).
+    #[Pure, ThreadSafe]
     export let assert_equal_float64 = func(expected: float64, actual: float64) {
         if (!(expected === actual)) {
             mismatch(expected.to_string(), actual.to_string());
@@ -74,6 +84,7 @@ export let Test = module (
     };
 
     /// @brief Fails when the absolute difference exceeds the tolerance or either value is NaN.
+    #[Pure, ThreadSafe]
     export let assert_float_near = func(expected: float64, actual: float64, tolerance: float64) {
         let difference = expected - actual;
         if (difference < 0.0) {

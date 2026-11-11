@@ -1,0 +1,6 @@
+// A deferred `last` binding with neither a type nor a value (E0444).
+let make = func() -> int {
+    last base;
+    base = 1;
+    return base;
+};

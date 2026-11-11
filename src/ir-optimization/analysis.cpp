@@ -1,5 +1,6 @@
 #include "analysis.hpp"
 
+#include "neura-ir/attributes.hpp"
 #include "neura-ir/control_flow.hpp"
 #include "neura-ir/integer.hpp"
 
@@ -36,8 +37,10 @@ bool pure_and_total(const IrProgram& program, const IrNode& node) {
         if (!node.operands.empty() || node.symbol >= program.symbols.size()) {
             return false;
         }
-        const auto kind = program.symbols[node.symbol].kind;
-        return kind == SymbolKind::Local || kind == SymbolKind::Parameter;
+        // A deferred binding's load traps until its first store.
+        const auto& target = program.symbols[node.symbol];
+        return (target.kind == SymbolKind::Local || target.kind == SymbolKind::Parameter) &&
+               !deferred_binding(target);
     }
     case IrOp::Unary:
         return (node.text == "!" || node.text == "~") && all_operands(node.operands);

@@ -1,0 +1,19 @@
+// The setter-never-stores warning (W0005) follows #Allow and #Deny: by name
+// on the field, with `_` for `-`, and by code on the class.
+let Quiet = class (
+    #Allow(setter_never_stores)
+    export let level: int32 = 0;
+        | get: level;
+        | set: {
+            let ignored = value;
+        };
+);
+
+#Deny(W0005)
+let Strict = class (
+    export let level: int32 = 0;
+        | get: level;
+        | set: {
+            let ignored = value;
+        };
+);

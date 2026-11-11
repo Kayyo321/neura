@@ -49,6 +49,42 @@ struct IrHostBinding {
 
 enum class VariadicKind { None, Typed, Untyped };
 
+// NeuraIR 1.10 symbol attributes: typed, registered facts about a declaration
+// that later stages or a downstream compilation need. attributes.def is the
+// registry (stable ids, the symbol kinds that may carry each one, and its
+// payload schema); attributes.hpp is the API to attach, find, and check them.
+enum class AttributeId : std::uint16_t {
+#define NEURA_ATTRIBUTE(identifier, id, name, kinds, repeats, schema) identifier = id,
+#include "attributes.def"
+#undef NEURA_ATTRIBUTE
+};
+
+// The kinds of attribute payload values, in .nir tag order.
+enum class AttributeValueKind : std::uint8_t { Bool, Signed, Unsigned, Text, Symbol, Type, Span, List };
+
+// A small tagged value tree. Only the fields of `kind` are meaningful, and
+// equality and the .nir encoding consider only those: Bool, Signed (two's
+// complement), and Unsigned use `integer`; Text uses `text`; Symbol uses
+// `symbol`; Type uses `type`; Span uses `span`; List uses `items`.
+struct IrAttributeValue {
+    AttributeValueKind kind = AttributeValueKind::Bool;
+    std::uint64_t integer = 0;
+    std::string text{};
+    SymbolId symbol = no_symbol;
+    IrType type{};
+    Span span{};
+    std::vector<IrAttributeValue> items{};
+};
+
+bool operator==(const IrAttributeValue& a, const IrAttributeValue& b);
+
+struct IrAttribute {
+    AttributeId id;
+    IrAttributeValue value;
+
+    bool operator==(const IrAttribute&) const = default;
+};
+
 struct IrSymbol {
     SymbolKind kind;
     std::string name;
@@ -78,6 +114,8 @@ struct IrSymbol {
     VariadicKind variadic = VariadicKind::None;
     bool user_cast = false;
     SymbolId singleton_instance = no_symbol;
+    // NeuraIR 1.10. Registered attributes in the order they were attached.
+    std::vector<IrAttribute> attributes{};
 };
 
 // Class-owned namespace for class-level storage and receiver-free functions.
@@ -147,7 +185,29 @@ struct IrNode {
     // taken, and on a Call, VirtualCall, or CallClosure when the call is
     // made. insert_polls sets it across a program that contains a Spawn.
     bool poll = false;
+    // One plus the index in IrProgram::inline_sites of the call that the
+    // optimizer inlined this node from, or 0 for a node that was not inlined.
+    std::uint32_t inline_site = 0;
 };
+
+// A call the optimizer replaced with a copy of the callee's body. `parent`
+// is the site of the call itself (one plus its index), or 0 when the call was
+// written in `caller`, so the chain of sites gives the original caller chain.
+struct IrInlineSite {
+    SymbolId callee;
+    SymbolId caller;
+    Span call;
+    std::uint32_t parent = 0;
+};
+
+// NeuraIR 1.10. An Initialize with no operand declares a local without a
+// value: its slot exists but holds nothing until the first store, and a read
+// before that store traps. The local must carry binding.last with deferred
+// set (attributes.hpp); the frontend's definite-assignment analysis, not the
+// verifier, guarantees that every read follows a store.
+inline bool is_deferred_initialize(const IrNode& node) {
+    return node.op == IrOp::Initialize && node.operands.empty();
+}
 
 struct IrBody {
     SymbolId owner;
@@ -188,13 +248,17 @@ struct IrProgram {
     std::vector<IrNativeUnit> native_units{};
     // The linked native library, when the program has C imports.
     std::optional<IrNativeLibrary> native_library{};
+    // Calls inlined by the optimizer; empty before optimization and not part
+    // of a .nir file, which holds IR as lowered.
+    std::vector<IrInlineSite> inline_sites{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.
 class MissingPrimitiveWrapper : public Diagnostic {
 public:
+    // diagnostic-code: none: forwards to Diagnostic; each throw site gives the code.
     MissingPrimitiveWrapper(const Span& span, std::string message, std::string path)
-        : Diagnostic(span, std::move(message)), path(std::move(path)) {}
+        : Diagnostic(span, std::move(message)), path(std::move(path)) {} // diagnostic-code: none: as above
 
     std::string path;
 };

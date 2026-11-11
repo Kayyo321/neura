@@ -15,13 +15,13 @@ let IntRangeTests = module (
 
     export let test_accessors = func() -> void {
         let r = ranges.stepped(1, 10, 3);
-        test.assert_equal_int32(1, r.start());
-        test.assert_equal_int32(10, r.end());
-        test.assert_equal_int32(3, r.step());
+        test.assert_equal_int32(1, r.start);
+        test.assert_equal_int32(10, r.end);
+        test.assert_equal_int32(3, r.step);
         let s = ranges.of(-2, 2);
-        test.assert_equal_int32(-2, s.start());
-        test.assert_equal_int32(2, s.end());
-        test.assert_equal_int32(1, s.step());
+        test.assert_equal_int32(-2, s.start);
+        test.assert_equal_int32(2, s.end);
+        test.assert_equal_int32(1, s.step);
     };
 
     export let test_value_members = func {

@@ -19,21 +19,21 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **WorkerGroup** · [`export let SubmitOutcome = enum (Submitted, Closed, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L11)
+- **WorkerGroup** · [`export let SubmitOutcome = enum (Submitted, Closed, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L12)
   What submit reports. Closure and cancellation are expected events, not errors.
-- **WorkerGroup** · [`export let TrySubmitOutcome = enum (Submitted, Full, Closed)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L14)
+- **WorkerGroup** · [`export let TrySubmitOutcome = enum (Submitted, Full, Closed)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L15)
   What try_submit reports.
-- **WorkerGroup** · [`export let WorkerGroup = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L18)
-  The handle through which a body gives a group its jobs. It holds channel ends, so it can be given to a task. A job is a value of the transferable type T.
-- **WorkerGroup.WorkerGroup** · [`export let init = func(jobs: channels.Sender<T>, closing: channels.Closer<T>, stops: channels.Receiver<int>, worker_count: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L26)
+- **WorkerGroup** · [`export let WorkerGroup = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L20)
+  The handle through which a body gives a group its jobs. It holds channel ends, so it can be given to a task. A job is a value of the transferable type T. Tagged `#Final`, `#ThreadSafe`.
+- **WorkerGroup.WorkerGroup** · [`export let init = func(jobs: channels.Sender<T>, closing: channels.Closer<T>, stops: channels.Receiver<int>, worker_count: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L28)
   Wraps the ends of a group's channels. Use with_workers.
-- **WorkerGroup.WorkerGroup** · [`export let submit = func(job: T) -> SubmitOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L37)
+- **WorkerGroup.WorkerGroup** · [`export let submit = func(job: T) -> SubmitOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L39)
   Queues the job. Waits while the queue is full. Reports Closed once close_and_drain has closed the queue, and Cancelled when the submitting task is cancelled while it waits; the job is then not queued.
-- **WorkerGroup.WorkerGroup** · [`export let try_submit = func(job: T) -> TrySubmitOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L44)
+- **WorkerGroup.WorkerGroup** · [`export let try_submit = func(job: T) -> TrySubmitOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L46)
   Queues the job if there is room. Never waits, so a service that must shed load counts Full.
-- **WorkerGroup.WorkerGroup** · [`export let close_and_drain = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L54)
+- **WorkerGroup.WorkerGroup** · [`export let close_and_drain = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L56)
   Closes the queue and returns once every queued job has been processed and every worker has stopped. Later submissions report Closed. Call it from one task; on this handle a second call returns at once. If the calling task is cancelled while it waits, it returns early and with_workers waits for the workers instead.
-- **WorkerGroup** · [`export let with_workers = func<T>(workers: int, capacity: int, work: func(T) -> void, body: func(WorkerGroup<T>) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L80)
+- **WorkerGroup** · [`export let with_workers = func<T>(workers: int, capacity: int, work: func(T) -> void, body: func(WorkerGroup<T>) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L82)
   Starts `workers` tasks that take jobs from a queue of `capacity` jobs and run `work` on each; runs `body` with the group; then closes the queue, lets the workers finish every queued job, and returns once they have stopped. A worker also stops when its scope is cancelled, leaving queued jobs unprocessed; the jobs it was running finish first. T must be transferable and `work` task-safe, with transferable captures, as for any spawn. Fewer than one worker or a negative capacity traps with `invalid argument: workers` or `invalid argument: capacity`.
 <!-- END SOURCE API -->
 

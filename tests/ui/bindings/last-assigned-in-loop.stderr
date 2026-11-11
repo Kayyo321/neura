@@ -1,0 +1,13 @@
+error[E0442]: 'found' is assigned inside a loop
+ --> $DIR/last-assigned-in-loop.nra:5:9
+  |
+3 |     last found: int;
+  |          ----- declared outside the loop here
+4 |     for (let value: int in values) {
+  |     --- the loop that can repeat it
+5 |         found = value;
+  |         ^^^^^ this assignment could run more than once
+  |
+  = help: assign 'found' once, before or after the loop, or declare it with 'let', with an initial value, if it should change
+
+For more information about this error, try `neura explain E0442`.

@@ -16,7 +16,17 @@ public:
         ParsedFile result;
         result.file = current().span.file;
         while (!at_end()) {
-            result.statements.push_back(statement());
+            const auto start = cursor_;
+            try {
+                result.statements.push_back(statement());
+            } catch (const Diagnostic& error) {
+                recover(error, start);
+            }
+        }
+        if (!errors_.empty()) {
+            auto first = errors_.front();
+            for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
+            throw first;
         }
         result.untyped_variadic = std::move(untyped_variadic_);
         return result;
@@ -25,6 +35,15 @@ public:
 private:
     const std::vector<Token>& tokens_;
     std::size_t cursor_{};
+    // Syntax errors found so far (Tooling.md, Diagnostics): the parser
+    // records an error, skips to the end of the statement or member that
+    // failed, and goes on, up to error_limit() errors.
+    std::vector<Diagnostic> errors_;
+    // Set when skipping after an error reached the end of the file. Later
+    // errors there only restate that something was left open.
+    bool skipped_to_end_ = false;
+    // Set when error_limit() errors have been recorded.
+    bool stopped_ = false;
     unsigned block_depth_ = 0;
     std::optional<Span> untyped_variadic_;
 
@@ -48,13 +67,161 @@ private:
 
     void expect(std::string_view text) {
         if (!match(text)) {
-            throw Diagnostic(current().span, "expected '" + std::string(text) + "'");
+            if (text == ";" && cursor_ > 0) missing_semicolon();
+            expected("'" + std::string(text) + "'", text);
         }
+    }
+
+    // The span just after the previous token, where a missing token belongs.
+    Span after_previous() const {
+        const auto& previous = tokens_[cursor_ - 1].span;
+        Span after{previous.file, previous.line, previous.column, previous.offset + previous.length, 0};
+        // Columns count code points, and lines end as the lexer ends them.
+        const std::string_view text = tokens_[cursor_ - 1].text;
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            const auto c = static_cast<unsigned char>(text[i]);
+            if (c == '\r' || c == '\n') {
+                if (c == '\r' && i + 1 < text.size() && text[i + 1] == '\n') ++i;
+                ++after.line;
+                after.column = 1;
+            } else if ((c & 0xC0) != 0x80) {
+                ++after.column;
+            }
+        }
+        return after;
+    }
+
+    std::string found_text(const Token& token) const {
+        return token.kind == TokenKind::End ? "found the end of the file" : "found '" + token.text + "'";
+    }
+
+    // The index of the unclosed opening delimiter that `close` would end,
+    // searching back from the current token, or none.
+    std::optional<std::size_t> unclosed(std::string_view close) const {
+        const std::string_view open = close == ")" ? "(" : close == "]" ? "[" : close == "}" ? "{" : "";
+        if (open.empty()) return std::nullopt;
+        std::size_t depth = 0;
+        for (auto i = cursor_; i-- > 0;) {
+            if (tokens_[i].kind != TokenKind::Symbol) continue;
+            if (tokens_[i].text == close) {
+                ++depth;
+            } else if (tokens_[i].text == open) {
+                if (depth == 0) return i;
+                --depth;
+            }
+        }
+        return std::nullopt;
+    }
+
+    // Reports that `what` was expected at the current token. When that token
+    // starts a later line (or is the end of the file), the error points just
+    // after the previous token, where the missing text belongs. A missing
+    // closing delimiter is labelled at the delimiter it would close.
+    [[noreturn]] void expected(const std::string& what, std::string_view token = {}) const {
+        const auto& next = current();
+        const bool later_line = cursor_ > 0 &&
+            (next.kind == TokenKind::End || next.span.line > tokens_[cursor_ - 1].span.line);
+        auto error = Diagnostic(later_line ? after_previous() : next.span, "expected " + what).with_code("E0202");
+        const auto open = token.empty() ? std::nullopt : unclosed(token);
+        if (open) error.with_code("E0203");
+        if (later_line) {
+            error.label("expected " + what + " here");
+            error.label(next.span, found_text(next));
+        } else {
+            error.label(next.kind == TokenKind::End ? "expected " + what + " before the end of the file"
+                                                    : "expected " + what + ", " + found_text(next));
+        }
+        if (open) error.label(tokens_[*open].span, "unclosed '" + tokens_[*open].text + "' opened here");
+        throw error;
+    }
+
+    // Records `error` and skips past the statement or member that began at
+    // token `start`: to its terminating ';' at the same depth, to a closing
+    // delimiter of the enclosing construct (which is left for the caller), or
+    // to a keyword that begins the next statement. A speculative parse
+    // never reaches here: it catches errors itself.
+    void recover(const Diagnostic& error, std::size_t start) {
+        // Past the limit, the combined error unwinds through every level.
+        if (stopped_) throw;
+        if (!(skipped_to_end_ && error.span.offset >= tokens_.back().span.offset)) errors_.push_back(error);
+        if (errors_.size() >= error_limit()) {
+            auto first = errors_.front();
+            for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
+            stopped_ = true;
+            throw first;
+        }
+        std::size_t depth = 0;
+        for (auto i = start; i < cursor_; ++i) {
+            if (tokens_[i].kind != TokenKind::Symbol) continue;
+            const auto& text = tokens_[i].text;
+            if (text == "(" || text == "[" || text == "{") ++depth;
+            else if ((text == ")" || text == "]" || text == "}") && depth > 0) --depth;
+        }
+        // A keyword that begins a statement cannot continue this one, and a
+        // ';' outside a for header ends it, even inside an unclosed
+        // delimiter: stop there rather than skip the statements that follow.
+        if (cursor_ > start && current().kind == TokenKind::Keyword && statement_keyword(current().text)) return;
+        if (cursor_ > start && at(";")) {
+            bool header = false;
+            for (auto i = start; i < cursor_ && !header; ++i)
+                header = tokens_[i].kind == TokenKind::Keyword && tokens_[i].text == "for";
+            if (!header) {
+                advance();
+                return;
+            }
+        }
+        if (cursor_ == start && !at_end()) {
+            const auto& text = current().text;
+            if (current().kind == TokenKind::Symbol && (text == "(" || text == "[" || text == "{")) ++depth;
+            advance();
+        }
+        while (!at_end()) {
+            const auto& token = current();
+            if (token.kind == TokenKind::Symbol) {
+                const auto& text = token.text;
+                if (text == "(" || text == "[" || text == "{") {
+                    ++depth;
+                } else if (text == ")" || text == "]" || text == "}") {
+                    if (depth == 0) return;
+                    --depth;
+                } else if (text == ";" && depth == 0) {
+                    advance();
+                    return;
+                }
+            } else if (depth == 0 && cursor_ > start && token.kind == TokenKind::Keyword && statement_keyword(token.text)) {
+                return;
+            }
+            advance();
+        }
+        skipped_to_end_ = true;
+    }
+
+    static bool statement_keyword(std::string_view text) {
+        return text == "let" || text == "const" || text == "export" || text == "static" || text == "return" ||
+               text == "if" || text == "while" || text == "for" || text == "do" || text == "break" ||
+               text == "continue" || text == "destroy";
+    }
+
+    // A missing ';' is reported where it belongs, immediately after the
+    // previous token, with an insertion that `neura check --fix` applies.
+    [[noreturn]] void missing_semicolon(std::string_view note = {}) const {
+        const auto after = after_previous();
+        const auto& next = current();
+        auto error = Diagnostic(after, "expected ';'").with_code("E0201").label("expected ';' here");
+        if (next.span.offset != after.offset)
+            error.label(next.span, next.kind == TokenKind::End ? "found the end of the file" : "found '" + next.text + "'");
+        error.suggest("add the missing ';'", after, ";", Applicability::MachineApplicable);
+        if (!note.empty()) error.note(std::string(note));
+        throw error;
     }
 
     const Token& identifier() {
         if (current().kind != TokenKind::Identifier) {
-            throw Diagnostic(current().span, "expected an identifier");
+            if (current().kind == TokenKind::Keyword) {
+                throw Diagnostic(current().span, "expected an identifier").with_code("E0202")
+                    .label("'" + current().text + "' is a keyword");
+            }
+            expected("an identifier");
         }
         return advance();
     }
@@ -103,6 +270,8 @@ private:
             expect(")");
             expect("->");
             result.arguments.push_back(type());
+        } else if (at_anonymous_class()) {
+            result = anonymous_class();
         } else if (match("class")) {
             result.name = "class";
         } else {
@@ -121,8 +290,89 @@ private:
         }
         result.span = span_from(start);
         if (reference && result.reference)
-            throw Diagnostic(result.span, "a type can have only one reference prefix");
+            throw Diagnostic(result.span, "a type can have only one reference prefix").with_code("E0206");
         result.reference |= reference;
+        return result;
+    }
+
+    // Anonymous classes (Types.md, Anonymous classes). In a type
+    // position, `class` begins a class body only when what follows cannot
+    // continue the umbrella type `class`:
+    //   class ( )            class ( <member> ...
+    //   class implements I, J ( ...
+    //   class : Base ( <member> ...      class : Base implements I ( ...
+    // Bare `class` stays the umbrella type. `class : Base ( )` with an empty
+    // body is not recognized, because `c ? x as class : f()` already means
+    // a conditional expression.
+    // A class member declaration starts at `offset`: the same words that
+    // begin a declaration anywhere, including a contextual `last` binding,
+    // or the '#' of its tags, which no expression starts with.
+    bool at_class_member(std::size_t offset) const { return at_declaration(offset) || next_is(offset, "#"); }
+
+    bool next_keyword(std::size_t offset, std::string_view text) const {
+        if (cursor_ + offset >= tokens_.size()) return false;
+        const auto& token = tokens_[cursor_ + offset];
+        return token.kind == TokenKind::Keyword && token.text == text;
+    }
+
+    bool at_anonymous_class() const {
+        if (!at("class")) return false;
+        if (next_is(1, "(")) return next_is(2, ")") || at_class_member(2);
+        if (next_keyword(1, "implements")) return true;
+        if (!next_is(1, ":")) return false;
+        // A qualified base name, then a body with a member or an
+        // implements clause.
+        std::size_t offset = 2;
+        while (true) {
+            if (cursor_ + offset >= tokens_.size() || tokens_[cursor_ + offset].kind != TokenKind::Identifier)
+                return false;
+            ++offset;
+            if (!next_is(offset, ".")) break;
+            ++offset;
+        }
+        return next_keyword(offset, "implements") || (next_is(offset, "(") && at_class_member(offset + 1));
+    }
+
+    // `class [: Base] [implements I, ...] ( members )` in a type position.
+    // The members use the grammar of a class declaration's body.
+    TypeSyntax anonymous_class() {
+        const auto start = cursor_;
+        expect("class");
+        auto body = std::make_shared<Declaration>();
+        body->kind = Declaration::Kind::Class;
+        if (match(":")) body->base = type();
+        if (match("implements")) {
+            do {
+                body->interfaces.push_back(type());
+            } while (match(","));
+        }
+        expect("(");
+        // A method of the body is a named function wherever the type is
+        // written, as it is in a class declaration at file level.
+        // An error in a member ends the type: the statement that contains
+        // it recovers, and a speculative parse of type arguments sees it.
+        const auto depth = std::exchange(block_depth_, 0u);
+        struct Restore {
+            unsigned& depth;
+            unsigned saved;
+            ~Restore() { depth = saved; }
+        } restore{block_depth_, depth};
+        while (!at_end() && !at(")")) {
+            auto member = tagged_declaration(Declaration::Kind::Class);
+            if (member.cast_target) {
+                auto more_casts = std::exchange(member.overloads, {});
+                body->members.push_back(std::move(member));
+                for (auto& cast : more_casts) body->members.push_back(std::move(cast));
+            } else {
+                body->members.push_back(std::move(member));
+            }
+        }
+        expect(")");
+        body->span = span_from(start);
+        body->name_span = tokens_[start].span;
+        TypeSyntax result{};
+        result.name = "[anonymous class]";
+        result.anonymous = std::move(body);
         return result;
     }
 
@@ -166,6 +416,7 @@ private:
         if (!match("(")) return result;
         if (!at(")")) {
             do {
+                auto parameter_tags = tag_list();
                 const auto& name = identifier();
                 expect(":");
                 const bool variadic = match("...");
@@ -177,8 +428,9 @@ private:
                     parameter_type = type();
                 }
                 if (variadic && at(","))
-                    throw Diagnostic(current().span, "a variadic parameter must be last");
-                result.push_back({name.span, name.text, std::move(parameter_type), variadic});
+                    throw Diagnostic(current().span, "a variadic parameter must be last").with_code("E0207");
+                result.push_back(
+                    {name.span, name.text, std::move(parameter_type), variadic, std::move(parameter_tags)});
             } while (match(","));
         }
         expect(")");
@@ -231,13 +483,16 @@ private:
         result.generics = generic_parameters();
         const bool expression_body = function_body(result, branch_keyword);
         const bool host = !result.has_body && current().kind == TokenKind::Identifier && current().text == "host";
+        const bool kernel = !result.has_body && current().kind == TokenKind::Identifier &&
+                            current().text == "kernel" && tokens_[cursor_ + 1].kind == TokenKind::Symbol &&
+                            tokens_[cursor_ + 1].text == "(";
         if (!result.has_body && current().kind == TokenKind::Identifier && current().text == "scheduler" &&
             tokens_[cursor_ + 1].kind == TokenKind::Symbol && tokens_[cursor_ + 1].text == "(") {
             advance();
             expect("(");
             const auto& operation = current();
             if (operation.kind != TokenKind::String)
-                throw Diagnostic(operation.span, "expected a scheduler operation name");
+                throw Diagnostic(operation.span, "expected a scheduler operation name").with_code("E0213");
             advance();
             expect(")");
             result.scheduler_binding = operation.text.substr(1, operation.text.size() - 2);
@@ -245,23 +500,28 @@ private:
         }
         const bool callback = result.has_body && !expression_body && current().kind == TokenKind::Identifier &&
                               current().text == "callback";
-        if (host || callback) {
+        if (host || callback || kernel) {
             advance();
             expect("(");
             const auto& service = current();
-            if (service.kind != TokenKind::String)
-                throw Diagnostic(service.span, "expected a host service name");
+            if (service.kind != TokenKind::String) {
+                if (kernel) throw Diagnostic(service.span, "expected a kernel name").with_code("E0783");
+                throw Diagnostic(service.span, "expected a host service name").with_code("E0213");
+            }
             advance();
             expect(",");
             const auto& version = current();
             std::uint32_t number = 0;
             const auto end = version.text.data() + version.text.size();
             const auto [next, error] = std::from_chars(version.text.data(), end, number);
-            if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0)
-                throw Diagnostic(version.span, "host service version must be a positive uint32");
+            if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0) {
+                if (kernel)
+                    throw Diagnostic(version.span, "kernel ABI version must be a positive uint32").with_code("E0783");
+                throw Diagnostic(version.span, "host service version must be a positive uint32").with_code("E0213");
+            }
             advance();
             expect(")");
-            auto& binding = host ? result.host_binding : result.host_callback;
+            auto& binding = kernel ? result.kernel_binding : host ? result.host_binding : result.host_callback;
             binding.emplace(service.text.substr(1, service.text.size() - 2), number);
         }
         return expression_body;
@@ -272,7 +532,151 @@ private:
             tokens_[cursor_ + 1].kind == TokenKind::Keyword && tokens_[cursor_ + 1].text == branch_keyword;
     }
 
-    bool at_declaration() const { return at("export") || at("static") || at("let") || at("const"); }
+    bool at_declaration(std::size_t offset = 0) const {
+        return next_keyword(offset, "export") || next_keyword(offset, "static") || next_keyword(offset, "let") ||
+               next_keyword(offset, "const") || at_last_declaration(offset);
+    }
+
+    // `last` is contextual: it starts a declaration only when an identifier
+    // follows, which no expression statement can begin with, so `last = v;`,
+    // `last(x);`, `last.next`, and `last[i] = v;` keep their meaning.
+    bool at_last_declaration(std::size_t offset = 0) const {
+        if (cursor_ + offset + 1 >= tokens_.size()) return false;
+        const auto& word = tokens_[cursor_ + offset];
+        return word.kind == TokenKind::Identifier && word.text == "last" &&
+               tokens_[cursor_ + offset + 1].kind == TokenKind::Identifier;
+    }
+
+    // Tags (docs/lang/Tags.md):
+    //   tags := ( '#' tag | '#' '[' tag (',' tag)* [','] ']' )+
+    //   tag  := Name [ '(' [ arg (',' arg)* [','] ] ')' ]
+    //   arg  := [ident ':'] literal
+    // where a literal is a string, a number, true or false, a qualified
+    // name, or a bracketed list of those. Empty when no '#' is next.
+    std::vector<TagSyntax> tag_list() {
+        std::vector<TagSyntax> result;
+        while (at("#")) {
+            const auto hash = cursor_;
+            advance();
+            if (match("[")) {
+                do {
+                    if (at("]")) break;
+                    result.push_back(tag(cursor_));
+                } while (match(","));
+                expect("]");
+            } else {
+                result.push_back(tag(hash));
+            }
+        }
+        return result;
+    }
+
+    TagSyntax tag(std::size_t start) {
+        if (current().kind != TokenKind::Identifier) {
+            throw Diagnostic(current().span, "expected a tag name").with_code("E0910")
+                .label(current().kind == TokenKind::End ? "expected a tag name before the end of the file"
+                                                        : "expected a tag name, " + found_text(current()))
+                .help("a tag is '#Name' or '#Name(arguments)', such as '#Deprecated(use_instead: \"next\")'");
+        }
+        TagSyntax result{};
+        const auto& name = advance();
+        result.name = name.text;
+        result.name_span = name.span;
+        if (match("(")) {
+            while (!at(")")) {
+                result.arguments.push_back(tag_argument(false));
+                if (!match(",")) break;
+            }
+            expect(")");
+        }
+        result.span = span_from(start);
+        return result;
+    }
+
+    TagArgumentSyntax tag_argument(bool in_list) {
+        TagArgumentSyntax result{};
+        if (!in_list && current().kind == TokenKind::Identifier && next_is(1, ":")) {
+            result.name = current().text;
+            result.name_span = advance().span;
+            advance();
+        }
+        const auto value = cursor_;
+        const bool negative = match("-");
+        const auto& token = current();
+        if (!negative && token.kind == TokenKind::String) {
+            result.kind = TagArgumentSyntax::Kind::String;
+            result.text = decode_string_literal(advance().text);
+        } else if (token.kind == TokenKind::Integer || token.kind == TokenKind::Float) {
+            result.kind = token.kind == TokenKind::Integer ? TagArgumentSyntax::Kind::Integer
+                                                           : TagArgumentSyntax::Kind::Float;
+            result.text = (negative ? "-" : "") + advance().text;
+        } else if (!negative && (at("true") || at("false"))) {
+            result.kind = TagArgumentSyntax::Kind::Boolean;
+            result.text = advance().text;
+        } else if (!negative && token.kind == TokenKind::Identifier) {
+            result.kind = TagArgumentSyntax::Kind::Name;
+            result.text = qualified_name();
+        } else if (!negative && !in_list && match("[")) {
+            result.kind = TagArgumentSyntax::Kind::List;
+            while (!at("]")) {
+                result.items.push_back(tag_argument(true));
+                if (!match(",")) break;
+            }
+            expect("]");
+        } else {
+            cursor_ = value;
+            throw Diagnostic(current().span, "expected a tag argument").with_code("E0910")
+                .label("expected a string, a number, true or false, a name" +
+                       std::string(in_list ? "" : ", or a list") + ", " + found_text(current()))
+                .note("a tag argument is a literal, optionally written 'name: literal'");
+        }
+        // The value's span; a named argument's name has its own.
+        result.span = span_from(value);
+        return result;
+    }
+
+    // The documentation comment written among the tags that start at token
+    // `first` and end before the current token: the last one, which is the
+    // closest to the declaration.
+    std::shared_ptr<const DocComment> tag_documentation(std::size_t first) const {
+        std::shared_ptr<const DocComment> result;
+        for (auto i = first; i < cursor_; ++i)
+            if (tokens_[i].documentation) result = tokens_[i].documentation;
+        return result;
+    }
+
+    // A declaration with the tags written before it. The documentation
+    // comment may come before the tags, among them, or between them and the
+    // declaration; the one closest to the declaration documents it.
+    Declaration tagged_declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
+        if (!at("#")) return declaration(owner);
+        const auto first = cursor_;
+        auto tags = tag_list();
+        const auto documentation = tag_documentation(first);
+        const auto tags_span = span_from(first);
+        if (!at_declaration() || ((at("let") || at("const")) && next_is(1, "["))) {
+            const bool destructure = at_declaration();
+            auto error = Diagnostic(current().kind == TokenKind::End ? after_previous() : current().span,
+                                    destructure ? "tags cannot apply to a destructuring declaration"
+                                                : "expected a declaration after tags")
+                .with_code("E0909")
+                .label(destructure ? "a destructuring declaration takes no tags"
+                       : current().kind == TokenKind::End ? "expected 'let' or 'const' before the end of the file"
+                                                          : "expected 'let' or 'const', " + found_text(current()))
+                .label(tags_span, "these tags need a declaration to apply to");
+            if (!destructure) error.note("tags apply to declarations only, not to statements or expressions");
+            throw error;
+        }
+        auto result = declaration(owner);
+        if (result.name == "_") {
+            throw Diagnostic(tags_span, "tags cannot apply to '_'").with_code("E0909")
+                .label("these tags apply to nothing")
+                .label(result.name_span.value_or(result.span), "'_' declares no name");
+        }
+        if (!result.documentation) result.documentation = documentation;
+        result.tags = std::move(tags);
+        return result;
+    }
 
     Declaration declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
         const auto start = cursor_;
@@ -283,7 +687,10 @@ private:
         result.exported = match("export");
         result.static_member = match("static");
         result.constant = match("const");
-        if (!result.constant) {
+        if (!result.constant && at_last_declaration()) {
+            advance();
+            result.constant = result.last = true;
+        } else if (!result.constant) {
             expect("let");
         }
         if (match(".")) {
@@ -291,7 +698,7 @@ private:
                 result.promote_import = true;
             } else if (!result.constant && at("as")) {
                 if (owner != Declaration::Kind::Class)
-                    throw Diagnostic(current().span, "a cast declaration requires a class");
+                    throw Diagnostic(current().span, "a cast declaration requires a class").with_code("E0512");
                 const auto& name = advance();
                 result.name = name.text;
                 result.name_span = name.span;
@@ -364,12 +771,16 @@ private:
                 result.generics = generic_parameters();
                 expect("(");
                 while (!at(")")) {
+                    const auto tags_start = cursor_;
+                    auto variant_tags = tag_list();
+                    const auto variant_documentation = tag_documentation(tags_start);
                     const auto variant_start = cursor_;
                     const auto& variant = identifier();
                     Declaration member{};
                     member.kind = Declaration::Kind::Binding;
                     member.name = variant.text;
-                    member.documentation = variant.documentation;
+                    member.documentation = variant.documentation ? variant.documentation : variant_documentation;
+                    member.tags = std::move(variant_tags);
                     member.name_span = variant.span;
                     const bool positional = match("(");
                     member.named_payload = !positional && match("{");
@@ -394,7 +805,7 @@ private:
                     }
                 }
                 if (result.members.empty()) {
-                    throw Diagnostic(current().span, "an enum needs at least one variant");
+                    throw Diagnostic(current().span, "an enum needs at least one variant").with_code("E0209");
                 }
                 expect(")");
             } else if (at("module") || at("class") || at("interface") || at("singleton")) {
@@ -422,7 +833,15 @@ private:
                 }
                 expect("(");
                 while (!at_end() && !at(")")) {
-                    auto member = declaration(result.kind);
+                    const auto member_start = cursor_;
+                    Declaration member;
+                    try {
+                        member = tagged_declaration(result.kind);
+                    } catch (const Diagnostic& error) {
+                        recover(error, member_start);
+                        skip_accessor_clauses();
+                        continue;
+                    }
                     if (member.cast_target) {
                         auto more_casts = std::exchange(member.overloads, {});
                         result.members.push_back(std::move(member));
@@ -435,24 +854,133 @@ private:
             } else {
                 result.initializer = expression();
             }
+        } else if (!result.type && result.last) {
+            throw deferred_last_without_type(result);
         } else if (!result.type) {
-            throw Diagnostic(current().span, "expected a type annotation or an initializer");
+            throw Diagnostic(current().span, "expected a type annotation or an initializer").with_code("E0205")
+                .label("'" + result.name + "' needs a type, a value, or both")
+                .help("write ': T' after the name for its type, and '= value' for its value");
         }
 
-        // Aggregate members and overload groups can end at a block body.
-        auto& final_branch = result.overloads.empty() ? result : result.overloads.back();
-        if ((owner || !result.overloads.empty()) && final_branch.has_body && !expression_body) {
-            match(";");
-        } else {
-            expect(";");
-        }
+        // Every declaration ends with ';', including one whose value is a body.
+        const auto& final_branch = result.overloads.empty() ? result : result.overloads.back();
+        const bool body_value = (final_branch.has_body && !expression_body) ||
+                                result.kind == Declaration::Kind::Class ||
+                                result.kind == Declaration::Kind::Interface ||
+                                result.kind == Declaration::Kind::Module;
+        if (body_value && !at(";"))
+            missing_semicolon("every declaration ends with ';', including one whose value is a function, class or "
+                              "module body");
+        expect(";");
         if (result.overloads.empty()) result.span = span_from(start);
+        if (owner) accessor_clauses(result);
         return result;
+    }
+
+    // `last x;`: a deferred `last` binding is assigned later, so only its
+    // type can say what it holds.
+    static Diagnostic deferred_last_without_type(const Declaration& declaration) {
+        const auto name = *declaration.name_span;
+        const Span after{name.file, name.line, name.column + name.length, name.offset + name.length, 0};
+        return Diagnostic(name, "a deferred 'last' binding needs a type").with_code("E0444")
+            .label("'" + declaration.name + "' has neither a type nor a value")
+            .suggest("give it a type and assign it exactly once later", after, ": <type>",
+                     Applicability::HasPlaceholders)
+            .suggest("or give it its value now", after, " = <value>", Applicability::HasPlaceholders);
+    }
+
+    // `last [a, b] ...`: `last` declares one name, and an index into a
+    // binding named `last` can hold neither a ',' nor a ':' after its ']',
+    // so this can only be meant as a destructuring declaration.
+    bool at_last_destructuring() const {
+        return at_contextual("last") && next_is(1, "[") && cursor_ + 3 < tokens_.size() &&
+               tokens_[cursor_ + 2].kind == TokenKind::Identifier &&
+               (next_is(3, ",") || (next_is(3, "]") && next_is(4, ":")));
+    }
+
+    Diagnostic last_destructuring() const {
+        const auto& word = current().span;
+        auto close = cursor_ + 1;
+        while (close + 1 < tokens_.size() && !next_is(close - cursor_, "]")) ++close;
+        const auto& end = tokens_[close].span;
+        Span names = word;
+        names.length = end.offset + end.length - word.offset;
+        return Diagnostic(word, "a destructuring declaration cannot use 'last'").with_code("E0536")
+            .label("'last' declares a single name")
+            .label(names, "these names are destructured")
+            .note("'last' is a contextual word: followed by '[' it is a binding named 'last' being indexed")
+            .suggest("declare the names with 'const', which binds each of them once", word, "const",
+                     Applicability::MachineApplicable);
+    }
+
+    // Accessor clauses after a member's ';' (Types.md, Accessors). No member
+    // begins with '|', so the position is unambiguous, and `get`, `set`, and
+    // `value` stay ordinary identifiers everywhere else. Lowering checks
+    // which members may have them.
+    void accessor_clauses(Declaration& member) {
+        while (at("|")) {
+            const auto start = cursor_;
+            advance();
+            const auto& keyword = current();
+            if (keyword.kind != TokenKind::Identifier || (keyword.text != "get" && keyword.text != "set"))
+                throw Diagnostic(keyword.span, "expected 'get' or 'set' after '|'").with_code("E0202")
+                    .label(keyword.kind == TokenKind::End ? "expected 'get' or 'set' before the end of the file"
+                                                          : "expected 'get' or 'set', " + found_text(keyword))
+                    .help("an accessor clause is '| get: <expression>;' or '| set: <statement>;'");
+            advance();
+            AccessorClause clause;
+            clause.setter = keyword.text == "set";
+            clause.keyword = keyword.span;
+            expect(":");
+            if (at("{")) {
+                clause.block = true;
+                clause.body = block();
+                if (!at(";")) missing_semicolon("an accessor clause ends with ';', including one whose body is a block");
+                expect(";");
+            } else if (clause.setter) {
+                const auto statement_start = cursor_;
+                auto body = simple_statement();
+                body.span = span_from(statement_start);
+                clause.body.push_back(std::move(body));
+                expect(";");
+            } else {
+                clause.expression = expression();
+                expect(";");
+            }
+            clause.span = span_from(start);
+            member.accessors.push_back(std::move(clause));
+        }
+    }
+
+    // After an error in a member, skips the accessor clauses that follow it,
+    // each through its ';', so that they are not read as members of their own.
+    void skip_accessor_clauses() {
+        while (at("|")) {
+            advance();
+            std::size_t depth = 0;
+            while (!at_end()) {
+                const auto& token = current();
+                if (token.kind == TokenKind::Symbol) {
+                    const auto& text = token.text;
+                    if (text == "(" || text == "[" || text == "{") {
+                        ++depth;
+                    } else if (text == ")" || text == "]" || text == "}") {
+                        if (depth == 0) return;
+                        --depth;
+                    } else if (text == ";" && depth == 0) {
+                        advance();
+                        break;
+                    }
+                }
+                advance();
+            }
+        }
     }
 
     static void definition_has_no_annotation(const Declaration& declaration) {
         if (declaration.type) {
-            throw Diagnostic(declaration.type->span, "a definition cannot have a binding type annotation");
+            throw Diagnostic(declaration.type->span, "a definition cannot have a binding type annotation")
+                .with_code("E0208");
         }
     }
 
@@ -461,7 +989,12 @@ private:
         ++block_depth_;
         std::vector<Statement> result;
         while (!at_end() && !at("}")) {
-            result.push_back(statement());
+            const auto start = cursor_;
+            try {
+                result.push_back(statement());
+            } catch (const Diagnostic& error) {
+                recover(error, start);
+            }
         }
         expect("}");
         --block_depth_;
@@ -478,6 +1011,12 @@ private:
     Statement statement() {
         const auto start = cursor_;
         Statement result{};
+        if (at("#")) {
+            result.kind = Statement::Kind::Binding;
+            result.declaration = std::make_unique<Declaration>(tagged_declaration());
+            result.span = result.declaration->span;
+            return result;
+        }
 
         if ((at("let") || at("const")) && tokens_[cursor_ + 1].text == "[") {
             result.kind = Statement::Kind::Destructure;
@@ -489,9 +1028,9 @@ private:
                 result.bindings.push_back(identifier());
             } while (match(",") && !at("]"));
             expect("]");
-            expect("=");
-            result.expressions.push_back(expression());
-            expect(";");
+            destructure_tail(result);
+        } else if (at_last_destructuring()) {
+            throw last_destructuring();
         } else if (at_declaration()) {
             result.kind = Statement::Kind::Binding;
             result.declaration = std::make_unique<Declaration>(declaration());
@@ -550,12 +1089,39 @@ private:
             result = simple_statement();
             if (scope_call && at("{") && result.kind == Statement::Kind::Expression &&
                 result.expressions.front().kind == Expr::Kind::Call) {
-                throw Diagnostic(parenthesis, "a scope statement names one scope or none: scope (name) { } or scope { }");
+                throw Diagnostic(parenthesis, "a scope statement names one scope or none: scope (name) { } or scope { }")
+                    .with_code("E0211");
             }
             expect(";");
         }
         result.span = span_from(start);
         return result;
+    }
+
+    // After the names of a destructuring declaration (Types.md, Tuples):
+    //   let [a, b] = tuple;
+    //   let [a, b]: [A, B] = tuple;
+    //   let [a, b] = x, y;            let [a, b]: [A, B] = x, y;
+    // A comma after the first initializer makes a list with one
+    // initializer per name. Lowering checks the counts.
+    void destructure_tail(Statement& result) {
+        if (match(":")) {
+            result.binding_type = type();
+            if (result.binding_type->name != "[tuple]" || !result.binding_type->collections.empty() ||
+                result.binding_type->reference) {
+                const auto names = result.bindings.size();
+                throw Diagnostic(result.binding_type->span, "a destructuring annotation must be a tuple type")
+                    .with_code("E0437")
+                    .label("expected a tuple type with " + std::to_string(names) + " element" +
+                           (names == 1 ? "" : "s"))
+                    .help("write one type per name in brackets, as in 'let [a, b]: [int, string] = ...'");
+            }
+        }
+        expect("=");
+        do {
+            result.expressions.push_back(expression());
+        } while (match(","));
+        expect(";");
     }
 
     // The contextual words of Concurrency.md section 4.4 stay identifiers.
@@ -816,11 +1382,12 @@ private:
             advance();
             result.operands.push_back(expression(ordering_precedence + 1, true, branch_keyword));
             if (precedence() == equality_precedence || precedence() == ordering_precedence) {
-                throw Diagnostic(current().span, "a comparison chain expects another value; use '&&' or '||' between comparisons");
+                throw Diagnostic(current().span, "a comparison chain expects another value; use '&&' or '||' between comparisons")
+                    .with_code("E0210");
             }
         } while (at(connector) && at_comparison_connector(branch_keyword));
         if (at_comparison_connector(branch_keyword)) {
-            throw Diagnostic(current().span, "a comparison chain must use only 'and' or only 'or'");
+            throw Diagnostic(current().span, "a comparison chain must use only 'and' or only 'or'").with_code("E0210");
         }
         result.span = span_from(start);
         return result;
@@ -887,9 +1454,11 @@ private:
     std::vector<TypeSyntax> postfix_type_arguments() {
         const auto start = cursor_;
         advance();
+        SpeculativeDiagnostics speculative;
         try {
             auto result = type_arguments();
             if (at("(") || at(".") || at(";")) {
+                speculative.commit();
                 return result;
             }
         } catch (const Diagnostic&) {
@@ -977,7 +1546,7 @@ private:
             lambda->kind = Declaration::Kind::Function;
             function_body(*lambda, branch_keyword);
             if (!lambda->has_body)
-                throw Diagnostic(current().span, "expected a function body");
+                throw Diagnostic(current().span, "expected a function body").with_code("E0202");
             lambda->span = span_from(start);
             auto result = make_expression(Expr::Kind::Lambda, lambda->span);
             result.lambda = std::move(lambda);
@@ -998,20 +1567,12 @@ private:
         if (match("{")) {
             auto result = expression();
             if (result.kind != Expr::Kind::Range)
-                throw Diagnostic(result.span, "braces in an expression must enclose a range");
+                throw Diagnostic(result.span, "braces in an expression must enclose a range").with_code("E0212");
             expect("}");
             result.span = span_from(start);
             return result;
         }
-        if (match("new")) {
-            auto object_type = type();
-            expect("(");
-            auto arguments = expression_list(")");
-            auto result = make_expression(Expr::Kind::New, span_from(start));
-            result.type = std::move(object_type);
-            result.operands = std::move(arguments);
-            return result;
-        }
+        if (match("new")) return new_expression(start);
         if (match("import")) {
             expect(":");
             if (current().kind == TokenKind::Identifier && current().text == "c" &&
@@ -1023,7 +1584,7 @@ private:
                 std::vector<std::string> paths;
                 do {
                     if (current().kind != TokenKind::String)
-                        throw Diagnostic(current().span, "expected a header or library path string");
+                        throw Diagnostic(current().span, "expected a header or library path string").with_code("E0202");
                     paths.push_back(decode_string_literal(advance().text));
                 } while (match(","));
                 expect(")");
@@ -1049,7 +1610,7 @@ private:
             advance();
             auto operand = postfix(branch_keyword);
             if (operand.kind != Expr::Kind::Call)
-                throw Diagnostic(operand.span, "spawn requires a call, such as 'spawn work(item)'");
+                throw Diagnostic(operand.span, "spawn requires a call, such as 'spawn work(item)'").with_code("E0603");
             auto result = make_expression(Expr::Kind::Spawn, span_from(start), "spawn");
             result.operands.push_back(std::move(operand));
             return result;
@@ -1060,7 +1621,61 @@ private:
         if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
         if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);
         if (token.kind == TokenKind::String) return token_expression(Expr::Kind::String);
-        throw Diagnostic(token.span, "expected an expression");
+        throw Diagnostic(token.span, "expected an expression").with_code("E0204")
+            .label(token.kind == TokenKind::End ? std::string("expected an expression before the end of the file")
+                                                : "expected an expression, found '" + token.text + "'");
+    }
+
+    // After `new` (ObjectLifecycle.md, Construction):
+    //   new T(arguments)     the class T
+    //   new(arguments)       target-typed: `(` always begins arguments
+    //   new                  target-typed, no arguments: `new` followed by
+    //                        anything that cannot begin a type, such as
+    //                        `;`, `,`, `)`, `]`, or `}`
+    // A target-typed `new` has no type; lowering takes the expected type.
+    Expr new_expression(std::size_t start) {
+        const bool type_start = current().kind == TokenKind::Identifier || at("&") || at("[") ||
+                                at("func") || at("class");
+        if (!at("(") && !type_start) return make_expression(Expr::Kind::New, span_from(start));
+        std::optional<TypeSyntax> object_type;
+        if (at("class") && next_is(1, "(") && next_is(2, ")") && !next_is(3, "(")) {
+            // `new class()` names the umbrella type and passes no arguments;
+            // the empty anonymous class is constructed with `new class()()`.
+            object_type = TypeSyntax{advance().span, "class", {}, {}};
+        } else if (!at("(")) {
+            object_type = type();
+        }
+        const auto open = current().span;
+        const auto open_index = cursor_;
+        expect("(");
+        auto arguments = expression_list(")");
+        if (!object_type && at("(")) {
+            // `new (T)(x)` once parenthesized the type. The first list is
+            // now the arguments of a target-typed `new`.
+            auto error = Diagnostic(span_from(start), "a type after 'new' is not parenthesized").with_code("E0435")
+                .label("the class cannot be written in parentheses here")
+                .label(open, "this '(' begins the arguments of a target-typed 'new'")
+                .label(current().span, "a second argument list follows");
+            if (arguments.size() == 1 && (arguments.front().kind == Expr::Kind::Name ||
+                                          arguments.front().kind == Expr::Kind::Member)) {
+                std::string name;
+                for (auto i = open_index + 1; i + 1 < cursor_; ++i) name += tokens_[i].text;
+                const auto& close = tokens_[cursor_ - 1].span;
+                error.suggest("write the class without parentheses",
+                              Span{open.file, open.line, open.column, open.offset,
+                                   close.offset + close.length - open.offset},
+                              name, Applicability::MaybeIncorrect);
+                error.help("where the type is expected, the class can be left out: 'new(x)'");
+            } else {
+                error.help("write 'new T(arguments)', or 'new(arguments)' where the type is expected");
+            }
+            throw error;
+        }
+        auto result = make_expression(Expr::Kind::New, span_from(start));
+        result.type = std::move(object_type);
+        result.operands = std::move(arguments);
+        result.open = open;
+        return result;
     }
 
     Expr token_expression(Expr::Kind kind) {

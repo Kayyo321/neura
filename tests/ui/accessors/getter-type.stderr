@@ -1,0 +1,9 @@
+error[E0403]: expected int32, got string
+ --> $DIR/getter-type.nra:4:16
+  |
+3 |     export let count: int = 0;
+  |                ----- 'count' has type int32, which its getter returns
+4 |         | get: "zero";
+  |                ^^^^^^ expected int32, found string
+
+For more information about this error, try `neura explain E0403`.

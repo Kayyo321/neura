@@ -45,7 +45,7 @@ let HelloWorld = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("Hello, World!");
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -72,6 +72,57 @@ The `.nvr` image contains the circuit and execution information needed by the Ne
 | `neura update` | Installs a newer release. |
 
 [Tooling](docs/lang/Tooling.md) describes every command, and the [tutorial](docs/lang/Tutorial.md) introduces the language.
+
+## Neura at a glance
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+/// An account whose balance only its own methods change.
+#Final
+let Account = class (
+    export last owner: string;
+
+    /// The balance in cents: read-only outside the class.
+    export let balance: int64 = 0;
+        | get: balance;
+
+    export let init = func(name: string) {
+        owner = name;
+    };
+
+    export let deposit = func(amount: int64) {
+        balance += amount;
+    };
+
+    #NoDiscard
+    export let withdraw = func(amount: int64) -> bool {
+        if (amount > balance) {
+            return false;
+        }
+        balance -= amount;
+        return true;
+    };
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let account: Account = new("Ada");
+        account.deposit(250);
+        last paid = account.withdraw(100);
+        console.println("{} has {}, paid: {}", account.owner, account.balance, paid);
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+Ada has 150, paid: true
+```
+
+Every declaration ends with `;`. A [`last`](docs/lang/CoreLanguage.md#source-and-bindings) binding is assigned exactly once, `new` takes its class from the annotation ([target-typed `new`](docs/lang/ObjectLifecycle.md#target-typed-new)), and `account.balance` calls the field's getter ([accessors](docs/lang/Types.md#accessors)). [Tags](docs/lang/Tags.md) such as `#Final` and `#NoDiscard` tell the compiler how to treat a declaration, and it checks them: here, that no class extends `Account` and that no caller drops the result of `withdraw`. The [language overview](docs/lang/Overview.md) tours the rest, including [anonymous classes](docs/lang/Types.md#anonymous-classes), [monitors](docs/lang/Concurrency.md#81-monitors) shared by tasks, and [diagnostics](docs/lang/Tooling.md#diagnostics) that `neura explain` documents.
 
 ## Write Neura with an AI agent
 
@@ -128,12 +179,12 @@ A source build reports its version as `<version>-dev`, and `neura update` does n
 
 - [Project design](docs/Project.md) covers the pipeline, execution model, decompilation, and verification.
 - [Language overview](docs/lang/Overview.md) and [tutorial](docs/lang/Tutorial.md) cover Neura syntax and semantics. See [examples](examples/) for sample `.nra` programs.
-- [Tooling](docs/lang/Tooling.md) covers building the compiler, checking source, inspecting NeuraIR, building and running `.nvr` images, running tests, and disassembling and decompiling images.
+- [Tooling](docs/lang/Tooling.md) covers building the compiler, checking source, inspecting NeuraIR, building and running `.nvr` images, running tests, and disassembling and decompiling images. [Diagnostic codes](docs/diagnostics/README.md) explains every error and warning the compiler reports.
 - [Neura Virtual Machine](docs/runtime/NVM.md) and [NVR format](docs/runtime/NVR.md) define execution and the executable image. [Neuron conversion and execution](docs/Backend.md) and [Decompiler](docs/Decompiler.md) describe the implementation, and the [release checklist](docs/Release.md) maps each feature to its tests.
 - [Install, update, and uninstall](docs/Install.md) covers installing a release archive, `neura doctor`, `neura update`, and `neura uninstall`.
 - [Wiki maintenance](docs/Wiki.md) explains how to update, review, and publish the repository's wiki sources.
 - [Website maintenance](docs/Site.md) explains how to change, preview, and publish the [website](https://kayyo321.github.io/neura/), whose pages are in [`site/`](site/) and whose documentation is this repository's Markdown, rendered. [The design of the website](docs/SiteDesign.md) records its colors, type, grids, and illustrations.
-- [Contributing](CONTRIBUTING.md) explains how to propose changes and verify them.
+- [Contributing](CONTRIBUTING.md) explains how to propose changes and verify them, and the [changelog](CHANGELOG.md) records what each version changed.
 
 ## Rules for agents
 

@@ -8,12 +8,12 @@ let PrimitiveReferences = module (
 
         export let init = func(value: &int) {
             instance.total = value;
-        }
+        };
     );
 
     export let example = func(initial: int, amount: int) -> int {
         let count: int = initial;
-        let view = new CounterView(count);
+        last view: CounterView = new(count);
         add(view.total, amount);
         return count;
     };

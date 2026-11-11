@@ -1,0 +1,9 @@
+error[E0405]: the getter of 'count' may exit without returning int32
+ --> $DIR/getter-missing-return.nra:4:11
+  |
+4 |         | get: {
+  |           ^^^ the getter must return int32 on every path
+  |
+  = note: a path through the body ends without 'return' or a trap
+
+For more information about this error, try `neura explain E0405`.

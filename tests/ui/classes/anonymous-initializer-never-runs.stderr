@@ -1,0 +1,11 @@
+error[E0530]: this field initializer of a fields-only anonymous class never runs
+ --> $DIR/anonymous-initializer-never-runs.nra:3:55
+  |
+3 | let describe = func(point: class (export let x: int = 0;)) -> int {
+  |                                                       ^ never evaluated
+  |                            ------------------------------ this class is not the annotation of a binding that 'new' initializes
+  |
+  = note: a fields-only anonymous class takes its field initializers from the annotation of the 'let', 'const', or 'last' binding that a 'new' initializes; written anywhere else, they would never run
+  = help: remove the initializer, and write it where a binding declared with this class is initialized with 'new'
+
+For more information about this error, try `neura explain E0530`.

@@ -1,0 +1,3 @@
+// An unexported field of a fields-only anonymous class (E0532); the fix
+// exports it.
+let point: class (export let x: int = 0;) = new;

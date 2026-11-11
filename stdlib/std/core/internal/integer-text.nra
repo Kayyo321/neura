@@ -7,6 +7,7 @@ let.promote _ = import:Std.Core.Optional;
 /// The value accumulation stays in each type's module.
 export let IntegerText = module (
     /// @brief Traps unless the radix is between 2 and 36 inclusive.
+    #Pure
     export let check_radix = func(radix: int) {
         if (radix < 2 || radix > 36) {
             trap_with_message("invalid argument: radix outside 2 through 36");
@@ -14,6 +15,7 @@ export let IntegerText = module (
     };
 
     /// @brief The lowercase ASCII digit for a value from 0 through 35.
+    #Pure
     export let digit_byte = func(value: int) -> uint8 {
         if (value < 10) {
             return (value + 48) as uint8;
@@ -23,6 +25,7 @@ export let IntegerText = module (
 
     /// @brief The value of an ASCII digit byte, letters in either case, or 36 when the byte is not a digit of
     /// any radix.
+    #Pure
     export let digit_value = func(b: uint8) -> int {
         if (b >= 48 && b <= 57) {
             return (b - 48) as int;
@@ -37,8 +40,9 @@ export let IntegerText = module (
     };
 
     /// @brief The text of digits stored least significant first, with a leading `-` when `negative` is set.
+    #Pure
     export let digits_text = func(reversed: uint8[list], negative: bool) -> string {
-        let bytes: uint8[list] = [];
+        last bytes: uint8[list] = [];
         if (negative) {
             bytes.append(45);
         }
@@ -51,12 +55,13 @@ export let IntegerText = module (
 
     /// @brief Left-pads `text` with copies of `pad` to `min_width` characters. A `0` pad goes after a leading
     /// `-`. `pad` must be one scalar value.
+    #Pure
     export let pad_number = func(text: string, min_width: int, pad: string) -> string {
-        let pad_length = pad.byte_length;
+        last pad_length = pad.byte_length;
         if (pad_length == 0 || sequence_length(pad.byte_at(0)) != pad_length) {
             trap_with_message("invalid argument: pad is not one scalar value");
         }
-        let missing = min_width - text.byte_length;
+        last missing = min_width - text.byte_length;
         if (missing <= 0) {
             return text;
         }
@@ -72,12 +77,13 @@ export let IntegerText = module (
 
     /// @brief The first error of the grammar: an optional `+` or `-`, then one or more digits of the radix.
     /// None when the text matches.
+    #Pure
     export let syntax_error = func(text: string, radix: int) -> Optional<Error> {
-        let length = text.byte_length;
+        last length = text.byte_length;
         if (length == 0) {
             return Optional<Error>.Some(parse_error(ParseErrorKind.Empty, 0, "empty input"));
         }
-        let start = sign_length(text);
+        last start = sign_length(text);
         if (start == length) {
             return Optional<Error>.Some(
                 parse_error(ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
@@ -92,8 +98,9 @@ export let IntegerText = module (
     };
 
     /// @brief 1 when the text starts with `+` or `-`, otherwise 0.
+    #Pure
     export let sign_length = func(text: string) -> int {
-        let first = text.byte_at(0);
+        last first = text.byte_at(0);
         if (first == 43 || first == 45) {
             return 1;
         }
@@ -101,6 +108,7 @@ export let IntegerText = module (
     };
 
     /// @brief Creates an out-of-range parse error for the given numeric type.
+    #Pure
     export let out_of_range = func(type_name: string) -> Error =>
         parse_error(ParseErrorKind.OutOfRange, 0, "value out of range for " + type_name);
 

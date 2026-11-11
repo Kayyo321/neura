@@ -17,22 +17,22 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Base64** · [`export let encode = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L64)
-  Encodes bytes with the standard alphabet and padding.
-- **Base64** · [`export let encode_unpadded = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L67)
-  Encodes bytes with the standard alphabet and omits padding.
-- **Base64** · [`export let encode_url = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L71)
-  Encodes bytes with the URL-safe alphabet and padding.
-- **Base64** · [`export let encode_url_unpadded = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L74)
-  Encodes bytes with the URL-safe alphabet and omits padding.
-- **Base64** · [`export let decode = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L78)
-  Strict decoding of padded standard text.
-- **Base64** · [`export let decode_unpadded = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L82)
-  Strict decoding of unpadded standard text.
-- **Base64** · [`export let decode_url = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L86)
-  Strict decoding of padded URL-safe text.
-- **Base64** · [`export let decode_url_unpadded = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L90)
-  Strict decoding of unpadded URL-safe text.
+- **Base64** · [`export let encode = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L33)
+  Encodes bytes with the standard alphabet and padding. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Base64** · [`export let encode_unpadded = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L37)
+  Encodes bytes with the standard alphabet and omits padding. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Base64** · [`export let encode_url = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L41)
+  Encodes bytes with the URL-safe alphabet and padding. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Base64** · [`export let encode_url_unpadded = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L45)
+  Encodes bytes with the URL-safe alphabet and omits padding. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Base64** · [`export let decode = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L50)
+  Strict decoding of padded standard text. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Base64** · [`export let decode_unpadded = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L54)
+  Strict decoding of unpadded standard text. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Base64** · [`export let decode_url = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L58)
+  Strict decoding of padded URL-safe text. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Base64** · [`export let decode_url_unpadded = func(text: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/base64.nra#L62)
+  Strict decoding of unpadded URL-safe text. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -43,9 +43,9 @@ The following sections are taken from the [standard library specification](Stdli
 
 Everything here needs T1 except the `Json` value type itself.
 
-- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone.
-- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error).
-- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero.
+- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone. The kernel `neura.encoding.utf8_validate` computes it (P2a).
+- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error). The kernels `neura.encoding.hex_encode` and `hex_decode` compute it (P2a).
+- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero. The kernels `neura.encoding.base64_encode` and `base64_decode` compute every form (P2a).
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
 
 **`Json`** (RFC 8259).
@@ -92,8 +92,8 @@ The module `Json`:
 - **Json parse errors.** `Empty` for empty or all-whitespace text; `UnexpectedEnd` at the text length; `Syntax` for structure; `InvalidCharacter` inside a token, with escapes reported at the backslash; `OutOfRange` at the bracket that opens level 513. Top-level scalars are accepted.
 - **Json values.** Numbers compare by a canonical decimal text, including exponents beyond `int64`. `hash` starts each variant from its position (Null 1 through Object 6), and an object's hash combines its member count with the wrapping sum of its distinct member hashes, so it agrees with order-insensitive equality even when names repeat. `number_to_int64` is `None` for anything but a plain integer. `index` keeps the last value of a repeated name. A `StringMap<JsonValue>` supports lookups; its `equals` and `to_string` are rejected at build time because `JsonValue` has no built-in value members.
 - **Json traps.** `number is not finite`, `negative indent`, `number text`, and `number exponent out of range`, after `invalid argument: `.
-- **Sha256** keeps rolled loops: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB.
+- **Sha256** kept rolled loops while it was Neura code: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB. It now calls kernels (P2a), which cut the `sha256` benchmark from 163,795 steps and 861,597 image bytes to 31,043 steps (mostly building the input) and 600,765 bytes.
 
 ### Task safety
 
-A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). `decode`, `decode_unpadded`, `decode_url`, and `decode_url_unpadded` are not: each builds a table of its alphabet's values on first use and keeps it in a module binding. The encoders, `encode_with`, and `decode_with` are task-safe. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.
+A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). Every function of this module is task-safe: the fixed-alphabet encoders and decoders run on built-in kernels and keep no module state, and `encode_with` and `decode_with` use the alphabet they are given. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.

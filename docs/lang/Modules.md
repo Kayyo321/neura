@@ -84,6 +84,8 @@ The executable and any newly emitted `.nir` contain the linked program. They can
 
 The compiler reserves the `Std` namespace. Installed tools resolve `Std.*` below their installation's `share/neura/stdlib` directory. A checkout build can also resolve them from the checkout's `stdlib` directory. Project files and `-I` roots cannot supply replacements for these imports. Imports with an `Internal` component are accessible only from standard library files.
 
+The [`#Internal` tag](Tags.md#internal) gives a single declaration the same limit. An internal declaration of the standard library is usable only inside the standard library; an internal declaration of a project is usable only from files in its file's directory and the directories below it, which are its own module, its sibling modules, and their children ([Project structure](ProjectStructure.md)). With `export`, an internal member is visible to the other modules of its library and hidden from the programs that import the library. A use from outside is error `E0911`. The rule also applies to a module imported from a prebuilt `.nir` artifact, which records its tags.
+
 A module in that source tree may bind a bodyless, non-generic function to a versioned host service.
 
 <!-- example: fragment: a host binding, which the compiler accepts only inside a module of the trusted standard library -->
@@ -93,6 +95,8 @@ let write_line = func(message: string) -> WriteResult host("neura.console.write_
 ```
 
 The result enum has exactly two variants. `Ok` represents success without a value and `Ok(T)` represents success with one value. `Error(uint32)` carries the host error code. Supported host data include Boolean and numeric values, strings, arrays, lists, and tuples made of supported types. The runner must register the named service with the matching version and signature. The compiler emits imports only for bindings reached by the built program. [NVM](../runtime/NVM.md#host-calls-and-standard-output) defines value transfer and continuation behavior.
+
+A bodyless function in that tree may instead end in `kernel("neura.area.name", version)`, which binds it to a built-in C [kernel](../runtime/Kernels.md): a deterministic, pure function that the runtime calls in place of Neura code, with no capability and no host request. The compiler checks the signature against its kernel table (`E0780` to `E0783`), and [Stdlib, P2a](Stdlib.md#p2a-kernel-bindings-in-source) lists the modules that use kernels.
 
 A module in that tree may also mark a function with a block body as a host callback, which a host service may call while it serves a request:
 
@@ -119,7 +123,7 @@ let Logger = module (
 let ConsoleLogger = module:Logger (
     export let.override log = func(message: string) -> void {
         // Write the message to the console.
-    }
+    };
 );
 ```
 
@@ -132,7 +136,7 @@ let program = import:Std.Program;
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

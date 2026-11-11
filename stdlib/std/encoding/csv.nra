@@ -9,6 +9,7 @@ let strings = import:Std.Text.Strings;
 /// ends at the next single quote, and inside it commas, CR, LF, and doubled quotes ("" for one quote) are data.
 /// Any other byte, including a CR that does not start a CRLF, is data in either kind of field.
 /// @see [Std.Encoding.Csv](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Csv)
+#Since("0.1.0")
 export let Csv = module (
     /// @brief The records of the text, each a list of its fields.
     ///
@@ -19,9 +20,10 @@ export let Csv = module (
     /// - Syntax, "text after closing quote": at the first byte after the
     /// closing quote that is not a comma or a line break.
     /// - UnexpectedEnd, "unterminated quoted field": at the text's length.
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<string[list][list]> {
-        let records: string[list][list] = [];
-        let count = text.byte_length;
+        last records: string[list][list] = [];
+        last count = text.byte_length;
         let record: string[list] = [];
         let i = 0;
         while (i < count) {
@@ -40,7 +42,7 @@ export let Csv = module (
             } else {
                 end = i;
                 while (end < count) {
-                    let b = text.byte_at(end);
+                    last b = text.byte_at(end);
                     if (b == 44 or 10 or 13 or 34) {
                         if (b == 34) {
                             return failure(ParseErrorKind.Syntax, end, "quote in unquoted field");
@@ -58,7 +60,7 @@ export let Csv = module (
                 records.append(record);
                 return Result<string[list][list]>.Ok(records);
             }
-            let b = text.byte_at(end);
+            last b = text.byte_at(end);
             if (b == 44) {
                 i = end + 1;
                 if (i == count) {
@@ -84,8 +86,9 @@ export let Csv = module (
     ///
     /// A field is quoted, with each quote doubled, only when it contains a comma, a quote, a CR, or an LF. A
     /// row with no fields is written as an empty line, which parses as one empty field.
+    #[NoDiscard, Pure, ThreadSafe]
     export let write = func(rows: string[list][list]) -> string {
-        let out = builders.create();
+        last out = builders.create();
         for (let row in rows) {
             let first = true;
             for (let field in row) {
@@ -108,7 +111,7 @@ export let Csv = module (
 
     /// @brief Whether the byte at the offset is a comma, an LF, or the CR of a CRLF.
     let is_separator = func(text: string, offset: int) -> bool {
-        let b = text.byte_at(offset);
+        last b = text.byte_at(offset);
         if (b == 44 or 10) {
             return true;
         }
@@ -118,7 +121,7 @@ export let Csv = module (
     /// @brief The offset of the quote that closes a quoted field whose content starts at `start`, or -1 when
     /// the text ends first.
     let quoted_end = func(text: string, start: int) -> int {
-        let count = text.byte_length;
+        last count = text.byte_length;
         let j = start;
         while (j < count) {
             if (text.byte_at(j) == 34) {
@@ -135,7 +138,7 @@ export let Csv = module (
 
     /// @brief The content between `start` and `end` with each doubled quote made single.
     let unquote = func(text: string, start: int, end: int) -> string {
-        let content = text.slice(start, end);
+        last content = text.slice(start, end);
         if (strings.index_of(content, "\"") < 0) {
             return content;
         }
@@ -144,7 +147,7 @@ export let Csv = module (
 
     /// @brief Tests whether a field contains a separator, quote, CR, or LF.
     let needs_quotes = func(field: string) -> bool {
-        let count = field.byte_length;
+        last count = field.byte_length;
         for (let i = 0; i < count; i++) {
             if (field.byte_at(i) == 44 or 34 or 13 or 10) {
                 return true;

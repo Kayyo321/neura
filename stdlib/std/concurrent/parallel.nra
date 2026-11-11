@@ -2,15 +2,17 @@
 /// worker on each item in index order would return; more workers may change only wall time and peak process
 /// memory.
 /// @see [Std.Concurrent.Parallel](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Parallel)
+#Since("0.1.0")
 export let Parallel = module (
     /// @brief The limits each item of a map runs under, the same under any number of workers. An item that
-    /// exceeds one traps as that item.
+    /// exceeds one traps as that item. The fields are read-only.
+    #[Final, Immutable, ThreadSafe]
     export let ItemLimits = class (
         /// @brief The most steps one item may execute.
-        export let max_steps: int64;
+        export last max_steps: int64;
         /// @brief The most heap cells one item may hold at once, the copies of the program's constants it
         /// can read included.
-        export let max_heap_cells: int64;
+        export last max_heap_cells: int64;
 
         /// @brief Limits of the given steps and heap cells, both positive.
         export let init = func(steps: int64, heap_cells: int64) {
@@ -26,14 +28,16 @@ export let Parallel = module (
     );
 
     /// @brief Limits of the given steps and heap cells for each item.
-    export let limits = func(steps: int64, heap_cells: int64) -> ItemLimits => new ItemLimits(steps, heap_cells);
+    #[Pure, ThreadSafe]
+    export let limits = func(steps: int64, heap_cells: int64) -> ItemLimits => new(steps, heap_cells);
 
     /// @brief Returns what `worker` returns for each item, in input order. T and U are transferable. The worker
     /// is task-safe, issues no host request, uses no task, channel, or other scheduler operation, and uses no
     /// object identity; the compiler checks this. Each item runs alone under `limits`. If items trap, the run
     /// reports the trap of the lowest index.
+    #NoDiscard(reason: "the worker has no effects, so the results are all a map gives")
     export let map = func<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[] {
-        let started: uint64[list] = [];
+        last started: uint64[list] = [];
         for (let item: T in items) {
             started.append(start<U>(func -> U => worker(item), limits.max_steps, limits.max_heap_cells));
         }

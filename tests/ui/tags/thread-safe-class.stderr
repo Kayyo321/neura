@@ -1,0 +1,13 @@
+error[E0609]: #ThreadSafe class 'Stats' cannot be shared between tasks
+  --> $DIR/thread-safe-class.nra:3:1
+   |
+ 3 | #ThreadSafe
+   | ^^^^^^^^^^^ #ThreadSafe promises that tasks may share its instances
+...
+13 |     export let peek = func() -> int64 => hits;
+   |     ------ method 'peek' is exported and not synchronized
+   |
+   = note: tasks may share an instance of an #Immutable class, or of a monitor: a class whose exported methods are all #Synchronized, whose fields are transferable, and whose state only its own methods reach through their receiver
+   = help: mark the class #Immutable or #Synchronized, or remove #ThreadSafe
+
+For more information about this error, try `neura explain E0609`.

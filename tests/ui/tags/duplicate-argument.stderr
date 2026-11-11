@@ -1,0 +1,8 @@
+error[E0904]: the argument 'as_of' of #Deprecated is given twice
+ --> $DIR/duplicate-argument.nra:2:22
+  |
+2 | #Deprecated("0.1.0", as_of: "0.2.0")
+  |                      ^^^^^ given again here
+  |             ------- first given here
+
+For more information about this error, try `neura explain E0904`.

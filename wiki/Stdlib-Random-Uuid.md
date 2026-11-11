@@ -17,24 +17,24 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Uuid** · [`export let Uuid = class implements Comparable<Uuid>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L13)
-  An immutable 128-bit identifier ordered by its unsigned big-endian bytes.
-- **Uuid.Uuid** · [`export let init = func(first: uint64, last: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L20)
+- **Uuid** · [`export let Uuid = class implements Comparable<Uuid>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L15)
+  An immutable 128-bit identifier ordered by its unsigned big-endian bytes. Tagged `#Final`, `#NoDiscard`, `#Immutable`, `#ThreadSafe`.
+- **Uuid.Uuid** · [`export let init = func(first: uint64, last: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L22)
   Constructs an identifier from its big-endian halves.
-- **Uuid.Uuid** · [`export let to_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L26)
-  The 16 bytes in order, as a new list.
-- **Uuid.Uuid** · [`export let compare_to = func(other: Uuid) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L34)
-  Lexicographic over the bytes, each unsigned.
-- **Uuid.Uuid** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L45)
-  Tests whether another UUID has the same two halves.
-- **Uuid.Uuid** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L54)
-  Starts from 17 and combines each byte in order.
-- **Uuid.Uuid** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L63)
-  The 36-character hyphenated form in lowercase.
-- **Uuid** · [`export let random = func(source: Random) -> Uuid`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L82)
-  A version 4 identifier from 16 bytes of random.fill_bytes, with the version bits set to 0100 and the variant bits to 10.
-- **Uuid** · [`export let parse = func(text: string) -> Result<Uuid>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L93)
-  The 36-character hyphenated form, hex digits in either case. Errors: Empty; InvalidCharacter at the first byte that is not a hex digit or a hyphen in its place, or at offset 36 when text follows; UnexpectedEnd at the length for shorter text.
+- **Uuid.Uuid** · [`export let to_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L29)
+  The 16 bytes in order, as a new list. Tagged `#Pure`.
+- **Uuid.Uuid** · [`export let compare_to = func(other: Uuid) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L38)
+  Lexicographic over the bytes, each unsigned. Tagged `#Pure`.
+- **Uuid.Uuid** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L50)
+  Tests whether another UUID has the same two halves. Tagged `#Pure`.
+- **Uuid.Uuid** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L60)
+  Starts from 17 and combines each byte in order. Tagged `#Pure`.
+- **Uuid.Uuid** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L70)
+  The 36-character hyphenated form in lowercase. Tagged `#Pure`.
+- **Uuid** · [`export let random = func(source: Random) -> Uuid`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L90)
+  A version 4 identifier from 16 bytes of random.fill_bytes, with the version bits set to 0100 and the variant bits to 10. Tagged `#ThreadSafe`.
+- **Uuid** · [`export let parse = func(text: string) -> Result<Uuid>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L102)
+  The 36-character hyphenated form, hex digits in either case. Errors: Empty; InvalidCharacter at the first byte that is not a hex digit or a hyphen in its place, or at offset 36 when text follows; UnexpectedEnd at the length for shorter text. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

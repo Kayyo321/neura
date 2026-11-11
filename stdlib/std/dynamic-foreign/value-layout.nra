@@ -6,6 +6,7 @@ let.promote _ = import:Std.DynamicForeign.MemoryLayout;
 /// Platform-sized C types (int, long, size_t, and the rest) come from Linker.canonical_layout, which asks the
 /// runner for their sizes.
 /// @see [Std.DynamicForeign.ValueLayout](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-ValueLayout)
+#Since("0.1.0")
 export let ValueLayout = module (
     /// @brief A C `_Bool`, one byte that is 0 or 1, carried as bool.
     export const Bool = value(Carrier.Bool);

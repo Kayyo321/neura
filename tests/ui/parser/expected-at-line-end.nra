@@ -1,0 +1,5 @@
+// A call whose closing ')' is missing at the end of a line (E0203): the
+// error points just after the last argument, not at the next line.
+let add = func(a: int, b: int) -> int => a + b;
+let three = add(1, 2
+let four = 4;

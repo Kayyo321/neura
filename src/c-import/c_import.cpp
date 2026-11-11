@@ -52,7 +52,8 @@ NeuraLibclang& libclang(const CImportOptions& options, const Span& site) {
         failure = library->error;
         throw Diagnostic(site, "C imports need libclang, which could not be loaded: " + failure +
                                    "; install libclang (for example the libclang1-19 package), or name the "
-                                   "library with --libclang or the NEURA_LIBCLANG environment variable");
+                                   "library with --libclang or the NEURA_LIBCLANG environment variable")
+            .with_code("E0708");
     }
     loaded = std::move(library);
     return *loaded;
@@ -330,7 +331,7 @@ private:
                                                             static_cast<int>(argv.size()), unsaved, unsaved ? 1 : 0,
                                                             NEURA_LIBCLANG_HEADER_PARSE_OPTIONS, &unit);
         if (error != CXError_Success || unit == nullptr)
-            throw Diagnostic(site_, "cannot parse C header " + header_.string());
+            throw Diagnostic(site_, "cannot parse C header " + header_.string()).with_code("E0708");
         if (report) {
             for (unsigned i = 0; i < lib_.clang_getNumDiagnostics(unit); ++i) {
                 auto diagnostic = lib_.clang_getDiagnostic(unit, i);
@@ -340,7 +341,7 @@ private:
                         text(lib_.clang_formatDiagnostic(diagnostic, lib_.clang_defaultDiagnosticDisplayOptions()));
                     lib_.clang_disposeDiagnostic(diagnostic);
                     lib_.clang_disposeTranslationUnit(unit);
-                    throw Diagnostic(site_, "C import: " + message);
+                    throw Diagnostic(site_, "C import: " + message).with_code("E0708");
                 }
                 lib_.clang_disposeDiagnostic(diagnostic);
             }

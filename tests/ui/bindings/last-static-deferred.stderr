@@ -1,0 +1,9 @@
+error[E0447]: a deferred 'last' binding must be a local or an instance field
+ --> $DIR/last-static-deferred.nra:3:17
+  |
+3 |     static last limit: int;
+  |                 ^^^^^ 'limit' is declared without a value
+  |
+  = help: give the static field its value where it is declared
+
+For more information about this error, try `neura explain E0447`.

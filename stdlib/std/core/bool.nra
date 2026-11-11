@@ -4,14 +4,18 @@ let.promote _ = import:Std.Core.Result;
 
 /// @brief Companion functions for bool (Stdlib.md section 7.4).
 /// @see [Std.Core.Bool](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Bool)
+#Since("0.1.0")
 export let Bool = module (
     /// @brief 1 for true, 0 for false.
+    #[Inline, Pure, ThreadSafe]
     export let to_int = func(v: bool) -> int => v ? 1 : 0;
 
     /// @brief Returns true when exactly one operand is true.
+    #[Inline, Pure, ThreadSafe]
     export let xor = func(a: bool, b: bool) -> bool => a != b;
 
     /// @brief The natural order: false before true. Usable as a comparator.
+    #[Pure, ThreadSafe]
     export let compare = func(a: bool, b: bool) -> Ordering {
         if (a == b) {
             return Ordering.Equal;
@@ -23,9 +27,11 @@ export let Bool = module (
     };
 
     /// @brief 1231 for true and 1237 for false (section 5.2).
+    #[Pure, ThreadSafe]
     export let hash = func(v: bool) -> uint32 => v.hash_code();
 
     /// @brief Returns the lowercase text `true` or `false`.
+    #[Pure, ThreadSafe]
     export let to_string = func(v: bool) -> string {
         if (v) {
             return "true";
@@ -37,6 +43,7 @@ export let Bool = module (
     ///
     /// The empty text fails with Empty; a proper prefix of either word with UnexpectedEnd at its length; any
     /// other text with InvalidCharacter at the first byte that matches neither word.
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<bool> {
         if (text == "true") {
             return Result<bool>.Ok(true);
@@ -44,13 +51,13 @@ export let Bool = module (
         if (text == "false") {
             return Result<bool>.Ok(false);
         }
-        let length = text.byte_length;
+        last length = text.byte_length;
         if (length == 0) {
             return Result<bool>.Err(
                 Error.Parse { kind: ParseErrorKind.Empty, offset: 0, message: "empty input" });
         }
         let matched = common_prefix(text, "true");
-        let other = common_prefix(text, "false");
+        last other = common_prefix(text, "false");
         if (other > matched) {
             matched = other;
         }

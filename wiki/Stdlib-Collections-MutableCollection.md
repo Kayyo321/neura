@@ -17,7 +17,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **MutableCollection** · [`export let MutableCollection = interface<T>:Collection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/mutable-collection.nra#L7)
+- **MutableCollection** · [`export let MutableCollection = interface<T>:Collection<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/mutable-collection.nra#L8)
   Common insertion and removal operations for lists and sets.
 <!-- END SOURCE API -->
 
@@ -45,5 +45,6 @@ Map<K, V> ── MutableMap<K, V>
 - Read-only and mutable interfaces are separate. A function that only reads takes the read-only interface, and no member simulates immutability by trapping.
 - Members that need only other members (`is_empty`, `first`, `contains_all`, `for_each`) become default methods written once in the interface.
 - `ImmutableList<T>`, `ImmutableSet<T>`, and `ImmutableMap<K, V>` are classes that copy their contents at construction and implement only the read-only interfaces. Their module functions `of` take a built-in list (for the map, a list of `[K, V]`; a duplicate key traps).
+- Members that an interface declares, such as `size()` and `is_empty()`, stay methods in every class, because an interface cannot require an [accessor](Types#accessors); `ArrayList.items()` stays a method with them. The immutable classes and `Sequence` are `#Final` and `#NoDiscard`, and every query that returns an `Optional` (`get`, `first_or_none`, `peek`, `floor`, and the like) is `#NoDiscard` ([Tags](Tags)).
 - `Lists.same_elements`, `Sets.same_elements`, and `Maps.same_entries` compare collections of different classes through the read-only interfaces. They also need G3.
 - For-each accepts an `Iterable<T>` through G5.

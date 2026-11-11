@@ -18,18 +18,18 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Charsets** · [`export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L11)
-  Selects ASCII, Latin-1, UTF-8, or a UTF-16 or UTF-32 byte-order policy.
-- **Charsets** · [`export let for_name = func(name: string) -> result.Result<Charset>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L17)
-  Resolves a supported charset name or alias without regard to ASCII case.
-- **Charsets** · [`export let encode = func(text: string, charset: Charset) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L51)
+- **Charsets** · [`export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L13)
+  Selects ASCII, Latin-1, UTF-8, or a UTF-16 or UTF-32 byte-order policy. Since 0.1.0.
+- **Charsets** · [`export let for_name = func(name: string) -> result.Result<Charset>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L20)
+  Resolves a supported charset name or alias without regard to ASCII case. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Charsets** · [`export let encode = func(text: string, charset: Charset) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L54)
   Encodes text, substituting a question mark for unrepresentable ASCII or Latin-1 scalars.
-- **Charsets** · [`export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L55)
-  Encodes strictly and returns an Encoding error for the first unrepresentable scalar.
-- **Charsets** · [`export let decode = func(bytes: uint8[list], charset: Charset) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L59)
+- **Charsets** · [`export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L59)
+  Encodes strictly and returns an Encoding error for the first unrepresentable scalar. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Charsets** · [`export let decode = func(bytes: uint8[list], charset: Charset) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L63)
   Decodes bytes, substituting U+FFFD for malformed input.
-- **Charsets** · [`export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L63)
-  Decodes strictly and returns an Encoding error at the first malformed input.
+- **Charsets** · [`export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L68)
+  Decodes strictly and returns an Encoding error at the first malformed input. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Current text and formatting contracts
@@ -99,8 +99,8 @@ All of `Strings` needs T1. String operations are functions that take the string 
 
 Functions that return several strings return a built-in list, not an `ArrayList`: the built-in for-each works on it, and `Std.Text` then needs nothing from `Std.Collections`.
 
-**Search algorithm.** `index_of` scans for the needle's first byte and then compares the remaining bytes in place. Its worst case is the product of the two lengths. The simple scan has the smallest circuit and a predictable step count.
+**Search algorithm.** The searches, comparisons, trims, splits, `lines`, replacements, ASCII case mappings, `scalar_count`, and `hash` run on the `neura.text`, `neura.hash`, and `neura.encoding` kernels (P2a). The text searches use the two-way string-matching algorithm, so a search is linear in the length of the text it reads plus the needle's length, never their product. A kernel is charged by the work its arguments allow (P2a), so the steps of each member are linear: `index_of` and `index_of_from` search in windows that start at 128 bytes and double, so their steps grow with the distance from `from` to the occurrence rather than with the rest of the text, and a loop that calls `index_of_from` after each occurrence is linear in the text; `split`, `split_limit`, and `lines` find every separator in two kernel calls over the text (one counts, one writes the offsets) and then slice the pieces, so they are linear in the text plus the number of pieces.
 
-**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
+**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator, the `neura.encoding.utf8_check` and `utf8_validate` kernels, must agree with the validation NVM performs when constructing text; its Neura original is the oracle of the `strings` and `utf8` tests.
 
-**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.

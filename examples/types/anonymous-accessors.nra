@@ -1,0 +1,37 @@
+// Accessors on the fields of an anonymous class (Types.md, Anonymous
+// classes). A body with accessor clauses is a class of its own, so its
+// fields may leave out their types and its own initializers run at `new`.
+// Outside the body, every read and write goes through the accessors.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let failure = import:Std.Core.Failure;
+
+let my_data: class (
+    export let data: string = "";
+        | set: data = value;
+        | get: data;
+
+    export let code = "XY729H08";
+        | get: code;
+
+    export let non_zero = 18000;
+        | get: non_zero;
+        | set: {
+            if (value == 0) {
+                failure.trap("non_zero must not be zero");
+            }
+            non_zero = value;
+        };
+) = new;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        my_data.data = "payload";
+        let my_var = my_data.data;
+        console.print_line(my_var);
+        console.print_line(my_data.code);
+        my_data.non_zero -= 17999;
+        console.print_line(my_data.non_zero.to_string());
+        return program.ExitCode.Ok;
+    };
+);

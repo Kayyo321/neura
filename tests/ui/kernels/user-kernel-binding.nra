@@ -1,0 +1,4 @@
+// A kernel binding outside the standard library (E0780).
+export let Hashes = module (
+    export let crc32 = func(bytes: uint8[list]) -> uint32 kernel("neura.digest.crc32", 1);
+);

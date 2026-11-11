@@ -33,7 +33,7 @@ else()
     set(NEURA_VERSION_FULL "${NEURA_VERSION_CORE}-${NEURA_VERSION_PRERELEASE}")
 endif()
 
-project(Neura VERSION ${NEURA_VERSION_CORE} LANGUAGES CXX)
+project(Neura VERSION ${NEURA_VERSION_CORE} LANGUAGES CXX C)
 
 # The host target triple names launchers and release archives.
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" neura_host_arch)
@@ -94,11 +94,19 @@ set(neura_nvm_sources
     src/nvm/providers.cpp
     src/nvm/scalar_text.cpp
     src/nvm/schedule.cpp
+    src/nvm/tier1.cpp
+    src/nvm/tier2.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
+    # The native code generator of tier 2 (docs/runtime/NVM.md, "Native
+    # compilation"): part of the runtime, with no dependency of its own.
+    src/jit/aarch64.cpp
+    src/jit/compiler.cpp
+    src/jit/jit.cpp
+    src/jit/x86_64.cpp
 )
 add_library(neura_nvm STATIC ${neura_nvm_sources})
-target_link_libraries(neura_nvm PUBLIC neura_nvr)
+target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift)
 # Std.DynamicForeign calls native functions through libffi and loads
 # libraries with the platform loader.
 #
@@ -159,7 +167,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         if(NEURA_STATIC_LIBC)
             set(NEURA_HAS_STATIC_LAUNCHER ON)
             add_library(neura_nvm_static STATIC ${neura_nvm_sources})
-            target_link_libraries(neura_nvm_static PUBLIC neura_nvr)
+            target_link_libraries(neura_nvm_static PUBLIC neura_nvr neura_lift)
             # A static program cannot use the C library's resolver portably,
             # so this launcher takes numeric addresses and "localhost" only.
             target_compile_definitions(neura_nvm_static PRIVATE NEURA_NO_NATIVE_INTEROP NEURA_NUMERIC_ADDRESSES_ONLY)
@@ -240,8 +248,41 @@ add_library(neura_lifecycle STATIC
 target_include_directories(neura_lifecycle PUBLIC src)
 neura_target_defaults(neura_lifecycle)
 
+# The neuron circuit library: gadgets for bits, integers, and IEEE floats,
+# and block assembly. The converter emits graphs with it and the lift
+# library regenerates them with it, so it depends only on the image format.
+add_library(neura_circuit STATIC
+    src/circuit/block_synth.cpp
+    src/circuit/circuit.cpp
+    src/circuit/float_circuit.cpp
+)
+target_link_libraries(neura_circuit PUBLIC neura_nvr)
+neura_target_defaults(neura_circuit)
+
+# Lifted blocks (docs/runtime/NVM.md, "Execution tiers"): the typed
+# expressions behind a block's graph, the structural and overflow proofs that
+# make them trustworthy, and their lowering to native 64-bit operations. It
+# depends on the circuit library and the image format only, so the runtime
+# can use it without compiler code. Float operations are lowered only where
+# hardware arithmetic is bit-exact, which rules out contracted multiply-adds.
+add_library(neura_lift STATIC
+    src/lift/expression.cpp
+    src/lift/hints.cpp
+    src/lift/lift.cpp
+    src/lift/lowered_block.cpp
+    src/lift/overflow.cpp
+    src/lift/proof.cpp
+    src/lift/recognize.cpp
+)
+target_link_libraries(neura_lift PUBLIC neura_circuit)
+if(NOT MSVC)
+    target_compile_options(neura_lift PRIVATE -ffp-contract=off)
+endif()
+neura_target_defaults(neura_lift)
+
 add_library(neura_compiler STATIC
     src/c-import/c_import.cpp
+    src/cli/diagnostic_render.cpp
     src/cli/source_loader.cpp
     src/cli/source_docs.cpp
     src/lexer/lexer.cpp
@@ -254,35 +295,60 @@ add_library(neura_compiler STATIC
     src/neura-ir/specialize.cpp
     src/neura-ir/static_initialization.cpp
     src/neura-ir/task_analysis.cpp
+    src/neura-ir/purity.cpp
+    src/neura-ir/dispatch.cpp
+    src/neura-ir/monitors.cpp
+    src/neura-ir/kernel_signature.cpp
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
+    src/neura-ir/attributes.cpp
+    src/neura-ir/tags.cpp
     src/neura-ir/linker.cpp
     src/neura-ir/reference_initialization.cpp
+    src/neura-ir/definite_assignment.cpp
     src/neura-ir/reference_storage.cpp
     src/ir-optimization/analysis.cpp
+    src/ir-optimization/effects.cpp
+    src/ir-optimization/inlining.cpp
     src/ir-optimization/integer_folding.cpp
+    src/ir-optimization/locals.cpp
     src/ir-optimization/optimizer.cpp
     src/ir-optimization/passes.cpp
-    src/backend/block_synth.cpp
-    src/backend/circuit.cpp
-    src/backend/float_circuit.cpp
+    src/ir-optimization/value_passes.cpp
     src/backend/converter.cpp
+    src/util/source_map.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
-target_link_libraries(neura_compiler PUBLIC neura_nvr PRIVATE neura_libclang)
+target_link_libraries(neura_compiler PUBLIC neura_circuit neura_lift neura_nvr PRIVATE neura_libclang)
 neura_target_defaults(neura_compiler)
 
 # The decompiler reads images through the shared loader and lifts their
-# graphs by regenerating them with the converter's circuit library.
+# graphs with the lift library, which regenerates them with the converter's
+# circuit library.
 add_library(neura_decompiler STATIC
     src/decompiler/assembly.cpp
     src/decompiler/decompile.cpp
     src/decompiler/lifter.cpp
 )
-target_link_libraries(neura_decompiler PUBLIC neura_compiler neura_nvm)
+target_link_libraries(neura_decompiler PUBLIC neura_lift neura_compiler neura_nvm)
 neura_target_defaults(neura_decompiler)
 
-add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp src/launcher/descriptor.cpp)
+# `neura explain` prints the pages in docs/diagnostics, embedded here so that
+# the binary needs no documentation files at run time.
+file(GLOB neura_diagnostic_pages CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagnostics/E*.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/diagnostics/W*.md")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${neura_diagnostic_pages})
+set(neura_diagnostic_pages_inc "")
+foreach(page IN LISTS neura_diagnostic_pages)
+    get_filename_component(code "${page}" NAME_WE)
+    file(READ "${page}" text)
+    string(APPEND neura_diagnostic_pages_inc "{\"${code}\", R\"neura_page(${text})neura_page\"},\n")
+endforeach()
+file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/diagnostic_pages.inc"
+    CONTENT "${neura_diagnostic_pages_inc}" @ONLY)
+
+add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/explain.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp
+    src/launcher/descriptor.cpp)
 target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler neura_lifecycle)
 if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(neura PRIVATE -static-libstdc++ -static-libgcc)
@@ -323,6 +389,53 @@ if(NOT EXISTS "${NEURA_LIBCLANG_DIR}/include/clang-c/Index.h")
 endif()
 set(NEURA_LIBCLANG_TESTS ${BUILD_TESTING})
 add_subdirectory(third_party/neura-libclang)
+
+# --- Kernels (docs/runtime/Kernels.md) ---------------------------------------
+# Deterministic, pure C functions that the runtime will call in place of
+# standard library code. They call no libm function (scripts/check-kernels.sh
+# checks the archive), so they add nothing to the release binaries' libc,
+# libm, and loader dependencies. Floating point keeps strict binary64
+# semantics: no contraction into fused multiply-add, no fast-math, and no
+# host-specific instruction selection. The image format links it, so the
+# loader checks an image's KERN table against the kernel table and the NVM
+# (neura_nvm and neura_nvm_static, hence every launcher) runs kernel exits;
+# the compiler checks kernel bindings against the same table.
+add_library(neura_kernels STATIC
+    src/kernels/neura_digest.c
+    src/kernels/neura_encoding.c
+    src/kernels/neura_hash.c
+    src/kernels/neura_integer_text.c
+    src/kernels/neura_kernel.c
+    src/kernels/neura_math.c
+    src/kernels/neura_sort.c
+    src/kernels/neura_text.c
+)
+target_include_directories(neura_kernels PUBLIC src/kernels)
+set_target_properties(neura_kernels PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(neura_kernels PRIVATE /W4 /WX /fp:strict)
+else()
+    target_compile_options(neura_kernels PRIVATE
+        -ffp-contract=off -fno-math-errno
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+target_link_libraries(neura_nvr PUBLIC neura_kernels)
+if(BUILD_TESTING)
+    # Published vectors and boundary cases for each kernel family, plus the
+    # math vectors of tests/stdlib/math/support/math-vectors.nra.
+    add_executable(neura_kernel_tests tests/kernels/kernel_tests.cpp)
+    target_link_libraries(neura_kernel_tests PRIVATE neura_kernels)
+    neura_target_defaults(neura_kernel_tests)
+    foreach(suite IN ITEMS abi digest encoding text integer hash sort math table)
+        add_test(NAME kernels-${suite}
+            COMMAND neura_kernel_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
+endif()
+# --- End of kernels -----------------------------------------------------------
 
 if(BUILD_TESTING)
     if(TARGET neura_launcher)
@@ -379,6 +492,14 @@ if(BUILD_TESTING)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/schedules.cmake"
     )
 
+    # Monitors: #Synchronized methods on shared instances (Concurrency.md section 8.1).
+    add_test(NAME concurrency-monitors COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-monitors-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/monitors.cmake"
+    )
+
     add_test(NAME concurrency-parallel COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -403,6 +524,23 @@ if(BUILD_TESTING)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/nir-link.cmake"
     )
 
+    # Diagnostics: the core's unit tests, and one UI test per area under
+    # tests/ui that compares rendered errors and applied fixes.
+    add_executable(neura_diagnostic_tests tests/diagnostics/unit_tests.cpp)
+    target_link_libraries(neura_diagnostic_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_diagnostic_tests)
+    foreach(suite IN ITEMS sink source-map render width edits)
+        add_test(NAME diagnostics-unit-${suite} COMMAND neura_diagnostic_tests ${suite})
+    endforeach()
+    file(GLOB neura_ui_areas CONFIGURE_DEPENDS LIST_DIRECTORIES true "${CMAKE_CURRENT_SOURCE_DIR}/tests/ui/*")
+    foreach(area_dir IN LISTS neura_ui_areas)
+        if(IS_DIRECTORY "${area_dir}")
+            get_filename_component(area "${area_dir}" NAME)
+            add_test(NAME ui-${area} COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ui-test.py" --neura "$<TARGET_FILE:neura>" "${area_dir}")
+        endif()
+    endforeach()
+
     add_executable(neura_ir_tests
         tests/ir-optimization/behavior_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
@@ -410,6 +548,7 @@ if(BUILD_TESTING)
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
         tests/ir-optimization/main.cpp
+        tests/ir-optimization/pass_tests.cpp
         tests/ir-optimization/structure_tests.cpp
         tests/ir-optimization/support.cpp
         tests/ir-optimization/verifier_tests.cpp
@@ -445,7 +584,10 @@ if(BUILD_TESTING)
         tests/backend/nir_tests.cpp
         tests/backend/placement_tests.cpp
         tests/backend/reference_tests.cpp
+        tests/backend/tier_tests.cpp
+        tests/backend/tier2_tests.cpp
         tests/backend/vm_tests.cpp
+        tests/jit/jit_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
@@ -489,10 +631,15 @@ if(BUILD_TESTING)
         set_tests_properties(gpu-device gpu-cli PROPERTIES SKIP_RETURN_CODE 77 LABELS gpu TIMEOUT 1800)
     endif()
 
-    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement concurrency)
+    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement concurrency tier jit)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+    # backend-tier compares tier 2 with tier 0 with the default native code
+    # (docs/runtime/NVM.md, "Native compilation"); this runs it again with
+    # every region on the region interpreter.
+    add_test(NAME backend-tier-interpreter COMMAND neura_backend_tests tier "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(backend-tier-interpreter PROPERTIES ENVIRONMENT NEURA_JIT=off)
 
     add_test(NAME backend-each COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
@@ -511,6 +658,20 @@ if(BUILD_TESTING)
     foreach(suite IN ITEMS lossless lift behavior)
         add_test(NAME decompiler-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
+
+    # Lifted blocks (src/lift): the structural and overflow proofs, and the
+    # lowered blocks against the reference evaluator over a program corpus.
+    add_executable(neura_lift_tests
+        tests/lift/lift_tests.cpp
+        tests/ir-optimization/main.cpp
+        tests/ir-optimization/support.cpp
+    )
+    target_link_libraries(neura_lift_tests PRIVATE neura_lift neura_compiler neura_nvm)
+    target_include_directories(neura_lift_tests PRIVATE tests)
+    neura_target_defaults(neura_lift_tests)
+    foreach(suite IN ITEMS proof overflow execute corpus floats)
+        add_test(NAME lift-${suite} COMMAND neura_lift_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 
     add_test(NAME backend-cli COMMAND ${CMAKE_COMMAND}

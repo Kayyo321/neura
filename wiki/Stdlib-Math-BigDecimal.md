@@ -17,58 +17,58 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **BigDecimal** · [`export let RoundingMode = enum (Up, Down, Ceiling, Floor, HalfUp, HalfDown, HalfEven)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L21)
+- **BigDecimal** · [`export let RoundingMode = enum (Up, Down, Ceiling, Floor, HalfUp, HalfDown, HalfEven)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L22)
   Java's rounding modes: Up and Down round away from and toward zero, Ceiling and Floor toward positive and negative infinity, and the Half modes round to the nearest neighbour with ties away from zero, toward zero, or to the even neighbour.
-- **BigDecimal** · [`export let BigDecimal = class implements Comparable<BigDecimal>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L24)
-  An immutable decimal represented by an unscaled integer times ten raised to the negative scale.
-- **BigDecimal.BigDecimal** · [`export let init = func(unscaled_part: BigInteger, scale_part: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L31)
-  The value unscaled * 10^(-scale). A nil unscaled value traps.
-- **BigDecimal.BigDecimal** · [`export let unscaled = func -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L40)
-  The unscaled value.
-- **BigDecimal.BigDecimal** · [`export let scale = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L43)
+- **BigDecimal** · [`export let BigDecimal = class implements Comparable<BigDecimal>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L26)
+  An immutable decimal represented by an unscaled integer times ten raised to the negative scale. Tagged `#Final`, `#NoDiscard`.
+- **BigDecimal.BigDecimal** · [`export last unscaled: BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L28)
+  The integer coefficient, the unscaled value.
+- **BigDecimal.BigDecimal** · [`export last scale: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L30)
   The number of digits after the decimal point; negative for a multiple of a power of ten.
-- **BigDecimal.BigDecimal** · [`export let sign = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L46)
-  Returns minus one, zero, or one according to the coefficient's sign.
-- **BigDecimal.BigDecimal** · [`export let negate = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L49)
+- **BigDecimal.BigDecimal** · [`export let init = func(unscaled_part: BigInteger, scale_part: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L33)
+  The value unscaled * 10^(-scale). A nil unscaled value traps.
+- **BigDecimal.BigDecimal** · [`export let sign = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L43)
+  Returns minus one, zero, or one according to the coefficient's sign. Tagged `#Pure`.
+- **BigDecimal.BigDecimal** · [`export let negate = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L46)
   Reverses the sign and preserves the scale.
-- **BigDecimal.BigDecimal** · [`export let abs = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L52)
+- **BigDecimal.BigDecimal** · [`export let abs = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L49)
   Returns the absolute value and preserves the scale.
-- **BigDecimal.BigDecimal** · [`export let add = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L55)
+- **BigDecimal.BigDecimal** · [`export let add = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L52)
   Exact; the result has the larger scale.
-- **BigDecimal.BigDecimal** · [`export let subtract = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L68)
+- **BigDecimal.BigDecimal** · [`export let subtract = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L65)
   Exact; the result has the larger scale.
-- **BigDecimal.BigDecimal** · [`export let multiply = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L71)
-  Exact; the result's scale is the sum of the scales.
-- **BigDecimal.BigDecimal** · [`export let divide = func(other: BigDecimal, result_scale: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L76)
+- **BigDecimal.BigDecimal** · [`export let multiply = func(other: BigDecimal) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L69)
+  Exact; the result's scale is the sum of the scales. Tagged `#Pure`.
+- **BigDecimal.BigDecimal** · [`export let divide = func(other: BigDecimal, result_scale: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L74)
   this / other rounded to `result_scale` digits after the point with `mode`. A zero divisor traps (reason 1) in the BigInteger division.
-- **BigDecimal.BigDecimal** · [`export let set_scale = func(new_scale: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L95)
+- **BigDecimal.BigDecimal** · [`export let set_scale = func(new_scale: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L93)
   The same value with `new_scale` digits after the point, rounded with `mode` when digits are dropped.
-- **BigDecimal.BigDecimal** · [`export let round = func(precision: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L105)
+- **BigDecimal.BigDecimal** · [`export let round = func(precision: int, mode: RoundingMode) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L103)
   The value rounded to `precision` significant digits with `mode`. A precision of 0 returns the value unchanged; a negative precision traps.
-- **BigDecimal.BigDecimal** · [`export let strip_trailing_zeros = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L125)
+- **BigDecimal.BigDecimal** · [`export let strip_trailing_zeros = func -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L123)
   The numerically equal value with no trailing zeros in the unscaled value; zero has scale 0.
-- **BigDecimal.BigDecimal** · [`export let pow = func(exponent: int) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L153)
-  this^exponent exactly, with scale * exponent. pow(0) is 1 with scale 0; a negative exponent traps.
-- **BigDecimal.BigDecimal** · [`export let to_big_integer = func(mode: RoundingMode) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L161)
+- **BigDecimal.BigDecimal** · [`export let pow = func(exponent: int) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L152)
+  this^exponent exactly, with scale * exponent. pow(0) is 1 with scale 0; a negative exponent traps. Tagged `#Pure`.
+- **BigDecimal.BigDecimal** · [`export let to_big_integer = func(mode: RoundingMode) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L160)
   The integer part rounded with `mode`.
-- **BigDecimal.BigDecimal** · [`export let to_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L165)
+- **BigDecimal.BigDecimal** · [`export let to_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L164)
   The nearest float64, ties to even; infinities beyond the range and signed zeros below it.
 - **BigDecimal.BigDecimal** · [`export let compare_to = func(other: BigDecimal) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L198)
-  Compares numerical values independently of scale without aligning widely separated scales.
-- **BigDecimal.BigDecimal** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L230)
-  Numeric equality: 2.0 equals 2.00.
-- **BigDecimal.BigDecimal** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L238)
+  Compares numerical values independently of scale without aligning widely separated scales. Tagged `#Pure`.
+- **BigDecimal.BigDecimal** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L231)
+  Numeric equality: 2.0 equals 2.00. Tagged `#Pure`.
+- **BigDecimal.BigDecimal** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L239)
   From 17, combines the hashes of the stripped form's unscaled value and scale.
-- **BigDecimal.BigDecimal** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L246)
+- **BigDecimal.BigDecimal** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L247)
   Plain notation: exactly `scale` digits after the point when the scale is positive, and -scale appended zeros when it is negative. Zero with a negative scale prints as 0.
-- **BigDecimal** · [`export let of_int64 = func(value: int64) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L267)
-  Constructs an exact decimal from an int64 at scale zero.
-- **BigDecimal** · [`export let of_big_integer = func(value: BigInteger, scale: int) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L271)
-  Constructs a decimal from its unscaled integer and scale.
-- **BigDecimal** · [`export let of_float64 = func(v: float64) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L276)
-  The exact binary value of v with the smallest scale that holds it: 0.5 has scale 1 and 2.0 has scale 0. NaN and the infinities trap.
-- **BigDecimal** · [`export let parse = func(text: string) -> Result<BigDecimal>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L313)
-  An optional sign, digits with an optional point (at least one digit overall), and an optional exponent: `e` or `E`, an optional sign, and digits. The scale is the number of fraction digits minus the exponent; one outside the int range fails with OutOfRange.
+- **BigDecimal** · [`export let of_int64 = func(value: int64) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L269)
+  Constructs an exact decimal from an int64 at scale zero. Tagged `#Pure`, `#ThreadSafe`.
+- **BigDecimal** · [`export let of_big_integer = func(value: BigInteger, scale: int) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L274)
+  Constructs a decimal from its unscaled integer and scale. Tagged `#Pure`.
+- **BigDecimal** · [`export let of_float64 = func(v: float64) -> BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L280)
+  The exact binary value of v with the smallest scale that holds it: 0.5 has scale 1 and 2.0 has scale 0. NaN and the infinities trap. Tagged `#Pure`, `#ThreadSafe`.
+- **BigDecimal** · [`export let parse = func(text: string) -> Result<BigDecimal>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L318)
+  An optional sign, digits with an optional point (at least one digit overall), and an optional exponent: `e` or `E`, an optional sign, and digits. The scale is the number of fraction digits minus the exponent; one outside the int range fails with OutOfRange. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -95,7 +95,7 @@ These are the intended source-module contracts. Compiler support for the operati
 
 ### 10.3 `BigDecimal`
 
-An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`, representing unscaled × 10^(-scale). Parsing uses T1 and float conversion uses N1.
+An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`, representing unscaled × 10^(-scale), in the read-only fields `unscaled` and `scale`. Parsing uses T1 and float conversion uses N1.
 
 - `equals` and `compare_to` are numeric, so `2.0` equals `2.00`. `hash_code` is computed on the form with trailing zeros stripped.
 - `add` and `subtract` give the larger scale; `multiply` gives the sum of the scales; all are exact.
@@ -109,9 +109,9 @@ An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`
 
 Everything here needs T1 except the `Json` value type itself.
 
-- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone.
-- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error).
-- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero.
+- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone. The kernel `neura.encoding.utf8_validate` computes it (P2a).
+- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error). The kernels `neura.encoding.hex_encode` and `hex_decode` compute it (P2a).
+- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero. The kernels `neura.encoding.base64_encode` and `base64_decode` compute every form (P2a).
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
 
 **`Json`** (RFC 8259).
@@ -150,8 +150,8 @@ The module `Json`:
 
 ### 18.10 Math
 
-- **fdlibm port.** `Math` is a port of fdlibm 5.3 written without a reference copy of the sources; Sun's notice is kept in `math.nra`, `internal/trig.nra`, and the test transliteration. The Neura functions agree bit for bit with a C transliteration of the same port on 9,148 vector cases (`tests/stdlib/math/vectors`), and that transliteration stays within 1 ulp of a 70-digit reference for the functions fdlibm documents as such, with the same larger errors as glibc for `sinh`, `cosh`, `tanh`, and `log10`. Agreement with a reference fdlibm 5.3 build has not been checked. Expressions fdlibm evaluates only to raise the inexact flag are omitted. `sqrt` is the correctly rounded integer method of [section 10.1](Stdlib-Design#101-math). `log2`, which fdlibm 5.3 lacks, follows `e_log10.c` and returns exact results for powers of two. `pow(±1, ±∞)` and `pow(1, NaN)` are NaN, as in fdlibm.
+- **fdlibm port.** `Math` is a port of fdlibm 5.3 written without a reference copy of the sources; Sun's notice is kept in the Neura port (`tests/stdlib/math/support/reference-math.nra` and `reference-math-trig.nra`, the kernels' oracle since `Math` binds the kernels), in `src/kernels/`, and in the test transliteration. The Neura functions agree bit for bit with a C transliteration of the same port on 9,148 vector cases (`tests/stdlib/math/vectors`), and that transliteration stays within 1 ulp of a 70-digit reference for the functions fdlibm documents as such, with the same larger errors as glibc for `sinh`, `cosh`, `tanh`, and `log10`. Agreement with a reference fdlibm 5.3 build has not been checked. Expressions fdlibm evaluates only to raise the inexact flag are omitted. `sqrt` is the correctly rounded integer method of [section 10.1](Stdlib-Design#101-math). `log2`, which fdlibm 5.3 lacks, follows `e_log10.c` and returns exact results for powers of two. `pow(±1, ±∞)` and `pow(1, NaN)` are NaN, as in fdlibm.
 - **BigInteger** keeps its fields private (`signum`, `magnitude`); its constructor normalizes the value and adopts the list. `mod_inverse` traps for a modulus that is not positive. `floor_mod` takes the modulus's sign.
-- **BigDecimal** adds `unscaled()` and `scale()`. `round(0, mode)` returns the value unchanged; a rounding carry drops one zero, as Java does. `of_float64` gives the exact value at the smallest scale. `-0.00` parses as zero. `parse` accepts an optional sign, digits with an optional point, and an optional `e` or `E` exponent; a scale outside `int` fails with `OutOfRange` at offset 0. Zero with a negative scale prints as `0`.
+- **BigDecimal** adds the read-only fields `unscaled` and `scale`. `round(0, mode)` returns the value unchanged; a rounding carry drops one zero, as Java does. `of_float64` gives the exact value at the smallest scale. `-0.00` parses as zero. `parse` accepts an optional sign, digits with an optional point, and an optional `e` or `E` exponent; a scale outside `int` fails with `OutOfRange` at offset 0. Zero with a negative scale prints as `0`.
 - **Trap details.** `negative exponent`, `negative shift count`, `negative bit index`, `modulus not positive`, `not a finite value`, `negative precision`, `magnitude too large`, and `zero sign with a nonzero magnitude` after `invalid argument: `.
-- **Cost.** A float64 operation compiles to a large circuit, so a program that calls several `Math` functions has an image of several megabytes; `Math` is not in the cost baseline for that reason.
+- **Cost.** A `Math` call is one kernel call of one to four steps. While `Math` was Neura code, every float64 operation in it compiled to a large circuit: the `elementary` test program, which calls every function, had an image of 14,719,526 bytes, and has one of 15,480 bytes since it binds the kernels. `Math` is not in the cost baseline.

@@ -1,0 +1,43 @@
+let test = import:Std.Test;
+
+// Schedule exploration of a monitor (Concurrency.md sections 8.1 and 14.4).
+// Each task reads the count, makes a call that is a scheduling point, and
+// writes the count back. Every schedule must give the exact total, which
+// holds only because the synchronized methods exclude one another.
+let TallyTests = module (
+    #Synchronized
+    let Tally = class (
+        let count: int32 = 0;
+
+        export let add = func(times: int32) {
+            for (let i = 0; i < times; i++) {
+                let seen = count;
+                pause();
+                count = seen + 1;
+            }
+        };
+
+        export let add_twice = func(times: int32) {
+            add(times);
+            add(times);
+        };
+
+        export let total = func -> int32 => count;
+
+        let pause = func {};
+    );
+
+    let work = func(tally: Tally, times: int32) {
+        tally.add_twice(times);
+    };
+
+    export let test_total_is_exact = func() -> void {
+        let tally = new Tally();
+        scope {
+            for (let i = 0; i < 4; i++) {
+                spawn work(tally, 5);
+            }
+        }
+        test.assert_equal_int32(40, tally.total());
+    };
+);

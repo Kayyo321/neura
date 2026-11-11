@@ -19,17 +19,17 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Scope** · [`export let Scope = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L13)
-  A scope's cancellation signal and deadline.
-- **Scope.Scope** · [`export let cancel = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L23)
+- **Scope** · [`export let Scope = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L15)
+  A scope's cancellation signal and deadline. Tagged `#Final`.
+- **Scope.Scope** · [`export let cancel = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L25)
   Requests cancellation of the scope's tasks and all their descendants. Idempotent, and it cannot be undone. It wakes their parked channel operations and cancellable host requests; it never interrupts a running task, and the scope's exit still waits for every task.
-- **Scope.Scope** · [`export let is_cancelled = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L28)
+- **Scope.Scope** · [`export let is_cancelled = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L30)
   Whether cancellation of this scope was requested, by cancel or by its deadline.
-- **Scope.Scope** · [`export let cancel_after = func(span: duration.Duration) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L33)
-  Cancels the scope once the duration has passed on the monotonic clock. Needs the clock capability. A later call replaces this scope's own deadline; its tasks still observe the earlier of it and any deadline they inherited.
-- **Scope.Scope** · [`export let cancel_at = func(moment: instant.Instant) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L40)
-  Cancels the scope at the instant. Needs the clock capability.
-- **Scope.Scope** · [`export let deadline = func -> optional.Optional<duration.Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L50)
+- **Scope.Scope** · [`export let cancel_after = func(span: duration.Duration) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L36)
+  Cancels the scope once the duration has passed on the monotonic clock. Needs the clock capability. A later call replaces this scope's own deadline; its tasks still observe the earlier of it and any deadline they inherited. Tagged `#NoDiscard(reason: "without the clock capability no deadline is set")`.
+- **Scope.Scope** · [`export let cancel_at = func(moment: instant.Instant) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L44)
+  Cancels the scope at the instant. Needs the clock capability. Tagged `#NoDiscard(reason: "without the clock capability no deadline is set")`.
+- **Scope.Scope** · [`export let deadline = func -> optional.Optional<duration.Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L54)
   The reading of the monotonic clock at which the scope's tasks are cancelled: the earlier of this scope's deadline and the one it inherited, or None.
 <!-- END SOURCE API -->
 
@@ -44,7 +44,7 @@ The following sections give this module's contract from the [standard-library de
 ```neura
 let stop_after = func(limit: durations.Duration) -> int {
     scope (group) {
-        group.cancel_after(limit);
+        let _ = group.cancel_after(limit);
         let counting = spawn count_until_stopped();
         return counting.join();
     }

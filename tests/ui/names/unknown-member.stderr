@@ -1,0 +1,12 @@
+error[E0305]: unknown or inaccessible member 'sise' of Box
+ --> $DIR/unknown-member.nra:7:12
+  |
+7 |     return box.sise;
+  |            ^^^^^^^^ Box has no member 'sise'
+  |
+help: there is a member with a similar name: 'size'
+  |
+7 |     return box.size;
+  |                ~~~~
+
+For more information about this error, try `neura explain E0305`.

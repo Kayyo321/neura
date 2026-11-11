@@ -1,10 +1,12 @@
 /// @brief The handle of a task started with `spawn` (Concurrency.md section 4.1). A handle is scope-bound: it
 /// stays inside the `scope` block that started its task, so it cannot be returned, stored in a field, or captured.
 /// @see [Std.Concurrent.Task](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Task)
+#Since("0.1.0")
 export let Task = module (
     /// @brief A call running as a task, or its result once the call has returned.
+    #Final
     export let Task = class<T> (
-        let id: uint64;
+        last id: uint64;
 
         let init = func(task: uint64) {
             id = task;
@@ -18,9 +20,11 @@ export let Task = module (
         export let is_finished = func -> bool => task_finished(id);
 
         /// @brief What a select waits on for this task. Used by the select statement.
+        #Hidden
         export let select_handle = func -> uint64 => id;
 
         /// @brief The result of a join that a select committed. Used by the select statement.
+        #Hidden
         export let join_selected = func(code: uint32) -> T => take<T>();
     );
 

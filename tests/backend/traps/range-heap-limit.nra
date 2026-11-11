@@ -7,5 +7,5 @@ let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let values = {0 .. 100};
         return program.ExitCode.Ok;
-    }
+    };
 );

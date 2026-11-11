@@ -1,0 +1,123 @@
+name: Native code
+
+# Runs tier 2's native code generator (docs/runtime/NVM.md, "Native
+# compilation") on the platforms where --jit=auto does not enable it yet:
+# AArch64 Linux, AArch64 macOS, and x86-64 macOS. Each job forces native code
+# with NEURA_JIT=on, runs the JIT and tier unit suites, the boundary
+# arithmetic comparison, and the byte-for-byte runtime identity comparison
+# against tier 0. Once these jobs pass, `auto` can be extended to their
+# platforms. The workflow is not a required check. It runs for pull requests
+# that change the runtime, and on a maintainer's request. It holds no secrets
+# and its token can only read the repository.
+on:
+  pull_request:
+    paths:
+      - "src/jit/**"
+      - "src/nvm/**"
+      - ".github/workflows/jit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  native:
+    name: Native code (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Linux arm64
+            runner: ubuntu-24.04-arm
+          - platform: macOS arm64
+            runner: macos-15
+          - platform: macOS x86-64
+            runner: macos-15-intel
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - name: Check out the repository and its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install the build dependencies (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends gcc-14 g++-14 libffi-dev
+          echo "CC=gcc-14" >> "$GITHUB_ENV"
+          echo "CXX=g++-14" >> "$GITHUB_ENV"
+          echo "JOBS=$(nproc)" >> "$GITHUB_ENV"
+
+      - name: Install the build dependencies (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          brew install libffi pkgconf
+          echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "JOBS=$(sysctl -n hw.ncpu)" >> "$GITHUB_ENV"
+
+      - name: Describe the machine
+        run: |
+          uname -a
+          cmake --version
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_GPU=OFF
+
+      - name: Build
+        run: cmake --build build --parallel "$JOBS" --target neura neura_backend_tests 2>&1 | tee build/build.log
+
+      - name: The JIT suite with native code
+        env:
+          NEURA_JIT: "on"
+        run: build/neura_backend_tests jit "$PWD"
+
+      - name: The tier suite with native code
+        env:
+          NEURA_JIT: "on"
+        run: build/neura_backend_tests tier "$PWD"
+
+      - name: Boundary arithmetic, interpreted and native, checked against tier 1
+        run: python3 scripts/tier-boundary.py --neura build/neura --out build/tier-boundary --jit off,on
+
+      - name: Runtime identity, tier 0 against native code
+        run: |
+          python3 scripts/runtime-identity.py capture --neura build/neura --images build/identity/images \
+            --out build/identity/tier0 --extended --run-option=--tier=0
+          python3 scripts/runtime-identity.py capture --neura build/neura --images build/identity/images \
+            --out build/identity/jit --extended --jit on
+          python3 scripts/runtime-identity.py compare build/identity/tier0 build/identity/jit
+
+      - name: Runtime identity, tier 0 against eager native code
+        env:
+          NEURA_TIER_EAGER: "1"
+        run: |
+          python3 scripts/runtime-identity.py capture --neura build/neura --images build/identity/images \
+            --out build/identity/jit-eager --extended --jit on
+          python3 scripts/runtime-identity.py compare build/identity/tier0 build/identity/jit-eager
+
+      - name: Upload the build log and the differing captures
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jit-${{ matrix.runner }}
+          path: |
+            build/build.log
+            build/tier-boundary
+            build/identity/jit
+            build/identity/jit-eager
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,41 @@
+// sizes: quick 40 full 90
+// Multiplies two n by n int64 matrices with the textbook triple loop and
+// folds the product into a checksum. The size is the first argument;
+// java/MatrixMultiply.java prints the same line.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let MatrixMultiply = module:program.Entry (
+    const Mask: int64 = 1073741823;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let a = lists.filled<int64>(n * n, 0);
+        let b = lists.filled<int64>(n * n, 0);
+        let c = lists.filled<int64>(n * n, 0);
+        for (let i = 0; i < n; i = i + 1) {
+            for (let j = 0; j < n; j = j + 1) {
+                a[i * n + j] = ((i * 7 + j * 3) % 100) as int64;
+                b[i * n + j] = ((i * 5 + j * 11) % 100) as int64;
+            }
+        }
+        for (let i = 0; i < n; i = i + 1) {
+            for (let j = 0; j < n; j = j + 1) {
+                let sum: int64 = 0;
+                for (let k = 0; k < n; k = k + 1) {
+                    sum = sum + a[i * n + k] * b[k * n + j];
+                }
+                c[i * n + j] = sum;
+            }
+        }
+        let checksum: int64 = 0;
+        for (let i = 0; i < n * n; i = i + 1) {
+            checksum = (checksum * 31 + c[i]) & Mask;
+        }
+        console.println("matrix-multiply {}", checksum);
+        return program.ExitCode.Ok;
+    };
+);

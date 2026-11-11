@@ -4,11 +4,11 @@ let program = import:Std.Program;
 let First = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
-    }
+    };
 );
 
 let Second = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
-    }
+    };
 );

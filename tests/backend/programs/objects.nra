@@ -10,7 +10,7 @@ let Objects = module:program.Entry (
 
         export let increment = func() -> void {
             value = value + step;
-        }
+        };
     );
 
     let Shape = class (
@@ -18,31 +18,31 @@ let Objects = module:program.Entry (
 
         export let describe = func() -> string {
             return name + " with " + sides_text();
-        }
+        };
 
         export let sides_text = func() -> string {
             return "no sides";
-        }
+        };
 
         export let sides = func() -> int32 {
             return 0;
-        }
+        };
     );
 
     let Triangle = class:Shape (
         export let.override sides_text = func() -> string {
             return "three sides";
-        }
+        };
 
         export let.override sides = func() -> int32 {
             return 3;
-        }
+        };
     );
 
     let Square = class:Shape (
         export let.override sides = func() -> int32 {
             return 4;
-        }
+        };
     );
 
     let total_sides = func(first: Shape, second: Shape) -> int32 {
@@ -54,7 +54,7 @@ let Objects = module:program.Entry (
 
         export let init = func(text: string) -> void {
             label = text;
-        }
+        };
     );
 
     let Loud = class:Labeled (
@@ -63,7 +63,7 @@ let Objects = module:program.Entry (
         export let init = func(text: string) -> void {
             super.init(text);
             label = label + suffix;
-        }
+        };
     );
 
     let Resource = class (
@@ -71,13 +71,13 @@ let Objects = module:program.Entry (
 
         let deinit = func() -> void {
             console.print_line("release " + name);
-        }
+        };
     );
 
     let Connection = class:Resource (
         let deinit = func() -> void {
             console.print_line("close connection");
-        }
+        };
     );
 
     export let.override main = func(args: string[]) -> program.ExitCode {
@@ -107,5 +107,5 @@ let Objects = module:program.Entry (
         resource.name = "socket";
         destroy resource;
         return program.ExitCode.Ok;
-    }
+    };
 );

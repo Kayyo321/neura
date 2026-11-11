@@ -60,7 +60,7 @@ let ValuesTests = module (
         test.assert(unit.Unit.Value == unit.Unit.Value);
         test.assert_equal_string("Value", unit.Unit.Value.to_string());
         test.assert_equal_int32(0, version.Major);
-        test.assert_equal_int32(1, version.Minor);
+        test.assert_equal_int32(2, version.Minor);
         test.assert_equal_int32(0, version.Patch);
     };
 );

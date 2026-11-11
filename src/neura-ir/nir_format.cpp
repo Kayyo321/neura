@@ -1,4 +1,5 @@
 #include "nir_format.hpp"
+#include "attributes.hpp"
 #include "host_binding.hpp"
 #include "integer.hpp"
 
@@ -25,7 +26,10 @@ constexpr std::uint8_t max_op_1_7 = static_cast<std::uint8_t>(IrOp::ReferencePla
 constexpr std::uint8_t max_op_1_9 = static_cast<std::uint8_t>(IrOp::SchedulerCall);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
-constexpr std::uint16_t newest_node_minor = 9;
+constexpr std::uint16_t task_minor = 9;
+// NeuraIR 1.10 adds symbol attributes and deferred initialization.
+constexpr std::uint16_t attribute_minor = 10;
+constexpr std::uint16_t newest_node_minor = attribute_minor;
 
 bool may_poll(IrOp op) {
     return op == IrOp::Loop || op == IrOp::Call || op == IrOp::VirtualCall || op == IrOp::CallClosure;
@@ -65,8 +69,10 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (op > max_op_1_7 || node.poll) return newest_node_minor;
-        if (op > max_op_1_4) {
+        if (is_deferred_initialize(node)) return attribute_minor;
+        if (op > max_op_1_7 || node.poll) {
+            version = std::max(version, task_minor);
+        } else if (op > max_op_1_4) {
             version = std::max<std::uint16_t>(version, 7);
         } else if (op > max_op_1_3 || scoped_statements(node) || class_qualified_load(node)) {
             version = std::max<std::uint16_t>(version, 4);
@@ -95,7 +101,9 @@ enum Flag : std::uint8_t {
 };
 
 enum LinkFlag : std::uint8_t {
-    VariadicMask = 3, UserCast = 4, OverloadBranch = 8, Singleton = 16
+    VariadicMask = 3, UserCast = 4, OverloadBranch = 8, Singleton = 16,
+    // NeuraIR 1.10: a nonempty attribute vector follows the references.
+    HasAttributes = 32
 };
 
 class Writer {
@@ -104,6 +112,7 @@ public:
         // Span paths form a table in order of first use.
         for (const auto& symbol : program.symbols) {
             path(symbol.span.file);
+            for_each_attribute_span(symbol.attributes, [&](const Span& span) { path(span.file); });
         }
         for (const auto& body : program.bodies) {
             for (const auto& node : body.instructions) {
@@ -128,6 +137,7 @@ public:
             if (is_static_initializer(item)) version = std::max<std::uint16_t>(version, 5);
             if (is_static_scope(item)) version = std::max<std::uint16_t>(version, 4);
             if (host_callback(item)) version = std::max<std::uint16_t>(version, 8);
+            if (!item.attributes.empty()) version = std::max(version, attribute_minor);
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
                 version = std::max<std::uint16_t>(version, 3);
@@ -292,9 +302,34 @@ private:
             u8(static_cast<std::uint8_t>(static_cast<std::uint8_t>(value.variadic) |
                 (value.user_cast ? UserCast : 0) |
                 (value.overload_group != no_symbol ? OverloadBranch : 0) |
-                (value.singleton_instance != no_symbol ? Singleton : 0)));
+                (value.singleton_instance != no_symbol ? Singleton : 0) |
+                (value.attributes.empty() ? 0 : HasAttributes)));
             if (value.overload_group != no_symbol) reference(value.overload_group);
             if (value.singleton_instance != no_symbol) reference(value.singleton_instance);
+            if (!value.attributes.empty()) {
+                count(value.attributes.size());
+                for (const auto& item : value.attributes) {
+                    u16(static_cast<std::uint16_t>(item.id));
+                    attribute_value(item.value);
+                }
+            }
+        }
+    }
+
+    void attribute_value(const IrAttributeValue& value) {
+        u8(static_cast<std::uint8_t>(value.kind));
+        switch (value.kind) {
+        case AttributeValueKind::Bool: u8(value.integer != 0 ? 1 : 0); break;
+        case AttributeValueKind::Signed:
+        case AttributeValueKind::Unsigned: u64(value.integer); break;
+        case AttributeValueKind::Text: text(value.text); break;
+        case AttributeValueKind::Symbol: reference(value.symbol); break;
+        case AttributeValueKind::Type: type(value.type); break;
+        case AttributeValueKind::Span: span(value.span); break;
+        case AttributeValueKind::List:
+            count(value.items.size());
+            for (const auto& item : value.items) attribute_value(item);
+            break;
         }
     }
 
@@ -341,7 +376,7 @@ public:
         }
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7, max_op_1_9};
+            max_op_1_7, max_op_1_9, max_op_1_9};
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
@@ -571,7 +606,9 @@ private:
         }
         if (minor_ >= 6) {
             const auto linkage = u8();
-            if ((linkage & ~(VariadicMask | UserCast | OverloadBranch | Singleton)) != 0 ||
+            if ((linkage & HasAttributes) != 0 && minor_ < attribute_minor)
+                fail("symbol attributes require NeuraIR format 1.10");
+            if ((linkage & ~(VariadicMask | UserCast | OverloadBranch | Singleton | HasAttributes)) != 0 ||
                 (linkage & VariadicMask) == VariadicMask) {
                 fail("invalid source linkage flags");
             }
@@ -579,6 +616,45 @@ private:
             value.user_cast = (linkage & UserCast) != 0;
             if ((linkage & OverloadBranch) != 0) value.overload_group = required_reference();
             if ((linkage & Singleton) != 0) value.singleton_instance = required_reference();
+            if ((linkage & HasAttributes) != 0) {
+                // An attribute is at least an id, a value kind, and one byte.
+                const auto n = count(4);
+                if (n == 0) fail("an attribute flag needs at least one attribute");
+                value.attributes.reserve(n);
+                for (std::uint32_t i = 0; i < n; ++i) {
+                    const auto id = u16();
+                    if (!find_attribute_info(id)) fail("unknown symbol attribute " + std::to_string(id));
+                    value.attributes.push_back({static_cast<AttributeId>(id), attribute_value(0)});
+                }
+                if (const auto problem = attribute_problem(value.kind, value.attributes))
+                    fail("symbol '" + value.name + "': " + *problem);
+            }
+        }
+        return value;
+    }
+
+    IrAttributeValue attribute_value(std::size_t depth) {
+        enter(depth);
+        IrAttributeValue value;
+        value.kind = static_cast<AttributeValueKind>(
+            tag(static_cast<std::uint8_t>(AttributeValueKind::List), "attribute value"));
+        switch (value.kind) {
+        case AttributeValueKind::Bool:
+            value.integer = u8();
+            if (value.integer > 1) fail("invalid attribute bool " + std::to_string(value.integer));
+            break;
+        case AttributeValueKind::Signed:
+        case AttributeValueKind::Unsigned: value.integer = u64(); break;
+        case AttributeValueKind::Text: value.text = text(); break;
+        case AttributeValueKind::Symbol: value.symbol = required_reference(); break;
+        case AttributeValueKind::Type: value.type = type(depth + 1); break;
+        case AttributeValueKind::Span: value.span = span(); break;
+        case AttributeValueKind::List: {
+            const auto n = count(2);
+            value.items.reserve(n);
+            for (std::uint32_t i = 0; i < n; ++i) value.items.push_back(attribute_value(depth + 1));
+            break;
+        }
         }
         return value;
     }
@@ -612,6 +688,8 @@ private:
         value.text = text();
         if (!aggregates_ && new_operator(value)) fail("bitwise operations require NeuraIR format 1.2");
         value.operands = nodes(depth + 1);
+        if (minor_ < attribute_minor && is_deferred_initialize(value))
+            fail("deferred initialization requires NeuraIR format 1.10");
         if (minor_ < 4 && class_qualified_load(value))
             fail("static fields with class reference qualifiers require NeuraIR format 1.4");
         value.body = nodes(depth + 1);

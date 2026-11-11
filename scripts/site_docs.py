@@ -57,16 +57,25 @@ NEURA_KEYWORDS = {
     "while", "do", "for", "in", "break", "continue", "return", "true", "false", "as", "is", "nil", "enum",
     "match", "and", "or", "interface", "implements", "promote", "static", "singleton",
 }
+# A tag before a declaration (docs/lang/Tags.md), `#Name` or the opening of a
+# group `#[Name`, is marked like a keyword.
 NEURA_TOKEN = re.compile(
     r'(?P<c>//[^\n]*|/\*.*?\*/)|(?P<s>"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\')'
+    r"|(?P<t>#(?:\[\s*)?[A-Za-z_][A-Za-z0-9_]*)"
     r"|(?P<n>\b\d[\d_]*(?:\.\d+)?\b)|(?P<w>\b[A-Za-z_][A-Za-z0-9_]*\b)",
     re.DOTALL,
 )
+# The word of an accessor clause (Types.md, Accessors), followed by its colon.
+ACCESSOR_CLAUSE = re.compile(r"(?:get|set)\s*:")
 # References that a page or stylesheet loads, which `fingerprint` versions.
 PAGE_REFERENCE = re.compile(r'\b(href|src|srcset|data-index)="([^"]*)"')
 CSS_URL = re.compile(r'url\("([^"]+)"\)')
 API_ITEM = re.compile(r'<li><strong>([^<]*)</strong> · <a href="([^"]*)"><code>([^<]*)</code></a>')
-DECLARED_NAME = re.compile(r"\b(?:let|const)\s+([A-Za-z_][A-Za-z0-9_]*)")
+DECLARED_NAME = re.compile(r"\b(?:let|const|last)\s+([A-Za-z_][A-Za-z0-9_]*)")
+# `last` is a contextual word: a keyword only when a name follows it, as in
+# `last total: int;`, and an ordinary name in `last = 3;` or `last.next`.
+CONTEXTUAL_KEYWORDS = {"last"}
+CONTEXTUAL_FOLLOWER = re.compile(r"[ \t]+([A-Za-z_][A-Za-z0-9_]*)")
 
 Report = Callable[[str, int, str], None]
 
@@ -79,10 +88,19 @@ def highlight(language: str, source: str) -> str | None:
     for match in NEURA_TOKEN.finditer(source):
         out.append(html.escape(source[position:match.start()], quote=False))
         kind, text = match.lastgroup, match.group()
-        if kind == "w" and text not in NEURA_KEYWORDS:
+        if kind == "w" and text in CONTEXTUAL_KEYWORDS:
+            follower = CONTEXTUAL_FOLLOWER.match(source, match.end())
+            keyword = follower is not None and follower.group(1) not in NEURA_KEYWORDS
+        else:
+            keyword = text in NEURA_KEYWORDS
+        # `get` and `set` are keywords only as an accessor clause, `| get:`.
+        if (kind == "w" and text in ("get", "set") and ACCESSOR_CLAUSE.match(source, match.start())
+                and re.search(r"\|\s*$", source[:match.start()])):
+            keyword = True
+        if kind == "w" and not keyword:
             out.append(html.escape(text, quote=False))
         else:
-            out.append(f'<span class="{"k" if kind == "w" else kind}">{html.escape(text, quote=False)}</span>')
+            out.append(f'<span class="{"k" if kind in ("w", "t") else kind}">{html.escape(text, quote=False)}</span>')
         position = match.end()
     out.append(html.escape(source[position:], quote=False))
     return "".join(out)

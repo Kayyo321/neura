@@ -6,6 +6,8 @@
 
 #include "backend/converter.hpp"
 #include "ir-optimization/evaluator.hpp"
+#include "lift/hints.hpp"
+#include "lift/proof.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/float.hpp"
 #include "nvr/names.hpp"
@@ -492,11 +494,39 @@ NEURA_TEST(conversion, conversion_is_deterministic) {
     }
 }
 
+NEURA_TEST(conversion, lift_hints_are_optional) {
+    // The LIFT section is optional metadata (docs/runtime/NVR.md, "Lift
+    // hints"): leaving it out changes nothing else, raises no format
+    // version, and every hint the converter writes passes the structural
+    // proof against its block.
+    const auto program = program_path(environment, "computation");
+    auto with_hints = backend::build(lower_files({program})).image;
+    backend::BuildOptions options;
+    options.lift_hints = false;
+    const auto without_hints = backend::build(lower_files({program}), options).image;
+    const auto hints = lift::decode_hints(with_hints);
+    check(!hints.empty(), "the default build records lift hints");
+    check(lift::decode_hints(without_hints).empty(), "--no-lift-hints omits LIFT");
+    for (const auto& [key, form] : hints) {
+        const auto& block = with_hints.functions[key.first].blocks[key.second];
+        check(lift::prove_structure(with_hints, block, with_hints.graphs[block.graph], *form),
+              "hint for function " + std::to_string(key.first) + " block " + std::to_string(key.second) +
+                  " regenerates its block");
+    }
+    check(nvr::encode(with_hints).size() > nvr::encode(without_hints).size(), "the section takes bytes");
+    check(nvr::load(nvr::encode(with_hints)).minor_version == nvr::load(nvr::encode(without_hints)).minor_version,
+          "the section raises no format version");
+    check(lift::strip_hints(with_hints), "the default build has a LIFT section");
+    check(with_hints == without_hints, "the hints are the only difference");
+}
+
 NEURA_TEST(conversion, source_map_is_optional) {
     auto with_map = backend::build(lower_files({program_path(environment, "computation")})).image;
     backend::BuildOptions options;
     options.source_map = false;
     auto without_map = backend::build(lower_files({program_path(environment, "computation")}), options).image;
+    // The LIFT section is optional metadata of its own (lift_hints_are_optional).
+    check(lift::strip_hints(with_map) && lift::strip_hints(without_map), "both builds carry lift hints");
     check(with_map.source_map.has_value() && !with_map.source_map->empty(), "the default build has a source map");
     check(!without_map.source_map.has_value(), "--no-source-map omits SMAP");
     check(without_map.other_sections.empty(), "--no-source-map omits NAME");

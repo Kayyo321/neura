@@ -1,0 +1,94 @@
+// Target-typed `new` in every position that gives it a type, and typed
+// multi-binding (ObjectLifecycle.md, Target-typed new; Types.md, Tuples).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Pair = class (
+    export let left: int = 0;
+    export let right: int = 0;
+
+    export let init = func() {
+        console.print_line("init()");
+    } or func(a: int, b: int) {
+        console.print_line("init(" + a.to_string() + ", " + b.to_string() + ")");
+        left = a;
+        right = b;
+    };
+
+    export let sum = func() -> int => left + right;
+);
+
+let Box = class<T> (
+    export let item: T;
+
+    export let init = func(value: T) {
+        item = value;
+    };
+);
+
+let Holder = class (
+    // A field initializer gets its type from the field's annotation.
+    export let pair: Pair = new(7, 8);
+);
+
+let Tag = class (
+    export let name: string = "tag";
+);
+
+// An overload is chosen by the class that 'new' can construct.
+let describe = func(pair: Pair) -> string => "pair " + pair.sum().to_string()
+    or func(value: int) -> string => "int " + value.to_string();
+
+let make = func() -> Pair {
+    return new(4, 5);
+};
+
+let total = func(first: Pair, second: Pair) -> int => first.sum() + second.sum();
+
+let counter: int = 0;
+let next = func() -> int {
+    counter = counter + 1;
+    return counter;
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // The two forms without arguments are the same.
+        let a: Pair = new;
+        let b: Pair = new Pair();
+        console.print_line(a.sum().to_string() + " " + b.sum().to_string());
+
+        // With arguments.
+        let c: Pair = new(1, 2);
+        const d: Pair = new(3, 4);
+        console.print_line(c.sum().to_string() + " " + d.sum().to_string());
+
+        // Generic expected types choose the instantiation.
+        let words: Box<string> = new("boxed");
+        let number: Box<int> = new(41);
+        console.print_line(words.item + " " + (number.item + 1).to_string());
+
+        // Result, argument, field, assignment, and collection element.
+        console.print_line(make().sum().to_string());
+        console.print_line(total(new(1, 1), new).to_string());
+        console.print_line(describe(new(2, 3)));
+        console.print_line(describe(6));
+        console.print_line(new Holder().pair.sum().to_string());
+        a = new(10, 10);
+        console.print_line(a.sum().to_string());
+        let pairs: Pair[] = [new(1, 2), new];
+        console.print_line(pairs.length.to_string() + " " + pairs[0].sum().to_string());
+
+        // Typed multi-binding: each value is lowered with its own expected
+        // type, from left to right.
+        let [k, v]: [Pair, Tag] = new(5, 6), new;
+        console.print_line(k.sum().to_string() + " " + v.name);
+        const [first, second] = next(), next();
+        console.print_line(first.to_string() + " " + second.to_string());
+        let [label, amount]: [string, int64] = "total", 9;
+        console.print_line(label + " " + amount.to_string());
+        let [whole, _] = [11, "ignored"];
+        console.print_line(whole.to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,15 @@
+// A spawned call that reaches a #NotThreadSafe function (E0601): the author
+// declined to promise task safety, so the call is rejected even though the
+// function touches no shared state. The label is at the tag.
+#NotThreadSafe
+let render = func(value: int32) -> int32 {
+    return value * 2;
+};
+
+let work = func(value: int32) -> int32 => render(value);
+
+let run = func() {
+    scope {
+        spawn work(3);
+    }
+};

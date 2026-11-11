@@ -100,7 +100,7 @@ export let Main = module : program.Entry (
                             console.print_line("deadline failed: " + errors.message(problem));
                         },
                     }
-                    spawn reader(listener.local_port(), reads[0]);
+                    spawn reader(listener.local_port, reads[0]);
                     spawn acceptor(accepts[0]);
                     spawn sleeper(sleeps[0]);
                     show(reads[1]);

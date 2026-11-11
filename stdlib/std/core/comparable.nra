@@ -3,8 +3,10 @@ let.promote _ = import:Std.Core.Ordering;
 /// @brief Natural order for value classes such as BigInteger, Duration, and Path. Sorted collections never
 /// require it: they always take a comparator.
 /// @see [Std.Core.Comparable](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Comparable)
+#Since("0.1.0")
 export let Comparable = module (
     /// @brief Defines the natural ordering between a receiver and another value of type T.
+    #Since("0.1.0")
     export let Comparable = interface<T> (
         /// @brief Returns Less, Equal, or Greater according to the receiver's order relative to other.
         let compare_to = func(other: T) -> Ordering;

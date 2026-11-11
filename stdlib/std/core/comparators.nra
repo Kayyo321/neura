@@ -3,6 +3,7 @@ let.promote _ = import:Std.Core.Ordering;
 /// @brief Comparator combinators (Stdlib.md section 5.3). A comparator is a native function value of type (T,
 /// T) -> Ordering that defines a total order.
 /// @see [Std.Core.Comparators](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Comparators)
+#Since("0.1.0")
 export let Comparators = module (
     /// @brief The opposite order of `c`.
     export let reversed = func<T>(c: func(T, T) -> Ordering) -> func(T, T) -> Ordering {
@@ -24,7 +25,7 @@ export let Comparators = module (
     export let then = func<T>(first: func(T, T) -> Ordering, second: func(T, T) -> Ordering)
         -> func(T, T) -> Ordering {
         return func(a: T, b: T) -> Ordering {
-            let order = first(a, b);
+            last order = first(a, b);
             if (order != Ordering.Equal) {
                 return order;
             }

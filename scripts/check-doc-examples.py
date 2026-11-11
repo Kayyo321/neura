@@ -15,6 +15,15 @@ between, by an HTML comment that says how the block is checked:
                                      passes it.
   <!-- example: rejected: <text> --> `neura check` fails, and its diagnostic
                                      contains <text>.
+  <!-- example: error: <CODE> -->    `neura build` fails, and the first error
+                                     it reports has the code <CODE>, such as
+                                     E0401. The explain pages in
+                                     docs/diagnostics use it for their failing
+                                     examples.
+  <!-- example: warning: <CODE> -->  `neura emit-ir` (which optimizes) succeeds,
+                                     and the first diagnostic it reports is the
+                                     warning <CODE>, such as W0001. The explain
+                                     pages of warnings use it.
   <!-- example: fragment: <why> -->  The block is not a complete file, so it is
                                      not compiled. The reason is required.
 
@@ -44,7 +53,11 @@ TIMEOUT_SECONDS = 60
 
 FENCE = re.compile(r"^( {0,3})(`{3,}|~{3,})\s*([^\s`]*)")
 DIRECTIVE = re.compile(r"^<!--\s*example:\s*(.*?)\s*-->$")
-KINDS = ("check", "run", "test", "rejected", "fragment")
+KINDS = ("check", "run", "test", "rejected", "error", "warning", "fragment")
+CODE = re.compile(r"^E\d{4}$")
+WARNING_CODE = re.compile(r"^W\d{4}$")
+FIRST_ERROR = re.compile(r"^.*?:\d+:\d+: error(?:\[(E\d{4})\])?: ", re.MULTILINE)
+FIRST_DIAGNOSTIC = re.compile(r"^.*?:\d+:\d+: (error|warning)(?:\[([EW]\d{4})\])?: ", re.MULTILINE)
 
 
 @dataclasses.dataclass
@@ -90,6 +103,10 @@ def parse_directive(text: str) -> tuple[str | None, str, str | None]:
         return None, "", f"`example: {kind}` takes no argument"
     if kind == "rejected" and not argument:
         return None, "", "`example: rejected` needs the diagnostic text it expects, as `rejected: <text>`"
+    if kind == "error" and not CODE.match(argument):
+        return None, "", "`example: error` needs the diagnostic code it expects, as `error: E0401`"
+    if kind == "warning" and not WARNING_CODE.match(argument):
+        return None, "", "`example: warning` needs the warning code it expects, as `warning: W0001`"
     if kind == "fragment" and not argument:
         return None, "", "`example: fragment` needs a reason, as `fragment: <reason>`"
     return kind, argument, None
@@ -157,6 +174,22 @@ def verify(neura: str, block: Block) -> list[str]:
                 if block.argument not in result.stdout + result.stderr:
                     return [f"the diagnostic does not contain `{block.argument}`:\n"
                             f"{indent(result.stdout + result.stderr)}"]
+            elif block.kind == "error":
+                result = execute(neura, ["build", "--error-format=short", "example.nra", "-o", "example.nvr"],
+                                 directory)
+                if result.returncode == 0:
+                    return [f"`neura build` accepted an example that should fail with {block.argument}"]
+                first = FIRST_ERROR.search(result.stderr)
+                if not first or first.group(1) != block.argument:
+                    return [f"the first error is not {block.argument}:\n{indent(result.stdout + result.stderr)}"]
+            elif block.kind == "warning":
+                result = execute(neura, ["emit-ir", "--error-format=short", "example.nra"], directory)
+                if result.returncode != 0:
+                    return [f"`neura emit-ir` rejected an example that should only warn:\n"
+                            f"{indent(result.stderr)}"]
+                first = FIRST_DIAGNOSTIC.search(result.stderr)
+                if not first or first.group(1) != "warning" or first.group(2) != block.argument:
+                    return [f"the first diagnostic is not the warning {block.argument}:\n{indent(result.stderr)}"]
             elif block.kind == "test":
                 result = execute(neura, ["test", "example.nra"], directory)
                 if result.returncode != 0:

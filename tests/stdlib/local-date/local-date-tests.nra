@@ -11,9 +11,9 @@ let LocalDateTests = module (
     let check_day = func(epoch_day: int64, year: int, month: int, day: int, weekday: weekdays.DayOfWeek, day_of_year: int,
             leap: bool, month_length: int, text: string) -> void {
         let date = local_date.of_epoch_day(epoch_day);
-        test.assert_equal_int32(year, date.year());
-        test.assert_equal_int32(month, date.month());
-        test.assert_equal_int32(day, date.day());
+        test.assert_equal_int32(year, date.year);
+        test.assert_equal_int32(month, date.month);
+        test.assert_equal_int32(day, date.day);
         test.assert_equal_int64(epoch_day, local_date.of(year, month, day).to_epoch_day());
         test.assert_equal_string(weekday.to_string(), date.day_of_week().to_string());
         test.assert_equal_int32(day_of_year, date.day_of_year());
@@ -265,17 +265,17 @@ let LocalDateTests = module (
                 let date = local_date.of_epoch_day(e);
                 test.assert_equal_int64(e, date.to_epoch_day());
                 test.assert_equal_int32(((previous.day_of_week() as int) + 1) % 7, date.day_of_week() as int);
-                if (date.day() == 1) {
-                    test.assert_equal_int32(previous.length_of_month(), previous.day());
-                    if (date.month() == 1) {
-                        test.assert_equal_int32(previous.year() + 1, date.year());
-                        test.assert_equal_int32(12, previous.month());
+                if (date.day == 1) {
+                    test.assert_equal_int32(previous.length_of_month(), previous.day);
+                    if (date.month == 1) {
+                        test.assert_equal_int32(previous.year + 1, date.year);
+                        test.assert_equal_int32(12, previous.month);
                         test.assert_equal_int32(1, date.day_of_year());
                     } else {
-                        test.assert_equal_int32(previous.month() + 1, date.month());
+                        test.assert_equal_int32(previous.month + 1, date.month);
                     }
                 } else {
-                    test.assert_equal_int32(previous.day() + 1, date.day());
+                    test.assert_equal_int32(previous.day + 1, date.day);
                     test.assert_equal_int32(previous.day_of_year() + 1, date.day_of_year());
                 }
                 previous = date;
@@ -289,14 +289,14 @@ let LocalDateTests = module (
         let e: int64 = -365961662;
         while (e <= 364522971) {
             let date = local_date.of_epoch_day(e);
-            test.assert_equal_int64(e, local_date.of(date.year(), date.month(), date.day()).to_epoch_day());
+            test.assert_equal_int64(e, local_date.of(date.year, date.month, date.day).to_epoch_day());
             e = e + 182623;
         }
     };
 
     export let test_of_and_try_of = func() -> void {
         let date = local_date.of(2024, 2, 29);
-        test.assert_equal_int32(2024, date.year());
+        test.assert_equal_int32(2024, date.year);
         test.assert(local_date.try_of(2024, 2, 29).equals(date));
         test.assert(local_date.try_of(2023, 2, 29) == nil);
         test.assert(local_date.try_of(2024, 13, 1) == nil);

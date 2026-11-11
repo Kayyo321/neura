@@ -1,0 +1,7 @@
+// A tag that does not repeat, given twice on one declaration (E0906): once
+// on its own line and once in a group.
+#Stable
+#[Since("0.2.0"), Stable]
+let count = func() -> int32 {
+    return 1;
+};

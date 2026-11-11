@@ -48,8 +48,8 @@ let NetTests = module (
 
     export let test_echo_round_trip = func() -> void {
         let listener = listen();
-        test.assert(listener.local_port() > 0);
-        let client = connect(listener.local_port());
+        test.assert(listener.local_port > 0);
+        let client = connect(listener.local_port);
         let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
         test.assert_ok<unit.Unit>(client.write(bytes_of("ping é")));
         test.assert_equal_string("ping é", text_of(test.assert_ok<uint8[list]>(server.read(64))));
@@ -66,23 +66,25 @@ let NetTests = module (
 
     export let test_read_timeout = func() -> void {
         let listener = listen();
-        let client = connect(listener.local_port());
+        let client = connect(listener.local_port);
         let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
-        server.set_read_timeout(duration.of_millis(30));
+        test.assert_equal_int64(0, server.read_timeout.to_nanos());
+        server.read_timeout = duration.of_millis(30);
+        test.assert_equal_int64(30000000, server.read_timeout.to_nanos());
         let failure = test.assert_err<uint8[list]>(server.read(16));
         test.assert(kind_of(failure) == error.IoErrorKind.TimedOut);
         test.assert_equal_string("TimedOut: stream read failed", error.message(failure));
         test.assert_ok<unit.Unit>(client.write(bytes_of("late")));
         test.assert_equal_string("late", text_of(test.assert_ok<uint8[list]>(server.read(16))));
         // Zero waits without limit.
-        server.set_read_timeout(duration.of_nanos(0));
+        server.read_timeout = duration.of_nanos(0);
         test.assert_ok<unit.Unit>(client.close());
         test.assert_equal_int32(0, test.assert_ok<uint8[list]>(server.read(16)).length);
     };
 
     export let test_connection_refused = func() -> void {
         let listener = listen();
-        let port = listener.local_port();
+        let port = listener.local_port;
         test.assert_ok<unit.Unit>(listener.close());
         let failure = test.assert_err<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", port, duration.of_seconds(5)));
         test.assert(kind_of(failure) == error.IoErrorKind.ConnectionRefused);
@@ -91,13 +93,13 @@ let NetTests = module (
 
     export let test_port_in_use = func() -> void {
         let listener = listen();
-        expect_kind<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", listener.local_port()), error.IoErrorKind.AlreadyExists);
+        expect_kind<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", listener.local_port), error.IoErrorKind.AlreadyExists);
         test.assert_ok<unit.Unit>(listener.close());
     };
 
     export let test_bind_to_a_name = func() -> void {
         let listener = test.assert_ok<tcp_listener.TcpListener>(tcp_listener.bind("localhost", 0));
-        let client = test.assert_ok<tcp_stream.TcpStream>(tcp_stream.connect("localhost", listener.local_port(), duration.of_seconds(5)));
+        let client = test.assert_ok<tcp_stream.TcpStream>(tcp_stream.connect("localhost", listener.local_port, duration.of_seconds(5)));
         let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
         test.assert_ok<unit.Unit>(client.write(bytes_of("n")));
         test.assert_equal_string("n", text_of(test.assert_ok<uint8[list]>(server.read(4))));
@@ -105,7 +107,7 @@ let NetTests = module (
 
     export let test_streams_and_listeners_are_closeable = func() -> void {
         let listener = listen();
-        let client = connect(listener.local_port());
+        let client = connect(listener.local_port);
         let resources: closeable.Closeable[list] = [client, listener];
         for (let resource in resources) {
             test.assert_ok<unit.Unit>(resource.close());
@@ -116,7 +118,7 @@ let NetTests = module (
 
     export let test_closed_resources = func() -> void {
         let listener = listen();
-        let port = listener.local_port();
+        let port = listener.local_port;
         let client = connect(port);
         let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
         test.assert_ok<unit.Unit>(client.close());
@@ -126,7 +128,7 @@ let NetTests = module (
         test.assert_ok<unit.Unit>(listener.close());
         test.assert_ok<unit.Unit>(listener.close());
         expect_kind<tcp_stream.TcpStream>(listener.accept(), error.IoErrorKind.Closed);
-        test.assert_equal_int32(port, listener.local_port());
+        test.assert_equal_int32(port, listener.local_port);
         let failure = test.assert_err<tcp_stream.TcpStream>(listener.accept());
         test.assert_equal_string("Closed: listener is closed (127.0.0.1:0)", error.message(failure));
         test.assert_ok<unit.Unit>(server.close());
@@ -136,7 +138,7 @@ let NetTests = module (
     // Other.
     export let test_open_socket_limit = func() -> void {
         let listener = listen();
-        let port = listener.local_port();
+        let port = listener.local_port;
         let streams: tcp_stream.TcpStream[list] = [];
         while (streams.length < 1022) {
             streams.append(connect(port));
@@ -147,14 +149,14 @@ let NetTests = module (
         expect_kind<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", port, duration.of_seconds(5)), error.IoErrorKind.Other);
         expect_kind<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0), error.IoErrorKind.Other);
         test.assert_ok<unit.Unit>(last.close());
-        test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        let _ = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
     };
 
     // The previous test left 1,024 sockets open; the runner closed them when
     // that run ended.
     export let test_open_sockets_are_released_after_a_run = func() -> void {
         let listener = listen();
-        let port = listener.local_port();
+        let port = listener.local_port;
         let streams: tcp_stream.TcpStream[list] = [];
         while (streams.length < 1022) {
             streams.append(connect(port));

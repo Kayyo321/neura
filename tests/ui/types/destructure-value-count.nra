@@ -1,0 +1,2 @@
+// A list of values with more values than names (E0436).
+let [width, height] = 640, 480, 3;

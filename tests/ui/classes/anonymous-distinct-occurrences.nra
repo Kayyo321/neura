@@ -1,0 +1,10 @@
+// An anonymous class with a method is a type of its own at each place it
+// is written (E0403).
+let first: class (
+    export let count: int = 0;
+    export let next = func() -> int => count + 1;
+) = new;
+let second: class (
+    export let count: int = 0;
+    export let next = func() -> int => count + 1;
+) = first;

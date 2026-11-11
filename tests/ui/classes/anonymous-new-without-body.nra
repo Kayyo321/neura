@@ -1,0 +1,6 @@
+// An assignment cannot run the field initializers that the binding's
+// anonymous class writes (E0533).
+let point: class (export let x: int = 1;) = new;
+let reset = func() {
+    point = new;
+};

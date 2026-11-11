@@ -106,6 +106,46 @@ continues to infer an array. A tuple can be indexed with a zero-based integer
 literal in range. The tuple's elements are immutable. A reference stored in a
 tuple retains the behavior of the referenced value.
 
+### Typed and listed destructuring
+
+A destructuring declaration can annotate its names with a tuple type, and it
+can give each name its own value:
+
+```text
+destructuring := ("let" | "const") "[" names "]" [":" tuple-type] "=" values ";"
+names         := name ("," name)* [","]
+values        := expression ("," expression)*
+```
+
+With one value, that value is the tuple to destructure, as above; an
+annotation checks it, and a bracket literal takes the annotation as its
+expected type. With two or more values, there is one value for each name, in
+order, and each value is lowered with its element of the annotation as its
+expected type, so a value that needs a type, such as `new` without a class
+([Object lifecycle](ObjectLifecycle#target-typed-new)), takes it from the
+annotation. Without an annotation each name has its value's type. The values
+are evaluated from left to right before any name is bound, so no name is in
+scope in the values. A count that differs from the number of names is
+[E0436](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0436.md), and an annotation that is not a tuple type is
+[E0437](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0437.md). The declaration is a statement in a block or
+at file level, where destructuring is allowed; a module or class body declares
+its members one at a time.
+
+<!-- example: check -->
+```neura
+let Point = class (
+    export let x: int = 0;
+    export let init = func() {
+    } or func(x0: int) {
+        x = x0;
+    };
+);
+
+let [width, height] = 640, 480;
+const [origin, corner]: [Point, Point] = new, new(width);
+let [label, scale]: [string, float64] = "zoom", 2.0;
+```
+
 ## Type overlays
 
 A type definition can give an existing type another name. These overlays describe the role of a value without introducing a separate representation or a distinct type.
@@ -138,7 +178,7 @@ let LogEntry = class (
 
     export let format = func() -> string {
         return "[" + level + "] " + message;
-    }
+    };
 );
 
 let entry = new LogEntry();
@@ -313,7 +353,7 @@ let Reading = class (
 
     export let init = func(initial: int16) {
         instance.value = initial;
-    }
+    };
 
     export let.as int16 = func -> int16 => value
         or as int64 = func -> int64 => value as int64;
@@ -328,6 +368,129 @@ let implicit = accept(reading);
 `as` looks for a visible conversion to the exact target on the source's static class, then on its base classes. When none matches, the usual numeric or checked reference cast rules apply. `is` always tests the reference type. Calling a conversion on a nil receiver traps like any other instance method.
 
 Function arguments can use one visible conversion when their type is otherwise incompatible with the parameter. Assignments and returns require ordinary assignability or an explicit `as`. A conversion from `Reading` to `int64` therefore cannot satisfy an `int32` parameter. An unexported cast is only available within its declaring class.
+
+### Accessors
+
+An exported instance field can have a getter and a setter. Each is an accessor clause written after the field's `;`, indented under the field. Code outside the class still reads and writes the field as a member: `my_data.data` calls the getter and `my_data.data = text` calls the setter. There is no call syntax and no visible accessor method.
+
+<!-- example: check -->
+```neura
+let failure = import:Std.Core.Failure;
+
+let MyData = class (
+    export let data: string = "";
+        | set: data = value;
+        | get: data;
+
+    export let code = "XY729H08";
+        | get: code;
+
+    export let non_zero = 18000;
+        | get: non_zero;
+        | set: {
+            if (value == 0) {
+                failure.trap("non_zero must not be zero");
+            }
+            non_zero = value;
+        };
+);
+
+let my_data = new MyData();
+my_data.data = "payload";
+let my_var = my_data.data;
+my_data.non_zero += 1;
+```
+
+```text
+field     = "export" ("let" | "const" | "last") name [":" type] ["=" expression] ";" { accessor }
+accessor  = "|" "get" ":" (expression | block) ";"
+          | "|" "set" ":" (simple-statement | block) ";"
+```
+
+- `get`, `set`, and `value` are contextual. They have this meaning only in an accessor clause and stay ordinary identifiers everywhere else.
+- A field has at most one `get` and one `set` clause, in either order. Every clause ends with `;`, including one whose body is a block: `| set: { ... };`.
+- A getter's expression has the field's type. A block getter returns a value of that type on every path or traps.
+- In a setter, `value` names the incoming value, which has the field's type. The body is one simple statement, such as an assignment or a call, or a block. A setter that never assigns its field is accepted with the warning `setter-never-stores` ([W0005](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/W0005.md)), which `#Allow` and `#Deny` on the field or an enclosing declaration control ([Tags](Tags#allow-and-deny)).
+- A setter rejects a value with a trap such as `Std.Core.Failure.trap` ([Errors](Errors)). The trap ends the run.
+
+**Inside and outside the class.** Within the declaring class (its methods, constructors, field initializers, the accessor bodies, and closures in them), a bare field name and `instance.data` name the field's storage. That is why `data = value` in a setter stores the value instead of calling the setter again, and why a constructor can write `instance.data = data`. Every other access calls the accessors:
+
+- an explicit receiver other than `instance`, such as `other.data`, even inside the declaring class;
+- all code outside the class;
+- a subclass, including its bare name of the inherited field.
+
+A field with only `get` is read-only outside its class: assigning it there, or updating it with a compound assignment, `++`, or `--`, is error `E0510`. A field with only `set` is write-only outside its class: reading or updating it there is error `E0515`. Inside the declaring class, an access whose accessor is missing uses the storage. A field without accessors behaves as before.
+
+**Evaluation order.** `object.field = expression` evaluates the receiver, then the expression, then calls the setter. A compound assignment such as `object.field += expression`, and `++` and `--` in prefix or postfix form, evaluate the receiver once, call the getter, evaluate any right operand, compute the new value with the field's type, and call the setter. Checked arithmetic traps before the setter runs. A postfix update yields the getter's value and a prefix update the new value, as for any variable ([Numbers](Numbers)). In a chain such as `holder.counter.count = 5`, `holder.counter` is a read through its getter and `count` is then set on the result.
+
+**Places.** A primitive reference cannot alias a field that is reached through its accessors. Passing `my_data.non_zero` to an `&int` parameter, or binding it to a reference, is error `E0524`. Copy the value into a local, pass the local, and assign the result back.
+
+**Limits in this release.** Accessors resolve statically to the declaring class: they are not virtual and cannot be overridden, and a subclass cannot redeclare the field. Interfaces cannot require accessors. Accessors are allowed only on exported instance fields (`E0516`, `E0517`, `E0518`, `E0519`). A `const` or `last` field can have a getter but not a setter (`E0521`). A field named `value` cannot have a setter (`E0522`). A primitive reference field cannot have accessors (`E0523`). Calling an accessor through a nil reference traps like any instance method. A getter or setter call is an ordinary method call to the [task-safety](#task-safe-calls) analysis and the optimizer. In NeuraIR the clauses are the hidden methods `$get_<field>` and `$set_<field>`, linked from the field by the [1.10 attributes](NirFormat#revision-110-symbol-attributes-and-deferred-initialization) `accessor.get`, `accessor.set`, and `accessor.of`, so a program that imports the class from a `.nir` file uses the same accessors. See [accessors.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/accessors.nra).
+
+### Anonymous classes
+
+A class body can be written wherever a type is expected: in the annotation of a binding or field, a parameter or result type, a tuple element, a collection element, and a type argument.
+
+```text
+anonymous-class := "class" [":" base] ["implements" interface ("," interface)*] "(" member* ")"
+```
+
+The members use the grammar of a class declaration's body, and each ends with `;`. In a type position, `class` begins a body only when it is followed by `(` and then `)` or a member (`export`, `static`, `let`, `const`, or `last` and a name, or the `#` of a member's tags), by `implements`, or by `: Base` and then `implements` or `(` and a member. Anything else after `class` leaves it the [umbrella type](#umbrella-class-and-nil), so `x as class`, `x is class`, `<T: class>`, and `c ? x as class : y` keep their meaning. A body with a base and no members, `class : Base ()`, is therefore not recognized; write a member, or use `Base`. After `new`, `class()` followed by anything but `(` is the umbrella type with no arguments, as before, and `new class()()` constructs the empty anonymous class. The rule against an annotation on a definition, `let X: T = class (...)` ([E0208](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0208.md)), is unrelated: an anonymous class is a type, not a definition.
+
+<!-- example: check -->
+```neura
+let describe = func(point: class (export let x: int; export let y: int;)) -> string {
+    return point.x.to_string() + "," + point.y.to_string();
+};
+
+let origin: class (
+    export let x: int = 0;
+    export let y: int = 0;
+) = new;
+origin.x = 3;
+let text = describe(origin);
+```
+
+**Identity.** A body whose members are all `let` instance fields without accessor clauses or [tags](Tags) is *fields-only*. Its class is identified by its fields: their order, names, and types. Two fields-only bodies with the same fields, anywhere in the program or in the prebuilt modules it links, are the same class, so the parameter of `describe` above and the annotation of `origin` name one type. Field initializers are not part of the identity. Every field of a fields-only body is exported (otherwise nothing could use it, [E0532](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0532.md)) and has a type annotation ([E0534](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0534.md)), so exportedness and mutability are part of the identity only in that they are always the same. Any other body is a class of its own at each place it is written: one with a method, an `init` or `deinit`, a static member, a cast, a base, or interfaces, and also one with a `const` or `last` field, a field with [accessors](#accessors), or a member with a tag, because each of these gives the class behaviour or attributes that its fields alone do not describe. A tag such as `#Deprecated` or `#Unit("px")` is an attribute of the field's declaration, which a structural identity shared across the program could not keep apart: two bodies whose fields differ only in their tags would otherwise be one class with one set of tags. Two such bodies are different types even when their text is the same. A class of its own accepts every member that a declared class accepts, including unexported fields and fields whose type is inferred from their initializer.
+
+**Construction.** A class of its own behaves like a declared class: its field initializers run when it is constructed, wherever `new` names it. A fields-only class takes its field initializers from one body: the body in the annotation of the `let`, `const`, or `last` binding (local, file-level, or field) that a `new` initializes, or the body written after `new` itself, as in `new class (export let x: int = 1;)()`. `new` allocates the object and then runs that body's initializers in field order, at the `new`, with the names visible there. Fields without an initializer start uninitialized, as in any class. Initializers written in any other occurrence, such as a parameter or result type or a collection element type, would never run and are [E0530](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0530.md). A target-typed `new` whose type arrives without a body, such as the value of an assignment to a binding whose body has initializers, cannot tell which initializers to run ([E0533](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0533.md)); a `new` for a parameter or result type whose body has no initializers constructs the object with every field uninitialized.
+
+**Accessors and `last` fields.** A field of an anonymous class can have `| get:` and `| set:` clauses. The rules of [accessors](#accessors) apply with the body as the declaring class: inside the body a bare field name is the storage, and every access from outside it, such as `my_data.data = text` or `let v = my_data.code;`, calls the accessors. Writing a get-only field from outside is [E0510](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0510.md). A `last` field follows the rules of [`last` fields](ObjectLifecycle#last-fields), so one declared without a value needs an `init` in the body that assigns it ([E0446](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0446.md)).
+
+<!-- example: check -->
+```neura
+let failure = import:Std.Core.Failure;
+
+let my_data: class (
+    export let data: string = "";
+        | set: data = value;
+        | get: data;
+
+    export let code = "XY729H08";
+        | get: code;
+
+    export let non_zero = 18000;
+        | get: non_zero;
+        | set: {
+            if (value == 0) {
+                failure.trap("non_zero must not be zero");
+            }
+            non_zero = value;
+        };
+) = new;
+
+my_data.data = "payload";
+let v = my_data.code;
+my_data.non_zero += 1;
+```
+
+The body has accessors, so it is a class of its own: `code` and `non_zero` take their types from their initializers, and `new` runs the body's own initializers. See [anonymous-accessors.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/anonymous-accessors.nra).
+
+**Scope.** Names in the body resolve in the module or file that encloses it, as for a class declared there. A field type cannot use a type parameter of an enclosing generic function or class ([E0531](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0531.md)): an anonymous class is not generic. Unexported members of a class of its own are visible only in its body, as for any class.
+
+**Names.** Diagnostics, `to_string`, and the names an image keeps for tools describe a fields-only class by its fields, as in `class(x: int32, y: int32)`, with each type spelled as diagnostics spell it. A `const` or `last` field is marked with its keyword, and a field whose type is inferred appears by its name alone. A class of its own adds where it is written, as in `class(count: int32)@counter.nra:3:12`; its runtime name is qualified by its enclosing module like any class's. `neura docs` prints the fields with the types as written and the accessors they have, as in `class(x: int, y: int)` or `class(data: string { get; set }, code { get })`.
+
+**Separate compilation.** A fields-only class is the same class in every module that writes its fields, including prebuilt NeuraIR modules compiled separately: a program can pass an object that one module created to a function of another module whose parameter writes the same fields. In NeuraIR the class is declared in a generated file of its own, named after a hash of its fields, so every module that writes those fields declares the same file and linking coalesces it ([NeuraIR format](NirFormat#anonymous-classes)). A class of its own belongs to the source file where it is written. Every anonymous class carries the [`class.anonymous`](NirFormat#symbol-attributes) attribute.
 
 ## Enums
 
@@ -421,7 +584,9 @@ A value given to another task through `spawn` (the callee value, a method's rece
 | A tuple | When every element is |
 | A function value | When every closure of its type that the program creates has transferable captures. A named function has no captures. A closure that captures an object, array, or list is not transferable, because a copy of a closure shares what it captured. |
 | A `Std.Concurrent` handle: `Sender<T>`, `Receiver<T>`, `Closer<T>`, `Timer`, `AtomicInt64`, `Semaphore`, `Guarded<T>` | Yes, and its fields are transferable |
-| Any other class instance, including library collections, `StringBuilder`, and classes whose fields are all constant | No. Immutable classes are not transferable in this release. |
+| An instance of a class marked `#Immutable` ([below](#immutable-classes)) | When its fields are, which a specialization with mutable type arguments may not be; tasks share the instance |
+| An instance of a monitor, a class whose exported methods are all `#Synchronized` ([below](#monitors)) | Yes, for a task: tasks share the instance. Not for a parallel map item, which receives copies |
+| Any other class instance, including library collections, `StringBuilder`, classes whose fields are all constant but that are not marked `#Immutable`, and classes marked `#NotThreadSafe` | No |
 | An array or a list | No. Its elements can be assigned, so a variadic call whose arguments are packed into an array cannot be spawned. |
 | A primitive reference, `MemorySegment`, and every native handle | No |
 | `Task<T>` and `Scope` | No; they are scope-bound |
@@ -433,13 +598,48 @@ let total = func(items: int[]) -> int => items.length;
 
 `spawn total(items)` is rejected at `items` with `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A channel opened as `channels.open<result.Result<int>>(1)` is rejected with `a value of type Result<int32> is not transferable, so it cannot be a channel's element type`. An error is sent as its transferable copy, `Std.Core.Error.PortableError` ([Standard library](StandardLibrary)). A task returns its result to the task that joins it whatever the result's type, because nothing else can reach what the finished task built.
 
+### Immutable classes
+
+A class marked `#Immutable` promises that no field of an instance changes after its constructor returns, and the compiler checks it ([Tags](Tags#immutable)): every instance field is declared `last` or `const` and has an *immutable type*, and every base and subclass is `#Immutable` too.
+
+| Type | Immutable |
+| --- | --- |
+| `bool`, integers, floating-point types, `string` | Yes |
+| A tuple, or an enum whose payloads are immutable | When every element or payload is |
+| A class marked `#Immutable` | When its type arguments are |
+| A type parameter of the declaring generic class | Counts as immutable; each specialization is judged with its concrete types |
+| Arrays, lists, function values, interfaces, and other classes | No |
+
+<!-- example: check -->
+```neura
+#Immutable
+let Money = class (
+    export last currency: string;
+    export last cents: int64;
+
+    export let init = func(code: string, amount: int64) {
+        currency = code;
+        cents = amount;
+    };
+
+    export let plus = func(other: Money) -> Money => new Money(currency, cents + other.cents);
+);
+```
+
+Tasks share the instances of an `#Immutable` class: passing one to `spawn` or sending it on a channel gives the other task the same object, which neither task can change. A `const` binding of an immutable type may be read by a `#Pure` function ([Tags](Tags#pure)).
+
+### Monitors
+
+A *monitor* is a class whose exported methods are all `#Synchronized`: each runs with exclusive access to its receiver, under a guard per instance, and a method may call the methods of its own receiver. Tasks share a monitor's instances when its fields have transferable types and its state is reached only through the receiver of its own methods. [Concurrency, section 8.1](Concurrency#81-monitors) gives the rules, the guard, and the choice between a monitor and `Guarded<T>`.
+
 ### Task-safe calls
 
 A value check is not enough: a function can reach shared mutable state without being handed it. The call a `spawn` starts must be *task-safe*. Neither it nor anything it can call, transitively, may
 
 - read or write a module, file, or static binding that is reassignable or whose type is not transferable (reading a `const` of transferable type is allowed);
 - make an active use that could run a [static initializer](#static-initialization);
-- issue a request to a native library.
+- issue a request to a native library;
+- call a function or method marked `#NotThreadSafe`. A class marked `#NotThreadSafe` is different: a task may create and use its own instance, and what is rejected is giving an instance to another task.
 
 For a virtual call or a call through a function value, the compiler takes the union over every override and over every function value of that type that code which can run creates (the program's own functions, initializers, and what they reach), so it can reject a call because of an implementation that never runs. Narrow the type, or pass the needed value as an argument. The diagnostic lists the chain of calls from the `spawn` to the offending operation. `neura check --task-safety` prints the verdict for every function of the program. The task that runs `main` is not restricted.
 

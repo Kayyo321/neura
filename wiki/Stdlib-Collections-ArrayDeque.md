@@ -17,51 +17,51 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **ArrayDeque** · [`export let ArrayDeque = class<T> implements Deque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L11)
-  A double-ended queue with constant-time indexing and amortized constant-time end operations.
-- **ArrayDeque.ArrayDeque** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L28)
+- **ArrayDeque** · [`export let ArrayDeque = class<T> implements Deque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L13)
+  A double-ended queue with constant-time indexing and amortized constant-time end operations. Tagged `#NotThreadSafe`.
+- **ArrayDeque.ArrayDeque** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L30)
   Returns the number of elements.
-- **ArrayDeque.ArrayDeque** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L31)
+- **ArrayDeque.ArrayDeque** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L33)
   Returns true when there are no elements.
-- **ArrayDeque.ArrayDeque** · [`export let get = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L34)
+- **ArrayDeque.ArrayDeque** · [`export let get = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L36)
   Returns the element at zero-based `index` in constant time. An invalid index causes a bounds trap.
-- **ArrayDeque.ArrayDeque** · [`export let add_first = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L40)
+- **ArrayDeque.ArrayDeque** · [`export let add_first = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L42)
   Inserts `value` at the front.
-- **ArrayDeque.ArrayDeque** · [`export let add_last = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L46)
+- **ArrayDeque.ArrayDeque** · [`export let add_last = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L48)
   Appends `value` at the back.
-- **ArrayDeque.ArrayDeque** · [`export let enqueue = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L52)
+- **ArrayDeque.ArrayDeque** · [`export let enqueue = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L54)
   Appends `value` at the back.
-- **ArrayDeque.ArrayDeque** · [`export let remove_first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L97)
+- **ArrayDeque.ArrayDeque** · [`export let remove_first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L99)
   Removes and returns the first element. Traps with `no such element` when empty.
-- **ArrayDeque.ArrayDeque** · [`export let remove_last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L112)
+- **ArrayDeque.ArrayDeque** · [`export let remove_last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L114)
   Removes and returns the last element. Traps with `no such element` when empty.
-- **ArrayDeque.ArrayDeque** · [`export let dequeue = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L127)
+- **ArrayDeque.ArrayDeque** · [`export let dequeue = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L129)
   Removes and returns the first element. Traps with `no such element` when empty.
-- **ArrayDeque.ArrayDeque** · [`export let first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L130)
+- **ArrayDeque.ArrayDeque** · [`export let first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L132)
   Returns the first element. Traps with `no such element` when empty.
-- **ArrayDeque.ArrayDeque** · [`export let last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L141)
+- **ArrayDeque.ArrayDeque** · [`export let last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L143)
   Returns the last element. Traps with `no such element` when empty.
-- **ArrayDeque.ArrayDeque** · [`export let peek = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L152)
-  The first element, or None when empty.
-- **ArrayDeque.ArrayDeque** · [`export let try_dequeue = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L163)
+- **ArrayDeque.ArrayDeque** · [`export let peek = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L155)
+  The first element, or None when empty. Tagged `#NoDiscard`.
+- **ArrayDeque.ArrayDeque** · [`export let try_dequeue = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L166)
   Removes the first element and returns it as `Some`, or returns `None` when empty.
-- **ArrayDeque.ArrayDeque** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L171)
+- **ArrayDeque.ArrayDeque** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L174)
   Removes all elements from both halves of the deque.
-- **ArrayDeque.ArrayDeque** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L180)
+- **ArrayDeque.ArrayDeque** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L183)
   Tests membership with `value.equals(element)`.
-- **ArrayDeque.ArrayDeque** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L195)
+- **ArrayDeque.ArrayDeque** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L198)
   A new built-in list from first to last.
-- **ArrayDeque.ArrayDeque** · [`export let iterator = func -> iterators.Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L209)
+- **ArrayDeque.ArrayDeque** · [`export let iterator = func -> iterators.Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L212)
   Returns a fail-fast iterator from the front to the back.
-- **ArrayDeque.ArrayDeque** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L214)
+- **ArrayDeque.ArrayDeque** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L217)
   Calls `action` from the front to the back. The action leaves the deque structure unchanged.
-- **ArrayDeque.ArrayDeque** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L228)
+- **ArrayDeque.ArrayDeque** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L231)
   Traps with "invalid state: ..." when iteration and indexing disagree or the size is inconsistent.
-- **ArrayDeque.ArrayDeque** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L248)
+- **ArrayDeque.ArrayDeque** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L251)
   Formats elements as `[a, b, c]` from first to last. The deque prints "(this collection)" where its own text reaches it again.
-- **ArrayDeque** · [`export let create = func<T> -> ArrayDeque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L308)
+- **ArrayDeque** · [`export let create = func<T> -> ArrayDeque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L311)
   Creates an empty deque.
-- **ArrayDeque** · [`export let of = func<T>(items: T[list]) -> ArrayDeque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L311)
+- **ArrayDeque** · [`export let of = func<T>(items: T[list]) -> ArrayDeque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L314)
   Creates a deque from a shallow copy of `items`, in list order.
 <!-- END SOURCE API -->
 
@@ -188,7 +188,7 @@ It follows both the list and the deque contracts. Prefer `ArrayList` or `ArrayDe
 
 - **Modification counts.** `ArrayList` uses its backing list's `version`; `ArrayDeque`, `LinkedList`, `PriorityQueue`, `BitSet`, and `OrdinalMap` share a `Cell<uint64>` count with their iterators. A callback or comparator that changes the collection traps with `collection modified during iteration`, and `Sorting` checks the list's version after every comparator call, also when it sorts a built-in list directly.
 - **Construction.** `new ArrayList<T>(items)` adopts the list, as `wrap` does. `PriorityQueue`'s constructor takes the items and the comparator and heapifies a copy. `ArrayDeque`, `LinkedList`, and `BitSet` also have `create` and `of`.
-- **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)).
+- **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](Concurrency#52-task-safe-calls)).
 - **LinkedList.** `sort` and `binary_search` work on a copy; `sort` and `reverse` move values between existing nodes, which is not a structural change; `clear` unlinks every node. Positional access outside the list traps with `invalid argument: index out of range`.
 - **ArrayList.add_all** reads the argument up to its starting length, so `add_all(items())` doubles the list instead of trapping.
 - **Equality direction.** Search members call `value.equals(element)` with the searched value as the receiver.

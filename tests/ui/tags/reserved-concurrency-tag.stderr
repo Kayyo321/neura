@@ -1,0 +1,11 @@
+error[E0908]: #Isolated is reserved: the compiler does not do what it promises yet
+ --> $DIR/reserved-concurrency-tag.nra:6:5
+  |
+6 |     #Isolated
+  |     ^^^^^^^^^ reserved tag
+  |
+  = note: #Isolated: touches no state shared with other tasks
+  = note: reserved tags are rejected so that no program relies on a promise the compiler does not keep
+  = help: `neura check --task-safety` reports which functions can be a parallel worker
+
+For more information about this error, try `neura explain E0908`.

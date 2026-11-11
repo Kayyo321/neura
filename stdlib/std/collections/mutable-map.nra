@@ -4,6 +4,7 @@ let optional = import:Std.Core.Optional;
 /// @brief Mutation operations for maps. Replacing an existing key's value preserves iterator validity.
 /// Member callbacks must leave the map structure unchanged.
 /// @see [Std.Collections.MutableMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-MutableMap)
+#Since("0.1.0")
 export let MutableMap = module (
     /// @brief An association whose entries can be inserted, replaced, or removed. Replacing the value of an existing key preserves its position and iterator validity.
     export let MutableMap = interface<K, V>:map.Map<K, V> (

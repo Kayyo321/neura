@@ -1,0 +1,11 @@
+error[E0908]: #NoTrap is reserved: the compiler does not do what it promises yet
+ --> $DIR/reserved-tag.nra:3:1
+  |
+3 | #NoTrap
+  | ^^^^^^^ reserved tag
+  |
+  = note: #NoTrap: never traps
+  = note: reserved tags are rejected so that no program relies on a promise the compiler does not keep
+  = help: document the guarantee and test the boundary values; no analysis proves it yet
+
+For more information about this error, try `neura explain E0908`.

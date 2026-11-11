@@ -1,0 +1,34 @@
+-- assignment
+receiver a
+operand 5
+set count 5
+-- read
+receiver b
+get count 5
+5
+-- compound
+receiver c
+get count 5
+operand 3
+set count 8
+-- postfix
+receiver d
+get count 8
+set count 9
+old 8
+-- prefix
+receiver e
+get count 9
+set count 8
+new 8
+-- chain
+get counter
+set count 40
+get counter
+get count 40
+set count 80
+get counter
+get count 80
+80
+-- wide
+36000000000

@@ -1,0 +1,5 @@
+// A setter on a field named value (E0522).
+let Cell = class (
+    export let value: int = 0;
+        | set: value = value;
+);

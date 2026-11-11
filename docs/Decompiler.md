@@ -10,6 +10,8 @@ neura decompile program.nvr                     # typed reconstruction
 
 Optional metadata, the source map (`SMAP`) and names (`NAME`), only labels the output. It never decides what an operation is. `decompile --no-provenance` omits it, and decompiling an image with both sections removed produces the same text as `--no-provenance`.
 
+The `LIFT` section ([NVR](runtime/NVR.md#lift-hints)), which records the operations the converter built each block from, is not evidence either: the decompiler does not read it, keeps proving every lifted block by regenerating it from the circuit, and decompiles an image to the same text with or without it. Like any optional section, `disassemble` writes it as a `section "LIFT"` record of hex bytes and `assemble` reproduces it, so a disassembled and edited image keeps its hints; the runtime proves each hint against the edited graph, and a hint that no longer matches leaves its block on the reference evaluator.
+
 ## Assembly: the lossless form
 
 `disassemble` writes every record of every table in table order, each with its index, so the text names every field the encoding holds:
@@ -108,9 +110,13 @@ An image with scheduler exits or polls (NVR 1.5) decompiles like any other. A sc
 
 Names, spawn sites, and source locations come from optional metadata only. None of this needs the `SMAP` or `NAME` sections, and `--no-provenance` changes only the comments. The decompiler does not lift scheduling behavior, so it makes no claim about which task runs when. Regenerated images (`resynthesize`) keep scheduler exits and polls unchanged. `nvm::record` and `nvm::replay` accept images with tasks (trace file version 3), so a regenerated task image can be compared with its original by replaying the original's trace, which is an observed match under that trace. The `decompiler-behavior` corpus holds no task image yet; `concurrency-programs` checks that every task fixture reassembles to the same bytes and decompiles with its scheduler operations labeled and its scopes paired.
 
+## Kernel calls
+
+An image that calls a built-in kernel (NVR 1.6, [Kernels](runtime/Kernels.md)) decompiles like any other. A kernel call is a state exit whose immediate names a `KERN` record, and the decompiler recovers it as a **named opaque operation**: `s2 := kernel "neura.digest.sha256" v1(s1) [opaque kernel]; goto b3`. The name, ABI version, arguments, and result slot are decoded from the exit and the record; what the kernel computes is not in the image, so the decompiler does not lift it, infer it from the circuit, or claim anything about its result beyond its type. The block around the call is labeled by the usual evidence classes, since its graph is unaffected by the exit. The lossless form writes the table as `kernel I "NAME" version V parameters [ ... ] result T` records and the exit as `exit state kernel immediate I ...`, and reassembles to the same bytes. A behavior comparison of an image with kernel calls depends on running both images on a runtime with the same kernels: the result is an observed match under that runtime, not a proof about the kernel.
+
 ## Lifting
 
-Lifting works on one block at a time and uses only the block's graph, inputs, and exits:
+Lifting works on one block at a time and uses only the block's graph, inputs, and exits. The search and the structural proof live in the lift library (`src/lift`), which the runtime's lifted blocks also use ([execution tiers](runtime/NVM.md#execution-tiers)); the exhaustive fallback, rendering, and evidence labels are the decompiler's.
 
 1. **Targets.** The values the exits read from the graph, each a typed lane group, and, for a block with two normal exits, the condition that selects between them.
 2. **Observation.** The graph is evaluated on 40 pseudo-random and boundary input samples, plus samples at the constants that equality neurons spell (a ReLU reading every lane of an input word with weights of +1 and -1 tests equality with the constant those signs spell).

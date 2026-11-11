@@ -1,0 +1,11 @@
+error[E0517]: a static field cannot have accessors
+ --> $DIR/static-field.nra:4:9
+  |
+3 |     export static let calls: int = 0;
+  |                       ----- 'calls' is declared 'static'
+4 |         | get: calls;
+  |         ^^^^^^^^^^^^^ accessor clause on a static field
+  |
+  = help: accessors serve instance fields; expose a static field through a static function instead
+
+For more information about this error, try `neura explain E0517`.

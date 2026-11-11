@@ -1,0 +1,53 @@
+// Two monitors that call each other deadlock, and the run reports it like any
+// other deadlock (Concurrency.md section 10.5). The left task holds Left's
+// guard and calls Right; the right task holds Right's guard and calls Left.
+// Each signals that it holds its own guard and waits for the other's signal
+// before crossing, so both are inside when they cross, under every quantum.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
+#Synchronized
+let Left = class (
+    export let cross = func(other: Right, mine: channels.Sender<int64>, theirs: channels.Receiver<int64>) -> int64 {
+        mine.send(1);
+        theirs.receive();
+        return other.touch() + 1;
+    };
+
+    export let touch = func -> int64 => 1;
+);
+
+#Synchronized
+let Right = class (
+    export let cross = func(other: Left, mine: channels.Sender<int64>, theirs: channels.Receiver<int64>) -> int64 {
+        mine.send(2);
+        theirs.receive();
+        return other.touch() + 2;
+    };
+
+    export let touch = func -> int64 => 2;
+);
+
+let go_left = func(left: Left, right: Right, mine: channels.Sender<int64>, theirs: channels.Receiver<int64>) -> int64 =>
+    left.cross(right, mine, theirs);
+
+let go_right = func(left: Left, right: Right, mine: channels.Sender<int64>, theirs: channels.Receiver<int64>) -> int64 =>
+    right.cross(left, mine, theirs);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let left = new Left();
+        let right = new Right();
+        let [to_right, from_left, left_closer] = channels.open<int64>(1);
+        let [to_left, from_right, right_closer] = channels.open<int64>(1);
+        console.print_line("crossing");
+        scope {
+            let one = spawn go_left(left, right, to_right, from_right);
+            let two = spawn go_right(left, right, to_left, from_left);
+            console.print_line((one.join() + two.join()).to_string());
+        }
+        console.print_line("not reached");
+        return program.ExitCode.Ok;
+    };
+);

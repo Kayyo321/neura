@@ -44,11 +44,17 @@ jobs:
       - name: Check documentation links
         run: python3 scripts/check-docs.py
 
+      - name: Check the diagnostic codes, their pages, and their tests
+        run: python3 scripts/check-diagnostics.py
+
       - name: Check the standard library reference pages
         run: python3 scripts/update-stdlib-wiki-api.py --check
 
       - name: Check that the wiki pages are generated from docs
         run: python3 scripts/generate-wiki.py --check
+
+      - name: Check that the kernel table, reference, and declarations are generated
+        run: python3 scripts/gen-kernels.py --check
       - name: Check the website
         run: python3 scripts/build-site.py --check
 
@@ -89,6 +95,9 @@ jobs:
             exit 1
           fi
 
+      - name: Check that the kernels call no libm or stateful libc function
+        run: scripts/check-kernels.sh build
+
       # The runner's AppArmor profile forbids unprivileged user namespaces,
       # which native-install uses to run a static executable in an empty root.
       - name: Allow unprivileged user namespaces
@@ -101,7 +110,7 @@ jobs:
 
       - name: Require every test to have run
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 124
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 159
 
       - name: Upload the test report
         if: ${{ !cancelled() }}

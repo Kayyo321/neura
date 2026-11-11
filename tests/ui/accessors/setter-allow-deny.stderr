@@ -1,0 +1,13 @@
+error[W0005]: the setter of 'level' never stores 'level'
+  --> $DIR/setter-allow-deny.nra:16:11
+   |
+12 | #Deny(W0005)
+   | ------------ the warning is denied here
+...
+16 |         | set: {
+   |           ^^^ this setter never assigns 'level'
+   |
+   = note: a write from outside the class calls the setter, so it has no effect on 'level'
+   = help: assign the field in the setter, such as 'level = value;', or remove the setter to make 'level' read-only outside its class
+
+For more information about this error, try `neura explain W0005`.

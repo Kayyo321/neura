@@ -1,0 +1,13 @@
+error[E0905]: #Since expects a string for 'version', found an integer
+ --> $DIR/argument-type.nra:2:8
+  |
+2 | #Since(2)
+  |        ^ expected a string
+  |
+  = help: the signature is #Since(version: string)
+help: write it as a string
+  |
+2 | #Since("2")
+  |        ~~~
+
+For more information about this error, try `neura explain E0905`.

@@ -16,5 +16,5 @@ let Shared = module:program.Entry (
             console.print_line("24");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

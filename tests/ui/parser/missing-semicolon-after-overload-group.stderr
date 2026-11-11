@@ -1,0 +1,16 @@
+error[E0201]: expected ';'
+ --> $DIR/missing-semicolon-after-overload-group.nra:6:2
+  |
+6 | }
+  |  ^ expected ';' here
+7 |
+8 | let doubled = scale(21);
+  | --- found 'let'
+  |
+  = note: every declaration ends with ';', including one whose value is a function, class or module body
+help: add the missing ';'
+  |
+6 | };
+  |  +
+
+For more information about this error, try `neura explain E0201`.

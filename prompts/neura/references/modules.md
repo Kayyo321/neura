@@ -38,7 +38,7 @@ let Geometry = module (
 
     export let area = func(radius: float64) -> float64 {
         return Pi * square(radius);
-    }
+    };
 );
 
 let ring = Geometry.area(2.0);
@@ -48,7 +48,7 @@ let where = Geometry.Quadrant.First;
 ```
 
 - Access exports as `Module.member`; nested types and modules chain: `new Geometry.Point()`, `Geometry.Quadrant.First`.
-- Members end with `;`, or follow a block body's `}` directly. Both forms are accepted.
+- Every member ends with `;`, including one whose block body ends at `}` (`};`).
 - A module is not a type. `func(store: Store)` fails with `'Store' is not a type`. To pass behavior around at run time, use an [interface](syntax.md#interfaces) or a class.
 - Imports may appear inside a module body; they are visible only there.
 
@@ -141,14 +141,14 @@ let Logger = module (
 
         export let format = func -> string {
             return "[" + level + "] " + message;
-        }
+        };
     );
 
     export let log = func(message: string) -> void;          // requirement: no body
 
     export let log_entry = func(entry: LogEntry) -> void {   // uses the requirement
         log(entry.format());
-    }
+    };
 );
 
 let ConsoleLogger = module:Logger (                           // implements Logger
@@ -156,13 +156,13 @@ let ConsoleLogger = module:Logger (                           // implements Logg
 
     export let.override log = func(message: string) -> void {
         console.print_line(prefix + " -> " + message);
-    }
+    };
 );
 
 let QuietLogger = module:Logger (
     export const.override default_level: string = "WARN";     // override data, constant
     export let.override log = func(message: string) -> void {
-    }
+    };
 );
 
 let App = module:program.Entry (
@@ -173,7 +173,7 @@ let App = module:program.Entry (
         ConsoleLogger.log_entry(entry);
         QuietLogger.log("never shown");
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -236,7 +236,7 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(greeter.greet("Neura"));
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -261,6 +261,29 @@ neura test -I src tests/greeter-tests.nra  # tests need the source root
 - The imported file's module is what the import returns; only its exports are visible.
 - A module file and a directory can share a name, so a module can have child modules. Importing a parent does not import its children.
 - More than one matching file is an ambiguity error. There is no package manifest or dependency manager.
+
+### Library-internal declarations: `#Internal`
+
+`export` makes a member visible to every importer. `#Internal` narrows that to the declaring *library*: the directory of the declaring file and the directories below it (its own module, sibling modules, and their children). A use from a file outside that tree is error `E0911`. In the standard library the library is the whole standard library.
+
+<!-- example: check -->
+```neura
+let Retry = module (
+    /// Shared with the other modules of acme/http-client; not part of the public API.
+    #Internal
+    export let backoff_ms = func(attempt: int) -> int => 100 * attempt;
+
+    export let delays = func(attempts: int) -> int[list] {
+        let result: int[list] = [];
+        for (let attempt = 1; attempt <= attempts; attempt++) {
+            result.append(backoff_ms(attempt));
+        }
+        return result;
+    };
+);
+```
+
+Inside one file `#Internal` has no effect. Tags are recorded in `.nir` files, so the rule also holds for a prebuilt module. `#Deprecated(use_instead: ...)` and `#Hidden` (left out of `neura docs`) are the other tags a library uses on its exports; see [tags.md](tags.md).
 
 ## The program entry point
 

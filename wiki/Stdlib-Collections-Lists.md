@@ -17,27 +17,27 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Lists** · [`export let copy = func<T>(items: T[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L9)
+- **Lists** · [`export let copy = func<T>(items: T[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L10)
   A new list with the same elements.
-- **Lists** · [`export let concat = func<T>(a: T[list], b: T[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L21)
+- **Lists** · [`export let concat = func<T>(a: T[list], b: T[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L22)
   A new list with the elements of `a` followed by those of `b`.
-- **Lists** · [`export let reverse = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L33)
+- **Lists** · [`export let reverse = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L34)
   Reverses the list in place. Not structural.
-- **Lists** · [`export let swap = func<T>(items: T[list], i: int, j: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L46)
+- **Lists** · [`export let swap = func<T>(items: T[list], i: int, j: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L47)
   Exchanges two elements. Not structural.
-- **Lists** · [`export let fill = func<T>(items: T[list], value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L53)
+- **Lists** · [`export let fill = func<T>(items: T[list], value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L54)
   Replaces every element with `value`. Not structural.
-- **Lists** · [`export let insert_at = func<T>(items: T[list], index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L64)
+- **Lists** · [`export let insert_at = func<T>(items: T[list], index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L65)
   Inserts `value` before position `index`, or appends when the index equals the length. Appends the last element again and shifts the suffix right by indexed writes.
-- **Lists** · [`export let truncate = func<T>(items: T[list], length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L85)
+- **Lists** · [`export let truncate = func<T>(items: T[list], length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L86)
   Removes elements from the end until `length` remain. Traps with "invalid argument: negative size" or "invalid argument: size above current size".
-- **Lists** · [`export let clear = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L98)
+- **Lists** · [`export let clear = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L99)
   Removes every element from the end of the same list.
-- **Lists** · [`export let filled = func<T>(count: int, value: T) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L106)
+- **Lists** · [`export let filled = func<T>(count: int, value: T) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L107)
   A new list of `count` copies of `value`. Traps with "invalid argument: negative count".
-- **Lists** · [`export let from_array = func<T>(items: T[]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L120)
+- **Lists** · [`export let from_array = func<T>(items: T[]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L121)
   A new list with the array's elements.
-- **Lists** · [`export let same_elements = func<T>(a: list.List<T>, b: list.List<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L133)
+- **Lists** · [`export let same_elements = func<T>(a: list.List<T>, b: list.List<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/lists.nra#L134)
   Whether two lists of any classes have the same size and equal elements at each position, by equals with the element of `a` first.
 <!-- END SOURCE API -->
 
@@ -78,6 +78,7 @@ Map<K, V> ── MutableMap<K, V>
 - Read-only and mutable interfaces are separate. A function that only reads takes the read-only interface, and no member simulates immutability by trapping.
 - Members that need only other members (`is_empty`, `first`, `contains_all`, `for_each`) become default methods written once in the interface.
 - `ImmutableList<T>`, `ImmutableSet<T>`, and `ImmutableMap<K, V>` are classes that copy their contents at construction and implement only the read-only interfaces. Their module functions `of` take a built-in list (for the map, a list of `[K, V]`; a duplicate key traps).
+- Members that an interface declares, such as `size()` and `is_empty()`, stay methods in every class, because an interface cannot require an [accessor](Types#accessors); `ArrayList.items()` stays a method with them. The immutable classes and `Sequence` are `#Final` and `#NoDiscard`, and every query that returns an `Optional` (`get`, `first_or_none`, `peek`, `floor`, and the like) is `#NoDiscard` ([Tags](Tags)).
 - `Lists.same_elements`, `Sets.same_elements`, and `Maps.same_entries` compare collections of different classes through the read-only interfaces. They also need G3.
 - For-each accepts an `Iterable<T>` through G5.
 
@@ -94,6 +95,8 @@ The module `Sorting`. Generic sorting needs G1 for the comparator.
 
 It makes at most about `n log2 n` comparator calls. `ArrayList.sort` calls it on `storage`. `sort_range(items, start, end, c)` sorts part of a list.
 
+**`sort_ascending(items)`** sorts an `int64`, `uint64`, `float64`, `int32`, or `uint32` list in ascending order, with the result `sort` gives with the type's `compare` (`Float64.total_compare` for `float64`, so `-0.0` comes before `0.0` and every NaN comes last, in its original order). The kernels `neura.sort.i64`, `u64`, and `f64` do the work (P2a) for one step per eight element comparisons; an `int32` or `uint32` list is widened into a new list for the kernel and written back by index. Like `sort`, it writes elements and leaves the list's version unchanged. The comparator `sort` stays in Neura, because a kernel cannot call back into the program.
+
 **`binary_search<T>(items: T[list], value: T, c) → int`** requires `items` sorted by `c`. It finds the lowest index whose element is not `Less` than `value`. If that element compares `Equal`, it returns the index, the first of any equal run. Otherwise it returns `-(insertion point) - 1`.
 
 The module **`Lists`** has helpers for built-in lists that need no callback: `copy<T>(items)`, `concat<T>(a, b)`, `reverse<T>(items)`, `swap<T>(items, i, j)`, `fill<T>(items, value)`, `insert_at<T>(items, index, value)`, `truncate<T>(items, length)`, `clear<T>(items)`, `filled<T>(count, value)`, and `from_array<T>(items: T[])`. There is no conversion from a list to an array, because an array's length must come from a literal.
@@ -102,7 +105,7 @@ The module **`Lists`** has helpers for built-in lists that need no callback: `co
 
 - **Modification counts.** `ArrayList` uses its backing list's `version`; `ArrayDeque`, `LinkedList`, `PriorityQueue`, `BitSet`, and `OrdinalMap` share a `Cell<uint64>` count with their iterators. A callback or comparator that changes the collection traps with `collection modified during iteration`, and `Sorting` checks the list's version after every comparator call, also when it sorts a built-in list directly.
 - **Construction.** `new ArrayList<T>(items)` adopts the list, as `wrap` does. `PriorityQueue`'s constructor takes the items and the comparator and heapifies a copy. `ArrayDeque`, `LinkedList`, and `BitSet` also have `create` and `of`.
-- **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)).
+- **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](Concurrency#52-task-safe-calls)).
 - **LinkedList.** `sort` and `binary_search` work on a copy; `sort` and `reverse` move values between existing nodes, which is not a structural change; `clear` unlinks every node. Positional access outside the list traps with `invalid argument: index out of range`.
 - **ArrayList.add_all** reads the argument up to its starting length, so `add_all(items())` doubles the list instead of trapping.
 - **Equality direction.** Search members call `value.equals(element)` with the searched value as the receiver.

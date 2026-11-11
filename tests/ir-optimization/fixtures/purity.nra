@@ -1,0 +1,151 @@
+// Calls of pure functions (docs/IrOptimization.md, "Pure calls"): an identical
+// later call is reused when nothing in between writes what the callee reads,
+// and an unused call of a pure and total function is removed. Each rewrite is
+// next to the cases where it must not apply: a call that may trap stays, an
+// impure call stays, and a write to what the callee reads blocks reuse. A
+// kernel that sorts a list in place writes that list: a function that passes
+// it a list it did not allocate is not pure, and the write blocks reuse of a
+// read of the list.
+let sorting = import:Std.Collections.Sorting;
+
+let Purity = module (
+    export let trace: int64 = 0;
+
+    // Records `tag`, so the final trace shows the order of the calls.
+    export let mark = func(tag: int8) -> int8 {
+        trace = (trace % 1000000000000) * 1000 + (tag as int64) + 500;
+        return tag;
+    };
+
+    let Box = class (
+        export let value: int8 = 0;
+
+        // Pure: it reads the state of its receiver.
+        export let read = func -> int8 => value;
+    );
+
+    // Pure, and may trap on overflow.
+    let square = func(x: int16) -> int16 => x * x;
+
+    // Pure and total: a comparison cannot fail.
+    let less = func(a: int8, b: int8) -> bool => a < b;
+
+    // Pure, and not total: it loops.
+    let count_down = func(from: int8) -> int8 {
+        let left: int8 = from;
+        while (left > 0) {
+            left = left - 1;
+        }
+        return left;
+    };
+
+    // Reused: the second call has the same argument, and nothing in between
+    // writes anything square reads. It may trap, but the first call would have.
+    export let reuse_pure_call = func(x: int16) -> int16 {
+        let first: int16 = square(x);
+        let second: int16 = square(x);
+        return first - second;
+    };
+
+    // Kept: mark writes the trace, so its second call is an effect of its own.
+    export let keep_impure_call = func(x: int8) -> int8 {
+        let first: int8 = mark(x);
+        let second: int8 = mark(x);
+        return first - second;
+    };
+
+    // Reused: a method that nothing overrides is a fixed target, and nothing
+    // writes the box between the calls.
+    export let reuse_method_call = func(x: int8) -> int8 {
+        let box = new Box();
+        box.value = x;
+        let first: int8 = box.read();
+        let second: int8 = box.read();
+        return first - second;
+    };
+
+    // Kept: the write to the box changes what read returns.
+    export let keep_after_write = func(x: int8) -> int8 {
+        let box = new Box();
+        box.value = x;
+        let first: int8 = box.read();
+        box.value = x / 2;
+        let second: int8 = box.read();
+        return first - second;
+    };
+
+    // Removed: less is pure and total, and its result is unused.
+    export let drop_unused_total_call = func(x: int8, y: int8) -> int8 {
+        less(x, y);
+        return x;
+    };
+
+    // Kept: square may trap, so an unused call still decides whether the run
+    // ends here.
+    export let keep_unused_trapping_call = func(x: int16) -> int16 {
+        square(x);
+        return x;
+    };
+
+    // Kept: count_down may loop for a long time, which a removal would change.
+    export let keep_unused_looping_call = func(x: int8) -> int8 {
+        count_down(x);
+        return x;
+    };
+
+    // A list that first_then_sort sorts in place through the neura.sort.i64
+    // kernel after reading its first element: the method writes the list of
+    // its receiver, which it did not allocate, so it is not pure.
+    let Bag = class (
+        export let items: int64[list] = [];
+
+        export let first_then_sort = func -> int64 {
+            let first: int64 = items[0];
+            sorting.sort_ascending(items);
+            return first;
+        };
+    );
+
+    // Pure: the list it sorts is one it allocated.
+    export let smaller = func(a: int16, b: int16) -> int64 {
+        let items: int64[list] = [a as int64, b as int64];
+        sorting.sort_ascending(items);
+        return items[0];
+    };
+
+    // Kept: each call of first_then_sort sorts the list, so the second call
+    // returns the smaller value although the first returned b.
+    export let keep_kernel_writer_calls = func(a: int16, b: int16) -> int64 {
+        let bag = new Bag();
+        bag.items = [b as int64, a as int64];
+        let first: int64 = bag.first_then_sort();
+        let second: int64 = bag.first_then_sort();
+        return first - second;
+    };
+
+    // Kept: the unused call still sorts the list that the result reads.
+    export let keep_unused_kernel_writer = func(a: int16, b: int16) -> int64 {
+        let bag = new Bag();
+        bag.items = [b as int64, a as int64];
+        bag.first_then_sort();
+        return bag.items[0];
+    };
+
+    // Not reused: the kernel writes the list between the two reads.
+    export let reread_after_kernel_write = func(a: int16, b: int16) -> int64 {
+        let items: int64[list] = [b as int64, a as int64];
+        let before: int64 = items[0];
+        sorting.sort_ascending(items);
+        let after: int64 = items[0];
+        return before - after;
+    };
+
+    // Kept, although smaller is pure: the effect summaries that guard reuse
+    // (ir-optimization/effects.cpp) count its write to its own list as a write
+    // to the heap.
+    export let keep_fresh_kernel_user = func(a: int16, b: int16) -> int64 {
+        let first: int64 = smaller(a, b);
+        let second: int64 = smaller(a, b);
+        return first - second;
+    };
+);

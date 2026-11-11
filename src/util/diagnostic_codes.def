@@ -1,0 +1,217 @@
+// The registry of diagnostic codes, one NEURA_DIAGNOSTIC(code, title) entry
+// per code, in code order. A code is never reused or renumbered once it has
+// been released; retire it by keeping its entry.
+//
+// Ranges:
+//   E01xx  lexer               E06xx  concurrency
+//   E02xx  parser              E07xx  modules and imports
+//   E03xx  names               E08xx  backend
+//   E04xx  types and bindings  E09xx  tags
+//   E05xx  classes             W####  warnings
+//
+// E0899 is the one code for errors that only a compiler defect or a
+// hand-edited artifact can cause.
+//
+// Include this file after defining NEURA_DIAGNOSTIC; it undefines the macro.
+
+#ifndef NEURA_DIAGNOSTIC
+#error "define NEURA_DIAGNOSTIC(code, title) before including diagnostic_codes.def"
+#endif
+
+// Lexer
+NEURA_DIAGNOSTIC(E0101, "invalid character")
+NEURA_DIAGNOSTIC(E0102, "invalid UTF-8")
+NEURA_DIAGNOSTIC(E0103, "unterminated string literal")
+NEURA_DIAGNOSTIC(E0104, "invalid escape or character in a string literal")
+NEURA_DIAGNOSTIC(E0105, "malformed numeric literal")
+
+// Parser
+NEURA_DIAGNOSTIC(E0201, "expected a semicolon")
+NEURA_DIAGNOSTIC(E0202, "unexpected token")
+NEURA_DIAGNOSTIC(E0203, "unclosed delimiter")
+NEURA_DIAGNOSTIC(E0204, "expected an expression")
+NEURA_DIAGNOSTIC(E0205, "declaration without a type or an initializer")
+NEURA_DIAGNOSTIC(E0206, "invalid type syntax")
+NEURA_DIAGNOSTIC(E0207, "misplaced variadic parameter")
+NEURA_DIAGNOSTIC(E0208, "type annotation on a definition")
+NEURA_DIAGNOSTIC(E0209, "enum without variants")
+NEURA_DIAGNOSTIC(E0210, "malformed comparison chain")
+NEURA_DIAGNOSTIC(E0211, "malformed scope statement")
+NEURA_DIAGNOSTIC(E0212, "braces that do not enclose a range")
+NEURA_DIAGNOSTIC(E0213, "malformed binding clause")
+
+// Names
+NEURA_DIAGNOSTIC(E0301, "duplicate local binding")
+NEURA_DIAGNOSTIC(E0302, "duplicate declaration")
+NEURA_DIAGNOSTIC(E0303, "duplicate parameter or field name")
+NEURA_DIAGNOSTIC(E0304, "unknown name")
+NEURA_DIAGNOSTIC(E0305, "unknown or inaccessible member")
+NEURA_DIAGNOSTIC(E0306, "use before declaration")
+NEURA_DIAGNOSTIC(E0307, "ambiguous promoted name")
+NEURA_DIAGNOSTIC(E0308, "not a namespace")
+NEURA_DIAGNOSTIC(E0309, "cyclic declaration")
+NEURA_DIAGNOSTIC(E0310, "misuse of the discard name '_'")
+NEURA_DIAGNOSTIC(E0311, "reserved name")
+
+// Types and bindings
+NEURA_DIAGNOSTIC(E0401, "assignment to a constant binding")
+NEURA_DIAGNOSTIC(E0402, "invalid assignment target")
+NEURA_DIAGNOSTIC(E0403, "mismatched types")
+NEURA_DIAGNOSTIC(E0404, "local binding without an initializer")
+NEURA_DIAGNOSTIC(E0405, "missing return")
+NEURA_DIAGNOSTIC(E0406, "return does not match the function's result type")
+NEURA_DIAGNOSTIC(E0407, "wrong number of arguments")
+NEURA_DIAGNOSTIC(E0408, "no matching overload")
+NEURA_DIAGNOSTIC(E0409, "ambiguous overload or cast")
+NEURA_DIAGNOSTIC(E0410, "non-exhaustive match")
+NEURA_DIAGNOSTIC(E0411, "invalid match subject")
+NEURA_DIAGNOSTIC(E0412, "invalid match arm")
+NEURA_DIAGNOSTIC(E0413, "operator not defined for the operand type")
+NEURA_DIAGNOSTIC(E0414, "invalid indexing")
+NEURA_DIAGNOSTIC(E0415, "invalid conversion")
+NEURA_DIAGNOSTIC(E0416, "void in a value position")
+NEURA_DIAGNOSTIC(E0417, "wrong number of type arguments")
+NEURA_DIAGNOSTIC(E0418, "type argument does not satisfy its bound")
+NEURA_DIAGNOSTIC(E0419, "explicit type arguments required")
+NEURA_DIAGNOSTIC(E0420, "target-typed new without a class to construct")
+NEURA_DIAGNOSTIC(E0421, "not a type of the required kind")
+NEURA_DIAGNOSTIC(E0422, "expected a value")
+NEURA_DIAGNOSTIC(E0423, "expression is not callable")
+NEURA_DIAGNOSTIC(E0424, "literal out of range")
+NEURA_DIAGNOSTIC(E0425, "type cannot be inferred")
+NEURA_DIAGNOSTIC(E0426, "tuple arity mismatch")
+NEURA_DIAGNOSTIC(E0427, "invalid enum variant use")
+NEURA_DIAGNOSTIC(E0428, "invalid primitive reference")
+NEURA_DIAGNOSTIC(E0429, "invalid range bounds")
+NEURA_DIAGNOSTIC(E0430, "value is not iterable")
+NEURA_DIAGNOSTIC(E0431, "statement outside its context")
+NEURA_DIAGNOSTIC(E0432, "invalid for loop header")
+NEURA_DIAGNOSTIC(E0433, "invalid overload group")
+NEURA_DIAGNOSTIC(E0434, "function without a body")
+NEURA_DIAGNOSTIC(E0435, "parenthesized type after new")
+NEURA_DIAGNOSTIC(E0436, "destructuring count mismatch")
+NEURA_DIAGNOSTIC(E0437, "destructuring annotation is not a tuple type")
+// `last` bindings and definite assignment
+NEURA_DIAGNOSTIC(E0440, "a deferred 'last' binding assigned twice")
+NEURA_DIAGNOSTIC(E0441, "a deferred 'last' binding read before it is assigned")
+NEURA_DIAGNOSTIC(E0442, "a deferred 'last' binding assigned in a loop")
+NEURA_DIAGNOSTIC(E0443, "a closure captures a 'last' binding before it is assigned")
+NEURA_DIAGNOSTIC(E0444, "a deferred 'last' binding without a type")
+NEURA_DIAGNOSTIC(E0445, "a 'last' field assigned outside 'init'")
+NEURA_DIAGNOSTIC(E0446, "a constructor that does not assign a 'last' field")
+NEURA_DIAGNOSTIC(E0447, "a deferred 'last' binding that is not a local or an instance field")
+
+// Classes, lifecycle, and accessors
+NEURA_DIAGNOSTIC(E0501, "invalid static member")
+NEURA_DIAGNOSTIC(E0502, "invalid override")
+NEURA_DIAGNOSTIC(E0503, "invalid inheritance")
+NEURA_DIAGNOSTIC(E0504, "interface not satisfied")
+NEURA_DIAGNOSTIC(E0505, "type cannot be constructed")
+NEURA_DIAGNOSTIC(E0506, "invalid base constructor call")
+NEURA_DIAGNOSTIC(E0507, "inaccessible constructor")
+NEURA_DIAGNOSTIC(E0508, "member needs a receiver")
+NEURA_DIAGNOSTIC(E0509, "invalid lifecycle function")
+NEURA_DIAGNOSTIC(E0510, "field is read-only outside its class")
+NEURA_DIAGNOSTIC(E0511, "invalid singleton")
+NEURA_DIAGNOSTIC(E0512, "invalid cast declaration")
+NEURA_DIAGNOSTIC(E0513, "reference field not definitely bound")
+NEURA_DIAGNOSTIC(E0514, "invalid destroy")
+NEURA_DIAGNOSTIC(E0515, "field is write-only outside its class")
+NEURA_DIAGNOSTIC(E0516, "accessor on a field that is not exported")
+NEURA_DIAGNOSTIC(E0517, "accessor on a static field")
+NEURA_DIAGNOSTIC(E0518, "accessor on a member that is not a field")
+NEURA_DIAGNOSTIC(E0519, "accessor outside a class")
+NEURA_DIAGNOSTIC(E0520, "duplicate accessor")
+NEURA_DIAGNOSTIC(E0521, "setter on a constant field")
+NEURA_DIAGNOSTIC(E0522, "setter on a field named value")
+NEURA_DIAGNOSTIC(E0523, "accessor on a primitive reference field")
+NEURA_DIAGNOSTIC(E0524, "reference to a field with accessors")
+NEURA_DIAGNOSTIC(E0530, "anonymous class field initializer that never runs")
+NEURA_DIAGNOSTIC(E0531, "anonymous class uses an enclosing type parameter")
+NEURA_DIAGNOSTIC(E0532, "unexported field in a fields-only anonymous class")
+NEURA_DIAGNOSTIC(E0533, "new without the field initializers of an anonymous class")
+NEURA_DIAGNOSTIC(E0534, "untyped field in a fields-only anonymous class")
+NEURA_DIAGNOSTIC(E0536, "destructuring declared with last")
+
+// Concurrency
+NEURA_DIAGNOSTIC(E0601, "function is not task-safe")
+NEURA_DIAGNOSTIC(E0602, "value is not transferable")
+NEURA_DIAGNOSTIC(E0603, "invalid spawn")
+NEURA_DIAGNOSTIC(E0604, "tasks combined with foreign code")
+NEURA_DIAGNOSTIC(E0605, "scope-bound value leaves its scope")
+NEURA_DIAGNOSTIC(E0606, "invalid select")
+NEURA_DIAGNOSTIC(E0607, "scope block outside a function body")
+NEURA_DIAGNOSTIC(E0608, "#ThreadSafe function that is not task-safe")
+NEURA_DIAGNOSTIC(E0609, "#ThreadSafe class whose instances cannot be shared")
+NEURA_DIAGNOSTIC(E0610, "#NotThreadSafe class that promises sharing")
+
+// Modules and imports
+NEURA_DIAGNOSTIC(E0701, "unresolved import")
+NEURA_DIAGNOSTIC(E0702, "import of an internal standard library module")
+NEURA_DIAGNOSTIC(E0703, "ambiguous import")
+NEURA_DIAGNOSTIC(E0704, "invalid import declaration")
+NEURA_DIAGNOSTIC(E0705, "imported file does not declare the module")
+NEURA_DIAGNOSTIC(E0706, "invalid NeuraIR artifact")
+NEURA_DIAGNOSTIC(E0707, "conflicting NeuraIR artifact")
+NEURA_DIAGNOSTIC(E0708, "C import failed")
+NEURA_DIAGNOSTIC(E0709, "C header or library not found")
+NEURA_DIAGNOSTIC(E0710, "invalid host or scheduler binding")
+NEURA_DIAGNOSTIC(E0780, "kernel binding outside the standard library")
+NEURA_DIAGNOSTIC(E0781, "kernel binding does not match its kernel")
+NEURA_DIAGNOSTIC(E0782, "unknown kernel or kernel ABI version")
+NEURA_DIAGNOSTIC(E0783, "malformed kernel binding")
+
+// Backend
+NEURA_DIAGNOSTIC(E0801, "not supported by circuit conversion")
+NEURA_DIAGNOSTIC(E0802, "type without a circuit representation")
+NEURA_DIAGNOSTIC(E0803, "missing entry point")
+NEURA_DIAGNOSTIC(E0804, "more than one entry point")
+NEURA_DIAGNOSTIC(E0805, "invalid entry point signature")
+NEURA_DIAGNOSTIC(E0806, "external function without a runtime binding")
+NEURA_DIAGNOSTIC(E0807, "literal not representable in the circuit")
+NEURA_DIAGNOSTIC(E0808, "generic specialization limit exceeded")
+NEURA_DIAGNOSTIC(E0899, "internal compiler error")
+
+// Tags (docs/lang/Tags.md); E0923-E0929 stay free for later tags.
+NEURA_DIAGNOSTIC(E0900, "unknown tag")
+NEURA_DIAGNOSTIC(E0901, "tag on a declaration it does not apply to")
+NEURA_DIAGNOSTIC(E0902, "unknown or misplaced tag argument")
+NEURA_DIAGNOSTIC(E0903, "missing tag argument")
+NEURA_DIAGNOSTIC(E0904, "duplicate tag argument")
+NEURA_DIAGNOSTIC(E0905, "tag argument of the wrong type")
+NEURA_DIAGNOSTIC(E0906, "duplicate tag")
+NEURA_DIAGNOSTIC(E0907, "conflicting tags")
+NEURA_DIAGNOSTIC(E0908, "reserved tag")
+NEURA_DIAGNOSTIC(E0909, "tags without a declaration")
+NEURA_DIAGNOSTIC(E0910, "malformed tag")
+NEURA_DIAGNOSTIC(E0911, "use of an internal declaration outside its library")
+NEURA_DIAGNOSTIC(E0912, "extension of a final class")
+NEURA_DIAGNOSTIC(E0913, "override of a final method")
+NEURA_DIAGNOSTIC(E0914, "extension of a sealed type outside its module")
+NEURA_DIAGNOSTIC(E0915, "unknown warning in a tag")
+NEURA_DIAGNOSTIC(E0916, "result tag on a function without a result")
+NEURA_DIAGNOSTIC(E0917, "#Pure function that is not pure")
+NEURA_DIAGNOSTIC(E0918, "assignable field in an #Immutable class")
+NEURA_DIAGNOSTIC(E0919, "field of a mutable type in an #Immutable class")
+NEURA_DIAGNOSTIC(E0920, "#Immutable class with a base or subclass that is not #Immutable")
+NEURA_DIAGNOSTIC(E0921, "#Synchronized on a method without a body to guard")
+NEURA_DIAGNOSTIC(E0922, "override of a synchronized method that is not synchronized")
+
+// Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
+// -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later
+// warnings. An includer that defines only NEURA_DIAGNOSTIC sees them as codes.
+#ifndef NEURA_WARNING
+#define NEURA_WARNING(code, name, title) NEURA_DIAGNOSTIC(code, title)
+#define NEURA_WARNING_FROM_DIAGNOSTIC
+#endif
+NEURA_WARNING(W0001, "deprecated", "use of a deprecated declaration")
+NEURA_WARNING(W0002, "experimental", "use of an experimental declaration")
+NEURA_WARNING(W0003, "unused-result", "discarded result of a #NoDiscard call")
+NEURA_WARNING(W0004, "inline", "#Inline(always: true) function that cannot be inlined")
+NEURA_WARNING(W0005, "setter-never-stores", "setter that never stores its field")
+#ifdef NEURA_WARNING_FROM_DIAGNOSTIC
+#undef NEURA_WARNING_FROM_DIAGNOSTIC
+#endif
+#undef NEURA_WARNING
+
+#undef NEURA_DIAGNOSTIC

@@ -7,6 +7,7 @@ export let FloatRounding = module (
     ///
     /// Overflow gives an infinity and underflow a subnormal or a zero of the same sign. `top` should hold at
     /// least 55 significant bits when `sticky` is set, so that the sticky bits lie below the rounding bit.
+    #Pure
     export let compose = func(negative: bool, top: uint64, exponent: int, sticky: bool) -> float64 {
         let sign: uint64 = 0;
         if (negative) {
@@ -21,7 +22,7 @@ export let FloatRounding = module (
             top <<= 1;
             e--;
         }
-        let binade = e + 63; // the value lies in [2^binade, 2^(binade + 1))
+        last binade = e + 63; // the value lies in [2^binade, 2^(binade + 1))
         if (binade > 1023) {
             return float64.from_bits(sign | 9218868437227405312);
         }
@@ -41,7 +42,7 @@ export let FloatRounding = module (
         } else {
             mantissa = top >> shift;
             round = ((top >> (shift - 1)) & 1) != 0;
-            let below = (1 as uint64 << (shift - 1)) - 1;
+            last below = (1 as uint64 << (shift - 1)) - 1;
             rest = rest || (top & below) != 0;
         }
         if (round && (rest || (mantissa & 1) != 0)) {
@@ -53,7 +54,7 @@ export let FloatRounding = module (
         }
         // mantissa is 2^52 through 2^53; a carry to 2^53 moves to the next
         // binade, and from the largest binade to infinity.
-        let field = ((binade + 1023) as uint64) << 52;
+        last field = ((binade + 1023) as uint64) << 52;
         return float64.from_bits(sign | (field + mantissa - 4503599627370496));
     };
 );

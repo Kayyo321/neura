@@ -19,8 +19,10 @@ let.promote string_maps = import:Std.Collections.StringMap;
 /// it copies them, and converts it once (string concatenation and StringBuilder.append also copy every byte, so
 /// they would add a second pass).
 /// @see [Std.Encoding.Json](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Json)
+#Since("0.1.0")
 export let Json = module (
     /// @brief Represents null, booleans, number text, strings, arrays, and ordered object members.
+    #Since("0.1.0")
     export let JsonValue = enum (
         Null,
         Boolean(bool),
@@ -34,12 +36,14 @@ export let Json = module (
     const MaxDepth: int = 512;
 
     /// @brief A Number with the integer's decimal text.
+    #[Pure, ThreadSafe]
     export let number_of_int64 = func(v: int64) -> JsonValue => JsonValue.Number(v.to_string());
 
     /// @brief A Number with the float's shortest round-trip text (Stdlib.md section 7.5), which is valid JSON
     /// number text.
     ///
     /// NaN and the infinities trap with "invalid argument: number is not finite".
+    #[Pure, ThreadSafe]
     export let number_of_float64 = func(v: float64) -> JsonValue {
         if (v != v || v - v != 0.0) {
             trap_with_message("invalid argument: number is not finite");
@@ -48,6 +52,7 @@ export let Json = module (
     };
 
     /// @brief The value of the first member with the name.
+    #[NoDiscard, Pure, ThreadSafe]
     export let member = func(members: [string, JsonValue][list], name: string) -> Optional<JsonValue> {
         for (let entry in members) {
             if (entry[0] == name) {
@@ -59,12 +64,13 @@ export let Json = module (
 
     /// @brief Some(the value) when the text is a JSON number with no fraction and no exponent whose value fits
     /// in int64; otherwise None, including for text that is not a JSON number.
+    #[Pure, ThreadSafe]
     export let number_to_int64 = func(text: string) -> Optional<int64> {
-        let count = text.byte_length;
+        last count = text.byte_length;
         if (scan_number(text, 0) != count) {
             return Optional<int64>.None;
         }
-        let negative = text.byte_at(0) == 45;
+        last negative = text.byte_at(0) == 45;
         let i = 0;
         if (negative) {
             i = 1;
@@ -72,11 +78,11 @@ export let Json = module (
         // Accumulate in the negative range so that the minimum fits.
         let value: int64 = 0;
         while (i < count) {
-            let b = text.byte_at(i);
+            last b = text.byte_at(i);
             if (b < 48 || b > 57) {
                 return Optional<int64>.None;
             }
-            let digit = (b - 48) as int64;
+            last digit = (b - 48) as int64;
             if (value < -922337203685477580 || (value == -922337203685477580 && digit > 8)) {
                 return Optional<int64>.None;
             }
@@ -94,6 +100,7 @@ export let Json = module (
 
     /// @brief The float64 nearest the number, ties to even (Float64.parse). Text that is not a JSON number
     /// traps with "invalid argument: number text".
+    #[Pure, ThreadSafe]
     export let number_to_float64 = func(text: string) -> float64 {
         require_number(text);
         return match (float64s.parse(text)) {
@@ -130,8 +137,9 @@ export let Json = module (
     /// "unpaired surrogate" at the escape's backslash.
     /// - OutOfRange, "nesting deeper than 512": at the bracket that opens the
     /// 513th level.
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<JsonValue> {
-        let parser = new Parser();
+        last parser = new Parser();
         parser.document(text);
         if (parser.failed) {
             return Result<JsonValue>.Err(Error.Parse {
@@ -145,8 +153,9 @@ export let Json = module (
 
     /// @brief The value's JSON text with no whitespace. A Number whose text is not a JSON number traps with
     /// "invalid argument: number text".
+    #[NoDiscard, Pure, ThreadSafe]
     export let write = func(value: JsonValue) -> string {
-        let out: uint8[list] = [];
+        last out: uint8[list] = [];
         write_value(out, value, -1, 0);
         return text_of(out);
     };
@@ -156,11 +165,12 @@ export let Json = module (
     ///
     /// Empty arrays and objects are [] and {}. A negative indent traps with "invalid argument: negative
     /// indent".
+    #[NoDiscard, Pure, ThreadSafe]
     export let write_pretty = func(value: JsonValue, indent: int) -> string {
         if (indent < 0) {
             trap_with_message("invalid argument: negative indent");
         }
-        let out: uint8[list] = [];
+        last out: uint8[list] = [];
         write_value(out, value, indent, 0);
         return text_of(out);
     };
@@ -171,6 +181,7 @@ export let Json = module (
     /// value. Arrays compare element by element. Objects are equal when they have the same number of members
     /// and each member of either has a member with the same name and an equal value in the other, in any order.
     /// A Number whose text is not a JSON number traps with "invalid argument: number text".
+    #[Pure, ThreadSafe]
     export let equals = func(a: JsonValue, b: JsonValue) -> bool {
         match (a) {
             JsonValue.Null => {
@@ -221,6 +232,7 @@ export let Json = module (
     /// canonical text of a number is "0" for zero and otherwise an optional "-", the significant digits without
     /// leading or trailing zeros, "e", and the decimal exponent that makes them an integer: 120.50 is
     /// "1205e-1".
+    #ThreadSafe
     export let hash = func(value: JsonValue) -> uint32 => match (value) {
         JsonValue.Null => 1,
         JsonValue.Boolean(b) => hashing.combine(2, hashing.of_bool(b)),
@@ -232,8 +244,9 @@ export let Json = module (
 
     /// @brief A StringMap from each member name to its value, in member order. For a repeated name the last
     /// value wins and the name keeps its first position, as in parse.
+    #ThreadSafe
     export let index = func(members: [string, JsonValue][list]) -> StringMap<JsonValue> {
-        let map = string_maps.create<JsonValue>();
+        last map = string_maps.create<JsonValue>();
         for (let entry in members) {
             map.set(entry[0], entry[1]);
         }
@@ -248,6 +261,7 @@ export let Json = module (
     /// read, or -1 after recording the first failure. Values and strings are returned through the fields
     /// `value` and `text_value`. Offsets travel as arguments rather than fields because every field access is
     /// an NVM step.
+    #Final
     let Parser = class (
         /// @brief The parsed JSON value, initially Null.
         export let value: JsonValue = JsonValue.Null;
@@ -268,7 +282,7 @@ export let Json = module (
 
         /// @brief Parses the whole text; afterwards `value` or the failure fields hold the outcome.
         export let document = func(text: string) {
-            let count = text.byte_length;
+            last count = text.byte_length;
             let p = skip_whitespace(text, count, 0);
             if (p == count) {
                 fail(ParseErrorKind.Empty, count, "no value");
@@ -315,14 +329,14 @@ export let Json = module (
                 b = text.byte_at(p);
             }
             if (b == 34) {
-                let end = string_at(text, count, p);
+                last end = string_at(text, count, p);
                 if (end >= 0) {
                     value = JsonValue.Text(text_value);
                 }
                 return end;
             }
             if (b == 45 || (b >= 48 && b <= 57)) {
-                let end = scan_number(text, p);
+                last end = scan_number(text, p);
                 if (end < 0) {
                     return number_failure(text, count, -end - 1);
                 }
@@ -352,8 +366,8 @@ export let Json = module (
 
         /// @brief Matches a JSON literal and reports the first mismatch or premature end.
         let literal = func(text: string, count: int, p: int, word: string) -> int {
-            let length = word.byte_length;
-            let end = p + length;
+            last length = word.byte_length;
+            last end = p + length;
             // The slice is valid when its end is a character boundary.
             if (end < count && (text.byte_at(end) & 192) != 128 || end == count) {
                 if (text.slice(p, end) == word) {
@@ -361,7 +375,7 @@ export let Json = module (
                 }
             }
             for (let k = 0; k < length; k++) {
-                let at = p + k;
+                last at = p + k;
                 if (at == count) {
                     return end_of_input(count);
                 }
@@ -377,7 +391,7 @@ export let Json = module (
             if (at == count) {
                 return end_of_input(count);
             }
-            let b = text.byte_at(at);
+            last b = text.byte_at(at);
             if (b >= 48 && b <= 57) {
                 return fail(ParseErrorKind.InvalidCharacter, at, "leading zero");
             }
@@ -389,7 +403,7 @@ export let Json = module (
             if (depth > MaxDepth) {
                 return fail(ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
             }
-            let items: JsonValue[list] = [];
+            last items: JsonValue[list] = [];
             let p = skip_whitespace(text, count, start + 1);
             if (p < count && text.byte_at(p) == 93) {
                 value = JsonValue.Array(items);
@@ -428,11 +442,11 @@ export let Json = module (
             if (depth > MaxDepth) {
                 return fail(ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
             }
-            let members: [string, JsonValue][list] = [];
+            last members: [string, JsonValue][list] = [];
             // The member names, read without unpacking the tuples, and the
             // member positions by name once the object is large enough
             // that scanning for a repeated name would cost more.
-            let names: string[list] = [];
+            last names: string[list] = [];
             let positions: StringMap<int> = nil;
             let p = skip_whitespace(text, count, start + 1);
             if (p < count && text.byte_at(p) == 125) {
@@ -451,7 +465,7 @@ export let Json = module (
                 if (p < 0) {
                     return p;
                 }
-                let name = text_value;
+                last name = text_value;
                 if (p == count) {
                     return end_of_input(count);
                 }
@@ -470,10 +484,10 @@ export let Json = module (
                 if (p < 0) {
                     return p;
                 }
-                let member_value = value;
+                last member_value = value;
                 let existing = -1;
                 if (positions == nil) {
-                    let size = names.length;
+                    last size = names.length;
                     for (let k = 0; k < size; k++) {
                         if (names[k] == name) {
                             existing = k;
@@ -524,16 +538,16 @@ export let Json = module (
         /// @brief The string whose opening quote is at `start`, into `text_value`. Text without escapes is one
         /// slice; otherwise the bytes are copied and the escapes decoded.
         let string_at = func(text: string, count: int, start: int) -> int {
-            let first = start + 1;
+            last first = start + 1;
             let i = plain_end(text, count, first);
             if (i < count && text.byte_at(i) == 34) {
                 text_value = text.slice(first, i);
                 return i + 1;
             }
-            let out: uint8[list] = [];
+            last out: uint8[list] = [];
             copy_bytes(out, text, first, i);
             while (i < count) {
-                let b = text.byte_at(i);
+                last b = text.byte_at(i);
                 if (b == 34) {
                     text_value = text_of(out);
                     return i + 1;
@@ -542,7 +556,7 @@ export let Json = module (
                     return fail(ParseErrorKind.InvalidCharacter, i, "control character in string");
                 }
                 if (b != 92) {
-                    let end = plain_end(text, count, i);
+                    last end = plain_end(text, count, i);
                     copy_bytes(out, text, i, end);
                     i = end;
                     continue;
@@ -550,7 +564,7 @@ export let Json = module (
                 if (i + 1 == count) {
                     return end_of_input(count);
                 }
-                let e = text.byte_at(i + 1);
+                last e = text.byte_at(i + 1);
                 if (e == 117) {
                     i = unicode_escape(out, text, count, i);
                     if (i < 0) {
@@ -583,7 +597,7 @@ export let Json = module (
         /// @brief Decodes the \u escape whose backslash is at `at`, and the low half of a surrogate pair after
         /// it, into `out`. Returns the offset after the escape or pair.
         let unicode_escape = func(out: uint8[list], text: string, count: int, at: int) -> int {
-            let unit = hex_unit(text, count, at);
+            last unit = hex_unit(text, count, at);
             if (unit < 0) {
                 return -1;
             }
@@ -600,7 +614,7 @@ export let Json = module (
                 if (text.byte_at(next) != 92 || text.byte_at(next + 1) != 117) {
                     return fail(ParseErrorKind.InvalidCharacter, at, "unpaired surrogate");
                 }
-                let low = hex_unit(text, count, next);
+                last low = hex_unit(text, count, next);
                 if (low < 0) {
                     return -1;
                 }
@@ -622,7 +636,7 @@ export let Json = module (
                 if (at + k >= count) {
                     return end_of_input(count);
                 }
-                let b = text.byte_at(at + k) as int;
+                last b = text.byte_at(at + k) as int;
                 let digit = -1;
                 if (b >= 48 && b <= 57) {
                     digit = b - 48;
@@ -645,7 +659,7 @@ export let Json = module (
     let skip_whitespace = func(text: string, count: int, start: int) -> int {
         let i = start;
         while (i < count) {
-            let b = text.byte_at(i);
+            last b = text.byte_at(i);
             if (b != 32 && b != 10 && b != 13 && b != 9) {
                 return i;
             }
@@ -661,10 +675,10 @@ export let Json = module (
     let plain_end = func(text: string, count: int, start: int) -> int {
         let i = start;
         while (i + 4 <= count) {
-            let b0 = text.byte_at(i);
-            let b1 = text.byte_at(i + 1);
-            let b2 = text.byte_at(i + 2);
-            let b3 = text.byte_at(i + 3);
+            last b0 = text.byte_at(i);
+            last b1 = text.byte_at(i + 1);
+            last b2 = text.byte_at(i + 2);
+            last b3 = text.byte_at(i + 3);
             if (b0 == 34 || b0 == 92 || b0 < 32 || b1 == 34 || b1 == 92 || b1 < 32
                 || b2 == 34 || b2 == 92 || b2 < 32 || b3 == 34 || b3 == 92 || b3 < 32) {
                 break;
@@ -672,7 +686,7 @@ export let Json = module (
             i += 4;
         }
         while (i < count) {
-            let b = text.byte_at(i);
+            last b = text.byte_at(i);
             if (b == 34 || b == 92 || b < 32) {
                 return i;
             }
@@ -703,7 +717,7 @@ export let Json = module (
     /// The grammar: an optional minus, 0 or a nonzero digit followed by digits, an optional point followed by
     /// digits, and an optional e or E, sign, and digits. A digit after a leading 0 breaks it.
     let scan_number = func(text: string, start: int) -> int {
-        let count = text.byte_length;
+        last count = text.byte_length;
         let i = start;
         if (i < count && text.byte_at(i) == 45) {
             i++;
@@ -711,7 +725,7 @@ export let Json = module (
         if (i == count) {
             return -1 - i;
         }
-        let b = text.byte_at(i);
+        last b = text.byte_at(i);
         if (b == 48) {
             i++;
             if (i < count && is_digit(text.byte_at(i))) {
@@ -744,20 +758,20 @@ export let Json = module (
 
     /// @brief Scans decimal digits four bytes at a time when possible.
     let digits_end = func(text: string, start: int) -> int {
-        let count = text.byte_length;
+        last count = text.byte_length;
         let i = start;
         while (i + 4 <= count) {
-            let b0 = text.byte_at(i);
-            let b1 = text.byte_at(i + 1);
-            let b2 = text.byte_at(i + 2);
-            let b3 = text.byte_at(i + 3);
+            last b0 = text.byte_at(i);
+            last b1 = text.byte_at(i + 1);
+            last b2 = text.byte_at(i + 2);
+            last b3 = text.byte_at(i + 3);
             if (b0 < 48 || b0 > 57 || b1 < 48 || b1 > 57 || b2 < 48 || b2 > 57 || b3 < 48 || b3 > 57) {
                 break;
             }
             i += 4;
         }
         while (i < count) {
-            let b = text.byte_at(i);
+            last b = text.byte_at(i);
             if (b < 48 || b > 57) {
                 return i;
             }
@@ -811,7 +825,7 @@ export let Json = module (
             },
             JsonValue.Array(items) => {
                 out.append(91);
-                let count = items.length;
+                last count = items.length;
                 for (let i = 0; i < count; i++) {
                     if (i > 0) {
                         out.append(44);
@@ -826,7 +840,7 @@ export let Json = module (
             },
             JsonValue.Object(members) => {
                 out.append(123);
-                let count = members.length;
+                last count = members.length;
                 for (let i = 0; i < count; i++) {
                     if (i > 0) {
                         out.append(44);
@@ -854,7 +868,7 @@ export let Json = module (
             return;
         }
         out.append(10);
-        let spaces = indent * level;
+        last spaces = indent * level;
         for (let k = 0; k < spaces; k++) {
             out.append(32);
         }
@@ -863,15 +877,15 @@ export let Json = module (
     /// @brief Appends the string in quotes, escaping the quote, the backslash, and every byte below 0x20.
     let append_string = func(out: uint8[list], s: string) {
         out.append(34);
-        let count = s.byte_length;
+        last count = s.byte_length;
         let i = 0;
         while (i < count) {
             // Four bytes that need no escape at a time.
             if (i + 4 <= count) {
-                let b0 = s.byte_at(i);
-                let b1 = s.byte_at(i + 1);
-                let b2 = s.byte_at(i + 2);
-                let b3 = s.byte_at(i + 3);
+                last b0 = s.byte_at(i);
+                last b1 = s.byte_at(i + 1);
+                last b2 = s.byte_at(i + 2);
+                last b3 = s.byte_at(i + 3);
                 if (b0 >= 32 && b0 != 34 && b0 != 92 && b1 >= 32 && b1 != 34 && b1 != 92
                     && b2 >= 32 && b2 != 34 && b2 != 92 && b3 >= 32 && b3 != 34 && b3 != 92) {
                     out.append(b0);
@@ -882,7 +896,7 @@ export let Json = module (
                     continue;
                 }
             }
-            let b = s.byte_at(i);
+            last b = s.byte_at(i);
             i++;
             if (b >= 32 && b != 34 && b != 92) {
                 out.append(b);
@@ -906,7 +920,7 @@ export let Json = module (
                     out.append(48);
                     out.append(48);
                     out.append(48 + (b >> 4));
-                    let low = b & 15;
+                    last low = b & 15;
                     out.append(low + 48 + ((low + 6) >> 4) * 39);
                 }
             }
@@ -955,7 +969,7 @@ export let Json = module (
 
     /// @brief Tests equal length and recursively compares corresponding elements.
     let arrays_equal = func(a: JsonValue[list], b: JsonValue[list]) -> bool {
-        let count = a.length;
+        last count = a.length;
         if (count != b.length) {
             return false;
         }
@@ -969,7 +983,7 @@ export let Json = module (
 
     /// @brief Compares object members without regard to order, with a fast path for matching order.
     let objects_equal = func(a: [string, JsonValue][list], b: [string, JsonValue][list]) -> bool {
-        let count = a.length;
+        last count = a.length;
         if (count != b.length) {
             return false;
         }
@@ -1012,13 +1026,13 @@ export let Json = module (
 
     /// @brief Combines distinct member-pair hashes without regard to member order.
     let object_hash = func(members: [string, JsonValue][list]) -> uint32 {
-        let pairs: uint32[list] = [];
+        last pairs: uint32[list] = [];
         for (let entry in members) {
             pairs.append(hashing.combine(entry[0].hash_code(), hash(entry[1])));
         }
         sorting.sort<uint32>(pairs, compare_hashes);
         let total: uint64 = 0;
-        let count = pairs.length;
+        last count = pairs.length;
         for (let i = 0; i < count; i++) {
             if (i == 0 || pairs[i] != pairs[i - 1]) {
                 total = (total + (pairs[i] as uint64)) & 4294967295;
@@ -1045,13 +1059,13 @@ export let Json = module (
     /// JSON number traps with "invalid argument: number text".
     let canonical_number = func(text: string) -> string {
         require_number(text);
-        let count = text.byte_length;
-        let negative = text.byte_at(0) == 45;
+        last count = text.byte_length;
+        last negative = text.byte_at(0) == 45;
         let i = 0;
         if (negative) {
             i = 1;
         }
-        let integer_end = digits_end(text, i);
+        last integer_end = digits_end(text, i);
         let fraction_start = integer_end;
         let fraction_end = integer_end;
         if (fraction_start < count && text.byte_at(fraction_start) == 46) {
@@ -1060,17 +1074,17 @@ export let Json = module (
         }
         // The significant digits, read through the integer part and then
         // the fraction.
-        let digits: uint8[list] = [];
+        last digits: uint8[list] = [];
         let started = false;
         for (let k = i; k < integer_end; k++) {
-            let b = text.byte_at(k);
+            last b = text.byte_at(k);
             if (b != 48 || started) {
                 started = true;
                 digits.append(b);
             }
         }
         for (let k = fraction_start; k < fraction_end; k++) {
-            let b = text.byte_at(k);
+            last b = text.byte_at(k);
             if (b != 48 || started) {
                 started = true;
                 digits.append(b);
@@ -1133,7 +1147,7 @@ export let Json = module (
             delta = -adjustment;
         }
         // Ten leading zeros absorb any carry: the adjustment is below 10^10.
-        let bytes: uint8[list] = [48, 48, 48, 48, 48, 48, 48, 48, 48, 48];
+        last bytes: uint8[list] = [48, 48, 48, 48, 48, 48, 48, 48, 48, 48];
         for (let k = 0; k < length; k++) {
             bytes.append(digits.byte_at(k));
         }
@@ -1141,7 +1155,7 @@ export let Json = module (
         let carry: int64 = delta;
         let k = length - 1;
         while (carry != 0) {
-            let total = ((bytes[k] - 48) as int64) + carry;
+            last total = ((bytes[k] - 48) as int64) + carry;
             let digit = total % 10;
             carry = total / 10;
             if (digit < 0) {
@@ -1156,7 +1170,7 @@ export let Json = module (
         while (bytes[first] == 48) {
             first++;
         }
-        let kept: uint8[list] = [];
+        last kept: uint8[list] = [];
         if (negative) {
             kept.append(45);
         }

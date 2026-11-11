@@ -1,0 +1,2 @@
+// A tuple annotation with fewer types than names (E0436).
+let [low, high, step]: [int, int] = 1, 9, 2;

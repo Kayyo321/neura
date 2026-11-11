@@ -1,0 +1,12 @@
+error[E0201]: expected ';'
+ --> $DIR/missing-semicolon-at-end.nra:2:17
+  |
+2 | let ready = true
+  |                 ^ expected ';' here
+  |
+help: add the missing ';'
+  |
+2 | let ready = true;
+  |                 +
+
+For more information about this error, try `neura explain E0201`.

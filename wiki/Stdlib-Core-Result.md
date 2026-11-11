@@ -17,31 +17,31 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Result** · [`export let Result = enum<T> (Ok(T), Err(Error))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L10)
-  Represents a successful payload (Ok) or an expected failure (Err).
-- **Result** · [`export let is_ok = func<T>(r: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L13)
+- **Result** · [`export let Result = enum<T> (Ok(T), Err(Error))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L12)
+  Represents a successful payload (Ok) or an expected failure (Err). Since 0.1.0.
+- **Result** · [`export let is_ok = func<T>(r: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L15)
   Reports whether the result holds a success payload.
-- **Result** · [`export let is_err = func<T>(r: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L19)
+- **Result** · [`export let is_err = func<T>(r: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L21)
   Reports whether the result holds an error.
-- **Result** · [`export let value_or = func<T>(r: Result<T>, fallback: T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L25)
+- **Result** · [`export let value_or = func<T>(r: Result<T>, fallback: T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L27)
   Returns the success payload or the already-evaluated fallback.
-- **Result** · [`export let expect = func<T>(r: Result<T>, detail: string) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L31)
+- **Result** · [`export let expect = func<T>(r: Result<T>, detail: string) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L33)
   The value, or a trap whose message is the detail, ": ", and the error's message.
-- **Result** · [`export let to_optional = func<T>(r: Result<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L43)
-  Returns Some for success and discards an error by returning None.
-- **Result** · [`export let with_context = func<T>(r: Result<T>, message: string) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L49)
-  Wraps an Err in a Context error; returns an Ok unchanged.
-- **Result** · [`export let map = func<T, U>(r: Result<T>, f: func(T) -> U) -> Result<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L55)
-  Transforms only a successful payload, preserving an error unchanged.
-- **Result** · [`export let and_then = func<T, U>(r: Result<T>, f: func(T) -> Result<U>) -> Result<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L61)
-  Calls the function on success and returns its result, or propagates the original error.
-- **Result** · [`export let map_error = func<T>(r: Result<T>, f: func(Error) -> Error) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L67)
-  Transforms only the error payload, preserving success unchanged.
-- **Result** · [`export let equals = func<T>(a: Result<T>, b: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L73)
+- **Result** · [`export let to_optional = func<T>(r: Result<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L46)
+  Returns Some for success and discards an error by returning None. Tagged `#NoDiscard`.
+- **Result** · [`export let with_context = func<T>(r: Result<T>, message: string) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L53)
+  Wraps an Err in a Context error; returns an Ok unchanged. Tagged `#NoDiscard`.
+- **Result** · [`export let map = func<T, U>(r: Result<T>, f: func(T) -> U) -> Result<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L60)
+  Transforms only a successful payload, preserving an error unchanged. Tagged `#NoDiscard`.
+- **Result** · [`export let and_then = func<T, U>(r: Result<T>, f: func(T) -> Result<U>) -> Result<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L67)
+  Calls the function on success and returns its result, or propagates the original error. Tagged `#NoDiscard`.
+- **Result** · [`export let map_error = func<T>(r: Result<T>, f: func(Error) -> Error) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L74)
+  Transforms only the error payload, preserving success unchanged. Tagged `#NoDiscard`.
+- **Result** · [`export let equals = func<T>(a: Result<T>, b: Result<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L80)
   Both Ok with equal values, or both Err with structurally equal errors.
-- **Result** · [`export let hash = func<T>(r: Result<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L91)
+- **Result** · [`export let hash = func<T>(r: Result<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L98)
   Hash.combine(1, the value's hash) for Ok and Hash.combine(2, the error's hash) for Err.
-- **Result** · [`export let to_string = func<T>(r: Result<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L97)
+- **Result** · [`export let to_string = func<T>(r: Result<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/result.nra#L104)
   Formats the success value or the error with its variant name.
 <!-- END SOURCE API -->
 
@@ -55,7 +55,7 @@ There are two kinds of failure and they never mix.
 
 **Returned errors.** A function whose failure depends on input text, input bytes, or the outside world returns `Result<T>` ([section 6.2](Stdlib-Design#62-resultt)). The caller reads it with `match`. There is no propagation shorthand and no exception; passing an error up is an explicit `match` arm that returns it.
 
-**Traps.** A function whose precondition is violated ends the run. The run stops at once with the process status of the trap's class, 134 (`Abort`) for a message trap; no library or user code runs afterwards; nothing can observe or recover it ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). The module `Failure` in `Std.Core` has one function:
+**Traps.** A function whose precondition is violated ends the run. The run stops at once with the process status of the trap's class, 134 (`Abort`) for a message trap; no library or user code runs afterwards; nothing can observe or recover it ([Errors](Errors)). The module `Failure` in `Std.Core` has one function:
 
 | Member | Behavior |
 | --- | --- |
@@ -87,8 +87,9 @@ Library trap conditions and their messages. The message text is part of the cont
 ### 5.5 Resources
 
 - A host resource (`File`, `TcpStream`, `TcpListener`) has `close() → Result<Unit>`. Closing again does nothing and returns `Ok`. Any other operation on a closed resource returns an `Io` error of kind `Closed`. If `close` reports an error the resource is still closed.
+- **Results that must be used.** The functions and methods of `Std.Io`, `Std.Fs`, and `Std.Net` whose `Result` can report a failed read, write, open, connection, or file system operation are tagged `#NoDiscard`, and so are the classes `File`, `TcpStream`, and `TcpListener`: a statement that drops such a result warns with `W0003` ([Tags](Tags#nodiscard)), and `let _ = ...;` drops one on purpose. `close()` is not tagged.
 - **Closing is always explicit.** Reclaiming an unreachable resource object frees its storage and does nothing else: `deinit` does not run and the host ID stays open until the run ends. No library class declares `deinit`. `Fs` and `Net` each allow at most 1,024 simultaneously open IDs per run; exceeding that returns an `Io` error of kind `Other`.
-- **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. With tasks a body can end early by cancellation, and the close must still happen ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#7-cancellation-deadlines-and-resources)).
+- **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. With tasks a body can end early by cancellation, and the close must still happen ([Concurrency](Concurrency#7-cancellation-deadlines-and-resources)).
   - If the open fails, the helper returns that error and does not call the body.
   - The body runs in a `scope` the helper owns, so every task started in that scope has finished before the resource is closed.
   - If the close succeeds, the helper returns the body's result unchanged. If the close fails after a body `Ok`, it returns the close error. If the close fails after a body `Err`, it returns a `Context` error whose cause is the body's error and whose message carries the close error's message: `closing the resource also failed: ` and that message from `with_open`, `close failed after the body failed: ` and that message from `with_connection`.
@@ -96,7 +97,7 @@ Library trap conditions and their messages. The message text is part of the cont
   - A trap in the body ends the run without cleanup; the runner then closes what the run left open.
 - **`Closeable.release<T>(resource: Closeable, outcome: Result<T>) → Result<T>`** is the closing rule on its own: it closes the resource and combines the result with the outcome of the work, as `with_open` does. A program that owns another kind of closeable resource calls it exactly once, after the work, on every ordinary completion.
 - Where a wrapper owns a closeable resource, it can use the `Closeable` interface. A wrapper over a bare function value does not own or close the function's receiver.
-- **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
+- **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
 
 ### 5.7 Conformance summary
 
@@ -184,9 +185,9 @@ Use `nil` for an internal absent reference when it cannot be confused with a rea
 | `to_unsigned(v)`, `to_signed(v)` | The same-width type with the same bit pattern ([section 7.2](Stdlib-Design#72-arithmetic-without-wrapping-intrinsics)). |
 | `hash(v) → uint32` | [Section 5.2](Stdlib-Design#52-equality-hashing-and-text). |
 | `to_string(v) → string` | Decimal. Built by concatenating one-character literals, most significant digit first; negative values are handled in the negative range so `Min` needs no negation. |
-| `to_string_radix(v, radix: int) → string` | Lowercase digits. |
+| `to_string_radix(v, radix: int) → string` | Lowercase digits. The kernel `neura.integer.format_i64` or `format_u64` writes them (P2a). |
 | `format(v, radix: int, min_width: int, pad: string) → string` | As `to_string_radix`, then left-padded with copies of `pad` to `min_width` digits and sign. When `pad` is `0`, padding goes after the sign. |
-| `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. |
+| `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. The kernel `neura.integer.parse_i64` or `parse_u64` parses the text as a 64-bit value, which a narrower type then checks against its range (P2a). |
 
 **Parsing grammar.** An optional `+` or `-`, then one or more digits of the radix, letters in either case. No whitespace, separators, or radix prefix. An empty input fails with kind `Empty`; a sign with no digits with `UnexpectedEnd`; any other byte with `InvalidCharacter` at its offset; a value outside the type with `OutOfRange` at offset 0. A `-` on an unsigned type is accepted only for zero. The parser accumulates in the negative range for signed types, so `Min` parses without overflow.
 
@@ -249,11 +250,11 @@ All of `Strings` needs T1. String operations are functions that take the string 
 
 Functions that return several strings return a built-in list, not an `ArrayList`: the built-in for-each works on it, and `Std.Text` then needs nothing from `Std.Collections`.
 
-**Search algorithm.** `index_of` scans for the needle's first byte and then compares the remaining bytes in place. Its worst case is the product of the two lengths. The simple scan has the smallest circuit and a predictable step count.
+**Search algorithm.** The searches, comparisons, trims, splits, `lines`, replacements, ASCII case mappings, `scalar_count`, and `hash` run on the `neura.text`, `neura.hash`, and `neura.encoding` kernels (P2a). The text searches use the two-way string-matching algorithm, so a search is linear in the length of the text it reads plus the needle's length, never their product. A kernel is charged by the work its arguments allow (P2a), so the steps of each member are linear: `index_of` and `index_of_from` search in windows that start at 128 bytes and double, so their steps grow with the distance from `from` to the occurrence rather than with the rest of the text, and a loop that calls `index_of_from` after each occurrence is linear in the text; `split`, `split_limit`, and `lines` find every separator in two kernel calls over the text (one counts, one writes the offsets) and then slice the pieces, so they are linear in the text plus the number of pieces.
 
-**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
+**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator, the `neura.encoding.utf8_check` and `utf8_validate` kernels, must agree with the validation NVM performs when constructing text; its Neura original is the oracle of the `strings` and `utf8` tests.
 
-**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 8.4 `Regex`
 
@@ -272,9 +273,9 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 | `find_all(input)` | A built-in list of `RegexMatch`: successive non-overlapping matches. After an empty match the search resumes one scalar value later. |
 | `replace_all(input, replacement) → string`, `replace_first(...)` | `$0` through `$99` and `${name}` insert groups; `$$` is a dollar sign. A reference to a group that does not exist traps; a group that did not participate inserts nothing. |
 | `split(input)` | A built-in list of strings, with the rules of `Strings.split`. |
-| `group_count() → int`, `pattern() → string` | |
+| `group_count: int`, `pattern: string` | Get-only fields ([accessors](Types#accessors)), set at compilation. |
 
-`RegexMatch` is an immutable class: `start()`, `end()`, `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
+`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
 
 ### 10.2 `BigInteger`
 
@@ -306,7 +307,7 @@ An immutable arbitrary-precision integer. Parsing uses T1 and conversion to `flo
 
 ### 10.3 `BigDecimal`
 
-An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`, representing unscaled × 10^(-scale). Parsing uses T1 and float conversion uses N1.
+An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`, representing unscaled × 10^(-scale), in the read-only fields `unscaled` and `scale`. Parsing uses T1 and float conversion uses N1.
 
 - `equals` and `compare_to` are numeric, so `2.0` equals `2.00`. `hash_code` is computed on the form with trailing zeros stripped.
 - `add` and `subtract` give the larger scale; `multiply` gives the sum of the scales; all are exact.
@@ -325,7 +326,7 @@ An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`
 | `print_line(s: string)` | Writes the text and one LF through `neura.console.write_line`. A failed write traps with `console write failed`. | F1 for the message |
 | `try_print_line(s: string) → Result<Unit>` | The same write, returning the failure. | |
 | `write(s)`, `error_line(s)`, and their `try_` forms | Write raw text through `neura.console.write`, to output or to the error stream. | T1 (text to bytes) |
-| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](https://github.com/Kayyo321/neura/wiki/StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
+| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
 | `print`, `println`, `eprint`, `eprintln`, and their `try_` forms | Format first and then write to output or to the error stream. The newline forms append one LF. | T1, P2 |
 | `read_line() → Result<Optional<string>>` | A line without its terminator; `None` at the end of input. | T1 |
 | `output() → ByteSink`, `error() → ByteSink`, `input() → ByteSource` | The console as streams. | |
@@ -344,9 +345,9 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 | Class | Behavior | Needs |
 | --- | --- | --- |
-| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, `size()`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
+| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, the read-only field `size`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
 | `BufferedReader` | Built from a `ByteSource`. Holds up to 8,192 bytes (configurable, at least 16). `read` is a `ByteSource`; `read_exact(count) → Result<uint8[list]>` fails with kind `UnexpectedEnd`; `read_all()`. | None |
-| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`. It does not close anything. | None |
+| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`; the read-only field `buffered` is the number of bytes waiting. It does not close anything. | None |
 | `Utf8Reader` | Built from a `ByteSource`. `read_scalar() → Result<Optional<uint32>>`, `read_line() → Result<Optional<string>>`, `read_to_end() → Result<string>`. Invalid UTF-8 fails with kind `InvalidData`. | T1 |
 | `Utf8Writer` | Built from a `ByteSink`. `write` is a `TextSink`; `write_line(s)` adds one LF. | T1 |
 
@@ -360,7 +361,7 @@ Needs P2 for every host operation and T1 for `Path`.
 
 - The separator is `/` on every host. The host service translates.
 - **Normalization at construction:** repeated separators collapse; `.` components are removed; a trailing separator is removed except for the root; an empty result is `.`. `..` components are kept, because removing them is not correct in the presence of links.
-- `is_absolute()` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
+- The read-only field `is_absolute` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
 - Module function `of(text)`. Members include `join(other: string) → Path`, `parent() → Path`, `file_name()`, `stem()`, `extension()`, `components()`, `resolve_lexically() → Path`, `starts_with(other: Path) → bool`, and `relative_to(base: Path) → Path`. An absolute argument to `join` replaces the path. `parent` returns `nil` when the path has no parent. `relative_to` returns `nil` when it cannot express the path relative to the base. `file_name`, `stem`, and `extension` return `Optional<string>`. The extension is the text after the last `.` of the file name when that dot is not the first character. `components` returns a built-in list of strings. Equality, hash, ordering, and text use the normalized path.
 
 **`File`** is a class wrapping a host file ID. The module functions `open(path, mode: OpenMode) → Result<File>` and `with_open<T>(path, mode, body)`, the scoped helper of [section 5.5](Stdlib-Design#55-resources). `OpenMode` is a fieldless enum: `Read` (must exist), `Write` (create or truncate), `Append`, `ReadWrite` (must exist), `CreateNew` (fails with `AlreadyExists`). Members: `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `seek(offset: int64, origin: SeekOrigin) → Result<int64>` (`SeekOrigin`: `Start`, `Current`, `End`), `size() → Result<int64>`, and `close() → Result<Unit>` ([section 5.5](Stdlib-Design#55-resources)). A `File` is unbuffered.
@@ -372,7 +373,7 @@ Needs P2 for every host operation and T1 for `Path`.
 | `read_bytes(path) → Result<uint8[list]>`, `read_text(path) → Result<string>` | `read_text` fails with `InvalidData` for invalid UTF-8. Both close the file on every path, including a failed read. |
 | `write_bytes(path, bytes)`, `write_text(path, text)`, `append_text(path, text)` `→ Result<Unit>` | Create the file if needed; the `write_` forms truncate. A failed write is reported after the file is closed. |
 | `exists(path) → Result<bool>` | `Ok(false)` for `NotFound`; other failures are errors. |
-| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class: `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, `modified: Instant`. |
+| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class with the read-only fields `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, and `modified: Instant`. |
 | `list(path)` | A `Result` of a built-in list of `Path`: the directory's entries joined to `path`, sorted by name bytes. |
 | `create_directory(path)`, `create_directories(path)` | The second creates missing parents and succeeds when the directory exists. |
 | `remove_file(path)`, `remove_directory(path)` | `remove_directory` requires an empty directory. |
@@ -393,10 +394,10 @@ This module replaces `SysIo.Entry` ([section 4.6](Stdlib-Design#46-retired-built
 
 ### 11.4 `Std.Net`
 
-TCP only. A call waits for its result; in a program with tasks the waiting task parks and the others run, and cancelling its scope ends the wait with kind `Cancelled` ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#104-host-io)). Needs P2 and T1.
+TCP only. A call waits for its result; in a program with tasks the waiting task parks and the others run, and cancelling its scope ends the wait with kind `Cancelled` ([Concurrency](Concurrency#104-host-io)). Needs P2 and T1.
 
-- `TcpStream`: the module functions `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>` and `with_connection<T>(host, port, body)`, the scoped helper of [section 5.5](Stdlib-Design#55-resources). Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `set_read_timeout(timeout: Duration)` (zero for none; an expired timeout fails with kind `TimedOut`), and `close()`. A write that is cancelled while it waits fails with kind `Cancelled` and the message `stream write cancelled after N bytes`, where N is the number of bytes already sent.
-- `TcpListener`: the module function `bind(host: string, port: int) → Result<TcpListener>`. Members `accept() → Result<TcpStream>`, `local_port() → int`, and `close()`. Port 0 asks the host for a free port.
+- `TcpStream`: the module functions `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>` and `with_connection<T>(host, port, body)`, the scoped helper of [section 5.5](Stdlib-Design#55-resources). Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), the field `read_timeout: Duration` (zero, the initial value, for none; an expired timeout fails with kind `TimedOut`; assigning a negative duration traps with `invalid argument: negative timeout`), and `close()`. A write that is cancelled while it waits fails with kind `Cancelled` and the message `stream write cancelled after N bytes`, where N is the number of bytes already sent.
+- `TcpListener`: the module function `bind(host: string, port: int) → Result<TcpListener>`. Members `accept() → Result<TcpStream>`, the read-only field `local_port: int`, and `close()`. Port 0 asks the host for a free port.
 - A port outside 0 through 65,535 traps.
 - Service arguments: `connect` takes the host text, the port, and the timeout in nanoseconds; `listen` takes the host text and port; `accept` takes a listener ID; `read` takes a socket ID, a maximum count, and a timeout in nanoseconds (0 for none); `write` takes a socket ID and bytes; `close` takes either kind of ID.
 
@@ -414,21 +415,23 @@ The value types are immutable classes with `compare_to`, `equals`, `hash_code`, 
 
 **`Instant`** is a point on the UTC time line: `int64` seconds since 1970-01-01T00:00:00Z and an `int` nanosecond adjustment from 0 through 999,999,999. Leap seconds are ignored, as in POSIX time.
 
-- Module functions `of_epoch_seconds(seconds, nanos)`, `of_epoch_millis`, the constant `Epoch`, and `parse`. Members `plus(Duration)`, `minus(Duration)`, `duration_since(other) → Duration`, `epoch_seconds()`, `nanos()`, `to_epoch_millis()`, `to_local(offset: ZoneOffset) → LocalDateTime`.
+- Module functions `of_epoch_seconds(seconds, nanos)`, `of_epoch_millis`, the constant `Epoch`, and `parse`. The read-only fields `epoch_seconds` and `nanos`, and the members `plus(Duration)`, `minus(Duration)`, `duration_since(other) → Duration`, `to_epoch_millis()`, `to_local(offset: ZoneOffset) → LocalDateTime`.
 - `to_string` is `YYYY-MM-DDTHH:MM:SS` with a fraction of 3, 6, or 9 digits when the nanoseconds are not zero (the shortest of those that is exact), then `Z`. `parse` accepts that form and a numeric offset in place of `Z`.
 
 **`Clock`** is an interface with `now() → Result<Instant>`, `monotonic() → Result<Duration>` (elapsed time from an arbitrary fixed origin, never decreasing), and `sleep(duration) → Result<Unit>`.
 
 - `SystemClock` uses the clock host services (P2) and fails with `CapabilityDenied` when they are not allowed.
 - `FixedClock` holds an instant set at construction; `set(instant)` and `advance(duration)` change it; `sleep` advances it and returns at once; it never fails. Library code that needs time takes a `Clock`, so tests pass a `FixedClock`.
-- `Stopwatch` takes a `Clock` and offers `start`, `stop`, `reset`, and `elapsed() → Result<Duration>`.
+- `Stopwatch` takes a `Clock` and offers `start`, `stop`, `reset`, `elapsed() → Result<Duration>`, and the read-only field `is_running`.
 
 **Calendar types** use the proleptic Gregorian calendar.
 
-- `LocalDate` stores `year` (-999,999 through 999,999), `month` (1 through 12), and `day`. The module function `of(year, month, day)` traps for an invalid date. `try_of(year, month, day) → LocalDate` returns `nil` for invalid components. Conversion to and from a day count since 1970-01-01 (`to_epoch_day`, `of_epoch_day`) uses the 400-year cycle of 146,097 days. Shift the year so that it starts in March, split it into the cycle and the year within the cycle, and compute the day of the cycle using floor division so that negative years work. Members include `plus_days`, `plus_months`, `plus_years`, `days_until(other) → int64`, `day_of_week() → DayOfWeek`, `day_of_year()`, `is_leap_year()`, and `length_of_month()`. Month and year changes clamp the day to the end of the target month. `DayOfWeek` runs from `Monday` through `Sunday`, with epoch day 0 on Thursday. Text uses `YYYY-MM-DD`. Years outside 0000 through 9999 have a sign and at least four digits.
-- `LocalTime`: `hour`, `minute`, `second`, `nano`, stored as nanoseconds of the day. `plus(Duration)` wraps around midnight. Text form `HH:MM:SS` with the same fraction rule as `Instant`.
-- `LocalDateTime`: a `LocalDate` and a `LocalTime`. `plus(Duration)` carries into the date. `at_offset(offset) → Instant`. Text form: the date, `T`, the time.
-- `ZoneOffset`: total seconds from -64,800 through 64,800. The constant `Utc`, `of_hours_minutes`, text form `Z` or `±HH:MM`.
+- `LocalDate` stores `year` (-999,999 through 999,999), `month` (1 through 12), and `day`, read-only fields. The module function `of(year, month, day)` traps for an invalid date. `try_of(year, month, day) → LocalDate` returns `nil` for invalid components. Conversion to and from a day count since 1970-01-01 (`to_epoch_day`, `of_epoch_day`) uses the 400-year cycle of 146,097 days. Shift the year so that it starts in March, split it into the cycle and the year within the cycle, and compute the day of the cycle using floor division so that negative years work. Members include `plus_days`, `plus_months`, `plus_years`, `days_until(other) → int64`, `day_of_week() → DayOfWeek`, `day_of_year()`, `is_leap_year()`, and `length_of_month()`. Month and year changes clamp the day to the end of the target month. `DayOfWeek` runs from `Monday` through `Sunday`, with epoch day 0 on Thursday. Text uses `YYYY-MM-DD`. Years outside 0000 through 9999 have a sign and at least four digits.
+- `LocalTime`: `hour()`, `minute()`, `second()`, `nano()`, computed from the nanoseconds of the day that it stores (`to_nano_of_day()`). `plus(Duration)` wraps around midnight. Text form `HH:MM:SS` with the same fraction rule as `Instant`.
+- `LocalDateTime`: a `LocalDate` and a `LocalTime`, the read-only fields `date` and `time`. `plus(Duration)` carries into the date. `at_offset(offset) → Instant`. Text form: the date, `T`, the time.
+- `ZoneOffset`: total seconds from -64,800 through 64,800, the read-only field `total_seconds`. The constant `Utc`, `of_hours_minutes`, text form `Z` or `±HH:MM`.
+
+A read-only field is an exported `last` field (an `is_running` with a get-only [accessor](Types#accessors)): code outside the class reads it as `date.year` and cannot assign it. The value classes are `#Final`, and `#NoDiscard`, so a call whose result is dropped, such as `instant.plus(span);`, warns ([Tags](Tags)).
 
 There is no time zone database, no named zones, and no daylight-saving rules. Conversions between instants and local times take an explicit `ZoneOffset`. The ISO forms above are the only text forms.
 
@@ -461,9 +464,9 @@ The same seed gives the same sequence of results from every member, on every run
 
 Everything here needs T1 except the `Json` value type itself.
 
-- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone.
-- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error).
-- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero.
+- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone. The kernel `neura.encoding.utf8_validate` computes it (P2a).
+- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error). The kernels `neura.encoding.hex_encode` and `hex_decode` compute it (P2a).
+- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero. The kernels `neura.encoding.base64_encode` and `base64_decode` compute every form (P2a).
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
 
 **`Json`** (RFC 8259).
@@ -504,8 +507,8 @@ The module `Json`:
 
 - **Receivers.** A method cannot name its own receiver, so a member that returns "the same object" needs a stored self reference. `StringBuilder` keeps one, set by its factory `create()`. Classes whose invariants need a factory (`StringBuilder`, `Random`, `File`, `TcpStream`, `TcpListener`) take a module-private token or an internal handle in their constructors.
 - **Constructor visibility.** An unexported `init` is private to its class, not to its module, so a module function cannot call it. `Regex` exports its constructor for that reason; an object built directly with it traps on use.
-- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure).
-- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#initialization)).
+- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](ProjectStructure).
+- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](Modules#initialization)).
 - **Extra members.** `Error` and `Result` have `equals`, `hash`, and `to_string`, and `SimpleDetail` compares its code and message, so errors compare structurally. `Comparable<T>` is `Std.Core.Comparable`. The collection interfaces declare `add(T) → bool` for every mutable collection (lists return true), and a sorted map's `first`, `last`, `range`, and `descending` give entries while `floor`, `ceiling`, `lower`, and `higher` give keys, with `_entry` forms for entries.
 
 ### 18.5 Time, randomness, and logging

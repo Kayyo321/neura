@@ -1,0 +1,14 @@
+// A spawned call that reaches a reassignable module binding through two
+// calls (E0601): each call on the way and the write are labelled.
+let counter: int = 0;
+let bump = func() {
+    counter = counter + 1;
+};
+let audit = func(entry: int) {
+    bump();
+};
+let run = func() {
+    scope {
+        spawn audit(3);
+    }
+};

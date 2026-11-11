@@ -17,40 +17,40 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Path** · [`export let Path = class implements Comparable<Path>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L13)
-  An immutable normalized path with lexical operations independent of the filesystem.
-- **Path.Path** · [`export let init = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L18)
+- **Path** · [`export let Path = class implements Comparable<Path>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L15)
+  An immutable normalized path with lexical operations independent of the filesystem. Tagged `#Final`, `#Immutable`, `#ThreadSafe`.
+- **Path.Path** · [`export last is_absolute: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L21)
+  Whether the path starts at the root: its text starts with `/`. Read-only. Since 0.2.0.
+- **Path.Path** · [`export let init = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L24)
   Normalizes `raw`; Path.of is the usual spelling.
-- **Path.Path** · [`export let is_absolute = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L23)
-  Reports whether the path starts at the root.
-- **Path.Path** · [`export let join = func(other: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L26)
-  This path followed by `other`; an absolute `other` replaces it.
-- **Path.Path** · [`export let parent = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L31)
-  The path without its last component, or nil for the root, `.`, and a single relative component.
-- **Path.Path** · [`export let file_name = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L44)
-  The last component; None for the root, `.`, and a path ending in `..`.
-- **Path.Path** · [`export let stem = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L53)
-  The file name without its extension.
-- **Path.Path** · [`export let extension = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L62)
-  The text after the last `.` of the file name, when that dot is not the name's first character.
-- **Path.Path** · [`export let components = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L78)
-  The components in order, starting with "/" for an absolute path. The path `.` has none.
-- **Path.Path** · [`export let resolve_lexically = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L92)
-  Removes each `..` together with the component before it, without consulting the file system. `..` directly below the root is removed; leading `..` of a relative path are kept.
-- **Path.Path** · [`export let starts_with = func(other: Path) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L110)
-  True when both paths are absolute or both relative and every component of `other` begins this path.
-- **Path.Path** · [`export let relative_to = func(base: Path) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L131)
-  A relative path that joined to `base` names this path, or nil when one is absolute and the other relative or when `base` has a `..` component after the common part.
-- **Path.Path** · [`export let compare_to = func(other: Path) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L159)
-  Orders paths lexicographically by their normalized UTF-8 bytes.
-- **Path.Path** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L162)
-  Tests equality of the normalized path text.
-- **Path.Path** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L170)
-  Hashes the normalized path text.
-- **Path.Path** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L173)
-  Returns the normalized path text.
-- **Path** · [`export let of = func(text: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L177)
-  Constructs a path and normalizes its separators and dot components.
+- **Path.Path** · [`export let join = func(other: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L31)
+  This path followed by `other`; an absolute `other` replaces it. Tagged `#Pure`.
+- **Path.Path** · [`export let parent = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L37)
+  The path without its last component, or nil for the root, `.`, and a single relative component. Tagged `#Pure`.
+- **Path.Path** · [`export let file_name = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L51)
+  The last component; None for the root, `.`, and a path ending in `..`. Tagged `#Pure`.
+- **Path.Path** · [`export let stem = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L61)
+  The file name without its extension. Tagged `#Pure`.
+- **Path.Path** · [`export let extension = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L71)
+  The text after the last `.` of the file name, when that dot is not the name's first character. Tagged `#Pure`.
+- **Path.Path** · [`export let components = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L88)
+  The components in order, starting with "/" for an absolute path. The path `.` has none. Tagged `#Pure`.
+- **Path.Path** · [`export let resolve_lexically = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L103)
+  Removes each `..` together with the component before it, without consulting the file system. `..` directly below the root is removed; leading `..` of a relative path are kept. Tagged `#Pure`.
+- **Path.Path** · [`export let starts_with = func(other: Path) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L122)
+  True when both paths are absolute or both relative and every component of `other` begins this path. Tagged `#Pure`.
+- **Path.Path** · [`export let relative_to = func(base: Path) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L144)
+  A relative path that joined to `base` names this path, or nil when one is absolute and the other relative or when `base` has a `..` component after the common part. Tagged `#Pure`.
+- **Path.Path** · [`export let compare_to = func(other: Path) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L173)
+  Orders paths lexicographically by their normalized UTF-8 bytes. Tagged `#Pure`.
+- **Path.Path** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L177)
+  Tests equality of the normalized path text. Tagged `#Pure`.
+- **Path.Path** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L186)
+  Hashes the normalized path text. Tagged `#Pure`.
+- **Path.Path** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L190)
+  Returns the normalized path text. Tagged `#Pure`.
+- **Path** · [`export let of = func(text: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L195)
+  Constructs a path and normalizes its separators and dot components. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -83,7 +83,7 @@ Needs P2 for every host operation and T1 for `Path`.
 
 - The separator is `/` on every host. The host service translates.
 - **Normalization at construction:** repeated separators collapse; `.` components are removed; a trailing separator is removed except for the root; an empty result is `.`. `..` components are kept, because removing them is not correct in the presence of links.
-- `is_absolute()` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
+- The read-only field `is_absolute` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
 - Module function `of(text)`. Members include `join(other: string) → Path`, `parent() → Path`, `file_name()`, `stem()`, `extension()`, `components()`, `resolve_lexically() → Path`, `starts_with(other: Path) → bool`, and `relative_to(base: Path) → Path`. An absolute argument to `join` replaces the path. `parent` returns `nil` when the path has no parent. `relative_to` returns `nil` when it cannot express the path relative to the base. `file_name`, `stem`, and `extension` return `Optional<string>`. The extension is the text after the last `.` of the file name when that dot is not the first character. `components` returns a built-in list of strings. Equality, hash, ordering, and text use the normalized path.
 
 **`File`** is a class wrapping a host file ID. The module functions `open(path, mode: OpenMode) → Result<File>` and `with_open<T>(path, mode, body)`, the scoped helper of [section 5.5](Stdlib-Design#55-resources). `OpenMode` is a fieldless enum: `Read` (must exist), `Write` (create or truncate), `Append`, `ReadWrite` (must exist), `CreateNew` (fails with `AlreadyExists`). Members: `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `seek(offset: int64, origin: SeekOrigin) → Result<int64>` (`SeekOrigin`: `Start`, `Current`, `End`), `size() → Result<int64>`, and `close() → Result<Unit>` ([section 5.5](Stdlib-Design#55-resources)). A `File` is unbuffered.
@@ -95,7 +95,7 @@ Needs P2 for every host operation and T1 for `Path`.
 | `read_bytes(path) → Result<uint8[list]>`, `read_text(path) → Result<string>` | `read_text` fails with `InvalidData` for invalid UTF-8. Both close the file on every path, including a failed read. |
 | `write_bytes(path, bytes)`, `write_text(path, text)`, `append_text(path, text)` `→ Result<Unit>` | Create the file if needed; the `write_` forms truncate. A failed write is reported after the file is closed. |
 | `exists(path) → Result<bool>` | `Ok(false)` for `NotFound`; other failures are errors. |
-| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class: `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, `modified: Instant`. |
+| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class with the read-only fields `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, and `modified: Instant`. |
 | `list(path)` | A `Result` of a built-in list of `Path`: the directory's entries joined to `path`, sorted by name bytes. |
 | `create_directory(path)`, `create_directories(path)` | The second creates missing parents and succeeds when the directory exists. |
 | `remove_file(path)`, `remove_directory(path)` | `remove_directory` requires an empty directory. |

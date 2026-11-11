@@ -1,0 +1,5 @@
+// Characters that are not tokens (E0101): the lexer reports each one and
+// goes on, and a typographic quote gets the ASCII quote as a suggestion.
+let total = 1 $ 2;
+let label = “ready”;
+let mark = 3 @ 4;
