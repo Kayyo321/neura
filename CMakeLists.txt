@@ -94,11 +94,12 @@ set(neura_nvm_sources
     src/nvm/providers.cpp
     src/nvm/scalar_text.cpp
     src/nvm/schedule.cpp
+    src/nvm/tier1.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
 )
 add_library(neura_nvm STATIC ${neura_nvm_sources})
-target_link_libraries(neura_nvm PUBLIC neura_nvr)
+target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift)
 # Std.DynamicForeign calls native functions through libffi and loads
 # libraries with the platform loader.
 #
@@ -159,7 +160,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         if(NEURA_STATIC_LIBC)
             set(NEURA_HAS_STATIC_LAUNCHER ON)
             add_library(neura_nvm_static STATIC ${neura_nvm_sources})
-            target_link_libraries(neura_nvm_static PUBLIC neura_nvr)
+            target_link_libraries(neura_nvm_static PUBLIC neura_nvr neura_lift)
             # A static program cannot use the C library's resolver portably,
             # so this launcher takes numeric addresses and "localhost" only.
             target_compile_definitions(neura_nvm_static PRIVATE NEURA_NO_NATIVE_INTEROP NEURA_NUMERIC_ADDRESSES_ONLY)
@@ -259,7 +260,6 @@ neura_target_defaults(neura_circuit)
 # hardware arithmetic is bit-exact, which rules out contracted multiply-adds.
 add_library(neura_lift STATIC
     src/lift/expression.cpp
-    src/lift/hints.cpp
     src/lift/hints.cpp
     src/lift/lift.cpp
     src/lift/lowered_block.cpp
@@ -559,6 +559,7 @@ if(BUILD_TESTING)
         tests/backend/nir_tests.cpp
         tests/backend/placement_tests.cpp
         tests/backend/reference_tests.cpp
+        tests/backend/tier_tests.cpp
         tests/backend/vm_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
         tests/ir-optimization/evaluator.cpp
@@ -603,7 +604,7 @@ if(BUILD_TESTING)
         set_tests_properties(gpu-device gpu-cli PROPERTIES SKIP_RETURN_CODE 77 LABELS gpu TIMEOUT 1800)
     endif()
 
-    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement concurrency)
+    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement concurrency tier)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()

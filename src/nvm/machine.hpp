@@ -17,6 +17,7 @@ namespace neura::nvm {
 
 class GraphDevice;
 class Fleet;
+class TierCache;
 
 struct TaskDumpRequest;
 class ScheduleChooser;
@@ -40,6 +41,16 @@ struct RunLimits {
     // Evaluates graphs for this run, or nullptr for the reference evaluator.
     // The device must have been created for the image the run executes.
     GraphDevice* graph_device = nullptr;
+    // The highest execution tier (docs/runtime/NVM.md, "Execution tiers"):
+    // 0 evaluates every graph by reference; 1 also runs proven lifted blocks
+    // natively. The tier never changes what a run does, only its speed.
+    // NEURA_TIER=0 in the environment lowers it for every run. Without a
+    // graph device only: a device evaluates the graphs it accepts.
+    std::uint8_t tier = 1;
+    // Lifted blocks shared by the runs of one image (src/nvm/tier1.hpp), or
+    // null for a cache of the run's own, which its parallel items share. It
+    // must be for the image the run executes and outlive the run.
+    TierCache* tier_cache = nullptr;
     std::uint64_t max_tasks = 65'536;
     std::uint64_t task_quantum = 1'024;
     // Values buffered in all channels, and overlapping host requests issued
