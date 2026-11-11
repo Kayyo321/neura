@@ -1,0 +1,187 @@
+name: Tier 2
+
+# Builds and tests the platforms and configurations Tier 1 does not, on a
+# maintainer's request. Only an account with write access can start this
+# workflow. It holds no secrets and its token can only read the repository.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  linux-arm64:
+    name: Build and test (Linux arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      CC: gcc-14
+      CXX: g++-14
+      NEURA_LIBCLANG_REQUIRED: "1"
+      NEURA_USERNS_REQUIRED: "1"
+    steps:
+      - name: Check out the repository and its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install the build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
+
+      - name: Describe the machine
+        run: |
+          uname -a
+          "$CXX" --version
+          cmake --version
+          ldd --version | head -1
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
+
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Test
+        run: >
+          ctest --test-dir build --parallel "$(nproc)" --no-tests=error
+          --output-on-failure --output-junit ctest-junit.xml
+
+      - name: Upload the build log and the test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tier2-linux-arm64
+          path: |
+            build/build.log
+            build/ctest-junit.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  macos:
+    name: Build and test (macOS ${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            runner: macos-15
+          - architecture: x86-64
+            runner: macos-15-intel
+    env:
+      NEURA_LIBCLANG_REQUIRED: "1"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - name: Check out the repository and its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install the build dependencies
+        run: |
+          brew install libffi pkgconf
+          echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Describe the machine
+        run: |
+          uname -a
+          sw_vers
+          c++ --version
+          cmake --version
+          xcode-select --print-path
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee build/build.log
+
+      - name: Test
+        run: >
+          ctest --test-dir build --parallel "$(sysctl -n hw.ncpu)" --no-tests=error
+          --output-on-failure --output-junit ctest-junit.xml
+
+      - name: Upload the build log and the test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tier2-macos-${{ matrix.architecture }}
+          path: |
+            build/build.log
+            build/ctest-junit.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  sanitizers:
+    name: Address and undefined-behavior sanitizers (Linux x86-64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CC: gcc-14
+      CXX: g++-14
+      NEURA_LIBCLANG_REQUIRED: "1"
+      ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:abort_on_error=0
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - name: Check out the repository and its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install the build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
+
+      # A static executable cannot carry the sanitizer runtime, so the static
+      # launcher is left out of this configuration.
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DNEURA_STATIC_LAUNCHER=OFF
+          "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+          "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
+
+      - name: Test
+        run: >
+          ctest --test-dir build --parallel "$(nproc)" --no-tests=error
+          --output-on-failure --output-junit ctest-junit.xml --timeout 3600
+
+      - name: Upload the build log and the test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tier2-sanitizers
+          path: |
+            build/build.log
+            build/ctest-junit.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 30
