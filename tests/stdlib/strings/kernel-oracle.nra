@@ -9,7 +9,9 @@ let strings = import:Std.Text.Strings;
 let test = import:Std.Test;
 
 // The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). Std.Text.Strings
-// runs the neura.text, neura.hash.string, and neura.encoding.utf8_* kernels,
+// runs the neura.text (with split, split_limit, and lines on neura.text.split,
+// and index_of in doubling windows of neura.text.index_of),
+// neura.hash.string, and neura.encoding.utf8_* kernels,
 // and Std.Core.String runs neura.text.compare, ascii_lower, and the blank
 // trim kernels; ReferenceStrings and ReferenceString (support/) are the Neura
 // code they replaced, unchanged. The two must agree on a fixed edge corpus
@@ -32,7 +34,8 @@ let StringsKernelOracle = module (
         let blank = strings.from_scalars([0, 1, 31, 32, 9]);
         return ["", " ", "a", "A", "é", "😀", "abc", "ABC", "aBc", "a b c", space, blank, space + "x" + space,
             blank + "x" + blank, space + blank, blank + space, "  é😀  ", "abcabcabc", "aaaa", "éééé", "€€",
-            "😀a😀", "Hello, World!", "x" + strings.from_scalars([133]) + "y", strings.from_scalars([160, 65, 160])];
+            "😀a😀", "Hello, World!", "x" + strings.from_scalars([133]) + "y", strings.from_scalars([160, 65, 160]),
+            ",", ",,", "a,b,,c,", "\n", "\r\n", "a\r\nb\n", "a\n\n", "a\r\r\nb\r", "\n\r\n\n"];
     };
 
     // A text of up to `count` random pieces.
@@ -72,6 +75,7 @@ let StringsKernelOracle = module (
         test.assert_equal_int32(reference.scalar_count(s), strings.scalar_count(s));
         test.assert_equal_uint64(reference.hash(s) as uint64, strings.hash(s) as uint64);
         test.assert_equal_string(reference.trim(s), strings.trim(s));
+        test.assert_equal_string(show_list(reference.lines(s)), show_list(strings.lines(s)));
         test.assert_equal_string(reference.trim_start(s), strings.trim_start(s));
         test.assert_equal_string(reference.trim_end(s), strings.trim_end(s));
         test.assert_equal_string(reference.to_ascii_upper(s), strings.to_ascii_upper(s));
@@ -85,6 +89,29 @@ let StringsKernelOracle = module (
                 let broken = corrupt(s, at, value as uint8);
                 test.assert_equal_string(show_result(reference.from_bytes(broken)),
                     show_result(strings.from_bytes(broken)));
+            }
+        }
+    };
+
+    let show_list = func(values: string[list]) -> string {
+        let out = values.length.to_string() + ":";
+        for (let value in values) {
+            out = out + "[" + value + "]";
+        }
+        return out;
+    };
+
+    // split and split_limit with t as the separator, at limits around the number of pieces.
+    let agree_split = func(s: string, t: string) {
+        if (t.byte_length == 0) {
+            return;
+        }
+        let all = reference.split(s, t);
+        test.assert_equal_string(show_list(all), show_list(strings.split(s, t)));
+        for (let limit in [1, 2, 3, all.length - 1, all.length, all.length + 1, 2147483647]) {
+            if (limit >= 1) {
+                test.assert_equal_string(show_list(reference.split_limit(s, t, limit)),
+                    show_list(strings.split_limit(s, t, limit)));
             }
         }
     };
@@ -110,6 +137,7 @@ let StringsKernelOracle = module (
                 test.assert_equal_int32(reference.index_of_from(s, t, from), strings.index_of_from(s, t, from));
             }
         }
+        agree_split(s, t);
         if (t.byte_length > 0) {
             for (let replacement in ["", "-", "é😀", t + t]) {
                 test.assert_equal_string(reference.replace(s, t, replacement), strings.replace(s, t, replacement));
@@ -130,6 +158,35 @@ let StringsKernelOracle = module (
             for (let piece in pieces()) {
                 agree_pair(s, piece);
             }
+        }
+    };
+
+    // Texts longer than the first index_of window of 128 bytes, so searches
+    // cross window ends, some of them inside a multi-byte character. Each
+    // needle is searched for from several offsets and as a separator.
+    export let test_long_texts = func {
+        let source = random.seeded(20261112);
+        for (let round = 0; round < 12; round++) {
+            let s = text(source, 400);
+            for (let needle in ["€", "😀a", "zz", "", text(source, 2)]) {
+                agree_split(s, needle);
+                test.assert_equal_int32(reference.index_of(s, needle), strings.index_of(s, needle));
+                test.assert_equal_int32(reference.last_index_of(s, needle), strings.last_index_of(s, needle));
+                let from = 0;
+                while (from <= s.byte_length) {
+                    if (strings.is_boundary(s, from)) {
+                        test.assert_equal_int32(reference.index_of_from(s, needle, from),
+                            strings.index_of_from(s, needle, from));
+                    }
+                    from += 61;
+                }
+            }
+            // A needle that occurs only once, far from the start.
+            let tail = "#tail#";
+            let long = s + s + s + tail;
+            test.assert_equal_int32(reference.index_of(long, tail), strings.index_of(long, tail));
+            test.assert_equal_int32(long.byte_length - tail.byte_length, strings.index_of_from(long, tail, 0));
+            test.assert_equal_string(show_list(reference.lines(long)), show_list(strings.lines(long)));
         }
     };
 

@@ -1,4 +1,5 @@
-// The Neura implementation of Std.Text.Strings (its searches, comparisons, trims, replacements, ASCII case mappings, scalar count, and UTF-8 check) before it became a kernel binding, kept
+// The Neura implementation of Std.Text.Strings (its searches, comparisons, trims, splits, lines,
+// replacements, ASCII case mappings, scalar count, and UTF-8 check) before it became a kernel binding, kept
 // unchanged (but for the module's name) as the oracle of kernel-oracle.nra. It lives with the tests,
 // not in the standard library: only library source may import an Internal module, and code
 // here never reaches a user's image.
