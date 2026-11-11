@@ -98,6 +98,12 @@ set(neura_nvm_sources
     src/nvm/tier2.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
+    # The native code generator of tier 2 (docs/runtime/NVM.md, "Native
+    # compilation"): part of the runtime, with no dependency of its own.
+    src/jit/aarch64.cpp
+    src/jit/compiler.cpp
+    src/jit/jit.cpp
+    src/jit/x86_64.cpp
 )
 add_library(neura_nvm STATIC ${neura_nvm_sources})
 target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift)
@@ -581,6 +587,7 @@ if(BUILD_TESTING)
         tests/backend/tier_tests.cpp
         tests/backend/tier2_tests.cpp
         tests/backend/vm_tests.cpp
+        tests/jit/jit_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
@@ -624,10 +631,15 @@ if(BUILD_TESTING)
         set_tests_properties(gpu-device gpu-cli PROPERTIES SKIP_RETURN_CODE 77 LABELS gpu TIMEOUT 1800)
     endif()
 
-    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement concurrency tier)
+    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement concurrency tier jit)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+    # backend-tier compares tier 2 with tier 0 with the default native code
+    # (docs/runtime/NVM.md, "Native compilation"); this runs it again with
+    # every region on the region interpreter.
+    add_test(NAME backend-tier-interpreter COMMAND neura_backend_tests tier "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(backend-tier-interpreter PROPERTIES ENVIRONMENT NEURA_JIT=off)
 
     add_test(NAME backend-each COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"

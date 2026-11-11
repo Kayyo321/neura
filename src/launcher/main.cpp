@@ -124,6 +124,11 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy, neu
         } else if (flag == "--tier=0" || flag == "--tier=1" || flag == "--tier=2") {
             // The tier changes only speed, and the variable can only lower it.
             options.limits.tier = std::min<std::uint8_t>(options.limits.tier, static_cast<std::uint8_t>(flag.back() - '0'));
+        } else if (flag.starts_with("--jit=")) {
+            // Native code for tier 2 changes only speed, like the tier.
+            if (!neura::jit::parse_mode(std::string(flag.substr(6)), options.limits.jit)) {
+                throw std::runtime_error("NEURA_RUN_OPTIONS: --jit expects off, on, or auto");
+            }
         } else if (flag == "--tier-stats") {
             options.tier_stats = true;
         } else if (flag == "--stats") {

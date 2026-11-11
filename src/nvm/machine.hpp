@@ -1,6 +1,7 @@
 #pragma once
 
 #include "host.hpp"
+#include "jit/jit.hpp"
 #include "nvr/image.hpp"
 
 #include <atomic>
@@ -53,6 +54,13 @@ struct RunLimits {
     // null for a cache of the run's own, which its parallel items share. It
     // must be for the image the run executes and outlive the run.
     TierCache* tier_cache = nullptr;
+    // Whether tier 2 runs its regions as native code (docs/runtime/NVM.md,
+    // "Native compilation"): Off runs them on the region interpreter, On
+    // compiles them and fails the run at its start when this platform
+    // cannot, Auto compiles them where that is enabled by default. Like the
+    // tier, it never changes what a run does. Only at tier 2; NEURA_JIT in
+    // the environment combines with it (jit::combine).
+    jit::Mode jit = jit::Mode::Auto;
     std::uint64_t max_tasks = 65'536;
     std::uint64_t task_quantum = 1'024;
     // Values buffered in all channels, and overlapping host requests issued

@@ -87,11 +87,12 @@ void usage(std::ostream& out) {
            "                  <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
            "       neura inspect <file> [-o <file.nvr>]\n"
            "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [--tier=0|1|2] "
-           "[--tier-stats] [capabilities] "
+           "[--jit=off|on|auto] [--tier-stats] [capabilities] "
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
-           "                  [--max-heap-cells N] [--stats] [--tier=0|1|2] [--tier-stats] [capabilities]\n"
+           "                  [--max-heap-cells N] [--stats] [--tier=0|1|2] [--jit=off|on|auto]\n"
+           "                  [--tier-stats] [capabilities]\n"
            "                  [--gpu=auto|always|off] [--no-gpu]\n"
            "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
            "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
@@ -129,6 +130,9 @@ void usage(std::ostream& out) {
            "  --tier=0|1|2             the highest execution tier: 0 evaluates every graph by reference, 1 also\n"
            "                           runs proven lifted blocks natively, 2 (the default) also runs regions of\n"
            "                           them without returning to the dispatcher; the result is the same\n"
+           "  --jit=off|on|auto        tier 2 runs its regions as native code: on fails the run when this platform\n"
+           "                           cannot, auto (the default) uses it where it is enabled by default, off\n"
+           "                           interprets them; the result is the same (--deny-native does not apply)\n"
            "  --tier-stats             print the blocks lifted, the regions formed, and the steps each tier ran\n"
            "  --replay <file>          (run) answer host requests from a trace instead of services; a trace of a\n"
            "                           concurrent run carries its own quantum and limits, which replace the options\n"
@@ -622,6 +626,11 @@ Options read_options(int argc, char** argv) {
             options.limits.tier = static_cast<std::uint8_t>(arg.back() - '0');
         } else if (arg.starts_with("--tier=")) {
             throw std::runtime_error("--tier expects 0, 1, or 2");
+        } else if (arg.starts_with("--jit=")) {
+            if (!runs) throw std::runtime_error("--jit applies only to run and test");
+            if (!neura::jit::parse_mode(std::string(arg.substr(6)), options.limits.jit)) {
+                throw std::runtime_error("--jit expects off, on, or auto");
+            }
         } else if (arg == "--tier-stats") {
             if (!runs) throw std::runtime_error("--tier-stats applies only to run and test");
             options.tier_stats = true;

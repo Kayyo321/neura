@@ -36,6 +36,12 @@ Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does 
 
 Each job uploads its build log and CTest report. A Tier 2 job does not run `check-test-report.py`, so a skipped test does not fail it: read the report before treating a green job as full coverage of that platform. A green Tier 2 run is not required to merge a pull request.
 
+## Native code: the JIT on other platforms
+
+[`jit.yml`](../.github/workflows/jit.yml) runs tier 2's native code generator ([native compilation](runtime/NVM.md#native-compilation)) where `--jit=auto` does not enable it yet: Ubuntu 24.04 on arm64 (GCC 14) and macOS 15 on arm64 and x86-64 (Apple Clang). It runs for a pull request that changes `src/jit/` or `src/nvm/`, and when a maintainer starts it with `gh workflow run jit.yml --ref <branch>`. It has a read-only token and no secrets, and it is not required to merge a pull request.
+
+Each job builds `neura` and the backend tests, runs the `jit` and `tier` suites with `NEURA_JIT=on`, runs `scripts/tier-boundary.py --jit off,on`, and captures the extended runtime identity cases at `--tier=0` and with `--jit on` (once more with `NEURA_TIER_EAGER=1`) and compares them byte for byte. When a platform's job passes, `auto` can be extended to it.
+
 ## Pages: website deployment
 
 [`pages.yml`](../.github/workflows/pages.yml) runs on every push to `main`, and when a maintainer starts it by hand. It builds the [website](Site.md) from `site/` and the documents it lists, and deploys it with GitHub Pages. It does not run for pull requests; Tier 1 checks the site there.

@@ -1,6 +1,7 @@
 #include "tier2.hpp"
 
 #include "tier1.hpp"
+#include "jit/jit.hpp"
 #include "lift/evaluate.hpp"
 
 #include <algorithm>
@@ -1362,9 +1363,34 @@ void TierCache::add_region_events(const RegionCounts& counts,
     total.references += counts.references;
     total.state_traps += counts.state_traps;
     total.exits += counts.exits;
+    total.native += counts.native;
     for (const auto& [key, value] : steps) statistics_.region_steps[key] += value;
     for (const auto& [key, value] : deopts) statistics_.region_deopts[key] += value;
     for (const auto& [key, value] : leaves) statistics_.region_leaves[key] += value;
+}
+
+const jit::Program* TierCache::native(const tier2::Region& region) {
+    const std::lock_guard lock(mutex_);
+    const auto [it, inserted] = native_.try_emplace(&region);
+    if (!inserted) return it->second.get();
+    // Compiled once, synchronously, by the first run that enters the region
+    // with native code enabled; every other run waits for the lock and
+    // shares the result.
+    auto compiled = jit::compile(region);
+    if (compiled.program) {
+        ++statistics_.jit_compiled;
+        statistics_.jit_bytes += compiled.program->size();
+        it->second = std::move(compiled.program);
+    } else {
+        ++statistics_.jit_failures[compiled.failure];
+    }
+    return it->second.get();
+}
+
+void TierCache::note_jit(jit::Mode mode, const jit::Availability& availability) {
+    const std::lock_guard lock(mutex_);
+    statistics_.jit_mode = jit::mode_name(mode);
+    if (!availability.enabled) statistics_.jit_off = availability.reason;
 }
 
 } // namespace neura::nvm

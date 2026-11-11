@@ -70,9 +70,9 @@ def parse_args():
     parser.add_argument("--run-option", action="append", default=[], metavar="OPTION",
                         help="pass OPTION to neura run, for example --run-option=--tier=0 (repeatable)")
     parser.add_argument("--compare-tiers", action="store_true",
-                        help="run each program at --tier=0, --tier=1, and --tier=2 instead of comparing with Java, "
-                             "and report the share of steps tiers 1 and 2 ran (docs/runtime/NVM.md, "
-                             "\"Execution tiers\")")
+                        help="run each program at --tier=0, --tier=1, and --tier=2 (regions interpreted, and "
+                             "compiled with --jit=on where this machine can) instead of comparing with Java, and "
+                             "report the share of steps tiers 1 and 2 ran (docs/runtime/NVM.md, \"Execution tiers\")")
     parser.add_argument("--out-dir", default=str(ROOT / "build" / "bench-wall"),
                         help="where images, classes, and results go (default build/bench-wall)")
     args = parser.parse_args()
@@ -166,6 +166,7 @@ def main():
             fail(f"javac failed\n{compiled.stdout}{compiled.stderr}")
 
     results = []
+    native = None
     for name, source, size in selected:
         image = images / f"{name}.nvr"
         built = subprocess.run([str(neura), "build", str(source), "-o", str(image)], capture_output=True, text=True)
@@ -174,7 +175,10 @@ def main():
         command = [str(neura), "run", "--stats", "--max-steps", str(args.max_steps), *args.run_option, str(image),
                    "--", str(size)]
         if args.compare_tiers:
-            results.append(compare_tiers(command, out, args.runs, name, size))
+            if native is None:
+                native = native_available(neura, out, image)
+                print(f"native code: {'compared (--jit=on)' if native else 'not available here'}", flush=True)
+            results.append(compare_tiers(command, out, args.runs, name, size, native))
             continue
         seconds, times, output, stats = median_run(command, out, args.runs, f"{name} (neura)")
         entry = {
@@ -219,57 +223,99 @@ def main():
 
 
 TIER_STEPS = re.compile(r"tier: steps (\d+): tier 2 ([0-9.]+)% .*?, tier 1 ([0-9.]+)%")
+JIT_LINE = re.compile(r"tier: jit on: (\d+) regions compiled \((\d+) bytes of code\)")
 
 
-def compare_tiers(command, cwd, runs, name, size):
-    """Times one program at tiers 0, 1, and 2. All must print the same
-    output and report the same steps and peak heap cells."""
+def compare_tiers(command, cwd, runs, name, size, native):
+    """Times one program at tiers 0 and 1, at tier 2 with every region on
+    the region interpreter (--jit=off), and, when `native`, at tier 2 with
+    regions compiled to native code (--jit=on; docs/runtime/NVM.md, "Native
+    compilation"). All must print the same output and report the same steps
+    and peak heap cells."""
     at = command.index("run") + 1
+    configurations = [("tier0", ["--tier=0"]), ("tier1", ["--tier=1"]), ("tier2", ["--tier=2", "--jit=off"])]
+    if native:
+        configurations.append(("jit", ["--tier=2", "--jit=on"]))
     timed_runs = {}
-    for tier in (0, 1, 2):
-        tiered = command[:at] + [f"--tier={tier}"] + command[at:]
-        timed_runs[tier] = median_run(tiered, cwd, runs, f"{name} (tier {tier})")
-    seconds = {tier: timed_runs[tier][0] for tier in timed_runs}
-    for tier in (1, 2):
-        if timed_runs[tier][2] != timed_runs[0][2] or timed_runs[tier][3] != timed_runs[0][3]:
-            fail(f"{name}: tier 0 and tier {tier} differ in output or stats")
+    for key, options in configurations:
+        timed_runs[key] = median_run(command[:at] + options + command[at:], cwd, runs, f"{name} ({key})")
+    seconds = {key: timed_runs[key][0] for key in timed_runs}
+    for key in timed_runs:
+        if timed_runs[key][2] != timed_runs["tier0"][2] or timed_runs[key][3] != timed_runs["tier0"][3]:
+            fail(f"{name}: tier 0 and {key} differ in output or stats")
     shares = {}
-    for tier in (1, 2):
-        stats = command[:at] + [f"--tier={tier}", "--tier-stats"] + command[at:]
-        match = TIER_STEPS.search(subprocess.run(stats, cwd=cwd, capture_output=True).stderr.decode(errors="replace"))
-        shares[tier] = (float(match.group(2)), float(match.group(3))) if match else (None, None)
-    print(f"{name:16} size {size:>8}  tier 0 {seconds[0]:8.3f} s  tier 1 {seconds[1]:8.3f} s  "
-          f"tier 2 {seconds[2]:8.3f} s  speedup {seconds[0] / seconds[1]:5.2f} {seconds[0] / seconds[2]:5.2f}  "
-          f"tier 1 steps {shares[1][1]}%  tier 2 steps in regions {shares[2][0]}%", flush=True)
-    stats0 = timed_runs[0][3]
-    return {"name": name, "size": size, "steps": stats0[0] if stats0 else None,
-            "tier0": {"median_seconds": seconds[0], "seconds": timed_runs[0][1]},
-            "tier1": {"median_seconds": seconds[1], "seconds": timed_runs[1][1], "steps_percent": shares[1][1]},
-            "tier2": {"median_seconds": seconds[2], "seconds": timed_runs[2][1], "region_percent": shares[2][0],
-                      "tier1_percent": shares[2][1]},
-            "output": timed_runs[0][2].decode(errors="replace")}
+    compiled = None
+    for key, options in configurations[1:]:
+        stats = command[:at] + options + ["--tier-stats"] + command[at:]
+        text = subprocess.run(stats, cwd=cwd, capture_output=True).stderr.decode(errors="replace")
+        match = TIER_STEPS.search(text)
+        shares[key] = (float(match.group(2)), float(match.group(3))) if match else (None, None)
+        if key == "jit":
+            jit = JIT_LINE.search(text)
+            compiled = (int(jit.group(1)), int(jit.group(2))) if jit else None
+    line = (f"{name:16} size {size:>8}  tier 0 {seconds['tier0']:8.3f} s  tier 1 {seconds['tier1']:8.3f} s  "
+            f"tier 2 {seconds['tier2']:8.3f} s")
+    if native:
+        line += f"  jit {seconds['jit']:8.3f} s  jit speedup over tier 2 {seconds['tier2'] / seconds['jit']:5.2f}"
+    line += (f"  speedup {seconds['tier0'] / seconds['tier1']:5.2f} {seconds['tier0'] / seconds['tier2']:5.2f}  "
+             f"tier 1 steps {shares['tier1'][1]}%  tier 2 steps in regions {shares['tier2'][0]}%")
+    print(line, flush=True)
+    stats0 = timed_runs["tier0"][3]
+    entry = {"name": name, "size": size, "steps": stats0[0] if stats0 else None,
+             "tier0": {"median_seconds": seconds["tier0"], "seconds": timed_runs["tier0"][1]},
+             "tier1": {"median_seconds": seconds["tier1"], "seconds": timed_runs["tier1"][1],
+                       "steps_percent": shares["tier1"][1]},
+             "tier2": {"median_seconds": seconds["tier2"], "seconds": timed_runs["tier2"][1],
+                       "region_percent": shares["tier2"][0], "tier1_percent": shares["tier2"][1]},
+             "output": timed_runs["tier0"][2].decode(errors="replace")}
+    if native:
+        entry["jit"] = {"median_seconds": seconds["jit"], "seconds": timed_runs["jit"][1],
+                        "region_percent": shares["jit"][0],
+                        "regions_compiled": compiled[0] if compiled else None,
+                        "code_bytes": compiled[1] if compiled else None}
+    return entry
+
+
+def native_available(neura, cwd, image):
+    """Whether `neura run --jit=on` can run native code on this machine."""
+    process = subprocess.run([str(neura), "run", "--jit=on", "--max-steps", "1", str(image)], cwd=cwd,
+                             capture_output=True)
+    return b"--jit=on" not in process.stderr
 
 
 def tier_markdown(report):
+    native = any("jit" in entry for entry in report["results"])
     lines = [
         f"Tiers 0, 1, and 2, {report['mode']} sizes, median of {report['runs']} runs "
         f"({report['date']}, {report['machine']['system']} {report['machine']['machine']}, "
-        f"{report['machine']['cpus']} CPUs).",
+        f"{report['machine']['cpus']} CPUs). Tier 2 runs regions on the region interpreter"
+        + ("; Native runs them as native code (--jit=on)." if native else "."),
         "",
         f"- Neura: {report['neura_version'] or report['neura']}",
         "",
-        "| Program | Size | Steps | Tier 0 (s) | Tier 1 (s) | Tier 2 (s) | Speedup 1 | Speedup 2 | "
-        "Steps on tier 1 | Steps in regions |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
+    if native:
+        lines += ["| Program | Size | Steps | Tier 0 (s) | Tier 1 (s) | Tier 2 (s) | Native (s) | Speedup 1 | "
+                  "Speedup 2 | Speedup native | Native / tier 2 | Steps in regions |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    else:
+        lines += ["| Program | Size | Steps | Tier 0 (s) | Tier 1 (s) | Tier 2 (s) | Speedup 1 | Speedup 2 | "
+                  "Steps on tier 1 | Steps in regions |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
     percent = lambda value: "" if value is None else f"{value:.1f}%"
     for entry in report["results"]:
         t0 = entry["tier0"]["median_seconds"]
         t1 = entry["tier1"]["median_seconds"]
         t2 = entry["tier2"]["median_seconds"]
-        lines.append(f"| {entry['name']} | {entry['size']} | {entry['steps']} | {t0:.3f} | {t1:.3f} | {t2:.3f} | "
-                     f"{t0 / t1:.2f} | {t0 / t2:.2f} | {percent(entry['tier1']['steps_percent'])} | "
-                     f"{percent(entry['tier2']['region_percent'])} |")
+        if native and "jit" in entry:
+            tj = entry["jit"]["median_seconds"]
+            lines.append(f"| {entry['name']} | {entry['size']} | {entry['steps']} | {t0:.3f} | {t1:.3f} | {t2:.3f} | "
+                         f"{tj:.3f} | {t0 / t1:.2f} | {t0 / t2:.2f} | {t0 / tj:.2f} | {tj / t2:.2f} | "
+                         f"{percent(entry['tier2']['region_percent'])} |")
+        else:
+            lines.append(f"| {entry['name']} | {entry['size']} | {entry['steps']} | {t0:.3f} | {t1:.3f} | {t2:.3f} | "
+                         f"{t0 / t1:.2f} | {t0 / t2:.2f} | {percent(entry['tier1']['steps_percent'])} | "
+                         f"{percent(entry['tier2']['region_percent'])} |")
     return "\n".join(lines) + "\n"
 
 
