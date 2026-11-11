@@ -136,7 +136,7 @@ Every module of the [standard library specification](Stdlib-Design) has a test a
 | Standard library fields and tags of this release | [Stdlib](Stdlib-Design), [Tags](Tags) | `stdlib-accessors`; each module's `stdlib-<area>` test reads the new fields; `doc-examples` | End to end |
 | Data formats and digests | [Stdlib 13](Stdlib-Design#13-data-formats) | `stdlib-utf8`, `-hex`, `-base64`, `-csv`, `-json`, `-crc32`, `-sha256` (published vectors) | Published vectors, sampled |
 | Logging | [Stdlib 14.1](Stdlib-Design#141-stdlog) | `stdlib-logger` | End to end |
-| Reference evaluator agreement | [Stdlib 17](Stdlib-Design#17-verification) | `backend-reference` (every library test function under the NeuraIR reference evaluator and NVM; tests that need host responses or exceed the evaluator's budget are counted, not compared) | Differential |
+| Reference evaluator agreement | [Stdlib 17](Stdlib-Design#17-verification) | `backend-reference` (every library test function under the NeuraIR reference evaluator and NVM; kernel-bound calls run the runtime's kernels; tests that need host responses, open a channel, or exceed the evaluator's budget or call depth are counted, not compared) | Differential |
 | Cost baseline | [Stdlib 17](Stdlib-Design#17-verification) | `benchmarks` (steps, peak heap cells, neurons, and image bytes against `tests/benchmarks/baseline.txt`; step growth between two sizes) | Measured |
 
 ## Decompiler
