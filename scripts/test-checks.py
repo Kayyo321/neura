@@ -12,8 +12,10 @@ The exit status is 0 when every case behaves as expected and 1 otherwise.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -243,12 +245,22 @@ def site_build() -> None:
         command = site_command(directory, "--output", str(output), "--base-path", "/project")
         expect("site: a build into a new directory", command, None)
         expect("site: a build into a directory that holds files", command, "is not an empty directory")
+        def unversioned(text: str) -> str:
+            return re.sub(r"\?v=[0-9a-f]{10}", "", text)
+
+        stylesheet = hashlib.sha256((output / "assets" / "site.css").read_bytes()).hexdigest()[:10]
+        home_page = (output / "index.html").read_text(encoding="utf-8")
         results = {
-            "a build copies every other file unchanged": all(
-                (output / name[len("site/"):]).read_text(encoding="utf-8") == text
+            "a build copies every other file unchanged, apart from versions": all(
+                unversioned((output / name[len("site/"):]).read_text(encoding="utf-8")) == text
                 for name, text in SITE.items() if name.startswith("site/") and name != "site/404.html"),
             "a build gives the missing-address page a base": (output / "404.html").read_text(encoding="utf-8")
                 == SITE["site/404.html"].replace("<head>", '<head><base href="/project/">'),
+            "a page loads its stylesheet by a version of its content":
+                f'href="assets/site.css?v={stylesheet}"' in home_page,
+            "a stylesheet loads its images by a version of their content":
+                re.search(r'url\("logo.png\?v=[0-9a-f]{10}"\)', (output / "assets" / "site.css").read_text()) is not None,
+            "a link to a page is not versioned": 'href="guide/"' in home_page,
         }
         for label, passed in results.items():
             failures += not passed

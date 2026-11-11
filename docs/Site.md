@@ -126,6 +126,12 @@ Every image of the site comes from [`artwork/site/plates.py`](../artwork/site/pl
 
 The fonts in `site/assets/fonts/` are under the SIL Open Font License, and each family's license text is published beside it. [The design of the website](SiteDesign.md#type) names the files and what each is for.
 
+### Versions of stylesheets, scripts, and images
+
+GitHub Pages lets a browser keep any file for ten minutes without asking again. A page loaded after a deployment could then be shown with the previous stylesheet, which is how a fix can seem not to have arrived. The build therefore adds a version to every reference to a file of `assets/`, in pages and in stylesheets: the first ten characters of the SHA-256 of the file, as in `assets/site.css?v=c8665bf5dd`. A changed file has a new address, which the browser fetches, and an unchanged one keeps its address and its cached copy. Write references in `site/` without a version; the build adds it.
+
+A page itself is still kept for up to ten minutes, so a reader who had the site open sees a change after that time or after reloading with the cache bypassed (Ctrl+Shift+R, or Cmd+Shift+R on a Mac).
+
 ### The page for a missing address
 
 GitHub Pages returns `404.html` for an address that names no file, at the address that was requested. A relative reference in that page would resolve against a directory that does not exist. The build therefore inserts `<base href="/neura/">` into the published copy of `404.html`, which makes its references resolve from the top of the site. Write the references in `site/404.html` relative to the top of the site, as in any page there.

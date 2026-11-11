@@ -25,6 +25,7 @@ describes the site, and how to add a document or a section.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import posixpath
@@ -58,6 +59,9 @@ NEURA_TOKEN = re.compile(
     r"|(?P<n>\b\d[\d_]*(?:\.\d+)?\b)|(?P<w>\b[A-Za-z_][A-Za-z0-9_]*\b)",
     re.DOTALL,
 )
+# References that a page or stylesheet loads, which `fingerprint` versions.
+PAGE_REFERENCE = re.compile(r'\b(href|src|srcset|data-index)="([^"]*)"')
+CSS_URL = re.compile(r'url\("([^"]+)"\)')
 API_ITEM = re.compile(r'<li><strong>([^<]*)</strong> · <a href="([^"]*)"><code>([^<]*)</code></a>')
 DECLARED_NAME = re.compile(r"\b(?:let|const)\s+([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -524,7 +528,8 @@ class Assembly:
 
     def search_box(self, page: str, large: bool = False) -> str:
         size = " large" if large else ""
-        return (f'<div class="search{size}" data-search data-root="{root_of(page)}" hidden>'
+        return (f'<div class="search{size}" data-search data-root="{root_of(page)}" '
+                f'data-index="{root_of(page)}assets/search.json" hidden>'
                 f'<label class="visually-hidden" for="search-{1 if large else 0}">Search the documentation</label>'
                 f'<input id="search-{1 if large else 0}" type="search" autocomplete="off" spellcheck="false" '
                 f'placeholder="{"Search documents, sections, and library members" if large else "Search"}" role="combobox" '
@@ -685,6 +690,7 @@ class Assembly:
                 self.origins[name] = Origin(f"{SITE}/{name}", [(1, 1, "")])
             self.files[name] = data
         if not has_contents:
+            self.fingerprint()
             return self.files
 
         documents = self.ordered()
@@ -711,7 +717,49 @@ class Assembly:
         self.check_fragments(ids)
         self.files["assets/search.json"] = self.search_index().encode("utf-8")
         self.origins["assets/search.json"] = Origin(f"{SITE}/{CONTENTS}", generated=True)
+        self.fingerprint()
         return self.files
+
+    # Fingerprints ---------------------------------------------------------
+
+    def version(self, page: str, reference: str) -> str:
+        """`reference` with `?v=` and the start of its file's SHA-256, when it names a file of `assets/`."""
+        if not reference or "?" in reference or ":" in reference or reference.startswith(("#", "/")):
+            return reference
+        path, hash_sign, fragment = reference.partition("#")
+        target = posixpath.normpath(posixpath.join(posixpath.dirname(page), path))
+        if not target.startswith("assets/") or target not in self.files:
+            return reference
+        digest = hashlib.sha256(self.files[target]).hexdigest()[:10]
+        return f"{path}?v={digest}{hash_sign}{fragment}"
+
+    def fingerprint(self) -> None:
+        """Give each reference to a file of `assets/` a version made from that file's content.
+
+        GitHub Pages lets a browser keep a file for ten minutes without asking again, so after a deployment a
+        page could be shown with the stylesheet, script, or images of the previous one. A reference that changes
+        whenever its file changes makes the browser fetch the new file. Stylesheets are done first, because a
+        stylesheet's own version must cover the fonts and images it names.
+        """
+        for name in sorted(self.files):
+            if name.endswith(".css"):
+                text = self.files[name].decode("utf-8")
+                text = CSS_URL.sub(lambda match: f'url("{self.version(name, match.group(1))}")', text)
+                self.files[name] = text.encode("utf-8")
+        for name in sorted(self.files):
+            if not name.endswith(".html"):
+                continue
+
+            def replace(match: re.Match, page: str = name) -> str:
+                attribute, value = match.group(1), match.group(2)
+                if attribute == "srcset":
+                    value = ", ".join(" ".join([self.version(page, part.split()[0])] + part.split()[1:])
+                                      for part in value.split(",") if part.split())
+                else:
+                    value = self.version(page, value)
+                return f'{attribute}="{value}"'
+
+            self.files[name] = PAGE_REFERENCE.sub(replace, self.files[name].decode("utf-8")).encode("utf-8")
 
     def search_index(self) -> str:
         """Pages, their sections, and library members, for the search box. URLs are relative to the top."""
