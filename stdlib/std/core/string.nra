@@ -1,12 +1,12 @@
 let charsets = import:Std.Text.Charsets;
 let formatting = import:Std.Io.Internal.Formatting;
-let ordering = import:Std.Core.Ordering;
 let regex = import:Std.Text.Regex;
 let result = import:Std.Core.Result;
 let string_builder = import:Std.Core.StringBuilder;
 let unicode_case = import:Std.Text.Internal.UnicodeCase;
 let unicode_scalars = import:Std.Text.Scalars;
 let strings = import:Std.Text.Strings;
+let text_kernels = import:Std.Internal.Kernels.Text;
 let variadic = import:Std.Core.Variadic;
 
 /// @brief The primitive companion for immutable UTF-8 text.
@@ -33,15 +33,11 @@ export let String = module:strings (
             other != nil && s == other.to_string();
 
     /// @brief Compares UTF-8 bytes lexicographically and returns -1, 0, or 1.
-    export let compare_to = func(s: string, other: string) -> int => match (strings.compare(s, other)) {
-        ordering.Ordering.Less => -1,
-        ordering.Ordering.Equal => 0,
-        ordering.Ordering.Greater => 1,
-    };
+    export let compare_to = func(s: string, other: string) -> int => text_kernels.compare(s, other) as int;
 
     /// @brief Compares UTF-8 bytes lexicographically after folding ASCII letters.
     export let compare_to_ignore_ascii_case = func(s: string, other: string) -> int =>
-        compare_to(strings.to_ascii_lower(s), strings.to_ascii_lower(other));
+        text_kernels.compare(text_kernels.ascii_lower(s), text_kernels.ascii_lower(other)) as int;
 
     /// @brief Applies Unicode lowercase mapping with the root locale rules.
     export let to_lower_case = func(s: string) -> string => unicode_case.lower(s, "")
@@ -292,13 +288,10 @@ export let String = module:strings (
 
     /// @brief Removes leading and trailing code points through U+0020.
     export let.override trim = func(s: string) -> string {
-        let start = 0;
-        let end = s.byte_length;
-        while (start < end && s.byte_at(start) <= 32) {
-            start += 1;
-        }
-        while (end > start && s.byte_at(end - 1) <= 32) {
-            end -= 1;
+        let start = text_kernels.blank_prefix_length(s) as int;
+        let end = text_kernels.blank_suffix_start(s) as int;
+        if (end < start) {
+            end = start;
         }
         return s.slice(start, end);
     };
