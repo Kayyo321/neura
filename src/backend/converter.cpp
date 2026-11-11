@@ -1,8 +1,8 @@
 #include "converter.hpp"
 
-#include "block_synth.hpp"
-#include "circuit.hpp"
-#include "float_circuit.hpp"
+#include "circuit/block_synth.hpp"
+#include "circuit/circuit.hpp"
+#include "circuit/float_circuit.hpp"
 #include "ir-optimization/analysis.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/aggregate.hpp"

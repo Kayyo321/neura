@@ -110,11 +110,6 @@ BigInt power_of_ten(std::size_t exponent) {
 
 } // namespace
 
-std::uint64_t FloatFormat::canonical_nan() const {
-    const auto exponent = ((std::uint64_t{1} << exponent_bits) - 1) << fraction_bits;
-    return exponent | (std::uint64_t{1} << (fraction_bits - 1));
-}
-
 std::optional<IrType> float_bits_type(const IrType& type) {
     const auto format = float_format(type);
     if (!format) return std::nullopt;

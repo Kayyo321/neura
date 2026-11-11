@@ -1,7 +1,7 @@
 #pragma once
 
 #include "circuit.hpp"
-#include "neura-ir/float.hpp"
+#include "float_format.hpp"
 
 namespace neura::backend {
 

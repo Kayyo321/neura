@@ -240,6 +240,37 @@ add_library(neura_lifecycle STATIC
 target_include_directories(neura_lifecycle PUBLIC src)
 neura_target_defaults(neura_lifecycle)
 
+# The neuron circuit library: gadgets for bits, integers, and IEEE floats,
+# and block assembly. The converter emits graphs with it and the lift
+# library regenerates them with it, so it depends only on the image format.
+add_library(neura_circuit STATIC
+    src/circuit/block_synth.cpp
+    src/circuit/circuit.cpp
+    src/circuit/float_circuit.cpp
+)
+target_link_libraries(neura_circuit PUBLIC neura_nvr)
+neura_target_defaults(neura_circuit)
+
+# Lifted blocks (docs/runtime/NVM.md, "Execution tiers"): the typed
+# expressions behind a block's graph, the structural and overflow proofs that
+# make them trustworthy, and their lowering to native 64-bit operations. It
+# depends on the circuit library and the image format only, so the runtime
+# can use it without compiler code. Float operations are lowered only where
+# hardware arithmetic is bit-exact, which rules out contracted multiply-adds.
+add_library(neura_lift STATIC
+    src/lift/expression.cpp
+    src/lift/lift.cpp
+    src/lift/lowered_block.cpp
+    src/lift/overflow.cpp
+    src/lift/proof.cpp
+    src/lift/recognize.cpp
+)
+target_link_libraries(neura_lift PUBLIC neura_circuit)
+if(NOT MSVC)
+    target_compile_options(neura_lift PRIVATE -ffp-contract=off)
+endif()
+neura_target_defaults(neura_lift)
+
 add_library(neura_compiler STATIC
     src/c-import/c_import.cpp
     src/cli/diagnostic_render.cpp
@@ -269,24 +300,22 @@ add_library(neura_compiler STATIC
     src/ir-optimization/optimizer.cpp
     src/ir-optimization/passes.cpp
     src/ir-optimization/value_passes.cpp
-    src/backend/block_synth.cpp
-    src/backend/circuit.cpp
-    src/backend/float_circuit.cpp
     src/backend/converter.cpp
     src/util/source_map.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
-target_link_libraries(neura_compiler PUBLIC neura_nvr PRIVATE neura_libclang)
+target_link_libraries(neura_compiler PUBLIC neura_circuit neura_nvr PRIVATE neura_libclang)
 neura_target_defaults(neura_compiler)
 
 # The decompiler reads images through the shared loader and lifts their
-# graphs by regenerating them with the converter's circuit library.
+# graphs with the lift library, which regenerates them with the converter's
+# circuit library.
 add_library(neura_decompiler STATIC
     src/decompiler/assembly.cpp
     src/decompiler/decompile.cpp
     src/decompiler/lifter.cpp
 )
-target_link_libraries(neura_decompiler PUBLIC neura_compiler neura_nvm)
+target_link_libraries(neura_decompiler PUBLIC neura_lift neura_compiler neura_nvm)
 neura_target_defaults(neura_decompiler)
 
 # `neura explain` prints the pages in docs/diagnostics, embedded here so that
@@ -591,6 +620,20 @@ if(BUILD_TESTING)
     foreach(suite IN ITEMS lossless lift behavior)
         add_test(NAME decompiler-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
+
+    # Lifted blocks (src/lift): the structural and overflow proofs, and the
+    # lowered blocks against the reference evaluator over a program corpus.
+    add_executable(neura_lift_tests
+        tests/lift/lift_tests.cpp
+        tests/ir-optimization/main.cpp
+        tests/ir-optimization/support.cpp
+    )
+    target_link_libraries(neura_lift_tests PRIVATE neura_lift neura_compiler neura_nvm)
+    target_include_directories(neura_lift_tests PRIVATE tests)
+    neura_target_defaults(neura_lift_tests)
+    foreach(suite IN ITEMS proof overflow execute corpus)
+        add_test(NAME lift-${suite} COMMAND neura_lift_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 
     add_test(NAME backend-cli COMMAND ${CMAKE_COMMAND}
