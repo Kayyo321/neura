@@ -145,12 +145,4 @@ Verification is part of the compiler and decompiler workflow. Each check should 
 
 Use exhaustive evaluation for small input spaces and targeted boundary and differential tests for larger ones. A solver can prove equivalence for a supported encoding, such as fixed-width bit vectors, provided the model covers the executor's semantics and the relevant state and effects. A bounded stateful proof needs an explicit step or memory bound. General stateful equivalence may require invariants or an inductive argument. Report test coverage, bounded proofs, and unresolved results with their respective scope.
 
-## Implementation order
-
-1. Define Boolean and selected fixed-width integer semantics. Compile a small pure function through the full pipeline, emit a circuit, and run it from the artifact.
-2. Add a reference evaluator and verify lowering and optimization against it. Show an optimized circuit's weights and trace their relationship to NeuraIR.
-3. Validate the artifact contract at load time and recover supported combinational circuits into readable operations. Check equivalence for both compiler output and deliberately modified artifacts.
-4. Extend the execution model to explicit state, bounded resources, and defined failure paths. Add functions with state, loops, and recursion as their semantics and target contracts are specified.
-5. Extend the same approach to modules, object state, dispatch, and collections. Introduce external effects through named capabilities with replayable test inputs.
-
-The numeric rules, artifact format, runtime boundary, and decompiler's supported input class need concrete specifications as each implementation step selects them. Language decisions outside the compiler contract are tracked in [Feature status and implementation decisions](lang/Status.md).
+Open language decisions are listed in [Feature status](lang/Status.md#open-language-decisions).
