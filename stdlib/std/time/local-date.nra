@@ -8,6 +8,7 @@ let result = import:Std.Core.Result;
 /// @brief A date in the proleptic Gregorian calendar, years -999,999 through 999,999 (Stdlib.md section 12.1).
 /// Day counts are days since 1970-01-01.
 /// @see [Std.Time.LocalDate](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-LocalDate)
+#Since("0.1.0")
 export let LocalDate = module (
     /// @brief An immutable Gregorian date within the supported year range.
     #[Final, NoDiscard]
@@ -37,8 +38,8 @@ export let LocalDate = module (
 
         /// @brief Month and year changes clamp the day to the end of the target month.
         export let plus_months = func(months: int64) -> LocalDate {
-            let total = (year as int64) * 12 + ((month - 1) as int64) + months;
-            let target_month = (calendar.floor_mod(total, 12) + 1) as int;
+            last total = (year as int64) * 12 + ((month - 1) as int64) + months;
+            last target_month = (calendar.floor_mod(total, 12) + 1) as int;
             return clamped(calendar.floor_div(total, 12), target_month, day);
         };
 
@@ -59,7 +60,7 @@ export let LocalDate = module (
 
         /// @brief 1 through 366.
         export let day_of_year = func -> int {
-            let first = calendar.epoch_day_of(year as int64, 1, 1);
+            last first = calendar.epoch_day_of(year as int64, 1, 1);
             return (to_epoch_day() - first + 1) as int;
         };
 
@@ -88,7 +89,7 @@ export let LocalDate = module (
             if (!(other is LocalDate)) {
                 return false;
             }
-            let date = other as LocalDate;
+            last date = other as LocalDate;
             return year == date.year && month == date.month && day == date.day;
         };
 
@@ -111,7 +112,7 @@ export let LocalDate = module (
         if (!valid(year, month, day)) {
             trap_with_message("invalid argument: invalid date");
         }
-        return new LocalDate(year, month, day);
+        return new(year, month, day);
     };
 
     /// @brief nil for invalid components.
@@ -119,7 +120,7 @@ export let LocalDate = module (
         if (!valid(year, month, day)) {
             return nil;
         }
-        return new LocalDate(year, month, day);
+        return new(year, month, day);
     };
 
     /// @brief Traps with "invalid argument: date out of range" outside -999999-01-01 through 999999-12-31.
@@ -128,15 +129,16 @@ export let LocalDate = module (
             trap_with_message("invalid argument: date out of range");
         }
         let [year, month, day] = calendar.civil_of(epoch_day);
-        return new LocalDate(year as int, month, day);
+        return new(year as int, month, day);
     };
 
     /// @brief YYYY-MM-DD, where the year is four digits or a sign and at least four digits.
     ///
     /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the
     /// first byte of a year beyond 999,999, a month outside 1 through 12, or a day outside the month.
+    #NoDiscard
     export let parse = func(text: string) -> result.Result<LocalDate> {
-        let scan = new calendar.Scanner(text);
+        last scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);
         scan.finish();
         if (!scan.ok()) {
@@ -158,11 +160,11 @@ export let LocalDate = module (
         if (year < calendar.MinYear || year > calendar.MaxYear) {
             trap_with_message("invalid argument: date out of range");
         }
-        let length = calendar.month_length(year, month);
+        last length = calendar.month_length(year, month);
         if (day > length) {
-            return new LocalDate(year as int, month, length);
+            return new(year as int, month, length);
         }
-        return new LocalDate(year as int, month, day);
+        return new(year as int, month, day);
     };
 
     /// @brief Converts an unequal comparison to Less or Greater.

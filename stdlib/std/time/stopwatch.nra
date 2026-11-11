@@ -6,9 +6,9 @@ let.promote _ = import:Std.Core.Unit;
 /// @brief Measures elapsed time with a Clock's monotonic reading (Stdlib.md section 12.1). Time accumulates
 /// across start and stop pairs until reset.
 /// @see [Std.Time.Stopwatch](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-Stopwatch)
+#Since("0.1.0")
 export let Stopwatch = module (
     /// @brief A clock-backed accumulator for one or more elapsed intervals.
-    #Final
     export let Stopwatch = class (
         /// @brief The clock supplying monotonic readings.
         last source: Clock;
@@ -71,6 +71,7 @@ export let Stopwatch = module (
 
         /// @brief The time measured so far, including the current run. A stopped stopwatch does not read the
         /// clock.
+        #NoDiscard
         export let elapsed = func -> result.Result<Duration> {
             if (!is_running) {
                 return result.Result<Duration>.Ok(accumulated);
@@ -83,5 +84,5 @@ export let Stopwatch = module (
     );
 
     /// @brief A stopped stopwatch over `time_source`.
-    export let create = func(time_source: Clock) -> Stopwatch => new Stopwatch(time_source);
+    export let create = func(time_source: Clock) -> Stopwatch => new(time_source);
 );

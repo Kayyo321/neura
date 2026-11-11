@@ -7,6 +7,7 @@ let result = import:Std.Core.Result;
 /// @brief A fixed offset from UTC in whole minutes, -18:00 through +18:00 (Stdlib.md section 12.1). There are
 /// no named zones and no daylight-saving rules.
 /// @see [Std.Time.ZoneOffset](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-ZoneOffset)
+#Since("0.1.0")
 export let ZoneOffset = module (
     /// @brief An immutable fixed offset from UTC with whole-minute resolution.
     #[Final, NoDiscard]
@@ -52,20 +53,21 @@ export let ZoneOffset = module (
             (hours < 0 && minutes > 0)) {
             trap_with_message("invalid argument: invalid zone offset");
         }
-        let total = hours * 3600 + minutes * 60;
+        last total = hours * 3600 + minutes * 60;
         if (total < -calendar.MaxOffsetSeconds || total > calendar.MaxOffsetSeconds) {
             trap_with_message("invalid argument: invalid zone offset");
         }
-        return new ZoneOffset(total);
+        return new(total);
     };
 
     /// @brief Z, or a sign and HH:MM no further than 18:00 from zero. -00:00 and +00:00 are Utc.
     ///
     /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an
     /// hour above 18 or a minute above 59, or at the sign when the total exceeds 18:00.
+    #NoDiscard
     export let parse = func(text: string) -> result.Result<ZoneOffset> {
-        let scan = new calendar.Scanner(text);
-        let total = calendar.read_offset(scan);
+        last scan = new calendar.Scanner(text);
+        last total = calendar.read_offset(scan);
         scan.finish();
         if (!scan.ok()) {
             return result.Result<ZoneOffset>.Err(scan.failure());

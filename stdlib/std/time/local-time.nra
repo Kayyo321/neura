@@ -8,12 +8,13 @@ let result = import:Std.Core.Result;
 /// @brief A time of day, stored as nanoseconds since midnight (Stdlib.md section 12.1). There are no leap
 /// seconds.
 /// @see [Std.Time.LocalTime](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-LocalTime)
+#Since("0.1.0")
 export let LocalTime = module (
     /// @brief An immutable wall-clock time within a 24-hour day.
     #[Final, NoDiscard]
     export let LocalTime = class implements Comparable<LocalTime> (
         /// @brief The nanosecond offset from midnight.
-        let nanos_of_day: int64;
+        last nanos_of_day: int64;
 
         /// @brief Stores the supplied nanosecond offset from midnight.
         export let init = func(nanos: int64) {
@@ -37,8 +38,8 @@ export let LocalTime = module (
 
         /// @brief Wraps around midnight in either direction.
         export let plus = func(span: duration.Duration) -> LocalTime {
-            let shift = calendar.floor_mod(span.to_nanos(), calendar.NanosPerDay);
-            return new LocalTime((nanos_of_day + shift) % calendar.NanosPerDay);
+            last shift = calendar.floor_mod(span.to_nanos(), calendar.NanosPerDay);
+            return new((nanos_of_day + shift) % calendar.NanosPerDay);
         };
 
         /// @brief Orders times by their nanosecond offsets from midnight.
@@ -75,8 +76,8 @@ export let LocalTime = module (
             nano > 999999999) {
             trap_with_message("invalid argument: invalid time");
         }
-        let seconds = (hour * 3600 + minute * 60 + second) as int64;
-        return new LocalTime(seconds * calendar.NanosPerSecond + (nano as int64));
+        last seconds = (hour * 3600 + minute * 60 + second) as int64;
+        return new(seconds * calendar.NanosPerSecond + (nano as int64));
     };
 
     /// @brief Traps with "invalid argument: invalid time" outside 0 through 86,399,999,999,999.
@@ -84,16 +85,17 @@ export let LocalTime = module (
         if (nanos < 0 || nanos >= calendar.NanosPerDay) {
             trap_with_message("invalid argument: invalid time");
         }
-        return new LocalTime(nanos);
+        return new(nanos);
     };
 
     /// @brief HH:MM:SS with an optional fraction of one through nine digits.
     ///
     /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an
     /// hour above 23 or a minute or second above 59.
+    #NoDiscard
     export let parse = func(text: string) -> result.Result<LocalTime> {
-        let scan = new calendar.Scanner(text);
-        let nanos = calendar.read_time(scan);
+        last scan = new calendar.Scanner(text);
+        last nanos = calendar.read_time(scan);
         scan.finish();
         if (!scan.ok()) {
             return result.Result<LocalTime>.Err(scan.failure());

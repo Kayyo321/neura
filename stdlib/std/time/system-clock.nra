@@ -14,6 +14,7 @@ let.promote _ = import:Std.Core.Unit;
 /// kind Cancelled, unless the time had already passed. A cancelled sleep has no effect other than ending early.
 /// `now` and `monotonic` read the clock at once and are not cancellable. Without tasks `sleep` waits as before.
 /// @see [Std.Time.SystemClock](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-SystemClock)
+#Since("0.1.0")
 export let SystemClock = module (
     /// @brief Carries the provider's UTC epoch seconds and nanosecond fraction or an error code.
     let WallOutcome = enum (Ok([int64, int]), Error(uint32));
@@ -32,6 +33,7 @@ export let SystemClock = module (
     /// @brief A clock whose operations use the runtime's clock capability.
     export let SystemClock = class implements Clock (
         /// @brief The host's wall clock as an instant.
+        #NoDiscard
         export let now = func -> result.Result<instant.Instant> {
             return match (wall_clock()) {
                 WallOutcome.Ok(reading) => result.Result<instant.Instant>.Ok(instant.of_epoch_seconds(reading[0], reading[1])),
@@ -40,6 +42,7 @@ export let SystemClock = module (
         };
 
         /// @brief The host's monotonic clock, from an origin fixed for the run.
+        #NoDiscard
         export let monotonic = func -> result.Result<Duration> {
             return match (monotonic_clock()) {
                 NanosOutcome.Ok(nanos) => result.Result<Duration>.Ok(of_nanos(nanos)),
@@ -50,7 +53,7 @@ export let SystemClock = module (
         /// @brief Waits for the duration; a zero or negative duration asks the host to wait for zero
         /// nanoseconds. Fails with Cancelled when the task's scope is cancelled first.
         export let sleep = func(span: Duration) -> result.Result<Unit> {
-            let nanos = span.to_nanos();
+            last nanos = span.to_nanos();
             return match (sleep_for(nanos < 0 ? 0 : nanos)) {
                 DoneOutcome.Ok => result.Result<Unit>.Ok(Unit.Value),
                 DoneOutcome.Error(code) => result.Result<Unit>.Err(host_error.io(code, "sleep failed", "")),
@@ -59,5 +62,5 @@ export let SystemClock = module (
     );
 
     /// @brief Creates a clock backed by the host's wall and monotonic clocks.
-    export let create = func -> SystemClock => new SystemClock();
+    export let create = func -> SystemClock => new;
 );

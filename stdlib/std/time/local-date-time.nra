@@ -11,6 +11,7 @@ let zone_offset = import:Std.Time.ZoneOffset;
 
 /// @brief A date and a time of day without an offset (Stdlib.md section 12.1).
 /// @see [Std.Time.LocalDateTime](https://github.com/Kayyo321/neura/wiki/Stdlib-Time-LocalDateTime)
+#Since("0.1.0")
 export let LocalDateTime = module (
     /// @brief An immutable local date and time without an associated UTC offset.
     #[Final, NoDiscard]
@@ -29,27 +30,27 @@ export let LocalDateTime = module (
         /// @brief Carries whole days into the date. Traps with "invalid argument: date out of range" when the
         /// date leaves its range.
         export let plus = func(span: duration.Duration) -> LocalDateTime {
-            let nanos = span.to_nanos();
+            last nanos = span.to_nanos();
             let days = calendar.floor_div(nanos, calendar.NanosPerDay);
             let time_of_day = time.to_nano_of_day() + calendar.floor_mod(nanos, calendar.NanosPerDay);
             if (time_of_day >= calendar.NanosPerDay) {
                 days++;
                 time_of_day -= calendar.NanosPerDay;
             }
-            return new LocalDateTime(date.plus_days(days), local_time.of_nano_of_day(time_of_day));
+            return new(date.plus_days(days), local_time.of_nano_of_day(time_of_day));
         };
 
         /// @brief The instant at which UTC reads this date and time minus the offset.
         export let at_offset = func(offset: zone_offset.ZoneOffset) -> instant.Instant {
-            let time_of_day = time.to_nano_of_day();
-            let seconds = date.to_epoch_day() * calendar.SecondsPerDay + time_of_day / calendar.NanosPerSecond -
+            last time_of_day = time.to_nano_of_day();
+            last seconds = date.to_epoch_day() * calendar.SecondsPerDay + time_of_day / calendar.NanosPerSecond -
                 (offset.total_seconds as int64);
             return instant.of_epoch_seconds(seconds, (time_of_day % calendar.NanosPerSecond) as int);
         };
 
         /// @brief Orders by local date first and time of day second.
         export let compare_to = func(other: LocalDateTime) -> Ordering {
-            let by_date = date.compare_to(other.date);
+            last by_date = date.compare_to(other.date);
             if (by_date != Ordering.Equal) {
                 return by_date;
             }
@@ -61,7 +62,7 @@ export let LocalDateTime = module (
             if (!(other is LocalDateTime)) {
                 return false;
             }
-            let moment = other as LocalDateTime;
+            last moment = other as LocalDateTime;
             return date === moment.date && time === moment.time;
         };
 
@@ -76,20 +77,21 @@ export let LocalDateTime = module (
 
     /// @brief Combines a date and time of day without applying an offset.
     export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime {
-        return new LocalDateTime(on, at);
+        return new(on, at);
     };
 
     /// @brief The LocalDate form, T, and the LocalTime form, with their errors.
+    #NoDiscard
     export let parse = func(text: string) -> result.Result<LocalDateTime> {
-        let scan = new calendar.Scanner(text);
+        last scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);
         scan.expect(84, "'T'");
-        let nanos = calendar.read_time(scan);
+        last nanos = calendar.read_time(scan);
         scan.finish();
         if (!scan.ok()) {
             return result.Result<LocalDateTime>.Err(scan.failure());
         }
-        let moment = new LocalDateTime(local_date.of(year as int, month, day), local_time.of_nano_of_day(nanos));
+        last moment = new LocalDateTime(local_date.of(year as int, month, day), local_time.of_nano_of_day(nanos));
         return result.Result<LocalDateTime>.Ok(moment);
     };
 );
