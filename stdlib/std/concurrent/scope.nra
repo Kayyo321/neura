@@ -8,10 +8,12 @@ let.promote _ = import:Std.Core.Unit;
 /// @brief The handle that `scope (name) { ... }` binds (Concurrency.md section 7). It cancels the scope's tasks
 /// and sets their deadline. A handle is scope-bound: it cannot leave its block.
 /// @see [Std.Concurrent.Scope](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Scope)
+#Since("0.1.0")
 export let Scope = module (
     /// @brief A scope's cancellation signal and deadline.
+    #Final
     export let Scope = class (
-        let id: uint64;
+        last id: uint64;
 
         let init = func(scope: uint64) {
             id = scope;
@@ -30,6 +32,7 @@ export let Scope = module (
         /// @brief Cancels the scope once the duration has passed on the monotonic clock. Needs the clock
         /// capability. A later call replaces this scope's own deadline; its tasks still observe the earlier
         /// of it and any deadline they inherited.
+        #NoDiscard(reason: "without the clock capability no deadline is set")
         export let cancel_after = func(span: duration.Duration) -> result.Result<Unit> =>
             match (system_clock.create().monotonic()) {
                 result.Result.Ok(now) => arm(now.to_nanos() + span.to_nanos()),
@@ -37,8 +40,9 @@ export let Scope = module (
             };
 
         /// @brief Cancels the scope at the instant. Needs the clock capability.
+        #NoDiscard(reason: "without the clock capability no deadline is set")
         export let cancel_at = func(moment: instant.Instant) -> result.Result<Unit> {
-            let clock = system_clock.create();
+            last clock = system_clock.create();
             return match (clock.now()) {
                 result.Result.Ok(wall) => cancel_after(moment.duration_since(wall)),
                 result.Result.Err(error) => result.Result<Unit>.Err(error),
@@ -48,7 +52,7 @@ export let Scope = module (
         /// @brief The reading of the monotonic clock at which the scope's tasks are cancelled: the earlier of
         /// this scope's deadline and the one it inherited, or None.
         export let deadline = func -> optional.Optional<duration.Duration> {
-            let at = scope_deadline(id);
+            last at = scope_deadline(id);
             if (at == 9223372036854775807) {
                 return optional.Optional<duration.Duration>.None;
             }
