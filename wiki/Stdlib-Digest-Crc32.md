@@ -1,6 +1,6 @@
 # `Std.Digest.Crc32`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Digest.Crc32`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Digest.Crc32`. Its [source](https://github.com/Kayyo3
 
 - [Exported declarations for `Std.Digest.Crc32`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -35,11 +35,11 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 13.2 `Std.Digest`
 
-Both can be written today: they work on built-in `uint8` lists with the 32-bit recipes of [section 7.2](Stdlib-Design#72-arithmetic-without-wrapping-intrinsics).
+Both work on built-in `uint8` lists with the 32-bit recipes of [section 7.2](Stdlib-Design#72-arithmetic-without-wrapping-intrinsics).
 
 - **`Crc32`:** the IEEE 802.3 checksum (reflected polynomial 0xEDB88320, initial value and final exclusive-or of all ones). A 256-entry `uint32` list is computed on first use. `update(bytes)`, `value() → uint32`, `reset()`, and the module function `of(bytes) → uint32`.
 - **`Sha256`:** FIPS 180-4. `update(bytes)`, `finish()` (a built-in list of 32 bytes; a later `update` or `finish` traps with `invalid state: digest finished`), and the module function `of(bytes)`.

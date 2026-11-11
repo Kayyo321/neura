@@ -1,6 +1,6 @@
 # `Std.Concurrent.Task`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Concurrent.Task`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -10,7 +10,7 @@ Import this module as `Std.Concurrent.Task`. Its [source](https://github.com/Kay
 - [The `Std.Concurrent` modules and their contracts](Stdlib-Design#19-stdconcurrent)
 - [Concurrency specification](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md): tasks, isolation, the memory model, the scheduler, and limits
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -68,4 +68,4 @@ A `Task<T>` must not be reachable after its scope exits ([section 4.3](https://g
 
 - Live tasks are bounded by `--max-tasks`, 65,536 by default; exceeding it traps with status 137 at the `spawn`. A task record costs 20 heap cells until the scope that owns it closes; a task spawned as a statement, with no handle, is released when it finishes ([section 10.3](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#103-limits)).
 - `join` and `is_finished` are task-safe: a spawned task may open scopes and join its own tasks. They are scheduler operations, so the worker of a parallel map cannot use them.
-- A program that uses this module cannot use `Std.DynamicForeign` or a C import ([decision C15](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#3-decisions)).
+- A program that uses this module cannot use `Std.DynamicForeign` or a C import ([Concurrency, section 16](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#16-limits)).

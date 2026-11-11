@@ -1,6 +1,6 @@
 # `Std.Concurrent.Scope`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Concurrent.Scope`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -10,7 +10,7 @@ Import this module as `Std.Concurrent.Scope`. Its [source](https://github.com/Ka
 - [The `Std.Concurrent` modules and their contracts](Stdlib-Design#19-stdconcurrent)
 - [Concurrency specification](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md): tasks, isolation, the memory model, the scheduler, and limits
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -68,4 +68,4 @@ A `Scope` cannot leave its block: it cannot be returned, stored in a field or a 
 
 ### Task safety
 
-Every member is task-safe. `cancel_after` and `cancel_at` issue a host request to read the clock. A program that uses this module cannot use `Std.DynamicForeign` or a C import ([decision C15](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#3-decisions)).
+Every member is task-safe. `cancel_after` and `cancel_at` issue a host request to read the clock. A program that uses this module cannot use `Std.DynamicForeign` or a C import ([Concurrency, section 16](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#16-limits)).

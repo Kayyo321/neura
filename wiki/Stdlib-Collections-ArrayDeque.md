@@ -1,6 +1,6 @@
 # `Std.Collections.ArrayDeque`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Collections.ArrayDeque`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Collections.ArrayDeque`. Its [source](https://github.
 
 - [Exported declarations for `Std.Collections.ArrayDeque`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -67,7 +67,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.7 Conformance summary
 
@@ -91,7 +91,7 @@ These are the intended source-module contracts. Compiler support for the operati
 
 This section fixes the member sets that the concrete classes and the interfaces in [section 9.10](Stdlib-Design#910-interfaces-and-read-only-views) share.
 
-The **Needs** column names the compiler facilities an implementation relies on.
+The **Needs** column names the compiler facilities of [section 3](Stdlib-Design#3-language-facilities) that a member uses.
 
 **List contract** (`ArrayList`, `LinkedList`)
 
@@ -165,11 +165,11 @@ All of this needs G3.
 
 ### 9.4 `ArrayDeque<T>`
 
-**Redesign.** The first plan used a ring buffer in an array with vacant slots. Without vacant slots a ring would keep a reference to every removed element until its slot was reused. The deque is instead two built-in lists used as stacks.
+The deque is two built-in lists used as stacks. A ring buffer would keep a reference to every removed element until its slot was reused, because the language has no vacant slots.
 
 - **Layout.** `front` holds the first part of the deque in reverse order, so that its last element is the deque's first. `back` holds the rest in order. Plus the modification count.
 - `add_first` appends to `front`; `add_last` appends to `back`. `remove_first` removes the last element of `front`; `remove_last` removes the last element of `back`. Each is one storage operation, and the removed slot is gone, so nothing is retained.
-- **Rebalancing.** When `remove_first` finds `front` empty and `back` not empty, it moves the first half of `back` (rounded up) into `front` in reverse order and shifts the rest of `back` down, in a helper function. `remove_last` on an empty `back` mirrors it. A rebalance of `n` elements is followed by at least `n / 2` cheap removals from that end, so every end operation is amortized constant time. A3 would make the move two bulk operations.
+- **Rebalancing.** When `remove_first` finds `front` empty and `back` not empty, it moves the first half of `back` (rounded up) into `front` in reverse order and shifts the rest of `back` down, in a helper function. `remove_last` on an empty `back` mirrors it. A rebalance of `n` elements is followed by at least `n / 2` cheap removals from that end, so every end operation is amortized constant time.
 - **Indexing.** `get(i)` reads `front[front.length - 1 - i]` when `i` is less than `front.length`, and `back[i - front.length]` otherwise. Constant time.
 - **Iteration** is first to last: `front` from its end to its start, then `back`.
 
@@ -191,6 +191,6 @@ It follows both the list and the deque contracts. Prefer `ArrayList` or `ArrayDe
 - **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)).
 - **LinkedList.** `sort` and `binary_search` work on a copy; `sort` and `reverse` move values between existing nodes, which is not a structural change; `clear` unlinks every node. Positional access outside the list traps with `invalid argument: index out of range`.
 - **ArrayList.add_all** reads the argument up to its starting length, so `add_all(items())` doubles the list instead of trapping.
-- **Equality direction.** Search members call `value.equals(element)` with the probe as the receiver.
+- **Equality direction.** Search members call `value.equals(element)` with the searched value as the receiver.
 - **OrdinalMap.** A key outside 0 through n - 1 is the language's bounds trap, also in `contains_key`; `equals` is false when the other map holds a key beyond this map's size; `compute` returns the callback's result.
 - **Trap details.** `negative size`, `size above current size`, `range`, `negative count`, `index out of range`, and `negative element` after `invalid argument: `; `invalid state: ` for a failed `validate()`.

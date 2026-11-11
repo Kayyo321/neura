@@ -1,6 +1,6 @@
 # `Std.Core.Int32`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Core.Int32`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Core.Int32`. Its [source](https://github.com/Kayyo321
 
 - [Exported declarations for `Std.Core.Int32`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -97,7 +97,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.2 Equality, hashing, and text
 
@@ -119,7 +119,7 @@ The compiler supplies these results for supported value members. Companion funct
 
 Float equality here deliberately differs from `==`: it is an equivalence relation consistent with the hash, which hash tables need, while `==` stays IEEE 754. The multiplier 31 is chosen because multiplying by 31 is a shift and a subtraction.
 
-The module **`Hash`** has the building blocks, all ordinary functions that work today:
+The module **`Hash`** has the building blocks, all ordinary functions:
 
 | Member | Behavior |
 | --- | --- |
@@ -135,7 +135,7 @@ A class's hash starts from 17 and combines each field's hash in declaration orde
 
 ### 5.3 Ordering
 
-- **`Ordering`** is a fieldless enum with variants `Less`, `Equal`, and `Greater`. Comparison results are `Ordering` values, never integers, so the subtraction idiom (which would trap on overflow) cannot be written. The module `Ordering` also exports `reverse(o)`, `then(first, second)` (returns `first` unless it is `Equal`), `is_less(o)`, `is_at_most(o)`, `is_greater(o)`, and `is_at_least(o)`. All of this works today.
+- **`Ordering`** is a fieldless enum with variants `Less`, `Equal`, and `Greater`. Comparison results are `Ordering` values, never integers, so the subtraction idiom (which would trap on overflow) cannot be written. The module `Ordering` also exports `reverse(o)`, `then(first, second)` (returns `first` unless it is `Equal`), `is_less(o)`, `is_at_most(o)`, `is_greater(o)`, and `is_at_least(o)`.
 - **A comparator is a native function value** of type `(T, T) → Ordering`. There is no comparator interface or wrapper class. A named function, a bound method, or a closure all serve. A comparator must define a total order; if it does not, the library stays memory safe and terminates, and the resulting order or lookup is unspecified.
 - **Natural orders** are named functions in the companion modules, usable as comparators directly: `Int32.compare`, `Float64.total_compare`, `Strings.compare`, and so on.
 
@@ -152,7 +152,7 @@ A class's hash starts from 17 and combines each field's hash in declaration orde
 
 ### 9.6 Hash collections
 
-**Decisions kept from the first plan:** hash collections iterate in **insertion order**, so output never depends on hash values, and the load factor is fixed at one half.
+Hash collections iterate in **insertion order**, so output never depends on hash values, and the load factor is fixed at one half.
 
 The index and entry tables are built-in lists grown by `append`. The shared probing core uses indices and hash values. Constructors can use specialized default value members or accept caller-supplied key operations.
 
@@ -166,7 +166,7 @@ The index and entry tables are built-in lists grown by `append`. The shared prob
 
 #### `HashCore`
 
-`Std.Collections.Internal.HashCore` is a **non-generic** class. It knows hashes and entry numbers. It never sees a key. The owning collection keeps the keys and values in its own dense lists, indexed by entry number, and does the key comparison itself. One core therefore serves every hash collection, including the ones that can be written today.
+`Std.Collections.Internal.HashCore` is a **non-generic** class. It knows hashes and entry numbers. It never sees a key. The owning collection keeps the keys and values in its own dense lists, indexed by entry number, and does the key comparison itself. One core therefore serves every hash collection, including `IntMap` and `StringMap`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -200,7 +200,7 @@ When compaction happens:
 
 | Class | Keys | Key operations | Needs |
 | --- | --- | --- | --- |
-| `IntMap<V>` | `int` | `Int32.hash` and `==`, called directly | Nothing: it can be written today |
+| `IntMap<V>` | `int` | `Int32.hash` and `==`, called directly | Nothing |
 | `StringMap<V>` | `string` | `Strings.hash` and `Strings.equals` | T1 |
 | `HashMap<K, V>`, `HashSet<T>` created with `with_keys<K, V>(hash: (K) → uint32, same: (K, K) → bool)` | Any | The two function values, stored in the collection | G1 |
 | `HashMap<K, V>`, `HashSet<T>` created with `create<K, V>()` | Any | `hash_code` and `equals` | G3 |

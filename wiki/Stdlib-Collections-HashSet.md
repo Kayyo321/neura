@@ -1,6 +1,6 @@
 # `Std.Collections.HashSet`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Collections.HashSet`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Collections.HashSet`. Its [source](https://github.com
 
 - [Exported declarations for `Std.Collections.HashSet`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -77,7 +77,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.7 Conformance summary
 
@@ -101,7 +101,7 @@ These are the intended source-module contracts. Compiler support for the operati
 
 This section fixes the member sets that the concrete classes and the interfaces in [section 9.10](Stdlib-Design#910-interfaces-and-read-only-views) share.
 
-The **Needs** column names the compiler facilities an implementation relies on.
+The **Needs** column names the compiler facilities of [section 3](Stdlib-Design#3-language-facilities) that a member uses.
 
 **List contract** (`ArrayList`, `LinkedList`)
 
@@ -162,7 +162,7 @@ The **Needs** column names the compiler facilities an implementation relies on.
 
 ### 9.6 Hash collections
 
-**Decisions kept from the first plan:** hash collections iterate in **insertion order**, so output never depends on hash values, and the load factor is fixed at one half.
+Hash collections iterate in **insertion order**, so output never depends on hash values, and the load factor is fixed at one half.
 
 The index and entry tables are built-in lists grown by `append`. The shared probing core uses indices and hash values. Constructors can use specialized default value members or accept caller-supplied key operations.
 
@@ -176,7 +176,7 @@ The index and entry tables are built-in lists grown by `append`. The shared prob
 
 #### `HashCore`
 
-`Std.Collections.Internal.HashCore` is a **non-generic** class. It knows hashes and entry numbers. It never sees a key. The owning collection keeps the keys and values in its own dense lists, indexed by entry number, and does the key comparison itself. One core therefore serves every hash collection, including the ones that can be written today.
+`Std.Collections.Internal.HashCore` is a **non-generic** class. It knows hashes and entry numbers. It never sees a key. The owning collection keeps the keys and values in its own dense lists, indexed by entry number, and does the key comparison itself. One core therefore serves every hash collection, including `IntMap` and `StringMap`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -210,7 +210,7 @@ When compaction happens:
 
 | Class | Keys | Key operations | Needs |
 | --- | --- | --- | --- |
-| `IntMap<V>` | `int` | `Int32.hash` and `==`, called directly | Nothing: it can be written today |
+| `IntMap<V>` | `int` | `Int32.hash` and `==`, called directly | Nothing |
 | `StringMap<V>` | `string` | `Strings.hash` and `Strings.equals` | T1 |
 | `HashMap<K, V>`, `HashSet<T>` created with `with_keys<K, V>(hash: (K) → uint32, same: (K, K) → bool)` | Any | The two function values, stored in the collection | G1 |
 | `HashMap<K, V>`, `HashSet<T>` created with `create<K, V>()` | Any | `hash_code` and `equals` | G3 |

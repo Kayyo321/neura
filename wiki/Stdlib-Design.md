@@ -1,17 +1,16 @@
 <!-- Generated from docs/lang/Stdlib.md by scripts/generate-wiki.py. Edit that file, not this one. -->
-# Standard library implementation plan
+# Standard library specification
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-This page defines the Neura standard library's source modules, contracts, and algorithms. The language and runtime already supply the facilities in [section 3](#3-language-baseline-and-gaps). Every module and host service on this page is implemented in `stdlib/` and the runner, and tested as [section 17](#17-verification) describes; [Status](Status) and [Standard library](StandardLibrary) list what shipped. [Section 18](#18-implementation-decisions) records the decisions made where this plan left a choice open, and where the implementation departs from it.
+This page specifies the Neura standard library's source modules, contracts, and algorithms. The language and runtime supply the facilities in [section 3](#3-language-facilities). Every module and host service on this page is implemented in `stdlib/` and the runner, and tested as [section 17](#17-verification) describes; [Status](Status) and [Standard library](StandardLibrary) list what ships. [Section 18](#18-behavior-details) states the rules that complete the contracts of the earlier sections. [Design notes](https://github.com/Kayyo321/neura/blob/main/docs/design/Stdlib.md) record why the library is shaped as it is.
 
-## 1. How to read this plan
+## 1. How to read this page
 
 - **Syntax is not specified here.** This page describes behavior, data layout, and algorithms in prose and tables. It contains no Neura source.
 - **Member notation.** Tables write a member as `name(parameter: Type, ...) → Result`. A function type is written `(A, B) → R`. A tuple type is written `[A, B]`, as in the language. This is documentation notation.
-- **Names are binding.** Module, type, and member names on this page are the names to implement. They follow the [coding style](CodingStyle). No member is named with a keyword; [section 15.2](#152-name-audit) lists the names that changed for that reason.
-- **Dependency labels.** Labels such as G1 and T1 point to compiler facilities used by an API. Their presence in an API table records what the implementation relies on. Host bindings also require registered providers.
-- **"Decision"** marks a choice this plan makes. Decisions are final for the first version. Changing one requires editing this page first.
+- **Names.** Module, type, and member names on this page are the names in `stdlib/`. They follow the [coding style](CodingStyle). No member is named with a keyword ([section 15](#15-names)).
+- **Dependency labels.** Labels such as G1 and T1 point to the compiler facilities of [section 3](#3-language-facilities) that an API uses. Host bindings also require registered providers.
 - **Sizes and indices** are `int` (`int32`), matching the built-in `length`. Hash codes are `uint32`.
 - **Runtime-sized data is a built-in list.** An array's length is fixed by its literal, so a function cannot build an array whose length it computes. Every API that takes or returns a sequence of bytes, strings, or elements uses a built-in list (`uint8[list]`, `string[list]`, `T[list]`).
 - **"Traps"** always means the run ends: see [section 5.1](#51-failure-model).
@@ -29,61 +28,23 @@ This page defines the Neura standard library's source modules, contracts, and al
 9. **Collection type arguments are invariant.** `List<Alert>` and `List<Renderable>` are distinct types. Interfaces define extension points. A library class is meant to be subclassed only where its contract says so.
 10. **Pay only for what is reachable.** An image contains only what the entry point can reach.
 
-## 3. Language baseline and gaps
+## 3. Language facilities
 
+The compiler and runtime supply these facilities to the library. The labels are used by the API tables below.
 
-### 3.1 What the probes established
-
-The former frontend rejections for generic callbacks, generic enums, interface declarations, type tests, and string operations no longer describe the current compiler. These fixtures exercise the corresponding behavior through source, optimized and unoptimized NVR builds, and execution. The supported API contracts and remaining restrictions are in [Status](Status) and the language pages.
-
-| Capability | Evidence and boundary |
-| --- | --- |
-| Tuples and recursive payload enums | [Aggregates](https://github.com/Kayyo321/neura/blob/main/tests/backend/programs/aggregates.nra) exercises tuple returns and destructuring, recursive values, and exhaustive matching. The source-level JSON model can use its own enum and built-in lists. |
-| Closures with generic types | [Generic closures](https://github.com/Kayyo321/neura/blob/main/tests/backend/programs/generic-closures.nra) exercises specialization. Captures still snapshot bindings and share references to objects. |
-| Generic enum payloads and constructors | [Generic enums](https://github.com/Kayyo321/neura/blob/main/tests/backend/programs/generic-enums.nra) covers explicit specialization and matching. Nested patterns and match guards remain outside the design. |
-| Class defaults, nil, and structural value members | [Classes and nil](https://github.com/Kayyo321/neura/blob/main/tests/backend/programs/class-nil.nra) exercises identity, override dispatch, casts, and operations on primitive and composite values. |
-| Interfaces, multiple bounds, and for-each | [Interfaces](https://github.com/Kayyo321/neura/blob/main/tests/backend/programs/interfaces.nra) exercises generic requirements, inherited defaults, multiple interface bounds, and the iterator protocol. |
-| Text, raw float bits, and message traps | [Primitives](https://github.com/Kayyo321/neura/blob/main/tests/backend/programs/stdlib-primitives.nra) covers UTF-8, IEEE bit access, and scalar value members. [Message traps](https://github.com/Kayyo321/neura/blob/main/tests/backend/traps/message-trap.nra) checks the Unicode message and source location. |
-| Reserved library roots, source host bindings, and the entry point | [Backend library test](https://github.com/Kayyo321/neura/blob/main/tests/backend/stdlib.cmake) checks trusted imports, both entry forms, reachable host bindings, and host error continuations. Its installed fixture does not establish availability of every proposed host provider. |
-| Runtime-sized collections and GC | Built-in lists grow at runtime and expose their structural `version`. Arrays still originate from literals. The [VM tests](https://github.com/Kayyo321/neura/blob/main/tests/backend/vm_tests.cpp) check collection under heap pressure and tracing through cycles. Public `insert_at` and `truncate` remain optional. |
-
-
-### 3.2 Status of the first plan's blockers
-
-| First plan | Current design |
-| --- | --- |
-| L1 Interfaces, L12 iterable for-each | [G4](#g4-interfaces) and [G5](#g5-for-each-over-library-collections) supply the language machinery. The collection interfaces and adapters still need source implementations. |
-| L2 Universal members and an `Object` root | [G3](#g3-universal-members) supplies operations for supported values and an explicit class-reference root spelled `class`. Scalar values are not boxed into it. |
-| L3 Function types and closures | [G1](#g1-function-types-over-type-parameters) permits concrete and generic callback types. |
-| L4 Automatic reclamation | [NVM](NVM#garbage-collection) supplies deterministic tracing and reclaims cycles. Host resources still require explicit close. |
-| L5 Vacant storage and storage operations | Runtime-sized arrays, clearing vacant slots, and bulk copy are unnecessary for the chosen layouts. Lists supply growing storage and `nil` supplies absent node links. [Optional accelerations](#34-optional-accelerations) |
-| L6 Bitwise operators and wrapping arithmetic | Checked shifts and bitwise operators are available. [Arithmetic recipes](#72-arithmetic-without-wrapping-intrinsics) implement modular operations without changing ordinary checked arithmetic. [N1](#n1-float-bit-access) supplies exact float bit access. |
-| L7 `char` and string semantics | [T1](#t1-text-primitives) supplies immutable UTF-8 text primitives. [Scalars](#83-scalars) represent code points as `uint32`. |
-| L8 Class-level members and closed classes | Type modules supply factories. No class-level members are required. |
-| L9 Type tests and downcasts | Class and interface references support `is` and checked `as`. Error outcomes still use exhaustive matching, and collection APIs compare their typed values directly. |
-| L10 Enum intrinsics | Fieldless ordinals and variant text are available. Ordinal collections use integer keys. A payload enum's discriminant does not enumerate its values, and no reverse ordinal lookup or reflection is required. |
-| L11 Packaging | [P1](#p1-library-root) reserves the installed standard-library namespace. Imports stay explicit and facade re-exports are optional. |
-| L13 Host and intrinsic declarations | [P2](#p2-host-bindings-in-source) supplies named and versioned host bindings in trusted source. Text, float bit access, and message traps are ordinary language primitives. |
-| E1–E6 Error handling | Returned failures are `Result<T>`, with one active case. Runtime traps keep their reason codes and cannot be caught. Message traps carry reason 3. Unwinding, defer, and recovery are outside the design. |
-
-
-### 3.3 Compiler and runtime dependencies
-
-The identifiers below describe dependencies of the source implementations. A compiler facility can be implemented before the corresponding library module or host provider is ready.
-
-#### G1. Function types over type parameters
+### G1. Function types over type parameters
 
 Function types may mention enclosing type parameters in signatures, locals, fields, tuples, collections, and type arguments. Generic bodies may create closures that capture such values. Specialization resolves their types and generates the concrete callable and capture layouts. Captured local bindings are copied. Mutating a captured object's fields mutates the shared object.
 
 This supports generic predicates, comparators, collection callbacks, `Sequence` adapters, and `Optional` and `Result` mapping helpers.
 
-#### G2. Generic enums
+### G2. Generic enums
 
 Generic declarations use `enum<T>(None, Some(T))` and specialize per concrete argument list. Variant construction supplies explicit type arguments, as in `Optional<T>.Some(value)`. A pattern uses the enum qualifier, as in `Optional.Some(value)`, or a concrete type overlay. The subject's type fixes the pattern's payload types.
 
 A specialized enum can hold tuples, collection elements, callbacks, class references, or nested enum values. Its variants remain exhaustive. This permits direct `Optional<T>` and `Result<T>` source implementations. Nested patterns, guards, and inferred type arguments remain outside this design.
 
-#### G3. Universal members
+### G3. Universal members
 
 - **G3a. Value members.** Supported scalars, strings, fieldless enums, tuples, arrays, and lists have `equals`, `hash_code`, and `to_string`. Generic calls resolve after specialization. Tuples and collections recurse into supported element types. Payload enums require functions supplied by their authors. Calling a generic value operation with an unsupported specialized type is diagnosed.
 - **G3b. Class members.** The root type `class` holds class and interface references. Classes inherit `equals(other: class)`, `hash_code()`, and `to_string()`, with ordinary override dispatch. An override can use `other is MyClass` before a checked `other as MyClass` to compare fields. `==` and `!=` on class references compare identity and never call an override. Default hashing and text allocate an identity number on the first request; the number follows request order rather than allocation order. Variant and class names used by these operations are execution data.
@@ -91,17 +52,17 @@ A specialized enum can hold tuples, collection elements, callbacks, class refere
 
 These contracts support default key operations in hash collections. A type may still supply custom comparison, equality, and hash callbacks where a collection constructor accepts them.
 
-#### G4. Interfaces
+### G4. Interfaces
 
 Interfaces can be generic, inherit other interfaces, and declare required and default methods. A class can implement several interfaces. Multiple bounds are expressible on a type parameter. Inherited default conflicts require an explicit override. Interface values use the existing class dispatch machinery and can hold `nil`.
 
 The standard collection and stream interface declarations are source work. Existing callback-based adapters can remain where a function type accurately describes a single operation.
 
-#### G5. For-each over library collections
+### G5. For-each over library collections
 
 For-each over an interface iterable calls `iterator()` once, tests `has_next()`, and calls `next()` for each element. Collection iterators own their structural-change checks. For-each over a built-in list uses the existing NVM structural-version rule. A library adapter should keep its order and modification contract the same through either entry point.
 
-#### T1. Text primitives
+### T1. Text primitives
 
 Strings are immutable UTF-8 with byte length bounded by `int`. The language supplies:
 
@@ -115,41 +76,31 @@ Strings are immutable UTF-8 with byte length bounded by `int`. The language supp
 
 These operations supply the substrate for `Std.Text`, parsing, encodings, and string-keyed collections.
 
-#### N1. Float bit access
+### N1. Float bit access
 
 A float value's `to_bits()` returns the unsigned integer of the same width. `float16.from_bits`, `bfloat16.from_bits`, `float32.from_bits`, and `float64.from_bits` preserve every bit, including NaN payloads and the sign of zero. The `float` alias has the `float32` operation. Reinterpreting bits does not round or perform a numeric `as` conversion. Circuit conversion connects the same value lanes to a differently typed result.
 
-#### F1. Trap with a message
+### F1. Trap with a message
 
 The built-in statement `trap_with_message(message)` ends execution with trap reason 3 and includes its string in the diagnostic. It does not need an assertion host service. `Failure.trap` wraps this primitive; its callers do not catch it.
 
 Use the primitive directly in a value-returning function's trap-only branch so that return analysis sees a terminator. Calls to a void wrapper follow the ordinary function typing rules.
 
-#### P1. Library root
+### P1. Library root
 
 The installed tool finds its standard-library source root relative to the executable. Reserved `Std` imports resolve in that trusted tree, separately from ordinary `-I` roots. A user file cannot declare or shadow the `Std` namespace. Imports containing an `Internal` component are reserved for trusted library source. No implicit prelude is added.
 
-#### P2. Host bindings in source
+### P2. Host bindings in source
 
 Trusted library source can bind a bodyless function with the suffix `host("service.name", version)`. The return type is a payload enum with `Ok` and `Error(uint32)` variants, with an optional success payload on `Ok`. Both continuations return to the caller. The emitted import records the signature and version and includes only reachable bindings. A service still needs a matching runtime provider and a capability policy. A declaration alone cannot create either.
 
-#### P3. Entry point from the library
+### P3. Entry point from the library
 
-An override of `Std.Program.Entry.main` can be the image entry point. Its `ExitCode` maps `Ok` to 0, `Failure` to 1, `Status(int)` to the validated process status, and each named variant to its fixed status. The compiler still accepts the legacy `SysIo.Entry` route for migration and rejects an image with two entry points.
+An override of `Std.Program.Entry.main` can be the image entry point. Its `ExitCode` maps `Ok` to 0, `Failure` to 1, `Status(int)` to the validated process status, and each named variant to its fixed status. The compiler rejects an image with two entry points.
 
-### 3.4 Optional accelerations
+### What the language does not provide
 
-None of these blocks anything. Each replaces a loop of storage operations with one, or saves typing. They are listed so that nobody mistakes them for prerequisites.
-
-| ID | Addition | Replaces | Benefit |
-| --- | --- | --- | --- |
-| A1 | Allocate a list of a runtime length filled with one value | A loop of `append` | Hash index tables and sort buffers are filled in one operation. |
-| A2 | List insert at an index, and truncate to a length | `append` then shifting by element writes; repeated `remove_at` of the last element | `add_at`, `clear`, and `truncate` cost one operation instead of one per element. |
-| A3 | Bulk copy of a range between lists | Element-by-element reads and writes | Sorting merges and deque rebalancing. |
-| A4 | Read of a list's structural version, implemented as `list.version` | A modification count kept by the wrapper class | Iterator objects detect modification made through any backing-list alias. [ArrayList](#93-arraylistt) |
-| A5 | Hexadecimal integer literals | Decimal constants | Readability of masks and published constants. |
-| A6 | Re-export of generic classes, generic functions, and payload enums | Importing each type's own module | One import per library area ([section 4.2](#42-source-layout)). |
-| A7 | Inference of type arguments | Explicit type arguments at every generic call | Shorter call sites. |
+The language has no hexadecimal integer literals, no inference of type arguments, no re-export of generic classes, generic functions, or payload enums, no list operation that allocates a list of a given length, inserts at an index, or truncates, and no bulk copy of a range between lists. The library builds these from the operations it has; [design notes](https://github.com/Kayyo321/neura/blob/main/docs/design/Stdlib.md) list them and the members that would use them.
 
 ## 4. Architecture
 
@@ -174,15 +125,15 @@ None of these blocks anything. Each replaces a loop of storage operations with o
 | `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` | [Foreign interop](ForeignInterop) |
 | `Std.Concurrent` | `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, `Guarded` | [19](#19-stdconcurrent), [Concurrency](Concurrency#9-stdconcurrent) |
 
-`Std.Program`, `Std.Io.Console`, and `Std.Test` replace the built-in `SysIo` and `Test` modules, which are deleted ([section 4.6](#46-retiring-sysio-and-test)).
+`Std.Program`, `Std.Io.Console`, and `Std.Test` replace the built-in `SysIo` and `Test` modules, which are deleted ([section 4.6](#46-retired-built-ins)).
 
 ### 4.2 Source layout
 
 - The library source tree is `stdlib/`, laid out by the rules in [Project structure](ProjectStructure). The installed tool discovers its trusted copy automatically. Ordinary `-I` roots cannot provide `Std` modules.
-- **Decision: one module per type, named after the type.** `stdlib/std/collections/array-list.nra` declares the module `ArrayList`, imported as `Std.Collections.ArrayList`, which exports the class `ArrayList`. The probes confirmed that a module can export a class of its own name and that the importer can construct it and use the module's enums in `match`.
-- **Factories are module functions.** Where Java writes a static method on a class, this library has an exported function in the type's module. This is why the first plan's class-level members are not needed. In the tables below, a type's "module functions" are these.
+- **One module per type, named after the type.** `stdlib/std/collections/array-list.nra` declares the module `ArrayList`, imported as `Std.Collections.ArrayList`, which exports the class `ArrayList`.
+- **Factories are module functions.** Where Java writes a static method on a class, this library has an exported function in the type's module. No class-level members are needed. In the tables below, a type's "module functions" are these.
 - **Internal helpers** are unexported members of the module that uses them, or separate modules under an `Internal` component (`Std.Collections.Internal.HashCore`) when two types share them. Nothing outside `Std` imports an `Internal` module; P1's namespace rule extends to enforce that.
-- **Facades are deferred.** A module such as `Std.Collections` that re-exports every collection type needs acceleration A6. It is a convenience: the type modules are the stable import paths and remain valid afterwards.
+- **No facades.** A module such as `Std.Collections` that re-exports every collection type needs re-export of generic classes, which the language does not have ([section 16](#16-not-provided)). The type modules are the import paths.
 - **There is no general prelude.** Import modules to use their names. Primitive member syntax can resolve functions from the primitive's trusted companion module.
 - The library is compiled together with the program. There is no separately compiled library image.
 
@@ -235,13 +186,11 @@ The exact signatures are in [NVM](NVM#host-services). The retired `neura.test.as
 - **Ordering.** `neura.fs.list` returns names sorted by their UTF-8 bytes. The host sorts.
 - Host IDs are opaque `int64` values that the library wraps in classes and never exposes.
 
-### 4.6 Retiring `SysIo` and `Test`
+### 4.6 Retired built-ins
 
-This migration is complete: every example and test uses the new modules, and importing `SysIo` or `Test` is an error that names `Std.Io.Console` and `Std.Program`, or `Std.Test`. Images built earlier whose only import is `neura.console.write_line` still run; images that call the retired assertion services fail to bind (`tests/backend/legacy`). The rest of this section is the plan as written.
+The compiler has no built-in `SysIo` or `Test` module. Importing `SysIo` is an error, `the built-in SysIo module was removed; use Std.Io.Console and Std.Program`, and importing `Test` is an error, `the built-in Test module was removed; use Std.Test`. An image built with the removed host services behaves as follows: an image whose only import is `neura.console.write_line` runs, and an image that calls the removed assertion services fails to bind (`tests/backend/legacy`).
 
-`SysIo` and `Test` are development scaffolding: the compiler resolves both names during lowering, the converter recognizes `SysIo.println` and the entry override by name, and NVM registers two test services. Library development ends with all of that deleted. Nothing forwards from the old names, and no alias is kept.
-
-| Today | Replacement | Needs |
+| Removed | Replacement | Needs |
 | --- | --- | --- |
 | `SysIo.println(text)`; a failed write traps with reason 3 | `Console.print_line(text)` in `Std.Io.Console`: a function bound to `neura.console.write_line` version 1, wrapped so that a failed write calls `Failure.trap` | P2, F1 |
 | `SysIo.Entry`, a module with the requirement `main` | `Std.Program.Entry`, a library module with the same requirement | P3 |
@@ -249,14 +198,7 @@ This migration is complete: every example and test uses the new modules, and imp
 | `Test.assert(condition)` and `Test.assert_equal_int32(expected, actual)`, host services that record a message and return an error that traps | `Std.Test` ([section 14.2](#142-stdtest)): Neura functions that build the message and call `Failure.trap` | F1 |
 | The runner prints the recorded assertion message | The runner prints the trap's message | F1 |
 
-
-Migration proceeds in source order:
-
-1. Supply `Std.Program`, `Std.Io.Console.print_line`, `Failure.trap`, and the typed assertions in `Std.Test`. Use `trap_with_message` for the library failure path.
-2. Migrate examples and tests to the new imports. Compare exit status, text, and failure diagnostics.
-3. Retire built-in name resolution and the legacy assertion host services once no shipped source depends on them. Keep the console provider for the standard module's declared import. Document what earlier executable images need from the runner.
-
-The compiler accepts the old and new entry routes during this migration. A program with both is rejected.
+A program with two entry points is rejected.
 
 ### 4.7 Versioning
 
@@ -287,11 +229,11 @@ Library trap conditions and their messages. The message text is part of the cont
 | An assertion failed | The assertion's message | `Std.Test` |
 | A host write that has no error result failed | `console write failed` | `Console.print_line` |
 
-**Decision: the library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
+**The library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
 
-**What the absence of unwinding changes.** The first plan assumed panics that unwind, deferred actions, and recovery. None exists, and this plan asks for none.
+**What the absence of unwinding means.** The language has no panics that unwind, no deferred actions, and no recovery, and the library has none.
 
-| First plan's promise | Now |
+| Not provided | Instead |
 | --- | --- |
 | `Closeables.use` closes the resource even when the body panics | Replaced by the scoped helpers of [section 5.5](#55-resources), which close the resource on every ordinary completion. A body cannot fail and return; it either returns or the run ends, and when a run ends, by return or by trap, the host releases every file and socket. |
 | "If the predicate of `remove_if` panics, the collection is left valid" | Removed. A trap inside a callback ends the run, so no state can be observed afterwards. No collection keeps recovery code. |
@@ -319,7 +261,7 @@ The compiler supplies these results for supported value members. Companion funct
 
 Float equality here deliberately differs from `==`: it is an equivalence relation consistent with the hash, which hash tables need, while `==` stays IEEE 754. The multiplier 31 is chosen because multiplying by 31 is a shift and a subtraction.
 
-The module **`Hash`** has the building blocks, all ordinary functions that work today:
+The module **`Hash`** has the building blocks, all ordinary functions:
 
 | Member | Behavior |
 | --- | --- |
@@ -335,7 +277,7 @@ A class's hash starts from 17 and combines each field's hash in declaration orde
 
 ### 5.3 Ordering
 
-- **`Ordering`** is a fieldless enum with variants `Less`, `Equal`, and `Greater`. Comparison results are `Ordering` values, never integers, so the subtraction idiom (which would trap on overflow) cannot be written. The module `Ordering` also exports `reverse(o)`, `then(first, second)` (returns `first` unless it is `Equal`), `is_less(o)`, `is_at_most(o)`, `is_greater(o)`, and `is_at_least(o)`. All of this works today.
+- **`Ordering`** is a fieldless enum with variants `Less`, `Equal`, and `Greater`. Comparison results are `Ordering` values, never integers, so the subtraction idiom (which would trap on overflow) cannot be written. The module `Ordering` also exports `reverse(o)`, `then(first, second)` (returns `first` unless it is `Equal`), `is_less(o)`, `is_at_most(o)`, `is_greater(o)`, and `is_at_least(o)`.
 - **A comparator is a native function value** of type `(T, T) → Ordering`. There is no comparator interface or wrapper class. A named function, a bound method, or a closure all serve. A comparator must define a total order; if it does not, the library stays memory safe and terminates, and the resulting order or lookup is unspecified.
 - **Natural orders** are named functions in the companion modules, usable as comparators directly: `Int32.compare`, `Float64.total_compare`, `Strings.compare`, and so on.
 
@@ -356,15 +298,15 @@ The loop form depends on the source value.
 
 | Way | Available | Notes |
 | --- | --- | --- |
-| For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Today | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
-| An index loop over `size()` and `get(index)` | Today | For lists and deques. No modification check. |
-| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Today, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
-| For-each directly over the collection | Today | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
+| For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Yes | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
+| An index loop over `size()` and `get(index)` | Yes | For lists and deques. No modification check. |
+| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
+| For-each directly over the collection | Yes | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
 
-- **Decision: iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
-- **Map iteration yields tuples.** A map's iterator returns `[K, V]`. The tuple is an immutable snapshot of the entry, which is the contract the first plan's `Entry` class existed to state.
-- **Decision: no removal through iterators.** Collections remove in bulk with `remove_if` and `retain_if`.
-- **Decision: fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
+- **Iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
+- **Map iteration yields tuples.** A map's iterator returns `[K, V]`. The tuple is an immutable snapshot of the entry, which is an immutable snapshot of one association.
+- **No removal through iterators.** Collections remove in bulk with `remove_if` and `retain_if`.
+- **Fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
 - The iteration order of every collection is specified in section 9.
 - `Iterator<T>` and `Iterable<T>` are the interfaces for this protocol. Concrete iterator classes and collections implement these member signatures.
 
@@ -372,7 +314,7 @@ The loop form depends on the source value.
 
 - A host resource (`File`, `TcpStream`, `TcpListener`) has `close() → Result<Unit>`. Closing again does nothing and returns `Ok`. Any other operation on a closed resource returns an `Io` error of kind `Closed`. If `close` reports an error the resource is still closed.
 - **Closing is always explicit.** Reclaiming an unreachable resource object frees its storage and does nothing else: `deinit` does not run and the host ID stays open until the run ends. No library class declares `deinit`. `Fs` and `Net` each allow at most 1,024 simultaneously open IDs per run; exceeding that returns an `Io` error of kind `Other`.
-- **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. The earlier decision here was "there is no scoped helper"; it is reversed, because with tasks a body can end early by cancellation and the close must still happen ([Concurrency](Concurrency#7-cancellation-deadlines-and-resources)).
+- **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. With tasks a body can end early by cancellation, and the close must still happen ([Concurrency](Concurrency#7-cancellation-deadlines-and-resources)).
   - If the open fails, the helper returns that error and does not call the body.
   - The body runs in a `scope` the helper owns, so every task started in that scope has finished before the resource is closed.
   - If the close succeeds, the helper returns the body's result unchanged. If the close fails after a body `Ok`, it returns the close error. If the close fails after a body `Err`, it returns a `Context` error whose cause is the body's error and whose message carries the close error's message: `closing the resource also failed: ` and that message from `with_open`, `close failed after the body failed: ` and that message from `with_connection`.
@@ -385,7 +327,7 @@ The loop form depends on the source value.
 ### 5.6 Callbacks
 
 - A callback parameter is written as a native function type. The library declares no named function shapes: a type overlay can be neither generic nor a function type, and the native spelling says everything a name would.
-- **Concrete callbacks work today.** `Logger` takes a sink of type `(string) → void`, and any module can use function values whose types name no type parameter.
+- **Concrete callbacks.** `Logger` takes a sink of type `(string) → void`, and any module can use function values whose types name no type parameter.
 - **Generic callbacks specialize with their caller.** A member of `ArrayList<T>` can take `(T) → bool`. The G1 label in API tables identifies members that depend on this compiler facility.
 - **Capture is by value.** A closure copies the locals it uses when it is created. A closure cannot count or accumulate in a captured local. It captures an object and mutates that. `Std.Core` provides `Cell<T>` ([section 6.5](#65-small-types)) for the purpose: a callback that sums captures a `Cell<int64>`.
 - **Capture of a reference is shared.** A closure that captures a collection sees later changes to it, and changes it makes are visible outside. A callback passed to a collection's own member must not structurally modify that collection; the member compares the modification count after each call and traps on a change.
@@ -423,7 +365,7 @@ A function that a spawned task calls must be task-safe ([Concurrency](Concurrenc
 
 ### 6.1 `Optional<T>`
 
-**Recommendation: a generic payload enum with the variants `None` and `Some(T)`, read with `match`.** The first plan's class (a `present` flag and a late field) is dropped. The enum cannot be read without handling both cases, has no trapping accessor to misuse, and needs no late field.
+**`Optional<T>` is a generic payload enum with the variants `None` and `Some(T)`, read with `match`.** The enum cannot be read without handling both cases, has no trapping accessor to misuse, and needs no late field.
 
 Requires G2. The module `Optional` exports the enum and these functions; the last column says what each needs beyond G2.
 
@@ -444,7 +386,7 @@ The mapping functions are conveniences. A `match` is useful when the cases requi
 
 ### 6.2 `Result<T>`
 
-**Recommendation: a generic payload enum with the variants `Ok(T)` and `Err(Error)`.** It is the one representation of a fallible outcome. An operation with no value returns `Result<Unit>`. The error type is fixed to `Error` so that every fallible function composes with every other.
+**`Result<T>` is a generic payload enum with the variants `Ok(T)` and `Err(Error)`.** It is the one representation of a fallible outcome. An operation with no value returns `Result<Unit>`. The error type is fixed to `Error` so that every fallible function composes with every other.
 
 Requires G2. The module `Result` exports the enum and:
 
@@ -463,7 +405,7 @@ There is no accessor for the error alone: `match` reads it.
 
 ### 6.3 `Error`
 
-**Decision: `Error` is a payload enum.** Errors are ordinary values read with `match`. A custom error can hold an `ErrorDetail` reference, which is required to be non-nil.
+**`Error` is a payload enum.** Errors are ordinary values read with `match`. A custom error can hold an `ErrorDetail` reference, which is required to be non-nil.
 
 | Variant | Fields | Meaning |
 | --- | --- | --- |
@@ -475,7 +417,7 @@ There is no accessor for the error alone: `match` reads it.
 
 - `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`, `Cancelled`. The first fourteen map from host error codes 1 through 14, and `Cancelled` from code 15, the answer of a cancelled version 2 request ([Concurrency](Concurrency#104-host-io)); it comes last so that the kinds before it keep their order. `Closed` and `InvalidData` are produced by the library.
 - `ParseErrorKind`, in order: `Empty`, `InvalidCharacter`, `OutOfRange`, `UnexpectedEnd`, `Syntax`.
-- **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works today. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
+- **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
 - Adding a variant to `Error` breaks every `match` without a wildcard arm, so the variant list changes only with a major version. Code that only reports errors should end its `match` with a wildcard arm that calls `Errors.message`.
 - Errors are immutable. A cause is set at construction, so chains are finite and acyclic.
 - **`PortableError`** is the transferable copy of an `Error`, for a failure that must cross a channel or a spawn. `Error` itself is not transferable, because `Custom` holds an `ErrorDetail` object ([Concurrency](Concurrency#51-transferable-types)). `PortableError` has the same variants and fields with one change: `Custom` is `Custom { code: string, message: string }`, and the cause of its `Context` is a `PortableError`.
@@ -504,17 +446,13 @@ Use `nil` for an internal absent reference when it cannot be confused with a rea
 
 ### 6.5 Small types
 
-| Type | Definition | Status |
+| Type | Definition | Available |
 | --- | --- | --- |
-| `Unit` | A fieldless enum with the single variant `Value`. | Today |
-| `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Today |
-| `IntRange` | An immutable class: `start` (inclusive), `end` (exclusive), `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Today |
+| `Unit` | A fieldless enum with the single variant `Value`. | Yes |
+| `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Yes |
+| `IntRange` | An immutable class: `start` (inclusive), `end` (exclusive), `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Yes |
 
-Removed from the first plan:
-
-- **`Pair<A, B>`** is the native tuple `[A, B]`. `partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`.
-- **`Entry<K, V>`** is the tuple `[K, V]`. Its contract was "an immutable snapshot of one association", which a tuple already is. Its text (`key: value`) is produced by the map's `to_string`.
-- **`Boxed<T>`** existed to pass non-class values as `Object`. No API on this page takes an `Object`.
+`Pair`, `Entry`, and `Boxed` do not exist: a pair is the native tuple `[A, B]` (`partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`), and a map entry is the tuple `[K, V]`. No API on this page takes an `Object`.
 
 Named types are kept where the name carries a contract a tuple cannot: `RegexMatch` (group lookup by name), `FileMetadata` (three fields of unrelated types that will grow), and the value classes of `Std.Time`.
 
@@ -552,7 +490,7 @@ Named types are kept where the name carries a contract a tuple cannot: `RegexMat
 
 ### 7.2 Arithmetic without wrapping intrinsics
 
-The first plan asked for wrapping arithmetic and sign reinterpretation as intrinsics. The language's checked operators, shifts that discard high bits, and masks are enough. Each recipe below says why no intermediate value leaves its type. The `uint32` and `uint64` multiplication recipes were probed in both build modes.
+The language has no wrapping arithmetic or sign reinterpretation. The checked operators, shifts that discard high bits, and masks are enough. Each recipe below says why no intermediate value leaves its type. The `uint32` and `uint64` multiplication recipes are tested in both build modes.
 
 | Operation | Recipe | Why it fits |
 | --- | --- | --- |
@@ -570,7 +508,7 @@ The first plan asked for wrapping arithmetic and sign reinterpretation as intrin
 
 Signed wrapping operations convert to the unsigned pattern, operate, and convert back.
 
-**What the recipes do not cover.** A float's bit pattern (N1). Everything else that the first plan routed through intrinsics is on this table: hashing uses the 32-bit rows, `Random` and `Sha256` use the `uint64` and `uint32` rows, `BitSet` uses plain masks and shifts on `uint32`, and `BigInteger` uses the limb row.
+**What the recipes do not cover.** A float's bit pattern (N1). Everything else is on this table: hashing uses the 32-bit rows, `Random` and `Sha256` use the `uint64` and `uint32` rows, `BitSet` uses plain masks and shifts on `uint32`, and `BigInteger` uses the limb row.
 
 ### 7.3 Float modules
 
@@ -613,7 +551,7 @@ Every finite output is a valid Neura float literal for its type. The digits are 
 
 ### 8.1 `Strings`
 
-All of `Strings` needs T1. String operations are functions that take the string first. **Decision:** all positions are byte offsets into the UTF-8 encoding, of type `int`. No member is named `length`: `byte_length` and `scalar_count` say which unit they count. An offset that is out of range, or not on a character boundary where one is required, traps.
+All of `Strings` needs T1. String operations are functions that take the string first. All positions are byte offsets into the UTF-8 encoding, of type `int`. No member is named `length`: `byte_length` and `scalar_count` say which unit they count. An offset that is out of range, or not on a character boundary where one is required, traps.
 
 | Member | Behavior |
 | --- | --- |
@@ -652,7 +590,7 @@ Functions that return several strings return a built-in list, not an `ArrayList`
 
 **UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
 
-**Unicode scope. Decision:** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 8.2 `StringBuilder`
 
@@ -673,9 +611,9 @@ A class in `Std.Core` that accumulates text. Needs T1. The module function `crea
 
 ### 8.3 `Scalars`
 
-**Decision: there is no `char` type.** A code point is a `uint32` holding a Unicode scalar value. The first plan made `char` a language blocker so that a character would print as itself; `StringBuilder.append_scalar` and `Strings.from_scalars` do that explicitly, and the library needs no new primitive type or literal form.
+**There is no `char` type.** A code point is a `uint32` holding a Unicode scalar value. `StringBuilder.append_scalar` and `Strings.from_scalars` print a code point as its character explicitly.
 
-`Scalars` is a module of functions on `uint32` that work today: `is_valid` (at most 0x10FFFF and not a surrogate), `utf8_length` (1 through 4), `is_ascii`, `is_ascii_digit`, `is_ascii_hex_digit`, `is_ascii_alphabetic`, `is_ascii_alphanumeric`, `is_ascii_uppercase`, `is_ascii_lowercase`, `is_ascii_whitespace`, `is_ascii_punctuation`, `is_ascii_control`, `to_ascii_upper`, `to_ascii_lower`, `digit_value(scalar, radix: int) → int` (-1 when it is not a digit of the radix), and `from_digit(value: int, radix: int) → uint32` (lowercase; traps when out of range). Each is a range comparison; none uses a table. The constant `Replacement` is 0xFFFD.
+`Scalars` is a module of functions on `uint32`: `is_valid` (at most 0x10FFFF and not a surrogate), `utf8_length` (1 through 4), `is_ascii`, `is_ascii_digit`, `is_ascii_hex_digit`, `is_ascii_alphabetic`, `is_ascii_alphanumeric`, `is_ascii_uppercase`, `is_ascii_lowercase`, `is_ascii_whitespace`, `is_ascii_punctuation`, `is_ascii_control`, `to_ascii_upper`, `to_ascii_lower`, `digit_value(scalar, radix: int) → int` (-1 when it is not a digit of the radix), and `from_digit(value: int, radix: int) → uint32` (lowercase; traps when out of range). Each is a range comparison; none uses a table. The constant `Replacement` is 0xFFFD.
 
 ### 8.4 `Regex`
 
@@ -704,7 +642,7 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 
 This section fixes the member sets that the concrete classes and the interfaces in [section 9.10](#910-interfaces-and-read-only-views) share.
 
-The **Needs** column names the compiler facilities an implementation relies on.
+The **Needs** column names the compiler facilities of [section 3](#3-language-facilities) that a member uses.
 
 **List contract** (`ArrayList`, `LinkedList`)
 
@@ -778,7 +716,7 @@ All of this needs G3.
 
 ### 9.3 `ArrayList<T>`
 
-**Decision:** `ArrayList` is a thin class over one built-in list. Each built-in list operation is a single NVM storage operation; a library-managed backing array would spend graph evaluations on capacity checks for every append and would need runtime-length arrays, which do not exist.
+`ArrayList` is a thin class over one built-in list. Each built-in list operation is a single NVM storage operation; a library-managed backing array would spend graph evaluations on capacity checks for every append and would need runtime-length arrays, which do not exist.
 
 - **Layout.** One built-in list `storage`. Its `version` is the modification counter.
 - **Module functions.** `create<T>()`, `of<T>(items: T[list])` (copies), `filled<T>(count, value)`, and `wrap<T>(items: T[list])` (adopts the list without copying).
@@ -789,20 +727,20 @@ All of this needs G3.
 | --- | --- | --- |
 | `get`, `set`, `size`, `add`, `remove_last` | One storage operation | Built-in index, length, `append`, and `remove_at` of the last index. |
 | `remove_at` | One storage operation | Built-in `remove_at`. |
-| `add_at` | One operation per element after the index | At the end, append the new value directly. Otherwise append the last element again, shift the suffix right by one with indexed writes, and store the new value. A2 would make this one operation. |
-| `truncate`, `clear` | One operation per removed element | Repeatedly remove the last index from the same backing list. A2 would shorten this to one in-place operation. |
+| `add_at` | One operation per element after the index | At the end, append the new value directly. Otherwise append the last element again, shift the suffix right by one with indexed writes, and store the new value.  |
+| `truncate`, `clear` | One operation per removed element | Repeatedly remove the last index from the same backing list.  |
 | `remove_if` | Linear | Check the version after each callback, compact the kept elements by indexed writes, then remove the tail from the end. The backing version advances on each actual removal. |
 | `reverse`, `fill`, `slice`, `to_list` | Linear | Element reads and writes. |
 
-No removal leaves a stale reference: the built-in list drops the slot, and the probes showed the removed element is reclaimed.
+No removal leaves a stale reference: the built-in list drops the slot, and the removed element is reclaimed.
 
 ### 9.4 `ArrayDeque<T>`
 
-**Redesign.** The first plan used a ring buffer in an array with vacant slots. Without vacant slots a ring would keep a reference to every removed element until its slot was reused. The deque is instead two built-in lists used as stacks.
+The deque is two built-in lists used as stacks. A ring buffer would keep a reference to every removed element until its slot was reused, because the language has no vacant slots.
 
 - **Layout.** `front` holds the first part of the deque in reverse order, so that its last element is the deque's first. `back` holds the rest in order. Plus the modification count.
 - `add_first` appends to `front`; `add_last` appends to `back`. `remove_first` removes the last element of `front`; `remove_last` removes the last element of `back`. Each is one storage operation, and the removed slot is gone, so nothing is retained.
-- **Rebalancing.** When `remove_first` finds `front` empty and `back` not empty, it moves the first half of `back` (rounded up) into `front` in reverse order and shifts the rest of `back` down, in a helper function. `remove_last` on an empty `back` mirrors it. A rebalance of `n` elements is followed by at least `n / 2` cheap removals from that end, so every end operation is amortized constant time. A3 would make the move two bulk operations.
+- **Rebalancing.** When `remove_first` finds `front` empty and `back` not empty, it moves the first half of `back` (rounded up) into `front` in reverse order and shifts the rest of `back` down, in a helper function. `remove_last` on an empty `back` mirrors it. A rebalance of `n` elements is followed by at least `n / 2` cheap removals from that end, so every end operation is amortized constant time.
 - **Indexing.** `get(i)` reads `front[front.length - 1 - i]` when `i` is less than `front.length`, and `back[i - front.length]` otherwise. Constant time.
 - **Iteration** is first to last: `front` from its end to its start, then `back`.
 
@@ -819,7 +757,7 @@ It follows both the list and the deque contracts. Prefer `ArrayList` or `ArrayDe
 
 ### 9.6 Hash collections
 
-**Decisions kept from the first plan:** hash collections iterate in **insertion order**, so output never depends on hash values, and the load factor is fixed at one half.
+Hash collections iterate in **insertion order**, so output never depends on hash values, and the load factor is fixed at one half.
 
 The index and entry tables are built-in lists grown by `append`. The shared probing core uses indices and hash values. Constructors can use specialized default value members or accept caller-supplied key operations.
 
@@ -833,7 +771,7 @@ The index and entry tables are built-in lists grown by `append`. The shared prob
 
 #### `HashCore`
 
-`Std.Collections.Internal.HashCore` is a **non-generic** class. It knows hashes and entry numbers. It never sees a key. The owning collection keeps the keys and values in its own dense lists, indexed by entry number, and does the key comparison itself. One core therefore serves every hash collection, including the ones that can be written today.
+`Std.Collections.Internal.HashCore` is a **non-generic** class. It knows hashes and entry numbers. It never sees a key. The owning collection keeps the keys and values in its own dense lists, indexed by entry number, and does the key comparison itself. One core therefore serves every hash collection, including `IntMap` and `StringMap`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -867,7 +805,7 @@ When compaction happens:
 
 | Class | Keys | Key operations | Needs |
 | --- | --- | --- | --- |
-| `IntMap<V>` | `int` | `Int32.hash` and `==`, called directly | Nothing: it can be written today |
+| `IntMap<V>` | `int` | `Int32.hash` and `==`, called directly | Nothing |
 | `StringMap<V>` | `string` | `Strings.hash` and `Strings.equals` | T1 |
 | `HashMap<K, V>`, `HashSet<T>` created with `with_keys<K, V>(hash: (K) → uint32, same: (K, K) → bool)` | Any | The two function values, stored in the collection | G1 |
 | `HashMap<K, V>`, `HashSet<T>` created with `create<K, V>()` | Any | `hash_code` and `equals` | G3 |
@@ -882,9 +820,9 @@ When compaction happens:
 
 ### 9.7 `TreeMap<K, V>` and `TreeSet<T>`
 
-Sorted collections ordered by a comparator given at construction. They need G1, because the comparator's type mentions `K`. **Decision:** a comparator is always required; for a built-in type pass its `compare` function. Two keys are the same key when the comparator returns `Equal`; `equals` is not consulted.
+Sorted collections ordered by a comparator given at construction. They need G1, because the comparator's type mentions `K`. A comparator is always required; for a built-in type pass its `compare` function. Two keys are the same key when the comparator returns `Equal`; `equals` is not consulted.
 
-**Decision kept:** the balanced tree is an **AVL tree**. Lookups dominate, each comparison is a call through a function value, and an AVL tree is at most about 1.44 log2 of the size tall against about 2 log2 for a red-black tree.
+The balanced tree is an **AVL tree**. Lookups dominate, each comparison is a call through a function value, and an AVL tree is at most about 1.44 log2 of the size tall against about 2 log2 for a red-black tree.
 
 Nodes are separately allocated. Missing child and parent links use `nil`.
 
@@ -913,12 +851,11 @@ These rules fix which of several equal elements comes out first; they are not fi
 
 ### 9.9 `BitSet` and `OrdinalMap<V>`
 
-Both can be written today.
 
 - **`BitSet`** is a set of non-negative `int` values following the set contract. Layout: a built-in `uint32` list of words (bit `i` is in word `i / 32` at position `i % 32`) and a cached `count`. A negative element traps. Setting a bit beyond the last word appends zero words. Besides the contract it has `flip(i)`, the in-place `union_with`, `intersect_with`, `subtract`, and `symmetric_difference_with`, and `next_set(from) → int` (the next member at or after `from`, or -1). Every operation is a mask, a shift by 0 through 31, or a comparison on `uint32`; nothing wraps. Iteration is ascending. Equality is set equality, so trailing zero words do not matter.
 - **`OrdinalMap<V>`** is a map from the integers 0 through `n - 1` to values, with `n` fixed at construction. Layout: an `int` list `position` of length `n` (the key's place in the dense lists, or -1), a dense `int` list of keys, and a dense list of values. `set` appends to the dense lists; `delete` moves the last dense entry into the removed place and removes the last slot, so nothing is retained. Every operation is constant time. Iteration is in key order, by scanning `position`.
 
-**Enum keys.** The first plan had `EnumSet<E>` and `EnumMap<E, V>` built on intrinsics for an enum's variant count and for constructing a variant from an ordinal. Neither intrinsic is needed. A fieldless enum already converts to its ordinal with `as`, so a set of variants is a `BitSet` of ordinals and a map keyed by variants is an `OrdinalMap<V>` sized by the caller with the number of variants. The caller converts at the call. Going back from an ordinal to a variant is a `match`-style function the enum's author writes. This applies to fieldless enums only: a payload enum has no ordinal conversion, and nothing here constructs one.
+**Enum keys.** There is no `EnumSet<E>` or `EnumMap<E, V>`. A fieldless enum already converts to its ordinal with `as`, so a set of variants is a `BitSet` of ordinals and a map keyed by variants is an `OrdinalMap<V>` sized by the caller with the number of variants. The caller converts at the call. Going back from an ordinal to a variant is a `match`-style function the enum's author writes. This applies to fieldless enums only: a payload enum has no ordinal conversion, and nothing here constructs one.
 
 ### 9.10 Interfaces and read-only views
 
@@ -937,7 +874,7 @@ Map<K, V> ── MutableMap<K, V>
 └── SortedMap<K, V>
 ```
 
-- **Decision kept:** read-only and mutable interfaces are separate. A function that only reads takes the read-only interface, and no member simulates immutability by trapping.
+- Read-only and mutable interfaces are separate. A function that only reads takes the read-only interface, and no member simulates immutability by trapping.
 - Members that need only other members (`is_empty`, `first`, `contains_all`, `for_each`) become default methods written once in the interface.
 - `ImmutableList<T>`, `ImmutableSet<T>`, and `ImmutableMap<K, V>` are classes that copy their contents at construction and implement only the read-only interfaces. Their module functions `of` take a built-in list (for the map, a list of `[K, V]`; a duplicate key traps).
 - `Lists.same_elements`, `Sets.same_elements`, and `Maps.same_entries` compare collections of different classes through the read-only interfaces. They also need G3.
@@ -958,13 +895,13 @@ It makes at most about `n log2 n` comparator calls. `ArrayList.sort` calls it on
 
 **`binary_search<T>(items: T[list], value: T, c) → int`** requires `items` sorted by `c`. It finds the lowest index whose element is not `Less` than `value`. If that element compares `Equal`, it returns the index, the first of any equal run. Otherwise it returns `-(insertion point) - 1`.
 
-The module **`Lists`** has helpers for built-in lists that need no callback and work today: `copy<T>(items)`, `concat<T>(a, b)`, `reverse<T>(items)`, `swap<T>(items, i, j)`, `fill<T>(items, value)`, `insert_at<T>(items, index, value)`, `truncate<T>(items, length)`, `clear<T>(items)`, `filled<T>(count, value)`, and `from_array<T>(items: T[])`. There is no conversion from a list to an array, because an array's length must come from a literal.
+The module **`Lists`** has helpers for built-in lists that need no callback: `copy<T>(items)`, `concat<T>(a, b)`, `reverse<T>(items)`, `swap<T>(items, i, j)`, `fill<T>(items, value)`, `insert_at<T>(items, index, value)`, `truncate<T>(items, length)`, `clear<T>(items)`, `filled<T>(count, value)`, and `from_array<T>(items: T[])`. There is no conversion from a list to an array, because an array's length must come from a literal.
 
 ### 9.12 `Sequence<T>`
 
 A class for lazy pipelines, the counterpart of Java's streams. Needs G1; the members that return `Optional` also need G2.
 
-**Redesign.** The first plan wrapped an `Iterator<T>` interface and gave each operation an adapter class implementing it. A sequence is now two native function values, and each operation is a closure over the previous two.
+A sequence is two native function values, and each operation is a closure over the previous two.
 
 - **Layout.** `has_next: () → bool`, `next: () → T`, and a `bool` `consumed`.
 - **Why closures fit.** An adapter's state is exactly what a closure captures. `map` captures the upstream pair and the mapping function and needs no state of its own. Operations that do keep state (`take`'s remaining count, `filter`'s buffered element, `enumerate`'s index) hold it in a captured `Cell`, because captured locals are copies ([section 5.6](#56-callbacks)).
@@ -1005,7 +942,7 @@ The module also has functions for sequences of one element type, which a member 
 - **`sqrt`** is correctly rounded. It unpacks the operand, computes the integer square root of the significand shifted to an even exponent, one result bit per step with a running remainder, and rounds to nearest, ties to even. Negative operands other than `-0.0` give NaN.
 - **Other functions:** `cbrt`, `hypot`, `exp`, `expm1`, `log`, `log1p`, `log2`, `log10`, `pow`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `to_radians`, and `to_degrees`.
 
-**Decision:** these functions are a port of fdlibm 5.3, operation for operation, including its argument reduction, its polynomial coefficients (written as exact bit patterns through `Float64.from_bits`), and its special cases. fdlibm relies only on IEEE 754 double arithmetic with round-to-nearest and no fused or reassociated operations, which is what [Numbers](Numbers) guarantees, and on reading and writing the high and low 32-bit words of a double, which is N1. The functions are therefore defined by their source: every runtime produces bit-identical results. Every NaN result is the canonical NaN. fdlibm's copyright notice must be kept in the ported files, following the third-party rule in [CONTRIBUTING](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md).
+These functions are a port of fdlibm 5.3, operation for operation, including its argument reduction, its polynomial coefficients (written as exact bit patterns through `Float64.from_bits`), and its special cases. fdlibm relies only on IEEE 754 double arithmetic with round-to-nearest and no fused or reassociated operations, which is what [Numbers](Numbers) guarantees, and on reading and writing the high and low 32-bit words of a double, which is N1. The functions are therefore defined by their source: every runtime produces bit-identical results. Every NaN result is the canonical NaN. fdlibm's copyright notice must be kept in the ported files, following the third-party rule in [CONTRIBUTING](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md).
 
 ### 10.2 `BigInteger`
 
@@ -1033,15 +970,15 @@ An immutable arbitrary-precision integer. Parsing uses T1 and conversion to `flo
 | `to_int64() → Optional<int64>`, `to_float64() → float64` | `to_float64` rounds to nearest, ties to even, and gives an infinity beyond the range. |
 | `to_string()`, `to_string_radix(radix)` | Radix 10 divides repeatedly by 10^9 and joins nine-digit groups. |
 
-Bitwise and, or, and exclusive or on big integers are not in the first version.
+`BigInteger` has no bitwise and, or, or exclusive or.
 
 ### 10.3 `BigDecimal`
 
 An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`, representing unscaled × 10^(-scale). Parsing uses T1 and float conversion uses N1.
 
-- **Decision:** `equals` and `compare_to` are numeric, so `2.0` equals `2.00`. `hash_code` is computed on the form with trailing zeros stripped.
+- `equals` and `compare_to` are numeric, so `2.0` equals `2.00`. `hash_code` is computed on the form with trailing zeros stripped.
 - `add` and `subtract` give the larger scale; `multiply` gives the sum of the scales; all are exact.
-- **Decision:** division always takes an explicit result scale and `RoundingMode`: `divide(other, scale, mode)`. There is no exact division that could fail on a non-terminating quotient.
+- Division always takes an explicit result scale and `RoundingMode`: `divide(other, scale, mode)`. There is no exact division that could fail on a non-terminating quotient.
 - `RoundingMode` is a fieldless enum, in order: `Up`, `Down`, `Ceiling`, `Floor`, `HalfUp`, `HalfDown`, `HalfEven`, with Java's meanings.
 - Other members: `set_scale(scale, mode)`, `round(precision, mode)`, `strip_trailing_zeros`, `negate`, `abs`, `sign`, `pow(exponent: int)`, `to_big_integer(mode)`, `to_float64()`, and the module functions `of_int64`, `of_big_integer(value, scale)`, `of_float64(v)` (the exact binary value; NaN and infinities trap), and `parse(text) → Result<BigDecimal>`.
 - `to_string` always uses plain notation with exactly `scale` fraction digits when the scale is positive, and appends zeros for a negative scale (zero with a negative scale prints as `0`).
@@ -1055,7 +992,7 @@ An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`
 
 | Member | Behavior | Also needs |
 | --- | --- | --- |
-| `print_line(s: string)` | Writes the text and one LF through `neura.console.write_line`. A failed write traps with `console write failed`, as `SysIo.println` does today. | F1 for the message |
+| `print_line(s: string)` | Writes the text and one LF through `neura.console.write_line`. A failed write traps with `console write failed`. | F1 for the message |
 | `try_print_line(s: string) → Result<Unit>` | The same write, returning the failure. | |
 | `write(s)`, `error_line(s)`, and their `try_` forms | Write raw text through `neura.console.write`, to output or to the error stream. | T1 (text to bytes) |
 | `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
@@ -1063,9 +1000,9 @@ An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`
 | `read_line() → Result<Optional<string>>` | A line without its terminator; `None` at the end of input. | T1 |
 | `output() → ByteSink`, `error() → ByteSink`, `input() → ByteSource` | The console as streams. | |
 
-**Decision:** console output is unbuffered in the library. Each completed format is sent in program order through the existing raw write paths. The byte paths repeat partial writes until they finish or return an error.
+Console output is unbuffered in the library. Each completed format is sent in program order through the existing raw write paths. The byte paths repeat partial writes until they finish or return an error.
 
-**Streams are function values.** The first plan declared interfaces (`ByteReader`, `ByteWriter`, `TextReader`, `TextWriter`) so that a buffer could wrap any reader. Each of those is one operation with a concrete signature, which is what a native function value is, and a bound method supplies one from any object. No interface is needed and nothing here waits for G4.
+**Streams are function values.** A reader or writer is one operation with a concrete signature, which is what a native function value is, and a bound method supplies one from any object. The library declares no `ByteReader`, `ByteWriter`, `TextReader`, or `TextWriter` interface.
 
 | Shape | Type | Contract |
 | --- | --- | --- |
@@ -1073,13 +1010,13 @@ An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`
 | `ByteSink` | `(uint8[list]) → Result<Unit>` | Writes every byte, repeating partial host writes. Does not keep the list. |
 | `TextSink` | `(string) → Result<Unit>` | Writes the string. |
 
-The three names are this page's shorthand. A type overlay cannot name a function type today (probed), so library source spells each type out. Reading the method `read` of a `File` as a value binds the file and gives a `ByteSource`; a closure over anything else gives one too. The probe passed a bound method of a class to a function expecting a byte source and drained it, in both build modes. Closing is not part of a stream: the code that opened a resource closes it.
+The three names are this page's shorthand. A type overlay cannot name a function type, so library source spells each type out. Reading the method `read` of a `File` as a value binds the file and gives a `ByteSource`; a closure over anything else gives one too. Closing is not part of a stream: the code that opened a resource closes it.
 
 | Class | Behavior | Needs |
 | --- | --- | --- |
-| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, `size()`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | Today |
-| `BufferedReader` | Built from a `ByteSource`. Holds up to 8,192 bytes (configurable, at least 16). `read` is a `ByteSource`; `read_exact(count) → Result<uint8[list]>` fails with kind `UnexpectedEnd`; `read_all()`. | Today |
-| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`. It does not close anything. | Today |
+| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, `size()`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
+| `BufferedReader` | Built from a `ByteSource`. Holds up to 8,192 bytes (configurable, at least 16). `read` is a `ByteSource`; `read_exact(count) → Result<uint8[list]>` fails with kind `UnexpectedEnd`; `read_all()`. | None |
+| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`. It does not close anything. | None |
 | `Utf8Reader` | Built from a `ByteSource`. `read_scalar() → Result<Optional<uint32>>`, `read_line() → Result<Optional<string>>`, `read_to_end() → Result<string>`. Invalid UTF-8 fails with kind `InvalidData`. | T1 |
 | `Utf8Writer` | Built from a `ByteSink`. `write` is a `TextSink`; `write_line(s)` adds one LF. | T1 |
 
@@ -1116,10 +1053,10 @@ Needs P2 for every host operation and T1 for `Path`.
 
 ### 11.3 `Std.Program`
 
-This module replaces `SysIo.Entry` ([section 4.6](#46-retiring-sysio-and-test)). It needs P3.
+This module replaces `SysIo.Entry` ([section 4.6](#46-retired-built-ins)). It needs P3.
 
-- **`Entry`** is a module with one requirement, `main(args: string[]) → ExitCode`. A program's entry module inherits it and overrides `main`, exactly as programs inherit `SysIo.Entry` today. Program arguments arrive only through this parameter.
-- **`ExitCode`** is a payload enum: `Ok`, `Failure`, `Status(int)`, and the named statuses `SeriousFailure` (2), `CommandNotFound` (127), `IllegalInstruction` (132), `Breakpoint` (133), `Abort` (134), `ArithmeticError` (136), `OutOfMemory` (137), `BusError` (138), `SegmentationFault` (139), `CpuTimeExceeded` (152), and `FileSizeExceeded` (153). `Ok`, `Failure`, and `Status` map to 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. The first plan kept the old one-variant enum; a payload enum lets a program return any status without a host call. Neura enums cannot carry explicit integer values, so the compiler and `status_of(code) → int` hold the table; the named variants follow declaration order after `Status`, so the original three keep their ordinals.
+- **`Entry`** is a module with one requirement, `main(args: string[]) → ExitCode`. A program's entry module inherits it and overrides `main`, as every program does. Program arguments arrive only through this parameter.
+- **`ExitCode`** is a payload enum: `Ok`, `Failure`, `Status(int)`, and the named statuses `SeriousFailure` (2), `CommandNotFound` (127), `IllegalInstruction` (132), `Breakpoint` (133), `Abort` (134), `ArithmeticError` (136), `OutOfMemory` (137), `BusError` (138), `SegmentationFault` (139), `CpuTimeExceeded` (152), and `FileSizeExceeded` (153). `Ok`, `Failure`, and `Status` map to 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. A payload enum lets a program return any status without a host call. Neura enums cannot carry explicit integer values, so the compiler and `status_of(code) → int` hold the table; the named variants follow declaration order after `Status`, so the original three keep their ordinals.
 - **`status_of(code: ExitCode) → int`** returns the status a variant stands for, trapping for an invalid `Status`.
 - **`Environment.get(name: string) → Lookup`**, where `Lookup` is a payload enum: `Found(string)`, `Missing`, and `Failed(Error)`. A purpose-built enum reads better here than a `Result` of an `Optional`. Needs P2.
 - **`Process.exit(status: int)`** ends the run with that status through `neura.process.exit` and does not return. A status outside 0 through 255 traps. The overload `Process.exit(code: ExitCode)` exits with `status_of(code)`. Needs P2. Returning from `main` is preferred; `exit` is for leaving from deep inside a program.
@@ -1133,13 +1070,13 @@ TCP only. A call waits for its result; in a program with tasks the waiting task 
 - A port outside 0 through 65,535 traps.
 - Service arguments: `connect` takes the host text, the port, and the timeout in nanoseconds; `listen` takes the host text and port; `accept` takes a listener ID; `read` takes a socket ID, a maximum count, and a timeout in nanoseconds (0 for none); `write` takes a socket ID and bytes; `close` takes either kind of ID.
 
-UDP, TLS, HTTP, and name-resolution APIs are not in the first version.
+The library has no UDP, TLS, HTTP, or name-resolution APIs.
 
 ## 12. Time and randomness
 
 ### 12.1 `Std.Time`
 
-The value types are immutable classes with `compare_to`, `equals`, `hash_code`, and `to_string`. They can be written today: their arithmetic is checked integer arithmetic and their text is digits and punctuation joined by concatenation. Each `parse` needs T1.
+The value types are immutable classes with `compare_to`, `equals`, `hash_code`, and `to_string`. Their arithmetic is checked integer arithmetic and their text is digits and punctuation joined by concatenation. Each `parse` needs T1.
 
 **`Duration`** is a signed count of nanoseconds in one `int64` (about ±292 years).
 
@@ -1165,7 +1102,7 @@ The value types are immutable classes with `compare_to`, `equals`, `hash_code`, 
 - `LocalDateTime`: a `LocalDate` and a `LocalTime`. `plus(Duration)` carries into the date. `at_offset(offset) → Instant`. Text form: the date, `T`, the time.
 - `ZoneOffset`: total seconds from -64,800 through 64,800. The constant `Utc`, `of_hours_minutes`, text form `Z` or `±HH:MM`.
 
-**Decision:** there is no time zone database, no named zones, and no daylight-saving rules in the first version. Conversions between instants and local times take an explicit `ZoneOffset`. The ISO forms above are the only text forms.
+There is no time zone database, no named zones, and no daylight-saving rules. Conversions between instants and local times take an explicit `ZoneOffset`. The ISO forms above are the only text forms.
 
 ### 12.2 `Std.Random`
 
@@ -1185,7 +1122,7 @@ The value types are immutable classes with `compare_to`, `equals`, `hash_code`, 
 | `next_float64() → float64` | The top 53 bits of one step, converted to `float64` (exact) and multiplied by 2^-53: uniform in 0 up to but excluding 1. |
 | `next_gaussian() → float64` | Marsaglia's polar method. Each accepted pair yields two values; the second is kept in the generator and returned by the next call. |
 | `fill_bytes(count: int)` | A new built-in `uint8` list. Each step supplies 8 bytes, least significant first; a final partial group uses the low bytes. |
-| `shuffle<T>(items: T[list])` | Fisher–Yates: for `i` from the last index down to 1, swap `i` with `next_int_below(i + 1)`. Generic, with no callback, so it works today. |
+| `shuffle<T>(items: T[list])` | Fisher–Yates: for `i` from the last index down to 1, swap `i` with `next_int_below(i + 1)`. Generic, with no callback. |
 | `choose<T>(items: T[list]) → T` | Traps with `no such element` for an empty list. |
 
 The same seed gives the same sequence of results from every member, on every runtime, in every library version with the same major number. `Random` is not suitable for secrets, and the library offers no cryptographic generator.
@@ -1198,14 +1135,14 @@ The same seed gives the same sequence of results from every member, on every run
 
 Everything here needs T1 except the `Json` value type itself.
 
-- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone and can be written today.
+- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone.
 - **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error).
 - **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero.
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
 
 **`Json`** (RFC 8259).
 
-**Recommendation: `JsonValue` is a recursive payload enum.** The first plan had an interface, six implementing classes, a kind enum, and five accessors returning `Optional`. All of that is one declaration and `match`, and it compiles today: the probe declared this shape and walked it with mutually recursive functions in both build modes.
+**`JsonValue` is a recursive payload enum.** It is read with `match` and walked with mutually recursive functions.
 
 | Variant | Payload |
 | --- | --- |
@@ -1224,7 +1161,7 @@ The module `Json`:
 
 | Function | Behavior | Needs |
 | --- | --- | --- |
-| `number_of_int64(v: int64) → JsonValue` | A `Number` with the integer's text. | Today |
+| `number_of_int64(v: int64) → JsonValue` | A `Number` with the integer's text. | None |
 | `number_of_float64(v: float64) → JsonValue` | A `Number` with the float's text. NaN and infinities trap. | N1 |
 | `member(members, name: string) → Optional<JsonValue>` | The first member with that name. | T1 |
 | `number_to_int64(text: string) → Optional<int64>` | `Some` when the text has no fraction or exponent and fits. | T1 |
@@ -1239,7 +1176,7 @@ The module `Json`:
 
 ### 13.2 `Std.Digest`
 
-Both can be written today: they work on built-in `uint8` lists with the 32-bit recipes of [section 7.2](#72-arithmetic-without-wrapping-intrinsics).
+Both work on built-in `uint8` lists with the 32-bit recipes of [section 7.2](#72-arithmetic-without-wrapping-intrinsics).
 
 - **`Crc32`:** the IEEE 802.3 checksum (reflected polynomial 0xEDB88320, initial value and final exclusive-or of all ones). A 256-entry `uint32` list is computed on first use. `update(bytes)`, `value() → uint32`, `reset()`, and the module function `of(bytes) → uint32`.
 - **`Sha256`:** FIPS 180-4. `update(bytes)`, `finish()` (a built-in list of 32 bytes; a later `update` or `finish` traps with `invalid state: digest finished`), and the module function `of(bytes)`.
@@ -1250,19 +1187,19 @@ These are for integrity checks and content addressing. The library makes no clai
 
 ### 14.1 `Std.Log`
 
-`Logger` can be written today: its sink is a concrete function value and its text is built by concatenation.
+`Logger`: its sink is a concrete function value and its text is built by concatenation.
 
 - `LogLevel` is a fieldless enum, in order: `Trace`, `Debug`, `Info`, `Warn`, `Error`, `Off`. Levels compare by ordinal.
 - **The sink is a function value** of type `(string) → void`, called once per accepted record with the finished line, without a line terminator. `Console.print_line` is a sink. A closure that appends to a captured list is a sink for tests; because a captured list is shared, the test reads the list afterwards. A sink that can fail handles its own failure, typically by counting it in a captured `Cell`.
 - Module functions `create(name: string, sink, level: LogLevel)` and `create_timed(name, sink, level, clock: Clock)`.
 - Each record is one line: with a clock, the instant's text and a space; then the level in uppercase, a space, the name, `: `, and the message. If the clock fails, the timestamp is `-`.
-- **Decision:** without a clock there is no timestamp, so log output is deterministic by default.
+- Without a clock there is no timestamp, so log output is deterministic by default.
 - Members: `trace`, `debug`, `info`, `warn`, `error` (each taking a message), `log(level, message)`, `log_lazy(level, make: () → string)` (the function runs only when the level is enabled), `is_enabled(level)`, and `set_level(level)`.
-- **Decision:** there is no global logger registry. A logger is passed to the code that uses it.
+- There is no global logger registry. A logger is passed to the code that uses it.
 
 ### 14.2 `Std.Test`
 
-This module replaces the built-in `Test` as described in [section 4.6](#46-retiring-sysio-and-test). An assertion builds its message in Neura and calls `Failure.trap`. The runner reports the message from the trapping test.
+This module replaces the built-in `Test` as described in [section 4.6](#46-retired-built-ins). An assertion builds its message in Neura and calls `Failure.trap`. The runner reports the message from the trapping test.
 
 | Member | Failure message | Needs |
 | --- | --- | --- |
@@ -1277,72 +1214,30 @@ This module replaces the built-in `Test` as described in [section 4.6](#46-retir
 
 - The typed assertions remain available for callers that prefer a concrete signature.
 - **There is no assertion that expects a trap.** A trap cannot be caught, so a test function cannot observe one and continue. Code that must trap is tested by a separate program with an expected diagnostic ([section 17](#17-verification)).
-- A failed assertion ends its test, as today. Tests are discovered and run as [Testing](Testing) describes; only the import changes.
+- A failed assertion ends its test. Tests are discovered and run as [Testing](Testing) describes; only the import changes.
 
-## 15. Scope and names
-
-### 15.1 Deferred and excluded
-
-| Area | Status | Reason |
-| --- | --- | --- |
-| Concurrent collections; threads and executors that outlive a scope; free-standing locks | Not provided | `Std.Concurrent` supplies scoped tasks, channels, worker groups, `AtomicInt64`, `Semaphore`, and `Guarded<T>` ([section 19](#19-stdconcurrent)). Concurrent collections come after these, built on `Guarded<T>` or as owner tasks. No other library class is transferable, so a collection belongs to one task. |
-| Reflection, runtime class loading, serialization of arbitrary objects | Excluded | The library needs class and interface type tests, which are available without a general reflection model. |
-| Finalizers, weak references | Excluded | Reclamation runs no code, by design. |
-| Recovery from traps, cleanup when a trap ends the run | Excluded | The runtime has neither, and the library is designed not to need them. The scoped helpers of [section 5.5](#55-resources) cover every ordinary completion. |
-| Time zones, locales, localized formatting, collation | Deferred | They need large versioned data tables. |
-| Unicode normalization, non-ASCII case mapping and classification | Deferred to `Std.Text.Unicode` | Same reason. |
-| Ciphers, signatures, TLS, secure random, HTTP | Deferred | They need review beyond this plan. |
-| `BigInteger` bitwise operations, UDP | Deferred | Not needed for the first version. |
-
-### 15.2 Name audit
+## 15. Names
 
 The lexer's keyword list includes `let`, `const`, `export`, `override`, `func`, `module`, `class`, `import`, `new`, `destroy`, `if`, `else`, `while`, `for`, `in`, `break`, `continue`, `return`, `true`, `false`, `as`, `is`, `nil`, `enum`, `match`, `and`, `or`, `interface`, and `implements`. A keyword cannot be a member name, including after a dot.
 
-| First plan | Problem | Now |
-| --- | --- | --- |
-| `Optional.or(supplier)` | `or` is a keyword | `Optional.or_else(o, other)` |
-| `Optional.or_else(fallback)`, `or_else_get(supplier)` | Freed the name above and matched `Result` | `value_or`, `value_or_else` |
-| `Optional.flat_map` | Named differently from `Result.and_then` for the same operation | `and_then` on both |
-| `Optional.get()`, `Result.get()`, `Result.error()` | Trapping accessors on a sum type | Removed; `match`, or `expect` with a message |
-| `Result.unpack()` | Returned a value and an error together | Removed |
-| `Errors.of`, `Errors.wrap` | | `Error.custom`, `Error.context` |
-| `Char`, `Chars`, `char_count`, `char_at`, `chars`, `append_char` | There is no `char` type | `Scalars`, `scalar_count`, `scalar_at`, `scalars`, `append_scalar` |
-| `Map.get_or_panic`, `or_panic` | There are no panics | `require`, `expect` |
-| `Closeables.use`, `Test.assert_panics` | Depended on unwinding | Removed |
-| `Pair`, `Entry`, `Boxed`, `EnumSet`, `EnumMap`, the named function shapes | Replaced by tuples, `BitSet`, `OrdinalMap`, and native function types | Removed |
-| `SysIo`, `Test` | Compiler built-ins | `Std.Io.Console`, `Std.Program`, `Std.Test` |
-
-No other name collides. `RegexMatch`, `is_match`, and `matches_fully` contain `match` but are not the keyword. `Fs.list` is allowed: `list` is not a keyword (probed). Variant names such as `Error.Io` and `JsonValue.Null` are always qualified.
+The names that changed because they collided with a keyword, and others replaced for other reasons, are listed in the [design notes](https://github.com/Kayyo321/neura/blob/main/docs/design/Stdlib.md#names-that-changed). No other name collides. `RegexMatch`, `is_match`, and `matches_fully` contain `match` but are not the keyword. `Fs.list` is allowed: `list` is not a keyword. Variant names such as `Error.Io` and `JsonValue.Null` are always qualified.
 
 Contracts deliberately kept: insertion-ordered hash collections, separate read-only and mutable interfaces, `Ordering` instead of integers, byte offsets for string positions, a required comparator for sorted collections, numeric equality for `BigDecimal`, the AVL tree, the fixed half load factor, unbuffered console output, and the fdlibm port.
 
 
-## 16. Roadmap
+## 16. Not provided
 
-The library was implemented in these independent source tracks, on the compiler support of [section 3](#3-language-baseline-and-gaps). Every track is complete: its modules are installed, tested through the installed compiler and NVM, and listed in [Standard library](StandardLibrary).
-
-| Track | Modules and acceptance criteria |
-| --- | --- |
-| Program, console, and testing | Implement `Std.Program`, `Std.Io.Console.print_line`, `Failure`, and `Std.Test` over the existing console provider and message trap. Migrate examples and verify both entry forms before removing the legacy built-ins. |
-| Core values | Implement `Unit`, `Cell`, `Ordering`, `Hash`, `Error`, `Optional`, `Result`, and the integer and Boolean companion modules. Exercise matching, nil versus `Some(nil)`, and generic callback specializations. |
-| Text and number conversion | Implement `Strings`, `StringBuilder`, `Scalars`, `Regex`, parsing and formatting companions, and `BigInteger` and `BigDecimal` conversions. Reuse T1 and N1, and validate all documented failure and boundary cases. |
-| Collections and iteration | Implement list, deque, linked list, hash, ordinal, tree, priority, and sequence modules against their interfaces. Check deterministic order, key equality, list aliasing, nil links, and structural modifications. |
-| Pure algorithms and data formats | Implement math, seeded randomness, calendar arithmetic, JSON and other encodings, and digests. Compare the outputs with independent reference models and published vectors where applicable. |
-| Host providers and capabilities | Register concrete providers for console input, files, environment, process, time, entropy, and networking. Specify denial, lifetime, error codes, and replay before considering the source modules complete. |
-| Concurrency | Implement `Std.Concurrent` over the scheduler operations of [Concurrency](Concurrency), the scoped resource helpers, `PortableError`, and the overlapping, cancellable forms of the console, clock, and network calls. Check the library's task safety with `check --task-safety`. |
-
-Within a track, establish the public contract and failure behavior, then implement, test, and document the module. A source module is supported only when the complete path through the installed compiler and NVM is verified.
-
-### 16.2 Dependencies by module
-
-| Module or API | Source dependencies or remaining runtime work |
-| --- | --- |
-| `Optional<T>`, `Result<T>`, `Error`, `Ordering`, `Hash`, `Unit`, `Cell` | Generic enums, generic callbacks, and value members are available. Implement the source declarations and adapters. |
-| Primitive companions, `Strings`, `StringBuilder`, `Regex`, `Scalars` | T1 and N1 are available. Implement parsing, Unicode scalar handling, formatting variants, and the documented algorithms. |
-| List, deque, tree, hash, ordinal, priority, sequence, and immutable collections | G1–G5, nil references, and the built-in list version are available. Implement the source modules and model-based tests. |
-| `Math`, `BigInteger`, `BigDecimal`, time value types, seeded `Random`, `Uuid`, encodings, and digests | Implement and verify the pure Neura algorithms. Host-sourced time and entropy require the named providers. |
-| `Std.Program`, `Console.print_line`, and `Std.Test` | P1–P3 and F1 are available. Install source modules, run migration tests, and retire legacy names only after their replacements are usable. |
-| Other `Console` methods, `File`, `Fs`, `Environment`, `Process`, `SystemClock`, entropy, `Std.Net` | P2 supplies the binding mechanism. The named providers, permission checks, and user-facing replay tools are separate runtime work. |
+| Area | Status | Reason |
+| --- | --- | --- |
+| Concurrent collections; threads and executors that outlive a scope; free-standing locks | Not provided | `Std.Concurrent` supplies scoped tasks, channels, worker groups, `AtomicInt64`, `Semaphore`, and `Guarded<T>` ([section 19](#19-stdconcurrent)). Build a concurrent collection on `Guarded<T>` or as an owner task. No other library class is transferable, so a collection belongs to one task. |
+| Reflection, runtime class loading, serialization of arbitrary objects | Excluded | The library needs class and interface type tests, which are available without a general reflection model. |
+| Finalizers, weak references | Excluded | Reclamation runs no code, by design. |
+| Recovery from traps, cleanup when a trap ends the run | Excluded | The runtime has neither, and the library is designed not to need them. The scoped helpers of [section 5.5](#55-resources) cover every ordinary completion. |
+| Time zones, locales, localized formatting, collation | Not provided | They need large versioned data tables. |
+| Unicode normalization, non-ASCII classification | Not provided | Same reason. |
+| Ciphers, signatures, TLS, secure random, HTTP | Not provided | They need security review. |
+| `BigInteger` bitwise operations, UDP | Not provided | |
+| Facade modules such as `Std.Collections` that re-export every collection type | Not provided | They need re-export of generic classes, which the language does not have. The type modules are the import paths. |
 
 ## 17. Verification
 
@@ -1354,7 +1249,7 @@ These requirements apply the repository's rules in [AGENTS.md](https://github.co
 - **Both build modes.** Every library test and trap test runs optimized and with `--no-optimize`, and the outputs must be identical.
 - **Reference evaluator.** The test programs also run under the IR reference evaluator, and the results must match NVM's.
 - **Determinism.** Each test program runs twice from the same image; output and step counts must be identical.
-- **Probes become tests.** Keep the compiler fixtures linked in [section 3.1](#31-what-the-probes-established) and add source-module tests as each track ships. Include negative cases for unsupported specialization, untrusted host declarations, and malformed artifacts where those boundaries are exercised.
+- **Compiler fixtures.** The library's tests include negative cases for unsupported specialization, untrusted host declarations, and malformed artifacts where those boundaries are exercised.
 - **Model-based tests.** For every collection, a test drives the collection and a trivially correct model (a plain built-in list, or an association list of tuples) with the same sequence of at least 10,000 operations drawn from `Random.seeded` with a fixed seed, and compares size, contents, iteration order, and return values after every operation.
 - **Invariant validation.** `HashCore`, the AVL tree, `ArrayDeque`, `LinkedList`, and `PriorityQueue` each have an exported `validate()` member that traps on a broken structural invariant (index slots agree with entries, dead entries within the retention bound, AVL balance and parent links, endpoint and reciprocal links, heap order). Model tests call it after every operation.
 - **Reclamation.** For each collection, a test adds and removes large elements in a loop under a heap limit that the loop would exceed if removed elements stayed reachable. For hash collections the limit allows for the documented retention bound and no more.
@@ -1368,11 +1263,9 @@ These requirements apply the repository's rules in [AGENTS.md](https://github.co
 - **Decompiler.** A library-using image must round-trip through `disassemble` and `assemble` byte for byte, and `decompile` must run on it. No stronger recovery claim is made for library code.
 - **Cost baseline.** A small benchmark set (insert and look up 1,000 map entries, sort 1,000 integers, format 100 integers, hash 10 KB with `Sha256`) records NVM steps, neuron count, and image size in a checked-in baseline. A change that raises any figure by more than 10% says why in its pull request. The layout choices of sections 9.3 through 9.7 are re-measured with this set when an acceleration ships.
 
-A completion summary for any track names the stages touched (for a pure library change: none beyond the library source; for a gap: each stage), lists the commands that ran, and separates tested behavior from behavior that was only inspected.
+## 18. Behavior details
 
-## 18. Implementation decisions
-
-The library follows this plan. Where the plan left a choice open, or where the language required a different shape, the implementation decided as below. Each decision is covered by the module's tests in `tests/stdlib/<area>/`.
+These rules complete the contracts of the earlier sections. Where a rule here is more specific than a table above, this section governs. Each is covered by the module's tests in `tests/stdlib/<area>/`.
 
 ### 18.1 Language and layout
 
@@ -1444,7 +1337,7 @@ The library follows this plan. Where the plan left a choice open, or where the l
 - **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](Concurrency#52-task-safe-calls)).
 - **LinkedList.** `sort` and `binary_search` work on a copy; `sort` and `reverse` move values between existing nodes, which is not a structural change; `clear` unlinks every node. Positional access outside the list traps with `invalid argument: index out of range`.
 - **ArrayList.add_all** reads the argument up to its starting length, so `add_all(items())` doubles the list instead of trapping.
-- **Equality direction.** Search members call `value.equals(element)` with the probe as the receiver.
+- **Equality direction.** Search members call `value.equals(element)` with the searched value as the receiver.
 - **OrdinalMap.** A key outside 0 through n - 1 is the language's bounds trap, also in `contains_key`; `equals` is false when the other map holds a key beyond this map's size; `compute` returns the callback's result.
 - **Trap details.** `negative size`, `size above current size`, `range`, `negative count`, `index out of range`, and `negative element` after `invalid argument: `; `invalid state: ` for a failed `validate()`.
 
@@ -1460,13 +1353,13 @@ The library follows this plan. Where the plan left a choice open, or where the l
 
 ### 18.10 Math
 
-- **fdlibm port.** `Math` is a port of fdlibm 5.3 written without a reference copy of the sources; Sun's notice is kept in `math.nra`, `internal/trig.nra`, and the test transliteration. The Neura functions agree bit for bit with a C transliteration of the same port on 9,148 vector cases (`tests/stdlib/math/vectors`), and that transliteration stays within 1 ulp of a 70-digit reference for the functions fdlibm documents as such, with the same larger errors as glibc for `sinh`, `cosh`, `tanh`, and `log10`. Agreement with a reference fdlibm 5.3 build is not yet established. Expressions fdlibm evaluates only to raise the inexact flag are omitted. `sqrt` is the correctly rounded integer method of [section 10.1](#101-math). `log2`, which fdlibm 5.3 lacks, follows `e_log10.c` and returns exact results for powers of two. `pow(±1, ±∞)` and `pow(1, NaN)` are NaN, as in fdlibm.
+- **fdlibm port.** `Math` is a port of fdlibm 5.3 written without a reference copy of the sources; Sun's notice is kept in `math.nra`, `internal/trig.nra`, and the test transliteration. The Neura functions agree bit for bit with a C transliteration of the same port on 9,148 vector cases (`tests/stdlib/math/vectors`), and that transliteration stays within 1 ulp of a 70-digit reference for the functions fdlibm documents as such, with the same larger errors as glibc for `sinh`, `cosh`, `tanh`, and `log10`. Agreement with a reference fdlibm 5.3 build has not been checked. Expressions fdlibm evaluates only to raise the inexact flag are omitted. `sqrt` is the correctly rounded integer method of [section 10.1](#101-math). `log2`, which fdlibm 5.3 lacks, follows `e_log10.c` and returns exact results for powers of two. `pow(±1, ±∞)` and `pow(1, NaN)` are NaN, as in fdlibm.
 - **BigInteger** keeps its fields private (`signum`, `magnitude`); its constructor normalizes the value and adopts the list. `mod_inverse` traps for a modulus that is not positive. `floor_mod` takes the modulus's sign.
 - **BigDecimal** adds `unscaled()` and `scale()`. `round(0, mode)` returns the value unchanged; a rounding carry drops one zero, as Java does. `of_float64` gives the exact value at the smallest scale. `-0.00` parses as zero. `parse` accepts an optional sign, digits with an optional point, and an optional `e` or `E` exponent; a scale outside `int` fails with `OutOfRange` at offset 0. Zero with a negative scale prints as `0`.
 - **Trap details.** `negative exponent`, `negative shift count`, `negative bit index`, `modulus not positive`, `not a finite value`, `negative precision`, `magnitude too large`, and `zero sign with a nonzero magnitude` after `invalid argument: `.
 - **Cost.** A float64 operation compiles to a large circuit, so a program that calls several `Math` functions has an image of several megabytes; `Math` is not in the cost baseline for that reason.
 
-### 18.11 Verification as built
+### 18.11 Test layout
 
 - **Layout.** Each area of `tests/stdlib` holds test files, `support/` modules, `traps/` programs with `// status:` and `// stderr:` headers, and `programs/` with expected output (`tests/stdlib/area.cmake`). Every area runs against a fresh installation (`stdlib-install`), its tests optimized twice and unoptimized, its programs and traps in both modes, and its program images through `disassemble`, `assemble`, and `decompile`.
 - **Reference evaluator.** `backend-reference` runs every library test function under the NeuraIR reference evaluator and NVM and compares the outcome, the console output, and any trap message. Tests that need host responses (files, sockets, console input) or exceed the evaluator's budget are counted and not compared.

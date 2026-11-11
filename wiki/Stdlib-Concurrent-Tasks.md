@@ -1,6 +1,6 @@
 # `Std.Concurrent.Tasks`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Concurrent.Tasks`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/tasks.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -10,7 +10,7 @@ Import this module as `Std.Concurrent.Tasks`. Its [source](https://github.com/Ka
 - [The `Std.Concurrent` modules and their contracts](Stdlib-Design#19-stdconcurrent)
 - [Concurrency specification](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md): tasks, isolation, the memory model, the scheduler, and limits
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -61,4 +61,4 @@ let quote = func -> result.Result<int[list]> {
 
 A call must be task-safe and its captures transferable, as for any spawn. The compiler checks the spawn inside the helper and reports a violation at the program's call of the helper, with the place where the library starts the task: `... (the library starts the task at tasks.nra:<line>:<column>)`. A call that captures an object is reported as `a value of type func() -> Result<int32> is not transferable, so it cannot be given to a spawned task: a function value of this type captures a value of type Box at ...` ([section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)).
 
-The helpers themselves are task-safe, so a task may call them. They use scheduler operations, so the worker of a parallel map cannot. A program that uses this module cannot use `Std.DynamicForeign` or a C import ([decision C15](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#3-decisions)).
+The helpers themselves are task-safe, so a task may call them. They use scheduler operations, so the worker of a parallel map cannot. A program that uses this module cannot use `Std.DynamicForeign` or a C import ([Concurrency, section 16](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#16-limits)).

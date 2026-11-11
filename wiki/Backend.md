@@ -101,12 +101,12 @@ The image's entry is a generated start function. It runs each initialization sta
 
 ## Semantic decisions
 
-These choices follow the existing contracts where they apply. Where the language is open, the backend takes the narrowest choice that agrees with every value the language could later define. A program that never reaches an undefined case behaves the same under any future decision.
+These choices follow the existing contracts where they apply. Where the language leaves a rule open, the backend takes the narrowest choice that agrees with every value a later language decision could define. A program that never reaches an open case does not depend on the choice.
 
 | Area | Language status | Backend behavior |
 | --- | --- | --- |
 | Integer overflow | [Specified](Numbers) | `+`, `-`, `*`, and unary `-` trap with reason 1 when the exact result is outside the type. Nothing wraps or saturates. |
-| Division | Specified | `/` truncates toward zero and `%` takes the dividend's sign. A zero divisor and `MIN / -1` trap with reason 1; `MIN % -1` is 0. Before this release an inexact quotient trapped; it now truncates. |
+| Division | Specified | `/` truncates toward zero and `%` takes the dividend's sign. A zero divisor and `MIN / -1` trap with reason 1; `MIN % -1` is 0. |
 | Floating point | Specified | IEEE 754 with ties-to-even rounding, subnormals, and no traps. Every NaN result is the canonical quiet NaN. The optimizer does not fold float arithmetic. |
 | Conversions | Specified | Checked: out-of-range integer results and float-to-integer conversions of NaN, infinities, and out-of-range values trap with reason 1. |
 | Negative index | Bounds error | A signed index is checked for a negative value in the graph, which traps with reason 2 before the value is converted to the `uint64` index of the state operation. NVM reports an index at or beyond the length as a bounds fault. |
@@ -115,8 +115,8 @@ These choices follow the existing contracts where they apply. Where the language
 | Module globals | Storage is open | One storage location per declared global. An inherited global that is not overridden is the same storage through the base and the derived module. An override has its own storage. The IR reference evaluator uses the same rule. |
 | Initialization order | [Specified](Modules#initialization) | Literal initializers become NVR global initializers. Other initializers and top-level statements run in a generated start function, files after their imports and each file in source order. A read before initialization is an NVM fault. Optimization keeps the root form of every global initializer, so `2 * 3` is not folded into a literal that would change when its global is set. |
 | Enums | [Specified](Types#enums) | Fieldless enums use `uint32` ordinals. Payload enums use typed layouts with an ordinal tag and the active fields. The legacy exit enum uses `int32`. |
-| Construction | Proposed in [Object lifecycle](ObjectLifecycle) | The base constructor runs, then this class's field initializers, then the rest of the declared `init`. Fields without an initializer start uninitialized; reading one before a store traps. |
-| Destruction | Proposed | Cleanup dispatches on the runtime class and runs each `deinit` from the most derived class toward the bases. Then the object is freed. A later use of the handle traps. |
+| Construction | [Specified](ObjectLifecycle#construction) | The base constructor runs, then this class's field initializers, then the rest of the declared `init`. Fields without an initializer start uninitialized; reading one before a store traps. |
+| Destruction | [Specified](ObjectLifecycle#destruction) | Cleanup dispatches on the runtime class and runs each `deinit` from the most derived class toward the bases. Then the object is freed. A later use of the handle traps. |
 | Console write failure | [Specified](Stdlib-Design#111-stdio) | `Console.print_line` traps with reason 3 and `console write failed`; `try_print_line` and the other console forms return an `Io` error. |
 | Assertions | [Specified](Testing) | A failed `Std.Test` assertion is a message trap (reason 3) whose message the test runner reports. |
 | For-each modification | [Specified](CoreLanguage#loops) | A changed list version traps with reason 5 at the `for` statement. |
@@ -228,7 +228,7 @@ The [release checklist](Release) maps each feature to its tests and states which
 | `backend-placement` | Cost model fits, deterministic gate accounting, placement, timing correction, and fleet equivalence with fixed models. |
 | `gpu-device` | Vulkan graph outputs over the integer circuit domains, mixed and split batches, buffer growth, and calibration. |
 | `gpu-cli` | CPU and Vulkan runs, tests, fleets, and trace replay compared through the CLI. |
-| `backend-concurrency` | The phase 1 fixtures (scopes, `spawn`, `join`, `is_finished`) from source to the NVM against an independent evaluator with the same scheduler: effects, status, and schedule, optimized and not, under several quanta and task limits; repeated runs; fleets; hand-assembled task images and their rejection. Channels, cancellation, timers, guards, overlapping host requests, and concurrent record and replay are tested on the NVM directly. `concurrency-frontend`, `concurrency-programs`, `concurrency-io`, `concurrency-schedules`, and `concurrency-parallel` check the source forms, the build routes, host I/O on the loopback interface, the test modes, and the parallel map through the CLI. |
+| `backend-concurrency` | The scope fixtures (scopes, `spawn`, `join`, `is_finished`) from source to the NVM against an independent evaluator with the same scheduler: effects, status, and schedule, optimized and not, under several quanta and task limits; repeated runs; fleets; hand-assembled task images and their rejection. Channels, cancellation, timers, guards, overlapping host requests, and concurrent record and replay are tested on the NVM directly. `concurrency-frontend`, `concurrency-programs`, `concurrency-io`, `concurrency-schedules`, and `concurrency-parallel` check the source forms, the build routes, host I/O on the loopback interface, the test modes, and the parallel map through the CLI. |
 | `backend-nir` | `.nir` round trips, deterministic encoding, both build routes give identical images, corrupt files are rejected. |
 | `backend-conversion` | Compiled functions against the IR reference evaluator: integer, structure, and float fixtures, exhaustively over 8-bit domains where the parameters allow and on sampled float operands; whole-program stdout and initialization order against the evaluator. |
 | `backend-generics` | Instance caching, determinism, the specialization limits, and specialized functions against the evaluator exhaustively over 8-bit inputs. |
