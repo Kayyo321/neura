@@ -9,14 +9,17 @@ let.promote _ = import:Std.Core.Result;
 /// (docs/runtime/Kernels.md). The Neura implementation they replaced is the oracle of
 /// tests/stdlib/hex/kernel-oracle.nra.
 /// @see [Std.Encoding.Hex](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Hex)
+#Since("0.1.0")
 export let Hex = module (
     /// @brief Two lowercase hex digits per byte, most significant first.
+    #NoDiscard
     export let encode = func(bytes: uint8[list]) -> string => kernels.hex_encode(bytes);
 
     /// @brief The bytes the digits encode.
     ///
     /// A byte that is not a hex digit fails with an Encoding error at its offset ("invalid hex digit"); an odd
     /// number of digits fails at the text's length ("odd number of hex digits").
+    #NoDiscard
     export let decode = func(text: string) -> Result<uint8[list]> {
         let [status, offset, bytes] = kernels.hex_decode(text);
         if (status != kernel_status.Ok) {
