@@ -168,6 +168,14 @@ private:
                 result += ": ";
                 result += type_text(*declaration.type);
             }
+            // Accessor clauses (Types.md, Accessors), getter first.
+            const auto has = [&](bool setter) {
+                return std::ranges::any_of(declaration.accessors,
+                                           [&](const AccessorClause& clause) { return clause.setter == setter; });
+            };
+            if (has(false) || has(true)) {
+                result += has(false) ? (has(true) ? " { get; set }" : " { get }") : " { set }";
+            }
             return result;
         } else {
             result = declaration.name + " = ";
@@ -247,6 +255,10 @@ private:
         }
         if (declaration.initializer) expression(*declaration.initializer);
         statements(declaration.body);
+        for (const auto& clause : declaration.accessors) {
+            if (clause.expression) expression(*clause.expression);
+            statements(clause.body);
+        }
         if (!declaration.name.empty()) scope_.pop_back();
         for (const auto& overload : declaration.overloads) this->declaration(overload);
     }

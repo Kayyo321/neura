@@ -93,6 +93,32 @@ def declaration(lines, start):
     raise ValueError(f"Unterminated declaration at line {start + 1}")
 
 
+ACCESSOR = re.compile(r"^\s*\|\s*(get|set)\s*:")
+
+
+def accessors(lines, start):
+    """The accessor summary of a field (Types.md, Accessors): its `| get:` and
+    `| set:` clause lines follow the declaration, more deeply indented."""
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    kinds = set()
+    clause_indent = None
+    for line in lines[start + 1:]:
+        if not line.strip() or line.lstrip().startswith("//"):
+            continue
+        depth = len(line) - len(line.lstrip())
+        if clause_indent is not None and (depth > clause_indent or
+                                          (depth == clause_indent and line.lstrip().startswith("}"))):
+            continue  # The block body of the previous clause.
+        clause = ACCESSOR.match(line)
+        if not clause or depth <= indent:
+            break
+        kinds.add(clause.group(1))
+        clause_indent = depth
+    if not kinds:
+        return ""
+    return " { " + "; ".join(kind for kind in ("get", "set") if kind in kinds) + " }"
+
+
 def area_name(directory):
     """The PascalCase area of a library directory: dynamic-foreign is DynamicForeign."""
     return "".join(word.capitalize() for word in directory.split("-"))
@@ -119,7 +145,7 @@ def exports(path, module):
             owners.append((indent, container.group(3), bool(container.group(2)) and public))
         if not match or not public or (indent == 0 and match.group(1) == module):
             continue
-        yield index + 1, owner, declaration(lines, index), comment_notes(lines, index)
+        yield index + 1, owner, declaration(lines, index) + accessors(lines, index), comment_notes(lines, index)
 
 
 def render(path, module):

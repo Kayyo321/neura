@@ -1,0 +1,22 @@
+// A 'last' field with a getter: assigned once inside the class, read through the getter outside (Types.md, Accessors).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Account = class (
+    export last owner: string;
+        | get: "owner " + owner;
+    export last currency: string = "EUR";
+        | get: currency;
+
+    export let init = func(name: string) {
+        instance.owner = name;
+    };
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let account = new Account("ada");
+        console.print_line(account.owner + " " + account.currency);
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,5 @@
+// Accessors on a field that is not exported (E0516).
+let Account = class (
+    let balance: int64 = 0;
+        | get: balance;
+);

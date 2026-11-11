@@ -1,0 +1,5 @@
+// An accessor clause names neither get nor set (E0202).
+let Counter = class (
+    export let count: int = 0;
+        | fetch: count;
+);

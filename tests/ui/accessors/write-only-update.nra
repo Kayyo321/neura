@@ -1,0 +1,7 @@
+// A compound assignment from outside the class reads a field that has only a setter (E0515).
+let Sink = class (
+    export let level: int = 0;
+        | set: level = value;
+);
+let sink = new Sink();
+sink.level += 2;

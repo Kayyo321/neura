@@ -9,9 +9,9 @@
 //   E04xx  types and bindings  E09xx  tags
 //   E05xx  classes             W####  warnings
 //
-// E0420, E0510, and the E09xx range are reserved by the 0.2.0 plan (target-
-// typed new, accessors, and tags). E0899 is the one code for errors that
-// only a compiler defect or a hand-edited artifact can cause.
+// E0420 and the E09xx range are reserved by the 0.2.0 plan (target-typed
+// new and tags). E0899 is the one code for errors that only a compiler
+// defect or a hand-edited artifact can cause.
 //
 // Include this file after defining NEURA_DIAGNOSTIC; it undefines the macro.
 
@@ -98,7 +98,7 @@ NEURA_DIAGNOSTIC(E0445, "a 'last' field assigned outside 'init'")
 NEURA_DIAGNOSTIC(E0446, "a constructor that does not assign a 'last' field")
 NEURA_DIAGNOSTIC(E0447, "a deferred 'last' binding that is not a local or an instance field")
 
-// Classes and lifecycle (E0510 is reserved for accessors)
+// Classes, lifecycle, and accessors
 NEURA_DIAGNOSTIC(E0501, "invalid static member")
 NEURA_DIAGNOSTIC(E0502, "invalid override")
 NEURA_DIAGNOSTIC(E0503, "invalid inheritance")
@@ -108,10 +108,21 @@ NEURA_DIAGNOSTIC(E0506, "invalid base constructor call")
 NEURA_DIAGNOSTIC(E0507, "inaccessible constructor")
 NEURA_DIAGNOSTIC(E0508, "member needs a receiver")
 NEURA_DIAGNOSTIC(E0509, "invalid lifecycle function")
+NEURA_DIAGNOSTIC(E0510, "field is read-only outside its class")
 NEURA_DIAGNOSTIC(E0511, "invalid singleton")
 NEURA_DIAGNOSTIC(E0512, "invalid cast declaration")
 NEURA_DIAGNOSTIC(E0513, "reference field not definitely bound")
 NEURA_DIAGNOSTIC(E0514, "invalid destroy")
+NEURA_DIAGNOSTIC(E0515, "field is write-only outside its class")
+NEURA_DIAGNOSTIC(E0516, "accessor on a field that is not exported")
+NEURA_DIAGNOSTIC(E0517, "accessor on a static field")
+NEURA_DIAGNOSTIC(E0518, "accessor on a member that is not a field")
+NEURA_DIAGNOSTIC(E0519, "accessor outside a class")
+NEURA_DIAGNOSTIC(E0520, "duplicate accessor")
+NEURA_DIAGNOSTIC(E0521, "setter on a constant field")
+NEURA_DIAGNOSTIC(E0522, "setter on a field named value")
+NEURA_DIAGNOSTIC(E0523, "accessor on a primitive reference field")
+NEURA_DIAGNOSTIC(E0524, "reference to a field with accessors")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

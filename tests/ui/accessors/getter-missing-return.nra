@@ -1,0 +1,9 @@
+// A block getter that can end without a return (E0405).
+let Counter = class (
+    export let count: int = 0;
+        | get: {
+            if (count > 0) {
+                return count;
+            }
+        };
+);

@@ -1,0 +1,5 @@
+// Accessors on a primitive reference field (E0523).
+let Tracker = class (
+    export let target: &int;
+        | get: target;
+);

@@ -1,0 +1,103 @@
+// Accessors (Types.md, Accessors): which accesses use the storage and which
+// call the accessors. Inside the declaring class a bare name or `instance.x`
+// is the storage; another receiver, a subclass, and outside code use the
+// accessors. Generic classes and inheritance route the same way.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Gauge = class (
+    export let level: int = 0;
+        | get: {
+            console.print_line("  get level");
+            return level;
+        };
+        | set: {
+            console.print_line("  set level " + value.to_string());
+            level = value;
+        };
+
+    export let init = func(level: int) {
+        // The parameter hides the field, so `instance.level` names the
+        // storage: no setter call.
+        instance.level = level;
+    };
+
+    export let raise = func {
+        // A bare name is the storage: no accessor calls.
+        level += 10;
+        instance.level++;
+    };
+
+    export let copy_from = func(other: Gauge) {
+        // Another receiver goes through the accessors, even inside the class.
+        level = other.level;
+    };
+
+    export let deferred = func -> int {
+        let read = func -> int => level;
+        return read();
+    };
+);
+
+let Boosted = class:Gauge (
+    export let init = func {
+        super.init(1);
+    };
+
+    export let boost = func {
+        // A subclass is outside the declaring class: its bare name of the
+        // inherited field calls the accessors.
+        level = level * 2;
+    };
+);
+
+let Box = class<T> (
+    export let item: T;
+        | get: item;
+        | set: item = value;
+
+    export let init = func(item: T) {
+        instance.item = item;
+    };
+);
+
+let Pair = class<A, B> (
+    export let first: A;
+        | get: first;
+    export let second: B;
+        | get: second;
+        | set: second = value;
+
+    export let init = func(first: A, second: B) {
+        instance.first = first;
+        instance.second = second;
+    };
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("construct");
+        let gauge = new Gauge(3);
+        console.print_line("raise");
+        gauge.raise();
+        console.print_line("read " + gauge.level.to_string());
+        console.print_line("copy");
+        let other = new Gauge(7);
+        gauge.copy_from(other);
+        console.print_line("closure " + gauge.deferred().to_string());
+        console.print_line("subclass");
+        let boosted = new Boosted();
+        boosted.boost();
+        console.print_line("as base " + (boosted as Gauge).level.to_string());
+
+        let numbers = new Box<int>(5);
+        numbers.item += 2;
+        let words = new Box<string>("a");
+        words.item = words.item + "b";
+        console.print_line(numbers.item.to_string() + " " + words.item);
+        let pair = new Pair<string, int64>("p", 1);
+        pair.second++;
+        console.print_line(pair.first + " " + pair.second.to_string());
+        return program.ExitCode.Ok;
+    };
+);

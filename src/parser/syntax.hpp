@@ -130,6 +130,22 @@ struct SelectArm {
     std::vector<Statement> body;
 };
 
+// An accessor clause after an exported instance field's ';' (Types.md,
+// Accessors): `| get: expression;`, `| get: { block };`, `| set: statement;`,
+// or `| set: { block };`. `get`, `set`, and `value` are contextual words.
+struct AccessorClause {
+    bool setter{};
+    // From the '|' through the clause's ';'.
+    Span span;
+    // The word `get` or `set`.
+    Span keyword;
+    // A getter's expression form. Empty for a block body or a setter.
+    std::optional<Expr> expression;
+    // A setter's single statement, or the statements of a block body.
+    std::vector<Statement> body;
+    bool block{};
+};
+
 struct Declaration {
     // An enum's variants are its members. Their parameters describe the payload.
     enum class Kind { Binding, Function, Class, Module, Enum, Interface };
@@ -173,6 +189,8 @@ struct Declaration {
     std::optional<TypeSyntax> cast_target{};
     std::shared_ptr<const DocComment> documentation{};
     std::optional<Span> name_span{};
+    // Accessor clauses after the member's ';', in source order.
+    std::vector<AccessorClause> accessors{};
 };
 
 struct ResolvedImport {

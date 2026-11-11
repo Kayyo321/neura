@@ -185,6 +185,26 @@ export let format_log = func(log_message: string, log_level: int) -> string {
   console.print_line(prefix + " -> " + message);
   ```
 
+### Accessor Clauses
+- Write each accessor clause on its own line after the field, indented one level (4 spaces) under it. Put a short body on the clause line; open a block body on the clause line and close it with `};` at the clause's indentation:
+  <!-- example: check -->
+  ```neura
+  let Gauge = class (
+      export let level: int = 0;
+          | get: level;
+          | set: {
+              if (value < 0) {
+                  trap_with_message("level must not be negative");
+              }
+              level = value;
+          };
+  );
+  ```
+- Write `get` before `set` when a field has both, unless the setter is the point of the field.
+- Leave a blank line after a field's last clause when another member follows.
+- Prefer a get-only field (`| get: field;`) to a method that only returns a field, such as `export let code = func -> string => code_value;`. Keep a method when the value is computed, takes arguments, or does work a reader would not expect from a field read.
+- Add a setter only when the class checks or reacts to a write. A setter that only stores, `| set: field = value;`, is worth writing only together with a getter that does more, or to keep the field write-only outside the class.
+
 ### Comments
 - Use `//` for single-line comments.
 - Place comments above the relevant code or inline with a single space after code:

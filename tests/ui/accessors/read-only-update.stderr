@@ -1,0 +1,13 @@
+error[E0510]: 'count' is read-only outside its class
+ --> $DIR/read-only-update.nra:7:1
+  |
+4 |         | get: count;
+  |         ------------- 'count' declares only a getter
+...
+7 | counter.count++;
+  | ^^^^^^^^^^^^^ cannot assign to 'count' here
+  |
+  = note: 'count' has no 'set' accessor, so only code inside 'Counter' can change it
+  = help: add a setter to the field, such as '| set: count = value;', or change it through a method of 'Counter'
+
+For more information about this error, try `neura explain E0510`.

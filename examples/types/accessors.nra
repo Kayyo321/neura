@@ -1,0 +1,47 @@
+// Getters and setters for exported instance fields (Types.md, Accessors).
+// Code outside the class reads and writes the fields as ordinary members,
+// and the compiler routes each access through the field's accessors.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let failure = import:Std.Core.Failure;
+
+let MyData = class (
+    // Read and written from anywhere.
+    export let data: string = "";
+        | set: data = value;
+        | get: data;
+
+    // Read-only outside the class.
+    export let code = "XY729H08";
+        | get: code;
+
+    // A setter that rejects zero.
+    export let non_zero = 18000;
+        | get: non_zero;
+        | set: {
+            if (value == 0) {
+                failure.trap("non_zero must not be zero");
+            }
+            non_zero = value;
+        };
+
+    // Inside the class each field is plain storage.
+    export let reissue = func(next: string) {
+        code = next;
+    };
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let my_data = new MyData();
+        my_data.data = "payload";
+        let my_var = my_data.data;
+        console.print_line(my_var);
+        console.print_line(my_data.code);
+        my_data.reissue("AB12");
+        console.print_line(my_data.code);
+        my_data.non_zero -= 17999;
+        console.print_line(my_data.non_zero.to_string());
+        return program.ExitCode.Ok;
+    };
+);

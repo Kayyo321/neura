@@ -616,6 +616,7 @@ private:
                         member = declaration(result.kind);
                     } catch (const Diagnostic& error) {
                         recover(error, member_start);
+                        skip_accessor_clauses();
                         continue;
                     }
                     if (member.cast_target) {
@@ -649,6 +650,7 @@ private:
                               "module body");
         expect(";");
         if (result.overloads.empty()) result.span = span_from(start);
+        if (owner) accessor_clauses(result);
         return result;
     }
 
@@ -662,6 +664,70 @@ private:
             .suggest("give it a type and assign it exactly once later", after, ": <type>",
                      Applicability::HasPlaceholders)
             .suggest("or give it its value now", after, " = <value>", Applicability::HasPlaceholders);
+    }
+
+    // Accessor clauses after a member's ';' (Types.md, Accessors). No member
+    // begins with '|', so the position is unambiguous, and `get`, `set`, and
+    // `value` stay ordinary identifiers everywhere else. Lowering checks
+    // which members may have them.
+    void accessor_clauses(Declaration& member) {
+        while (at("|")) {
+            const auto start = cursor_;
+            advance();
+            const auto& keyword = current();
+            if (keyword.kind != TokenKind::Identifier || (keyword.text != "get" && keyword.text != "set"))
+                throw Diagnostic(keyword.span, "expected 'get' or 'set' after '|'").with_code("E0202")
+                    .label(keyword.kind == TokenKind::End ? "expected 'get' or 'set' before the end of the file"
+                                                          : "expected 'get' or 'set', " + found_text(keyword))
+                    .help("an accessor clause is '| get: <expression>;' or '| set: <statement>;'");
+            advance();
+            AccessorClause clause;
+            clause.setter = keyword.text == "set";
+            clause.keyword = keyword.span;
+            expect(":");
+            if (at("{")) {
+                clause.block = true;
+                clause.body = block();
+                if (!at(";")) missing_semicolon("an accessor clause ends with ';', including one whose body is a block");
+                expect(";");
+            } else if (clause.setter) {
+                const auto statement_start = cursor_;
+                auto body = simple_statement();
+                body.span = span_from(statement_start);
+                clause.body.push_back(std::move(body));
+                expect(";");
+            } else {
+                clause.expression = expression();
+                expect(";");
+            }
+            clause.span = span_from(start);
+            member.accessors.push_back(std::move(clause));
+        }
+    }
+
+    // After an error in a member, skips the accessor clauses that follow it,
+    // each through its ';', so that they are not read as members of their own.
+    void skip_accessor_clauses() {
+        while (at("|")) {
+            advance();
+            std::size_t depth = 0;
+            while (!at_end()) {
+                const auto& token = current();
+                if (token.kind == TokenKind::Symbol) {
+                    const auto& text = token.text;
+                    if (text == "(" || text == "[" || text == "{") {
+                        ++depth;
+                    } else if (text == ")" || text == "]" || text == "}") {
+                        if (depth == 0) return;
+                        --depth;
+                    } else if (text == ";" && depth == 0) {
+                        advance();
+                        break;
+                    }
+                }
+                advance();
+            }
+        }
     }
 
     static void definition_has_no_annotation(const Declaration& declaration) {

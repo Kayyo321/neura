@@ -1,0 +1,11 @@
+error[E0518]: accessors require a field, but 'Unit' names a type
+ --> $DIR/type-alias.nra:4:9
+  |
+3 |     export let Unit = int;
+  |                ---- 'Unit' is an alias of a type
+4 |         | get: Unit;
+  |         ^^^^^^^^^^^^ accessor clause on a type alias
+  |
+  = help: remove the clause; only an exported instance field can have 'get' and 'set' accessors
+
+For more information about this error, try `neura explain E0518`.

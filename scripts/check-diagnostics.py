@@ -112,7 +112,7 @@ def exempt(lines: list[str], line: int) -> bool:
 def check_sources(root: Path, registered: dict[str, str]) -> tuple[list[str], set[str]]:
     problems, given = [], set()
     for path in sorted((root / "src").rglob("*")):
-        if path.suffix not in (".cpp", ".hpp") or not path.is_file():
+        if path.suffix not in (".cpp", ".hpp", ".inc") or not path.is_file():
             continue
         original = path.read_text(encoding="utf-8")
         lines = original.split("\n")

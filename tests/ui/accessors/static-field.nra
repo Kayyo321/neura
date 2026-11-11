@@ -1,0 +1,5 @@
+// Accessors on a static field (E0517).
+let Limits = class (
+    export static let calls: int = 0;
+        | get: calls;
+);

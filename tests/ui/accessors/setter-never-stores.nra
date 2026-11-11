@@ -1,0 +1,8 @@
+// A setter that never assigns its field (warning setter-never-stores).
+let Counter = class (
+    export let count: int = 0;
+        | get: count;
+        | set: {
+            let ignored = value;
+        };
+);

@@ -1,0 +1,12 @@
+error[E0522]: a field named 'value' cannot have a setter
+ --> $DIR/value-setter.nra:4:11
+  |
+3 |     export let value: int = 0;
+  |                ----- the field is named 'value'
+4 |         | set: value = value;
+  |           ^^^ setter of the field 'value'
+  |
+  = note: in a setter, 'value' names the incoming value, so the field's storage would be hidden
+  = help: rename the field
+
+For more information about this error, try `neura explain E0522`.

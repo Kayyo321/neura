@@ -1,0 +1,25 @@
+// status: 136
+// stderr: source arithmetic failure \(trap reason 1\)
+// An increment through accessors computes with the field's type and traps on
+// overflow before the setter runs (Types.md, Accessors).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Tally = class (
+    export let count: uint8 = 254;
+        | get: count;
+        | set: {
+            console.print_line("set " + value.to_string());
+            count = value;
+        };
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let tally = new Tally();
+        tally.count++;
+        tally.count++;
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

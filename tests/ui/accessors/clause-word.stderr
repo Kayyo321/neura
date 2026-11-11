@@ -1,0 +1,9 @@
+error[E0202]: expected 'get' or 'set' after '|'
+ --> $DIR/clause-word.nra:4:11
+  |
+4 |         | fetch: count;
+  |           ^^^^^ expected 'get' or 'set', found 'fetch'
+  |
+  = help: an accessor clause is '| get: <expression>;' or '| set: <statement>;'
+
+For more information about this error, try `neura explain E0202`.

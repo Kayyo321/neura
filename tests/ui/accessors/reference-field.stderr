@@ -1,0 +1,11 @@
+error[E0523]: a primitive reference field cannot have accessors
+ --> $DIR/reference-field.nra:4:9
+  |
+3 |     export let target: &int;
+  |                        ---- 'target' is a primitive reference
+4 |         | get: target;
+  |         ^^^^^^^^^^^^^^ accessor clause on a reference field
+  |
+  = help: store the value in a field of the primitive type itself
+
+For more information about this error, try `neura explain E0523`.

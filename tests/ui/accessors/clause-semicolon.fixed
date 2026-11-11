@@ -1,0 +1,8 @@
+// A block-bodied accessor clause without its ';' (E0201).
+let Counter = class (
+    export let count: int = 0;
+        | set: {
+            count = value;
+        };
+    export let other = 2;
+);

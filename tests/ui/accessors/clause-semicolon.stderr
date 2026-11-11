@@ -1,0 +1,15 @@
+error[E0201]: expected ';'
+ --> $DIR/clause-semicolon.nra:6:10
+  |
+6 |         }
+  |          ^ expected ';' here
+7 |     export let other = 2;
+  |     ------ found 'export'
+  |
+  = note: an accessor clause ends with ';', including one whose body is a block
+help: add the missing ';'
+  |
+6 |         };
+  |          +
+
+For more information about this error, try `neura explain E0201`.

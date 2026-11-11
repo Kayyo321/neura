@@ -537,6 +537,119 @@ let Record = class<T> (
 check_rejection(singleton-new "let one = singleton (); let another = new one();" "2:39" "singleton cannot be constructed")
 check_rejection(singleton-destroy "let one = singleton (); destroy one;" "2:33" "singleton cannot be destroyed")
 
+# Accessors of exported instance fields (Types.md, Accessors).
+check_rejection(accessor-read-only [=[
+let Ticket = class (
+    export let code = "XY";
+        | get: code;
+);
+let ticket = new Ticket();
+ticket.code = "AB";
+]=] "7:1" "E0510.*'code' is read-only outside its class")
+check_rejection(accessor-read-only-subclass [=[
+let Ticket = class (
+    export let code = "XY";
+        | get: code;
+);
+let Renewed = class:Ticket (
+    export let renew = func {
+        code = "AB";
+    };
+);
+]=] "8:9" "E0510.*'code' is read-only outside its class")
+check_rejection(accessor-write-only [=[
+let Sink = class (
+    export let level: int = 0;
+        | set: level = value;
+);
+let sink = new Sink();
+let current = sink.level;
+]=] "7:15" "E0515.*'level' is write-only outside its class")
+check_rejection(accessor-write-only-update [=[
+let Sink = class (
+    export let level: int = 0;
+        | set: level = value;
+);
+let sink = new Sink();
+sink.level--;
+]=] "7:1" "E0515.*'level' is write-only outside its class")
+check_rejection(accessor-not-exported [=[
+let Account = class (
+    let balance = 0;
+        | get: balance;
+);
+]=] "4:9" "E0516.*accessors require an exported field")
+check_rejection(accessor-static [=[
+let Limits = class (
+    export static let calls = 0;
+        | get: calls;
+);
+]=] "4:9" "E0517.*a static field cannot have accessors")
+check_rejection(accessor-method [=[
+let Shape = class (
+    export let area = func -> int => 4;
+        | get: 4;
+);
+]=] "4:9" "E0518.*'area' is a function")
+check_rejection(accessor-module [=[
+let Settings = module (
+    export let retries = 3;
+        | get: retries;
+);
+]=] "4:9" "E0519.*only allowed on class fields")
+check_rejection(accessor-interface [=[
+let Sized = interface (
+    let size = func -> int;
+        | get: 0;
+);
+]=] "4:9" "E0519.*an interface cannot declare accessors")
+check_rejection(accessor-duplicate [=[
+let Counter = class (
+    export let count = 0;
+        | set: count = value;
+        | set: count = value + 1;
+);
+]=] "5:11" "E0520.*duplicate 'set' accessor for 'count'")
+check_rejection(accessor-constant [=[
+let Config = class (
+    export const name = "default";
+        | set: name = value;
+);
+]=] "4:11" "E0521.*a .const. field cannot have a setter")
+check_rejection(accessor-value-field [=[
+let Cell = class (
+    export let value = 0;
+        | set: value = value;
+);
+]=] "4:11" "E0522.*a field named 'value' cannot have a setter")
+check_rejection(accessor-reference-field [=[
+let Tracker = class (
+    export let target: &int;
+        | get: target;
+);
+]=] "4:9" "E0523.*a primitive reference field cannot have accessors")
+check_rejection(accessor-reference-binding [=[
+let Counter = class (
+    export let count: int = 0;
+        | get: count;
+        | set: count = value;
+);
+let counter = new Counter();
+let alias: &int = counter.count;
+]=] "8:19" "E0524.*cannot refer to 'count', which has accessors")
+check_rejection(accessor-getter-type [=[
+let Counter = class (
+    export let count: int = 0;
+        | get: count > 0;
+);
+]=] "4:16" "E0403.*expected int32, got bool")
+check_rejection(accessor-clause-word [=[
+let Counter = class (
+    export let count = 0;
+        | put: count;
+);
+]=] "4:11" "E0202.*expected 'get' or 'set' after '[|]'")
+
 # Host callbacks are reserved for the trusted standard library.
 check_rejection(user-host-callback [=[
 let Tools = module (

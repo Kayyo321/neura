@@ -1,0 +1,13 @@
+error[E0510]: 'code' is read-only outside its class
+ --> $DIR/read-only.nra:7:1
+  |
+4 |         | get: code;
+  |         ------------ 'code' declares only a getter
+...
+7 | ticket.code = "AB12";
+  | ^^^^^^^^^^^ cannot assign to 'code' here
+  |
+  = note: 'code' has no 'set' accessor, so only code inside 'Ticket' can change it
+  = help: add a setter to the field, such as '| set: code = value;', or change it through a method of 'Ticket'
+
+For more information about this error, try `neura explain E0510`.

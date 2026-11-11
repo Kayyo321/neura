@@ -1,0 +1,6 @@
+// A setter on a constant field (E0521).
+let Config = class (
+    export const name = "default";
+        | get: name;
+        | set: name = value;
+);

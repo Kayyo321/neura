@@ -1,0 +1,15 @@
+error[E0516]: accessors require an exported field
+ --> $DIR/not-exported.nra:4:9
+  |
+3 |     let balance: int64 = 0;
+  |         ------- 'balance' is declared here without 'export'
+4 |         | get: balance;
+  |         ^^^^^^^^^^^^^^^ accessor clause on a field that is not exported
+  |
+  = note: inside its class a field is always read and written directly, so accessors only apply to access from outside the class
+help: export the field
+  |
+3 |     export let balance: int64 = 0;
+  |     +++++++
+
+For more information about this error, try `neura explain E0516`.

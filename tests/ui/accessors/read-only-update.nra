@@ -1,0 +1,7 @@
+// An increment from outside the class of a field that has only a getter (E0510).
+let Counter = class (
+    export let count: int = 0;
+        | get: count;
+);
+let counter = new Counter();
+counter.count++;
