@@ -241,8 +241,8 @@ target_include_directories(neura_lifecycle PUBLIC src)
 neura_target_defaults(neura_lifecycle)
 
 # The neuron circuit library: gadgets for bits, integers, and IEEE floats,
-# and block assembly. The converter emits graphs with it and the decompiler
-# regenerates them with it, so it depends only on the image format.
+# and block assembly. The converter emits graphs with it and the lift
+# library regenerates them with it, so it depends only on the image format.
 add_library(neura_circuit STATIC
     src/circuit/block_synth.cpp
     src/circuit/circuit.cpp
@@ -250,6 +250,26 @@ add_library(neura_circuit STATIC
 )
 target_link_libraries(neura_circuit PUBLIC neura_nvr)
 neura_target_defaults(neura_circuit)
+
+# Lifted blocks (docs/runtime/NVM.md, "Execution tiers"): the typed
+# expressions behind a block's graph, the structural and overflow proofs that
+# make them trustworthy, and their lowering to native 64-bit operations. It
+# depends on the circuit library and the image format only, so the runtime
+# can use it without compiler code. Float operations are lowered only where
+# hardware arithmetic is bit-exact, which rules out contracted multiply-adds.
+add_library(neura_lift STATIC
+    src/lift/expression.cpp
+    src/lift/lift.cpp
+    src/lift/lowered_block.cpp
+    src/lift/overflow.cpp
+    src/lift/proof.cpp
+    src/lift/recognize.cpp
+)
+target_link_libraries(neura_lift PUBLIC neura_circuit)
+if(NOT MSVC)
+    target_compile_options(neura_lift PRIVATE -ffp-contract=off)
+endif()
+neura_target_defaults(neura_lift)
 
 add_library(neura_compiler STATIC
     src/c-import/c_import.cpp
@@ -281,13 +301,14 @@ target_link_libraries(neura_compiler PUBLIC neura_circuit neura_nvr PRIVATE neur
 neura_target_defaults(neura_compiler)
 
 # The decompiler reads images through the shared loader and lifts their
-# graphs by regenerating them with the converter's circuit library.
+# graphs with the lift library, which regenerates them with the converter's
+# circuit library.
 add_library(neura_decompiler STATIC
     src/decompiler/assembly.cpp
     src/decompiler/decompile.cpp
     src/decompiler/lifter.cpp
 )
-target_link_libraries(neura_decompiler PUBLIC neura_compiler neura_nvm)
+target_link_libraries(neura_decompiler PUBLIC neura_lift neura_compiler neura_nvm)
 neura_target_defaults(neura_decompiler)
 
 add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp src/launcher/descriptor.cpp)
