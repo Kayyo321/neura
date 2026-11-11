@@ -11,7 +11,7 @@ let.promote _ = import:Std.Core.Result;
 #Since("0.1.0")
 export let Uuid = module (
     /// @brief An immutable 128-bit identifier ordered by its unsigned big-endian bytes.
-    #[Final, NoDiscard]
+    #[Final, NoDiscard, Immutable, ThreadSafe]
     export let Uuid = class implements Comparable<Uuid> (
         /// @brief The most significant eight bytes.
         last high: uint64;
@@ -33,6 +33,7 @@ export let Uuid = module (
         };
 
         /// @brief Lexicographic over the bytes, each unsigned.
+        #Pure
         export let compare_to = func(other: Uuid) -> Ordering {
             if (high != other.high) {
                 return order(high < other.high);
@@ -44,6 +45,7 @@ export let Uuid = module (
         };
 
         /// @brief Tests whether another UUID has the same two halves.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is Uuid)) {
                 return false;
@@ -81,6 +83,7 @@ export let Uuid = module (
 
     /// @brief A version 4 identifier from 16 bytes of random.fill_bytes, with the version bits set to 0100 and
     /// the variant bits to 10.
+    #ThreadSafe
     export let random = func(source: Random) -> Uuid {
         last bytes = source.fill_bytes(16);
         bytes[6] = (bytes[6] & 15) | 64;
@@ -92,7 +95,7 @@ export let Uuid = module (
     ///
     /// Errors: Empty; InvalidCharacter at the first byte that is not a hex digit or a hyphen in its place, or
     /// at offset 36 when text follows; UnexpectedEnd at the length for shorter text.
-    #NoDiscard
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<Uuid> {
         last length = text.byte_length;
         if (length == 0) {

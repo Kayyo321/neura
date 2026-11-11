@@ -57,12 +57,15 @@ export let BigInteger = module (
         };
 
         /// @brief Returns minus one, zero, or one according to the sign.
+        #Pure
         export let sign = func -> int => signum;
 
         /// @brief Reports whether this integer is zero.
+        #Pure
         export let is_zero = func -> bool => signum == 0;
 
         /// @brief Tests divisibility by two, including zero.
+        #Pure
         export let is_even = func -> bool => signum == 0 || (magnitude[0] & 1) == 0;
 
         /// @brief Returns the value with its sign reversed.
@@ -235,6 +238,7 @@ export let BigInteger = module (
         };
 
         /// @brief The number of bits of the magnitude; 0 for zero.
+        #Pure
         export let bit_length = func -> int {
             if (signum == 0) {
                 return 0;
@@ -244,6 +248,7 @@ export let BigInteger = module (
         };
 
         /// @brief Bit n of the magnitude. A negative n traps.
+        #Pure
         export let test_bit = func(n: int) -> bool {
             if (n < 0) {
                 trap_with_message("invalid argument: negative bit index");
@@ -256,6 +261,7 @@ export let BigInteger = module (
         };
 
         /// @brief Compares signed values by sign and then magnitude.
+        #Pure
         export let compare_to = func(other: BigInteger) -> Ordering {
             if (signum != other.signum) {
                 if (signum < other.signum) {
@@ -274,6 +280,7 @@ export let BigInteger = module (
         };
 
         /// @brief Tests whether another BigInteger has the same sign and magnitude.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is BigInteger)) {
                 return false;
@@ -284,6 +291,7 @@ export let BigInteger = module (
 
         /// @brief Starts at 0, combines each limb from most to least significant, then negates (wrapping) for a
         /// negative value.
+        #Pure
         export let.override hash_code = func -> uint32 {
             let h: uint32 = 0;
             for (let i = magnitude.length - 1; i >= 0; i--) {
@@ -296,7 +304,7 @@ export let BigInteger = module (
         };
 
         /// @brief Returns Some when the value fits in int64, or None otherwise.
-        #NoDiscard
+        #[NoDiscard, Pure]
         export let to_int64 = func -> Optional<int64> {
             if (magnitude.length > 2) {
                 return Optional<int64>.None;
