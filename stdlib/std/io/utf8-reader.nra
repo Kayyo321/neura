@@ -180,6 +180,7 @@ export let Utf8Reader = module (
     );
 
     /// @brief Creates a UTF-8 reader over the supplied byte source.
+    #[Pure, ThreadSafe]
     export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader =>
         new(source);
 );

@@ -649,6 +649,7 @@ export let RegexParser = module (
 
     /// @brief The ranges of \d, \w, and \s (by their lowercase letter) or of their negations (by the uppercase
     /// letter, as complements); empty otherwise.
+    #Pure
     export let shorthand_ranges = func(letter: uint8) -> uint32[list] {
         if (letter == 100) {
             return [48, 57];
@@ -676,6 +677,7 @@ export let RegexParser = module (
     ///
     /// Each optional copy of an item that can match empty also saves its entry position and checks for progress
     /// (two more instructions).
+    #Pure
     export let repeat_size = func(item: int, min: int, max: int, item_nullable: bool) -> int {
         last limit = MaxInstructions + 1;
         if (max < 0) {
@@ -697,6 +699,7 @@ export let RegexParser = module (
     };
 
     /// @brief Whether the node can match the empty string.
+    #Pure
     export let nullable = func(node: Node) -> bool {
         return match (node) {
             Node.Empty => true,

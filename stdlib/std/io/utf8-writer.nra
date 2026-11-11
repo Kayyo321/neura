@@ -28,6 +28,7 @@ export let Utf8Writer = module (
     );
 
     /// @brief Creates a UTF-8 writer over the supplied byte sink.
+    #[Pure, ThreadSafe]
     export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer =>
         new(sink);
 );

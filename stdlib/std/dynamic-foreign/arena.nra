@@ -61,9 +61,11 @@ export let Arena = module (
         };
 
         /// @brief Whether the arena is still open.
+        #Pure
         export let is_alive = func -> bool => lifetime.is_alive();
 
         /// @brief The scope shared with the arena's segments, for library code.
+        #Pure
         export let scope = func -> scopes.Scope => lifetime;
 
         /// @brief Frees the arena's memory and unloads its libraries. Closing twice, or closing the global arena,
@@ -74,9 +76,11 @@ export let Arena = module (
     );
 
     /// @brief A new arena that frees its memory when closed (Java's Arena.ofConfined).
+    #Pure
     export let of_confined = func -> Arena => new(new scopes.Scope(false));
 
     /// @brief The same as of_confined: Neura runs on one thread (Java's Arena.ofShared).
+    #Pure
     export let of_shared = func -> Arena => of_confined();
 
     /// @brief The arena whose memory lives until the end of the run (Java's Arena.global).

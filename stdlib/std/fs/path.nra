@@ -33,6 +33,7 @@ export let Path = module (
 
         /// @brief The path without its last component, or nil for the root, `.`, and a single relative
         /// component.
+        #Pure
         export let parent = func -> Path {
             last parts = split(text);
             if (parts.length == 0) {

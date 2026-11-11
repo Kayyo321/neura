@@ -10,7 +10,7 @@ let strings = import:Std.Text.Strings;
 #Since("0.1.0")
 export let Utf8 = module (
     /// @brief A copy of the string's bytes.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let encode = func(s: string) -> uint8[list] => strings.to_bytes(s);
 
     /// @brief The text, or an Encoding error at the offset `validate` returns. The message is "invalid start

@@ -25,6 +25,7 @@ export let Uuid = module (
         };
 
         /// @brief The 16 bytes in order, as a new list.
+        #Pure
         export let to_bytes = func -> uint8[list] {
             last bytes: uint8[list] = [];
             append_word(bytes, high);
@@ -55,6 +56,7 @@ export let Uuid = module (
         };
 
         /// @brief Starts from 17 and combines each byte in order.
+        #Pure
         export let.override hash_code = func -> uint32 {
             let hash: uint32 = 17;
             for (let b in to_bytes()) {
@@ -64,6 +66,7 @@ export let Uuid = module (
         };
 
         /// @brief The 36-character hyphenated form in lowercase.
+        #Pure
         export let.override to_string = func -> string {
             let text = "";
             last bytes = to_bytes();

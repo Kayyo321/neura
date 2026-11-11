@@ -152,7 +152,7 @@ export let LocalDate = module (
     ///
     /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the
     /// first byte of a year beyond 999,999, a month outside 1 through 12, or a day outside the month.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> result.Result<LocalDate> {
         last scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);

@@ -109,6 +109,7 @@ export let StringBuilder = module (
             | get: bytes.length;
 
         /// @brief Reports whether there are any accumulated bytes.
+        #Pure
         export let is_empty = func -> bool => bytes.length == 0;
 
         /// @brief Keeps the first `new_length` bytes. The length must be between 0 and the current byte length
@@ -139,6 +140,7 @@ export let StringBuilder = module (
         };
 
         /// @brief The current UTF-8 bytes determine equality and hashing.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is StringBuilder)) {
                 return false;
@@ -148,9 +150,11 @@ export let StringBuilder = module (
         };
 
         /// @brief Hashes the current text contents.
+        #Pure
         export let.override hash_code = func -> uint32 => hash_kernels.list_u8(bytes);
 
         /// @brief The accumulated text. The builder stays usable.
+        #Pure
         export let.override to_string = func -> string {
             let [valid, text] = string.from_utf8(bytes);
             if (!valid) {
@@ -170,7 +174,7 @@ export let StringBuilder = module (
     );
 
     /// @brief A new, empty builder.
-    #[NoDiscard, Since("0.1.0")]
+    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
     export let create = func -> StringBuilder {
         last owner = cell.of<StringBuilder>(nil);
         last builder: StringBuilder = new(Seal.Token, owner);

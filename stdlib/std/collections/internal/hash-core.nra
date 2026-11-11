@@ -68,15 +68,19 @@ export let HashCore = module (
         };
 
         /// @brief Returns the number of index slots.
+        #Pure
         export let table_size = func -> int => mask + 1;
 
         /// @brief The number of dense entries, live or dead.
+        #Pure
         export let used = func -> int => hashes.length;
 
         /// @brief Returns the first probe slot for the already spread hash.
+        #Pure
         export let home = func(hash: uint32) -> int => (hash & (mask as uint32)) as int;
 
         /// @brief Rule 1: a new entry needs a compaction first.
+        #Pure
         export let is_full = func -> bool {
             last entries = (mask + 1) >> 1;
             return hashes.length == entries || count + tombstones == entries;
@@ -84,6 +88,7 @@ export let HashCore = module (
 
         /// @brief The table size for a rule 1 compaction: doubled when more than half
         /// of E is live. Traps with "invalid argument: capacity" above 2^30.
+        #Pure
         export let grown_size = func -> int {
             last size = mask + 1;
             if (count > (size >> 2)) {
@@ -97,6 +102,7 @@ export let HashCore = module (
 
         /// @brief The first Empty slot from the hash's home. Used after a compaction,
         /// when the index has no tombstones.
+        #Pure
         export let free_slot = func(hash: uint32) -> int {
             let slot = (hash & (mask as uint32)) as int;
             while (index[slot] != Empty) {
@@ -106,6 +112,7 @@ export let HashCore = module (
         };
 
         /// @brief The slot that holds a live entry.
+        #Pure
         export let slot_of = func(entry: int) -> int {
             let slot = (hashes[entry] & (mask as uint32)) as int;
             while (index[slot] != entry) {
@@ -151,12 +158,14 @@ export let HashCore = module (
         };
 
         /// @brief Rule 2: more dead entries than live ones, and at least 8.
+        #Pure
         export let needs_compaction = func -> bool {
             last dead = hashes.length - count;
             return dead > count && dead >= 8;
         };
 
         /// @brief The old entry numbers of the live entries, in order.
+        #Pure
         export let live_entries = func -> int[list] {
             last order: int[list] = [];
             last length = live.length;
@@ -197,6 +206,7 @@ export let HashCore = module (
         /// broken: index slots and entries agree, at least half of the index
         /// is Empty, the last entry is live, and dead entries stay within
         /// max(count, 7).
+        #Pure
         export let validate = func {
             last size = mask + 1;
             if (size < MinimumSize || size > MaximumSize || (size & mask) != 0 || index.length != size) {
@@ -260,6 +270,7 @@ export let HashCore = module (
     /// @brief The table size for `capacity` entries: the smallest power of two at
     /// least max(8, 2 * capacity). Traps with "invalid argument: capacity" for
     /// a negative capacity or one above 2^29.
+    #Pure
     export let table_size_for = func(capacity: int) -> int {
         if (capacity < 0 || capacity > MaximumCapacity) {
             trap_with_message("invalid argument: capacity");
@@ -272,10 +283,12 @@ export let HashCore = module (
     };
 
     /// @brief Creates an empty core at the minimum table size.
+    #Pure
     export let create = func -> HashCore => new(MinimumSize);
 
     /// @brief Creates an empty core sized for the entry capacity.
     /// Traps with `invalid argument: capacity` outside 0 through 2^29.
+    #Pure
     export let with_capacity = func(capacity: int) -> HashCore => new(table_size_for(capacity));
 
     /// @brief Allocates `size` index slots initialized to `Empty`.

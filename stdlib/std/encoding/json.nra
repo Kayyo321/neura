@@ -100,7 +100,7 @@ export let Json = module (
 
     /// @brief The float64 nearest the number, ties to even (Float64.parse). Text that is not a JSON number
     /// traps with "invalid argument: number text".
-    #ThreadSafe
+    #[Pure, ThreadSafe]
     export let number_to_float64 = func(text: string) -> float64 {
         require_number(text);
         return match (float64s.parse(text)) {
@@ -137,7 +137,7 @@ export let Json = module (
     /// "unpaired surrogate" at the escape's backslash.
     /// - OutOfRange, "nesting deeper than 512": at the bracket that opens the
     /// 513th level.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<JsonValue> {
         last parser = new Parser();
         parser.document(text);
@@ -153,7 +153,7 @@ export let Json = module (
 
     /// @brief The value's JSON text with no whitespace. A Number whose text is not a JSON number traps with
     /// "invalid argument: number text".
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let write = func(value: JsonValue) -> string {
         last out: uint8[list] = [];
         write_value(out, value, -1, 0);
@@ -165,7 +165,7 @@ export let Json = module (
     ///
     /// Empty arrays and objects are [] and {}. A negative indent traps with "invalid argument: negative
     /// indent".
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let write_pretty = func(value: JsonValue, indent: int) -> string {
         if (indent < 0) {
             trap_with_message("invalid argument: negative indent");

@@ -69,7 +69,7 @@ export let ZoneOffset = module (
     ///
     /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an
     /// hour above 18 or a minute above 59, or at the sign when the total exceeds 18:00.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> result.Result<ZoneOffset> {
         last scan = new calendar.Scanner(text);
         last total = calendar.read_offset(scan);

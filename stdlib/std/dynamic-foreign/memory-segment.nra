@@ -31,22 +31,28 @@ export let MemorySegment = module (
         };
 
         /// @brief The native address of the first byte.
+        #Pure
         export let address = func -> int64 => base;
 
         /// @brief The number of accessible bytes.
+        #Pure
         export let byte_size = func -> int64 => length;
 
         /// @brief Whether the address is 0.
+        #Pure
         export let is_null = func -> bool => base == 0;
 
         /// @brief Whether the owning arena is still open.
+        #Pure
         export let is_alive = func -> bool => owner.is_alive();
 
         /// @brief The scope that owns the memory; library code passes it on to derived segments.
+        #Pure
         export let scope = func -> scopes.Scope => owner;
 
         /// @brief The same address with `size` accessible bytes, for memory whose extent native code defines.
         /// Like Java's reinterpret, this is unsafe: the size is not checked against the real allocation.
+        #Pure
         export let reinterpret = func(size: int64) -> MemorySegment {
             if (size < 0) {
                 trap_with_message("invalid argument: negative size");
@@ -55,12 +61,14 @@ export let MemorySegment = module (
         };
 
         /// @brief The `size` bytes starting at `offset`, sharing this segment's scope.
+        #Pure
         export let as_slice = func(offset: int64, size: int64) -> MemorySegment {
             check(offset, size);
             return new(base + offset, size, owner);
         };
 
         /// @brief The bytes from `offset` to the end, sharing this segment's scope.
+        #Pure
         export let as_slice_from = func(offset: int64) -> MemorySegment => as_slice(offset, length - offset);
 
         /// @brief Reads a C `_Bool`; any nonzero byte is true.
@@ -175,6 +183,7 @@ export let MemorySegment = module (
         };
 
         /// @brief Segments are equal when their addresses and sizes are.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is MemorySegment)) {
                 return false;
@@ -184,13 +193,16 @@ export let MemorySegment = module (
         };
 
         /// @brief Hashes the address and size.
+        #Pure
         export let.override hash_code = func -> uint32 => (base.to_string() + ":" + length.to_string()).hash_code();
 
         /// @brief `MemorySegment(address, size)` with the address in hexadecimal.
+        #Pure
         export let.override to_string = func -> string =>
             "MemorySegment(0x" + hex(base) + ", " + length.to_string() + ")";
 
         /// @brief Traps unless the scope is open and `size` bytes at `offset` lie inside the segment.
+        #Pure
         export let check = func(offset: int64, size: int64) {
             owner.check_alive();
             if (offset < 0 || size < 0 || offset > length || size > length - offset) {

@@ -36,6 +36,7 @@ export let Logger = module (
 
         /// @brief True when a record at `level` would reach the sink: the level is not Off and is at least the
         /// logger's level.
+        #Pure
         export let is_enabled = func(level: LogLevel) -> bool =>
             level != LogLevel.Off && (level as int) >= (instance.level as int);
 
@@ -81,10 +82,12 @@ export let Logger = module (
     );
 
     /// @brief A logger without timestamps.
+    #[Pure, ThreadSafe]
     export let create = func(name: string, sink: func(string) -> void, level: LogLevel) -> Logger =>
         new(name, sink, level, nil);
 
     /// @brief A logger whose records start with the clock's instant.
+    #[Pure, ThreadSafe]
     export let create_timed = func(name: string, sink: func(string) -> void, level: LogLevel, source: Clock) -> Logger =>
         new(name, sink, level, source);
 

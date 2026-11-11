@@ -40,5 +40,6 @@ export let AtomicInt64 = module (
     );
 
     /// @brief An atomic holding the initial value.
+    #[Pure, ThreadSafe]
     export let create = func(initial: int64) -> AtomicInt64 => new(initial);
 );

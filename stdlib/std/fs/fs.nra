@@ -37,6 +37,7 @@ export let Fs = module (
         };
 
         /// @brief Tests equality of the kind, size, and modification time.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is FileMetadata)) {
                 return false;
@@ -47,11 +48,13 @@ export let Fs = module (
         };
 
         /// @brief Combines the hashes of the kind, size, and modification time.
+        #Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(kind.hash_code(), size.hash_code()),
                 modified == nil ? 0 : modified.hash_code());
 
         /// @brief Formats the metadata as Kind(size, modified), with nil for an absent timestamp.
+        #Pure
         export let.override to_string = func -> string =>
             kind.to_string() + "(" + size.to_string() + ", " +
                 (modified == nil ? "nil" : modified.to_string()) + ")";

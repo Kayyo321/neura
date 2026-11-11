@@ -20,12 +20,15 @@ export let WideUint = module (
         export let limbs: uint32[list] = [];
 
         /// @brief Reports whether the value has no nonzero limbs.
+        #Pure
         export let is_zero = func -> bool => limbs.length == 0;
 
         /// @brief Tests the low bit, treating an empty limb list as even.
+        #Pure
         export let is_odd = func -> bool => limbs.length > 0 && (limbs[0] & 1) == 1;
 
         /// @brief Copies the limbs into an independent value.
+        #Pure
         export let copy = func -> WideUint {
             last duplicate = new WideUint();
             last target = duplicate.limbs;
@@ -36,6 +39,7 @@ export let WideUint = module (
         };
 
         /// @brief Returns the number of significant bits, or zero for zero.
+        #Pure
         export let bit_length = func -> int {
             last count = limbs.length;
             if (count == 0) {
@@ -51,6 +55,7 @@ export let WideUint = module (
         };
 
         /// @brief -1, 0, or 1 as this value is below, equal to, or above `other`.
+        #Pure
         export let compare = func(other: WideUint) -> int {
             last a = limbs;
             last b = other.limbs;
@@ -72,6 +77,7 @@ export let WideUint = module (
         };
 
         /// @brief The value when it is below 2^64; traps otherwise.
+        #Pure
         export let to_uint64 = func -> uint64 {
             last count = limbs.length;
             if (count > 2) {
@@ -285,6 +291,7 @@ export let WideUint = module (
 
         /// @brief Compares the value of the low `count` bits (count >= 1) with 2^(count - 1): -1 below, 0
         /// equal, 1 above.
+        #Pure
         export let low_bits_versus_half = func(count: int) -> int {
             last a = limbs;
             last index = (count - 1) / 32;
@@ -306,6 +313,7 @@ export let WideUint = module (
         };
 
         /// @brief Whether the low `count` bits are all zero.
+        #Pure
         export let low_bits_zero = func(count: int) -> bool {
             last a = limbs;
             last whole = count / 32;
@@ -326,6 +334,7 @@ export let WideUint = module (
         };
 
         /// @brief Decimal digits, most significant first; "0" for zero.
+        #Pure
         export let to_decimal = func -> string {
             if (limbs.length == 0) {
                 return "0";
@@ -372,9 +381,11 @@ export let WideUint = module (
     );
 
     /// @brief Creates a fresh zero magnitude with no limbs.
+    #Pure
     export let zero = func -> WideUint => new;
 
     /// @brief Splits an unsigned 64-bit value into up to two limbs.
+    #Pure
     export let of = func(value: uint64) -> WideUint {
         last result_value = new WideUint();
         if (value != 0) {

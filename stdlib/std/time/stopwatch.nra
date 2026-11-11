@@ -84,5 +84,6 @@ export let Stopwatch = module (
     );
 
     /// @brief A stopped stopwatch over `time_source`.
+    #[Pure, ThreadSafe]
     export let create = func(time_source: Clock) -> Stopwatch => new(time_source);
 );

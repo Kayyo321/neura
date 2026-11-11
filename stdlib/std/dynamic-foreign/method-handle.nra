@@ -43,9 +43,11 @@ export let MethodHandle = module (
         };
 
         /// @brief The C signature.
+        #Pure
         export let descriptor = func -> FunctionDescriptor => signature;
 
         /// @brief The function's address.
+        #Pure
         export let address = func -> MemorySegment => target;
 
         /// @brief Calls the function. Integers, floats, and booleans convert to the declared layouts when they

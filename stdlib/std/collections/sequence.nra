@@ -727,6 +727,7 @@ export let Sequence = module (
 
     /// @brief Returns the integers in ascending order from `start` inclusive to `end` exclusive.
     /// The sequence is empty when `end` is at or below `start`.
+    #[Pure, ThreadSafe]
     export let range = func(start: int, end: int) -> Sequence<int> {
         last position = cell.of<int>(start);
         let more = func -> bool => position.value < end;

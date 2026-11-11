@@ -34,7 +34,7 @@ export let Sha256 = module (
     );
 
     /// @brief A new digest with no bytes added.
-    #ThreadSafe
+    #[Pure, ThreadSafe]
     export let create = func -> Sha256 => new;
 
     /// @brief The 32-byte hash of the bytes.

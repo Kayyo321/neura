@@ -60,6 +60,7 @@ export let RegexMachine = module (
     );
 
     /// @brief Compiles a syntax tree with `groups` capturing groups.
+    #Pure
     export let compile = func(root: parser.Node, groups: int, ignore_case: bool, multi_line: bool, dot_all: bool) -> Program {
         last compiler = new Compiler(ignore_case, multi_line, dot_all, 2 * groups + 2);
         compiler.emit(Inst.Save(0));

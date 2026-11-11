@@ -114,10 +114,12 @@ export let BufferedReader = module (
     );
 
     /// @brief A reader holding up to 8,192 bytes.
+    #[Pure, ThreadSafe]
     export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader =>
         new(source, DefaultCapacity);
 
     /// @brief A capacity below 16 traps with "invalid argument: capacity below 16".
+    #[Pure, ThreadSafe]
     export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader =>
         new(source, capacity);
 );

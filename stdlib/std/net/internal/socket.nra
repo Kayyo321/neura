@@ -17,6 +17,7 @@ export let Socket = module (
     );
 
     /// @brief A port outside 0 through 65,535 traps.
+    #Pure
     export let check_port = func(port: int) {
         if (port < 0 || port > 65535) {
             trap_with_message("invalid argument: port");
@@ -24,5 +25,6 @@ export let Socket = module (
     };
 
     /// @brief Formats the host and decimal port for diagnostic context.
+    #Pure
     export let address_of = func(host: string, port: int) -> string => host + ":" + port.to_string();
 );

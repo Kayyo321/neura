@@ -62,5 +62,6 @@ export let SystemClock = module (
     );
 
     /// @brief Creates a clock backed by the host's wall and monotonic clocks.
+    #[Pure, ThreadSafe]
     export let create = func -> SystemClock => new;
 );

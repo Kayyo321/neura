@@ -53,6 +53,7 @@ export let SymbolLookup = module (
         };
 
         /// @brief A lookup that tries this one, then `other` (Java's SymbolLookup.or).
+        #Pure
         export let or_else = func(other: SymbolLookup) -> SymbolLookup {
             last chained: SymbolLookup = new(library, owner);
             chained.fallback = (fallback == nil) ? other : fallback.or_else(other);

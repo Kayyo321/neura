@@ -186,7 +186,7 @@ export let Strings = module (
     };
 
     /// @brief The parts with the separator between each pair.
-    #ThreadSafe
+    #[Pure, ThreadSafe]
     export let join = func(parts: string[list], separator: string) -> string {
         last count = parts.length;
         if (count == 0) {
@@ -210,7 +210,7 @@ export let Strings = module (
     };
 
     /// @brief `count` copies of the string. A negative count traps with "invalid argument: negative count".
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let repeat = func(s: string, count: int) -> string {
         if (count < 0) {
             trap_with_message("invalid argument: negative count");
@@ -295,7 +295,7 @@ export let Strings = module (
 
     /// @brief Copies of `pad` before the string until it has `width` scalar values. `pad` must be exactly one
     /// scalar value; otherwise the call traps with "invalid argument: pad is not one scalar value".
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let pad_start = func(s: string, width: int, pad: string) -> string {
         last missing = padding(s, width, pad);
         if (missing == 0) {
@@ -308,7 +308,7 @@ export let Strings = module (
     };
 
     /// @brief Copies of `pad` after the string, with the rules of pad_start.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let pad_end = func(s: string, width: int, pad: string) -> string {
         last missing = padding(s, width, pad);
         if (missing == 0) {
@@ -321,7 +321,7 @@ export let Strings = module (
     };
 
     /// @brief The scalar values in reverse order.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let reverse = func(s: string) -> string {
         last length = s.byte_length;
         last bytes: uint8[list] = [];
@@ -338,7 +338,7 @@ export let Strings = module (
     };
 
     /// @brief A copy of the UTF-8 bytes.
-    #ThreadSafe
+    #[Pure, ThreadSafe]
     export let to_bytes = func(s: string) -> uint8[list] {
         last bytes: uint8[list] = [];
         append_bytes(bytes, s, 0, s.byte_length);
@@ -393,7 +393,7 @@ export let Strings = module (
 
     /// @brief The text of the scalar values. A surrogate or a value above 0x10FFFF traps with "invalid
     /// argument: not a Unicode scalar value".
-    #ThreadSafe
+    #[Pure, ThreadSafe]
     export let from_scalars = func(values: uint32[list]) -> string {
         last bytes: uint8[list] = [];
         for (let value in values) {

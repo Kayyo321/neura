@@ -23,11 +23,11 @@ export let Timer = module (
         export let wait = func -> TimerOutcome => wait_selected(wait_timer(instance));
 
         /// @brief What a select waits on for this timer. Used by the select statement.
-        #Hidden
+        #[Hidden, Pure]
         export let select_handle = func -> Timer => instance;
 
         /// @brief The outcome of a wait that a select committed. Used by the select statement.
-        #Hidden
+        #[Hidden, Pure]
         export let wait_selected = func(code: uint32) -> TimerOutcome {
             if (code == 0) {
                 return TimerOutcome.Fired;

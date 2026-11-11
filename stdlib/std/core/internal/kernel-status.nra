@@ -11,13 +11,13 @@ export let KernelStatus = module (
     export const Ok: uint32 = 0;
 
     /// @brief The Encoding error of a NEURA_ERR_* encoding status (16 through 24) at the offset.
-    #NoDiscard
+    #[NoDiscard, Pure]
     export let encoding_error = func(status: uint32, offset: int64) -> Error =>
         Error.Encoding { offset: offset as int, message: encoding_message(status) };
 
     /// @brief The Parse error of a NEURA_ERR_PARSE_* status (32 through 35) at the offset. An out-of-range value
     /// names `type_name`, as "value out of range for int32".
-    #NoDiscard
+    #[NoDiscard, Pure]
     export let parse_error = func(status: uint32, offset: int64, type_name: string) -> Error {
         const [kind, message]: [ParseErrorKind, string] = parse_kind_and_message(status, type_name);
         return Error.Parse { kind: kind, offset: offset as int, message: message };
