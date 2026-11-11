@@ -504,6 +504,9 @@ if(BUILD_TESTING)
 
     # Standard library tests under the reference evaluator and NVM.
     add_test(NAME backend-reference COMMAND neura_backend_tests reference "${CMAKE_CURRENT_SOURCE_DIR}")
+    # The suite takes about 1470 seconds on GitHub's Intel macOS runners, which
+    # is too close to CTest's default limit of 1500 seconds.
+    set_tests_properties(backend-reference PROPERTIES TIMEOUT 3600)
 
     foreach(suite IN ITEMS lossless lift behavior)
         add_test(NAME decompiler-${suite}
