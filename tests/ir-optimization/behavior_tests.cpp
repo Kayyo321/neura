@@ -472,12 +472,14 @@ NEURA_TEST(behavior, hand_derived_expectations) {
 // written for it, prepared as a build prepares it, against the unoptimized
 // program. The fixture must make the pass rewrite something.
 NEURA_TEST(behavior, value_passes_alone_match_unoptimized) {
-    const std::array<std::pair<const char*, const char*>, 5> cases{{
+    const std::array<std::pair<const char*, const char*>, 7> cases{{
         {"propagate-copies", "dataflow.nra"},
         {"eliminate-common-subexpressions", "dataflow.nra"},
         {"hoist-loop-invariants", "dataflow.nra"},
         {"remove-dead-stores", "dataflow.nra"},
         {"inline-calls", "inlining.nra"},
+        {"eliminate-common-subexpressions", "purity.nra"},
+        {"remove-pure-discards", "purity.nra"},
     }};
     for (const auto& [pass, file] : cases) {
         const auto original = prepared({environment.fixtures() / file}, {}, true);
@@ -557,6 +559,24 @@ NEURA_TEST(behavior, the_comparison_notices_unsafe_rewrites) {
         discard.operands.push_back(std::move(again));
         block.body.insert(block.body.begin(), std::move(discard));
         check(noticed(inlining, broken, "Inlining.argument_once"), "an argument evaluated twice went unnoticed");
+    }
+    const auto purity = lower_fixture(environment, "purity.nra");
+    {
+        // Removing an unused call of a pure function that may trap.
+        auto broken = purity;
+        auto& body = body_of(broken, "Purity.keep_unused_trapping_call");
+        check(body.at(0).op == IrOp::Discard, "unexpected keep_unused_trapping_call");
+        body.erase(body.begin());
+        check(noticed(purity, broken, "Purity.keep_unused_trapping_call"),
+              "a dropped trapping pure call went unnoticed");
+    }
+    {
+        // Reusing a pure call's result after a write to what it reads.
+        auto broken = purity;
+        auto& body = body_of(broken, "Purity.keep_after_write");
+        auto& value = body.at(4).operands.front();
+        value = load_of(broken, body.at(2).symbol, value.span);
+        check(noticed(purity, broken, "Purity.keep_after_write"), "reuse after a write went unnoticed");
     }
 }
 

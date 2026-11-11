@@ -1,7 +1,9 @@
 #include "passes.hpp"
 
 #include "analysis.hpp"
+#include "effects.hpp"
 #include "integer_folding.hpp"
+#include "neura-ir/purity.hpp"
 
 #include <algorithm>
 #include <iterator>
@@ -187,10 +189,34 @@ std::size_t remove_unreachable(IrProgram& program) {
 }
 
 std::size_t remove_pure_discards(IrProgram& program) {
-    return rewrite_regions(program, [&program](std::vector<IrNode>& region) -> std::size_t {
-        return std::erase_if(region, [&program](const IrNode& statement) {
+    const EffectAnalysis effects(program);
+    const PurityAnalysis purity(program);
+    // A call whose result is unused, of a function that is pure and total
+    // (neura-ir/purity.hpp), with arguments that are pure and total: it
+    // has no effect, cannot fail, and returns. A call that polls is a
+    // scheduling point and stays.
+    const auto unused_call = [&](const IrNode& call) {
+        if ((call.op != IrOp::Call && call.op != IrOp::VirtualCall) || call.poll || !call.body.empty() ||
+            !call.alternative.empty()) {
+            return false;
+        }
+        const auto target = call.op == IrOp::Call ? call.symbol : effects.dispatch().target(call);
+        if (target == no_symbol || !purity.total(target)) return false;
+        for (std::size_t i = 0; i < call.operands.size(); ++i) {
+            const auto& operand = call.operands[i];
+            const bool receiver = call.op == IrOp::VirtualCall && i == 0;
+            if (receiver ? !(operand.type.kind == TypeKind::Module && operand.operands.empty() &&
+                             (operand.op == IrOp::Reference || operand.op == IrOp::Receiver))
+                         : !pure_and_total(program, operand)) {
+                return false;
+            }
+        }
+        return true;
+    };
+    return rewrite_regions(program, [&](std::vector<IrNode>& region) -> std::size_t {
+        return std::erase_if(region, [&](const IrNode& statement) {
             return statement.op == IrOp::Discard && statement.operands.size() == 1 &&
-                   pure_and_total(program, statement.operands.front());
+                   (pure_and_total(program, statement.operands.front()) || unused_call(statement.operands.front()));
         });
     });
 }

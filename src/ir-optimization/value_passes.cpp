@@ -8,6 +8,7 @@
 #include "analysis.hpp"
 #include "effects.hpp"
 #include "locals.hpp"
+#include "neura-ir/purity.hpp"
 
 #include <algorithm>
 #include <set>
@@ -72,12 +73,55 @@ IrNode load_of(const IrProgram& program, SymbolId local, const IrNode& replaced)
 // operations and conversions on bool, integer, and float values, field
 // reads, element reads, and lengths. String operations that allocate are
 // left out.
-bool repeatable(const IrProgram& program, const IrNode& node) {
+// The receiver of a call on a module: the module named, or the enclosing
+// module's own receiver. Evaluating it reads nothing.
+bool module_receiver(const IrNode& node) {
+    return node.type.kind == TypeKind::Module && node.operands.empty() &&
+           (node.op == IrOp::Reference || node.op == IrOp::Receiver);
+}
+
+// The function a call reaches in every run: a direct call's target, or a
+// module call's fixed target. no_symbol otherwise.
+SymbolId fixed_callee(const IrProgram& program, const EffectAnalysis& effects, const PurityAnalysis& purity,
+                      const IrNode& node) {
+    if (node.op == IrOp::Call) return node.symbol;
+    if (node.op != IrOp::VirtualCall || node.operands.empty()) return no_symbol;
+    if (node.operands.front().type.kind == TypeKind::Module) return effects.dispatch().target(node);
+    // A method that nothing overrides runs its own body for every receiver.
+    if (node.operands.front().type.kind == TypeKind::Object && node.symbol < program.symbols.size() &&
+        program.symbols[node.symbol].has_body && !purity.overridden(node.symbol)) {
+        return node.symbol;
+    }
+    return no_symbol;
+}
+
+bool repeatable(const IrProgram& program, const IrNode& node, const EffectAnalysis& effects,
+                const PurityAnalysis& purity) {
     const auto children = [&] {
         return node.body.empty() && node.alternative.empty() &&
-               std::ranges::all_of(node.operands, [&](const IrNode& operand) { return repeatable(program, operand); });
+               std::ranges::all_of(node.operands, [&](const IrNode& operand) {
+                   return repeatable(program, operand, effects, purity);
+               });
     };
     switch (node.op) {
+    case IrOp::Call:
+    case IrOp::VirtualCall: {
+        // A call of a pure function with a value result: the same arguments
+        // and the same state reachable from them give the same result, so
+        // the call can be reused like any other value. A poll on the call
+        // counts toward the task's quantum, and no pass removes one.
+        const auto target = fixed_callee(program, effects, purity, node);
+        if (target == no_symbol || node.poll || !value_type(node.type) || !purity.pure(target) ||
+            !node.body.empty() || !node.alternative.empty()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < node.operands.size(); ++i) {
+            const auto& operand = node.operands[i];
+            if (node.op == IrOp::VirtualCall && i == 0 && module_receiver(operand)) continue;
+            if (!repeatable(program, operand, effects, purity)) return false;
+        }
+        return true;
+    }
     case IrOp::Integer:
     case IrOp::Boolean:
     case IrOp::Float:
@@ -192,6 +236,7 @@ std::size_t propagate_copies(IrProgram& program) {
 
 std::size_t eliminate_common_subexpressions(IrProgram& program) {
     const EffectAnalysis analysis(program);
+    const PurityAnalysis purity(program);
     std::size_t count = 0;
     for (auto& body : program.bodies) {
         if (!function_body(program, body)) continue;
@@ -216,7 +261,7 @@ std::size_t eliminate_common_subexpressions(IrProgram& program) {
                     local = definition.operands.front().symbol;
                     expression = &definition.operands.back();
                 }
-                if (expression == nullptr || node_count(*expression) < 2 || !repeatable(program, *expression) ||
+                if (expression == nullptr || node_count(*expression) < 2 || !repeatable(program, *expression, analysis, purity) ||
                     expression->type != symbol(program, local).type) {
                     continue;
                 }
