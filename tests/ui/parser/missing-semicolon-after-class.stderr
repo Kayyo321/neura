@@ -1,0 +1,14 @@
+error[E0201]: expected ';'
+ --> $DIR/missing-semicolon-after-class.nra:5:2
+  |
+5 | )
+  |  ^ expected ';' here
+6 |
+7 | let origin = new Point();
+  | --- found 'let'
+  |
+  = note: every declaration ends with ';', including one whose value is a function, class or module body
+help: add the missing ';'
+  |
+5 | );
+  |  +

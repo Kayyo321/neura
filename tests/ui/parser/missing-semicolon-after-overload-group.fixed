@@ -1,0 +1,8 @@
+// An overload group is one declaration and ends with ';' after its final block.
+let scale = func(value: int) -> int {
+    return value * 2;
+} or func(value: int, factor: int) -> int {
+    return value * factor;
+};
+
+let doubled = scale(21);

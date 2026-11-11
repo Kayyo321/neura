@@ -1,0 +1,7 @@
+// A class declaration ends with ');'.
+let Point = class (
+    export let x: int = 0;
+    export let y: int = 0;
+)
+
+let origin = new Point();
