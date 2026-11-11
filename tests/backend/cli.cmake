@@ -178,6 +178,13 @@ build_image("${TEST_DIR}/multi-file.nvr" -I "${SOURCE_DIR}/examples/modules/mult
     "${SOURCE_DIR}/examples/modules/multi-file/main.nra")
 expect_run("multi-file" "${TEST_DIR}/multi-file.nvr" "Hello, Neura!\n" 0 "")
 
+# Field accessors (Types.md, Accessors), optimized and unoptimized.
+build_image("${TEST_DIR}/accessors.nvr" "${SOURCE_DIR}/examples/types/accessors.nra")
+build_image("${TEST_DIR}/accessors-unoptimized.nvr" --no-optimize "${SOURCE_DIR}/examples/types/accessors.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    expect_run("accessors example${variant}" "${TEST_DIR}/accessors${variant}.nvr" "payload\nXY729H08\nAB12\n1\n" 0 "")
+endforeach()
+
 # Scoped tasks, a cancellable operation, and shared state: the same output
 # under any quantum.
 build_image("${TEST_DIR}/service.nvr" "${SOURCE_DIR}/examples/concurrency/service.nra")

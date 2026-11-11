@@ -326,6 +326,64 @@ let implicit = accept(reading);
 
 Function arguments can use one visible conversion when their type is otherwise incompatible with the parameter. Assignments and returns require ordinary assignability or an explicit `as`. A conversion from `Reading` to `int64` therefore cannot satisfy an `int32` parameter. An unexported cast is only available within its declaring class.
 
+### Accessors
+
+An exported instance field can have a getter and a setter. Each is an accessor clause written after the field's `;`, indented under the field. Code outside the class still reads and writes the field as a member: `my_data.data` calls the getter and `my_data.data = text` calls the setter. There is no call syntax and no visible accessor method.
+
+<!-- example: check -->
+```neura
+let failure = import:Std.Core.Failure;
+
+let MyData = class (
+    export let data: string = "";
+        | set: data = value;
+        | get: data;
+
+    export let code = "XY729H08";
+        | get: code;
+
+    export let non_zero = 18000;
+        | get: non_zero;
+        | set: {
+            if (value == 0) {
+                failure.trap("non_zero must not be zero");
+            }
+            non_zero = value;
+        };
+);
+
+let my_data = new MyData();
+my_data.data = "payload";
+let my_var = my_data.data;
+my_data.non_zero += 1;
+```
+
+```text
+field     = "export" ("let" | "const") name [":" type] ["=" expression] ";" { accessor }
+accessor  = "|" "get" ":" (expression | block) ";"
+          | "|" "set" ":" (simple-statement | block) ";"
+```
+
+- `get`, `set`, and `value` are contextual. They have this meaning only in an accessor clause and stay ordinary identifiers everywhere else.
+- A field has at most one `get` and one `set` clause, in either order. Every clause ends with `;`, including one whose body is a block: `| set: { ... };`.
+- A getter's expression has the field's type. A block getter returns a value of that type on every path or traps.
+- In a setter, `value` names the incoming value, which has the field's type. The body is one simple statement, such as an assignment or a call, or a block. A setter that never assigns its field is accepted with the warning `setter-never-stores`.
+- A setter rejects a value with a trap such as `Std.Core.Failure.trap` ([Errors](Errors.md)). The trap ends the run.
+
+**Inside and outside the class.** Within the declaring class (its methods, constructors, field initializers, the accessor bodies, and closures in them), a bare field name and `instance.data` name the field's storage. That is why `data = value` in a setter stores the value instead of calling the setter again, and why a constructor can write `instance.data = data`. Every other access calls the accessors:
+
+- an explicit receiver other than `instance`, such as `other.data`, even inside the declaring class;
+- all code outside the class;
+- a subclass, including its bare name of the inherited field.
+
+A field with only `get` is read-only outside its class: assigning it there, or updating it with a compound assignment, `++`, or `--`, is error `E0510`. A field with only `set` is write-only outside its class: reading or updating it there is error `E0515`. Inside the declaring class, an access whose accessor is missing uses the storage. A field without accessors behaves as before.
+
+**Evaluation order.** `object.field = expression` evaluates the receiver, then the expression, then calls the setter. A compound assignment such as `object.field += expression`, and `++` and `--` in prefix or postfix form, evaluate the receiver once, call the getter, evaluate any right operand, compute the new value with the field's type, and call the setter. Checked arithmetic traps before the setter runs. A postfix update yields the getter's value and a prefix update the new value, as for any variable ([Numbers](Numbers.md)). In a chain such as `holder.counter.count = 5`, `holder.counter` is a read through its getter and `count` is then set on the result.
+
+**Places.** A primitive reference cannot alias a field that is reached through its accessors. Passing `my_data.non_zero` to an `&int` parameter, or binding it to a reference, is error `E0524`. Copy the value into a local, pass the local, and assign the result back.
+
+**Limits in this release.** Accessors resolve statically to the declaring class: they are not virtual and cannot be overridden, and a subclass cannot redeclare the field. Interfaces cannot require accessors. Accessors are allowed only on exported instance fields (`E0516`, `E0517`, `E0518`, `E0519`). A `const` field can have a getter but not a setter (`E0521`). A field named `value` cannot have a setter (`E0522`). A primitive reference field cannot have accessors (`E0523`). Calling an accessor through a nil reference traps like any instance method. A getter or setter call is an ordinary method call to the [task-safety](#task-safe-calls) analysis and the optimizer. In NeuraIR the clauses are the hidden methods `$get_<field>` and `$set_<field>`, linked from the field by the [1.10 attributes](../NirFormat.md#revision-110-symbol-attributes-and-deferred-initialization) `accessor.get`, `accessor.set`, and `accessor.of`, so a program that imports the class from a `.nir` file uses the same accessors. See [accessors.nra](../../examples/types/accessors.nra).
+
 ## Enums
 
 An enum declares a closed set of named variants. Variants are written qualified by the enum's name.
