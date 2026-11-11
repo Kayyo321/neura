@@ -1580,12 +1580,15 @@ private:
         case TypeKind::Tuple:
         case TypeKind::Array:
         case TypeKind::List: {
-            const auto& left = entry(a, node).elements;
-            const auto& right = entry(b, node).elements;
-            if (left.size() != right.size()) return false;
-            for (std::size_t i = 0; i < left.size(); ++i) {
+            // An element's equals method can allocate, which moves the heap's
+            // entries, and can change either collection. Each element is
+            // therefore read again from the heap and compared as a copy.
+            if (entry(a, node).elements.size() != entry(b, node).elements.size()) return false;
+            for (std::size_t i = 0; i < entry(a, node).elements.size() && i < entry(b, node).elements.size(); ++i) {
                 const auto& element = type.kind == TypeKind::Tuple ? type.arguments.at(i) : type.arguments.at(0);
-                if (!value_equals(left[i], right[i], element, node)) return false;
+                const Value left = entry(a, node).elements[i];
+                const Value right = entry(b, node).elements[i];
+                if (!value_equals(left, right, element, node)) return false;
             }
             return true;
         }
@@ -1634,10 +1637,12 @@ private:
         case TypeKind::Array:
         case TypeKind::List: {
             U64 hash = 1;
-            const auto& elements = entry(value, node).elements;
-            for (std::size_t i = 0; i < elements.size(); ++i) {
+            // As in value_equals: hash_code can allocate or change the
+            // collection, so no reference into the heap is kept across it.
+            for (std::size_t i = 0; i < entry(value, node).elements.size(); ++i) {
                 const auto& element = type.kind == TypeKind::Tuple ? type.arguments.at(i) : type.arguments.at(0);
-                hash = (hash * 31 + value_hash(elements[i], element, node)) & low;
+                const Value item = entry(value, node).elements[i];
+                hash = (hash * 31 + value_hash(item, element, node)) & low;
             }
             return hash;
         }
@@ -1663,10 +1668,12 @@ private:
         case TypeKind::Array:
         case TypeKind::List: {
             std::string text = "[";
-            const auto& elements = entry(value, node).elements;
-            for (std::size_t i = 0; i < elements.size(); ++i) {
+            // As in value_equals: to_string can allocate or change the
+            // collection, so no reference into the heap is kept across it.
+            for (std::size_t i = 0; i < entry(value, node).elements.size(); ++i) {
                 const auto& element = type.kind == TypeKind::Tuple ? type.arguments.at(i) : type.arguments.at(0);
-                text += (i == 0 ? "" : ", ") + value_text(elements[i], element, node);
+                const Value item = entry(value, node).elements[i];
+                text += (i == 0 ? "" : ", ") + value_text(item, element, node);
             }
             return text + "]";
         }
