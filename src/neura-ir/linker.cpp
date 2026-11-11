@@ -1,5 +1,6 @@
 #include "linker.hpp"
 
+#include "attributes.hpp"
 #include "host_binding.hpp"
 #include "verifier.hpp"
 
@@ -227,7 +228,8 @@ bool same_symbol(const IrSymbol& a, const IrSymbol& b, bool legacy_signatures) {
         signature(a.overload_group, b.overload_group, no_symbol) &&
         signature(a.variadic, b.variadic, VariadicKind::None) &&
         signature(a.user_cast, b.user_cast, false) &&
-        signature(a.singleton_instance, b.singleton_instance, no_symbol);
+        signature(a.singleton_instance, b.singleton_instance, no_symbol) &&
+        signature(a.attributes, b.attributes, std::vector<IrAttribute>{});
 }
 
 class Remapping {
@@ -298,6 +300,9 @@ void Remapping::symbol(IrSymbol& value, SymbolId id) const {
     if (value.bound) type(*value.bound);
     for (auto* types : {&value.payload_types, &value.interfaces, &value.additional_bounds})
         for (auto& item : *types) type(item);
+    for_each_attribute_symbol(value.attributes, [&](SymbolId& item) { item = reference(item); });
+    for_each_attribute_type(value.attributes, [&](IrType& item) { type(item); });
+    for_each_attribute_span(value.attributes, [&](Span& item) { span(item); });
 }
 
 void Remapping::node(IrNode& value) const {

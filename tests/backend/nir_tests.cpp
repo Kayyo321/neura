@@ -4,14 +4,18 @@
 
 #include "ir-optimization/concurrency_support.hpp"
 #include "lexer/lexer.hpp"
+#include "neura-ir/attributes.hpp"
 #include "neura-ir/linker.hpp"
 #include "neura-ir/nir_format.hpp"
+#include "neura-ir/reference_storage.hpp"
+#include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvr/format.hpp"
 #include "parser/syntax.hpp"
 
 #include "backend/converter.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -84,6 +88,7 @@ bool same_program(const IrProgram& a, const IrProgram& b) {
             x.library_path != y.library_path || x.interfaces != y.interfaces ||
             x.additional_bounds != y.additional_bounds || x.overload_group != y.overload_group ||
             x.variadic != y.variadic || x.user_cast != y.user_cast || x.singleton_instance != y.singleton_instance ||
+            x.attributes != y.attributes ||
             x.host_binding.has_value() != y.host_binding.has_value() ||
             (x.host_binding && (x.host_binding->name != y.host_binding->name ||
                                 x.host_binding->version != y.host_binding->version))) {
@@ -439,12 +444,12 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     clean.bodies.front().instructions.front().poll = false;
     check_equal(read_nir(write_nir(clean), "clean").bodies.size(), std::size_t{1}, "a plain node reads");
 
-    // Minor 10 is newer than this reader.
+    // Minor 11 is newer than this reader.
     auto newer = bytes;
-    newer[6] = 10;
-    expect_nir_error(newer, "NeuraIR format 1.10 is not supported; this reader accepts 1.0 through 1.9");
+    newer[6] = 11;
+    expect_nir_error(newer, "NeuraIR format 1.11 is not supported; this reader accepts 1.0 through 1.10");
     newer[6] = 200;
-    expect_nir_error(newer, "this reader accepts 1.0 through 1.9");
+    expect_nir_error(newer, "this reader accepts 1.0 through 1.10");
 
     // An operation tag above the newest one, in a 1.9 file.
     IrProgram above;
@@ -579,6 +584,499 @@ NEURA_TEST(nir, linking_rejects_conflicting_embedded_code) {
     } catch (const Diagnostic& error) {
         check(std::string(error.what()).find("file identity") != std::string::npos, error.what());
     }
+}
+
+// ---- NeuraIR 1.10: symbol attributes and deferred initialization ----------
+//
+// No source construct produces either yet, so these tests attach every
+// pre-registered attribute to the declarations of nir-versions/attributes.nra
+// and turn two of its locals into deferred `last` bindings, as lowering of
+// `last name: T; name = value;` will.
+
+namespace {
+
+SymbolId find_local(const IrProgram& program, SymbolId owner, std::string_view name) {
+    for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+        const auto& item = program.symbols[id];
+        if ((item.kind == SymbolKind::Local || item.kind == SymbolKind::Parameter) && item.owner == owner &&
+            item.name == name)
+            return id;
+    }
+    fail("no local or parameter named " + std::string(name));
+}
+
+IrNode load_of(const IrProgram& program, SymbolId id, const Span& span) {
+    IrNode node{};
+    node.op = IrOp::Load;
+    node.type = program.symbols[id].type;
+    node.span = span;
+    node.symbol = id;
+    return node;
+}
+
+// Rewrites `let name = value;` in `region` to a deferred declaration followed
+// by `name = value;`.
+bool defer_in(const IrProgram& program, std::vector<IrNode>& region, SymbolId local) {
+    for (std::size_t i = 0; i < region.size(); ++i) {
+        auto& node = region[i];
+        if (node.op == IrOp::Initialize && node.symbol == local && node.operands.size() == 1) {
+            IrNode store{};
+            store.op = IrOp::Store;
+            store.type = node.type;
+            store.span = node.span;
+            store.operands.push_back(load_of(program, local, node.span));
+            store.operands.push_back(std::move(node.operands.front()));
+            node.operands.clear();
+            region.insert(region.begin() + static_cast<std::ptrdiff_t>(i) + 1, std::move(store));
+            return true;
+        }
+        for (auto* nested : {&node.body, &node.alternative}) {
+            if (defer_in(program, *nested, local)) return true;
+        }
+    }
+    return false;
+}
+
+// Removes the first store to `local` in `region`, at any depth.
+bool remove_store(std::vector<IrNode>& region, SymbolId local) {
+    for (auto it = region.begin(); it != region.end(); ++it) {
+        if (it->op == IrOp::Store && it->operands.front().op == IrOp::Load && it->operands.front().symbol == local) {
+            region.erase(it);
+            return true;
+        }
+        for (auto* nested : {&it->body, &it->alternative}) {
+            if (remove_store(*nested, local)) return true;
+        }
+    }
+    return false;
+}
+
+struct Attributed {
+    IrProgram program;
+    SymbolId point, x, get_x, set_x, box, value, peek, checksum, sum_to, main, step, point_local, parameter;
+};
+
+const std::string attributed_output = "x = 4\nbox = 7\nsum_to(10) = 55\n";
+
+Attributed attributed_fixture(const Environment& environment, bool attributes = true, bool deferred = true) {
+    Attributed a;
+    a.program = lower_files({backend_dir(environment) / "nir-versions" / "attributes.nra"});
+    auto& p = a.program;
+    a.point = find_symbol(p, "Attributes.Point");
+    a.x = find_symbol(p, "Attributes.Point.x");
+    a.get_x = find_symbol(p, "Attributes.Point.get_x");
+    a.set_x = find_symbol(p, "Attributes.Point.set_x");
+    a.box = find_symbol(p, "Attributes.Box");
+    a.value = find_symbol(p, "Attributes.Box.value");
+    a.peek = find_symbol(p, "Attributes.Box.peek");
+    a.checksum = find_symbol(p, "Attributes.checksum");
+    a.sum_to = find_symbol(p, "Attributes.sum_to");
+    a.main = find_symbol(p, "Attributes.main");
+    a.step = find_local(p, a.sum_to, "step");
+    a.point_local = find_local(p, a.main, "point");
+    a.parameter = find_local(p, a.checksum, "value");
+    auto& s = p.symbols;
+    if (attributes) {
+        const Span tag_span{s[a.point].span.file, 7, 5, 120, 11};
+        add_attribute(s[a.point], AttributeId::Tag,
+                      tag_payload(1, "Deprecated", {{"as_of", attribute_text("0.2.0")}, {"", attribute_bool(true)}},
+                                  tag_span));
+        add_attribute(s[a.point], AttributeId::Tag,
+                      tag_payload(12, "Since", {{"", attribute_unsigned(2)}, {"delta", attribute_signed(-5)}}, tag_span));
+        set_attribute(s[a.point], AttributeId::ClassAnonymous,
+                      anonymous_class_payload(true, "class(x: int32)", s[a.point].span));
+        set_attribute(s[a.point], AttributeId::ClassShareable, attribute_bool(true));
+        set_attribute(s[a.x], AttributeId::AccessorGet, attribute_symbol(a.get_x));
+        set_attribute(s[a.x], AttributeId::AccessorSet, attribute_symbol(a.set_x));
+        set_attribute(s[a.x], AttributeId::BindingLast, attribute_bool(false));
+        set_attribute(s[a.get_x], AttributeId::AccessorOf, accessor_of_payload(a.x, AccessorKind::Get));
+        set_attribute(s[a.get_x], AttributeId::InlineDirective,
+                      attribute_unsigned(static_cast<std::uint64_t>(InlineDirective::Always)));
+        set_attribute(s[a.set_x], AttributeId::AccessorOf, accessor_of_payload(a.x, AccessorKind::Set));
+        set_attribute(s[a.set_x], AttributeId::Synchronized, attribute_bool(true));
+        // peek is never called, so specialization copies it only for the link.
+        set_attribute(s[a.value], AttributeId::AccessorGet, attribute_symbol(a.peek));
+        set_attribute(s[a.peek], AttributeId::AccessorOf, accessor_of_payload(a.value, AccessorKind::Get));
+        set_attribute(s[a.checksum], AttributeId::KernelBinding, kernel_binding_payload("neura.test.checksum", 1));
+        set_attribute(s[a.checksum], AttributeId::InlineDirective,
+                      attribute_unsigned(static_cast<std::uint64_t>(InlineDirective::Never)));
+        add_attribute(s[a.parameter], AttributeId::Tag, tag_payload(3, "Hidden", {}, s[a.parameter].span));
+    }
+    if (deferred) {
+        for (const auto local : {a.step, a.point_local}) {
+            set_attribute(s[local], AttributeId::BindingLast, attribute_bool(true));
+            s[local].constant = true;
+        }
+        check(defer_in(p, body_of(p, "Attributes.sum_to"), a.step), "step is declared in sum_to");
+        check(defer_in(p, body_of(p, "Attributes.main"), a.point_local), "point is declared in main");
+    }
+    return a;
+}
+
+std::vector<std::uint8_t> image_bytes(IrProgram program) {
+    return nvr::encode(backend::build(std::move(program)).image);
+}
+
+Captured run_program(IrProgram program, bool optimize = true) {
+    backend::BuildOptions options;
+    options.optimize = optimize;
+    return run_captured(nvr::load(nvr::encode(backend::build(std::move(program), options).image)));
+}
+
+void expect_issue(const IrProgram& program, std::string_view fragment,
+                  std::source_location where = std::source_location::current()) {
+    const auto issues = verify_ir(program);
+    std::string found;
+    for (const auto& issue : issues) {
+        if (issue.message.find(fragment) != std::string::npos) return;
+        found += "\n  " + issue.message;
+    }
+    fail("expected a verifier issue containing '" + std::string(fragment) + "', found:" + found, where);
+}
+
+// One function symbol and nothing else: the smallest file that can carry
+// attributes, for byte-level corruption checks.
+IrProgram attributed_function(std::vector<IrAttribute> attributes) {
+    IrProgram program;
+    program.symbols.push_back(IrSymbol{SymbolKind::Function, "f", {}, no_symbol, no_symbol, no_symbol, {}, {}, {}, {},
+                                       false, false, false, false});
+    program.symbols.front().attributes = std::move(attributes);
+    return program;
+}
+
+} // namespace
+
+NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
+    struct Row {
+        AttributeId id;
+        std::uint16_t number;
+        std::string_view name;
+        std::uint32_t kinds;
+        bool repeats;
+        std::string_view schema;
+    };
+    // The table of docs/NirFormat.md, Revision 1.10.
+    const std::vector<Row> rows{
+        {AttributeId::Tag, 1, "tag", on_declarations, true, "[u65535 t *[t a] p]"},
+        {AttributeId::AccessorGet, 2, "accessor.get", on_field, false, "s"},
+        {AttributeId::AccessorSet, 3, "accessor.set", on_field, false, "s"},
+        {AttributeId::AccessorOf, 4, "accessor.of", on_function, false, "[s u1]"},
+        {AttributeId::BindingLast, 5, "binding.last", on_local | on_field, false, "b"},
+        {AttributeId::ClassAnonymous, 6, "class.anonymous", on_class, false, "[b t p]"},
+        {AttributeId::KernelBinding, 7, "kernel.binding", on_function, false, "[t u4294967295]"},
+        {AttributeId::InlineDirective, 8, "inline.directive", on_function, false, "u2"},
+        {AttributeId::Synchronized, 9, "synchronized", on_function, false, "b"},
+        {AttributeId::ClassShareable, 10, "class.shareable", on_class, false, "b"},
+    };
+    check_equal(attribute_registry().size(), rows.size(), "registered attributes");
+    for (const auto& row : rows) {
+        const auto* info = find_attribute_info(row.number);
+        check(info != nullptr && info->id == row.id && info->name == row.name && info->kinds == row.kinds &&
+                  info->repeats == row.repeats && info->schema == row.schema,
+              std::string(row.name) + " differs from the documented registry");
+    }
+    check(find_attribute_info(0) == nullptr && find_attribute_info(11) == nullptr, "ids 0 and 11 are unregistered");
+    check((on_declarations & symbol_kind_bit(SymbolKind::File)) == 0, "files carry no tags");
+
+    // Schemas accept the payloads of the helpers and reject other shapes.
+    check(!schema_problem("[u65535 t *[t a] p]", tag_payload(65535, "T", {{"", attribute_signed(-1)}}, {})),
+          "a tag payload matches its schema");
+    check(!schema_problem("[b t p]", anonymous_class_payload(false, "", {})), "an anonymous class payload matches");
+    check(!schema_problem("[t u4294967295]", kernel_binding_payload("k", 4294967295U)), "a kernel payload matches");
+    const auto problem = [](std::string_view schema, const IrAttributeValue& value) {
+        return schema_problem(schema, value).value_or("");
+    };
+    check_equal(problem("u2", attribute_unsigned(3)), std::string("the payload is 3, above its maximum 2"), "range");
+    check_equal(problem("b", attribute_text("x")), std::string("the payload is a text, expected bool"), "kind");
+    check_equal(problem("[s u1]", attribute_list({attribute_symbol(1)})),
+                std::string("the payload has 1 item(s), expected more"), "record length");
+    check_equal(problem("*[t a]", attribute_list({attribute_list({attribute_text(""), attribute_type({})})})),
+                std::string("the payload item 1 item 2 is a type, expected literal"), "nested literal");
+    check_equal(problem("s", attribute_symbol(no_symbol)), std::string("the payload is an absent symbol reference"),
+                "absent symbol");
+    check(problem("q", attribute_bool(true)).starts_with("invalid attribute schema"), "unknown schema letter");
+}
+
+NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10) {
+    const auto fixture = attributed_fixture(environment);
+    const auto& program = fixture.program;
+    const auto issues = verify_ir(program);
+    check(issues.empty(), issues.empty() ? "" : issues.front().message);
+    // Every pre-registered attribute is exercised.
+    for (const auto& info : attribute_registry()) {
+        check(std::ranges::any_of(program.symbols, [&](const IrSymbol& item) { return has_attribute(item, info.id); }),
+              std::string(info.name) + " is not attached by the fixture");
+    }
+    const auto bytes = write_nir(program);
+    check_equal(static_cast<int>(bytes[6]), 10, "an attributed program is NeuraIR 1.10");
+    std::uint16_t minor = 0;
+    const auto read = read_nir(bytes, "attributes.nir", &minor);
+    check_equal(static_cast<int>(minor), 10, "minor version read");
+    mismatch.clear();
+    check(same_program(program, read), mismatch);
+    check(write_nir(read) == bytes, "rewriting the read program changes its bytes");
+    check(printed(read) == printed(program), "listing differs after the round trip");
+    check_equal(find_attributes(read.symbols[fixture.point], AttributeId::Tag).size(), std::size_t{2},
+                "repeated tags keep their count");
+    check(find_attributes(read.symbols[fixture.point], AttributeId::Tag)[1]->value.items[1].text == "Since",
+          "tags keep their order");
+    check(deferred_binding(read.symbols[fixture.step]) && last_binding(read.symbols[fixture.x]) == false,
+          "binding.last keeps its deferred flag");
+    check(inline_directive(read.symbols[fixture.checksum]) == InlineDirective::Never &&
+              inline_directive(read.symbols[fixture.sum_to]) == InlineDirective::Auto,
+          "inline directives read back");
+
+    // The listing names each attribute and marks the deferred declarations.
+    const auto listing = printed(read);
+    const auto id = [](SymbolId symbol) { return "%" + std::to_string(symbol); };
+    for (const auto& fragment : {
+             " @accessor.get(" + id(fixture.get_x) + ") @accessor.set(" + id(fixture.set_x) + ") @binding.last(false)",
+             " @accessor.of([" + id(fixture.x) + ", 0u]) @inline.directive(1u)",
+             std::string(" @tag([1u, \"Deprecated\", [[\"as_of\", \"0.2.0\"], [\"\", true]], span("),
+             std::string("[[\"\", 2u], [\"delta\", -5i]]"),
+             std::string(" @kernel.binding([\"neura.test.checksum\", 1u]) @inline.directive(2u)"),
+             std::string(" @synchronized(true)"), std::string(" @class.shareable(true)"),
+             std::string(" @class.anonymous([true, \"class(x: int32)\", span("),
+             "initialize " + id(fixture.step) + " deferred : void"}) {
+        check(listing.find(fragment) != std::string::npos, "the listing lacks: " + fragment);
+    }
+
+    // Each half alone also needs 1.10.
+    check_equal(static_cast<int>(write_nir(attributed_fixture(environment, true, false).program)[6]), 10,
+                "attributes alone make a file 1.10");
+    check_equal(static_cast<int>(write_nir(attributed_fixture(environment, false, true).program)[6]), 10,
+                "deferred initialization alone makes a file 1.10");
+    check(static_cast<int>(write_nir(attributed_fixture(environment, false, false).program)[6]) < 10,
+          "the fixture without either keeps an earlier version");
+}
+
+NEURA_TEST(nir, attributed_programs_build_the_same_image_from_nir) {
+    auto fixture = attributed_fixture(environment);
+    const auto direct = image_bytes(fixture.program);
+    const auto routed = image_bytes(read_nir(write_nir(fixture.program), "attributes.nir"));
+    check(direct == routed, "the source and .nir routes emit different images");
+    // Attributes describe declarations; none of the current ones reaches the
+    // image, so attaching them changes no byte.
+    check(image_bytes(attributed_fixture(environment, true, false).program) ==
+              image_bytes(attributed_fixture(environment, false, false).program),
+          "attributes changed the image");
+    // Deferred declarations run like the declarations they replace, with and
+    // without optimization.
+    for (const bool optimize : {true, false}) {
+        const auto run = run_program(attributed_fixture(environment).program, optimize);
+        check(run.result.completed, "the deferred program trapped: " + run.result.trap.detail);
+        check_equal(run.output, attributed_output, "output with deferred bindings");
+    }
+}
+
+NEURA_TEST(nir, deferred_bindings_trap_when_read_before_their_store) {
+    // The verifier checks structure only. Definite assignment is the
+    // frontend's job, and the runtime traps on a read that slips through.
+    auto fixture = attributed_fixture(environment, false, true);
+    check(remove_store(body_of(fixture.program, "Attributes.sum_to"), fixture.step), "step has a store");
+    check(verify_ir(fixture.program).empty(), "the verifier does not track definite assignment");
+    for (const bool optimize : {true, false}) {
+        const auto run = run_program(fixture.program, optimize);
+        check(!run.result.completed && run.result.trap.kind == nvm::TrapKind::UninitializedSlot,
+              "expected an uninitialized slot trap, got: " + run.output);
+        check_equal(run.output, std::string("x = 4\nbox = 7\n"), "output before the trap");
+    }
+}
+
+NEURA_TEST(nir, verifier_checks_attributes_and_deferred_initialization) {
+    const auto base = attributed_fixture(environment);
+    check(verify_ir(base.program).empty(), "the fixture verifies");
+    auto program = base.program;
+    // A deferred declaration needs binding.last with deferred set.
+    remove_attributes(program.symbols[base.step], AttributeId::BindingLast);
+    expect_issue(program, "needs binding.last with deferred set");
+    program = base.program;
+    set_attribute(program.symbols[base.step], AttributeId::BindingLast, attribute_bool(false));
+    expect_issue(program, "needs binding.last with deferred set");
+    // A deferred binding has no value at its declaration.
+    program = attributed_fixture(environment, false, false).program;
+    set_attribute(program.symbols[base.step], AttributeId::BindingLast, attribute_bool(true));
+    expect_issue(program, "is deferred but initialized with a value");
+    // Only a local is declared without a value; a deferred field has no
+    // initialization at all.
+    program = base.program;
+    for (auto& body : program.bodies) {
+        if (body.owner != base.point) continue;
+        for (auto& instruction : body.instructions)
+            if (instruction.op == IrOp::Initialize && instruction.symbol == base.x) instruction.operands.clear();
+    }
+    set_attribute(program.symbols[base.x], AttributeId::BindingLast, attribute_bool(true));
+    expect_issue(program, "a deferred initialization declares only a local");
+    // A constant binding without the deferred flag still rejects stores.
+    program = attributed_fixture(environment, false, false).program;
+    program.symbols[base.step].constant = true;
+    check(defer_in(program, body_of(program, "Attributes.sum_to"), base.step), "step is declared in sum_to");
+    program.symbols[base.step].attributes = {{AttributeId::BindingLast, attribute_bool(false)}};
+    expect_issue(program, "store writes to const");
+
+    // Registry rules.
+    program = base.program;
+    set_attribute(program.symbols[base.checksum], AttributeId::BindingLast, attribute_bool(true));
+    expect_issue(program, "attribute binding.last is not allowed on this kind of symbol");
+    program = base.program;
+    add_attribute(program.symbols[base.checksum], AttributeId::InlineDirective, attribute_unsigned(0));
+    expect_issue(program, "attribute inline.directive is repeated");
+    program = base.program;
+    set_attribute(program.symbols[base.checksum], AttributeId::InlineDirective, attribute_text("always"));
+    expect_issue(program, "attribute inline.directive: the payload is a text, expected unsigned integer");
+    program = base.program;
+    program.symbols[base.checksum].attributes.push_back({static_cast<AttributeId>(999), attribute_bool(true)});
+    expect_issue(program, "unknown symbol attribute 999");
+    program = base.program;
+    set_attribute(program.symbols[base.x], AttributeId::AccessorGet, attribute_symbol(program.symbols.size() + 4));
+    expect_issue(program, "refers to missing symbol");
+    // Links between a field and its accessors.
+    program = base.program;
+    set_attribute(program.symbols[base.x], AttributeId::AccessorGet, attribute_symbol(base.set_x));
+    expect_issue(program, "as an accessor that does not serve it");
+    program = base.program;
+    remove_attributes(program.symbols[base.x], AttributeId::AccessorSet);
+    expect_issue(program, "which does not name it");
+    program = base.program;
+    set_attribute(program.symbols[base.checksum], AttributeId::Synchronized, attribute_bool(true));
+    expect_issue(program, "synchronized marks a method of a class");
+    program = base.program;
+    set_attribute(program.symbols[base.checksum], AttributeId::KernelBinding, kernel_binding_payload("", 1));
+    expect_issue(program, "needs a kernel name");
+}
+
+NEURA_TEST(nir, specialization_links_the_accessors_of_generic_instances) {
+    auto fixture = attributed_fixture(environment);
+    auto& program = fixture.program;
+    materialize_reference_storage(program);
+    specialize(program);
+    const auto issues = verify_ir(program);
+    check(issues.empty(), issues.empty() ? "" : issues.front().message);
+    const auto instance = std::ranges::find_if(program.symbols, [](const IrSymbol& item) {
+        return item.kind == SymbolKind::Class && item.name == "Box<int32>";
+    });
+    check(instance != program.symbols.end(), "Box<int32> is instantiated");
+    const auto instance_id = static_cast<SymbolId>(instance - program.symbols.begin());
+    const auto member = [&](std::string_view name) {
+        for (SymbolId id = 0; id < program.symbols.size(); ++id)
+            if (program.symbols[id].owner == instance_id && program.symbols[id].name == name) return id;
+        fail("Box<int32> has no member " + std::string(name));
+    };
+    const auto value = member("value");
+    const auto peek = member("peek");
+    const auto* get = find_attribute(program.symbols[value], AttributeId::AccessorGet);
+    check(get && get->value.symbol == peek, "the instance field names the instance's accessor");
+    const auto* of = find_attribute(program.symbols[peek], AttributeId::AccessorOf);
+    check(of && of->value.items[0].symbol == value, "the instance accessor names the instance field");
+    check(deferred_binding(program.symbols[fixture.step]), "the local keeps binding.last");
+}
+
+NEURA_TEST(nir, linking_remaps_attribute_references) {
+    const auto fixture = attributed_fixture(environment);
+    // Something first, so that the module's own symbols move.
+    IrProgram merged = lower_files({backend_dir(environment) / "nir-versions" / "loops.nra"});
+    const Span site{"consumer.nra"};
+    const auto mapping = link_ir(merged, read_nir(write_nir(fixture.program), "attributes.nir"), site);
+    require_valid_ir(merged, "after linking an attributed module");
+    check(mapping[fixture.x] != fixture.x, "the linked module's symbols moved");
+    const auto& x = merged.symbols[mapping[fixture.x]];
+    check(find_attribute(x, AttributeId::AccessorGet)->value.symbol == mapping[fixture.get_x],
+          "accessor.get follows the getter");
+    check(find_attribute(merged.symbols[mapping[fixture.set_x]], AttributeId::AccessorOf)->value.items[0].symbol ==
+              mapping[fixture.x],
+          "accessor.of follows the field");
+    // The same module again coalesces, since its attributes are equal.
+    const auto before = write_nir(merged);
+    const auto again = link_ir(merged, read_nir(write_nir(fixture.program), "attributes.nir"), site);
+    check(again == mapping && write_nir(merged) == before, "linking the module twice adds nothing");
+    // A copy whose attributes differ is a conflicting definition.
+    auto changed = fixture.program;
+    set_attribute(changed.symbols[fixture.checksum], AttributeId::InlineDirective, attribute_unsigned(1));
+    try {
+        link_ir(merged, std::move(changed), site);
+        fail("a definition with different attributes was coalesced");
+    } catch (const Diagnostic& error) {
+        check(std::string(error.what()).find("incompatible definitions") != std::string::npos, error.what());
+    }
+}
+
+NEURA_TEST(nir, attribute_files_are_rejected_when_malformed) {
+    const auto valid = attributed_function(
+        {{AttributeId::KernelBinding, kernel_binding_payload("neura.test", 2)},
+         {AttributeId::Tag, tag_payload(4, "Pure", {{"", attribute_signed(-3)}}, {})},
+         {AttributeId::InlineDirective, attribute_unsigned(1)}});
+    const auto bytes = write_nir(valid);
+    check_equal(static_cast<int>(bytes[6]), 10, "an attributed function is NeuraIR 1.10");
+    mismatch.clear();
+    check(same_program(read_nir(bytes, "valid"), valid), mismatch);
+    // A truncated attribute list.
+    for (std::size_t size = 0; size < bytes.size(); ++size) {
+        try {
+            read_nir(std::vector<std::uint8_t>(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(size)), "x");
+            fail("a " + std::to_string(size) + "-byte prefix was accepted");
+        } catch (const NirError&) {
+        }
+    }
+    // A 1.9 header on a file with attributes.
+    auto older = bytes;
+    older[6] = 9;
+    expect_nir_error(older, "symbol attributes require NeuraIR format 1.10");
+
+    // Registry rules, with the bytes the writer produces.
+    expect_nir_error(write_nir(attributed_function({{static_cast<AttributeId>(999), attribute_bool(true)}})),
+                     "unknown symbol attribute 999");
+    expect_nir_error(write_nir(attributed_function({{AttributeId::InlineDirective, attribute_text("never")}})),
+                     "attribute inline.directive: the payload is a text, expected unsigned integer");
+    expect_nir_error(write_nir(attributed_function({{AttributeId::InlineDirective, attribute_unsigned(3)}})),
+                     "the payload is 3, above its maximum 2");
+    expect_nir_error(write_nir(attributed_function({{AttributeId::BindingLast, attribute_bool(true)}})),
+                     "attribute binding.last is not allowed on this kind of symbol");
+    expect_nir_error(write_nir(attributed_function({{AttributeId::Synchronized, attribute_bool(true)},
+                                                    {AttributeId::Synchronized, attribute_bool(true)}})),
+                     "attribute synchronized is repeated");
+    // A type decodes, then fails the tag's literal schema.
+    expect_nir_error(
+        write_nir(attributed_function(
+            {{AttributeId::Tag, tag_payload(4, "Pure", {{"", attribute_type({TypeKind::Bool, "bool", no_symbol, {}})}}, {})}})),
+        "item 3 item 1 item 2 is a type, expected literal");
+    // Symbol payloads are references into the table.
+    auto field = attributed_function({});
+    field.symbols.front().kind = SymbolKind::Field;
+    field.symbols.front().attributes = {{AttributeId::AccessorGet, attribute_symbol(no_symbol)}};
+    expect_nir_error(write_nir(field), "missing symbol reference");
+    field.symbols.front().attributes = {{AttributeId::AccessorGet, attribute_symbol(7)}};
+    expect_nir_error(write_nir(field), "symbol reference 7 is out of range");
+
+    // Value bytes: one local with binding.last(true) ends in its value kind
+    // and bool, then the empty body and constant vectors and the native flag.
+    auto local = attributed_function({{AttributeId::BindingLast, attribute_bool(true)}});
+    local.symbols.front().kind = SymbolKind::Local;
+    auto value_bytes = write_nir(local);
+    const auto bool_byte = value_bytes.size() - 10;
+    check_equal(static_cast<int>(value_bytes[bool_byte]), 1, "the bool payload byte");
+    check_equal(static_cast<int>(value_bytes[bool_byte - 1]), static_cast<int>(AttributeValueKind::Bool),
+                "the value kind byte");
+    value_bytes[bool_byte] = 2;
+    expect_nir_error(value_bytes, "invalid attribute bool 2");
+    value_bytes[bool_byte] = 1;
+    value_bytes[bool_byte - 1] = 8;
+    expect_nir_error(value_bytes, "invalid attribute value tag 8");
+    value_bytes[bool_byte - 1] = static_cast<std::uint8_t>(AttributeValueKind::Unsigned);
+    expect_nir_error(value_bytes, "attribute binding.last: the payload is an unsigned integer, expected bool");
+
+    // Deferred initialization is a 1.10 feature too.
+    IrProgram deferred;
+    deferred.symbols.push_back(IrSymbol{SymbolKind::Function, "f", {}, no_symbol, no_symbol, no_symbol, {}, {}, {},
+                                        {}, false, false, false, true});
+    IrNode declaration{};
+    declaration.op = IrOp::Initialize;
+    deferred.bodies.push_back({0, {declaration}});
+    auto deferred_bytes = write_nir(deferred);
+    check_equal(static_cast<int>(deferred_bytes[6]), 10, "a deferred initialization is NeuraIR 1.10");
+    check(is_deferred_initialize(read_nir(deferred_bytes, "deferred").bodies.front().instructions.front()),
+          "a deferred initialization reads back");
+    deferred_bytes[6] = 9;
+    expect_nir_error(deferred_bytes, "deferred initialization requires NeuraIR format 1.10");
 }
 
 } // namespace neura::testing

@@ -904,7 +904,8 @@ void Converter::order_initialization() {
                 continue;
             }
             for (const auto& instruction : body.instructions) {
-                if (instruction.op == IrOp::Initialize && constant_initializer(instruction.operands.front())) {
+                if (instruction.op == IrOp::Initialize && !instruction.operands.empty() &&
+                    constant_initializer(instruction.operands.front())) {
                     continue;
                 }
                 Startup item{&instruction, kind == SymbolKind::Module ? body.owner : no_symbol};
@@ -1714,6 +1715,9 @@ void FunctionCompiler::statement(const IrNode& node) {
         if (it == slots_.end()) {
             it = slots_.emplace(node.symbol, new_slot(c_.type_of(c_.symbol(node.symbol).type, node.span))).first;
         }
+        // A deferred declaration (NIR 1.10) only creates the slot. It stays
+        // uninitialized, so a read before the first store traps.
+        if (is_deferred_initialize(node)) return;
         const auto slot = it->second;
         assign(slot, expression(node.operands.front()));
         return;

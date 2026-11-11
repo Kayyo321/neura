@@ -1,6 +1,7 @@
 #include "verifier.hpp"
 
 #include "aggregate.hpp"
+#include "attributes.hpp"
 #include "control_flow.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
@@ -276,6 +277,7 @@ private:
                                        " as a type parameter");
                 }
             }
+            if (!entry.attributes.empty()) check_attributes(id, entry);
             check_type_references(entry.type, entry.span);
             if (entry.bound) {
                 check_type_references(*entry.bound, entry.span);
@@ -353,6 +355,68 @@ private:
                     if (valid(parameter) && !host_data_type(symbol(parameter).type))
                         report(entry.span, "this parameter cannot cross the host boundary");
                 }
+            }
+        }
+    }
+
+    // The registry rules (attributes.def) and the links between attributes.
+    void check_attributes(SymbolId id, const IrSymbol& entry) {
+        if (const auto problem = attribute_problem(entry.kind, entry.attributes)) {
+            report(entry.span, "symbol " + name(id) + ": " + *problem);
+            return;
+        }
+        bool references = true;
+        for_each_attribute_symbol(entry.attributes, [&](SymbolId target) {
+            if (!valid(target)) {
+                report(entry.span, "an attribute of " + name(id) + " refers to missing symbol %" + std::to_string(target));
+                references = false;
+            }
+        });
+        for (const auto& attribute : entry.attributes) {
+            if (attribute.value.kind == AttributeValueKind::Type) check_type_references(attribute.value.type, entry.span);
+        }
+        if (!references) return;
+        // A field and its hidden accessor function name each other.
+        const auto accessor_of = [&](SymbolId function) -> std::optional<std::pair<SymbolId, std::uint64_t>> {
+            const auto* link = find_attribute(symbol(function), AttributeId::AccessorOf);
+            if (!link || link->value.items.size() != 2) return std::nullopt;
+            return std::pair{link->value.items[0].symbol, link->value.items[1].integer};
+        };
+        for (const auto& attribute : entry.attributes) {
+            switch (attribute.id) {
+            case AttributeId::AccessorGet:
+            case AttributeId::AccessorSet: {
+                const auto function = attribute.value.symbol;
+                const std::uint64_t kind = attribute.id == AttributeId::AccessorGet ? 0 : 1;
+                if (symbol(function).kind != SymbolKind::Function || symbol(function).owner != entry.owner ||
+                    accessor_of(function) != std::optional<std::pair<SymbolId, std::uint64_t>>{{id, kind}}) {
+                    report(entry.span, "field " + name(id) + " names " + name(function) +
+                                       " as an accessor that does not serve it");
+                }
+                break;
+            }
+            case AttributeId::AccessorOf: {
+                const auto field = attribute.value.items[0].symbol;
+                const auto link = attribute.value.items[1].integer == 0 ? AttributeId::AccessorGet
+                                                                        : AttributeId::AccessorSet;
+                const auto* back = symbol(field).kind == SymbolKind::Field ? find_attribute(symbol(field), link)
+                                                                            : nullptr;
+                if (!back || back->value.symbol != id || symbol(field).owner != entry.owner) {
+                    report(entry.span, "accessor " + name(id) + " serves " + name(field) +
+                                       ", which does not name it");
+                }
+                break;
+            }
+            case AttributeId::Synchronized:
+                if (!valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Class)
+                    report(entry.span, "synchronized marks a method of a class, not " + name(id));
+                break;
+            case AttributeId::KernelBinding:
+                if (attribute.value.items[0].text.empty())
+                    report(entry.span, "a kernel binding of " + name(id) + " needs a kernel name");
+                break;
+            default:
+                break;
             }
         }
     }
@@ -685,10 +749,12 @@ private:
     }
 
     void check_initialize(const IrNode& node, Context& context) {
-        if (!expect_operands(node, 1, "initialize")) {
+        // NeuraIR 1.10: without an operand, a deferred declaration.
+        const bool deferred = is_deferred_initialize(node);
+        if (!deferred && !expect_operands(node, 1, "initialize")) {
             return;
         }
-        check_value(node.operands.front(), context);
+        if (!deferred) check_value(node.operands.front(), context);
         if (!valid(node.symbol)) {
             report(node.span, "initialize refers to missing symbol " + name(node.symbol));
             return;
@@ -699,6 +765,14 @@ private:
             report(node.span, "initialize targets " + name(node.symbol) + ", which is not a binding");
             return;
         }
+        if (deferred && target.kind != SymbolKind::Local) {
+            report(node.span, "a deferred initialization declares only a local, not " + name(node.symbol));
+        } else if (deferred && !deferred_binding(target)) {
+            report(node.span, "a deferred initialization of " + name(node.symbol) +
+                              " needs binding.last with deferred set");
+        } else if (!deferred && deferred_binding(target)) {
+            report(node.span, "binding " + name(node.symbol) + " is deferred but initialized with a value");
+        }
         if (context.scoped_value && target.kind != SymbolKind::Local)
             report(node.span, "a scoped value can initialize only local bindings");
         if (target.owner != context.owner) {
@@ -708,7 +782,7 @@ private:
             report(node.span, "binding " + name(node.symbol) + " is initialized more than once");
         }
         initialized_[node.symbol] = true;
-        require_assignable(node.operands.front().type, target.type, node.span, "initializer");
+        if (!deferred) require_assignable(node.operands.front().type, target.type, node.span, "initializer");
         if (target.kind == SymbolKind::Local) {
             scopes_.back().push_back(node.symbol);
         }
@@ -725,8 +799,10 @@ private:
         }
         check_value(destination, context);
         check_value(source, context);
+        // A deferred `last` binding receives its value by a store; the
+        // frontend checks that it is assigned exactly once.
         if ((destination.op == IrOp::Load || destination.op == IrOp::Field) && valid(destination.symbol) &&
-            symbol(destination.symbol).constant) {
+            symbol(destination.symbol).constant && !deferred_binding(symbol(destination.symbol))) {
             const auto& target = symbol(destination.symbol);
             if (target.kind != SymbolKind::Global || !valid(context.function) ||
                 !is_static_initializer(symbol(context.function)) || target.owner != symbol(context.function).owner)
@@ -783,7 +859,7 @@ private:
             while (place->op == IrOp::ScopedValue && !place->body.empty()) place = &place->body.back();
             const auto& target = symbol(node.symbol);
             if (!is_primitive_reference(node.type) || node.type.name != "&" + target.type.name ||
-                target.constant || target.name.starts_with("$capture") ||
+                target.constant || deferred_binding(target) || target.name.starts_with("$capture") ||
                 (place->op != IrOp::Load && place->op != IrOp::Field) || place->symbol != node.symbol ||
                 place->type != target.type ||
                 (target.type.kind != TypeKind::Bool && target.type.kind != TypeKind::Integer &&
@@ -1441,6 +1517,7 @@ private:
         expect_type(node, TypeKind::Bool, "comparison chain result");
         expect_operands(node, 0, "comparison chain");
         if (node.body.size() != 2 || node.body.front().op != IrOp::Initialize ||
+            is_deferred_initialize(node.body.front()) ||
             !check_symbol_kind(node.body.front(), {SymbolKind::Local}, "comparison chain subject")) {
             report(node.span, "a comparison chain requires a subject binding followed by a boolean expression");
             return;

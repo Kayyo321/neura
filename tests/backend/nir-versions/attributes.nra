@@ -1,0 +1,57 @@
+// NeuraIR 1.10 fixture. No source construct produces attributes yet, so the
+// tests attach them to these declarations in C++ and turn `total` and `step`
+// into deferred bindings. The program prints the same lines either way.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Attributes = module:program.Entry (
+    let Point = class (
+        export let x: int32 = 0;
+        export let get_x = func() -> int32 {
+            return x;
+        };
+        export let set_x = func(value: int32) -> void {
+            x = value;
+        };
+    );
+
+    let Box = class<T> (
+        export let value: T;
+        export let get = func() -> T {
+            return value;
+        };
+        export let put = func(next: T) -> void {
+            value = next;
+        };
+        // Never called: an accessor link to it must still reach the instance.
+        export let peek = func() -> T {
+            return value;
+        };
+    );
+
+    let checksum = func(value: int32) -> int32 {
+        return value * 3 + 1;
+    };
+
+    let sum_to = func(limit: int32) -> int32 {
+        let total: int32 = 0;
+        let current: int32 = 1;
+        while (current <= limit) {
+            let step: int32 = current;
+            total = total + step;
+            current = current + 1;
+        }
+        return total;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let point = new Point();
+        point.set_x(4);
+        console.print_line("x = " + point.get_x().to_string());
+        let box = new Box<int32>();
+        box.put(checksum(2));
+        console.print_line("box = " + box.get().to_string());
+        console.print_line("sum_to(10) = " + sum_to(10).to_string());
+        return program.ExitCode.Ok;
+    };
+);
