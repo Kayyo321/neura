@@ -101,8 +101,10 @@ let StringsKernelOracle = module (
         test.assert_equal_bool(reference.equals_ignore_ascii_case(s, t), strings.equals_ignore_ascii_case(s, t));
         test.assert_equal_int32(reference.index_of(s, t), strings.index_of(s, t));
         test.assert_equal_int32(reference.last_index_of(s, t), strings.last_index_of(s, t));
-        test.assert_equal_string(show_optional(reference.strip_prefix(s, t)), show_optional(strings.strip_prefix(s, t)));
-        test.assert_equal_string(show_optional(reference.strip_suffix(s, t)), show_optional(strings.strip_suffix(s, t)));
+        test.assert_equal_string(show_optional(reference.strip_prefix(s, t)),
+            show_optional(strings.strip_prefix(s, t)));
+        test.assert_equal_string(show_optional(reference.strip_suffix(s, t)),
+            show_optional(strings.strip_suffix(s, t)));
         for (let from = 0; from <= s.byte_length; from++) {
             if (strings.is_boundary(s, from)) {
                 test.assert_equal_int32(reference.index_of_from(s, t, from), strings.index_of_from(s, t, from));

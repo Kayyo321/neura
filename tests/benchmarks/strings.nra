@@ -13,7 +13,7 @@ export let StringsBenchmark = module:program.Entry (
         let n = result.value_or<int32>(int32s.parse(args[0]), 0);
         let text = builders.create();
         let count = 0;
-        while (text.byte_length() < n) {
+        while (text.byte_length < n) {
             text.append("word").append_int(count as int64).append(",");
             count = count + 1;
         }

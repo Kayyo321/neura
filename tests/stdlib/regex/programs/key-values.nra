@@ -16,7 +16,7 @@ export let Main = module:program.Entry (
                 for (let m in field.find_all(line)) {
                     console.print_line(optional.value_or<string>(m.named_group("key"), "?") + " -> ["
                         + optional.value_or<string>(m.named_group("value"), "?") + "] at "
-                        + m.start().to_string());
+                        + m.start.to_string());
                 }
                 console.print_line(field.replace_all(line, "${value}:$1"));
             },

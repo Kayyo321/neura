@@ -16,7 +16,7 @@ let StringBuilderTests = module (
     export let test_empty = func() -> void {
         let b = builders.create();
         test.assert(b.is_empty());
-        test.assert_equal_int32(0, b.byte_length());
+        test.assert_equal_int32(0, b.byte_length);
         test.assert_equal_string("", b.to_string());
     };
 
@@ -25,7 +25,7 @@ let StringBuilderTests = module (
         let same = b.append("ab").append("").append("cd");
         test.assert(same == b);
         test.assert_equal_string("abcd", b.to_string());
-        test.assert_equal_int32(4, b.byte_length());
+        test.assert_equal_int32(4, b.byte_length);
         test.assert(!b.is_empty());
         test.assert(b.append_scalar(33) == b);
         test.assert(b.append_line("x") == b);
@@ -51,7 +51,7 @@ let StringBuilderTests = module (
     export let test_append_multibyte = func() -> void {
         let b = builders.create();
         b.append("Aé").append("🙂");
-        test.assert_equal_int32(7, b.byte_length());
+        test.assert_equal_int32(7, b.byte_length);
         test.assert_equal_string("Aé🙂", b.to_string());
     };
 
@@ -64,7 +64,7 @@ let StringBuilderTests = module (
     export let test_append_scalar_boundaries = func() -> void {
         let b = builders.create();
         b.append_scalar(0);
-        test.assert_equal_int32(1, b.byte_length());
+        test.assert_equal_int32(1, b.byte_length);
         test.assert_equal_string(utf8([0]), b.to_string());
         b.clear();
         // The last scalar of each encoded length and the first of the next.

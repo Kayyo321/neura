@@ -11,7 +11,7 @@ export let Main = module:program.Entry (
             result.Result.Ok(r) => {
                 console.print_line("before");
                 let m = r.find("abc");
-                let value = m.start();
+                let value = m.start;
                 console.print_line("after");
             },
             result.Result.Err(_) => {

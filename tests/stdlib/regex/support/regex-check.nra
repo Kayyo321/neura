@@ -28,7 +28,7 @@ export let RegexCheck = module (
     export let spans = func(r: regex.Regex, m: regex.RegexMatch) -> int[list] {
         let values: int[list] = [];
         let g = 0;
-        while (g <= r.group_count()) {
+        while (g <= r.group_count) {
             let start = m.group_start(g);
             match (m.group(g)) {
                 optional.Optional.Some(text) => {
@@ -54,7 +54,7 @@ export let RegexCheck = module (
             for (let value in spans(r, m)) {
                 actual.append(value);
             }
-            test.assert_equal_string(input.slice(m.start(), m.end()), m.text());
+            test.assert_equal_string(input.slice(m.start, m.end), m.text());
         }
         if (!expected.equals(actual)) {
             test.fail(pattern + " on <" + input + ">: expected " + expected.to_string() + ", got " + actual.to_string());
