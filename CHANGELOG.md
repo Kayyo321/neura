@@ -17,7 +17,11 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ## Unreleased
 
-No version has been published. The [release checklist](docs/Release.md) lists the language, toolchain, standard library, and decompiler features on `main`, each with the tests that establish it.
+Nothing yet.
+
+## [0.1.0] - 2026-11-11
+
+The first release. The [release checklist](docs/Release.md) lists the language, toolchain, standard library, and decompiler features in it, each with the tests that establish it. [Install and update](docs/Install.md) lists the supported platforms: Linux and macOS on x86-64 and arm64, and Windows through WSL 2.
 
 ### Added
 
@@ -51,7 +55,7 @@ No version has been published. The [release checklist](docs/Release.md) lists th
 
 ### Fixed
 
-- The install script and `neura update` treated a `gh` that is installed but not signed in as a failed provenance check and stopped. They now report that provenance was not verified and continue, as they do without `gh`; `--require-attestation` still stops. Found by the release workflow on `v0.1.0-rc.1`, whose published `install.sh` has this defect.
+- The install script and `neura update` treated a `gh` that is installed but not signed in as a failed provenance check and stopped. They now report that provenance was not verified and continue, as they do without `gh`; `--require-attestation` still stops. Found by the release workflow on the candidate `v0.1.0-rc.1`, whose published `install.sh` has this defect; `0.1.0` does not.
 
 ### Known issues
 
