@@ -85,7 +85,7 @@ The compiler validates the tags of every declaration while it lowers the program
 | Each argument exists and is in its place; each required argument is given; none is given twice. | `E0902`, `E0903`, `E0904` |
 | Each argument has the type of its parameter. | `E0905` |
 | A tag that does not repeat is given once. | `E0906` |
-| No two tags contradict each other: `Inline` and `NoInline`, `Final` and `Sealed`, `Hot` and `Cold`, `Likely` and `Unlikely`, `Stable` and `Experimental`, `ThreadSafe` and `NotThreadSafe`, `Blocking` and `NonBlocking`, `Unroll` and `NoUnroll`, or an `Allow` and a `Deny` of the same warning. | `E0907` |
+| No two tags contradict each other: `Inline` and `NoInline`, `Final` and `Sealed`, `Hot` and `Cold`, `Likely` and `Unlikely`, `Stable` and `Experimental`, `ThreadSafe` and `NotThreadSafe`, `Immutable` and `NotThreadSafe`, `Synchronized` and `NotThreadSafe`, `Blocking` and `NonBlocking`, `Unroll` and `NoUnroll`, or an `Allow` and a `Deny` of the same warning. | `E0907` |
 | The tag is not reserved. | `E0908` |
 | An `Allow` or `Deny` names a warning that exists. | `E0915` |
 
@@ -151,12 +151,15 @@ let save = func() -> void {
 
 `#Pure` on a function or method says that a call of it can be observed only through its result or its trap: the same arguments, with the same state reachable from them, give the same result or the same trap, and nothing else changes. The compiler checks it. A pure function:
 
-- writes no module, file, or static binding, and no field or element of an object it did not allocate during the call. It may build and fill objects, arrays, and lists of its own, in locals that only ever hold such new objects, and return them; a constructor and a field initializer may write the object they build;
+- writes no module, file, or static binding, and no field or element of an object it did not allocate during the call. It may build and fill objects, arrays, and lists of its own and return them; a constructor and a field initializer may write the object they build. An object it allocated stays its own wherever it is held, but what is stored into one of its objects is reachable from it: a list it received and stored in a field of a new object is still not its own;
 - reads no reassignable binding, and no `const` binding whose type is mutable (an array, a list, or a class that is not `#Immutable`); a `const` of an [immutable type](Types#immutable-classes) is fine;
-- makes no host request, uses no scheduler operation, and uses no object's identity (`hash_code` and `to_string` of the root class). A call of a [kernel](Kernels) is pure;
-- calls no function value, and calls only pure functions. A call of a method is pure when the method and every override of it in the program are.
+- makes no host request, uses no scheduler operation, and uses no object's identity (`hash_code` and `to_string` of the root class);
+- calls no function value, and calls only functions that are pure for the arguments it passes. A function that writes only the objects of its parameters, and nothing else, is pure for a call that passes objects the caller allocated: a pure function may fill a `StringBuilder` or a list of its own through a helper. A [kernel](Kernels) writes the list it receives for a writable view or a state, such as the list `Sorting.sort_ascending` sorts or a `Sha256`'s running state, and only reads its other arguments, so a pure function may pass it only lists of its own for those;
+- counts every function a call can run: for a method, the implementation in every class that can be the receiver, including an implementation of an interface requirement, which needs no `.override`; for `==` through `equals`, `hash_code`, and `to_string` of a value, those members of every class inside it, as the elements of a list or the parts of a tuple.
 
 A pure function may allocate, may trap (overflow, a bounds check, a failed cast), and may loop. A function that breaks a rule is error `E0917` at the tag, with a label at each call on the way to the first operation that breaks it, as a task-safety error labels its chain.
+
+A generic function is checked with each set of type arguments it is used with, after specialization, because a call through a type parameter, such as `item.to_string()`, reaches the member of the type argument. `neura build`, and `neura check` of a program with an entry point, report a specialization that is not pure as `E0917` at the tag, with a note naming the specialization, such as `text<Box>`; the check of the generic declaration alone counts such a call as pure. The whole-program check also sees implementations in other modules, so a library function marked `#Pure` that calls an interface method can be rejected for an implementation in the program that uses it.
 
 <!-- example: check -->
 ```neura
@@ -180,7 +183,12 @@ The optimizer uses the property the compiler infers, so an untagged pure functio
 
 `#ThreadSafe` on a function or method says that it is [task-safe](Concurrency#52-task-safe-calls). The compiler checks it with the same analysis as a `spawn`, and a function that is not task-safe is error `E0608` at the tag, with the call chain that a spawn of it would report. `#ThreadSafe` on a class says that tasks may share its instances and call every exported method: the class is `#Immutable` or a [monitor](Concurrency#81-monitors) (otherwise `E0609`, with a label at the member that breaks the rule), and each exported method is task-safe (`E0608`).
 
-`#NotThreadSafe` declines that promise. A spawned call or a parallel worker that reaches a `#NotThreadSafe` function, or a method of a `#NotThreadSafe` class, is error `E0601` with a label at the tag, even when the analysis would allow it, and an instance of a `#NotThreadSafe` class cannot be given to another task (`E0602`), even when the class is `#Immutable` or a monitor. The root task may use both freely. Both tags are persisted in `.nir` files, so they hold for the programs that import a module.
+`#NotThreadSafe` declines that promise, with a meaning that depends on what it marks:
+
+- On a function or method, the author declines to promise task safety: a spawned call or a parallel worker that can reach it is error `E0601` with a label at the tag, even when the analysis would allow it. *Can reach* is the task-safety analysis's union ([Concurrency](Concurrency#52-task-safe-calls)): the call a `spawn` starts or a parallel map's worker, and everything it can call transitively, through every implementation a virtual call can run and every function value of a called type that the program creates. The task that runs `main` is not checked, so it may call the function even in a program that spawns other tasks, and so may anything that only `main` reaches. A `#ThreadSafe` function or method that can reach it is `E0608`.
+- On a class, its instances stay in the task that holds them: an instance of the class, or of a class that extends it, is never transferable, so it cannot be given to another task (`E0602`, with a label at the tag), sent on a channel, or shared as a monitor. A task may allocate an instance of its own and call its methods, which are task-safe or not by the usual rule. The class cannot also promise sharing: `#Immutable` or `#Synchronized` on the same declaration is `E0907`, and a `#Synchronized` method of the class, of a base, or of a subclass, or `#ThreadSafe` or `#Immutable` on a subclass, is `E0610`.
+
+Both tags are persisted in `.nir` files, so they hold for the programs that import a module.
 
 ### Synchronized
 
@@ -289,7 +297,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | Tag | Applies to | Status | Meaning |
 | --- | --- | --- | --- |
 | `#ThreadSafe` | classes, functions, methods | implemented | Checked: the function is task-safe (E0608), or tasks may share the class's instances and call its exported methods (E0609). |
-| `#NotThreadSafe` | classes, functions, methods | implemented | No spawned task or parallel worker may call it (E0601) or receive the class's instances (E0602). |
+| `#NotThreadSafe` | classes, functions, methods | implemented | No spawned task or parallel worker may call the function (E0601); no task may give the class's instances to another (E0602), and the class cannot be shared (E0610). |
 | `#Synchronized` | classes, methods | implemented | The method, or every exported method of the class, runs under its instance's re-entrant guard (E0921, E0922). |
 | `#Isolated` | functions, methods | reserved | Touches no state shared with other tasks. Instead: `neura check --task-safety` reports which functions can be a parallel worker. |
 | `#Atomic` | fields, file and module bindings | reserved | Reads and writes are indivisible across tasks. Instead: use Std.Concurrent.AtomicInt64 or a Guarded. |

@@ -636,7 +636,7 @@ A value check is not enough: a function can reach shared mutable state without b
 - read or write a module, file, or static binding that is reassignable or whose type is not transferable (reading a `const` of transferable type is allowed);
 - make an active use that could run a [static initializer](#static-initialization);
 - issue a request to a native library;
-- call a function or a method of a class marked `#NotThreadSafe`.
+- call a function or method marked `#NotThreadSafe`. A class marked `#NotThreadSafe` is different: a task may create and use its own instance, and what is rejected is giving an instance to another task.
 
 For a virtual call or a call through a function value, the compiler takes the union over every override and over every function value of that type that code which can run creates (the program's own functions, initializers, and what they reach), so it can reject a call because of an implementation that never runs. Narrow the type, or pass the needed value as an argument. The diagnostic lists the chain of calls from the `spawn` to the offending operation. `neura check --task-safety` prints the verdict for every function of the program. The task that runs `main` is not restricted.
 

@@ -163,6 +163,7 @@ Errors about tasks, scopes, and isolation.
 | [E0607](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0607.md) | scope block outside a function body |
 | [E0608](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0608.md) | #ThreadSafe function that is not task-safe |
 | [E0609](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0609.md) | #ThreadSafe class whose instances cannot be shared |
+| [E0610](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0610.md) | #NotThreadSafe class that promises sharing |
 
 ## E07xx: Modules and imports
 
