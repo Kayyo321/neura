@@ -1,0 +1,9 @@
+// A deferred `last` binding that one branch already assigned (E0440).
+let pick = func(flag: bool) -> int {
+    last x: int;
+    if (flag) {
+        x = 1;
+    }
+    x = 2;
+    return x;
+};

@@ -68,6 +68,30 @@ const MaxRetries = 3;
 const DefaultTimeoutMs = 5000;
 ```
 
+#### Assign-once bindings (`last`, `snake_case`)
+A `last` binding is a local or a field that is assigned once, not a named constant, so it uses `snake_case`. Prefer `last` over `let` for a local or field that never changes after its first assignment, and over a `let` with a placeholder value when the value is chosen by a branch. Keep `const` with `PascalCase` for module, file, and static constants.
+<!-- example: check -->
+```neura
+let Connection = class (
+    export last host: string;
+    export last port: int = 8080;
+
+    export let init = func(host: string) {
+        instance.host = host;
+    };
+);
+
+let timeout_ms = func(retrying: bool) -> int {
+    last timeout: int;
+    if (retrying) {
+        timeout = 5000;
+    } else {
+        timeout = 1000;
+    }
+    return timeout;
+};
+```
+
 #### Functions and Methods (`snake_case`)
 All function definitions, exported routines, and class methods must use `snake_case`:
 <!-- example: fragment: naming illustration: module members shown without their module, with LogEntry and program undefined -->
@@ -245,6 +269,7 @@ Running check for: auth_service:8080
 | `let ConsoleLogger = module ( ... );` | `let console_logger = module ( ... );` | Modules use `PascalCase`. |
 | `export let log_message = func(...)` | `export let logMessage = func(...)` | Functions use `snake_case`. |
 | `let default_level: string = "INFO";` | `let DefaultLevel: string = "INFO";` | Variables use `snake_case`. |
+| `last timeout: int;` assigned once in each branch | `let timeout: int = 0;` overwritten in each branch | A value chosen once is a `last` binding. |
 | `func(target_host: string)` | `func(targetHost: string)` | Parameters use `snake_case`. |
 | `program.ExitCode.Ok` | `program.exit_code.ok` | Enums and variants use `PascalCase`. |
 

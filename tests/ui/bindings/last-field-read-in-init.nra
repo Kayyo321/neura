@@ -1,0 +1,10 @@
+// A constructor that reads a deferred `last` field before assigning it (E0441).
+let Box = class(
+    export last size: int;
+    export let doubled: int = 0;
+
+    export let init = func(initial: int) {
+        doubled = size * 2;
+        size = initial;
+    };
+);

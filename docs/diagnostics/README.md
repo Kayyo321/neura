@@ -95,6 +95,14 @@ Errors about types, values, calls, and statements.
 | [E0432](E0432.md) | invalid for loop header |
 | [E0433](E0433.md) | invalid overload group |
 | [E0434](E0434.md) | function without a body |
+| [E0440](E0440.md) | a deferred 'last' binding assigned twice |
+| [E0441](E0441.md) | a deferred 'last' binding read before it is assigned |
+| [E0442](E0442.md) | a deferred 'last' binding assigned in a loop |
+| [E0443](E0443.md) | a closure captures a 'last' binding before it is assigned |
+| [E0444](E0444.md) | a deferred 'last' binding without a type |
+| [E0445](E0445.md) | a 'last' field assigned outside 'init' |
+| [E0446](E0446.md) | a constructor that does not assign a 'last' field |
+| [E0447](E0447.md) | a deferred 'last' binding that is not a local or an instance field |
 
 ## E05xx: Classes and lifecycle
 

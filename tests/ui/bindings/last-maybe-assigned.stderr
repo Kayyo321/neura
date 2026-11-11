@@ -1,0 +1,16 @@
+error[E0440]: cannot assign twice to 'x'
+ --> $DIR/last-maybe-assigned.nra:7:5
+  |
+3 |     last x: int;
+  |          - declared here
+4 |     if (flag) {
+  |         ---- 'x' is not assigned when this condition is false
+5 |         x = 1;
+  |         - assigned here on some paths
+6 |     }
+7 |     x = 2;
+  |     ^ 'x' may already be assigned here
+  |
+  = help: consider declaring it with 'let', with an initial value, if it should change
+
+For more information about this error, try `neura explain E0440`.

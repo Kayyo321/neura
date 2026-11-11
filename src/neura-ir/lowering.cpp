@@ -1,5 +1,6 @@
 #include "aggregate.hpp"
 #include "control_flow.hpp"
+#include "definite_assignment.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
 #include "scheduler_ops.hpp"
@@ -230,6 +231,8 @@ private:
     Names library_files_;
     std::map<std::string, SymbolId, std::less<>> reference_layouts_;
     std::set<const Statement*> reference_field_bindings_;
+    // The single assignments of deferred `last` bindings (definite_assignment.hpp).
+    std::set<const Statement*> deferred_assignments_;
     std::map<std::pair<std::string, std::string>, SymbolId> linked_modules_;
     std::map<const Statement*, GlobalDestructure> destructures_;
     std::set<std::pair<SymbolId, SymbolId>> wrapper_imports_;
@@ -355,6 +358,10 @@ private:
     void arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
                    const Substitution& replacements, Context& context, std::size_t leading = 0);
     void place(const IrNode& destination) const;
+    // `last` bindings (definite_assignment.hpp).
+    void mark_last_member(SymbolId id, const Declaration& decl, SymbolKind kind);
+    [[noreturn]] void assign_last(const IrNode& destination) const;
+    void check_definite_assignment(const Declaration& function, SymbolId id);
     IrNode save_temporary(IrNode initializer, std::vector<IrNode>& instructions,
                           Context& context, std::string name, bool constant = true);
     IrNode capture_place(const Expr& expr, std::vector<IrNode>& instructions, Context& context);
@@ -403,7 +410,8 @@ void Lowering::record_names(SymbolId id, const Declaration& decl) {
     // its `const` keyword.
     if (decl.constant && !decl.exported && !decl.static_member && decl.kind == DeclKind::Binding &&
         !decl.span.file.empty())
-        const_spans_.insert_or_assign(id, Span{decl.span.file, decl.span.line, decl.span.column, decl.span.offset, 5});
+        const_spans_.insert_or_assign(id, Span{decl.span.file, decl.span.line, decl.span.column, decl.span.offset,
+                                               decl.last ? 4u : 5u});
 }
 
 // The names a reference at `context` could mean: locals from the innermost
@@ -635,6 +643,7 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         (decl.static_member && kind == SymbolKind::Global && symbol(lexical).kind == SymbolKind::Interface);
     symbol(id).exported = decl.exported || symbol(lexical).kind == SymbolKind::Interface;
     symbol(id).has_body = decl.has_body;
+    if (decl.last && decl.kind == DeclKind::Binding) mark_last_member(id, decl, kind);
     if (!decl.overloads.empty()) {
         const auto valid_branch = [](const Declaration& branch) {
             return branch.has_body && !branch.host_binding && branch.generics.empty() &&
@@ -1291,6 +1300,7 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
     const auto method = closure_method(environment.layout, callable, span, names);
     if (declaration.type && symbol(method).type.kind != TypeKind::Void) result_spans_.emplace(method, declaration.type->span);
     Context inner{method, method, context.receiver, 0, {entries_[method].names}, &environment};
+    check_definite_assignment(declaration, no_symbol);
     auto instructions = body(declaration.body, inner);
     if (symbol(method).type.kind != TypeKind::Void && !always_returns(instructions))
         throw missing_return(span, method, declaration);
@@ -1469,7 +1479,8 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
         auto initializer = node(op, decl.span, declared);
         if (op != IrOp::Nil) initializer.text = op == IrOp::Boolean ? "false" : "0";
         entries_[id].initializer = std::move(initializer);
-    } else if (symbol(id).kind != SymbolKind::Field || (decl.constant && !is_primitive_reference(declared))) {
+    } else if (symbol(id).kind != SymbolKind::Field ||
+               (decl.constant && !decl.last && !is_primitive_reference(declared))) {
         throw Diagnostic(decl.span, "binding requires an initializer").with_code("E0404");
     }
 }
@@ -3117,6 +3128,7 @@ void Lowering::place(const IrNode& destination) const {
     if (symbol(destination.symbol).name.starts_with("$capture"))
         throw Diagnostic(destination.span, "a captured binding cannot be reassigned").with_code("E0402");
     if (const auto& target = symbol(destination.symbol); target.constant) {
+        if (last_binding(target)) assign_last(destination);
         auto error = Diagnostic(destination.span, "cannot assign to const '" + target.name + "'")
             .with_code("E0401").label("cannot assign to a constant binding");
         if (!target.span.file.empty()) error.label(name_span(destination.symbol), "declared constant here");
@@ -3126,6 +3138,70 @@ void Lowering::place(const IrNode& destination) const {
             error.suggest("consider declaring it with 'let'", keyword->second, "let", Applicability::MaybeIncorrect);
         throw error;
     }
+}
+
+// A `last` member: with a value it is a constant; without one it is a
+// deferred instance field that each constructor assigns exactly once.
+void Lowering::mark_last_member(SymbolId id, const Declaration& decl, SymbolKind kind) {
+    if (!decl.initializer && kind != SymbolKind::Field) {
+        const auto at = decl.name_span.value_or(decl.span);
+        throw Diagnostic(at, "a deferred 'last' binding must be a local or an instance field").with_code("E0447")
+            .label("'" + decl.name + "' is declared without a value")
+            .help(decl.static_member ? "give the static field its value where it is declared"
+                                     : "give it its value where it is declared, or declare it inside a function body");
+    }
+    if (kind == SymbolKind::Field) set_attribute(symbol(id), AttributeId::BindingLast, attribute_bool(!decl.initializer));
+}
+
+// An assignment to a `last` binding that the definite-assignment analysis did
+// not accept as its single assignment.
+void Lowering::assign_last(const IrNode& destination) const {
+    const auto& target = symbol(destination.symbol);
+    const auto quoted = "'" + target.name + "'";
+    if (deferred_binding(target) && target.kind == SymbolKind::Field) {
+        auto error = Diagnostic(destination.span, "cannot assign to 'last' field " + quoted + " here")
+            .with_code("E0445").label("only an 'init' of its class can assign it, once");
+        if (!target.span.file.empty()) error.label(name_span(destination.symbol), "declared here without a value");
+        error.help("assign it in each 'init' as '" + target.name + " = value' or 'instance." + target.name +
+                   " = value', outside any closure");
+        throw error;
+    }
+    auto error = deferred_binding(target)
+        ? Diagnostic(destination.span, "cannot assign twice to " + quoted).with_code("E0440")
+        : Diagnostic(destination.span, "cannot assign twice to " + quoted).with_code("E0401");
+    error.label("second assignment");
+    if (!target.span.file.empty())
+        error.label(name_span(destination.symbol), deferred_binding(target) ? "declared here" : "first assigned here");
+    if (const auto keyword = const_spans_.find(destination.symbol);
+        !deferred_binding(target) && keyword != const_spans_.end() && user_source(keyword->second.file) &&
+        source_text(keyword->second) == "last")
+        error.suggest("consider declaring it with 'let' if it should change", keyword->second, "let",
+                      Applicability::MaybeIncorrect);
+    else if (!deferred_binding(target))
+        error.help("consider declaring it with 'let' if it should change");
+    throw error;
+}
+
+// Runs the definite-assignment analysis on a function or lambda body before
+// lowering it. In a constructor it also covers the class's deferred fields.
+void Lowering::check_definite_assignment(const Declaration& function, SymbolId id) {
+    std::vector<DeferredField> fields;
+    DefiniteAssignmentOptions options;
+    const auto owner = id == no_symbol ? no_symbol : symbol(id).owner;
+    if (owner != no_symbol && symbol(owner).kind == SymbolKind::Class && function.name == "init" &&
+        entries_[owner].declaration) {
+        for (const auto& member : entries_[owner].declaration->members) {
+            if (member.kind == DeclKind::Binding && member.last && !member.initializer && !member.static_member)
+                fields.push_back({member.name, member.name_span.value_or(member.span)});
+        }
+        auto ctx = context(id);
+        options.instance_is_receiver = find("instance", ctx, function.span) == no_symbol;
+        options.trap_is_builtin = find("trap_with_message", ctx, function.span) == no_symbol;
+    }
+    const auto constructor = function.name_span.value_or(function.span);
+    if (!fields.empty()) options.constructor = &constructor;
+    auto accepted = neura::check_definite_assignment(function.parameters, function.body, fields, options);
+    deferred_assignments_.insert(accepted.begin(), accepted.end());
 }
 
 IrNode Lowering::discard_binding(const Declaration& decl, Context& context) {
@@ -3614,12 +3690,35 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
                                       : "give the second binding another name, or assign to the first one");
             throw error;
         }
+        if (!declaration.initializer && declaration.last && declaration.type) {
+            // `last x: T;`: declared now, assigned exactly once later.
+            auto declared = type(*declaration.type, context);
+            if (declared.kind == TypeKind::Void)
+                throw Diagnostic(declaration.type->span, "a binding cannot have type void").with_code("E0416");
+            if (is_primitive_reference(declared))
+                throw Diagnostic(declaration.type->span, "a deferred 'last' binding cannot have a primitive reference type")
+                    .with_code("E0428");
+            auto id = add(SymbolKind::Local, declaration.name, declaration.span, context.owner);
+            record_names(id, declaration);
+            symbol(id).constant = true;
+            symbol(id).type = declared;
+            set_attribute(symbol(id), AttributeId::BindingLast, attribute_bool(true));
+            context.scopes.back().emplace(declaration.name, id);
+            auto result = node(IrOp::Initialize, stmt.span);
+            result.symbol = id;
+            return result;
+        }
         if (!declaration.initializer) {
             auto error = Diagnostic(declaration.span, "a local binding requires an initializer").with_code("E0404")
                 .label("'" + declaration.name + "' is declared without a value");
             const auto after = declaration.type ? std::optional<Span>(declaration.type->span) : declaration.name_span;
             if (const auto at = after ? source_span(after->file, after->offset + after->length, 0) : std::nullopt)
                 error.suggest("give it an initial value", *at, " = <value>", Applicability::HasPlaceholders);
+            if (const auto keyword = Span{declaration.span.file, declaration.span.line, declaration.span.column,
+                                          declaration.span.offset, 3};
+                declaration.type && user_source(keyword.file) && source_text(keyword) == "let")
+                error.suggest("or, to assign it exactly once later, declare it with 'last'", keyword, "last",
+                              Applicability::MaybeIncorrect);
             throw error;
         }
 
@@ -3635,6 +3734,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         auto id = add(SymbolKind::Local, declaration.name, declaration.span, context.owner);
         record_names(id, declaration);
         symbol(id).constant = declaration.constant;
+        if (declaration.last) set_attribute(symbol(id), AttributeId::BindingLast, attribute_bool(false));
         symbol(id).type = declared.value_or(initializer.type);
         context.scopes.back().emplace(declaration.name, id);
 
@@ -3692,7 +3792,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
             return result;
         }
         auto destination = expression(stmt.expressions[0], context);
-        place(destination);
+        if (!deferred_assignments_.contains(&stmt)) place(destination);
         if ((destination.op == IrOp::Load || destination.op == IrOp::Field) && destination.symbol != no_symbol)
             expected_origin_ = ExpectedOrigin{name_span(destination.symbol),
                                               "'" + symbol(destination.symbol).name + "' is declared here with type " +
@@ -4349,6 +4449,7 @@ void Lowering::lower_declaration(SymbolId id) {
             }
         }
         if (declaration.type && symbol(id).type.kind != TypeKind::Void) result_spans_.emplace(id, declaration.type->span);
+        check_definite_assignment(declaration, id);
         auto instructions = body(declaration.body, ctx);
         if (symbol(id).type.kind != TypeKind::Void && !always_returns(instructions))
             throw missing_return(declaration.span, id, declaration);
@@ -4372,6 +4473,16 @@ void Lowering::lower_declaration(SymbolId id) {
                         }
                     }
                 }
+            }
+        }
+        if (symbol(id).kind == SymbolKind::Class && own_member(id, "init") == no_symbol) {
+            for (const auto& member : declaration.members) {
+                if (member.kind != DeclKind::Binding || !member.last || member.initializer || member.static_member)
+                    continue;
+                throw Diagnostic(member.name_span.value_or(member.span), "class '" + symbol(id).name +
+                                 "' has no 'init' to assign 'last' field '" + member.name + "'")
+                    .with_code("E0446").label("declared here without a value")
+                    .help("give it its value here, or add an 'init' that assigns it exactly once");
             }
         }
         if (symbol(id).kind == SymbolKind::Interface) {
@@ -4585,6 +4696,8 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
                 for (auto& instruction : destructures_.at(&stmt).instructions)
                     instructions.push_back(std::move(instruction));
             } else {
+                const auto accepted = neura::check_definite_assignment({}, std::span(&stmt, 1));
+                deferred_assignments_.insert(accepted.begin(), accepted.end());
                 instructions.push_back(statement(stmt, ctx));
             }
         }

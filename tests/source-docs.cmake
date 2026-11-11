@@ -150,3 +150,25 @@ endforeach()
 if(stubs MATCHES "trailing comment|ordinary comment interrupts|local constant")
     message(FATAL_ERROR "Doxygen filter exposed an unattached or local comment")
 endif()
+
+# `last` declarations print with their keyword; `last` stays a name elsewhere.
+set(last_source "${TEST_DIR}/last.nra")
+file(WRITE "${last_source}" [=[
+/// A class with assign-once fields.
+let Account = class (
+    /// Assigned by init.
+    export last owner: string;
+    /// Fixed at declaration.
+    export last currency: string = "EUR";
+    /// A method named last.
+    export let last = func -> string => owner;
+    export let init = func(name: string) {
+        owner = name;
+    };
+);
+]=])
+run_docs(index "${last_source}")
+expect_json("last owner: string" files 0 symbols 1 signature)
+expect_json("constant" files 0 symbols 1 kind)
+expect_json("last currency: string" files 0 symbols 2 signature)
+expect_json("last = func() -> string" files 0 symbols 3 signature)

@@ -1,0 +1,14 @@
+error[E0401]: cannot assign twice to 'start'
+ --> $DIR/last-reassigned.nra:4:5
+  |
+3 |     last start = 1;
+  |          ----- first assigned here
+4 |     start = 2;
+  |     ^^^^^ second assignment
+  |
+help: consider declaring it with 'let' if it should change
+  |
+3 |     let start = 1;
+  |     ~~~
+
+For more information about this error, try `neura explain E0401`.

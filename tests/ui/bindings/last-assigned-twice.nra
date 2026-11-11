@@ -1,0 +1,7 @@
+// A deferred `last` binding assigned a second time (E0440).
+let main = func() -> int {
+    last x: int;
+    x = 10;
+    x = 20;
+    return x;
+};

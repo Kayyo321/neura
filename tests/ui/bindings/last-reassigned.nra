@@ -1,0 +1,6 @@
+// A `last` binding with a value assigned again (E0401).
+let next = func() -> int {
+    last start = 1;
+    start = 2;
+    return start;
+};

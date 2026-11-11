@@ -14,6 +14,7 @@ let CoreDriver = module:program.Entry (
         }
         console.print_line(core.describe(5));
         console.print_line(core.describe(0));
+        console.print_line(core.sign_name(-4) + " " + core.sign_name(0) + " " + core.sign_name(9));
         return program.ExitCode.Ok;
     };
 );

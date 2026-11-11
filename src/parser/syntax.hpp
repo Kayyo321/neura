@@ -138,6 +138,9 @@ struct Declaration {
     Span span;
     std::string name;
     bool constant{};
+    // `last`: an assign-once binding. It is also `constant`; without an
+    // initializer it is deferred and assigned exactly once later.
+    bool last{};
     bool exported{};
     bool override_member{};
     bool promote_import{};

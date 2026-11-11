@@ -52,7 +52,7 @@ library below `share/neura/stdlib/std/`.
 DECLARATION = re.compile(r"^(export\s|or\s+func\b|or\s+as\b)")
 CONTEXT = re.compile(r"^(static\s+)?let\s+\w+\s*=\s*(class|interface|singleton)\b")
 INTERFACE = re.compile(r"=\s*interface\b")
-INTERFACE_MEMBER = re.compile(r"^(static\s+)?(let|const)\s+\w+\s*=\s*func\b")
+INTERFACE_MEMBER = re.compile(r"^(static\s+)?(let|const|last)\s+\w+\s*=\s*func\b")
 ENUM_OPEN = re.compile(r"=\s*enum(<[^>]*>)?\s*\($")
 SIGNATURE_END = re.compile(r"(=>|\{|;|\($|\)\s*;?$)")
 

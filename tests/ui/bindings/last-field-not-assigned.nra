@@ -1,0 +1,10 @@
+// A constructor path that leaves a deferred `last` field unassigned (E0446).
+let Box = class(
+    export last size: int;
+
+    export let init = func(initial: int) {
+        if (initial > 0) {
+            size = initial;
+        }
+    };
+);

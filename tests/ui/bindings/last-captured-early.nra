@@ -1,0 +1,7 @@
+// A closure that captures a deferred `last` binding before it is assigned (E0443).
+let make = func() -> int {
+    last base: int;
+    let read = func() -> int => base;
+    base = 1;
+    return read();
+};

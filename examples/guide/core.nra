@@ -17,4 +17,20 @@ let Core = module (
 
     export let describe = func(value: int32) -> string =>
         (value > 0) ? "positive" : "zero or negative";
+
+    /// @brief Names the sign of a value.
+    /// @param value The value to classify.
+    /// @return "negative", "zero", or "positive".
+    export let sign_name = func(value: int32) -> string {
+        // A `last` binding is assigned exactly once, here on each branch.
+        last name: string;
+        if (value < 0) {
+            name = "negative";
+        } else if (value == 0) {
+            name = "zero";
+        } else {
+            name = "positive";
+        }
+        return name;
+    };
 );

@@ -1,0 +1,12 @@
+// A deferred `last` field assigned outside 'init' (E0445).
+let Box = class(
+    export last size: int;
+
+    export let init = func(initial: int) {
+        size = initial;
+    };
+
+    export let grow = func {
+        size = size + 1;
+    };
+);
