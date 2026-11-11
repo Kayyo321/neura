@@ -13,7 +13,7 @@ library below `share/neura/stdlib/std/`.
 ## `Std.Collections.ArrayDeque`
 
 ```text
-export let ArrayDeque = module (
+#Since("0.1.0") export let ArrayDeque = module (
 export let ArrayDeque = class<T> implements Deque<T> (
   export let size = func -> int
   export let is_empty = func -> bool
@@ -26,7 +26,7 @@ export let ArrayDeque = class<T> implements Deque<T> (
   export let dequeue = func -> T
   export let first = func -> T
   export let last = func -> T
-  export let peek = func -> optional.Optional<T>
+  #NoDiscard export let peek = func -> optional.Optional<T>
   export let try_dequeue = func -> optional.Optional<T>
   export let clear = func
   export let contains = func(value: T) -> bool
@@ -46,7 +46,7 @@ export let of = func<T>(items: T[list]) -> ArrayDeque<T>
 ## `Std.Collections.ArrayList`
 
 ```text
-export let ArrayList = module (
+#Since("0.1.0") export let ArrayList = module (
 export let ArrayList = class<T> implements MutableList<T> (
   export let init = func(values: T[list])
   export let items = func -> T[list]
@@ -56,8 +56,8 @@ export let ArrayList = class<T> implements MutableList<T> (
   export let set = func(index: int, value: T)
   export let first = func -> T
   export let last = func -> T
-  export let first_or_none = func -> optional.Optional<T>
-  export let last_or_none = func -> optional.Optional<T>
+  #NoDiscard export let first_or_none = func -> optional.Optional<T>
+  #NoDiscard export let last_or_none = func -> optional.Optional<T>
   export let add = func(value: T) -> bool
   export let add_at = func(index: int, value: T)
   export let add_all = func(values: T[list])
@@ -99,7 +99,7 @@ export let wrap = func<T>(items: T[list]) -> ArrayList<T>
 ## `Std.Collections.BitSet`
 
 ```text
-export let BitSet = module (
+#Since("0.1.0") export let BitSet = module (
 export let BitSet = class implements MutableSet<int> (
   export let size = func -> int
   export let is_empty = func -> bool
@@ -138,7 +138,7 @@ export let of = func(items: int[list]) -> BitSet
 ## `Std.Collections.Collection`
 
 ```text
-export let Collection = module (
+#Since("0.1.0") export let Collection = module (
 export let Collection = interface<T>:Iterable<T> (
   let size = func -> int
   let contains = func(value: T) -> bool
@@ -151,7 +151,7 @@ export let Collection = interface<T>:Iterable<T> (
 ## `Std.Collections.Deque`
 
 ```text
-export let Deque = module (
+#Since("0.1.0") export let Deque = module (
 export let Deque = interface<T>:Queue<T> (
   let add_first = func(value: T)
   let add_last = func(value: T)
@@ -164,14 +164,14 @@ export let Deque = interface<T>:Queue<T> (
 ## `Std.Collections.HashMap`
 
 ```text
-export let HashMap = module (
+#Since("0.1.0") export let HashMap = module (
 export let HashMap = class<K, V> implements MutableMap<K, V> (
   export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(K) -> uint32, equal: func(K, K) -> bool)
   export let size = func -> int
   export let is_empty = func -> bool
   export let clear = func
   export let contains_key = func(key: K) -> bool
-  export let get = func(key: K) -> optional.Optional<V>
+  #NoDiscard export let get = func(key: K) -> optional.Optional<V>
   export let get_or = func(key: K, fallback: V) -> V
   export let require = func(key: K) -> V
   export let set = func(key: K, value: V)
@@ -207,7 +207,7 @@ export let with_keys_and_capacity = func<K, V>(hash: func(K) -> uint32, same: fu
 ## `Std.Collections.HashSet`
 
 ```text
-export let HashSet = module (
+#Since("0.1.0") export let HashSet = module (
 export let HashSet = class<T> implements MutableSet<T> (
   export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(T) -> uint32, equal: func(T, T) -> bool)
   export let size = func -> int
@@ -245,16 +245,16 @@ export let with_keys_and_capacity = func<T>(hash: func(T) -> uint32, same: func(
 ## `Std.Collections.ImmutableList`
 
 ```text
-export let ImmutableList = module (
-export let ImmutableList = class<T> implements List<T> (
+#Since("0.1.0") export let ImmutableList = module (
+#[Final, NoDiscard] export let ImmutableList = class<T> implements List<T> (
   export let init = func(values: T[list])
   export let size = func -> int
   export let is_empty = func -> bool
   export let get = func(index: int) -> T
   export let first = func -> T
   export let last = func -> T
-  export let first_or_none = func -> optional.Optional<T>
-  export let last_or_none = func -> optional.Optional<T>
+  #NoDiscard export let first_or_none = func -> optional.Optional<T>
+  #NoDiscard export let last_or_none = func -> optional.Optional<T>
   export let contains = func(value: T) -> bool
   export let index_of = func(value: T) -> int
   export let last_index_of = func(value: T) -> int
@@ -277,13 +277,13 @@ export let of = func<T>(items: T[list]) -> ImmutableList<T>
 ## `Std.Collections.ImmutableMap`
 
 ```text
-export let ImmutableMap = module (
-export let ImmutableMap = class<K, V> implements Map<K, V> (
+#Since("0.1.0") export let ImmutableMap = module (
+#[Final, NoDiscard] export let ImmutableMap = class<K, V> implements Map<K, V> (
   export let init = func(seal: Seal, contents: hash_map.HashMap<K, V>)
   export let size = func -> int
   export let is_empty = func -> bool
   export let contains_key = func(key: K) -> bool
-  export let get = func(key: K) -> optional.Optional<V>
+  #NoDiscard export let get = func(key: K) -> optional.Optional<V>
   export let get_or = func(key: K, fallback: V) -> V
   export let require = func(key: K) -> V
   export let keys = func -> K[list]
@@ -301,8 +301,8 @@ export let of = func<K, V>(entries: [K, V][list]) -> ImmutableMap<K, V>
 ## `Std.Collections.ImmutableSet`
 
 ```text
-export let ImmutableSet = module (
-export let ImmutableSet = class<T> implements Set<T> (
+#Since("0.1.0") export let ImmutableSet = module (
+#[Final, NoDiscard] export let ImmutableSet = class<T> implements Set<T> (
   export let init = func(seal: Seal, values: T[list])
   export let size = func -> int
   export let is_empty = func -> bool
@@ -319,14 +319,14 @@ export let of = func<T>(items: T[list]) -> ImmutableSet<T>
 ## `Std.Collections.IntMap`
 
 ```text
-export let IntMap = module (
+#Since("0.1.0") export let IntMap = module (
 export let IntMap = class<V> implements MutableMap<int, V> (
   export let init = func(seal: Seal, table: hash_core.HashCore)
   export let size = func -> int
   export let is_empty = func -> bool
   export let clear = func
   export let contains_key = func(key: int) -> bool
-  export let get = func(key: int) -> optional.Optional<V>
+  #NoDiscard export let get = func(key: int) -> optional.Optional<V>
   export let get_or = func(key: int, fallback: V) -> V
   export let require = func(key: int) -> V
   export let set = func(key: int, value: V)
@@ -360,7 +360,7 @@ export let with_capacity = func<V>(capacity: int) -> IntMap<V>
 ## `Std.Collections.Iterable`
 
 ```text
-export let Iterable = module (
+#Since("0.1.0") export let Iterable = module (
 export let Iterable = interface<T> (
   let iterator = func -> iterators.Iterator<T>
 ```
@@ -368,7 +368,7 @@ export let Iterable = interface<T> (
 ## `Std.Collections.Iterator`
 
 ```text
-export let Iterator = module (
+#Since("0.1.0") export let Iterator = module (
 export let Iterator = interface<T> (
   let has_next = func -> bool
   let next = func -> T
@@ -377,7 +377,7 @@ export let Iterator = interface<T> (
 ## `Std.Collections.LinkedList`
 
 ```text
-export let LinkedList = module (
+#Since("0.1.0") export let LinkedList = module (
 let Node = class<T> (
   export let value: T
   export let next: Node<T> = nil
@@ -390,9 +390,9 @@ export let LinkedList = class<T> implements MutableList<T>, Deque<T> (
   export let set = func(index: int, value: T)
   export let first = func -> T
   export let last = func -> T
-  export let first_or_none = func -> optional.Optional<T>
-  export let last_or_none = func -> optional.Optional<T>
-  export let peek = func -> optional.Optional<T>
+  #NoDiscard export let first_or_none = func -> optional.Optional<T>
+  #NoDiscard export let last_or_none = func -> optional.Optional<T>
+  #NoDiscard export let peek = func -> optional.Optional<T>
   export let add = func(value: T) -> bool
   export let add_last = func(value: T)
   export let enqueue = func(value: T)
@@ -438,13 +438,13 @@ export let of = func<T>(items: T[list]) -> LinkedList<T>
 ## `Std.Collections.List`
 
 ```text
-export let List = module (
+#Since("0.1.0") export let List = module (
 export let List = interface<T>:Collection<T> (
   let get = func(index: int) -> T
   let first = func -> T
   let last = func -> T
-  let first_or_none = func -> optional.Optional<T>
-  let last_or_none = func -> optional.Optional<T>
+  #NoDiscard let first_or_none = func -> optional.Optional<T>
+  #NoDiscard let last_or_none = func -> optional.Optional<T>
   let index_of = func(value: T) -> int
   let last_index_of = func(value: T) -> int
   let index_where = func(test: func(T) -> bool) -> int
@@ -453,7 +453,7 @@ export let List = interface<T>:Collection<T> (
 ## `Std.Collections.Lists`
 
 ```text
-export let Lists = module (
+#Since("0.1.0") export let Lists = module (
 export let copy = func<T>(items: T[list]) -> T[list]
 export let concat = func<T>(a: T[list], b: T[list]) -> T[list]
 export let reverse = func<T>(items: T[list])
@@ -470,11 +470,11 @@ export let same_elements = func<T>(a: list.List<T>, b: list.List<T>) -> bool
 ## `Std.Collections.Map`
 
 ```text
-export let Map = module (
+#Since("0.1.0") export let Map = module (
 export let Map = interface<K, V>:Iterable<[K, V]> (
   let size = func -> int
   let contains_key = func(key: K) -> bool
-  let get = func(key: K) -> optional.Optional<V>
+  #NoDiscard let get = func(key: K) -> optional.Optional<V>
   let get_or = func(key: K, fallback: V) -> V
   let require = func(key: K) -> V
   let keys = func -> K[list]
@@ -488,14 +488,14 @@ export let Map = interface<K, V>:Iterable<[K, V]> (
 ## `Std.Collections.Maps`
 
 ```text
-export let Maps = module (
+#Since("0.1.0") export let Maps = module (
 export let same_entries = func<K, V>(a: Map<K, V>, b: Map<K, V>) -> bool
 ```
 
 ## `Std.Collections.MutableCollection`
 
 ```text
-export let MutableCollection = module (
+#Since("0.1.0") export let MutableCollection = module (
 export let MutableCollection = interface<T>:Collection<T> (
   let add = func(value: T) -> bool
   let remove = func(value: T) -> bool
@@ -508,7 +508,7 @@ export let MutableCollection = interface<T>:Collection<T> (
 ## `Std.Collections.MutableList`
 
 ```text
-export let MutableList = module (
+#Since("0.1.0") export let MutableList = module (
 export let MutableList = interface<T>:List<T>, MutableCollection<T> (
   let set = func(index: int, value: T)
   let add_at = func(index: int, value: T)
@@ -525,7 +525,7 @@ export let MutableList = interface<T>:List<T>, MutableCollection<T> (
 ## `Std.Collections.MutableMap`
 
 ```text
-export let MutableMap = module (
+#Since("0.1.0") export let MutableMap = module (
 export let MutableMap = interface<K, V>:map.Map<K, V> (
   let set = func(key: K, value: V)
   let delete = func(key: K) -> bool
@@ -541,21 +541,21 @@ export let MutableMap = interface<K, V>:map.Map<K, V> (
 ## `Std.Collections.MutableSet`
 
 ```text
-export let MutableSet = module (
+#Since("0.1.0") export let MutableSet = module (
 export let MutableSet = interface<T>:Set<T>, MutableCollection<T> ()
 ```
 
 ## `Std.Collections.OrdinalMap`
 
 ```text
-export let OrdinalMap = module (
+#Since("0.1.0") export let OrdinalMap = module (
 export let OrdinalMap = class<V> implements MutableMap<int, V> (
   export let init = func(limit: int)
   export let size = func -> int
   export let is_empty = func -> bool
   export let clear = func
   export let contains_key = func(key: int) -> bool
-  export let get = func(key: int) -> optional.Optional<V>
+  #NoDiscard export let get = func(key: int) -> optional.Optional<V>
   export let get_or = func(key: int, fallback: V) -> V
   export let require = func(key: int) -> V
   export let set = func(key: int, value: V)
@@ -586,14 +586,14 @@ export let create = func<V>(size: int) -> OrdinalMap<V>
 ## `Std.Collections.PriorityQueue`
 
 ```text
-export let PriorityQueue = module (
+#Since("0.1.0") export let PriorityQueue = module (
 export let PriorityQueue = class<T> implements Queue<T> (
   export let init = func(items: T[list], c: func(T, T) -> ordering.Ordering)
   export let size = func -> int
   export let is_empty = func -> bool
   export let enqueue = func(value: T)
   export let dequeue = func -> T
-  export let peek = func -> optional.Optional<T>
+  #NoDiscard export let peek = func -> optional.Optional<T>
   export let try_dequeue = func -> optional.Optional<T>
   export let clear = func
   export let drain_sorted = func -> T[list]
@@ -614,11 +614,11 @@ export let from_list = func<T>(items: T[list], c: func(T, T) -> ordering.Orderin
 ## `Std.Collections.Queue`
 
 ```text
-export let Queue = module (
+#Since("0.1.0") export let Queue = module (
 export let Queue = interface<T>:Collection<T> (
   let enqueue = func(value: T)
   let dequeue = func -> T
-  let peek = func -> optional.Optional<T>
+  #NoDiscard let peek = func -> optional.Optional<T>
   let try_dequeue = func -> optional.Optional<T>
   let clear = func
 ```
@@ -626,8 +626,8 @@ export let Queue = interface<T>:Collection<T> (
 ## `Std.Collections.Sequence`
 
 ```text
-export let Sequence = module (
-export let Sequence = class<T> implements Iterable<T> (
+#Since("0.1.0") export let Sequence = module (
+#[Final, NoDiscard] export let Sequence = class<T> implements Iterable<T> (
   export let init = func(more: func() -> bool, pull: func() -> T)
   export let iterator = func -> Iterator<T>
   export let map = func<U>(f: func(T) -> U) -> Sequence<U>
@@ -655,12 +655,12 @@ export let Sequence = class<T> implements Iterable<T> (
   export let any = func(test: func(T) -> bool) -> bool
   export let all = func(test: func(T) -> bool) -> bool
   export let none = func(test: func(T) -> bool) -> bool
-  export let reduce = func(f: func(T, T) -> T) -> optional.Optional<T>
-  export let first = func -> optional.Optional<T>
-  export let last = func -> optional.Optional<T>
-  export let find = func(test: func(T) -> bool) -> optional.Optional<T>
-  export let min = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T>
-  export let max = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T>
+  #NoDiscard export let reduce = func(f: func(T, T) -> T) -> optional.Optional<T>
+  #NoDiscard export let first = func -> optional.Optional<T>
+  #NoDiscard export let last = func -> optional.Optional<T>
+  #NoDiscard export let find = func(test: func(T) -> bool) -> optional.Optional<T>
+  #NoDiscard export let min = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T>
+  #NoDiscard export let max = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T>
   export let to_set = func -> hash_set.HashSet<T>
   export let to_map = func<K, V>(key: func(T) -> K, value: func(T) -> V) -> hash_map.HashMap<K, V>
   export let group_by = func<K>(key: func(T) -> K) -> hash_map.HashMap<K, array_list.ArrayList<T>>
@@ -684,71 +684,72 @@ export let sum_float64 = func(s: Sequence<float64>) -> float64
 ## `Std.Collections.Set`
 
 ```text
-export let Set = module (
+#Since("0.1.0") export let Set = module (
 export let Set = interface<T>:Collection<T> ()
 ```
 
 ## `Std.Collections.Sets`
 
 ```text
-export let Sets = module (
+#Since("0.1.0") export let Sets = module (
 export let same_elements = func<T>(a: Set<T>, b: Set<T>) -> bool
 ```
 
 ## `Std.Collections.SortedMap`
 
 ```text
-export let SortedMap = module (
+#Since("0.1.0") export let SortedMap = module (
 export let SortedMap = interface<K, V>:Map<K, V> (
   let first = func -> [K, V]
   let last = func -> [K, V]
   let range = func(from: K, to: K) -> [K, V][list]
   let descending = func -> [K, V][list]
-  let floor = func(key: K) -> optional.Optional<K>
-  let ceiling = func(key: K) -> optional.Optional<K>
-  let lower = func(key: K) -> optional.Optional<K>
-  let higher = func(key: K) -> optional.Optional<K>
-  let floor_entry = func(key: K) -> optional.Optional<[K, V]>
-  let ceiling_entry = func(key: K) -> optional.Optional<[K, V]>
-  let lower_entry = func(key: K) -> optional.Optional<[K, V]>
-  let higher_entry = func(key: K) -> optional.Optional<[K, V]>
+  #NoDiscard let floor = func(key: K) -> optional.Optional<K>
+  #NoDiscard let ceiling = func(key: K) -> optional.Optional<K>
+  #NoDiscard let lower = func(key: K) -> optional.Optional<K>
+  #NoDiscard let higher = func(key: K) -> optional.Optional<K>
+  #NoDiscard let floor_entry = func(key: K) -> optional.Optional<[K, V]>
+  #NoDiscard let ceiling_entry = func(key: K) -> optional.Optional<[K, V]>
+  #NoDiscard let lower_entry = func(key: K) -> optional.Optional<[K, V]>
+  #NoDiscard let higher_entry = func(key: K) -> optional.Optional<[K, V]>
 ```
 
 ## `Std.Collections.SortedSet`
 
 ```text
-export let SortedSet = module (
+#Since("0.1.0") export let SortedSet = module (
 export let SortedSet = interface<T>:Set<T> (
   let first = func -> T
   let last = func -> T
   let range = func(from: T, to: T) -> T[list]
   let descending = func -> T[list]
-  let floor = func(value: T) -> optional.Optional<T>
-  let ceiling = func(value: T) -> optional.Optional<T>
-  let lower = func(value: T) -> optional.Optional<T>
-  let higher = func(value: T) -> optional.Optional<T>
+  #NoDiscard let floor = func(value: T) -> optional.Optional<T>
+  #NoDiscard let ceiling = func(value: T) -> optional.Optional<T>
+  #NoDiscard let lower = func(value: T) -> optional.Optional<T>
+  #NoDiscard let higher = func(value: T) -> optional.Optional<T>
 ```
 
 ## `Std.Collections.Sorting`
 
 ```text
-export let Sorting = module (
+#Since("0.1.0") export let Sorting = module (
 export let sort_range = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering)
 export let sort = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering)
+#Since("0.2.0") export let sort_ascending = func(items: int64[list])
 export let binary_search = func<T>(items: T[list], value: T, c: func(T, T) -> ordering.Ordering) -> int
 ```
 
 ## `Std.Collections.StringMap`
 
 ```text
-export let StringMap = module (
+#Since("0.1.0") export let StringMap = module (
 export let StringMap = class<V> implements MutableMap<string, V> (
   export let init = func(seal: Seal, table: hash_core.HashCore)
   export let size = func -> int
   export let is_empty = func -> bool
   export let clear = func
   export let contains_key = func(key: string) -> bool
-  export let get = func(key: string) -> optional.Optional<V>
+  #NoDiscard export let get = func(key: string) -> optional.Optional<V>
   export let get_or = func(key: string, fallback: V) -> V
   export let require = func(key: string) -> V
   export let set = func(key: string, value: V)
@@ -782,7 +783,7 @@ export let with_capacity = func<V>(capacity: int) -> StringMap<V>
 ## `Std.Collections.TreeMap`
 
 ```text
-export let TreeMap = module (
+#Since("0.1.0") export let TreeMap = module (
 let Node = class<K, V> (
   export let key: K
   export let value: V
@@ -797,7 +798,7 @@ export let TreeMap = class<K, V> implements MutableMap<K, V>, SortedMap<K, V> (
   export let is_empty = func -> bool
   export let clear = func
   export let contains_key = func(key: K) -> bool
-  export let get = func(key: K) -> optional.Optional<V>
+  #NoDiscard export let get = func(key: K) -> optional.Optional<V>
   export let get_or = func(key: K, fallback: V) -> V
   export let require = func(key: K) -> V
   export let set = func(key: K, value: V)
@@ -824,14 +825,14 @@ export let TreeMap = class<K, V> implements MutableMap<K, V>, SortedMap<K, V> (
   export let key_range = func(from: K, to: K) -> K[list]
   export let descending = func -> [K, V][list]
   export let descending_keys = func -> K[list]
-  export let floor = func(key: K) -> optional.Optional<K>
-  export let ceiling = func(key: K) -> optional.Optional<K>
-  export let lower = func(key: K) -> optional.Optional<K>
-  export let higher = func(key: K) -> optional.Optional<K>
-  export let floor_entry = func(key: K) -> optional.Optional<[K, V]>
-  export let ceiling_entry = func(key: K) -> optional.Optional<[K, V]>
-  export let lower_entry = func(key: K) -> optional.Optional<[K, V]>
-  export let higher_entry = func(key: K) -> optional.Optional<[K, V]>
+  #NoDiscard export let floor = func(key: K) -> optional.Optional<K>
+  #NoDiscard export let ceiling = func(key: K) -> optional.Optional<K>
+  #NoDiscard export let lower = func(key: K) -> optional.Optional<K>
+  #NoDiscard export let higher = func(key: K) -> optional.Optional<K>
+  #NoDiscard export let floor_entry = func(key: K) -> optional.Optional<[K, V]>
+  #NoDiscard export let ceiling_entry = func(key: K) -> optional.Optional<[K, V]>
+  #NoDiscard export let lower_entry = func(key: K) -> optional.Optional<[K, V]>
+  #NoDiscard export let higher_entry = func(key: K) -> optional.Optional<[K, V]>
   export let validate = func
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
@@ -850,7 +851,7 @@ export let create = func<K, V>(comparator: func(K, K) -> ordering.Ordering) -> T
 ## `Std.Collections.TreeSet`
 
 ```text
-export let TreeSet = module (
+#Since("0.1.0") export let TreeSet = module (
 export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T> (
   export let init = func(seal: Seal, comparator: func(T, T) -> ordering.Ordering)
   export let size = func -> int
@@ -871,10 +872,10 @@ export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T> (
   export let remove_last = func -> T
   export let range = func(from: T, to: T) -> T[list]
   export let descending = func -> T[list]
-  export let floor = func(value: T) -> optional.Optional<T>
-  export let ceiling = func(value: T) -> optional.Optional<T>
-  export let lower = func(value: T) -> optional.Optional<T>
-  export let higher = func(value: T) -> optional.Optional<T>
+  #NoDiscard export let floor = func(value: T) -> optional.Optional<T>
+  #NoDiscard export let ceiling = func(value: T) -> optional.Optional<T>
+  #NoDiscard export let lower = func(value: T) -> optional.Optional<T>
+  #NoDiscard export let higher = func(value: T) -> optional.Optional<T>
   export let is_subset_of = func(other: TreeSet<T>) -> bool
   export let is_disjoint_from = func(other: TreeSet<T>) -> bool
   export let union = func(other: TreeSet<T>) -> TreeSet<T>
@@ -890,20 +891,20 @@ export let create = func<T>(comparator: func(T, T) -> ordering.Ordering) -> Tree
 ## `Std.Concurrent.AtomicInt64`
 
 ```text
-export let AtomicInt64 = module (
-export let AtomicInt64 = class (
+#Since("0.1.0") export let AtomicInt64 = module (
+#Final export let AtomicInt64 = class (
   export let init = func(initial: int64)
   export let load = func -> int64
   export let store = func(value: int64)
   export let add = func(delta: int64) -> int64
-  export let compare_exchange = func(expected: int64, desired: int64) -> bool
+  #NoDiscard export let compare_exchange = func(expected: int64, desired: int64) -> bool
 export let create = func(initial: int64) -> AtomicInt64
 ```
 
 ## `Std.Concurrent.Cancellation`
 
 ```text
-export let Cancellation = module (
+#Since("0.1.0") export let Cancellation = module (
 export let requested = func -> bool
 export let remaining = func -> optional.Optional<duration.Duration>
 ```
@@ -911,36 +912,32 @@ export let remaining = func -> optional.Optional<duration.Duration>
 ## `Std.Concurrent.Channel`
 
 ```text
-export let Channel = module (
+#Since("0.1.0") export let Channel = module (
 export let SendOutcome = enum (Sent, Closed, Cancelled)
 export let TrySendOutcome = enum (Sent, Full, Closed)
 export let Received = enum<T> (Value(T), Closed, Cancelled)
 export let TryReceived = enum<T> (Value(T), Empty, Closed)
-export let State = class (
+#Final export let State = class (
   export let init = func { }
-export let Sender = class<T> (
+#Final export let Sender = class<T> (
   export let init = func(shared: State)
   export let send = func(value: T) -> SendOutcome
   export let try_send = func(value: T) -> TrySendOutcome
-  export let select_handle = func -> State
-  export let send_selected = func(code: uint32) -> SendOutcome
-export let Receiver = class<T> (
+#Final export let Receiver = class<T> (
   export let init = func(shared: State)
   export let receive = func -> Received<T>
   export let try_receive = func -> TryReceived<T>
-  export let select_handle = func -> State
-  export let receive_selected = func(code: uint32) -> Received<T>
-export let Closer = class<T> (
+#Final export let Closer = class<T> (
   export let init = func(shared: State)
   export let close = func
-export let open = func<T>(capacity: int) -> [Sender<T>, Receiver<T>, Closer<T>]
+#NoDiscard export let open = func<T>(capacity: int) -> [Sender<T>, Receiver<T>, Closer<T>]
 ```
 
 ## `Std.Concurrent.Guarded`
 
 ```text
-export let Guarded = module (
-export let Guarded = class<T> (
+#Since("0.1.0") export let Guarded = module (
+#Final export let Guarded = class<T> (
   export let init = func(state: T)
   export let with = func<U>(body: func(T) -> U) -> U
 export let create = func<T>(initializer: func() -> T) -> Guarded<T>
@@ -949,36 +946,36 @@ export let create = func<T>(initializer: func() -> T) -> Guarded<T>
 ## `Std.Concurrent.Parallel`
 
 ```text
-export let Parallel = module (
-export let ItemLimits = class (
-  export let max_steps: int64
-  export let max_heap_cells: int64
+#Since("0.1.0") export let Parallel = module (
+#Final export let ItemLimits = class (
+  export last max_steps: int64
+  export last max_heap_cells: int64
   export let init = func(steps: int64, heap_cells: int64)
 export let limits = func(steps: int64, heap_cells: int64) -> ItemLimits
-export let map = func<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[]
+#NoDiscard(reason: "the worker has no effects, so the results are all a map gives") export let map = func<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[]
 ```
 
 ## `Std.Concurrent.Scope`
 
 ```text
-export let Scope = module (
-export let Scope = class (
+#Since("0.1.0") export let Scope = module (
+#Final export let Scope = class (
   export let cancel = func
   export let is_cancelled = func -> bool
-  export let cancel_after = func(span: duration.Duration) -> result.Result<Unit>
-  export let cancel_at = func(moment: instant.Instant) -> result.Result<Unit>
+  #NoDiscard(reason: "without the clock capability no deadline is set") export let cancel_after = func(span: duration.Duration) -> result.Result<Unit>
+  #NoDiscard(reason: "without the clock capability no deadline is set") export let cancel_at = func(moment: instant.Instant) -> result.Result<Unit>
   export let deadline = func -> optional.Optional<duration.Duration>
 ```
 
 ## `Std.Concurrent.Semaphore`
 
 ```text
-export let Semaphore = module (
+#Since("0.1.0") export let Semaphore = module (
 export let AcquireOutcome = enum (Acquired, Cancelled)
-export let Semaphore = class (
+#Final export let Semaphore = class (
   export let init = func(taking: channels.Receiver<bool>, giving: channels.Sender<bool>)
-  export let acquire = func -> AcquireOutcome
-  export let try_acquire = func -> bool
+  #NoDiscard(reason: "a cancelled acquire holds no permit") export let acquire = func -> AcquireOutcome
+  #NoDiscard(reason: "the result says whether a permit was taken") export let try_acquire = func -> bool
   export let release = func
 export let create = func(permits: int) -> Semaphore
 ```
@@ -986,18 +983,16 @@ export let create = func(permits: int) -> Semaphore
 ## `Std.Concurrent.Task`
 
 ```text
-export let Task = module (
-export let Task = class<T> (
+#Since("0.1.0") export let Task = module (
+#Final export let Task = class<T> (
   export let join = func -> T
   export let is_finished = func -> bool
-  export let select_handle = func -> uint64
-  export let join_selected = func(code: uint32) -> T
 ```
 
 ## `Std.Concurrent.Tasks`
 
 ```text
-export let Tasks = module (
+#Since("0.1.0") export let Tasks = module (
 export let all = func<T>(calls: (func() -> T)[list]) -> T[list]
 export let all_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T[list]>
 export let first_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T>
@@ -1006,24 +1001,22 @@ export let first_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> resu
 ## `Std.Concurrent.Timer`
 
 ```text
-export let Timer = module (
+#Since("0.1.0") export let Timer = module (
 export let TimerOutcome = enum (Fired, Cancelled)
-export let Timer = class (
+#Final export let Timer = class (
   export let init = func(at: int64)
   export let wait = func -> TimerOutcome
-  export let select_handle = func -> Timer
-  export let wait_selected = func(code: uint32) -> TimerOutcome
-export let after = func(span: duration.Duration) -> result.Result<Timer>
-export let at = func(moment: instant.Instant) -> result.Result<Timer>
+#NoDiscard export let after = func(span: duration.Duration) -> result.Result<Timer>
+#NoDiscard export let at = func(moment: instant.Instant) -> result.Result<Timer>
 ```
 
 ## `Std.Concurrent.WorkerGroup`
 
 ```text
-export let WorkerGroup = module (
+#Since("0.1.0") export let WorkerGroup = module (
 export let SubmitOutcome = enum (Submitted, Closed, Cancelled)
 export let TrySubmitOutcome = enum (Submitted, Full, Closed)
-export let WorkerGroup = class<T> (
+#Final export let WorkerGroup = class<T> (
   export let init = func(jobs: channels.Sender<T>, closing: channels.Closer<T>, stops: channels.Receiver<int>, worker_count: int)
   export let submit = func(job: T) -> SubmitOutcome
   export let try_submit = func(job: T) -> TrySubmitOutcome
@@ -1034,7 +1027,7 @@ export let with_workers = func<T>(workers: int, capacity: int, work: func(T) -> 
 ## `Std.Core.BFloat16`
 
 ```text
-export let BFloat16 = module (
+#Since("0.1.0") export let BFloat16 = module (
 export const Max: bfloat16 = bfloat16.from_bits(32639)
 export const MinPositive: bfloat16 = bfloat16.from_bits(1)
 export const MinNormal: bfloat16 = bfloat16.from_bits(128)
@@ -1064,26 +1057,26 @@ export let hash = func(v: bfloat16) -> uint32
 export let to_string = func(v: bfloat16) -> string
 export let to_fixed = func(v: bfloat16, digits: int) -> string
 export let to_exponential = func(v: bfloat16, digits: int) -> string
-export let parse = func(text: string) -> Result<bfloat16>
+#NoDiscard export let parse = func(text: string) -> Result<bfloat16>
 ```
 
 ## `Std.Core.Bool`
 
 ```text
-export let Bool = module (
+#Since("0.1.0") export let Bool = module (
 export let to_int = func(v: bool) -> int
 export let xor = func(a: bool, b: bool) -> bool
 export let compare = func(a: bool, b: bool) -> Ordering
 export let hash = func(v: bool) -> uint32
 export let to_string = func(v: bool) -> string
-export let parse = func(text: string) -> Result<bool>
+#NoDiscard export let parse = func(text: string) -> Result<bool>
 ```
 
 ## `Std.Core.Cell`
 
 ```text
-export let Cell = module (
-export let Cell = class<T> (
+#Since("0.1.0") export let Cell = module (
+#[Final, Since("0.1.0")] export let Cell = class<T> (
   export let value: T
   export let init = func(initial: T)
 export let of = func<T>(value: T) -> Cell<T>
@@ -1092,15 +1085,15 @@ export let of = func<T>(value: T) -> Cell<T>
 ## `Std.Core.Comparable`
 
 ```text
-export let Comparable = module (
-export let Comparable = interface<T> (
+#Since("0.1.0") export let Comparable = module (
+#Since("0.1.0") export let Comparable = interface<T> (
   let compare_to = func(other: T) -> Ordering
 ```
 
 ## `Std.Core.Comparators`
 
 ```text
-export let Comparators = module (
+#Since("0.1.0") export let Comparators = module (
 export let reversed = func<T>(c: func(T, T) -> Ordering) -> func(T, T) -> Ordering
 export let by_key = func<T, K>(key: func(T) -> K, c: func(K, K) -> Ordering)
 export let then = func<T>(first: func(T, T) -> Ordering, second: func(T, T) -> Ordering)
@@ -1109,21 +1102,21 @@ export let then = func<T>(first: func(T, T) -> Ordering, second: func(T, T) -> O
 ## `Std.Core.Error`
 
 ```text
-export let Error = module (
-export let IoErrorKind = enum (NotFound, PermissionDenied, AlreadyExists, InvalidInput, Interrupted, UnexpectedEnd, NotADirectory, IsADirectory, DirectoryNotEmpty, ConnectionRefused, ConnectionReset, TimedOut, Unsupported, CapabilityDenied, Closed, InvalidData, Other, Cancelled)
-export let ParseErrorKind = enum (Empty, InvalidCharacter, OutOfRange, UnexpectedEnd, Syntax)
-export let ErrorDetail = class (
+#Since("0.1.0") export let Error = module (
+#Since("0.1.0") export let IoErrorKind = enum (NotFound, PermissionDenied, AlreadyExists, InvalidInput, Interrupted, UnexpectedEnd, NotADirectory, IsADirectory, DirectoryNotEmpty, ConnectionRefused, ConnectionReset, TimedOut, Unsupported, CapabilityDenied, Closed, InvalidData, Other, Cancelled)
+#Since("0.1.0") export let ParseErrorKind = enum (Empty, InvalidCharacter, OutOfRange, UnexpectedEnd, Syntax)
+#Since("0.1.0") export let ErrorDetail = class (
   export let code = func() -> string
   export let message = func() -> string
-export let SimpleDetail = class:ErrorDetail (
+#[Final, Since("0.1.0")] export let SimpleDetail = class:ErrorDetail (
   export let init = func(code_value: string, message_value: string)
   export let.override code = func -> string
   export let.override message = func -> string
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
-export let Error = enum (Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom(ErrorDetail), Context { message: string, cause: Error })
-export let PortableError = enum (Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom { code: string, message: string }, Context { message: string, cause: PortableError })
+#Since("0.1.0") export let Error = enum (Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom(ErrorDetail), Context { message: string, cause: Error })
+#Since("0.1.0") export let PortableError = enum (Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom { code: string, message: string }, Context { message: string, cause: PortableError })
 export let custom = func(code: string, text: string) -> Error
 export let context = func(cause: Error, text: string) -> Error
 export let to_portable = func(e: Error) -> PortableError
@@ -1141,14 +1134,14 @@ export let to_string = func(e: Error) -> string
 ## `Std.Core.Failure`
 
 ```text
-export let Failure = module (
+#Since("0.1.0") export let Failure = module (
 export let trap = func(message: string)
 ```
 
 ## `Std.Core.Float16`
 
 ```text
-export let Float16 = module (
+#Since("0.1.0") export let Float16 = module (
 export const Max: float16 = float16.from_bits(31743)
 export const MinPositive: float16 = float16.from_bits(1)
 export const MinNormal: float16 = float16.from_bits(1024)
@@ -1178,13 +1171,13 @@ export let hash = func(v: float16) -> uint32
 export let to_string = func(v: float16) -> string
 export let to_fixed = func(v: float16, digits: int) -> string
 export let to_exponential = func(v: float16, digits: int) -> string
-export let parse = func(text: string) -> Result<float16>
+#NoDiscard export let parse = func(text: string) -> Result<float16>
 ```
 
 ## `Std.Core.Float32`
 
 ```text
-export let Float32 = module (
+#Since("0.1.0") export let Float32 = module (
 export const Max: float32 = float32.from_bits(2139095039)
 export const MinPositive: float32 = float32.from_bits(1)
 export const MinNormal: float32 = float32.from_bits(8388608)
@@ -1214,13 +1207,13 @@ export let hash = func(v: float32) -> uint32
 export let to_string = func(v: float32) -> string
 export let to_fixed = func(v: float32, digits: int) -> string
 export let to_exponential = func(v: float32, digits: int) -> string
-export let parse = func(text: string) -> Result<float32>
+#NoDiscard export let parse = func(text: string) -> Result<float32>
 ```
 
 ## `Std.Core.Float64`
 
 ```text
-export let Float64 = module (
+#Since("0.1.0") export let Float64 = module (
 export const Max: float64 = float64.from_bits(9218868437227405311)
 export const MinPositive: float64 = float64.from_bits(1)
 export const MinNormal: float64 = float64.from_bits(4503599627370496)
@@ -1250,13 +1243,13 @@ export let hash = func(v: float64) -> uint32
 export let to_string = func(v: float64) -> string
 export let to_fixed = func(v: float64, digits: int) -> string
 export let to_exponential = func(v: float64, digits: int) -> string
-export let parse = func(text: string) -> Result<float64>
+#NoDiscard export let parse = func(text: string) -> Result<float64>
 ```
 
 ## `Std.Core.Hash`
 
 ```text
-export let Hash = module (
+#Since("0.1.0") export let Hash = module (
 export let combine = func(seed: uint32, value: uint32) -> uint32
 export let spread = func(hash: uint32) -> uint32
 export let of_bool = func(value: bool) -> uint32
@@ -1267,7 +1260,7 @@ export let of_uint64 = func(value: uint64) -> uint32
 ## `Std.Core.Int16`
 
 ```text
-export let Int16 = module (
+#Since("0.1.0") export let Int16 = module (
 export const Min: int16 = -32768
 export const Max: int16 = 32767
 export const Bits: int = 16
@@ -1279,11 +1272,11 @@ export let clamp = func(v: int16, low: int16, high: int16) -> int16
 export let compare = func(a: int16, b: int16) -> Ordering
 export let pow = func(base: int16, exponent: int) -> int16
 export let gcd = func(a: int16, b: int16) -> int16
-export let checked_add = func(a: int16, b: int16) -> Optional<int16>
-export let checked_sub = func(a: int16, b: int16) -> Optional<int16>
-export let checked_mul = func(a: int16, b: int16) -> Optional<int16>
-export let checked_div = func(a: int16, b: int16) -> Optional<int16>
-export let checked_rem = func(a: int16, b: int16) -> Optional<int16>
+#NoDiscard export let checked_add = func(a: int16, b: int16) -> Optional<int16>
+#NoDiscard export let checked_sub = func(a: int16, b: int16) -> Optional<int16>
+#NoDiscard export let checked_mul = func(a: int16, b: int16) -> Optional<int16>
+#NoDiscard export let checked_div = func(a: int16, b: int16) -> Optional<int16>
+#NoDiscard export let checked_rem = func(a: int16, b: int16) -> Optional<int16>
 export let wrapping_add = func(a: int16, b: int16) -> int16
 export let wrapping_sub = func(a: int16, b: int16) -> int16
 export let wrapping_mul = func(a: int16, b: int16) -> int16
@@ -1304,14 +1297,14 @@ export let hash = func(v: int16) -> uint32
 export let to_string = func(v: int16) -> string
 export let to_string_radix = func(v: int16, radix: int) -> string
 export let format = func(v: int16, radix: int, min_width: int, pad: string) -> string
-export let parse = func(text: string) -> Result<int16>
-export let parse_radix = func(text: string, radix: int) -> Result<int16>
+#NoDiscard export let parse = func(text: string) -> Result<int16>
+#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<int16>
 ```
 
 ## `Std.Core.Int32`
 
 ```text
-export let Int32 = module (
+#Since("0.1.0") export let Int32 = module (
 export const Min: int32 = -2147483648
 export const Max: int32 = 2147483647
 export const Bits: int = 32
@@ -1323,11 +1316,11 @@ export let clamp = func(v: int32, low: int32, high: int32) -> int32
 export let compare = func(a: int32, b: int32) -> Ordering
 export let pow = func(base: int32, exponent: int) -> int32
 export let gcd = func(a: int32, b: int32) -> int32
-export let checked_add = func(a: int32, b: int32) -> Optional<int32>
-export let checked_sub = func(a: int32, b: int32) -> Optional<int32>
-export let checked_mul = func(a: int32, b: int32) -> Optional<int32>
-export let checked_div = func(a: int32, b: int32) -> Optional<int32>
-export let checked_rem = func(a: int32, b: int32) -> Optional<int32>
+#NoDiscard export let checked_add = func(a: int32, b: int32) -> Optional<int32>
+#NoDiscard export let checked_sub = func(a: int32, b: int32) -> Optional<int32>
+#NoDiscard export let checked_mul = func(a: int32, b: int32) -> Optional<int32>
+#NoDiscard export let checked_div = func(a: int32, b: int32) -> Optional<int32>
+#NoDiscard export let checked_rem = func(a: int32, b: int32) -> Optional<int32>
 export let wrapping_add = func(a: int32, b: int32) -> int32
 export let wrapping_sub = func(a: int32, b: int32) -> int32
 export let wrapping_mul = func(a: int32, b: int32) -> int32
@@ -1348,14 +1341,14 @@ export let hash = func(v: int32) -> uint32
 export let to_string = func(v: int32) -> string
 export let to_string_radix = func(v: int32, radix: int) -> string
 export let format = func(v: int32, radix: int, min_width: int, pad: string) -> string
-export let parse = func(text: string) -> Result<int32>
-export let parse_radix = func(text: string, radix: int) -> Result<int32>
+#NoDiscard export let parse = func(text: string) -> Result<int32>
+#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<int32>
 ```
 
 ## `Std.Core.Int64`
 
 ```text
-export let Int64 = module (
+#Since("0.1.0") export let Int64 = module (
 export const Min: int64 = -9223372036854775808
 export const Max: int64 = 9223372036854775807
 export const Bits: int = 64
@@ -1367,11 +1360,11 @@ export let clamp = func(v: int64, low: int64, high: int64) -> int64
 export let compare = func(a: int64, b: int64) -> Ordering
 export let pow = func(base: int64, exponent: int) -> int64
 export let gcd = func(a: int64, b: int64) -> int64
-export let checked_add = func(a: int64, b: int64) -> Optional<int64>
-export let checked_sub = func(a: int64, b: int64) -> Optional<int64>
-export let checked_mul = func(a: int64, b: int64) -> Optional<int64>
-export let checked_div = func(a: int64, b: int64) -> Optional<int64>
-export let checked_rem = func(a: int64, b: int64) -> Optional<int64>
+#NoDiscard export let checked_add = func(a: int64, b: int64) -> Optional<int64>
+#NoDiscard export let checked_sub = func(a: int64, b: int64) -> Optional<int64>
+#NoDiscard export let checked_mul = func(a: int64, b: int64) -> Optional<int64>
+#NoDiscard export let checked_div = func(a: int64, b: int64) -> Optional<int64>
+#NoDiscard export let checked_rem = func(a: int64, b: int64) -> Optional<int64>
 export let wrapping_add = func(a: int64, b: int64) -> int64
 export let wrapping_sub = func(a: int64, b: int64) -> int64
 export let wrapping_mul = func(a: int64, b: int64) -> int64
@@ -1392,14 +1385,14 @@ export let hash = func(v: int64) -> uint32
 export let to_string = func(v: int64) -> string
 export let to_string_radix = func(v: int64, radix: int) -> string
 export let format = func(v: int64, radix: int, min_width: int, pad: string) -> string
-export let parse = func(text: string) -> Result<int64>
-export let parse_radix = func(text: string, radix: int) -> Result<int64>
+#NoDiscard export let parse = func(text: string) -> Result<int64>
+#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<int64>
 ```
 
 ## `Std.Core.Int8`
 
 ```text
-export let Int8 = module (
+#Since("0.1.0") export let Int8 = module (
 export const Min: int8 = -128
 export const Max: int8 = 127
 export const Bits: int = 8
@@ -1411,11 +1404,11 @@ export let clamp = func(v: int8, low: int8, high: int8) -> int8
 export let compare = func(a: int8, b: int8) -> Ordering
 export let pow = func(base: int8, exponent: int) -> int8
 export let gcd = func(a: int8, b: int8) -> int8
-export let checked_add = func(a: int8, b: int8) -> Optional<int8>
-export let checked_sub = func(a: int8, b: int8) -> Optional<int8>
-export let checked_mul = func(a: int8, b: int8) -> Optional<int8>
-export let checked_div = func(a: int8, b: int8) -> Optional<int8>
-export let checked_rem = func(a: int8, b: int8) -> Optional<int8>
+#NoDiscard export let checked_add = func(a: int8, b: int8) -> Optional<int8>
+#NoDiscard export let checked_sub = func(a: int8, b: int8) -> Optional<int8>
+#NoDiscard export let checked_mul = func(a: int8, b: int8) -> Optional<int8>
+#NoDiscard export let checked_div = func(a: int8, b: int8) -> Optional<int8>
+#NoDiscard export let checked_rem = func(a: int8, b: int8) -> Optional<int8>
 export let wrapping_add = func(a: int8, b: int8) -> int8
 export let wrapping_sub = func(a: int8, b: int8) -> int8
 export let wrapping_mul = func(a: int8, b: int8) -> int8
@@ -1436,19 +1429,19 @@ export let hash = func(v: int8) -> uint32
 export let to_string = func(v: int8) -> string
 export let to_string_radix = func(v: int8, radix: int) -> string
 export let format = func(v: int8, radix: int, min_width: int, pad: string) -> string
-export let parse = func(text: string) -> Result<int8>
-export let parse_radix = func(text: string, radix: int) -> Result<int8>
+#NoDiscard export let parse = func(text: string) -> Result<int8>
+#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<int8>
 ```
 
 ## `Std.Core.IntRange`
 
 ```text
-export let IntRange = module (
-export let IntRange = class implements iterables.Iterable<int> (
+#Since("0.1.0") export let IntRange = module (
+#[Final, Since("0.1.0")] export let IntRange = class implements iterables.Iterable<int> (
+  #Since("0.2.0") export last start: int { get }
+  #Since("0.2.0") export last end: int { get }
+  #Since("0.2.0") export last step: int { get }
   export let init = func(start_value: int, end_value: int, step_value: int)
-  export let start = func -> int
-  export let end = func -> int
-  export let step = func -> int
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
@@ -1458,29 +1451,29 @@ export let IntRange = class implements iterables.Iterable<int> (
   export let get = func(index: int) -> int
   export let to_list = func -> int[list]
   export let iterator = func -> iterators.Iterator<int>
-let IntRangeIterator = class implements iterators.Iterator<int> (
+#Final let IntRangeIterator = class implements iterators.Iterator<int> (
   export let init = func(start_value: int, end_value: int, step_value: int)
   export let has_next = func -> bool
   export let next = func -> int
-export let of = func(start: int, end: int) -> IntRange
-export let stepped = func(start: int, end: int, step: int) -> IntRange
+#[NoDiscard, Since("0.1.0")] export let of = func(start: int, end: int) -> IntRange
+#[NoDiscard, Since("0.1.0")] export let stepped = func(start: int, end: int, step: int) -> IntRange
 ```
 
 ## `Std.Core.Optional`
 
 ```text
-export let Optional = module (
-export let Optional = enum<T> (None, Some(T))
+#Since("0.1.0") export let Optional = module (
+#Since("0.1.0") export let Optional = enum<T> (None, Some(T))
 export let is_some = func<T>(o: Optional<T>) -> bool
 export let is_none = func<T>(o: Optional<T>) -> bool
 export let value_or = func<T>(o: Optional<T>, fallback: T) -> T
 export let expect = func<T>(o: Optional<T>, detail: string) -> T
-export let to_result = func<T>(o: Optional<T>, failure: Error) -> Result<T>
-export let map = func<T, U>(o: Optional<T>, f: func(T) -> U) -> Optional<U>
-export let and_then = func<T, U>(o: Optional<T>, f: func(T) -> Optional<U>) -> Optional<U>
-export let filter = func<T>(o: Optional<T>, keep: func(T) -> bool) -> Optional<T>
+#NoDiscard export let to_result = func<T>(o: Optional<T>, failure: Error) -> Result<T>
+#NoDiscard export let map = func<T, U>(o: Optional<T>, f: func(T) -> U) -> Optional<U>
+#NoDiscard export let and_then = func<T, U>(o: Optional<T>, f: func(T) -> Optional<U>) -> Optional<U>
+#NoDiscard export let filter = func<T>(o: Optional<T>, keep: func(T) -> bool) -> Optional<T>
 export let value_or_else = func<T>(o: Optional<T>, make: func() -> T) -> T
-export let or_else = func<T>(o: Optional<T>, other: func() -> Optional<T>) -> Optional<T>
+#NoDiscard export let or_else = func<T>(o: Optional<T>, other: func() -> Optional<T>) -> Optional<T>
 export let equals = func<T>(a: Optional<T>, b: Optional<T>) -> bool
 export let hash = func<T>(o: Optional<T>) -> uint32
 export let to_string = func<T>(o: Optional<T>) -> string
@@ -1489,8 +1482,8 @@ export let to_string = func<T>(o: Optional<T>) -> string
 ## `Std.Core.Ordering`
 
 ```text
-export let Ordering = module (
-export let Ordering = enum (Less, Equal, Greater)
+#Since("0.1.0") export let Ordering = module (
+#Since("0.1.0") export let Ordering = enum (Less, Equal, Greater)
 export let reverse = func(o: Ordering) -> Ordering
 export let then = func(first: Ordering, second: Ordering) -> Ordering
 export let is_less = func(o: Ordering) -> bool
@@ -1502,17 +1495,17 @@ export let is_at_least = func(o: Ordering) -> bool
 ## `Std.Core.Result`
 
 ```text
-export let Result = module (
-export let Result = enum<T> (Ok(T), Err(Error))
+#Since("0.1.0") export let Result = module (
+#Since("0.1.0") export let Result = enum<T> (Ok(T), Err(Error))
 export let is_ok = func<T>(r: Result<T>) -> bool
 export let is_err = func<T>(r: Result<T>) -> bool
 export let value_or = func<T>(r: Result<T>, fallback: T) -> T
 export let expect = func<T>(r: Result<T>, detail: string) -> T
-export let to_optional = func<T>(r: Result<T>) -> Optional<T>
-export let with_context = func<T>(r: Result<T>, message: string) -> Result<T>
-export let map = func<T, U>(r: Result<T>, f: func(T) -> U) -> Result<U>
-export let and_then = func<T, U>(r: Result<T>, f: func(T) -> Result<U>) -> Result<U>
-export let map_error = func<T>(r: Result<T>, f: func(Error) -> Error) -> Result<T>
+#NoDiscard export let to_optional = func<T>(r: Result<T>) -> Optional<T>
+#NoDiscard export let with_context = func<T>(r: Result<T>, message: string) -> Result<T>
+#NoDiscard export let map = func<T, U>(r: Result<T>, f: func(T) -> U) -> Result<U>
+#NoDiscard export let and_then = func<T, U>(r: Result<T>, f: func(T) -> Result<U>) -> Result<U>
+#NoDiscard export let map_error = func<T>(r: Result<T>, f: func(Error) -> Error) -> Result<T>
 export let equals = func<T>(a: Result<T>, b: Result<T>) -> bool
 export let hash = func<T>(r: Result<T>) -> uint32
 export let to_string = func<T>(r: Result<T>) -> string
@@ -1521,7 +1514,7 @@ export let to_string = func<T>(r: Result<T>) -> string
 ## `Std.Core.String`
 
 ```text
-export let String = module:strings (
+#Since("0.1.0") export let String = module:strings (
 export let Charset = charsets.Charset
 export let concat = func(s: string, suffix: string) -> string
 export let substring = func(s: string, start: int) -> string
@@ -1531,13 +1524,13 @@ export let content_equals = func(s: string, other: string) -> bool
   or func(s: string, other: string_builder.StringBuilder) -> bool
 export let compare_to = func(s: string, other: string) -> int
 export let compare_to_ignore_ascii_case = func(s: string, other: string) -> int
-export let to_lower_case = func(s: string) -> string
+#NoDiscard export let to_lower_case = func(s: string) -> string
   or func(s: string, language_tag: string) -> string
-export let to_upper_case = func(s: string) -> string
+#NoDiscard export let to_upper_case = func(s: string) -> string
   or func(s: string, language_tag: string) -> string
 export let compare_to_ignore_case = func(s: string, other: string) -> int
 export let equals_ignore_case = func(s: string, other: string) -> bool
-export let case_fold = func(s: string) -> string
+#NoDiscard export let case_fold = func(s: string) -> string
 export let compare_to_fold_case = func(s: string, other: string) -> int
 export let equals_fold_case = func(s: string, other: string) -> bool
 export let starts_with_at = func(s: string, prefix: string, offset: int) -> bool
@@ -1555,12 +1548,12 @@ export let code_points = func(s: string) -> uint32[list]
 export let get_bytes = func(s: string) -> uint8[list]
   or func(s: string, charset: Charset) -> uint8[list]
   or func(s: string, charset_name: string) -> uint8[list]
-export let try_get_bytes = func(s: string, charset: Charset) -> result.Result<uint8[list]>
+#NoDiscard export let try_get_bytes = func(s: string, charset: Charset) -> result.Result<uint8[list]>
   or func(s: string, charset_name: string) -> result.Result<uint8[list]>
 export let decode_bytes = func(bytes: uint8[list]) -> string
   or func(bytes: uint8[list], charset: Charset) -> string
   or func(bytes: uint8[list], charset_name: string) -> string
-export let try_decode_bytes = func(bytes: uint8[list]) -> result.Result<string>
+#NoDiscard export let try_decode_bytes = func(bytes: uint8[list]) -> result.Result<string>
   or func(bytes: uint8[list], charset: Charset) -> result.Result<string>
   or func(bytes: uint8[list], charset_name: string) -> result.Result<string>
 export let utf16_length = func(s: string) -> int
@@ -1570,18 +1563,18 @@ export let chars = func(s: string) -> uint16[list]
 export let get_chars = func(s: string, start: int, end: int, destination: uint16[], destination_start: int)
 export let from_char_array = func(units: uint16[list]) -> string
 export let offset_by_code_points = func(s: string, offset: int, count: int) -> int
-export let.override trim = func(s: string) -> string
+#NoDiscard export let.override trim = func(s: string) -> string
 export let is_blank = func(s: string) -> bool
-export let strip = func(s: string) -> string
-export let strip_leading = func(s: string) -> string
-export let strip_trailing = func(s: string) -> string
+#NoDiscard export let strip = func(s: string) -> string
+#NoDiscard export let strip_leading = func(s: string) -> string
+#NoDiscard export let strip_trailing = func(s: string) -> string
 export let.override lines = func(s: string) -> string[list]
-export let indent = func(s: string, count: int) -> string
-export let strip_indent = func(s: string) -> string
+#NoDiscard export let indent = func(s: string, count: int) -> string
+#NoDiscard export let strip_indent = func(s: string) -> string
 export let matches = func(s: string, pattern: string) -> bool
-export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string
-export let replace_all = func(s: string, pattern: string, replacement: string) -> string
-export let replace_first_regex = func(s: string, pattern: string, replacement: string) -> string
+#NoDiscard export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string
+#NoDiscard export let replace_all = func(s: string, pattern: string, replacement: string) -> string
+#NoDiscard export let replace_first_regex = func(s: string, pattern: string, replacement: string) -> string
 export let split_regex = func(s: string, pattern: string) -> string[list]
 export let split_regex_limit = func(s: string, pattern: string, limit: int) -> string[list]
 export let split_with_delimiters = func(s: string, pattern: string, limit: int) -> string[list]
@@ -1589,14 +1582,14 @@ export let formatted = func(s: string, args: ...) -> string
 export let vformatted = func(s: string, args: variadic.Argument[]) -> string
 export let value_of = func<T>(value: T) -> string
 export let transform = func<T>(s: string, operation: func(string) -> T) -> T
-export let translate_escapes = func(s: string) -> string
+#NoDiscard export let translate_escapes = func(s: string) -> string
 ```
 
 ## `Std.Core.StringBuilder`
 
 ```text
-export let StringBuilder = module (
-export let StringBuilder = class (
+#Since("0.1.0") export let StringBuilder = module (
+#[Final, Since("0.1.0")] export let StringBuilder = class (
   export let init = func(seal: Seal, owner: Cell<StringBuilder>)
   export let append = func(s: string) -> StringBuilder
   export let append_scalar = func(scalar: uint32) -> StringBuilder
@@ -1607,20 +1600,20 @@ export let StringBuilder = class (
   export let append_float = func(v: float64) -> StringBuilder
   export let append_bool = func(v: bool) -> StringBuilder
   export let append_value = func<T>(value: T) -> StringBuilder
-  export let byte_length = func -> int
+  #Since("0.2.0") export let byte_length: int { get }
   export let is_empty = func -> bool
   export let truncate = func(new_length: int)
   export let clear = func
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
-export let create = func -> StringBuilder
+#[NoDiscard, Since("0.1.0")] export let create = func -> StringBuilder
 ```
 
 ## `Std.Core.UInt16`
 
 ```text
-export let UInt16 = module (
+#Since("0.1.0") export let UInt16 = module (
 export const Min: uint16 = 0
 export const Max: uint16 = 65535
 export const Bits: int = 16
@@ -1631,11 +1624,11 @@ export let clamp = func(v: uint16, low: uint16, high: uint16) -> uint16
 export let compare = func(a: uint16, b: uint16) -> Ordering
 export let pow = func(base: uint16, exponent: int) -> uint16
 export let gcd = func(a: uint16, b: uint16) -> uint16
-export let checked_add = func(a: uint16, b: uint16) -> Optional<uint16>
-export let checked_sub = func(a: uint16, b: uint16) -> Optional<uint16>
-export let checked_mul = func(a: uint16, b: uint16) -> Optional<uint16>
-export let checked_div = func(a: uint16, b: uint16) -> Optional<uint16>
-export let checked_rem = func(a: uint16, b: uint16) -> Optional<uint16>
+#NoDiscard export let checked_add = func(a: uint16, b: uint16) -> Optional<uint16>
+#NoDiscard export let checked_sub = func(a: uint16, b: uint16) -> Optional<uint16>
+#NoDiscard export let checked_mul = func(a: uint16, b: uint16) -> Optional<uint16>
+#NoDiscard export let checked_div = func(a: uint16, b: uint16) -> Optional<uint16>
+#NoDiscard export let checked_rem = func(a: uint16, b: uint16) -> Optional<uint16>
 export let wrapping_add = func(a: uint16, b: uint16) -> uint16
 export let wrapping_sub = func(a: uint16, b: uint16) -> uint16
 export let wrapping_mul = func(a: uint16, b: uint16) -> uint16
@@ -1656,14 +1649,14 @@ export let hash = func(v: uint16) -> uint32
 export let to_string = func(v: uint16) -> string
 export let to_string_radix = func(v: uint16, radix: int) -> string
 export let format = func(v: uint16, radix: int, min_width: int, pad: string) -> string
-export let parse = func(text: string) -> Result<uint16>
-export let parse_radix = func(text: string, radix: int) -> Result<uint16>
+#NoDiscard export let parse = func(text: string) -> Result<uint16>
+#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<uint16>
 ```
 
 ## `Std.Core.UInt32`
 
 ```text
-export let UInt32 = module (
+#Since("0.1.0") export let UInt32 = module (
 export const Min: uint32 = 0
 export const Max: uint32 = 4294967295
 export const Bits: int = 32
@@ -1674,11 +1667,11 @@ export let clamp = func(v: uint32, low: uint32, high: uint32) -> uint32
 export let compare = func(a: uint32, b: uint32) -> Ordering
 export let pow = func(base: uint32, exponent: int) -> uint32
 export let gcd = func(a: uint32, b: uint32) -> uint32
-export let checked_add = func(a: uint32, b: uint32) -> Optional<uint32>
-export let checked_sub = func(a: uint32, b: uint32) -> Optional<uint32>
-export let checked_mul = func(a: uint32, b: uint32) -> Optional<uint32>
-export let checked_div = func(a: uint32, b: uint32) -> Optional<uint32>
-export let checked_rem = func(a: uint32, b: uint32) -> Optional<uint32>
+#NoDiscard export let checked_add = func(a: uint32, b: uint32) -> Optional<uint32>
+#NoDiscard export let checked_sub = func(a: uint32, b: uint32) -> Optional<uint32>
+#NoDiscard export let checked_mul = func(a: uint32, b: uint32) -> Optional<uint32>
+#NoDiscard export let checked_div = func(a: uint32, b: uint32) -> Optional<uint32>
+#NoDiscard export let checked_rem = func(a: uint32, b: uint32) -> Optional<uint32>
 export let wrapping_add = func(a: uint32, b: uint32) -> uint32
 export let wrapping_sub = func(a: uint32, b: uint32) -> uint32
 export let wrapping_mul = func(a: uint32, b: uint32) -> uint32
@@ -1699,14 +1692,14 @@ export let hash = func(v: uint32) -> uint32
 export let to_string = func(v: uint32) -> string
 export let to_string_radix = func(v: uint32, radix: int) -> string
 export let format = func(v: uint32, radix: int, min_width: int, pad: string) -> string
-export let parse = func(text: string) -> Result<uint32>
-export let parse_radix = func(text: string, radix: int) -> Result<uint32>
+#NoDiscard export let parse = func(text: string) -> Result<uint32>
+#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<uint32>
 ```
 
 ## `Std.Core.UInt64`
 
 ```text
-export let UInt64 = module (
+#Since("0.1.0") export let UInt64 = module (
 export const Min: uint64 = 0
 export const Max: uint64 = 18446744073709551615
 export const Bits: int = 64
@@ -1717,11 +1710,11 @@ export let clamp = func(v: uint64, low: uint64, high: uint64) -> uint64
 export let compare = func(a: uint64, b: uint64) -> Ordering
 export let pow = func(base: uint64, exponent: int) -> uint64
 export let gcd = func(a: uint64, b: uint64) -> uint64
-export let checked_add = func(a: uint64, b: uint64) -> Optional<uint64>
-export let checked_sub = func(a: uint64, b: uint64) -> Optional<uint64>
-export let checked_mul = func(a: uint64, b: uint64) -> Optional<uint64>
-export let checked_div = func(a: uint64, b: uint64) -> Optional<uint64>
-export let checked_rem = func(a: uint64, b: uint64) -> Optional<uint64>
+#NoDiscard export let checked_add = func(a: uint64, b: uint64) -> Optional<uint64>
+#NoDiscard export let checked_sub = func(a: uint64, b: uint64) -> Optional<uint64>
+#NoDiscard export let checked_mul = func(a: uint64, b: uint64) -> Optional<uint64>
+#NoDiscard export let checked_div = func(a: uint64, b: uint64) -> Optional<uint64>
+#NoDiscard export let checked_rem = func(a: uint64, b: uint64) -> Optional<uint64>
 export let wrapping_add = func(a: uint64, b: uint64) -> uint64
 export let wrapping_sub = func(a: uint64, b: uint64) -> uint64
 export let wrapping_mul = func(a: uint64, b: uint64) -> uint64
@@ -1742,14 +1735,14 @@ export let hash = func(v: uint64) -> uint32
 export let to_string = func(v: uint64) -> string
 export let to_string_radix = func(v: uint64, radix: int) -> string
 export let format = func(v: uint64, radix: int, min_width: int, pad: string) -> string
-export let parse = func(text: string) -> Result<uint64>
-export let parse_radix = func(text: string, radix: int) -> Result<uint64>
+#NoDiscard export let parse = func(text: string) -> Result<uint64>
+#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<uint64>
 ```
 
 ## `Std.Core.UInt8`
 
 ```text
-export let UInt8 = module (
+#Since("0.1.0") export let UInt8 = module (
 export const Min: uint8 = 0
 export const Max: uint8 = 255
 export const Bits: int = 8
@@ -1760,11 +1753,11 @@ export let clamp = func(v: uint8, low: uint8, high: uint8) -> uint8
 export let compare = func(a: uint8, b: uint8) -> Ordering
 export let pow = func(base: uint8, exponent: int) -> uint8
 export let gcd = func(a: uint8, b: uint8) -> uint8
-export let checked_add = func(a: uint8, b: uint8) -> Optional<uint8>
-export let checked_sub = func(a: uint8, b: uint8) -> Optional<uint8>
-export let checked_mul = func(a: uint8, b: uint8) -> Optional<uint8>
-export let checked_div = func(a: uint8, b: uint8) -> Optional<uint8>
-export let checked_rem = func(a: uint8, b: uint8) -> Optional<uint8>
+#NoDiscard export let checked_add = func(a: uint8, b: uint8) -> Optional<uint8>
+#NoDiscard export let checked_sub = func(a: uint8, b: uint8) -> Optional<uint8>
+#NoDiscard export let checked_mul = func(a: uint8, b: uint8) -> Optional<uint8>
+#NoDiscard export let checked_div = func(a: uint8, b: uint8) -> Optional<uint8>
+#NoDiscard export let checked_rem = func(a: uint8, b: uint8) -> Optional<uint8>
 export let wrapping_add = func(a: uint8, b: uint8) -> uint8
 export let wrapping_sub = func(a: uint8, b: uint8) -> uint8
 export let wrapping_mul = func(a: uint8, b: uint8) -> uint8
@@ -1785,28 +1778,28 @@ export let hash = func(v: uint8) -> uint32
 export let to_string = func(v: uint8) -> string
 export let to_string_radix = func(v: uint8, radix: int) -> string
 export let format = func(v: uint8, radix: int, min_width: int, pad: string) -> string
-export let parse = func(text: string) -> Result<uint8>
-export let parse_radix = func(text: string, radix: int) -> Result<uint8>
+#NoDiscard export let parse = func(text: string) -> Result<uint8>
+#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<uint8>
 ```
 
 ## `Std.Core.Unit`
 
 ```text
-export let Unit = module (
-export let Unit = enum (Value)
+#Since("0.1.0") export let Unit = module (
+#Since("0.1.0") export let Unit = enum (Value)
 ```
 
 ## `Std.Core.Variadic`
 
 ```text
-export let Variadic = module (
-export let Argument = enum (Text(string), Signed(int64), Unsigned(uint64), Floating16(float16), BFloating16(bfloat16), Floating32(float32), Floating(float64), Boolean(bool), Object(class))
+#Since("0.1.0") export let Variadic = module (
+#Since("0.1.0") export let Argument = enum (Text(string), Signed(int64), Unsigned(uint64), Floating16(float16), BFloating16(bfloat16), Floating32(float32), Floating(float64), Boolean(bool), Object(class))
 ```
 
 ## `Std.Core.Version`
 
 ```text
-export let Version = module (
+#Since("0.1.0") export let Version = module (
 export const Major: int = 0
 export const Minor: int = 1
 export const Patch: int = 0
@@ -1815,33 +1808,33 @@ export const Patch: int = 0
 ## `Std.Digest.Crc32`
 
 ```text
-export let Crc32 = module (
-export let Crc32 = class (
+#Since("0.1.0") export let Crc32 = module (
+#Final export let Crc32 = class (
   export let init = func
   export let update = func(bytes: uint8[list])
   export let value = func -> uint32
   export let reset = func
 export let create = func -> Crc32
-export let of = func(bytes: uint8[list]) -> uint32
+#NoDiscard export let of = func(bytes: uint8[list]) -> uint32
 ```
 
 ## `Std.Digest.Sha256`
 
 ```text
-export let Sha256 = module (
-export let Sha256 = class (
+#Since("0.1.0") export let Sha256 = module (
+#Final export let Sha256 = class (
   export let init = func
   export let update = func(bytes: uint8[list])
   export let finish = func -> uint8[list]
 export let create = func -> Sha256
-export let of = func(bytes: uint8[list]) -> uint8[list]
+#NoDiscard export let of = func(bytes: uint8[list]) -> uint8[list]
 ```
 
 ## `Std.DynamicForeign.Arena`
 
 ```text
-export let Arena = module (
-export let Arena = class (
+#Since("0.1.0") export let Arena = module (
+#Final export let Arena = class (
   export let init = func(scope: scopes.Scope)
   export let allocate = func(size: int64, alignment: int64) -> MemorySegment
   or func(layout: MemoryLayout) -> MemorySegment
@@ -1859,7 +1852,7 @@ export let global = func -> Arena
 ## `Std.DynamicForeign.ForeignValue`
 
 ```text
-export let ForeignValue = module (
+#Since("0.1.0") export let ForeignValue = module (
 export let ForeignValue = enum (Void, Bool(bool), Int8(int8), UInt8(uint8), Int16(int16), UInt16(uint16), Int32(int32), UInt32(uint32), Int64(int64), UInt64(uint64), Float32(float32), Float64(float64), Address(MemorySegment), Struct(MemorySegment))
 export let as_bool = func(value: ForeignValue) -> bool
 export let as_int32 = func(value: ForeignValue) -> int32
@@ -1874,8 +1867,8 @@ export let describe = func(value: ForeignValue) -> string
 ## `Std.DynamicForeign.FunctionDescriptor`
 
 ```text
-export let FunctionDescriptor = module (
-export let FunctionDescriptor = class (
+#Since("0.1.0") export let FunctionDescriptor = module (
+#Final export let FunctionDescriptor = class (
   export let init = func(result_layout: Optional<MemoryLayout>, argument_layouts: MemoryLayout[list])
   export let return_layout = func -> Optional<MemoryLayout>
   export let argument_layouts = func -> MemoryLayout[list]
@@ -1890,8 +1883,8 @@ export let of_void = func(arguments: ...MemoryLayout) -> FunctionDescriptor
 ## `Std.DynamicForeign.Linker`
 
 ```text
-export let Linker = module (
-export let Linker = class (
+#Since("0.1.0") export let Linker = module (
+#Final export let Linker = class (
   export let init = func {}
   export let downcall_handle = func(symbol: MemorySegment, descriptor: FunctionDescriptor) -> MethodHandle
   or func(symbol: MemorySegment, descriptor: FunctionDescriptor, first_variadic: int) -> MethodHandle
@@ -1904,10 +1897,10 @@ export let native_linker = func -> Linker
 ## `Std.DynamicForeign.MemoryLayout`
 
 ```text
-export let MemoryLayout = module (
+#Since("0.1.0") export let MemoryLayout = module (
 export let Carrier = enum (Bool, Int8, UInt8, Int16, UInt16, Int32, UInt32, Int64, UInt64, Float32, Float64, Address)
 export let Shape = enum (Value, Struct, Union, Sequence, Padding)
-export let MemoryLayout = class (
+#Final export let MemoryLayout = class (
   export let init = func(shape: Shape, carrier: Carrier, byte_size: int64, byte_alignment: int64, members: MemoryLayout[list], member_offsets: int64[list], elements: int64)
   export let shape = func -> Shape
   export let byte_size = func -> int64
@@ -1939,8 +1932,8 @@ export let align_up = func(offset: int64, alignment: int64) -> int64
 ## `Std.DynamicForeign.MemorySegment`
 
 ```text
-export let MemorySegment = module (
-export let MemorySegment = class (
+#Since("0.1.0") export let MemorySegment = module (
+#Final export let MemorySegment = class (
   export let init = func(address_value: int64, size: int64, scope: scopes.Scope)
   export let address = func -> int64
   export let byte_size = func -> int64
@@ -1991,8 +1984,8 @@ export let of_address = func(address: int64) -> MemorySegment
 ## `Std.DynamicForeign.MethodHandle`
 
 ```text
-export let MethodHandle = module (
-export let MethodHandle = class (
+#Since("0.1.0") export let MethodHandle = module (
+#Final export let MethodHandle = class (
   export let init = func(symbol: MemorySegment, descriptor: FunctionDescriptor, variadic_index: int)
   export let descriptor = func -> FunctionDescriptor
   export let address = func -> MemorySegment
@@ -2006,8 +1999,8 @@ export let MethodHandle = class (
 ## `Std.DynamicForeign.SymbolLookup`
 
 ```text
-export let SymbolLookup = module (
-export let SymbolLookup = class (
+#Since("0.1.0") export let SymbolLookup = module (
+#Final export let SymbolLookup = class (
   export let init = func(library_id: int64, scope: scopes.Scope)
   export let find = func(name: string) -> Optional<MemorySegment>
   export let find_or_trap = func(name: string) -> MemorySegment
@@ -2020,7 +2013,7 @@ export let embedded = func -> SymbolLookup
 ## `Std.DynamicForeign.ValueLayout`
 
 ```text
-export let ValueLayout = module (
+#Since("0.1.0") export let ValueLayout = module (
 export const Bool = value(Carrier.Bool)
 export const Int8 = value(Carrier.Int8)
 export const UInt8 = value(Carrier.UInt8)
@@ -2038,51 +2031,51 @@ export const Address = value(Carrier.Address)
 ## `Std.Encoding.Base64`
 
 ```text
-export let Base64 = module (
-export let encode = func(bytes: uint8[list]) -> string
-export let encode_unpadded = func(bytes: uint8[list]) -> string
-export let encode_url = func(bytes: uint8[list]) -> string
-export let encode_url_unpadded = func(bytes: uint8[list]) -> string
-export let decode = func(text: string) -> Result<uint8[list]>
-export let decode_unpadded = func(text: string) -> Result<uint8[list]>
-export let decode_url = func(text: string) -> Result<uint8[list]>
-export let decode_url_unpadded = func(text: string) -> Result<uint8[list]>
+#Since("0.1.0") export let Base64 = module (
+#NoDiscard export let encode = func(bytes: uint8[list]) -> string
+#NoDiscard export let encode_unpadded = func(bytes: uint8[list]) -> string
+#NoDiscard export let encode_url = func(bytes: uint8[list]) -> string
+#NoDiscard export let encode_url_unpadded = func(bytes: uint8[list]) -> string
+#NoDiscard export let decode = func(text: string) -> Result<uint8[list]>
+#NoDiscard export let decode_unpadded = func(text: string) -> Result<uint8[list]>
+#NoDiscard export let decode_url = func(text: string) -> Result<uint8[list]>
+#NoDiscard export let decode_url_unpadded = func(text: string) -> Result<uint8[list]>
 ```
 
 ## `Std.Encoding.Csv`
 
 ```text
-export let Csv = module (
-export let parse = func(text: string) -> Result<string[list][list]>
-export let write = func(rows: string[list][list]) -> string
+#Since("0.1.0") export let Csv = module (
+#NoDiscard export let parse = func(text: string) -> Result<string[list][list]>
+#NoDiscard export let write = func(rows: string[list][list]) -> string
 ```
 
 ## `Std.Encoding.Hex`
 
 ```text
-export let Hex = module (
-export let encode = func(bytes: uint8[list]) -> string
-export let decode = func(text: string) -> Result<uint8[list]>
+#Since("0.1.0") export let Hex = module (
+#NoDiscard export let encode = func(bytes: uint8[list]) -> string
+#NoDiscard export let decode = func(text: string) -> Result<uint8[list]>
 ```
 
 ## `Std.Encoding.Json`
 
 ```text
-export let Json = module (
-export let JsonValue = enum (Null, Boolean(bool), Number(string), Text(string), Array(JsonValue[list]), Object([string, JsonValue][list]))
+#Since("0.1.0") export let Json = module (
+#Since("0.1.0") export let JsonValue = enum (Null, Boolean(bool), Number(string), Text(string), Array(JsonValue[list]), Object([string, JsonValue][list]))
 export let number_of_int64 = func(v: int64) -> JsonValue
 export let number_of_float64 = func(v: float64) -> JsonValue
-export let member = func(members: [string, JsonValue][list], name: string) -> Optional<JsonValue>
+#NoDiscard export let member = func(members: [string, JsonValue][list], name: string) -> Optional<JsonValue>
 export let number_to_int64 = func(text: string) -> Optional<int64>
 export let number_to_float64 = func(text: string) -> float64
 export let number_to_big_decimal = func(text: string) -> big_decimals.BigDecimal
-export let parse = func(text: string) -> Result<JsonValue>
-export let write = func(value: JsonValue) -> string
-export let write_pretty = func(value: JsonValue, indent: int) -> string
+#NoDiscard export let parse = func(text: string) -> Result<JsonValue>
+#NoDiscard export let write = func(value: JsonValue) -> string
+#NoDiscard export let write_pretty = func(value: JsonValue, indent: int) -> string
 export let equals = func(a: JsonValue, b: JsonValue) -> bool
 export let hash = func(value: JsonValue) -> uint32
 export let index = func(members: [string, JsonValue][list]) -> StringMap<JsonValue>
-let Parser = class (
+#Final let Parser = class (
   export let value: JsonValue = JsonValue.Null
   export let failed: bool = false
   export let failure_kind: ParseErrorKind = ParseErrorKind.Syntax
@@ -2095,68 +2088,68 @@ let Parser = class (
 ## `Std.Encoding.Utf8`
 
 ```text
-export let Utf8 = module (
-export let encode = func(s: string) -> uint8[list]
-export let decode = func(bytes: uint8[list]) -> Result<string>
-export let decode_lossy = func(bytes: uint8[list]) -> string
-export let validate = func(bytes: uint8[list]) -> int
+#Since("0.1.0") export let Utf8 = module (
+#NoDiscard export let encode = func(s: string) -> uint8[list]
+#NoDiscard export let decode = func(bytes: uint8[list]) -> Result<string>
+#NoDiscard export let decode_lossy = func(bytes: uint8[list]) -> string
+#NoDiscard export let validate = func(bytes: uint8[list]) -> int
 ```
 
 ## `Std.Fs.File`
 
 ```text
-export let File = module (
+#Since("0.1.0") export let File = module (
 export let OpenMode = enum (Read, Write, Append, ReadWrite, CreateNew)
 export let SeekOrigin = enum (Start, Current, End)
-export let File = class implements Closeable (
+#[Final, NoDiscard(reason: "an open file must be closed")] export let File = class implements Closeable (
   export let init = func(opened: FileHandle)
-  export let read = func(max: int) -> result.Result<uint8[list]>
-  export let write = func(data: uint8[list]) -> result.Result<Unit>
-  export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64>
-  export let size = func -> result.Result<int64>
+  #NoDiscard export let read = func(max: int) -> result.Result<uint8[list]>
+  #NoDiscard export let write = func(data: uint8[list]) -> result.Result<Unit>
+  #NoDiscard export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64>
+  #NoDiscard export let size = func -> result.Result<int64>
   export let close = func -> result.Result<Unit>
-export let open = func(path: Path, mode: OpenMode) -> result.Result<File>
-export let with_open = func<T>(path: Path, mode: OpenMode, body: func(File) -> result.Result<T>) -> result.Result<T>
+#NoDiscard export let open = func(path: Path, mode: OpenMode) -> result.Result<File>
+#NoDiscard export let with_open = func<T>(path: Path, mode: OpenMode, body: func(File) -> result.Result<T>) -> result.Result<T>
 ```
 
 ## `Std.Fs.Fs`
 
 ```text
-export let Fs = module (
+#Since("0.1.0") export let Fs = module (
 export let FileKind = enum (File, Directory, Other)
-export let FileMetadata = class (
-  export let kind: FileKind = FileKind.Other
-  export let size: int64 = 0
-  export let modified: instant.Instant = nil
+#Final export let FileMetadata = class (
+  export last kind: FileKind
+  export last size: int64
+  export last modified: instant.Instant
   export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant)
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
 export const CopyBufferSize: int = 65536
-export let read_bytes = func(path: Path) -> result.Result<uint8[list]>
-export let read_text = func(path: Path) -> result.Result<string>
-export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit>
-export let write_text = func(path: Path, text: string) -> result.Result<Unit>
-export let append_text = func(path: Path, text: string) -> result.Result<Unit>
-export let exists = func(path: Path) -> result.Result<bool>
-export let metadata = func(path: Path) -> result.Result<FileMetadata>
-export let list = func(path: Path) -> result.Result<Path[list]>
-export let create_directory = func(path: Path) -> result.Result<Unit>
-export let create_directories = func(path: Path) -> result.Result<Unit>
-export let remove_file = func(path: Path) -> result.Result<Unit>
-export let remove_directory = func(path: Path) -> result.Result<Unit>
-export let remove_tree = func(path: Path) -> result.Result<Unit>
-export let rename = func(from: Path, to: Path) -> result.Result<Unit>
-export let copy_file = func(from: Path, to: Path) -> result.Result<Unit>
+#NoDiscard export let read_bytes = func(path: Path) -> result.Result<uint8[list]>
+#NoDiscard export let read_text = func(path: Path) -> result.Result<string>
+#NoDiscard export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit>
+#NoDiscard export let write_text = func(path: Path, text: string) -> result.Result<Unit>
+#NoDiscard export let append_text = func(path: Path, text: string) -> result.Result<Unit>
+#NoDiscard export let exists = func(path: Path) -> result.Result<bool>
+#NoDiscard export let metadata = func(path: Path) -> result.Result<FileMetadata>
+#NoDiscard export let list = func(path: Path) -> result.Result<Path[list]>
+#NoDiscard export let create_directory = func(path: Path) -> result.Result<Unit>
+#NoDiscard export let create_directories = func(path: Path) -> result.Result<Unit>
+#NoDiscard export let remove_file = func(path: Path) -> result.Result<Unit>
+#NoDiscard export let remove_directory = func(path: Path) -> result.Result<Unit>
+#NoDiscard export let remove_tree = func(path: Path) -> result.Result<Unit>
+#NoDiscard export let rename = func(from: Path, to: Path) -> result.Result<Unit>
+#NoDiscard export let copy_file = func(from: Path, to: Path) -> result.Result<Unit>
 ```
 
 ## `Std.Fs.Path`
 
 ```text
-export let Path = module (
-export let Path = class implements Comparable<Path> (
+#Since("0.1.0") export let Path = module (
+#Final export let Path = class implements Comparable<Path> (
+  #Since("0.2.0") export last is_absolute: bool
   export let init = func(raw: string)
-  export let is_absolute = func -> bool
   export let join = func(other: string) -> Path
   export let parent = func -> Path
   export let file_name = func -> optional.Optional<string>
@@ -2176,14 +2169,14 @@ export let of = func(text: string) -> Path
 ## `Std.Io.BufferedReader`
 
 ```text
-export let BufferedReader = module (
+#Since("0.1.0") export let BufferedReader = module (
 export const DefaultCapacity: int = 8192
 export const MinimumCapacity: int = 16
-export let BufferedReader = class (
+#Final export let BufferedReader = class (
   export let init = func(input: func(int) -> Result<uint8[list]>, size: int)
-  export let read = func(max: int) -> Result<uint8[list]>
-  export let read_exact = func(count: int) -> Result<uint8[list]>
-  export let read_all = func -> Result<uint8[list]>
+  #NoDiscard export let read = func(max: int) -> Result<uint8[list]>
+  #NoDiscard export let read_exact = func(count: int) -> Result<uint8[list]>
+  #NoDiscard export let read_all = func -> Result<uint8[list]>
 export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader
 export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader
 ```
@@ -2191,14 +2184,14 @@ export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capaci
 ## `Std.Io.BufferedWriter`
 
 ```text
-export let BufferedWriter = module (
+#Since("0.1.0") export let BufferedWriter = module (
 export const DefaultCapacity: int = 8192
 export const MinimumCapacity: int = 16
-export let BufferedWriter = class (
+#Final export let BufferedWriter = class (
+  #Since("0.2.0") export let buffered: int { get }
   export let init = func(output: func(uint8[list]) -> Result<Unit>, size: int)
-  export let write = func(data: uint8[list]) -> Result<Unit>
-  export let flush = func -> Result<Unit>
-  export let buffered = func -> int
+  #NoDiscard export let write = func(data: uint8[list]) -> Result<Unit>
+  #NoDiscard export let flush = func -> Result<Unit>
 export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> BufferedWriter
 export let with_capacity = func(sink: func(uint8[list]) -> Result<Unit>, capacity: int) -> BufferedWriter
 ```
@@ -2206,53 +2199,53 @@ export let with_capacity = func(sink: func(uint8[list]) -> Result<Unit>, capacit
 ## `Std.Io.ByteBuffer`
 
 ```text
-export let ByteBuffer = module (
-export let ByteBuffer = class (
+#Since("0.1.0") export let ByteBuffer = module (
+#Final export let ByteBuffer = class (
+  #Since("0.2.0") export let size: int { get }
   export let write = func(input: uint8[list]) -> Result<Unit>
   export let to_list = func -> uint8[list]
-  export let size = func -> int
   export let clear = func
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
-  export let reader = func -> func(int) -> Result<uint8[list]>
+  #NoDiscard export let reader = func -> func(int) -> Result<uint8[list]>
 export let create = func -> ByteBuffer
 ```
 
 ## `Std.Io.Closeable`
 
 ```text
-export let Closeable = module (
+#Since("0.1.0") export let Closeable = module (
 export let Closeable = interface (
   let close = func -> Result<Unit>
-export let release = func<T>(resource: Closeable, outcome: Result<T>) -> Result<T>
+#NoDiscard export let release = func<T>(resource: Closeable, outcome: Result<T>) -> Result<T>
 ```
 
 ## `Std.Io.Console`
 
 ```text
-export let Console = module (
-export let try_vformat = func(pattern: string, args: Argument[]) -> result.Result<string>
+#Since("0.1.0") export let Console = module (
+#NoDiscard export let try_vformat = func(pattern: string, args: Argument[]) -> result.Result<string>
 export let vformat = func(pattern: string, args: Argument[]) -> string
-export let try_format = func(pattern: string, args: ...) -> result.Result<string>
+#NoDiscard export let try_format = func(pattern: string, args: ...) -> result.Result<string>
 export let format = func(pattern: string, args: ...) -> string
-export let Formatter = class (
+#Final export let Formatter = class (
   export static let format = func(pattern: string, args: ...) -> string
 export let print_line = func(s: string)
-export let try_print_line = func(s: string) -> result.Result<Unit>
+#NoDiscard export let try_print_line = func(s: string) -> result.Result<Unit>
 export let print = func(pattern: string, args: ...)
-export let try_print = func(pattern: string, args: ...) -> result.Result<Unit>
+#NoDiscard export let try_print = func(pattern: string, args: ...) -> result.Result<Unit>
 export let println = func(pattern: string, args: ...)
-export let try_println = func(pattern: string, args: ...) -> result.Result<Unit>
+#NoDiscard export let try_println = func(pattern: string, args: ...) -> result.Result<Unit>
 export let eprint = func(pattern: string, args: ...)
-export let try_eprint = func(pattern: string, args: ...) -> result.Result<Unit>
+#NoDiscard export let try_eprint = func(pattern: string, args: ...) -> result.Result<Unit>
 export let eprintln = func(pattern: string, args: ...)
-export let try_eprintln = func(pattern: string, args: ...) -> result.Result<Unit>
+#NoDiscard export let try_eprintln = func(pattern: string, args: ...) -> result.Result<Unit>
 export let write = func(s: string)
-export let try_write = func(s: string) -> result.Result<Unit>
+#NoDiscard export let try_write = func(s: string) -> result.Result<Unit>
 export let error_line = func(s: string)
-export let try_error_line = func(s: string) -> result.Result<Unit>
-export let read_line = func -> result.Result<Optional<string>>
+#NoDiscard export let try_error_line = func(s: string) -> result.Result<Unit>
+#NoDiscard export let read_line = func -> result.Result<Optional<string>>
 export let output = func -> func(uint8[list]) -> result.Result<Unit>
 export let error = func -> func(uint8[list]) -> result.Result<Unit>
 export let input = func -> func(int) -> result.Result<uint8[list]>
@@ -2261,35 +2254,35 @@ export let input = func -> func(int) -> result.Result<uint8[list]>
 ## `Std.Io.Utf8Reader`
 
 ```text
-export let Utf8Reader = module (
-export let Utf8Reader = class (
+#Since("0.1.0") export let Utf8Reader = module (
+#Final export let Utf8Reader = class (
   export let init = func(input: func(int) -> result.Result<uint8[list]>)
-  export let read_scalar = func -> result.Result<Optional<uint32>>
-  export let read_line = func -> result.Result<Optional<string>>
-  export let read_to_end = func -> result.Result<string>
+  #NoDiscard export let read_scalar = func -> result.Result<Optional<uint32>>
+  #NoDiscard export let read_line = func -> result.Result<Optional<string>>
+  #NoDiscard export let read_to_end = func -> result.Result<string>
 export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader
 ```
 
 ## `Std.Io.Utf8Writer`
 
 ```text
-export let Utf8Writer = module (
-export let Utf8Writer = class (
+#Since("0.1.0") export let Utf8Writer = module (
+#Final export let Utf8Writer = class (
   export let init = func(output: func(uint8[list]) -> Result<Unit>)
-  export let write = func(text: string) -> Result<Unit>
-  export let write_line = func(text: string) -> Result<Unit>
+  #NoDiscard export let write = func(text: string) -> Result<Unit>
+  #NoDiscard export let write_line = func(text: string) -> Result<Unit>
 export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer
 ```
 
 ## `Std.Log.Logger`
 
 ```text
-export let Logger = module (
+#Since("0.1.0") export let Logger = module (
 export let LogLevel = enum (Trace, Debug, Info, Warn, Error, Off)
-export let Logger = class (
+#Final export let Logger = class (
+  #Since("0.2.0") export let level: LogLevel
   export let init = func(name: string, target: func(string) -> void, level: LogLevel, time_source: Clock)
   export let is_enabled = func(level: LogLevel) -> bool
-  export let set_level = func(level: LogLevel)
   export let log = func(level: LogLevel, message: string)
   export let log_lazy = func(level: LogLevel, make: func() -> string)
   export let trace = func(message: string)
@@ -2304,12 +2297,12 @@ export let create_timed = func(name: string, sink: func(string) -> void, level: 
 ## `Std.Math.BigDecimal`
 
 ```text
-export let BigDecimal = module (
+#Since("0.1.0") export let BigDecimal = module (
 export let RoundingMode = enum (Up, Down, Ceiling, Floor, HalfUp, HalfDown, HalfEven)
-export let BigDecimal = class implements Comparable<BigDecimal> (
+#[Final, NoDiscard] export let BigDecimal = class implements Comparable<BigDecimal> (
+  export last unscaled: BigInteger
+  export last scale: int
   export let init = func(unscaled_part: BigInteger, scale_part: int)
-  export let unscaled = func -> BigInteger
-  export let scale = func -> int
   export let sign = func -> int
   export let negate = func -> BigDecimal
   export let abs = func -> BigDecimal
@@ -2330,14 +2323,14 @@ export let BigDecimal = class implements Comparable<BigDecimal> (
 export let of_int64 = func(value: int64) -> BigDecimal
 export let of_big_integer = func(value: BigInteger, scale: int) -> BigDecimal
 export let of_float64 = func(v: float64) -> BigDecimal
-export let parse = func(text: string) -> Result<BigDecimal>
+#NoDiscard export let parse = func(text: string) -> Result<BigDecimal>
 ```
 
 ## `Std.Math.BigInteger`
 
 ```text
-export let BigInteger = module (
-export let BigInteger = class implements Comparable<BigInteger> (
+#Since("0.1.0") export let BigInteger = module (
+#[Final, NoDiscard] export let BigInteger = class implements Comparable<BigInteger> (
   export let init = func(sign: int, limbs: uint32[list])
   export let sign = func -> int
   export let is_zero = func -> bool
@@ -2362,7 +2355,7 @@ export let BigInteger = class implements Comparable<BigInteger> (
   export let compare_to = func(other: BigInteger) -> Ordering
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
-  export let to_int64 = func -> Optional<int64>
+  #NoDiscard export let to_int64 = func -> Optional<int64>
   export let to_float64 = func -> float64
   export let.override to_string = func -> string
   export let to_string_radix = func(radix: int) -> string
@@ -2371,81 +2364,81 @@ export const One: BigInteger = new BigInteger(1, [1])
 export const Ten: BigInteger = new BigInteger(1, [10])
 export let of_int64 = func(value: int64) -> BigInteger
 export let of_uint64 = func(value: uint64) -> BigInteger
-export let parse = func(text: string) -> Result<BigInteger>
-export let parse_radix = func(text: string, radix: int) -> Result<BigInteger>
+#NoDiscard export let parse = func(text: string) -> Result<BigInteger>
+#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<BigInteger>
 ```
 
 ## `Std.Math.Math`
 
 ```text
-export let Math = module (
+#Since("0.1.0") export let Math = module (
 export const Pi: float64 = float64.from_bits(4614256656552045848)
 export const Tau: float64 = float64.from_bits(4618760256179416344)
 export const E: float64 = float64.from_bits(4613303445314885481)
 export const Ln2: float64 = float64.from_bits(4604418534313441775)
 export const Ln10: float64 = float64.from_bits(4612367379483415830)
 export const Sqrt2: float64 = float64.from_bits(4609047870845172685)
-export let sqrt = func(x: float64) -> float64
-export let cbrt = func(x: float64) -> float64
-export let hypot = func(x: float64, y: float64) -> float64
-export let exp = func(x: float64) -> float64
-export let expm1 = func(x: float64) -> float64
-export let log = func(x: float64) -> float64
-export let log1p = func(x: float64) -> float64
-export let log10 = func(x: float64) -> float64
-export let log2 = func(x: float64) -> float64
-export let pow = func(x: float64, y: float64) -> float64
-export let sin = func(x: float64) -> float64
-export let cos = func(x: float64) -> float64
-export let tan = func(x: float64) -> float64
-export let asin = func(x: float64) -> float64
-export let acos = func(x: float64) -> float64
-export let atan = func(x: float64) -> float64
-export let atan2 = func(y: float64, x: float64) -> float64
-export let sinh = func(x: float64) -> float64
-export let cosh = func(x: float64) -> float64
-export let tanh = func(x: float64) -> float64
-export let to_radians = func(degrees: float64) -> float64
-export let to_degrees = func(radians: float64) -> float64
+export let sqrt = func(x: float64) -> float64 kernel("neura.math.sqrt", 1)
+export let cbrt = func(x: float64) -> float64 kernel("neura.math.cbrt", 1)
+export let hypot = func(x: float64, y: float64) -> float64 kernel("neura.math.hypot", 1)
+export let exp = func(x: float64) -> float64 kernel("neura.math.exp", 1)
+export let expm1 = func(x: float64) -> float64 kernel("neura.math.expm1", 1)
+export let log = func(x: float64) -> float64 kernel("neura.math.log", 1)
+export let log1p = func(x: float64) -> float64 kernel("neura.math.log1p", 1)
+export let log10 = func(x: float64) -> float64 kernel("neura.math.log10", 1)
+export let log2 = func(x: float64) -> float64 kernel("neura.math.log2", 1)
+export let pow = func(x: float64, y: float64) -> float64 kernel("neura.math.pow", 1)
+export let sin = func(x: float64) -> float64 kernel("neura.math.sin", 1)
+export let cos = func(x: float64) -> float64 kernel("neura.math.cos", 1)
+export let tan = func(x: float64) -> float64 kernel("neura.math.tan", 1)
+export let asin = func(x: float64) -> float64 kernel("neura.math.asin", 1)
+export let acos = func(x: float64) -> float64 kernel("neura.math.acos", 1)
+export let atan = func(x: float64) -> float64 kernel("neura.math.atan", 1)
+export let atan2 = func(y: float64, x: float64) -> float64 kernel("neura.math.atan2", 1)
+export let sinh = func(x: float64) -> float64 kernel("neura.math.sinh", 1)
+export let cosh = func(x: float64) -> float64 kernel("neura.math.cosh", 1)
+export let tanh = func(x: float64) -> float64 kernel("neura.math.tanh", 1)
+export let to_radians = func(degrees: float64) -> float64 kernel("neura.math.to_radians", 1)
+export let to_degrees = func(radians: float64) -> float64 kernel("neura.math.to_degrees", 1)
 ```
 
 ## `Std.Net.TcpListener`
 
 ```text
-export let TcpListener = module (
-export let TcpListener = class implements Closeable (
+#Since("0.1.0") export let TcpListener = module (
+#[Final, NoDiscard(reason: "a listener must be closed")] export let TcpListener = class implements Closeable (
+  #Since("0.2.0") export last local_port: int
   export let init = func(opened: socket.Handle, bound_port: int)
-  export let accept = func -> Result<TcpStream>
-  export let local_port = func -> int
+  #NoDiscard export let accept = func -> Result<TcpStream>
   export let close = func -> Result<Unit>
-export let bind = func(host: string, port: int) -> Result<TcpListener>
+#NoDiscard export let bind = func(host: string, port: int) -> Result<TcpListener>
 ```
 
 ## `Std.Net.TcpStream`
 
 ```text
-export let TcpStream = module (
-export let TcpStream = class implements Closeable (
+#Since("0.1.0") export let TcpStream = module (
+#[Final, NoDiscard(reason: "a stream must be closed")] export let TcpStream = class implements Closeable (
+  #Since("0.2.0") export let read_timeout: Duration = of_nanos(0) { get; set }
   export let init = func(opened: socket.Handle)
-  export let read = func(max: int) -> Result<uint8[list]>
-  export let write = func(data: uint8[list]) -> Result<Unit>
-  export let set_read_timeout = func(timeout: Duration)
+  #NoDiscard export let read = func(max: int) -> Result<uint8[list]>
+  #NoDiscard export let write = func(data: uint8[list]) -> Result<Unit>
   export let close = func -> Result<Unit>
-export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream>
-export let with_connection = func<T>(host: string, port: int, body: func(TcpStream) -> Result<T>) -> Result<T>
+#NoDiscard export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream>
+#NoDiscard export let with_connection = func<T>(host: string, port: int, body: func(TcpStream) -> Result<T>) -> Result<T>
 ```
 
 ## `Std.Program`
 
 ```text
-export let Program = module (
+#Since("0.1.0") export let Program = module (
 export let ExitCode = enum (Ok, Failure, Status(int), SeriousFailure, CommandNotFound, IllegalInstruction, Breakpoint, Abort, ArithmeticError, OutOfMemory, BusError, SegmentationFault, CpuTimeExceeded, FileSizeExceeded)
-export let status_of = func(code: ExitCode) -> int
+#NoDiscard export let status_of = func(code: ExitCode) -> int
 export let Entry = module (
   export let main = func(args: string[]) -> ExitCode
 export let Environment = module (
   export let Lookup = enum (Found(string), Missing, Failed(Error))
-  export let get = func(name: string) -> Lookup
+  #NoDiscard export let get = func(name: string) -> Lookup
 export let Process = module (
   export let exit = func(status: int)
   or func(code: ExitCode)
@@ -2454,8 +2447,8 @@ export let Process = module (
 ## `Std.Random.Random`
 
 ```text
-export let Random = module (
-export let Random = class (
+#Since("0.1.0") export let Random = module (
+#Final export let Random = class (
   export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64)
   export let next_uint64 = func -> uint64
   export let next_uint32 = func -> uint32
@@ -2468,14 +2461,14 @@ export let Random = class (
   export let shuffle = func<T>(items: T[list])
   export let choose = func<T>(items: T[list]) -> T
 export let seeded = func(seed: uint64) -> Random
-export let from_entropy = func -> Result<Random>
+#NoDiscard export let from_entropy = func -> Result<Random>
 ```
 
 ## `Std.Random.Uuid`
 
 ```text
-export let Uuid = module (
-export let Uuid = class implements Comparable<Uuid> (
+#Since("0.1.0") export let Uuid = module (
+#[Final, NoDiscard] export let Uuid = class implements Comparable<Uuid> (
   export let init = func(first: uint64, last: uint64)
   export let to_bytes = func -> uint8[list]
   export let compare_to = func(other: Uuid) -> Ordering
@@ -2483,13 +2476,13 @@ export let Uuid = class implements Comparable<Uuid> (
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
 export let random = func(source: Random) -> Uuid
-export let parse = func(text: string) -> Result<Uuid>
+#NoDiscard export let parse = func(text: string) -> Result<Uuid>
 ```
 
 ## `Std.Test`
 
 ```text
-export let Test = module (
+#Since("0.1.0") export let Test = module (
 export let assert = func(condition: bool)
 export let assert_with = func(condition: bool, message: string)
 export let fail = func(message: string)
@@ -2511,38 +2504,40 @@ export let assert_err = func<T>(r: Result<T>) -> error.Error
 ## `Std.Text.Charsets`
 
 ```text
-export let Charsets = module (
-export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le)
-export let for_name = func(name: string) -> result.Result<Charset>
+#Since("0.1.0") export let Charsets = module (
+#Since("0.1.0") export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le)
+#NoDiscard export let for_name = func(name: string) -> result.Result<Charset>
 export let encode = func(text: string, charset: Charset) -> uint8[list]
-export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]>
+#NoDiscard export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]>
 export let decode = func(bytes: uint8[list], charset: Charset) -> string
-export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string>
+#NoDiscard export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string>
 ```
 
 ## `Std.Text.Regex`
 
 ```text
-export let Regex = module (
-export let RegexFlags = class (
+#Since("0.1.0") export let Regex = module (
+#[Final, Since("0.1.0")] export let RegexFlags = class (
   export let ignore_ascii_case: bool = false
   export let multi_line: bool = false
   export let dot_all: bool = false
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
-export let RegexMatch = class (
+#[Final, Since("0.1.0")] export let RegexMatch = class (
+  #Since("0.2.0") export last start: int { get }
+  #Since("0.2.0") export last end: int { get }
   export let init = func(text: string, captured: int[list], group_names: string[list])
-  export let start = func -> int
-  export let end = func -> int
-  export let text = func -> string
+  #NoDiscard export let text = func -> string
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
-  export let group = func(index: int) -> optional.Optional<string>
+  #NoDiscard export let group = func(index: int) -> optional.Optional<string>
   export let group_start = func(index: int) -> int
-  export let named_group = func(name: string) -> optional.Optional<string>
-export let Regex = class (
+  #NoDiscard export let named_group = func(name: string) -> optional.Optional<string>
+#[Final, Since("0.1.0")] export let Regex = class (
+  #Since("0.2.0") export last pattern: string { get }
+  #Since("0.2.0") export last group_count: int { get }
   export let init = func(text: string, compiled: machine.Program, group_names: string[list])
   export let is_match = func(input: string) -> bool
   export let matches_fully = func(input: string) -> bool
@@ -2552,19 +2547,17 @@ export let Regex = class (
   export let replace_all = func(input: string, replacement: string) -> string
   export let replace_first = func(input: string, replacement: string) -> string
   export let split = func(input: string) -> string[list]
-  export let group_count = func -> int
-  export let pattern = func -> string
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
-export let compile = func(pattern: string) -> result.Result<Regex>
-export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex>
+#[NoDiscard, Since("0.1.0")] export let compile = func(pattern: string) -> result.Result<Regex>
+#[NoDiscard, Since("0.1.0")] export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex>
 ```
 
 ## `Std.Text.Scalars`
 
 ```text
-export let Scalars = module (
+#Since("0.1.0") export let Scalars = module (
 export const Replacement: uint32 = 65533
 export let is_valid = func(scalar: uint32) -> bool
 export let utf8_length = func(scalar: uint32) -> int
@@ -2587,7 +2580,7 @@ export let from_digit = func(value: int, radix: int) -> uint32
 ## `Std.Text.Strings`
 
 ```text
-export let Strings = module (
+#Since("0.1.0") export let Strings = module (
 export let byte_length = func(s: string) -> int
 export let scalar_count = func(s: string) -> int
 export let is_empty = func(s: string) -> bool
@@ -2611,40 +2604,40 @@ export let split = func(s: string, separator: string) -> string[list]
 export let split_limit = func(s: string, separator: string, limit: int) -> string[list]
 export let lines = func(s: string) -> string[list]
 export let join = func(parts: string[list], separator: string) -> string
-export let repeat = func(s: string, count: int) -> string
-export let trim = func(s: string) -> string
-export let trim_start = func(s: string) -> string
-export let trim_end = func(s: string) -> string
-export let strip_prefix = func(s: string, prefix: string) -> optional.Optional<string>
-export let strip_suffix = func(s: string, suffix: string) -> optional.Optional<string>
-export let replace = func(s: string, target: string, replacement: string) -> string
-export let replace_first = func(s: string, target: string, replacement: string) -> string
-export let to_ascii_upper = func(s: string) -> string
-export let to_ascii_lower = func(s: string) -> string
+#NoDiscard export let repeat = func(s: string, count: int) -> string
+#NoDiscard export let trim = func(s: string) -> string
+#NoDiscard export let trim_start = func(s: string) -> string
+#NoDiscard export let trim_end = func(s: string) -> string
+#NoDiscard export let strip_prefix = func(s: string, prefix: string) -> optional.Optional<string>
+#NoDiscard export let strip_suffix = func(s: string, suffix: string) -> optional.Optional<string>
+#NoDiscard export let replace = func(s: string, target: string, replacement: string) -> string
+#NoDiscard export let replace_first = func(s: string, target: string, replacement: string) -> string
+#NoDiscard export let to_ascii_upper = func(s: string) -> string
+#NoDiscard export let to_ascii_lower = func(s: string) -> string
 export let equals_ignore_ascii_case = func(a: string, b: string) -> bool
-export let pad_start = func(s: string, width: int, pad: string) -> string
-export let pad_end = func(s: string, width: int, pad: string) -> string
-export let reverse = func(s: string) -> string
+#NoDiscard export let pad_start = func(s: string, width: int, pad: string) -> string
+#NoDiscard export let pad_end = func(s: string, width: int, pad: string) -> string
+#NoDiscard export let reverse = func(s: string) -> string
 export let to_bytes = func(s: string) -> uint8[list]
-export let from_bytes = func(bytes: uint8[list]) -> result.Result<string>
-export let from_bytes_lossy = func(bytes: uint8[list]) -> string
+#NoDiscard export let from_bytes = func(bytes: uint8[list]) -> result.Result<string>
+#NoDiscard export let from_bytes_lossy = func(bytes: uint8[list]) -> string
 export let from_scalars = func(values: uint32[list]) -> string
 ```
 
 ## `Std.Time.Clock`
 
 ```text
-export let Clock = module (
+#Since("0.1.0") export let Clock = module (
 export let Clock = interface (
-  let now = func -> result.Result<Instant>
-  let monotonic = func -> result.Result<duration.Duration>
+  #NoDiscard let now = func -> result.Result<Instant>
+  #NoDiscard let monotonic = func -> result.Result<duration.Duration>
   let sleep = func(span: duration.Duration) -> result.Result<Unit>
 ```
 
 ## `Std.Time.DayOfWeek`
 
 ```text
-export let DayOfWeek = module (
+#Since("0.1.0") export let DayOfWeek = module (
 export let DayOfWeek = enum (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday)
 export let plus = func(day: DayOfWeek, days: int64) -> DayOfWeek
 export let of_ordinal = func(ordinal: int) -> DayOfWeek
@@ -2653,8 +2646,8 @@ export let of_ordinal = func(ordinal: int) -> DayOfWeek
 ## `Std.Time.Duration`
 
 ```text
-export let Duration = module (
-export let Duration = class implements Comparable<Duration> (
+#Since("0.1.0") export let Duration = module (
+#[Final, NoDiscard] export let Duration = class implements Comparable<Duration> (
   export let init = func(nanos: int64)
   export let plus = func(other: Duration) -> Duration
   export let minus = func(other: Duration) -> Duration
@@ -2681,7 +2674,7 @@ export let of_seconds = func(seconds: int64) -> Duration
 export let of_minutes = func(minutes: int64) -> Duration
 export let of_hours = func(hours: int64) -> Duration
 export let of_days = func(days: int64) -> Duration
-export let parse = func(text: string) -> result.Result<Duration>
+#NoDiscard export let parse = func(text: string) -> result.Result<Duration>
 let Accumulator = class (
   export let magnitude: uint64 = 0
   export let init = func(bound: uint64)
@@ -2691,11 +2684,11 @@ let Accumulator = class (
 ## `Std.Time.FixedClock`
 
 ```text
-export let FixedClock = module (
+#Since("0.1.0") export let FixedClock = module (
 export let FixedClock = class implements Clock (
   export let init = func(start: instant.Instant)
-  export let now = func -> result.Result<instant.Instant>
-  export let monotonic = func -> result.Result<Duration>
+  #NoDiscard export let now = func -> result.Result<instant.Instant>
+  #NoDiscard export let monotonic = func -> result.Result<Duration>
   export let sleep = func(span: Duration) -> result.Result<Unit>
   export let set = func(moment: instant.Instant)
   export let advance = func(span: Duration)
@@ -2705,11 +2698,11 @@ export let of = func(start: instant.Instant) -> FixedClock
 ## `Std.Time.Instant`
 
 ```text
-export let Instant = module (
-export let Instant = class implements Comparable<Instant> (
+#Since("0.1.0") export let Instant = module (
+#[Final, NoDiscard] export let Instant = class implements Comparable<Instant> (
+  export last epoch_seconds: int64
+  export last nanos: int
   export let init = func(epoch_seconds: int64, nanos: int)
-  export let epoch_seconds = func -> int64
-  export let nanos = func -> int
   export let to_epoch_millis = func -> int64
   export let plus = func(span: duration.Duration) -> Instant
   export let minus = func(span: duration.Duration) -> Instant
@@ -2722,18 +2715,18 @@ export let Instant = class implements Comparable<Instant> (
 export const Epoch: Instant = new Instant(0, 0)
 export let of_epoch_seconds = func(seconds: int64, nanos: int) -> Instant
 export let of_epoch_millis = func(millis: int64) -> Instant
-export let parse = func(text: string) -> result.Result<Instant>
+#NoDiscard export let parse = func(text: string) -> result.Result<Instant>
 ```
 
 ## `Std.Time.LocalDate`
 
 ```text
-export let LocalDate = module (
-export let LocalDate = class implements Comparable<LocalDate> (
+#Since("0.1.0") export let LocalDate = module (
+#[Final, NoDiscard] export let LocalDate = class implements Comparable<LocalDate> (
+  export last year: int
+  export last month: int
+  export last day: int
   export let init = func(year: int, month: int, day: int)
-  export let year = func -> int
-  export let month = func -> int
-  export let day = func -> int
   export let to_epoch_day = func -> int64
   export let plus_days = func(days: int64) -> LocalDate
   export let plus_months = func(months: int64) -> LocalDate
@@ -2750,17 +2743,17 @@ export let LocalDate = class implements Comparable<LocalDate> (
 export let of = func(year: int, month: int, day: int) -> LocalDate
 export let try_of = func(year: int, month: int, day: int) -> LocalDate
 export let of_epoch_day = func(epoch_day: int64) -> LocalDate
-export let parse = func(text: string) -> result.Result<LocalDate>
+#NoDiscard export let parse = func(text: string) -> result.Result<LocalDate>
 ```
 
 ## `Std.Time.LocalDateTime`
 
 ```text
-export let LocalDateTime = module (
-export let LocalDateTime = class implements Comparable<LocalDateTime> (
+#Since("0.1.0") export let LocalDateTime = module (
+#[Final, NoDiscard] export let LocalDateTime = class implements Comparable<LocalDateTime> (
+  export last date: local_date.LocalDate
+  export last time: local_time.LocalTime
   export let init = func(on: local_date.LocalDate, at: local_time.LocalTime)
-  export let date = func -> local_date.LocalDate
-  export let time = func -> local_time.LocalTime
   export let plus = func(span: duration.Duration) -> LocalDateTime
   export let at_offset = func(offset: zone_offset.ZoneOffset) -> instant.Instant
   export let compare_to = func(other: LocalDateTime) -> Ordering
@@ -2768,14 +2761,14 @@ export let LocalDateTime = class implements Comparable<LocalDateTime> (
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
 export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime
-export let parse = func(text: string) -> result.Result<LocalDateTime>
+#NoDiscard export let parse = func(text: string) -> result.Result<LocalDateTime>
 ```
 
 ## `Std.Time.LocalTime`
 
 ```text
-export let LocalTime = module (
-export let LocalTime = class implements Comparable<LocalTime> (
+#Since("0.1.0") export let LocalTime = module (
+#[Final, NoDiscard] export let LocalTime = class implements Comparable<LocalTime> (
   export let init = func(nanos: int64)
   export let hour = func -> int
   export let minute = func -> int
@@ -2790,30 +2783,30 @@ export let LocalTime = class implements Comparable<LocalTime> (
 export const Midnight: LocalTime = new LocalTime(0)
 export let of = func(hour: int, minute: int, second: int, nano: int) -> LocalTime
 export let of_nano_of_day = func(nanos: int64) -> LocalTime
-export let parse = func(text: string) -> result.Result<LocalTime>
+#NoDiscard export let parse = func(text: string) -> result.Result<LocalTime>
 ```
 
 ## `Std.Time.Stopwatch`
 
 ```text
-export let Stopwatch = module (
+#Since("0.1.0") export let Stopwatch = module (
 export let Stopwatch = class (
+  export let is_running: bool = false { get }
   export let init = func(time_source: Clock)
-  export let is_running = func -> bool
   export let start = func -> result.Result<Unit>
   export let stop = func -> result.Result<Unit>
   export let reset = func
-  export let elapsed = func -> result.Result<Duration>
+  #NoDiscard export let elapsed = func -> result.Result<Duration>
 export let create = func(time_source: Clock) -> Stopwatch
 ```
 
 ## `Std.Time.SystemClock`
 
 ```text
-export let SystemClock = module (
+#Since("0.1.0") export let SystemClock = module (
 export let SystemClock = class implements Clock (
-  export let now = func -> result.Result<instant.Instant>
-  export let monotonic = func -> result.Result<Duration>
+  #NoDiscard export let now = func -> result.Result<instant.Instant>
+  #NoDiscard export let monotonic = func -> result.Result<Duration>
   export let sleep = func(span: Duration) -> result.Result<Unit>
 export let create = func -> SystemClock
 ```
@@ -2821,15 +2814,15 @@ export let create = func -> SystemClock
 ## `Std.Time.ZoneOffset`
 
 ```text
-export let ZoneOffset = module (
-export let ZoneOffset = class implements Comparable<ZoneOffset> (
+#Since("0.1.0") export let ZoneOffset = module (
+#[Final, NoDiscard] export let ZoneOffset = class implements Comparable<ZoneOffset> (
+  export last total_seconds: int
   export let init = func(total: int)
-  export let total_seconds = func -> int
   export let compare_to = func(other: ZoneOffset) -> Ordering
   export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
 export const Utc: ZoneOffset = new ZoneOffset(0)
 export let of_hours_minutes = func(hours: int, minutes: int) -> ZoneOffset
-export let parse = func(text: string) -> result.Result<ZoneOffset>
+#NoDiscard export let parse = func(text: string) -> result.Result<ZoneOffset>
 ```

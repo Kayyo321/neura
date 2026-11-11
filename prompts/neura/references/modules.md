@@ -262,6 +262,29 @@ neura test -I src tests/greeter-tests.nra  # tests need the source root
 - A module file and a directory can share a name, so a module can have child modules. Importing a parent does not import its children.
 - More than one matching file is an ambiguity error. There is no package manifest or dependency manager.
 
+### Library-internal declarations: `#Internal`
+
+`export` makes a member visible to every importer. `#Internal` narrows that to the declaring *library*: the directory of the declaring file and the directories below it (its own module, sibling modules, and their children). A use from a file outside that tree is error `E0911`. In the standard library the library is the whole standard library.
+
+<!-- example: check -->
+```neura
+let Retry = module (
+    /// Shared with the other modules of acme/http-client; not part of the public API.
+    #Internal
+    export let backoff_ms = func(attempt: int) -> int => 100 * attempt;
+
+    export let delays = func(attempts: int) -> int[list] {
+        let result: int[list] = [];
+        for (let attempt = 1; attempt <= attempts; attempt++) {
+            result.append(backoff_ms(attempt));
+        }
+        return result;
+    };
+);
+```
+
+Inside one file `#Internal` has no effect. Tags are recorded in `.nir` files, so the rule also holds for a prebuilt module. `#Deprecated(use_instead: ...)` and `#Hidden` (left out of `neura docs`) are the other tags a library uses on its exports; see [tags.md](tags.md).
+
 ## The program entry point
 
 A program has exactly one module that overrides `Std.Program.Entry.main(args: string[]) -> ExitCode`. Without one, `neura build` fails with `the program has no entry point: no module overrides Std.Program.Entry.main`; a second override is rejected.

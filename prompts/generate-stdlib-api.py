@@ -11,8 +11,9 @@ For each module outside an `internal` directory it lists, in source order, the
 exported declarations (their signature up to the body), the class, interface,
 and singleton headers that give those members their context, and the members of
 interfaces, which are declared without `export`. Declarations tagged `#Hidden`
-are left out with their members, and the `#Deprecated` and `#Since` tags of a
-declaration are kept before its signature. Pass `--check` to fail when the
+are left out with their members, and the tags of a declaration that a caller
+needs (`#Deprecated`, `#Since`, `#NoDiscard`, `#Final`, and the other checked
+tags) are kept before its signature. Pass `--check` to fail when the
 committed file is out of date instead of writing it.
 """
 
@@ -81,8 +82,10 @@ def accessors(lines: list[str], start: int) -> str:
     return " { " + "; ".join(kind for kind in ("get", "set") if kind in kinds) + " }" if kinds else ""
 
 
-# Tags shown before a signature.
-LISTED_TAGS = {"Deprecated", "Since"}
+# Tags shown before a signature: the API's history and the tags that constrain callers
+# (docs/lang/Tags.md), such as #NoDiscard, whose result a caller must use.
+LISTED_TAGS = {"Deprecated", "Since", "Experimental", "NoDiscard", "Final", "Sealed", "Pure", "Immutable",
+               "ThreadSafe", "NotThreadSafe", "Synchronized"}
 
 
 def split_tags(text):
