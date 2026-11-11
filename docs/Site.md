@@ -167,13 +167,15 @@ Check the live values with:
 python3 scripts/check-repository-settings.py
 ```
 
-To set them up on a repository that has no Pages site, which a maintainer does once:
+A maintainer set them up once, in this order. Turning Pages on with the workflow as its source creates the `github-pages` environment and limits it to the default branch; the second command applies the environment's file, and the third lists its branches, which must be `main` alone:
 
 ```sh
 gh api -X POST repos/Kayyo321/neura/pages -f build_type=workflow
 gh api -X PUT repos/Kayyo321/neura/environments/github-pages --input .github/settings/environment-github-pages.json
-gh api -X POST repos/Kayyo321/neura/environments/github-pages/deployment-branch-policies -f name=main -f type=branch
+gh api repos/Kayyo321/neura/environments/github-pages/deployment-branch-policies --jq '.branch_policies[].name'
 ```
+
+If the list is empty, add the branch with `gh api -X POST repos/Kayyo321/neura/environments/github-pages/deployment-branch-policies -f name=main -f type=branch`.
 
 ## Change how the site is built
 
