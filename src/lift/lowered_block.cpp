@@ -450,6 +450,11 @@ LoweringResult lower(const nvr::Image& image, const nvr::Block& block, const Lif
         } else if (specs.size() != 1) {
             return refused("several exits without a condition");
         }
+        // A shared form computes its scheduled operations first, in order,
+        // as its replay builds them, so its checks fail in the same order.
+        for (const auto& expression : form.schedule) {
+            if (!compiler.emit(*expression)) return refused(compiler.failure);
+        }
         for (const auto& [lane, expression] : form.computation_order()) {
             const auto reg = compiler.emit(*expression);
             if (!reg) return refused(compiler.failure);
@@ -499,12 +504,17 @@ LoweringResult lower(const nvr::Image& image, const nvr::Block& block, const Lif
 
 std::optional<std::uint32_t> execute(const LoweredBlock& block, std::span<const std::uint64_t> inputs,
                                      std::span<std::uint64_t> outputs) {
+    thread_local std::vector<std::uint64_t> registers;
+    registers.resize(block.input_widths.size() + block.code.size());
+    return execute(block, inputs, outputs, registers);
+}
+
+std::optional<std::uint32_t> execute(const LoweredBlock& block, std::span<const std::uint64_t> inputs,
+                                     std::span<std::uint64_t> outputs, std::span<std::uint64_t> registers) {
     if (block.uses_float && !float_environment_is_default()) {
         return std::nullopt;
     }
-    thread_local std::vector<std::uint64_t> registers;
     const auto count = block.input_widths.size();
-    registers.resize(count + block.code.size());
     for (std::size_t i = 0; i < count; ++i) {
         registers[i] = inputs[i] & width_mask(block.input_widths[i]);
     }

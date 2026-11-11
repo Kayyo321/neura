@@ -28,16 +28,20 @@ bool prove_structure(const nvr::Image& image, const nvr::Block& block, const nvr
 // Rebuilds a block from lifted operations: inputs in their order, values in
 // the given order, the condition last, exits as `original` lists them.
 // `graph` receives the regenerated graph. Returns nothing when the circuit
-// library cannot assemble the block.
+// library cannot assemble the block. With `schedule` (a shared form,
+// LiftedForm::shared), each expression node is built once, by pointer
+// identity, and the scheduled nodes are built first, in order.
 std::optional<nvr::Block> replay(const nvr::Image& image, const nvr::Block& original,
                                  const std::vector<std::pair<std::uint32_t, ExpressionPtr>>& values,
                                  const ExpressionPtr& condition, std::optional<std::size_t> exit_when_true,
-                                 nvr::Graph& graph, Checks* checks);
+                                 nvr::Graph& graph, Checks* checks,
+                                 const std::vector<ExpressionPtr>* schedule = nullptr);
 
 // replay() compared with `original` and `graph`.
 bool replay_matches(const nvr::Image& image, const nvr::Block& original, const nvr::Graph& graph,
                     const std::vector<std::pair<std::uint32_t, ExpressionPtr>>& values, const ExpressionPtr& condition,
-                    std::optional<std::size_t> exit_when_true, Checks* checks);
+                    std::optional<std::size_t> exit_when_true, Checks* checks,
+                    const std::vector<ExpressionPtr>* schedule = nullptr);
 
 // The graph of a dispatch block that takes Call exit e for each layout in
 // `exits[e]` and the last exit (an invalid-dispatch trap) otherwise, built

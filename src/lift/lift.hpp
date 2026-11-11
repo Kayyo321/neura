@@ -4,7 +4,9 @@
 #include "lowered_block.hpp"
 #include "nvr/image.hpp"
 
+#include <chrono>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -30,13 +32,45 @@ struct LiftResult {
     std::shared_ptr<const LoweredBlock> block;
     // When `block` is empty: why the block stays on the reference evaluator.
     std::string rejection;
+    // The overflow analysis ran out of the work it was given before it
+    // decided (`rejection` is exhausted_work): more work may prove the
+    // block. `form` is then the form whose structural proof held, so that a
+    // retry need not search again.
+    bool exhausted = false;
+    std::shared_ptr<const LiftedForm> form;
+};
+
+inline constexpr const char* exhausted_work = "the overflow analysis ran out of work";
+
+// The overflow proof and the 0/1 proof of every output lane depend on the
+// graph alone. A cache shared by the lifts of one image proves each graph
+// once. Thread-safe.
+class GraphProofs {
+public:
+    // Empty when the graph's proofs hold, else the rejection. With `work`,
+    // the case analysis is bounded (overflow.hpp); a verdict that ran out of
+    // work is exhausted_work and is not remembered.
+    std::string verdict(const nvr::Graph& graph, std::uint32_t index,
+                        std::uint64_t work = std::numeric_limits<std::uint64_t>::max());
+
+private:
+    std::mutex mutex_;
+    std::map<std::uint32_t, std::string> verdicts_;
+    // The most work a graph's analysis has run out of: less cannot decide it.
+    std::map<std::uint32_t, std::uint64_t> exhausted_;
 };
 
 // Lifts, proves, and lowers block `block` of function `function` of a loaded,
 // validated image. With `hint`, the recognizer's search is skipped and the
-// hint is proven like any other candidate: a hint is never trusted.
+// hint is proven like any other candidate: a hint is never trusted. A search
+// that passes `deadline` is abandoned, as a rejection that says so. `proofs`
+// shares graph proofs between the blocks of an image, and `work` bounds the
+// overflow analysis of a graph not yet proven.
 LiftResult lift_and_prove(const nvr::Image& image, std::uint32_t function, std::uint32_t block,
-                          const LiftedForm* hint = nullptr);
+                          const LiftedForm* hint = nullptr,
+                          std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max(),
+                          GraphProofs* proofs = nullptr,
+                          std::uint64_t work = std::numeric_limits<std::uint64_t>::max());
 
 // The accepted lowered block, or nothing.
 std::optional<LoweredBlock> lift_and_prove_block(const nvr::Image& image, std::uint32_t function,

@@ -89,8 +89,10 @@ public:
         if (e->type >= image_.types.size()) return "an expression type outside the type table";
         const auto& type = image_.types[e->type];
         // A reference is an opaque 64-lane handle: it can only pass through
-        // or be compared for identity.
-        if (!scalar(type) && !(nvr::is_reference(type.kind) && e->kind == Expression::Kind::Input)) {
+        // or be compared for identity, with another or with a constant
+        // handle such as nil.
+        if (!scalar(type) && !(nvr::is_reference(type.kind) && (e->kind == Expression::Kind::Input ||
+                                                                 e->kind == Expression::Kind::Immediate))) {
             return "an expression of a non-scalar type";
         }
         const auto operand = [&](std::size_t i) -> const nvr::Type& { return image_.types[e->operands[i]->type]; };
@@ -137,8 +139,12 @@ public:
             if (const auto* error = check(e->operands[0].get(), depth + 1)) return error;
             if (const auto* error = check(e->operands[1].get(), depth + 1)) return error;
             const auto& a = operand(0);
-            if (!same_shape(a, operand(1))) return "a binary operation on operands of different types";
             const auto& op = e->op;
+            // A shift count is an integer of any width, read as unsigned
+            // (docs/lang/Numbers.md): the circuit fails for any count with a
+            // lane set at or above the word's width, as the lowering does.
+            const bool shift = (op == "<<" || op == ">>") && is_integer(a) && is_integer(operand(1));
+            if (!shift && !same_shape(a, operand(1))) return "a binary operation on operands of different types";
             const bool boolean_result = type.kind == nvr::TypeKind::Bool;
             if (a.kind == nvr::TypeKind::Bool) {
                 if (op != "&&" && op != "||" && op != "==" && op != "!=") return "an unknown Boolean operation";
@@ -180,9 +186,12 @@ const char* form_type_error(const nvr::Image& image, const nvr::Block& block, co
         if (input.type >= image.types.size()) return "an input type outside the type table";
     }
     if (!form.dispatch.empty()) {
-        if (!form.values.empty() || form.condition || !form.order.empty()) return "a dispatch form with values";
+        if (!form.values.empty() || form.condition || !form.order.empty() || !form.schedule.empty()) {
+            return "a dispatch form with values";
+        }
         return nullptr;
     }
+    if (!form.shared && !form.schedule.empty()) return "a schedule in a form that is not shared";
     // The type each exit reads from the graph, keyed by first lane.
     std::map<std::uint32_t, std::uint32_t> targets;
     for (const auto& exit : block.exits) {
@@ -195,6 +204,9 @@ const char* form_type_error(const nvr::Image& image, const nvr::Block& block, co
     }
     if (form.values.size() != targets.size()) return "values that do not match the lanes the exits read";
     TypeChecker checker(image, block);
+    for (const auto& expression : form.schedule) {
+        if (const auto* error = checker.check(expression.get())) return error;
+    }
     for (const auto& [lane, expression] : form.values) {
         const auto target = targets.find(lane);
         if (target == targets.end()) return "a value for lanes no exit reads";

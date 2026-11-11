@@ -65,7 +65,21 @@ public:
             std::function<void(std::uint32_t, const Signal&)> fail)
         : image_(image), circuit_(circuit), inputs_(inputs), fail_(std::move(fail)) {}
 
+    // A shared form (LiftedForm::shared) builds each expression node once,
+    // however many times it is used, as the converter reuses a value it has
+    // computed. Otherwise every use builds the node again.
+    void share() { shared_ = true; }
+
     Word build(const Expression& e) {
+        if (!shared_) return compute(e);
+        if (const auto it = built_.find(&e); it != built_.end()) return it->second;
+        auto word = compute(e);
+        built_.emplace(&e, word);
+        return word;
+    }
+
+private:
+    Word compute(const Expression& e) {
         const auto& type = image_.types.at(e.type);
         switch (e.kind) {
         case Expression::Kind::Input:
@@ -127,7 +141,6 @@ public:
         throw std::logic_error("unknown expression kind");
     }
 
-private:
     Word binary(const std::string& op, const nvr::Type& t, const Word& a, const Word& b) {
         if (t.kind == nvr::TypeKind::Bool) {
             if (op == "&&") return {circuit_.logical_and(a.front(), b.front())};
@@ -197,6 +210,8 @@ private:
     Circuit& circuit_;
     const std::vector<Word>& inputs_;
     std::function<void(std::uint32_t, const Signal&)> fail_;
+    bool shared_ = false;
+    std::map<const Expression*, Word> built_;
 };
 
 } // namespace
@@ -204,7 +219,7 @@ private:
 std::optional<nvr::Block> replay(const nvr::Image& image, const nvr::Block& original,
                                  const std::vector<std::pair<std::uint32_t, ExpressionPtr>>& values,
                                  const ExpressionPtr& condition, std::optional<std::size_t> exit_when_true,
-                                 nvr::Graph& graph, Checks* checks) {
+                                 nvr::Graph& graph, Checks* checks, const std::vector<ExpressionPtr>* schedule) {
     ImageTables tables(image);
     BlockSynthesizer synth(tables);
     std::vector<Word> inputs;
@@ -222,7 +237,14 @@ std::optional<nvr::Block> replay(const nvr::Image& image, const nvr::Block& orig
         }
     });
     std::map<std::uint32_t, Word> words;
+    if (schedule) builder.share();
     try {
+        if (schedule) {
+            for (const auto& expression : *schedule) {
+                current = &expression;
+                builder.build(*expression);
+            }
+        }
         for (const auto& [lane, expression] : values) {
             current = &expression;
             words[lane] = builder.build(*expression);
@@ -310,10 +332,11 @@ std::optional<nvr::Block> replay(const nvr::Image& image, const nvr::Block& orig
 
 bool replay_matches(const nvr::Image& image, const nvr::Block& original, const nvr::Graph& graph,
                     const std::vector<std::pair<std::uint32_t, ExpressionPtr>>& values, const ExpressionPtr& condition,
-                    std::optional<std::size_t> exit_when_true, Checks* checks) {
+                    std::optional<std::size_t> exit_when_true, Checks* checks,
+                    const std::vector<ExpressionPtr>* schedule) {
     nvr::Graph regenerated;
     Checks found;
-    const auto block = replay(image, original, values, condition, exit_when_true, regenerated, &found);
+    const auto block = replay(image, original, values, condition, exit_when_true, regenerated, &found, schedule);
     if (!block || !(*block == original) || !(regenerated == graph)) {
         return false;
     }
@@ -393,7 +416,7 @@ bool prove_structure(const nvr::Image& image, const nvr::Block& block, const nvr
         return dispatch_circuit(block, form.dispatch) == graph;
     }
     return replay_matches(image, block, graph, form.computation_order(), form.condition, form.exit_when_true,
-                          checks);
+                          checks, form.shared ? &form.schedule : nullptr);
 }
 
 nvr::Graph expression_circuit(const nvr::Image& image, const std::vector<unsigned>& input_widths,

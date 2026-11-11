@@ -259,6 +259,7 @@ neura_target_defaults(neura_circuit)
 # hardware arithmetic is bit-exact, which rules out contracted multiply-adds.
 add_library(neura_lift STATIC
     src/lift/expression.cpp
+    src/lift/hints.cpp
     src/lift/lift.cpp
     src/lift/lowered_block.cpp
     src/lift/overflow.cpp
