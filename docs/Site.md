@@ -17,6 +17,7 @@ The site renders the repository's `wiki/` directory, not the separately hosted G
 | [`site/partials/`](../site/partials/) | The parts that every page shares: the head, the masthead, and the footer of the documentation. They are not published themselves. |
 | [`site/assets/site.css`](../site/assets/site.css) | The one stylesheet, used by every page. |
 | [`site/assets/docs.js`](../site/assets/docs.js) | The documentation's search box, the highlight of the current section, and the copy buttons on code. |
+| [`site/assets/copy-prompt.js`](../site/assets/copy-prompt.js) | The front page's "Copy Neura Language Skill" controls, which copy the prompt that the page includes from the README's section [Write Neura with an AI agent](../README.md#write-neura-with-an-ai-agent). |
 | [`site/assets/fonts/`](../site/assets/fonts/) | The font files and their licenses. |
 | [`site/assets/plates/`](../site/assets/plates/) | The illustrations, drawn by [`artwork/site/plates.py`](../artwork/site/plates.py). |
 | [`scripts/build-site.py`](../scripts/build-site.py) | Builds the site into a directory, checks it, and serves a preview. |
@@ -106,7 +107,7 @@ Because the site has no templates, the build replaces two kinds of comment in a 
 - **A listing that names its source shows that file.** The text of `<pre data-source="examples/hello-world/hello-world.nra">` equals the file at that path, apart from white space at either end. Elements inside the listing, such as the `<span>` that colors a keyword, do not count as text.
 - **No published file or directory name starts with `.`.** The deployment leaves such files out, so the source view publishes `.github/` as `_github/`.
 
-The check reads `href`, `src`, `srcset`, and `poster` attributes, `<style>` elements, and CSS files. It does not run scripts, so it cannot see a request that a script makes; a reviewer checks any script by reading it. `assets/docs.js` requests only `assets/search.json`.
+The check reads `href`, `src`, `srcset`, and `poster` attributes, `<style>` elements, and CSS files. It does not run scripts, so it cannot see a request that a script makes; a reviewer checks any script by reading it. `assets/docs.js` requests only `assets/search.json`, and `assets/copy-prompt.js` requests nothing.
 
 ## Rules for content
 

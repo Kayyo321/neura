@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Compile or run every Neura example in the repository's documentation.
 
-Each fenced ```neura block in README.md and docs/**/*.md must be preceded, on
-the line above it or with one blank line between, by an HTML comment that says
-how the block is checked:
+Each fenced ```neura block in README.md, docs/**/*.md, and prompts/**/*.md (the
+agent skill) must be preceded, on the line above it or with one blank line
+between, by an HTML comment that says how the block is checked:
 
   <!-- example: check -->            The block is a complete source file;
                                      `neura check` accepts it.
@@ -128,8 +128,9 @@ def parse(path: str, text: str) -> list[Block]:
 
 def markdown_files(root: Path) -> list[Path]:
     files = [root / "README.md"] if (root / "README.md").is_file() else []
-    if (root / "docs").is_dir():
-        files += sorted((root / "docs").rglob("*.md"))
+    for directory in ("docs", "prompts"):
+        if (root / directory).is_dir():
+            files += sorted((root / directory).rglob("*.md"))
     return files
 
 

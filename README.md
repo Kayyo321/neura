@@ -73,6 +73,32 @@ The `.nvr` image contains the circuit and execution information needed by the Ne
 
 [Tooling](docs/lang/Tooling.md) describes every command, and the [tutorial](docs/lang/Tutorial.md) introduces the language.
 
+## Write Neura with an AI agent
+
+The [Neura language skill](https://github.com/Kayyo321/neura/tree/main/prompts/neura) teaches a coding agent the language, the standard library, and the `neura` command line, with examples that the repository's tests compile and run. Paste this prompt into your agent to install it:
+
+```text
+Install the Neura language skill, then use it whenever you read or write Neura (.nra) code or run the neura command line.
+
+1. Download the skill: the prompts/neura directory of https://github.com/Kayyo321/neura, which holds SKILL.md and a references directory.
+   rm -rf /tmp/neura-skill
+   git clone --depth 1 --filter=blob:none --sparse https://github.com/Kayyo321/neura.git /tmp/neura-skill
+   git -C /tmp/neura-skill sparse-checkout set prompts/neura
+
+2. Install it where you load skills, keeping SKILL.md and references/ together in a directory named neura:
+   - Claude Code: copy /tmp/neura-skill/prompts/neura to ~/.claude/skills/neura for every project, or to .claude/skills/neura in this project.
+   - Another agent with a skills or rules directory: copy it there.
+   - An agent without skills: copy it to .agents/skills/neura in this project, and add this line to AGENTS.md, creating the file if needed: "Before reading or writing Neura (.nra) code, read .agents/skills/neura/SKILL.md and follow it."
+   Then remove /tmp/neura-skill.
+
+3. Run `neura --version`. If neura is not installed, offer to install it with the official installer, which installs under the home directory without sudo:
+   curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases/latest/download/install.sh | sh
+
+4. Read SKILL.md now. Then tell me where you installed the skill and which neura version you found.
+```
+
+An agent reads the skill's `SKILL.md` first and its `references/` as a task needs them. The [`prompts`](https://github.com/Kayyo321/neura/tree/main/prompts) directory describes how the skill is kept up to date.
+
 ## Compilation and execution
 
 ```text
