@@ -131,7 +131,7 @@ private:
         if (!valid) {
             auto invalid = location();
             invalid.length = 1;
-            throw Diagnostic(std::move(invalid), "invalid UTF-8");
+            throw Diagnostic(std::move(invalid), "invalid UTF-8").with_code("E0102");
         }
         offset_ += width;
         ++column_;
@@ -173,9 +173,10 @@ private:
         auto invalid = start;
         invalid.length = 1;
         if (peek() >= '!' && peek() <= '~') {
-            throw Diagnostic(std::move(invalid), "invalid character '" + std::string(1, peek()) + "'");
+            throw Diagnostic(std::move(invalid), "invalid character '" + std::string(1, peek()) + "'")
+                .with_code("E0101");
         }
-        throw Diagnostic(std::move(invalid), "invalid source character");
+        throw Diagnostic(std::move(invalid), "invalid source character").with_code("E0101");
     }
 
     TokenKind number() {
@@ -199,7 +200,7 @@ private:
             }
             if (!is_digit(peek())) {
                 exponent.length = offset_ - exponent.offset;
-                throw Diagnostic(std::move(exponent), "expected digits in numeric exponent");
+                throw Diagnostic(std::move(exponent), "expected digits in numeric exponent").with_code("E0105");
             }
             while (is_digit(peek())) {
                 advance();
@@ -208,7 +209,7 @@ private:
         if (is_name_start(peek())) {
             auto invalid = location();
             invalid.length = 1;
-            throw Diagnostic(std::move(invalid), "unexpected character after numeric literal");
+            throw Diagnostic(std::move(invalid), "unexpected character after numeric literal").with_code("E0105");
         }
         return kind;
     }
@@ -223,7 +224,7 @@ private:
             if (peek() == '\0') {
                 auto invalid = location();
                 invalid.length = 1;
-                throw Diagnostic(std::move(invalid), "null byte in string literal");
+                throw Diagnostic(std::move(invalid), "null byte in string literal").with_code("E0104");
             }
             if (peek() == '\\') {
                 auto escape = location();
@@ -231,13 +232,13 @@ private:
                 constexpr std::string_view escapes = "nrt\\\"";
                 if (escapes.find(peek()) == std::string_view::npos) {
                     escape.length = offset_ < source_.size() ? 2 : 1;
-                    throw Diagnostic(std::move(escape), "invalid string escape");
+                    throw Diagnostic(std::move(escape), "invalid string escape").with_code("E0104");
                 }
             }
             advance_text();
         }
         start.length = offset_ - start.offset;
-        throw Diagnostic(std::move(start), "unterminated string literal");
+        throw Diagnostic(std::move(start), "unterminated string literal").with_code("E0103");
     }
 
     std::string_view source_;

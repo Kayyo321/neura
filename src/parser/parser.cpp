@@ -49,7 +49,7 @@ private:
     void expect(std::string_view text) {
         if (!match(text)) {
             if (text == ";" && cursor_ > 0) missing_semicolon();
-            throw Diagnostic(current().span, "expected '" + std::string(text) + "'");
+            throw Diagnostic(current().span, "expected '" + std::string(text) + "'").with_code("E0202");
         }
     }
 
@@ -80,7 +80,7 @@ private:
 
     const Token& identifier() {
         if (current().kind != TokenKind::Identifier) {
-            throw Diagnostic(current().span, "expected an identifier");
+            throw Diagnostic(current().span, "expected an identifier").with_code("E0202");
         }
         return advance();
     }
@@ -147,7 +147,7 @@ private:
         }
         result.span = span_from(start);
         if (reference && result.reference)
-            throw Diagnostic(result.span, "a type can have only one reference prefix");
+            throw Diagnostic(result.span, "a type can have only one reference prefix").with_code("E0206");
         result.reference |= reference;
         return result;
     }
@@ -203,7 +203,7 @@ private:
                     parameter_type = type();
                 }
                 if (variadic && at(","))
-                    throw Diagnostic(current().span, "a variadic parameter must be last");
+                    throw Diagnostic(current().span, "a variadic parameter must be last").with_code("E0207");
                 result.push_back({name.span, name.text, std::move(parameter_type), variadic});
             } while (match(","));
         }
@@ -263,7 +263,7 @@ private:
             expect("(");
             const auto& operation = current();
             if (operation.kind != TokenKind::String)
-                throw Diagnostic(operation.span, "expected a scheduler operation name");
+                throw Diagnostic(operation.span, "expected a scheduler operation name").with_code("E0213");
             advance();
             expect(")");
             result.scheduler_binding = operation.text.substr(1, operation.text.size() - 2);
@@ -276,7 +276,7 @@ private:
             expect("(");
             const auto& service = current();
             if (service.kind != TokenKind::String)
-                throw Diagnostic(service.span, "expected a host service name");
+                throw Diagnostic(service.span, "expected a host service name").with_code("E0213");
             advance();
             expect(",");
             const auto& version = current();
@@ -284,7 +284,7 @@ private:
             const auto end = version.text.data() + version.text.size();
             const auto [next, error] = std::from_chars(version.text.data(), end, number);
             if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0)
-                throw Diagnostic(version.span, "host service version must be a positive uint32");
+                throw Diagnostic(version.span, "host service version must be a positive uint32").with_code("E0213");
             advance();
             expect(")");
             auto& binding = host ? result.host_binding : result.host_callback;
@@ -317,7 +317,7 @@ private:
                 result.promote_import = true;
             } else if (!result.constant && at("as")) {
                 if (owner != Declaration::Kind::Class)
-                    throw Diagnostic(current().span, "a cast declaration requires a class");
+                    throw Diagnostic(current().span, "a cast declaration requires a class").with_code("E0512");
                 const auto& name = advance();
                 result.name = name.text;
                 result.name_span = name.span;
@@ -420,7 +420,7 @@ private:
                     }
                 }
                 if (result.members.empty()) {
-                    throw Diagnostic(current().span, "an enum needs at least one variant");
+                    throw Diagnostic(current().span, "an enum needs at least one variant").with_code("E0209");
                 }
                 expect(")");
             } else if (at("module") || at("class") || at("interface") || at("singleton")) {
@@ -462,7 +462,7 @@ private:
                 result.initializer = expression();
             }
         } else if (!result.type) {
-            throw Diagnostic(current().span, "expected a type annotation or an initializer");
+            throw Diagnostic(current().span, "expected a type annotation or an initializer").with_code("E0205");
         }
 
         // Aggregate members and overload groups can end at a block body.
@@ -478,7 +478,8 @@ private:
 
     static void definition_has_no_annotation(const Declaration& declaration) {
         if (declaration.type) {
-            throw Diagnostic(declaration.type->span, "a definition cannot have a binding type annotation");
+            throw Diagnostic(declaration.type->span, "a definition cannot have a binding type annotation")
+                .with_code("E0208");
         }
     }
 
@@ -576,7 +577,8 @@ private:
             result = simple_statement();
             if (scope_call && at("{") && result.kind == Statement::Kind::Expression &&
                 result.expressions.front().kind == Expr::Kind::Call) {
-                throw Diagnostic(parenthesis, "a scope statement names one scope or none: scope (name) { } or scope { }");
+                throw Diagnostic(parenthesis, "a scope statement names one scope or none: scope (name) { } or scope { }")
+                    .with_code("E0211");
             }
             expect(";");
         }
@@ -842,11 +844,12 @@ private:
             advance();
             result.operands.push_back(expression(ordering_precedence + 1, true, branch_keyword));
             if (precedence() == equality_precedence || precedence() == ordering_precedence) {
-                throw Diagnostic(current().span, "a comparison chain expects another value; use '&&' or '||' between comparisons");
+                throw Diagnostic(current().span, "a comparison chain expects another value; use '&&' or '||' between comparisons")
+                    .with_code("E0210");
             }
         } while (at(connector) && at_comparison_connector(branch_keyword));
         if (at_comparison_connector(branch_keyword)) {
-            throw Diagnostic(current().span, "a comparison chain must use only 'and' or only 'or'");
+            throw Diagnostic(current().span, "a comparison chain must use only 'and' or only 'or'").with_code("E0210");
         }
         result.span = span_from(start);
         return result;
@@ -1005,7 +1008,7 @@ private:
             lambda->kind = Declaration::Kind::Function;
             function_body(*lambda, branch_keyword);
             if (!lambda->has_body)
-                throw Diagnostic(current().span, "expected a function body");
+                throw Diagnostic(current().span, "expected a function body").with_code("E0202");
             lambda->span = span_from(start);
             auto result = make_expression(Expr::Kind::Lambda, lambda->span);
             result.lambda = std::move(lambda);
@@ -1026,7 +1029,7 @@ private:
         if (match("{")) {
             auto result = expression();
             if (result.kind != Expr::Kind::Range)
-                throw Diagnostic(result.span, "braces in an expression must enclose a range");
+                throw Diagnostic(result.span, "braces in an expression must enclose a range").with_code("E0212");
             expect("}");
             result.span = span_from(start);
             return result;
@@ -1051,7 +1054,7 @@ private:
                 std::vector<std::string> paths;
                 do {
                     if (current().kind != TokenKind::String)
-                        throw Diagnostic(current().span, "expected a header or library path string");
+                        throw Diagnostic(current().span, "expected a header or library path string").with_code("E0202");
                     paths.push_back(decode_string_literal(advance().text));
                 } while (match(","));
                 expect(")");
@@ -1077,7 +1080,7 @@ private:
             advance();
             auto operand = postfix(branch_keyword);
             if (operand.kind != Expr::Kind::Call)
-                throw Diagnostic(operand.span, "spawn requires a call, such as 'spawn work(item)'");
+                throw Diagnostic(operand.span, "spawn requires a call, such as 'spawn work(item)'").with_code("E0603");
             auto result = make_expression(Expr::Kind::Spawn, span_from(start), "spawn");
             result.operands.push_back(std::move(operand));
             return result;
@@ -1088,7 +1091,7 @@ private:
         if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
         if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);
         if (token.kind == TokenKind::String) return token_expression(Expr::Kind::String);
-        throw Diagnostic(token.span, "expected an expression");
+        throw Diagnostic(token.span, "expected an expression").with_code("E0204");
     }
 
     Expr token_expression(Expr::Kind kind) {

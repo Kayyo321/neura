@@ -1470,7 +1470,7 @@ void require_valid_ir(const IrProgram& program, std::string_view stage) {
         if (issues.size() > 1) {
             message += " (and " + std::to_string(issues.size() - 1) + " more issue(s))";
         }
-        throw Diagnostic(std::move(first.span), std::move(message));
+        throw Diagnostic(std::move(first.span), std::move(message)).with_code("E0899");
     }
 }
 

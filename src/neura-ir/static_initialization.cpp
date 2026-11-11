@@ -354,7 +354,7 @@ void Initialization::rewrite(IrNode& node, SymbolId owner, SymbolId former_owner
             if (type < linked_symbols_ && field.constant && constant_type(field.type.kind) &&
                 !constant(node.symbol) && !linked_fields_.contains(node.symbol)) {
                 throw Diagnostic(node.span, "imported static constant '" + field.name +
-                                            "' has no stored value; rebuild its .nir file");
+                                            "' has no stored value; rebuild its .nir file").with_code("E0706");
             }
             if (guards_[type] != no_symbol || constant(node.symbol))
                 node = guarded_read(std::move(node), guards_[type]);

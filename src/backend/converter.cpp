@@ -401,7 +401,8 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         if (!format) {
             throw Diagnostic(where, type.name == "byte"
                 ? "the signedness of 'byte' is not specified; use uint8 or int8"
-                : "the width of '" + type.name + "' is not specified; use a sized integer type such as int32");
+                : "the width of '" + type.name + "' is not specified; use a sized integer type such as int32")
+                .with_code("E0802");
         }
         return scalar(format->is_signed ? nvr::TypeKind::Signed : nvr::TypeKind::Unsigned, format->bits);
     }
@@ -410,7 +411,7 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
     case TypeKind::Float: {
         const auto format = float_format(type);
         if (!format) {
-            throw Diagnostic(where, "'" + type.name + "' is not a floating-point format");
+            throw Diagnostic(where, "'" + type.name + "' is not a floating-point format").with_code("E0802");
         }
         return scalar(*format == bfloat16 ? nvr::TypeKind::BFloat : nvr::TypeKind::Float, format->width());
     }
@@ -422,7 +423,8 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
     case TypeKind::Object:
         if (!type.arguments.empty() || !symbol(type.symbol).generics.empty()) {
             throw Diagnostic(where, "generic class '" + symbol(type.symbol).name +
-                                        "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                        "' is not supported: IRtoNeuronConversion does not specialize generics")
+                .with_code("E0801");
         }
         return type_index({nvr::TypeKind::Object, 0, layout(type.symbol, where)});
     case TypeKind::Tuple:
@@ -434,12 +436,13 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         return scalar(nvr::TypeKind::Unsigned, 32);
     case TypeKind::TypeParameter:
         throw Diagnostic(where, "type parameter '" + type.name +
-                                    "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                    "' is not supported: IRtoNeuronConversion does not specialize generics")
+            .with_code("E0801");
     case TypeKind::Module:
     case TypeKind::Callable:
         break;
     }
-    throw Diagnostic(where, "'" + type.name + "' is not a value type");
+    throw Diagnostic(where, "'" + type.name + "' is not a value type").with_code("E0802");
 }
 
 std::uint32_t Converter::constant(std::uint32_t type, std::vector<std::uint8_t> payload) {
@@ -453,7 +456,7 @@ std::uint32_t Converter::constant(std::uint32_t type, std::vector<std::uint8_t> 
 
 std::uint32_t Converter::text_constant(const std::string& text, const Span& where) {
     if (!nvr::valid_utf8(text)) {
-        throw Diagnostic(where, "string literal is not valid UTF-8");
+        throw Diagnostic(where, "string literal is not valid UTF-8").with_code("E0807");
     }
     return constant(scalar(nvr::TypeKind::Text), std::vector<std::uint8_t>(text.begin(), text.end()));
 }
@@ -465,7 +468,8 @@ std::uint32_t Converter::layout(SymbolId cls, const Span& where) {
     const auto& item = symbol(cls);
     if (!item.generics.empty()) {
         throw Diagnostic(where, "generic class '" + item.name +
-                                    "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                    "' is not supported: IRtoNeuronConversion does not specialize generics")
+            .with_code("E0801");
     }
     // Reserve the index first: a field may refer to its own class.
     const auto index = static_cast<std::uint32_t>(image_.layouts.size());
@@ -538,7 +542,7 @@ std::optional<std::uint64_t> Converter::literal(const IrNode& node, std::uint32_
     case IrOp::Integer: {
         const auto value = parse_integer_literal(node.text);
         if (!value) {
-            throw Diagnostic(node.span, "malformed integer literal '" + node.text + "'");
+            throw Diagnostic(node.span, "malformed integer literal '" + node.text + "'").with_code("E0807");
         }
         const auto bits = value->negative ? std::uint64_t{0} - value->magnitude : value->magnitude;
         return bits & width_mask(t.width);
@@ -551,7 +555,8 @@ std::optional<std::uint64_t> Converter::literal(const IrNode& node, std::uint32_
     case IrOp::Float: {
         const auto parsed = parse_float_literal(node.text, float_format(node.type).value());
         if (parsed.error) {
-            throw Diagnostic(node.span, "float literal '" + node.text + "' does not fit " + node.type.name);
+            throw Diagnostic(node.span, "float literal '" + node.text + "' does not fit " + node.type.name)
+                .with_code("E0807");
         }
         return parsed.bits;
     }
@@ -570,7 +575,7 @@ std::uint32_t Converter::global(SymbolId id, const Span& where) {
     const auto init = global_initializers_.find(id);
     if (init == global_initializers_.end()) {
         if (item.owner == no_symbol || !is_static_scope(symbol(item.owner)))
-            throw Diagnostic(where, "global '" + item.name + "' has no initializer");
+            throw Diagnostic(where, "global '" + item.name + "' has no initializer").with_code("E0899");
     } else {
         const auto& node = *init->second;
         if (node.op == IrOp::String) {
@@ -638,7 +643,7 @@ std::optional<std::uint32_t> Converter::external_import(SymbolId function, const
     const auto key = std::pair{import.name, import.interface_version};
     if (const auto found = imports_.find(key); found != imports_.end()) {
         if (image_.imports[found->second] != import)
-            throw Diagnostic(where, "conflicting signatures for host service '" + import.name + "'");
+            throw Diagnostic(where, "conflicting signatures for host service '" + import.name + "'").with_code("E0806");
         return found->second;
     }
     const auto index = static_cast<std::uint32_t>(image_.imports.size());
@@ -942,7 +947,8 @@ FunctionOrigin Converter::entry_point() const {
                 !item.generics.empty() || item.parameters.size() != 1 ||
                 symbol(item.parameters.front()).type != arguments ||
                 item.type.kind != TypeKind::Enum || !standard_exit_variants(item.type.symbol))
-                throw Diagnostic(item.span, "Std.Program.Entry.main must declare main(string[]) -> ExitCode");
+                throw Diagnostic(item.span, "Std.Program.Entry.main must declare main(string[]) -> ExitCode")
+                    .with_code("E0805");
             requirements.insert(id);
         }
     }
@@ -969,10 +975,11 @@ FunctionOrigin Converter::entry_point() const {
         }
     }
     if (candidates.empty()) {
-        throw Diagnostic(where, "the program has no entry point: no module overrides Std.Program.Entry.main");
+        throw Diagnostic(where, "the program has no entry point: no module overrides Std.Program.Entry.main")
+            .with_code("E0803");
     }
     if (candidates.size() > 1) {
-        throw Diagnostic(symbol(candidates[1]).span, "the program has more than one entry point");
+        throw Diagnostic(symbol(candidates[1]).span, "the program has more than one entry point").with_code("E0804");
     }
     const auto main = candidates.front();
     return {Role::Function, main, symbol(main).owner};
@@ -1813,7 +1820,7 @@ void FunctionCompiler::statement(const IrNode& node) {
         destroy(node);
         return;
     default:
-        throw Diagnostic(node.span, "unsupported statement");
+        throw Diagnostic(node.span, "unsupported statement").with_code("E0801");
     }
 }
 
@@ -1847,7 +1854,7 @@ void FunctionCompiler::store(const IrNode& node) {
         return;
     }
     default:
-        throw Diagnostic(destination.span, "unsupported assignment destination");
+        throw Diagnostic(destination.span, "unsupported assignment destination").with_code("E0801");
     }
 }
 
@@ -2011,7 +2018,7 @@ std::vector<Operand> FunctionCompiler::sequence(const std::vector<IrNode>& nodes
 IntegerFormat FunctionCompiler::integer_format(const IrType& type, const Span& span) const {
     const auto& t = c_.type_at(c_.type_of(type, span));
     if (t.kind != nvr::TypeKind::Signed && t.kind != nvr::TypeKind::Unsigned) {
-        throw Diagnostic(span, "arithmetic requires an integer type");
+        throw Diagnostic(span, "arithmetic requires an integer type").with_code("E0899");
     }
     return {t.width, t.kind == nvr::TypeKind::Signed};
 }
@@ -2106,7 +2113,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         return call(node);
     case IrOp::MakeClosure:
     case IrOp::CallClosure:
-        throw Diagnostic(node.span, "function values must be specialized before conversion");
+        throw Diagnostic(node.span, "function values must be specialized before conversion").with_code("E0801");
     case IrOp::Spawn:
         return spawn(node);
     case IrOp::SchedulerCall:
@@ -2201,7 +2208,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
     default:
         break;
     }
-    throw Diagnostic(node.span, "this operation is not supported by IRtoNeuronConversion");
+    throw Diagnostic(node.span, "this operation is not supported by IRtoNeuronConversion").with_code("E0801");
 }
 
 Operand FunctionCompiler::load(const IrNode& node) {
@@ -2213,12 +2220,12 @@ Operand FunctionCompiler::load(const IrNode& node) {
         const auto global = c_.global(resolve_global(node), node.span);
         return state(nvr::StateOp::ReadGlobal, global, {}, c_.global_at(global).type, node.span);
     }
-    throw Diagnostic(node.span, "unsupported load");
+    throw Diagnostic(node.span, "unsupported load").with_code("E0801");
 }
 
 Operand FunctionCompiler::receiver_value(const IrNode& node) {
     if (self_slot_ == absent) {
-        throw Diagnostic(node.span, "a module is not a value");
+        throw Diagnostic(node.span, "a module is not a value").with_code("E0899");
     }
     return slot_operand(self_slot_);
 }
@@ -2237,7 +2244,7 @@ SymbolId FunctionCompiler::module_of(const IrNode& receiver) const {
         receiver_module_ != no_symbol) {
         return receiver_module_;
     }
-    throw Diagnostic(receiver.span, "unsupported module receiver");
+    throw Diagnostic(receiver.span, "unsupported module receiver").with_code("E0801");
 }
 
 SymbolId FunctionCompiler::resolve_global(const IrNode& node) {
@@ -2351,7 +2358,7 @@ Operand FunctionCompiler::binary(const IrNode& node) {
     } else if (op == "%") {
         result = remainder(circuit, a, b, format.is_signed);
     } else {
-        throw Diagnostic(node.span, "operator '" + op + "' is not supported");
+        throw Diagnostic(node.span, "operator '" + op + "' is not supported").with_code("E0801");
     }
     fail_when(result.failure, arithmetic_failure, node.span);
     return bits(c_.type_of(node.type, node.span), std::move(result.value));
@@ -2565,7 +2572,8 @@ Operand FunctionCompiler::call(const IrNode& node) {
     const auto& target = c_.symbol(node.symbol);
     if (!node.type_arguments.empty() || !target.generics.empty()) {
         throw Diagnostic(node.span, "generic function '" + target.name +
-                                        "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                        "' is not supported: IRtoNeuronConversion does not specialize generics")
+            .with_code("E0801");
     }
     if (node.op == IrOp::VirtualCall) {
         return virtual_call(node);
@@ -2573,7 +2581,7 @@ Operand FunctionCompiler::call(const IrNode& node) {
     const auto owner = target.owner;
     if (owner != no_symbol && (c_.symbol(owner).kind == SymbolKind::Class ||
                                c_.symbol(owner).kind == SymbolKind::Interface)) {
-        throw Diagnostic(node.span, "a method call requires a receiver");
+        throw Diagnostic(node.span, "a method call requires a receiver").with_code("E0899");
     }
     const auto receiver = owner != no_symbol && c_.symbol(owner).kind == SymbolKind::Module ? owner : no_symbol;
     auto arguments = sequence(node.operands);
@@ -2587,12 +2595,12 @@ Operand FunctionCompiler::call(const IrNode& node) {
 Operand FunctionCompiler::spawn(const IrNode& node, bool handle) {
     const auto& body = node.operands.front();
     if (body.op != IrOp::Allocate || body.symbol == no_symbol) {
-        throw Diagnostic(node.span, "function values must be specialized before conversion");
+        throw Diagnostic(node.span, "function values must be specialized before conversion").with_code("E0801");
     }
     const auto layout = c_.symbol(body.symbol).owner;
     const auto method = c_.member(layout, "$invoke");
     if (method == no_symbol || !c_.symbol(method).has_body) {
-        throw Diagnostic(node.span, "a spawned function value has no body");
+        throw Diagnostic(node.span, "a spawned function value has no body").with_code("E0899");
     }
     auto object = expression(body);
     spill(object);
@@ -2605,7 +2613,7 @@ Operand FunctionCompiler::scheduler_call(const IrNode& node) {
     const bool is_select = node.text == select_operation || node.text == select_with_default;
     const auto operation = scheduler_operation(node.text);
     if (!is_select && !operation) {
-        throw Diagnostic(node.span, "unknown scheduler operation '" + node.text + "'");
+        throw Diagnostic(node.span, "unknown scheduler operation '" + node.text + "'").with_code("E0899");
     }
     if (!is_select && operation->code == compile_time_operation) {
         // Checked when the program was analyzed; the value passes through.
@@ -2638,11 +2646,11 @@ Operand FunctionCompiler::scheduler_call(const IrNode& node) {
         // capture layout, as a spawn does, with that object as its argument.
         const auto& body = node.operands.front();
         if (body.op != IrOp::Allocate || body.symbol == no_symbol) {
-            throw Diagnostic(node.span, "function values must be specialized before conversion");
+            throw Diagnostic(node.span, "function values must be specialized before conversion").with_code("E0801");
         }
         const auto method = c_.member(c_.symbol(body.symbol).owner, "$invoke");
         if (method == no_symbol || !c_.symbol(method).has_body) {
-            throw Diagnostic(node.span, "an isolated function value has no body");
+            throw Diagnostic(node.span, "an isolated function value has no body").with_code("E0899");
         }
         target = c_.function({Role::Function, method, no_symbol});
     }
@@ -2661,7 +2669,7 @@ Operand FunctionCompiler::virtual_call(const IrNode& node) {
         const auto implementation = c_.resolve_member(module, node.symbol);
         if (!c_.symbol(implementation).has_body) {
             throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" +
-                                            c_.symbol(node.symbol).name + "'");
+                                            c_.symbol(node.symbol).name + "'").with_code("E0899");
         }
         auto arguments = sequence(node.operands, 1);
         return invoke({Role::Function, implementation, module}, std::move(arguments), result_type, node.span,
@@ -2669,7 +2677,7 @@ Operand FunctionCompiler::virtual_call(const IrNode& node) {
     }
     c_.type_of(receiver.type, receiver.span);
     if (receiver.type.kind != TypeKind::Object) {
-        throw Diagnostic(receiver.span, "unsupported method receiver");
+        throw Diagnostic(receiver.span, "unsupported method receiver").with_code("E0801");
     }
     return dispatch_call(receiver.type.symbol, node.symbol, sequence(node.operands), result_type, node.span,
                          node.poll);
@@ -2739,7 +2747,7 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
     if (!supports_value_members(c_.program(), type)) {
         const std::string member = equality ? "equals" : op == IrOp::ValueHash ? "hash_code" : "to_string";
         throw Diagnostic(span, "type " + describe_value_type(type) + " has no member '" + member +
-                                   "' in this specialization");
+                                   "' in this specialization").with_code("E0899");
     }
     const auto result_type = equality ? c_.scalar(nvr::TypeKind::Bool) :
         op == IrOp::ValueHash ? c_.scalar(nvr::TypeKind::Unsigned, 32) : c_.scalar(nvr::TypeKind::Text);
@@ -2749,11 +2757,12 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
 
     const auto cls = type.symbol;
     if (c_.symbol(cls).name.starts_with("$signature"))
-        throw Diagnostic(span, "function values do not support equality, hashing, or text members");
+        throw Diagnostic(span, "function values do not support equality, hashing, or text members").with_code("E0801");
     auto root = cls;
     while (c_.symbol(root).base != no_symbol) root = c_.symbol(root).base;
     const auto method = c_.member(root, equality ? "equals" : op == IrOp::ValueHash ? "hash_code" : "to_string");
-    if (method == no_symbol) throw Diagnostic(span, "this class reference has no value member contract");
+    if (method == no_symbol) throw Diagnostic(span, "this class reference has no value member contract")
+        .with_code("E0899");
     for (auto& operand : operands) spill(operand);
     const auto is_nil = [&](const Operand& operand) {
         const auto word = lanes(operand);
@@ -2790,7 +2799,7 @@ Operand FunctionCompiler::external_call(const IrNode& node) {
     if (c_.symbol(node.symbol).host_binding) return bound_host_call(node);
     const auto& target = c_.symbol(node.symbol);
     throw Diagnostic(node.span, "external function '" + c_.symbol(target.owner).name + "." + target.name +
-                                    "' has no runtime binding");
+                                    "' has no runtime binding").with_code("E0806");
 }
 
 Operand FunctionCompiler::bound_host_call(const IrNode& node) {
@@ -2953,7 +2962,8 @@ void FunctionCompiler::compile_function() {
     const auto& function = c_.symbol(origin_.symbol);
     if (!function.generics.empty()) {
         throw Diagnostic(function.span, "generic function '" + function.name +
-                                            "' is not supported: IRtoNeuronConversion does not specialize generics");
+                                            "' is not supported: IRtoNeuronConversion does not specialize generics")
+            .with_code("E0801");
     }
     const auto owner = function.owner;
     if (owner != no_symbol && (c_.symbol(owner).kind == SymbolKind::Class ||

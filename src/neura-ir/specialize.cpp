@@ -211,12 +211,12 @@ private:
             throw Diagnostic(where, "generic specialization does not terminate: the type arguments of '" + name +
                                         "' nest deeper than " + std::to_string(limits_.max_depth) +
                                         " levels (the chain starts at " + location(origin.span) +
-                                        (origin.name.empty() ? "" : " with " + origin.name) + ")");
+                                        (origin.name.empty() ? "" : " with " + origin.name) + ")").with_code("E0808");
         }
         if (instances_.size() >= limits_.max_instances) {
             throw Diagnostic(where, "generic specialization creates more than " +
                                         std::to_string(limits_.max_instances) + " instances (the chain starts at " +
-                                        location(origin.span) + ")");
+                                        location(origin.span) + ")").with_code("E0808");
         }
     }
 

@@ -51,7 +51,7 @@ fs::path find_c_header(const std::string& header, const fs::path& base, const st
         std::error_code ignored;
         if (fs::is_regular_file(dir / name, ignored)) return fs::canonical(dir / name);
     }
-    throw Diagnostic(span, "cannot find C header '" + header + "'");
+    throw Diagnostic(span, "cannot find C header '" + header + "'").with_code("E0709");
 }
 
 void collect_imports(const Declaration& declaration, std::vector<const Expr*>& imports);
@@ -125,7 +125,8 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
     if (artifact) relative.replace_extension(".nir");
     if (std_namespace(import.text)) {
         if (internal_module(import.text) && !from_library) {
-            throw Diagnostic(import.span, "cannot import internal standard library module '" + import.text + "'");
+            throw Diagnostic(import.span, "cannot import internal standard library module '" + import.text + "'")
+                .with_code("E0702");
         }
         const auto path = library / relative;
         if (!library.empty() && fs::is_regular_file(path)) {
@@ -134,7 +135,8 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
             // to bypass an Internal component of the actual module path.
             if (library_path(actual, library) == relative.generic_string()) return actual;
         }
-        throw Diagnostic(import.span, "cannot resolve standard library import '" + import.text + "'");
+        throw Diagnostic(import.span, "cannot resolve standard library import '" + import.text + "'")
+            .with_code("E0701");
     }
     std::set<fs::path> candidates;
     auto search = [&](const fs::path& root) {
@@ -151,7 +153,7 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
         search(root);
     }
     if (candidates.size() > 1) {
-        throw Diagnostic(import.span, "ambiguous import '" + import.text + "'");
+        throw Diagnostic(import.span, "ambiguous import '" + import.text + "'").with_code("E0703");
     }
     return candidates.empty() ? fs::path{} : *candidates.begin();
 }
@@ -159,7 +161,7 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
 fs::path find_artifact(const Expr& import, const std::vector<fs::path>& roots) {
     const fs::path path(*import.import_path);
     if (path.extension() != ".nir")
-        throw Diagnostic(import.span, "an artifact import needs a .nir file");
+        throw Diagnostic(import.span, "an artifact import needs a .nir file").with_code("E0706");
     std::set<fs::path> candidates;
     const auto search = [&](const fs::path& root) {
         if (fs::is_regular_file(root / path)) candidates.insert(fs::canonical(root / path));
@@ -169,9 +171,9 @@ fs::path find_artifact(const Expr& import, const std::vector<fs::path>& roots) {
         for (const auto& root : roots) search(root);
     }
     if (candidates.empty())
-        throw Diagnostic(import.span, "cannot find NeuraIR artifact '" + *import.import_path + "'");
+        throw Diagnostic(import.span, "cannot find NeuraIR artifact '" + *import.import_path + "'").with_code("E0701");
     if (candidates.size() > 1)
-        throw Diagnostic(import.span, "ambiguous NeuraIR artifact '" + *import.import_path + "'");
+        throw Diagnostic(import.span, "ambiguous NeuraIR artifact '" + *import.import_path + "'").with_code("E0703");
     return *candidates.begin();
 }
 
@@ -198,12 +200,13 @@ std::vector<fs::path> find_wildcard_modules(const Expr& import, const std::vecto
             }
             const auto [previous, added] = candidates.emplace(filename, actual);
             if (!added && previous->second != actual)
-                throw Diagnostic(import.span, "ambiguous wildcard import '" + import.text + "'");
+                throw Diagnostic(import.span, "ambiguous wildcard import '" + import.text + "'").with_code("E0703");
         }
     };
     if (standard) {
         if (internal_module(prefix) && !from_library)
-            throw Diagnostic(import.span, "cannot import internal standard library module '" + prefix + "'");
+            throw Diagnostic(import.span, "cannot import internal standard library module '" + prefix + "'")
+                .with_code("E0702");
         if (!library.empty()) search(library);
     } else {
         search(fs::path(import.span.file).parent_path());
@@ -212,7 +215,7 @@ std::vector<fs::path> find_wildcard_modules(const Expr& import, const std::vecto
     std::vector<fs::path> modules;
     for (const auto& [filename, actual] : candidates) modules.push_back(actual);
     if (modules.empty())
-        throw Diagnostic(import.span, "cannot resolve wildcard import '" + import.text + "'");
+        throw Diagnostic(import.span, "cannot resolve wildcard import '" + import.text + "'").with_code("E0701");
     return modules;
 }
 
@@ -226,15 +229,17 @@ struct ArtifactInput {
 
 ArtifactInput read_artifact(const fs::path& path, const Span& span) {
     std::ifstream input(path, std::ios::binary);
-    if (!input) throw Diagnostic(span, "cannot read NeuraIR artifact '" + path.generic_string() + "'");
+    if (!input) throw Diagnostic(span, "cannot read NeuraIR artifact '" + path.generic_string() + "'")
+        .with_code("E0706");
     const std::vector<std::uint8_t> bytes(std::istreambuf_iterator<char>{input}, {});
-    if (input.bad()) throw Diagnostic(span, "error reading NeuraIR artifact '" + path.generic_string() + "'");
+    if (input.bad()) throw Diagnostic(span, "error reading NeuraIR artifact '" + path.generic_string() + "'")
+        .with_code("E0706");
     try {
         ArtifactInput artifact{path, span, {}};
         artifact.program = read_nir(bytes, path.generic_string(), &artifact.minor_version);
         return artifact;
     } catch (const NirError& error) {
-        throw Diagnostic(span, error.what());
+        throw Diagnostic(span, error.what()).with_code("E0706");
     }
 }
 
@@ -301,18 +306,19 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             const bool from_library = !syntax.library_path.empty();
             if (!import->c_import.empty()) {
                 if (from_library || !c_imports)
-                    throw Diagnostic(import->span, "a C import is not available here");
+                    throw Diagnostic(import->span, "a C import is not available here").with_code("E0708");
                 const auto header = find_c_header(import->c_import.front(), file.parent_path(), roots, import->span);
                 std::vector<std::string> libraries;
                 for (std::size_t l = 1; l < import->c_import.size(); ++l) {
                     const auto path = file.parent_path() / import->c_import[l];
                     if (!fs::is_regular_file(path))
-                        throw Diagnostic(import->span, "cannot find C library '" + import->c_import[l] + "'");
+                        throw Diagnostic(import->span, "cannot find C library '" + import->c_import[l] + "'")
+                            .with_code("E0709");
                     const auto extension = path.extension().string();
                     if (extension != ".a" && extension != ".o" && extension != ".lib" && extension != ".obj")
                         throw Diagnostic(import->span, "a C import links static libraries (.a, .lib) and object "
                                                        "files (.o, .obj); load shared libraries with "
-                                                       "Std.DynamicForeign.SymbolLookup");
+                                                       "Std.DynamicForeign.SymbolLookup").with_code("E0708");
                     libraries.push_back(fs::canonical(path).string());
                 }
                 const auto module = import->text.substr(2);
@@ -344,7 +350,8 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             if (dependency.empty()) continue;
             if (artifact) {
                 if (!artifacts || from_library)
-                    throw Diagnostic(import->span, "this source load cannot import a NeuraIR artifact");
+                    throw Diagnostic(import->span, "this source load cannot import a NeuraIR artifact")
+                        .with_code("E0706");
                 auto found = std::ranges::find(*artifacts, dependency, &ArtifactInput::path);
                 if (found == artifacts->end()) {
                     artifacts->push_back(read_artifact(dependency, import->span));
@@ -399,10 +406,11 @@ SymbolId artifact_module(const ArtifactInput& artifact, std::string_view selecto
     if (matching.empty() && selector.empty() && candidates.size() == 1) return candidates.front();
     const auto path = artifact.path.generic_string();
     if (!selector.empty() && matching.empty())
-        throw Diagnostic(span, "artifact '" + path + "' does not declare module '" + std::string(selector) + "'");
+        throw Diagnostic(span, "artifact '" + path + "' does not declare module '" + std::string(selector) + "'")
+            .with_code("E0705");
     if (selector.empty() && candidates.empty())
-        throw Diagnostic(span, "artifact '" + path + "' has no project module to import");
-    throw Diagnostic(span, "ambiguous module in artifact '" + path + "'");
+        throw Diagnostic(span, "artifact '" + path + "' has no project module to import").with_code("E0705");
+    throw Diagnostic(span, "ambiguous module in artifact '" + path + "'").with_code("E0703");
 }
 
 IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<ArtifactInput> artifacts,
@@ -415,12 +423,15 @@ IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<Artif
         const fs::path name(relative);
         if (!relative.starts_with("std/") || name.extension() != ".nra" ||
             name.lexically_normal().generic_string() != relative)
-            throw Diagnostic(span, "invalid standard library identity '" + relative + "' in NeuraIR artifact");
+            throw Diagnostic(span, "invalid standard library identity '" + relative + "' in NeuraIR artifact")
+                .with_code("E0706");
         if (library.empty() || !fs::is_regular_file(library / name))
-            throw Diagnostic(span, "artifact needs installed standard library file '" + relative + "'");
+            throw Diagnostic(span, "artifact needs installed standard library file '" + relative + "'")
+                .with_code("E0707");
         const auto actual = fs::canonical(library / name);
         if (library_path(actual, library) != relative)
-            throw Diagnostic(span, "invalid standard library identity '" + relative + "' in NeuraIR artifact");
+            throw Diagnostic(span, "invalid standard library identity '" + relative + "' in NeuraIR artifact")
+                .with_code("E0706");
         if (trusted_paths.insert(actual).second) trusted_files.push_back(actual);
     };
     for (const auto& source : parsed) {
@@ -472,7 +483,8 @@ IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<Artif
     }
     for (const auto& source : parsed) {
         if (source.library_path.empty() && embedded.contains(source.file))
-            throw Diagnostic(Span{source.file}, "source is also included in an imported NeuraIR artifact");
+            throw Diagnostic(Span{source.file}, "source is also included in an imported NeuraIR artifact")
+                .with_code("E0707");
     }
     std::erase_if(parsed, [](const ParsedFile& source) { return !source.library_path.empty(); });
     return lower(parsed, std::move(linked));
