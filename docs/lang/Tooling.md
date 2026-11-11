@@ -33,7 +33,7 @@ build/neura emit-ir tests/ir-optimization/fixtures/folding.nra > after.ir
 diff before.ir after.ir
 ```
 
-The two listings for this fixture share a symbol table, so the diff shows rewritten instructions. For programs that take primitive references or specialize generics, the optimized listing can also show new or rewritten symbols from those compilation stages. The listing is separate from the versioned `.nir` file described below, which holds NeuraIR before those transformations. See [NeuraIR optimization](../IrOptimization.md) for the passes and their preconditions.
+The two listings for this fixture share a symbol table, so the diff shows rewritten instructions. For programs that take primitive references or specialize generics, the optimized listing can also show new or rewritten symbols from those compilation stages, and inlining adds a local named `$inline.<callee>.<name>` to the caller for each inlined parameter and local. The listing is separate from the versioned `.nir` file described below, which holds NeuraIR before those transformations. See [NeuraIR optimization](../IrOptimization.md) for the passes and their preconditions.
 
 ## Build and run executables
 
