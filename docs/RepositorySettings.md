@@ -13,6 +13,8 @@ The rules in [GOVERNANCE.md](../GOVERNANCE.md) are enforced by settings of the G
 | Runs from outside contributors | `repository.json` | A maintainer approves each workflow run for a pull request whose author has no write access. |
 | Security features | `repository.json` | Secret scanning with push protection, Dependabot alerts and security updates, and CodeQL code scanning with GitHub's default setup. |
 | Environment `release` | `repository.json`, `environment-release.json` | A job that names this environment starts only from a `v*` tag and only after the maintainer approves it. Signing and publishing secrets belong here and nowhere else. |
+| GitHub Pages | `repository.json` | The website is built and deployed by the [Pages workflow](../.github/workflows/pages.yml), not from a branch, and is served only over HTTPS. [Website maintenance](Site.md) describes it. |
+| Environment `github-pages` | `repository.json`, `environment-github-pages.json` | A Pages deployment is accepted only from `main`, so a workflow run on any other branch cannot publish the site. |
 | Immutable releases | `repository.json` | A published release's tag and files cannot be changed. |
 | Merged branches | `repository.json` | GitHub deletes a pull request's branch when it merges. |
 

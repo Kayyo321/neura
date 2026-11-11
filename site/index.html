@@ -1,0 +1,132 @@
+<!doctype html>
+<!--
+  The front page of the Neura website, https://kayyo321.github.io/neura/.
+  The build replaces each `include` comment with a partial from site/partials/
+  and each `markdown` comment with that section of the named document, so the
+  words here come from the repository's own documents. docs/Site.md explains
+  how the site is changed, checked, and published, and docs/SiteDesign.md
+  describes its design. Write every reference relative to this file: the site
+  is served below /neura/.
+-->
+<html lang="en">
+<head>
+<!-- include: head -->
+  <title>Neura</title>
+  <meta name="description" content="Neura is a statically typed programming language and a toolchain for compiling its programs into deterministic neuron circuits and decompiling those circuits into readable representations.">
+</head>
+<body class="front">
+  <a class="skip" href="#main">Skip to the content</a>
+<!-- include: masthead -->
+
+  <main id="main">
+    <section class="hero">
+      <picture class="hero-plate">
+        <source media="(max-width: 46rem)" srcset="assets/plates/neuron-slide.png" width="720" height="480">
+        <img src="assets/plates/neuron-hero.png" width="2160" height="780" alt="A single neuron, stained black on an amber ground. Its branches run on as square-cornered wires into the layers of a circuit.">
+      </picture>
+      <div class="hero-body">
+        <h1>Neura</h1>
+        <div class="hero-copy">
+<!-- markdown: README.md# -->
+          <p class="actions">
+            <a class="button" href="docs/README.html#getting-started">Install</a>
+            <a class="button pale" href="docs/lang/Tutorial.html">Learn</a>
+            <a href="docs/">Reading Room</a>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section spread" id="compilation">
+      <div class="narrow prose">
+<!-- markdown: README.md#compilation-and-execution -->
+      </div>
+      <figure class="wide">
+        <img src="assets/plates/neuron-slide.png" width="720" height="480" loading="lazy" alt="A stained neuron whose branches continue as wires into a three-layer circuit.">
+      </figure>
+    </section>
+
+    <section class="section" id="example">
+      <div class="listing">
+        <p class="listing-name"><a href="source/examples/hello-world/hello-world.nra.html">examples/hello-world/hello-world.nra</a> <span>Neura</span></p>
+        <pre data-source="examples/hello-world/hello-world.nra"><code><span class="k">let</span> console = <span class="k">import</span>:Std.Io.Console;
+<span class="k">let</span> program = <span class="k">import</span>:Std.Program;
+
+<span class="k">let</span> HelloWorld = <span class="k">module</span>:program.Entry ( <span class="c">// HelloWorld inherits Std.Program.Entry (main)</span>
+    <span class="k">export</span> <span class="k">let</span>.override main = <span class="k">func</span>(args: string[]) -&gt; program.ExitCode {
+        console.print_line("Hello, World!");
+        <span class="k">return</span> program.ExitCode.Ok; <span class="c">// Enum ExitCode</span>
+    }
+);</code></pre>
+      </div>
+      <p class="listing-next"><a href="docs/lang/Tutorial.html">Tutorial</a> <a href="docs/lang/Overview.html">Language overview</a> <a href="docs/README.html#getting-started">Install</a></p>
+    </section>
+
+    <section class="section spread flipped" id="documentation">
+      <figure class="wide">
+        <img src="assets/plates/type-tree.png" width="720" height="480" loading="lazy" alt="Three lines of metal type, set mirrored in a composing stick, with the syntax tree of the statement hanging below.">
+      </figure>
+      <div class="narrow prose">
+<!-- markdown: README.md#documentation -->
+      </div>
+    </section>
+  </main>
+
+  <footer class="poster">
+    <img class="poster-art" src="assets/plates/eye-poster.png" width="2160" height="900" loading="lazy" alt="">
+    <div class="poster-body">
+      <p class="wordmark" aria-hidden="true">Neura</p>
+      <div class="poster-grid">
+        <div class="identity">
+          <a class="logo" href="./" aria-label="Neura, front page"><span class="logo-mark"></span></a>
+        </div>
+        <nav aria-label="Learn">
+          <h2>Learn</h2>
+          <ul>
+            <li><a href="docs/README.html#getting-started">Install</a></li>
+            <li><a href="docs/lang/Tutorial.html">Tutorial</a></li>
+            <li><a href="docs/lang/Overview.html">Language overview</a></li>
+            <li><a href="stdlib/">Standard library</a></li>
+            <li><a href="docs/lang/Status.html">Feature status</a></li>
+          </ul>
+        </nav>
+        <nav aria-label="Toolchain">
+          <h2>Toolchain</h2>
+          <ul>
+            <li><a href="docs/lang/Tooling.html">Tooling</a></li>
+            <li><a href="docs/runtime/NVM.html">Neura Virtual Machine</a></li>
+            <li><a href="docs/runtime/NVR.html">NVR format</a></li>
+            <li><a href="docs/Decompiler.html">Decompiler</a></li>
+            <li><a href="docs/Project.html">Project design</a></li>
+          </ul>
+        </nav>
+        <nav aria-label="Project">
+          <h2>Project</h2>
+          <ul>
+            <li><a href="docs/CONTRIBUTING.html">Contributing</a></li>
+            <li><a href="docs/GOVERNANCE.html">Governance</a></li>
+            <li><a href="docs/CODE_OF_CONDUCT.html">Code of conduct</a></li>
+            <li><a href="docs/SECURITY.html">Security</a></li>
+            <li><a href="docs/CHANGELOG.html">Changelog</a></li>
+          </ul>
+        </nav>
+        <nav aria-label="Elsewhere">
+          <h2>Elsewhere</h2>
+          <ul>
+            <li><a href="docs/">Reading Room</a></li>
+            <li><a href="https://github.com/Kayyo321/neura">Source</a></li>
+            <li><a href="https://github.com/Kayyo321/neura/issues">Issues</a></li>
+            <li><a href="https://github.com/Kayyo321/neura/wiki">Wiki</a></li>
+          </ul>
+        </nav>
+      </div>
+      <div class="baseline">
+        <span>Open source</span>
+        <a href="https://github.com/Kayyo321/neura/blob/main/LICENSE">Apache License 2.0</a>
+        <span></span>
+        <a href="docs/Site.html">About this site</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

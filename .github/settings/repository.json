@@ -48,5 +48,19 @@
   },
   "environments/release/deployment-branch-policies": {
     "branch_policies": [{"name": "v*", "type": "tag"}]
+  },
+  "pages": {
+    "build_type": "workflow",
+    "https_enforced": true
+  },
+  "environments/github-pages": {
+    "deployment_branch_policy": {
+      "protected_branches": false,
+      "custom_branch_policies": true
+    },
+    "protection_rules": [{"type": "branch_policy"}]
+  },
+  "environments/github-pages/deployment-branch-policies": {
+    "branch_policies": [{"name": "main", "type": "branch"}]
   }
 }

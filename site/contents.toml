@@ -1,0 +1,125 @@
+# The repository documents the website publishes, and the order of its documentation.
+#
+# Each section becomes a group in the documentation's navigation and a shelf on its home
+# page, docs/index.html. Each page names a Markdown file of the repository by its path.
+# A document at docs/P.md is published at docs/P.html, one at the top of the checkout
+# (README.md) at docs/README.html, wiki/Stdlib.md at stdlib/index.html, wiki/Stdlib-X.md
+# at stdlib/X.html, and another wiki/X.md at docs/X.html.
+#
+#   label  the name in the navigation (default: the document's first heading)
+#   title  the page's title, for a document without a first-level heading
+#   plate  an illustration from assets/plates/ shown above the document
+#
+# A link between published documents leads to the published page. A document that no
+# section lists, but that [unlisted] matches, is published in a last section, so a new
+# document appears on the site as soon as it reaches main; file it in a section here.
+# docs/Site.md explains the rest.
+
+title = "Reading Room"
+summary = "Every document in the Neura repository, rendered from the main branch."
+
+# Wiki pages whose content is published from another file, by wiki page name. Other wiki
+# links lead to the published document in docs/ with the same name.
+[wiki]
+Stdlib-Design = "docs/lang/Stdlib.md"
+
+[[sections]]
+title = "Start here"
+plate = "eye-iris"
+pages = [
+  { source = "README.md", title = "Neura", label = "Introduction" },
+  { source = "docs/lang/Tutorial.md", label = "Tutorial" },
+  { source = "docs/lang/Status.md", label = "Feature status" },
+]
+
+[[sections]]
+title = "Language"
+plate = "type-tree"
+pages = [
+  { source = "docs/lang/Overview.md", label = "Overview" },
+  { source = "docs/lang/CoreLanguage.md", label = "Core language" },
+  { source = "docs/lang/Numbers.md", label = "Numbers" },
+  { source = "docs/lang/Types.md", label = "Types" },
+  { source = "docs/lang/Modules.md", label = "Modules and imports" },
+  { source = "docs/lang/Collections.md", label = "Collections" },
+  { source = "docs/lang/ObjectLifecycle.md", label = "Object lifecycle" },
+  { source = "docs/lang/Polymorphism.md", label = "Polymorphism" },
+  { source = "docs/lang/Errors.md", label = "Errors" },
+  { source = "docs/lang/Testing.md", label = "Testing" },
+  { source = "docs/lang/ResourcesConcurrency.md", label = "Resources and concurrency" },
+  { source = "docs/lang/Concurrency.md", label = "Concurrency" },
+  { source = "docs/lang/ForeignInterop.md", label = "Foreign interop" },
+  { source = "docs/lang/GpuExecution.md", label = "GPU execution" },
+  { source = "docs/lang/ProjectStructure.md", label = "Project structure" },
+  { source = "docs/style/CodingStyle.md", label = "Coding style" },
+]
+
+[[sections]]
+title = "Standard library"
+plate = "catalogue"
+pages = [
+  { source = "docs/lang/StandardLibrary.md", label = "Overview" },
+  { source = "wiki/Stdlib.md", label = "Module reference", plate = "catalogue" },
+  { source = "docs/lang/Stdlib.md", label = "Design and decisions" },
+]
+# Every module page, grouped by package in the navigation.
+modules = "wiki/Stdlib-*.md"
+
+[[sections]]
+title = "Toolchain"
+plate = "caliper"
+pages = [
+  { source = "docs/lang/Tooling.md", label = "Tooling" },
+  { source = "docs/lang/Standalone.md", label = "Native executables" },
+  { source = "docs/Decompiler.md", label = "Decompiler", plate = "eye-scan" },
+]
+
+[[sections]]
+title = "Compiler and circuits"
+plate = "neuron-slide"
+pages = [
+  { source = "wiki/Neurons-and-Circuits.md", label = "Neurons and circuits", plate = "neuron-engraving" },
+  { source = "docs/Project.md", label = "Project design" },
+  { source = "docs/Backend.md", label = "Neuron conversion" },
+  { source = "docs/IrOptimization.md", label = "NeuraIR optimization" },
+  { source = "docs/NirFormat.md", label = "NeuraIR format" },
+]
+
+[[sections]]
+title = "Runtime"
+plate = "tape"
+pages = [
+  { source = "docs/runtime/NVM.md", label = "Neura Virtual Machine" },
+  { source = "docs/runtime/NVR.md", label = "NVR format" },
+]
+
+[[sections]]
+title = "Contributing and governance"
+plate = "balance"
+pages = [
+  { source = "CONTRIBUTING.md", label = "Contributing" },
+  { source = "GOVERNANCE.md", label = "Governance" },
+  { source = "CODE_OF_CONDUCT.md", label = "Code of conduct" },
+  { source = "SECURITY.md", label = "Security" },
+  { source = "AGENTS.md", label = "Agent instructions" },
+]
+
+[[sections]]
+title = "Project records"
+plate = "cores"
+pages = [
+  { source = "CHANGELOG.md", label = "Changelog" },
+  { source = "docs/Release.md", label = "Release checklist" },
+  { source = "docs/ContinuousIntegration.md", label = "Continuous integration" },
+  { source = "docs/RepositorySettings.md", label = "Repository settings" },
+  { source = "docs/Wiki.md", label = "Wiki maintenance" },
+  { source = "docs/Site.md", label = "Website maintenance" },
+  { source = "docs/SiteDesign.md", label = "Website design" },
+]
+
+# Documents that no section above lists are published here, so that every document on main
+# reaches the site. A wiki page that presents a published document is left out.
+[unlisted]
+title = "More documents"
+include = ["*.md", "docs/**/*.md", "wiki/*.md"]
+exclude = ["CLAUDE.md", "wiki/Home.md", "wiki/_Sidebar.md"]
