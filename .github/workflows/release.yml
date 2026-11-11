@@ -348,7 +348,9 @@ jobs:
           home=$(mktemp -d)
           curl --proto '=https' --tlsv1.2 -fsSL \
             "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh" |
-            env -i HOME="$home" PATH=/usr/bin:/bin sh -s -- --version "$FULL"
+            env -i HOME="$home" PATH=/usr/bin:/bin GH_TOKEN="$GH_TOKEN" sh -s -- --version "$FULL" | tee install.log
+          # The token lets gh check the attestation, so the check must have run.
+          grep -F "Verified: build provenance" install.log
           reported=$(env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" neura --version)
           echo "$reported"
           case "$reported" in

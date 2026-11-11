@@ -575,6 +575,17 @@ std::string verify_provenance(const fs::path& file, bool local_source, bool requ
                std::string(local_source ? " read from the local source." : " fetched over HTTPS.");
     }
     if (local_source && !require) return "not checked: build provenance (a local source is not attested)";
+    // gh can verify nothing until it is signed in. That is a missing tool,
+    // not a failed verification: only a check that ran and failed says the
+    // file is not what the release workflow built.
+    const auto signed_in = run_child({gh.string(), "auth", "status"}, 30);
+    if (!signed_in.started || signed_in.status != 0) {
+        if (require) {
+            throw Failure{"--require-attestation needs gh (the GitHub CLI) to be signed in; run \"gh auth login\" or set GH_TOKEN"};
+        }
+        return "NOT verified: build provenance. gh is installed but not signed in, so integrity rests on the SHA-256 in the "
+               "release metadata" + std::string(local_source ? " read from the local source." : " fetched over HTTPS.");
+    }
     const auto result = run_child({gh.string(), "attestation", "verify", file.string(), "--repo", repository}, 180);
     if (!result.started || result.status != 0) {
         throw Failure{"build provenance verification failed (gh attestation verify): " + (result.started ? failure_detail(result) : "gh could not be run")};
