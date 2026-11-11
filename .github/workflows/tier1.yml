@@ -47,6 +47,9 @@ jobs:
       - name: Check the standard library reference pages
         run: python3 scripts/update-stdlib-wiki-api.py --check
 
+      - name: Check that the wiki pages are generated from docs
+        run: python3 scripts/generate-wiki.py --check
+
   build-and-test:
     name: Build and test (Linux x86-64)
     runs-on: ubuntu-24.04

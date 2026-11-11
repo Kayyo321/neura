@@ -8,7 +8,7 @@ GitHub Actions checks every pull request before it is merged. The workflows are 
 
 | Job | What it runs | Fails when |
 | --- | --- | --- |
-| Documentation and workflows | `scripts/test-checks.py`, `scripts/check-workflows.py`, `scripts/check-docs.py`, and `scripts/update-stdlib-wiki-api.py --check` | A check script misbehaves on its own test inputs; a workflow breaks a [workflow rule](#workflow-rules); a link in a tracked Markdown file names a missing file, wiki page, or heading; or a standard library reference page is stale. |
+| Documentation and workflows | `scripts/test-checks.py`, `scripts/check-workflows.py`, `scripts/check-docs.py`, `scripts/update-stdlib-wiki-api.py --check`, and `scripts/generate-wiki.py --check` | A check script misbehaves on its own test inputs; a workflow breaks a [workflow rule](#workflow-rules); a link in a tracked Markdown file names a missing file, wiki page, or heading; a standard library reference page is stale; or a generated wiki page differs from the docs page it is generated from, or `wiki/` holds a page that is neither generated nor listed as hand-written. |
 | Build and test (Linux x86-64) | A Release build with GCC 14 on Ubuntu 24.04, then every CTest entry | The build fails; the compiler reports a warning in a file outside `third_party/`; a test fails; a test is skipped, disabled, or not run; or the run holds fewer tests than the workflow's `--minimum`. |
 | Tier 1 | Reads the results of the other two jobs | Either job ended as anything other than `success`, including `skipped` and `cancelled`. |
 
@@ -31,6 +31,7 @@ python3 scripts/test-checks.py
 python3 scripts/check-workflows.py
 python3 scripts/check-docs.py
 python3 scripts/update-stdlib-wiki-api.py --check
+python3 scripts/generate-wiki.py --check
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel

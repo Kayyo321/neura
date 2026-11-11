@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Test the repository's check scripts.
 
-`check-docs.py`, `check-workflows.py`, and `check-test-report.py` gate pull
-requests, so each must accept valid input and reject each kind of problem it
+`check-docs.py`, `check-workflows.py`, `check-test-report.py`,
+`generate-wiki.py`, and `check-doc-examples.py` gate pull requests, so each must accept valid input and reject each kind of problem it
 exists to find. This script runs them on small inputs built in a temporary
 directory and compares the exit status and the reported problem.
 
@@ -11,6 +11,7 @@ The exit status is 0 when every case behaves as expected and 1 otherwise.
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -71,6 +72,24 @@ PAGE = """\
 failures = 0
 
 
+def load_script(name: str):
+    """Import a script whose file name has a hyphen."""
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), SCRIPTS / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def same(label: str, got: str, wanted: str) -> None:
+    """A case that compares text in this process."""
+    global failures
+    if got == wanted:
+        print(f"PASS {label}")
+    else:
+        failures += 1
+        print(f"FAIL {label}: expected\n{wanted}\nbut got\n{got}")
+
+
 def expect(label: str, command: list[str], problem: str | None) -> None:
     """Run a check; it must pass when `problem` is None and report it otherwise."""
     global failures
@@ -106,6 +125,26 @@ def docs(label: str, files: dict[str, str], problem: str | None) -> None:
         subprocess.run(["git", "-C", directory, "add", "--all"], check=True)
         expect(f"docs: {label}", [sys.executable, str(SCRIPTS / "check-docs.py"), "--root", directory,
                                   "--repository", "example/project"], problem)
+
+
+def wiki(label: str, change, problem: str | None) -> None:
+    """Run generate-wiki.py --check on a tree it has just written, after `change(root)` edits it."""
+    generator = load_script("generate-wiki")
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for path in generator.GENERATED:
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text("# Page\n\nSee [the overview](../lang/Overview.md#top) and "
+                                     "[source](../../src/main.cpp).\n", encoding="utf-8")
+        (root / "src").mkdir()
+        (root / "src" / "main.cpp").write_text("", encoding="utf-8")
+        (root / "wiki").mkdir()
+        for name in generator.HAND_WRITTEN | {"Stdlib-Core-Text", "Stdlib-Program"}:
+            (root / "wiki" / f"{name}.md").write_text("# By hand\n", encoding="utf-8")
+        script = str(SCRIPTS / "generate-wiki.py")
+        subprocess.run([sys.executable, script, "--root", directory], check=True, capture_output=True)
+        change(root)
+        expect(f"generate-wiki: {label}", [sys.executable, script, "--root", directory, "--check"], problem)
 
 
 def report(label: str, cases: str | None, minimum: int, problem: str | None) -> None:
@@ -163,6 +202,65 @@ def main() -> int:
          "no heading `#nope`")
     docs("a repository URL to a missing path", {"wiki/Home.md": f"[a]({BLOB}/src/gone.cpp)\n"},
          "src/gone.cpp does not exist")
+
+    wiki("pages that match", lambda root: None, None)
+    wiki("a stale page", lambda root: (root / "wiki" / "Types.md").write_text("# Page\n", encoding="utf-8"),
+         "wiki/Types.md: is stale")
+    wiki("an edited generated page",
+         lambda root: (root / "wiki" / "Status.md").write_text(
+             (root / "wiki" / "Status.md").read_text(encoding="utf-8") + "\nextra\n", encoding="utf-8"),
+         "wiki/Status.md: is stale")
+    wiki("a missing page", lambda root: (root / "wiki" / "Tooling.md").unlink(), "wiki/Tooling.md: is missing")
+    wiki("an unknown wiki page", lambda root: (root / "wiki" / "Notes.md").write_text("# Notes\n", encoding="utf-8"),
+         "wiki/Notes.md: neither generated")
+    wiki("a docs page with no wiki page", lambda root: (root / "docs" / "Extra.md").write_text("# E\n", encoding="utf-8"),
+         "docs/Extra.md: has no wiki page")
+    wiki("a missing hand-written page", lambda root: (root / "wiki" / "Home.md").unlink(),
+         "wiki/Home.md: listed as hand-written but does not exist")
+    wiki("a repository-only page", lambda root: (root / "docs" / "Wiki.md").write_text("# W\n", encoding="utf-8"), None)
+
+    generator = load_script("generate-wiki")
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for path in ("docs/lang/Status.md", "docs/runtime/NVM.md", "docs/lang/Stdlib.md", "docs/Wiki.md",
+                     "README.md", "wiki/Home.md", "wiki/Stdlib.md", "src/main.cpp"):
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text("", encoding="utf-8")
+        for name, link, wanted in (
+            ("a docs page with a wiki page", "[a](Status.md)", "[a](Status)"),
+            ("a docs page and anchor", "[a](Status.md#open-decisions)", "[a](Status#open-decisions)"),
+            ("a page in another docs directory", "[a](../runtime/NVM.md#x)", "[a](NVM#x)"),
+            ("the renamed standard library plan", "[a](Stdlib.md#18-implementation-decisions)",
+             "[a](Stdlib-Design#18-implementation-decisions)"),
+            ("a docs page with no wiki page", "[a](../Wiki.md)", f"[a]({BLOB}/docs/Wiki.md)"),
+            ("a repository file", "[a](../../src/main.cpp#L3)", f"[a]({BLOB}/src/main.cpp#L3)"),
+            ("a repository directory", "[a](../../src/)", f"[a]({BLOB.replace("blob", "tree")}/src)"),
+            ("a hand-written wiki page", "[a](../../wiki/Stdlib.md#x)", "[a](Stdlib#x)"),
+            ("the wiki home page", "[a](../../wiki/Home.md)", "[a](Home)"),
+            ("a link with a title", '[a](Status.md "t")', '[a](Status "t")'),
+            ("an angle-bracket target", "[a](<Status.md>)", "[a](<Status>)"),
+            ("an image", "![a](../../src/main.cpp)", f"![a]({BLOB}/src/main.cpp)"),
+            ("a reference definition", "[a]: Status.md", "[a]: Status"),
+            ("an HTML link", '<a href="Status.md">a</a>', '<a href="Status">a</a>'),
+            ("a link text with a code span", "[`a`](Status.md)", "[`a`](Status)"),
+            ("a link split over two lines", "[a\nb](Status.md)", "[a\nb](Status)"),
+            ("a same-page link", "[a](#heading)", "[a](#heading)"),
+            ("an external link", "[a](https://example.com/Status.md)", "[a](https://example.com/Status.md)"),
+            ("a mail link", "[a](mailto:x@example.com)", "[a](mailto:x@example.com)"),
+            ("a link in a code span", "`[a](Status.md)` and [b](Status.md)", "`[a](Status.md)` and [b](Status)"),
+            ("a link in a fenced block", "```text\n[a](Status.md)\n```\n[b](Status.md)",
+             "```text\n[a](Status.md)\n```\n[b](Status)"),
+            ("a link in a longer fence", "````md\n```\n[a](Status.md)\n````\n[b](Status.md)",
+             "````md\n```\n[a](Status.md)\n````\n[b](Status)"),
+            ("a link in a tilde fence", "~~~\n[a](Status.md)\n~~~\n[b](Status.md)",
+             "~~~\n[a](Status.md)\n~~~\n[b](Status)"),
+        ):
+            same(f"generate-wiki: {name}",
+                 generator.rewrite_links(link, "docs/lang/Types.md", root, "example/project"),
+                 wanted)
+        page = generator.generate("docs/lang/Status.md", "\n# Title\n\nBody [a](Types.md).\n", root, "example/project")
+        same("generate-wiki: the generated page", page, generator.COMMENT.format(path="docs/lang/Status.md")
+             + "\n# Title\n\n" + generator.NAVIGATION + "\n\nBody [a](Types).\n")
 
     ran = '<testcase name="a" status="run"/><testcase name="b" status="run"/>'
     report("every test ran", ran, 2, None)
