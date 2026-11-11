@@ -70,10 +70,18 @@ PROGRAMS = [
     ("concurrency-child-trap", "tests/concurrency/programs/child-trap.nra", [], False),
     ("concurrency-collect-parked", "tests/concurrency/programs/collect-parked.nra", [], False),
     ("concurrency-worker-group", "tests/concurrency/programs/worker-group.nra", [], False),
+    # Float and wide-integer circuits, which the evaluator runs differently
+    # from mostly-zero integer circuits.
+    ("wall-nbody", "tests/bench-wall/neura/nbody.nra", ["40"], False),
+    ("wall-mandelbrot", "tests/bench-wall/neura/mandelbrot.nra", ["10"], False),
+    ("wall-spectral-norm", "tests/bench-wall/neura/spectral-norm.nra", ["6"], False),
+    ("wall-sha256", "tests/bench-wall/neura/sha256.nra", ["2000"], False),
+    ("wall-binary-trees", "tests/bench-wall/neura/binary-trees.nra", ["8"], False),
+    ("wall-collatz", "tests/bench-wall/neura/collatz.nra", ["500"], False),
 ]
 
 # Programs rerun under each limit in the sweep.
-SWEEP_PROGRAMS = ["collections", "bench-hash-map", "trap-deep-recursion", "concurrency-fan-out"]
+SWEEP_PROGRAMS = ["collections", "bench-hash-map", "trap-deep-recursion", "concurrency-fan-out", "wall-nbody"]
 SWEEP = [
     ["--max-steps", "1000"], ["--max-steps", "12345"], ["--max-steps", "50001"],
     ["--max-heap-cells", "300"], ["--max-heap-cells", "1000"], ["--max-heap-cells", "5000"],
