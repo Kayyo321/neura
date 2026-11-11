@@ -2,7 +2,8 @@
 """Test the repository's check scripts.
 
 `check-docs.py`, `check-workflows.py`, `check-test-report.py`,
-`generate-wiki.py`, `check-doc-examples.py`, and `build-site.py` gate pull
+`generate-wiki.py`, `check-doc-examples.py`, `check-diagnostics.py`, and
+`build-site.py` gate pull
 requests, so each must accept valid input and reject each kind of problem it
 exists to find. This script runs them on small inputs built in a temporary
 directory and compares the exit status and the reported problem.
@@ -400,6 +401,28 @@ def examples(label: str, files: dict[str, str], problem: str | None) -> None:
                                           "--directives-only"], problem)
 
 
+DIAGNOSTIC_FILES = {
+    "src/util/diagnostic_codes.def": 'NEURA_DIAGNOSTIC(E0101, "invalid character")\n',
+    "src/lexer.cpp": 'throw Diagnostic(span, "invalid character").with_code("E0101");\n',
+    "docs/diagnostics/README.md": "# Codes\n\n[E0101](E0101.md)\n",
+    "docs/diagnostics/E0101.md": "# E0101: invalid character\n\n<!-- example: error: E0101 -->\n```neura\nlet x = $;\n```\n\n"
+                                 "<!-- example: check -->\n```neura\nlet x = 1;\n```\n",
+}
+
+
+def diagnostics(label: str, changes: dict[str, str | None], problem: str | None) -> None:
+    """Run check-diagnostics.py on a small registry, source, and set of pages."""
+    with tempfile.TemporaryDirectory() as directory:
+        for name, text in {**DIAGNOSTIC_FILES, **changes}.items():
+            if text is None:
+                continue
+            path = Path(directory) / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        expect(f"diagnostics: {label}", [sys.executable, str(SCRIPTS / "check-diagnostics.py"), "--root", directory],
+               problem)
+
+
 def block(directive: str | None, blank: str = "") -> str:
     comment = f"<!-- example: {directive} -->\n{blank}" if directive else ""
     return f"# Page\n\n{comment}```neura\nlet x = 1;\n```\n"
@@ -600,6 +623,29 @@ def main() -> int:
     examples("a fragment with an empty reason", {"docs/A.md": block("fragment:  ")}, "`example: fragment` needs a reason")
     examples("a rejected block without text", {"docs/A.md": block("rejected")}, "`example: rejected` needs")
     examples("a check with an argument", {"docs/A.md": block("check: yes")}, "`example: check` takes no argument")
+    examples("an error block with a code", {"docs/A.md": block("error: E0401")}, None)
+    examples("an error block without a code", {"docs/A.md": block("error")}, "`example: error` needs the diagnostic code")
+    examples("an error block with text for a code", {"docs/A.md": block("error: unknown name")},
+             "`example: error` needs the diagnostic code")
+
+    diagnostics("a code with a page and a failing example", {}, None)
+    diagnostics("a construction without a code", {"src/lexer.cpp": 'throw Diagnostic(span, "invalid character");\n'},
+                "src/lexer.cpp:1: a diagnostic is constructed without")
+    diagnostics("a construction with an exemption",
+                {"src/model.hpp": '// diagnostic-code: none: the model itself\nDiagnostic(span, "x");\n'}, None)
+    diagnostics("an unregistered code", {"src/parser.cpp": 'throw Diagnostic(span, "x").with_code("E0299");\n'},
+                "E0299 is not in the registry")
+    diagnostics("a registered code that nothing uses", {"src/lexer.cpp": "\n"}, "E0101 is registered but no diagnostic")
+    diagnostics("a code without a page", {"docs/diagnostics/E0101.md": None}, "E0101 has no explain page")
+    diagnostics("a page with another title", {"docs/diagnostics/E0101.md": DIAGNOSTIC_FILES["docs/diagnostics/E0101.md"]
+                .replace("invalid character", "bad character", 1)}, "the first line must be")
+    diagnostics("a page for no code", {"docs/diagnostics/E0102.md": "# E0102: x\n"}, "E0102 is not a registered code")
+    diagnostics("a code that nothing exercises", {"docs/diagnostics/E0101.md": "# E0101: invalid character\n\n"
+                "<!-- example: check -->\n```neura\nlet x = 1;\n```\n"}, "no failing example")
+    diagnostics("a page that says why it has no failing example", {
+        "docs/diagnostics/E0101.md": "# E0101: invalid character\n\n<!-- diagnostic: not reproducible: bytes -->\n\n"
+                                     "<!-- example: check -->\n```neura\nlet x = 1;\n```\n",
+        "tests/ui/lexer/a.stderr": "error[E0101]: invalid character\n"}, None)
     examples("a run without expected output", {"docs/A.md": block("run")}, "must be followed by a ```text block")
     examples("a run followed by another kind of block", {"docs/A.md": block("run") + "\n```sh\nls\n```\n"},
              "must be followed by a ```text block")

@@ -44,6 +44,9 @@ jobs:
       - name: Check documentation links
         run: python3 scripts/check-docs.py
 
+      - name: Check the diagnostic codes, their pages, and their tests
+        run: python3 scripts/check-diagnostics.py
+
       - name: Check the standard library reference pages
         run: python3 scripts/update-stdlib-wiki-api.py --check
 

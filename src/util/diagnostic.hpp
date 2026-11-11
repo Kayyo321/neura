@@ -74,10 +74,12 @@ struct DiagnosticData {
 
 class Diagnostic : public std::runtime_error {
 public:
+    // diagnostic-code: none: the constructor itself; sites add with_code.
     Diagnostic(Span location, std::string message)
         : std::runtime_error(std::move(message)), span(std::move(location)) {}
 
     static Diagnostic warning(Span location, std::string name, std::string message) {
+        // diagnostic-code: none: a warning has a name instead of a code.
         Diagnostic result(std::move(location), std::move(message));
         result.edit().severity = Severity::Warning;
         result.edit().name = std::move(name);
@@ -152,6 +154,7 @@ public:
 
     // A copy with `message` in place of this one's, keeping span and data.
     Diagnostic with_message(std::string message) const {
+        // diagnostic-code: none: the copy keeps this diagnostic's code.
         Diagnostic result(span, std::move(message));
         result.data_ = data_;
         return result;
