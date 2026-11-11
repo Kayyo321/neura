@@ -55,6 +55,7 @@ export let BitSet = module (
     };
 
     /// @brief A mutable set of non-negative integers that iterates in ascending order. Negative element arguments trap with `invalid argument: negative element`.
+    #NotThreadSafe
     export let BitSet = class implements MutableSet<int> (
         /// @brief Membership bits grouped into 32 consecutive integers per word.
         let words: uint32[list] = [];

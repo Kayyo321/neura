@@ -16,7 +16,7 @@ let sorting = import:Std.Collections.Sorting;
 #Since("0.1.0")
 export let Sequence = module (
     /// @brief A lazy traversal that can be handed to a downstream operation only once.
-    #[Final, NoDiscard]
+    #[Final, NoDiscard, NotThreadSafe]
     export let Sequence = class<T> implements Iterable<T> (
         /// @brief The availability check for the next output, which may fill a buffer from the upstream source.
         last has_next: func() -> bool;

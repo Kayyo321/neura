@@ -14,7 +14,7 @@ let scopes = import:Std.DynamicForeign.Internal.Scope;
 #Since("0.1.0")
 export let MemorySegment = module (
     /// @brief A native address, a size in bytes, and the scope that owns the memory.
-    #Final
+    #[Final, NotThreadSafe]
     export let MemorySegment = class (
         /// @brief The address of the first byte.
         last base: int64;

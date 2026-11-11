@@ -13,6 +13,7 @@ export let HashSet = module (
     let Seal = enum (Token);
 
     /// @brief A mutable set that tests membership by hash and equality and iterates in insertion order.
+    #NotThreadSafe
     export let HashSet = class<T> implements MutableSet<T> (
         /// @brief Never replaced, so iterators can read its modification count.
         last core: hash_core.HashCore;

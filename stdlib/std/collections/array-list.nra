@@ -11,6 +11,7 @@ let sorting = import:Std.Collections.Sorting;
 #Since("0.1.0")
 export let ArrayList = module (
     /// @brief A resizable list whose backing storage can be shared with callers.
+    #NotThreadSafe
     export let ArrayList = class<T> implements MutableList<T> (
         /// @brief The list shared with the constructor input and returned by `items()`.
         last storage: T[list];

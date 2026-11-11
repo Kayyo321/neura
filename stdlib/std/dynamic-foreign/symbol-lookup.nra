@@ -14,7 +14,7 @@ let scopes = import:Std.DynamicForeign.Internal.Scope;
 #Since("0.1.0")
 export let SymbolLookup = module (
     /// @brief A loaded library, the process's default lookup, or the image's embedded library.
-    #Final
+    #[Final, NotThreadSafe]
     export let SymbolLookup = class (
         /// @brief The provider's library identifier.
         last library: int64;

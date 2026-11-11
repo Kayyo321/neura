@@ -147,7 +147,7 @@ export let Regex = module (
     );
 
     /// @brief Stores a compiled pattern and provides matching, replacement, and splitting.
-    #[Final, Since("0.1.0")]
+    #[Final, Since("0.1.0"), NotThreadSafe]
     export let Regex = class (
         /// @brief The compiled program and its reusable execution state.
         last program: machine.Program;

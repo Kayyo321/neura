@@ -9,6 +9,7 @@ let.promote _ = import:Std.Core.Unit;
 #Since("0.1.0")
 export let Stopwatch = module (
     /// @brief A clock-backed accumulator for one or more elapsed intervals.
+    #NotThreadSafe
     export let Stopwatch = class (
         /// @brief The clock supplying monotonic readings.
         last source: Clock;

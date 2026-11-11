@@ -16,7 +16,7 @@ export let StringBuilder = module (
     let Seal = enum (Token);
 
     /// @brief Accumulates mutable UTF-8 bytes and produces immutable string snapshots.
-    #[Final, Since("0.1.0")]
+    #[Final, Since("0.1.0"), NotThreadSafe]
     export let StringBuilder = class (
         /// @brief Stores the current UTF-8 bytes.
         let bytes: uint8[list] = [];

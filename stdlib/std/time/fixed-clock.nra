@@ -10,6 +10,7 @@ let.promote _ = import:Std.Core.Unit;
 #Since("0.1.0")
 export let FixedClock = module (
     /// @brief A manually controlled clock with independent wall and monotonic readings.
+    #NotThreadSafe
     export let FixedClock = class implements Clock (
         /// @brief The current simulated instant.
         let current: instant.Instant;

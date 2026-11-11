@@ -8,7 +8,7 @@ let.promote _ = import:Std.Core.Unit;
 #Since("0.1.0")
 export let ByteBuffer = module (
     /// @brief A growable in-memory byte sink that can create independent readers.
-    #Final
+    #[Final, NotThreadSafe]
     export let ByteBuffer = class (
         /// @brief Stores all bytes written since construction or the last clear.
         let data: uint8[list] = [];

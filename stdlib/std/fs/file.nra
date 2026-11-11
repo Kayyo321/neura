@@ -39,7 +39,7 @@ export let File = module (
     let close_file = func(file: int64) -> DoneOutcome host("neura.fs.close", 1);
 
     /// @brief An unbuffered host file with an explicit, idempotent close operation.
-    #[Final, NoDiscard(reason: "an open file must be closed")]
+    #[Final, NoDiscard(reason: "an open file must be closed"), NotThreadSafe]
     export let File = class implements Closeable (
         /// @brief Holds the provider handle and the context used in error messages.
         last handle: FileHandle;

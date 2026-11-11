@@ -16,7 +16,7 @@ export let BufferedWriter = module (
     export const MinimumCapacity: int = 16;
 
     /// @brief Wraps a byte sink and batches small writes.
-    #Final
+    #[Final, NotThreadSafe]
     export let BufferedWriter = class (
         /// @brief The destination that receives the outgoing bytes.
         last sink: func(uint8[list]) -> Result<Unit>;

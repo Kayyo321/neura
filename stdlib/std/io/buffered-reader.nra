@@ -15,7 +15,7 @@ export let BufferedReader = module (
     export const MinimumCapacity: int = 16;
 
     /// @brief Wraps a byte source and retains unread bytes between reads.
-    #Final
+    #[Final, NotThreadSafe]
     export let BufferedReader = class (
         /// @brief The underlying byte source called when more input is needed.
         last source: func(int) -> Result<uint8[list]>;

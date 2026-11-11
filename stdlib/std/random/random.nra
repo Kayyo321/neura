@@ -16,7 +16,7 @@ export let Random = module (
     let Seal = enum (Token);
 
     /// @brief A deterministic xoshiro256** generator with an optional cached normal sample.
-    #Final
+    #[Final, NotThreadSafe]
     export let Random = class (
         /// @brief The first word of the xoshiro256** state.
         let s0: uint64;

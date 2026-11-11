@@ -11,6 +11,7 @@ let.promote _ = import:Std.Collections.Queue;
 #Since("0.1.0")
 export let PriorityQueue = module (
     /// @brief A min-heap that exposes the least element according to its comparator.
+    #NotThreadSafe
     export let PriorityQueue = class<T> implements Queue<T> (
         /// @brief Heap order: the children of index i are at 2i + 1 and 2i + 2.
         let heap: T[list];

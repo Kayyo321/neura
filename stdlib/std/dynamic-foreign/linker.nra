@@ -18,7 +18,7 @@ let strings = import:Std.Text.Strings;
 #Since("0.1.0")
 export let Linker = module (
     /// @brief The platform's C calling convention.
-    #Final
+    #[Final, NotThreadSafe]
     export let Linker = class (
         /// @brief Use native_linker.
         export let init = func {};

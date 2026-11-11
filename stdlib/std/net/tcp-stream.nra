@@ -44,7 +44,7 @@ export let TcpStream = module (
     let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
     /// @brief Owns a connected TCP socket with an independently configured read timeout.
-    #[Final, NoDiscard(reason: "a stream must be closed")]
+    #[Final, NoDiscard(reason: "a stream must be closed"), NotThreadSafe]
     export let TcpStream = class implements Closeable (
         /// @brief Holds the provider handle and the context used in error messages.
         last handle: socket.Handle;

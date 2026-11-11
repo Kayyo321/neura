@@ -8,7 +8,7 @@ let result = import:Std.Core.Result;
 #Since("0.1.0")
 export let Utf8Reader = module (
     /// @brief Decodes UTF-8 from a byte source and retains bytes read ahead.
-    #Final
+    #[Final, NotThreadSafe]
     export let Utf8Reader = class (
         /// @brief The underlying byte source called when more input is needed.
         last source: func(int) -> result.Result<uint8[list]>;

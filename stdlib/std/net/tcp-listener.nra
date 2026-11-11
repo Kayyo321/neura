@@ -33,7 +33,7 @@ export let TcpListener = module (
     let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
     /// @brief Owns a listening socket and retains its port after close.
-    #[Final, NoDiscard(reason: "a listener must be closed")]
+    #[Final, NoDiscard(reason: "a listener must be closed"), NotThreadSafe]
     export let TcpListener = class implements Closeable (
         /// @brief Holds the provider handle and the context used in error messages.
         last handle: socket.Handle;
