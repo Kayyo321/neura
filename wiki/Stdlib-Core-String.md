@@ -34,19 +34,19 @@ The following public declarations are taken from the module source; each links t
 - **String** · [`export let compare_to_ignore_ascii_case = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L46)
   Compares UTF-8 bytes lexicographically after folding ASCII letters. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let to_lower_case = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L51)
-  Applies Unicode lowercase mapping with the root locale rules. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Applies Unicode lowercase mapping with the root locale rules. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **String** · [`export let to_upper_case = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L58)
-  Applies Unicode uppercase mapping with the root locale rules. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Applies Unicode uppercase mapping with the root locale rules. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **String** · [`export let compare_to_ignore_case = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L65)
   Compares scalars after simple uppercase followed by simple lowercase mapping. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let equals_ignore_case = func(s: string, other: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L70)
   Tests equality using simple scalar case mapping. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let case_fold = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L75)
-  Applies full locale-independent Unicode case folding, which can expand a scalar. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Applies full locale-independent Unicode case folding, which can expand a scalar. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **String** · [`export let compare_to_fold_case = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L79)
-  Orders the results of full Unicode case folding. Tagged `#ThreadSafe`.
+  Orders the results of full Unicode case folding. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let equals_fold_case = func(s: string, other: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L84)
-  Tests equality of the results of full Unicode case folding. Tagged `#ThreadSafe`.
+  Tests equality of the results of full Unicode case folding. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let starts_with_at = func(s: string, prefix: string, offset: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L89)
   Tests whether the prefix begins at the supplied byte offset. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let region_matches = func(s: string, start: int, other: string, other_start: int, byte_count: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L94)
@@ -58,11 +58,11 @@ The following public declarations are taken from the module source; each links t
 - **String** · [`export let index_of_range = func(s: string, needle: string, start: int, end: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L125)
   Finds the first occurrence wholly within the half-open byte range, or returns -1. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let index_of_code_point = func(s: string, scalar: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L132)
-  Finds the first byte offset of the scalar, or returns -1. Tagged `#ThreadSafe`.
+  Finds the first byte offset of the scalar, or returns -1. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let last_index_of_from = func(s: string, needle: string, from: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L137)
   Finds the last occurrence starting at or before the specified byte offset, or returns -1. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let last_index_of_code_point = func(s: string, scalar: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L153)
-  Finds the last byte offset of the scalar, or returns -1. Tagged `#ThreadSafe`.
+  Finds the last byte offset of the scalar, or returns -1. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let code_point_at = func(s: string, offset: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L158)
   Returns the Unicode scalar beginning at a UTF-8 byte offset. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let code_point_before = func(s: string, offset: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L162)
@@ -74,11 +74,11 @@ The following public declarations are taken from the module source; each links t
 - **String** · [`export let get_bytes = func(s: string) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L175)
   Copies the UTF-8 bytes into a new list.
 - **String** · [`export let try_get_bytes = func(s: string, charset: Charset) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L185)
-  Encodes strictly and reports the byte offset of an unrepresentable scalar. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Encodes strictly and reports the byte offset of an unrepresentable scalar. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **String** · [`export let decode_bytes = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L195)
   Decodes UTF-8, substituting U+FFFD for each maximal malformed subpart.
 - **String** · [`export let try_decode_bytes = func(bytes: uint8[list]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L204)
-  Decodes UTF-8 strictly, returning an error at the first invalid sequence. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Decodes UTF-8 strictly, returning an error at the first invalid sequence. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **String** · [`export let utf16_length = func(s: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L218)
   Explicit UTF-16 adapters. Other positional operations use UTF-8. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let char_at = func(s: string, index: int) -> uint16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L233)
@@ -90,7 +90,7 @@ The following public declarations are taken from the module source; each links t
 - **String** · [`export let get_chars = func(s: string, start: int, end: int, destination: uint16[], destination_start: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L260)
   Copies a half-open UTF-16 code-unit range into an existing array or list. Invalid ranges trap.
 - **String** · [`export let from_char_array = func(units: uint16[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L275)
-  Decodes UTF-16 code units. Unpaired surrogates trap. Tagged `#ThreadSafe`.
+  Decodes UTF-16 code units. Unpaired surrogates trap. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let offset_by_code_points = func(s: string, offset: int, count: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L300)
   Moves a byte offset by a signed number of Unicode scalars. Invalid offsets or positions trap. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let.override trim = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L323)
@@ -106,13 +106,13 @@ The following public declarations are taken from the module source; each links t
 - **String** · [`export let.override lines = func(s: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L361)
   CR, LF, and CRLF each end a line. An empty string has no lines. Tagged `#Pure`, `#ThreadSafe`.
 - **String** · [`export let indent = func(s: string, count: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L386)
-  Positive counts add spaces. Negative counts remove up to that many leading whitespace code points. Each resulting line ends with LF. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Positive counts add spaces. Negative counts remove up to that many leading whitespace code points. Each resulting line ends with LF. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **String** · [`export let strip_indent = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L405)
-  Removes incidental indentation and trailing whitespace per line. A terminal line separator fixes the removable indentation at zero. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Removes incidental indentation and trailing whitespace per line. A terminal line separator fixes the removable indentation at zero. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **String** · [`export let matches = func(s: string, pattern: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L439)
   Tests whether a regex matches the whole string. An invalid pattern traps.
 - **String** · [`export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L444)
-  Replaces every occurrence of a Unicode scalar with another scalar. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Replaces every occurrence of a Unicode scalar with another scalar. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **String** · [`export let replace_all = func(s: string, pattern: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L449)
   Replaces all regex matches. An invalid pattern or replacement traps. Tagged `#NoDiscard`.
 - **String** · [`export let replace_first_regex = func(s: string, pattern: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L454)
@@ -132,7 +132,7 @@ The following public declarations are taken from the module source; each links t
 - **String** · [`export let transform = func<T>(s: string, operation: func(string) -> T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L481)
   Applies the supplied callback to the text and returns its result.
 - **String** · [`export let translate_escapes = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L486)
-  Decodes supported backslash and octal escapes and removes escaped line endings. Malformed escapes trap. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Decodes supported backslash and octal escapes and removes escaped line endings. Malformed escapes trap. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Current text and formatting contracts

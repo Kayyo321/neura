@@ -36,7 +36,7 @@ The following public declarations are taken from the module source; each links t
 - **ZoneOffset** · [`export let of_hours_minutes = func(hours: int, minutes: int) -> ZoneOffset`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L56)
   Hours -18 through 18 and minutes -59 through 59 with the same sign (either may be zero), at most 18:00 from zero. Anything else traps with "invalid argument: invalid zone offset". Tagged `#Pure`, `#ThreadSafe`.
 - **ZoneOffset** · [`export let parse = func(text: string) -> result.Result<ZoneOffset>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L73)
-  Z, or a sign and HH:MM no further than 18:00 from zero. -00:00 and +00:00 are Utc. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an hour above 18 or a minute above 59, or at the sign when the total exceeds 18:00. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Z, or a sign and HH:MM no further than 18:00 from zero. -00:00 and +00:00 are Utc. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an hour above 18 or a minute above 59, or at the sign when the total exceeds 18:00. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

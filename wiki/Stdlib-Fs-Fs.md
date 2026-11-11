@@ -29,43 +29,43 @@ The following public declarations are taken from the module source; each links t
   The last modification instant, or nil when unavailable.
 - **Fs.FileMetadata** · [`export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L33)
   Stores the entry's kind, size, and modification time.
-- **Fs.FileMetadata** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L40)
-  Tests equality of the kind, size, and modification time.
-- **Fs.FileMetadata** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L50)
-  Combines the hashes of the kind, size, and modification time.
-- **Fs.FileMetadata** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L55)
-  Formats the metadata as Kind(size, modified), with nil for an absent timestamp.
-- **Fs** · [`export const CopyBufferSize: int = 65536`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L78)
+- **Fs.FileMetadata** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L41)
+  Tests equality of the kind, size, and modification time. Tagged `#Pure`.
+- **Fs.FileMetadata** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L52)
+  Combines the hashes of the kind, size, and modification time. Tagged `#Pure`.
+- **Fs.FileMetadata** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L58)
+  Formats the metadata as Kind(size, modified), with nil for an absent timestamp. Tagged `#Pure`.
+- **Fs** · [`export const CopyBufferSize: int = 65536`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L81)
   Bytes per read and write of copy_file and read_bytes.
-- **Fs** · [`export let read_bytes = func(path: Path) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L82)
+- **Fs** · [`export let read_bytes = func(path: Path) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L85)
   Reads all bytes from the path and closes the file before returning. Tagged `#NoDiscard`.
-- **Fs** · [`export let read_text = func(path: Path) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L95)
+- **Fs** · [`export let read_text = func(path: Path) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L98)
   The file's text; invalid UTF-8 fails with InvalidData. Tagged `#NoDiscard`.
-- **Fs** · [`export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L112)
+- **Fs** · [`export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L115)
   Creates or truncates the file and writes the bytes. Tagged `#NoDiscard`.
-- **Fs** · [`export let write_text = func(path: Path, text: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L118)
+- **Fs** · [`export let write_text = func(path: Path, text: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L121)
   Creates or truncates the file and writes the UTF-8 bytes of the text. Tagged `#NoDiscard`.
-- **Fs** · [`export let append_text = func(path: Path, text: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L124)
+- **Fs** · [`export let append_text = func(path: Path, text: string) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L127)
   Creates the file if needed and writes the text at its end. Tagged `#NoDiscard`.
-- **Fs** · [`export let exists = func(path: Path) -> result.Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L130)
+- **Fs** · [`export let exists = func(path: Path) -> result.Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L133)
   Ok(false) for NotFound; other failures are errors. Follows links. Tagged `#NoDiscard`.
-- **Fs** · [`export let metadata = func(path: Path) -> result.Result<FileMetadata>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L139)
+- **Fs** · [`export let metadata = func(path: Path) -> result.Result<FileMetadata>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L142)
   The kind, size in bytes, and last modification time of an entry, following links. Tagged `#NoDiscard`.
-- **Fs** · [`export let list = func(path: Path) -> result.Result<Path[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L148)
+- **Fs** · [`export let list = func(path: Path) -> result.Result<Path[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L151)
   The directory's entries joined to `path`, sorted by name bytes. Tagged `#NoDiscard`.
-- **Fs** · [`export let create_directory = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L165)
+- **Fs** · [`export let create_directory = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L168)
   Creates a single directory. Missing parents and an existing entry are reported as errors. Tagged `#NoDiscard`.
-- **Fs** · [`export let create_directories = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L171)
+- **Fs** · [`export let create_directories = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L174)
   Creates the directory and any missing parents; succeeds when the directory already exists. Tagged `#NoDiscard`.
-- **Fs** · [`export let remove_file = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L202)
+- **Fs** · [`export let remove_file = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L205)
   Removes a file or another entry that is not a directory, such as a link (the link, not its target). Tagged `#NoDiscard`.
-- **Fs** · [`export let remove_directory = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L208)
+- **Fs** · [`export let remove_directory = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L211)
   Removes an empty directory. Tagged `#NoDiscard`.
-- **Fs** · [`export let remove_tree = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L217)
+- **Fs** · [`export let remove_tree = func(path: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L220)
   Removes `path` and, for a directory, everything below it: depth first, in sorted order. Links and other entries of kind Other are removed without descending into them. Stops at the first error. Tagged `#NoDiscard`.
-- **Fs** · [`export let rename = func(from: Path, to: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L249)
+- **Fs** · [`export let rename = func(from: Path, to: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L252)
   Renames or moves an entry, replacing an existing file at `to`. Tagged `#NoDiscard`.
-- **Fs** · [`export let copy_file = func(from: Path, to: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L256)
+- **Fs** · [`export let copy_file = func(from: Path, to: Path) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L259)
   Copies a file's bytes through a 65,536-byte buffer, replacing an existing target. Both files are closed on every path. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

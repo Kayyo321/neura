@@ -22,7 +22,7 @@ The following public declarations are taken from the module source; each links t
 - **BufferedWriter** · [`export const MinimumCapacity: int = 16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-writer.nra#L16)
   The smallest supported buffer capacity in bytes.
 - **BufferedWriter** · [`export let BufferedWriter = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-writer.nra#L20)
-  Wraps a byte sink and batches small writes. Tagged `#Final`.
+  Wraps a byte sink and batches small writes. Tagged `#Final`, `#NotThreadSafe`.
 - **BufferedWriter.BufferedWriter** · [`export let buffered: int { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-writer.nra#L30)
   The number of bytes waiting for flush. Read-only. Since 0.2.0.
 - **BufferedWriter.BufferedWriter** · [`export let init = func(output: func(uint8[list]) -> Result<Unit>, size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-writer.nra#L34)
@@ -31,10 +31,10 @@ The following public declarations are taken from the module source; each links t
   Buffers small writes and forwards larger ones after flushing pending bytes. Tagged `#NoDiscard`.
 - **BufferedWriter.BufferedWriter** · [`export let flush = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-writer.nra#L62)
   Passes the buffered bytes to the sink. Tagged `#NoDiscard`.
-- **BufferedWriter** · [`export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> BufferedWriter`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-writer.nra#L74)
-  A writer collecting up to 8,192 bytes.
-- **BufferedWriter** · [`export let with_capacity = func(sink: func(uint8[list]) -> Result<Unit>, capacity: int) -> BufferedWriter`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-writer.nra#L78)
-  A capacity below 16 traps with "invalid argument: capacity below 16".
+- **BufferedWriter** · [`export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> BufferedWriter`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-writer.nra#L75)
+  A writer collecting up to 8,192 bytes. Tagged `#Pure`, `#ThreadSafe`.
+- **BufferedWriter** · [`export let with_capacity = func(sink: func(uint8[list]) -> Result<Unit>, capacity: int) -> BufferedWriter`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-writer.nra#L80)
+  A capacity below 16 traps with "invalid argument: capacity below 16". Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

@@ -72,7 +72,7 @@ The following public declarations are taken from the module source; each links t
 - **Duration** · [`export let of_days = func(days: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L164)
   A day is 24 hours. Tagged `#Pure`, `#ThreadSafe`.
 - **Duration** · [`export let parse = func(text: string) -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L173)
-  An optional sign, P, an optional day count with D, then optionally T and at least one of hours (H), minutes (M), and seconds (S) in that order; seconds may have a fraction of one through nine digits. At least one component is required, and letters are uppercase. The to_string form always parses. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first digit of the component that leaves int64. Tagged `#NoDiscard`, `#ThreadSafe`.
+  An optional sign, P, an optional day count with D, then optionally T and at least one of hours (H), minutes (M), and seconds (S) in that order; seconds may have a fraction of one through nine digits. At least one component is required, and letters are uppercase. The to_string form always parses. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first digit of the component that leaves int64. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

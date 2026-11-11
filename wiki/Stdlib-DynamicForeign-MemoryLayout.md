@@ -59,18 +59,18 @@ The following public declarations are taken from the module source; each links t
   The short name of a carrier. Tagged `#Pure`.
 - **MemoryLayout** · [`export let carrier_size = func(carrier: Carrier) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L236)
   The fixed size of a carrier; an address has the runner's pointer size, 8 here. Tagged `#Pure`.
-- **MemoryLayout** · [`export let value = func(carrier: Carrier) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L252)
-  A scalar layout with its natural size and alignment.
-- **MemoryLayout** · [`export let value_sized = func(carrier: Carrier, size: int64, alignment: int64) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L258)
-  A scalar layout with an explicit size and alignment, for C types whose size the runner reports.
-- **MemoryLayout** · [`export let padding_layout = func(bytes: int64) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L266)
-  `bytes` bytes of padding with alignment 1.
-- **MemoryLayout** · [`export let struct_layout = func(members: ...MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L275)
+- **MemoryLayout** · [`export let value = func(carrier: Carrier) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L253)
+  A scalar layout with its natural size and alignment. Tagged `#Pure`.
+- **MemoryLayout** · [`export let value_sized = func(carrier: Carrier, size: int64, alignment: int64) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L260)
+  A scalar layout with an explicit size and alignment, for C types whose size the runner reports. Tagged `#Pure`.
+- **MemoryLayout** · [`export let padding_layout = func(bytes: int64) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L269)
+  `bytes` bytes of padding with alignment 1. Tagged `#Pure`.
+- **MemoryLayout** · [`export let struct_layout = func(members: ...MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L278)
   A struct with C's natural layout: each member at the next offset aligned for it, the size rounded up to the largest member alignment. Traps when two members share a nonempty name.
-- **MemoryLayout** · [`export let union_layout = func(members: ...MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L296)
+- **MemoryLayout** · [`export let union_layout = func(members: ...MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L299)
   A union: every member at offset 0, the size the largest member's rounded up to the largest alignment.
-- **MemoryLayout** · [`export let sequence_layout = func(elements: int64, element: MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L317)
+- **MemoryLayout** · [`export let sequence_layout = func(elements: int64, element: MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L320)
   `elements` consecutive copies of `element`, a C array.
-- **MemoryLayout** · [`export let align_up = func(offset: int64, alignment: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L330)
+- **MemoryLayout** · [`export let align_up = func(offset: int64, alignment: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L333)
   `offset` rounded up to a multiple of `alignment`. Tagged `#Pure`.
 <!-- END SOURCE API -->

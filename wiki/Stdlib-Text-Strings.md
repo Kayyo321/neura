@@ -62,9 +62,9 @@ The following public declarations are taken from the module source; each links t
 - **Strings** · [`export let lines = func(s: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L170)
   Splits at LF. A CR immediately before an LF is removed, and the empty piece after a final LF is dropped. The empty string gives one empty line, as split does. Tagged `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let join = func(parts: string[list], separator: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L190)
-  The parts with the separator between each pair. Tagged `#ThreadSafe`.
+  The parts with the separator between each pair. Tagged `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let repeat = func(s: string, count: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L214)
-  `count` copies of the string. A negative count traps with "invalid argument: negative count". Tagged `#NoDiscard`, `#ThreadSafe`.
+  `count` copies of the string. A negative count traps with "invalid argument: negative count". Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let trim = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L235)
   Removes space, tab, LF, vertical tab, form feed, and CR from both ends. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let trim_start = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L246)
@@ -86,19 +86,19 @@ The following public declarations are taken from the module source; each links t
 - **Strings** · [`export let equals_ignore_ascii_case = func(a: string, b: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L292)
   Equal after mapping A through Z to a through z in both strings. Tagged `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let pad_start = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L299)
-  Copies of `pad` before the string until it has `width` scalar values. `pad` must be exactly one scalar value; otherwise the call traps with "invalid argument: pad is not one scalar value". Tagged `#NoDiscard`, `#ThreadSafe`.
+  Copies of `pad` before the string until it has `width` scalar values. `pad` must be exactly one scalar value; otherwise the call traps with "invalid argument: pad is not one scalar value". Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let pad_end = func(s: string, width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L312)
-  Copies of `pad` after the string, with the rules of pad_start. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Copies of `pad` after the string, with the rules of pad_start. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let reverse = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L325)
-  The scalar values in reverse order. Tagged `#NoDiscard`, `#ThreadSafe`.
+  The scalar values in reverse order. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let to_bytes = func(s: string) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L342)
-  A copy of the UTF-8 bytes. Tagged `#ThreadSafe`.
+  A copy of the UTF-8 bytes. Tagged `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let from_bytes = func(bytes: uint8[list]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L353)
   The text the bytes encode, or an Encoding error whose offset is the start of the first ill-formed sequence (the length of the longest valid prefix). Its message is "invalid start byte", "invalid continuation byte", or "unexpected end of data". Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let from_bytes_lossy = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L368)
   The text the bytes encode, with each maximal ill-formed subsequence (Unicode's "maximal subpart" practice) replaced by one U+FFFD. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **Strings** · [`export let from_scalars = func(values: uint32[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/strings.nra#L397)
-  The text of the scalar values. A surrogate or a value above 0x10FFFF traps with "invalid argument: not a Unicode scalar value". Tagged `#ThreadSafe`.
+  The text of the scalar values. A surrogate or a value above 0x10FFFF traps with "invalid argument: not a Unicode scalar value". Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

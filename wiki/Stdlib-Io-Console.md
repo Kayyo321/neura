@@ -60,11 +60,11 @@ The following public declarations are taken from the module source; each links t
   Writes raw text and one LF to stderr, returning any write error. Tagged `#NoDiscard`.
 - **Console** · [`export let read_line = func -> result.Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L153)
   The next line of input without its LF or a CR before it; None at the end of input. A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line. Tagged `#NoDiscard`.
-- **Console** · [`export let output = func -> func(uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L188)
-  The output stream as a byte sink.
-- **Console** · [`export let error = func -> func(uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L192)
-  The error stream as a byte sink.
-- **Console** · [`export let input = func -> func(int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L196)
+- **Console** · [`export let output = func -> func(uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L189)
+  The output stream as a byte sink. Tagged `#Pure`, `#ThreadSafe`.
+- **Console** · [`export let error = func -> func(uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L194)
+  The error stream as a byte sink. Tagged `#Pure`, `#ThreadSafe`.
+- **Console** · [`export let input = func -> func(int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/console.nra#L198)
   Console input as a byte source. It first returns input that read_line read ahead.
 <!-- END SOURCE API -->
 

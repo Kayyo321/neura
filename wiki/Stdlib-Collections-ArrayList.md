@@ -17,91 +17,91 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **ArrayList** · [`export let ArrayList = class<T> implements MutableList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L14)
-  A resizable list whose backing storage can be shared with callers.
-- **ArrayList.ArrayList** · [`export let init = func(values: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L21)
+- **ArrayList** · [`export let ArrayList = class<T> implements MutableList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L15)
+  A resizable list whose backing storage can be shared with callers. Tagged `#NotThreadSafe`.
+- **ArrayList.ArrayList** · [`export let init = func(values: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L22)
   Adopts `values` without copying, as `wrap` does.
-- **ArrayList.ArrayList** · [`export let items = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L26)
+- **ArrayList.ArrayList** · [`export let items = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L27)
   Returns the live backing list shared with this wrapper. A built-in for-each over it traps with reason 5 on structural changes.
-- **ArrayList.ArrayList** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L29)
+- **ArrayList.ArrayList** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L30)
   Returns the number of elements.
-- **ArrayList.ArrayList** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L32)
+- **ArrayList.ArrayList** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L33)
   Returns true when there are no elements.
-- **ArrayList.ArrayList** · [`export let get = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L35)
+- **ArrayList.ArrayList** · [`export let get = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L36)
   Returns the element at zero-based `index`. An invalid index causes a bounds trap.
-- **ArrayList.ArrayList** · [`export let set = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L38)
+- **ArrayList.ArrayList** · [`export let set = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L39)
   Replaces the element at `index` without invalidating iterators. An invalid index causes a bounds trap.
-- **ArrayList.ArrayList** · [`export let first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L43)
+- **ArrayList.ArrayList** · [`export let first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L44)
   Returns the first element. Traps with `no such element` when empty.
-- **ArrayList.ArrayList** · [`export let last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L51)
+- **ArrayList.ArrayList** · [`export let last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L52)
   Returns the last element. Traps with `no such element` when empty.
-- **ArrayList.ArrayList** · [`export let first_or_none = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L60)
+- **ArrayList.ArrayList** · [`export let first_or_none = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L61)
   Returns the first element as `Some`, or `None` when empty. Tagged `#NoDiscard`.
-- **ArrayList.ArrayList** · [`export let last_or_none = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L69)
+- **ArrayList.ArrayList** · [`export let last_or_none = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L70)
   Returns the last element as `Some`, or `None` when empty. Tagged `#NoDiscard`.
-- **ArrayList.ArrayList** · [`export let add = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L77)
+- **ArrayList.ArrayList** · [`export let add = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L78)
   Appends `value` and returns true.
-- **ArrayList.ArrayList** · [`export let add_at = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L83)
+- **ArrayList.ArrayList** · [`export let add_at = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L84)
   Inserts before `index`, or appends when it equals the size. Other invalid indices cause a bounds trap.
-- **ArrayList.ArrayList** · [`export let add_all = func(values: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L103)
+- **ArrayList.ArrayList** · [`export let add_all = func(values: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L104)
   Appends each element in order. Reads by position up to the starting length, so adding the list's own items() doubles it.
-- **ArrayList.ArrayList** · [`export let remove_at = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L113)
+- **ArrayList.ArrayList** · [`export let remove_at = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L114)
   Removes and returns the element at zero-based `index`. An invalid index causes a bounds trap.
-- **ArrayList.ArrayList** · [`export let remove_first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L120)
+- **ArrayList.ArrayList** · [`export let remove_first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L121)
   Removes and returns the first element. Traps with `no such element` when empty.
-- **ArrayList.ArrayList** · [`export let remove_last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L130)
+- **ArrayList.ArrayList** · [`export let remove_last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L131)
   Removes and returns the last element. Traps with `no such element` when empty.
-- **ArrayList.ArrayList** · [`export let swap = func(i: int, j: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L141)
+- **ArrayList.ArrayList** · [`export let swap = func(i: int, j: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L142)
   Exchanges the elements at `i` and `j` without invalidating iterators.
-- **ArrayList.ArrayList** · [`export let reverse = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L148)
+- **ArrayList.ArrayList** · [`export let reverse = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L149)
   Reverses the element order in place without invalidating iterators.
-- **ArrayList.ArrayList** · [`export let fill = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L161)
+- **ArrayList.ArrayList** · [`export let fill = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L162)
   Replaces each element with `value` without invalidating iterators.
-- **ArrayList.ArrayList** · [`export let truncate = func(size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L173)
+- **ArrayList.ArrayList** · [`export let truncate = func(size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L174)
   Removes elements from the end of the backing list until `size` remain. Traps with "invalid argument: negative size" or "invalid argument: size above current size".
-- **ArrayList.ArrayList** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L186)
+- **ArrayList.ArrayList** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L187)
   Removes every element from the end of the same backing list.
-- **ArrayList.ArrayList** · [`export let slice = func(start: int, end: int) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L195)
+- **ArrayList.ArrayList** · [`export let slice = func(start: int, end: int) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L196)
   A new ArrayList with the elements from `start` inclusive to `end` exclusive. Traps with "invalid argument: range" unless 0 <= start <= end <= size().
-- **ArrayList.ArrayList** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L209)
+- **ArrayList.ArrayList** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L210)
   A new built-in list in order.
-- **ArrayList.ArrayList** · [`export let iterator = func -> Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L221)
+- **ArrayList.ArrayList** · [`export let iterator = func -> Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L222)
   A fail-fast iterator over the backing list.
-- **ArrayList.ArrayList** · [`export let sequence = func -> sequences.Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L225)
+- **ArrayList.ArrayList** · [`export let sequence = func -> sequences.Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L226)
   A lazy pipeline over this list's fail-fast iterator (Stdlib.md section 9.12): a structural change while it runs traps.
-- **ArrayList.ArrayList** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L229)
+- **ArrayList.ArrayList** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L230)
   Calls `action` in list order. The action leaves the list structure unchanged.
-- **ArrayList.ArrayList** · [`export let remove_if = func(drop: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L244)
+- **ArrayList.ArrayList** · [`export let remove_if = func(drop: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L245)
   Calls `drop` once per element in list order and compacts the survivors. The predicate leaves the list structure unchanged. The number of removed elements.
-- **ArrayList.ArrayList** · [`export let retain_if = func(keep: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L249)
+- **ArrayList.ArrayList** · [`export let retain_if = func(keep: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L250)
   Removes elements rejected by `keep` and returns the removal count. Calls the predicate once per element in list order. The predicate leaves the list structure unchanged.
-- **ArrayList.ArrayList** · [`export let index_where = func(test: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L280)
+- **ArrayList.ArrayList** · [`export let index_where = func(test: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L281)
   Returns the first index accepted by `test`, or -1 if no element matches. The predicate leaves the list structure unchanged.
-- **ArrayList.ArrayList** · [`export let sort = func(c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L298)
+- **ArrayList.ArrayList** · [`export let sort = func(c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L299)
   Stably sorts the backing list in place. The comparator defines a total order and leaves the list structure unchanged.
-- **ArrayList.ArrayList** · [`export let binary_search = func(value: T, c: func(T, T) -> ordering.Ordering) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L304)
+- **ArrayList.ArrayList** · [`export let binary_search = func(value: T, c: func(T, T) -> ordering.Ordering) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L305)
   Returns the first comparator-equal index, or `-insertion_point - 1` when absent. The list is already sorted by `c`, which leaves the list structure unchanged.
-- **ArrayList.ArrayList** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L308)
+- **ArrayList.ArrayList** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L309)
   Tests membership with `value.equals(element)`.
-- **ArrayList.ArrayList** · [`export let index_of = func(value: T) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L311)
+- **ArrayList.ArrayList** · [`export let index_of = func(value: T) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L312)
   Returns the lowest index where `value.equals(element)` is true, or -1 when absent.
-- **ArrayList.ArrayList** · [`export let last_index_of = func(value: T) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L324)
+- **ArrayList.ArrayList** · [`export let last_index_of = func(value: T) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L325)
   Returns the highest index where `value.equals(element)` is true, or -1 when absent.
-- **ArrayList.ArrayList** · [`export let remove = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L336)
+- **ArrayList.ArrayList** · [`export let remove = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L337)
   Removes the first element equal to `value`.
-- **ArrayList.ArrayList** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L347)
+- **ArrayList.ArrayList** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L348)
   Another ArrayList with the same element type, size, and equal elements at each index.
-- **ArrayList.ArrayList** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L355)
+- **ArrayList.ArrayList** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L356)
   Folds the element hashes in list order from 1, multiplying by 31 before each addition with 32-bit wraparound.
-- **ArrayList.ArrayList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L359)
+- **ArrayList.ArrayList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L360)
   Formats the list as `[a, b, c]`. The list prints "(this collection)" where its own text reaches it again.
-- **ArrayList** · [`export let create = func<T> -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L408)
+- **ArrayList** · [`export let create = func<T> -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L409)
   Creates an empty list with independent backing storage.
-- **ArrayList** · [`export let of = func<T>(items: T[list]) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L414)
+- **ArrayList** · [`export let of = func<T>(items: T[list]) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L415)
   Copies `items`.
-- **ArrayList** · [`export let filled = func<T>(count: int, value: T) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L426)
+- **ArrayList** · [`export let filled = func<T>(count: int, value: T) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L427)
   `count` copies of `value`. Traps with "invalid argument: negative count".
-- **ArrayList** · [`export let wrap = func<T>(items: T[list]) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L440)
+- **ArrayList** · [`export let wrap = func<T>(items: T[list]) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L441)
   Adopts `items` as the live backing list shared with the wrapper.
 <!-- END SOURCE API -->
 

@@ -72,11 +72,11 @@ The following public declarations are taken from the module source; each links t
 - **Float64** · [`export let to_string = func(v: float64) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L177)
   The shortest text that parses back to the same value (section 7.5). Tagged `#Pure`, `#ThreadSafe`.
 - **Float64** · [`export let to_fixed = func(v: float64, digits: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L182)
-  Exactly `digits` fraction digits (0 through 100; no point for 0), correctly rounded, ties to even. Other digit counts trap. Tagged `#ThreadSafe`.
+  Exactly `digits` fraction digits (0 through 100; no point for 0), correctly rounded, ties to even. Other digit counts trap. Tagged `#Pure`, `#ThreadSafe`.
 - **Float64** · [`export let to_exponential = func(v: float64, digits: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L188)
-  `d.ddd` with `digits` fraction digits (0 through 100), `e`, and the decimal exponent; correctly rounded, ties to even. Tagged `#ThreadSafe`.
+  `d.ddd` with `digits` fraction digits (0 through 100), `e`, and the decimal exponent; correctly rounded, ties to even. Tagged `#Pure`, `#ThreadSafe`.
 - **Float64** · [`export let parse = func(text: string) -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L194)
-  The grammar of section 7.5, converted exactly and rounded once, ties to even. Too large becomes an infinity and too small a signed zero. Tagged `#NoDiscard`, `#ThreadSafe`.
+  The grammar of section 7.5, converted exactly and rounded once, ties to even. Too large becomes an infinity and too small a signed zero. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

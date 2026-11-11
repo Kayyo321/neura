@@ -48,7 +48,7 @@ The following public declarations are taken from the module source; each links t
 - **LocalTime** · [`export let of_nano_of_day = func(nanos: int64) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L96)
   Traps with "invalid argument: invalid time" outside 0 through 86,399,999,999,999. Tagged `#Pure`, `#ThreadSafe`.
 - **LocalTime** · [`export let parse = func(text: string) -> result.Result<LocalTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L108)
-  HH:MM:SS with an optional fraction of one through nine digits. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an hour above 23 or a minute or second above 59. Tagged `#NoDiscard`, `#ThreadSafe`.
+  HH:MM:SS with an optional fraction of one through nine digits. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an hour above 23 or a minute or second above 59. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

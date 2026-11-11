@@ -31,8 +31,8 @@ The following public declarations are taken from the module source; each links t
   Adds to the value and returns the sum. The addition is checked like any int64 addition: it traps on overflow and leaves the value unchanged.
 - **AtomicInt64.AtomicInt64** · [`export let compare_exchange = func(expected: int64, desired: int64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/atomic-int64.nra#L33)
   Stores `desired` if the value equals `expected`, and reports whether it did. Tagged `#NoDiscard`.
-- **AtomicInt64** · [`export let create = func(initial: int64) -> AtomicInt64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/atomic-int64.nra#L43)
-  An atomic holding the initial value.
+- **AtomicInt64** · [`export let create = func(initial: int64) -> AtomicInt64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/atomic-int64.nra#L44)
+  An atomic holding the initial value. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

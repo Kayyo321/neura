@@ -40,7 +40,7 @@ The following public declarations are taken from the module source; each links t
 - **LocalDateTime** · [`export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L86)
   Combines a date and time of day without applying an offset. Tagged `#Pure`, `#ThreadSafe`.
 - **LocalDateTime** · [`export let parse = func(text: string) -> result.Result<LocalDateTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L92)
-  The LocalDate form, T, and the LocalTime form, with their errors. Tagged `#NoDiscard`, `#ThreadSafe`.
+  The LocalDate form, T, and the LocalTime form, with their errors. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

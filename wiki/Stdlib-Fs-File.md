@@ -22,7 +22,7 @@ The following public declarations are taken from the module source; each links t
 - **File** · [`export let SeekOrigin = enum (Start, Current, End)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L20)
   Selects the start, current position, or end as the reference point for seeking.
 - **File** · [`export let File = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L43)
-  An unbuffered host file with an explicit, idempotent close operation. Tagged `#Final`, `#NoDiscard(reason: "an open file must be closed")`.
+  An unbuffered host file with an explicit, idempotent close operation. Tagged `#Final`, `#NoDiscard(reason: "an open file must be closed")`, `#NotThreadSafe`.
 - **File.File** · [`export let init = func(opened: FileHandle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L50)
   Use File.open; the handle comes from the library.
 - **File.File** · [`export let read = func(max: int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L57)

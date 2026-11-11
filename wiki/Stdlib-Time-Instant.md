@@ -50,7 +50,7 @@ The following public declarations are taken from the module source; each links t
 - **Instant** · [`export let of_epoch_millis = func(millis: int64) -> Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L157)
   Converts a signed millisecond count into normalized epoch seconds and nanoseconds. Tagged `#Pure`, `#ThreadSafe`.
 - **Instant** · [`export let parse = func(text: string) -> result.Result<Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L168)
-  The to_string form with a fraction of one through nine digits, and Z or a numeric offset (+HH:MM or -HH:MM, at most 18:00) after the time. Years are -999,999 through 999,999. Errors are those of LocalDate.parse and LocalTime.parse for the date and time, then those of ZoneOffset.parse for the offset. Tagged `#NoDiscard`, `#ThreadSafe`.
+  The to_string form with a fraction of one through nine digits, and Z or a numeric offset (+HH:MM or -HH:MM, at most 18:00) after the time. Years are -999,999 through 999,999. Errors are those of LocalDate.parse and LocalTime.parse for the date and time, then those of ZoneOffset.parse for the offset. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

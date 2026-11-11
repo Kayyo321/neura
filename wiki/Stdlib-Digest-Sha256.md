@@ -26,7 +26,7 @@ The following public declarations are taken from the module source; each links t
 - **Sha256.Sha256** · [`export let finish = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L33)
   Pads the message, ends the digest, and returns the 32 bytes of the hash.
 - **Sha256** · [`export let create = func -> Sha256`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L38)
-  A new digest with no bytes added. Tagged `#ThreadSafe`.
+  A new digest with no bytes added. Tagged `#Pure`, `#ThreadSafe`.
 - **Sha256** · [`export let of = func(bytes: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L42)
   The 32-byte hash of the bytes. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->

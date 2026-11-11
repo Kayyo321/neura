@@ -18,7 +18,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **TcpStream** · [`export let TcpStream = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L48)
-  Owns a connected TCP socket with an independently configured read timeout. Tagged `#Final`, `#NoDiscard(reason: "a stream must be closed")`.
+  Owns a connected TCP socket with an independently configured read timeout. Tagged `#Final`, `#NoDiscard(reason: "a stream must be closed")`, `#NotThreadSafe`.
 - **TcpStream.TcpStream** · [`export let read_timeout: Duration = of_nanos(0) { get; set }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L59)
   The longest a read waits; zero, the initial value, waits without limit. Setting a negative timeout traps with "invalid argument: negative timeout". Since 0.2.0.
 - **TcpStream.TcpStream** · [`export let init = func(opened: socket.Handle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L67)

@@ -60,7 +60,7 @@ The following public declarations are taken from the module source; each links t
 - **LocalDate** · [`export let of_epoch_day = func(epoch_day: int64) -> LocalDate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L143)
   Traps with "invalid argument: date out of range" outside -999999-01-01 through 999999-12-31. Tagged `#Pure`, `#ThreadSafe`.
 - **LocalDate** · [`export let parse = func(text: string) -> result.Result<LocalDate>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L156)
-  YYYY-MM-DD, where the year is four digits or a sign and at least four digits. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first byte of a year beyond 999,999, a month outside 1 through 12, or a day outside the month. Tagged `#NoDiscard`, `#ThreadSafe`.
+  YYYY-MM-DD, where the year is four digits or a sign and at least four digits. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first byte of a year beyond 999,999, a month outside 1 through 12, or a day outside the month. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

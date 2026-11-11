@@ -18,7 +18,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **Sequence** · [`export let Sequence = class<T> implements Iterable<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L20)
-  A lazy traversal that can be handed to a downstream operation only once. Tagged `#Final`, `#NoDiscard`.
+  A lazy traversal that can be handed to a downstream operation only once. Tagged `#Final`, `#NoDiscard`, `#NotThreadSafe`.
 - **Sequence.Sequence** · [`export let init = func(more: func() -> bool, pull: func() -> T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L31)
   Constructs a lazy sequence from an availability check and an element pull.
 - **Sequence.Sequence** · [`export let iterator = func -> Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L38)
@@ -103,15 +103,15 @@ The following public declarations are taken from the module source; each links t
   An infinite sequence of make(), make(), ...
 - **Sequence** · [`export let iterate = func<T>(seed: T, step: func(T) -> T) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L713)
   Returns an infinite sequence starting with `seed` and repeatedly applying `step`. The step runs only when the next element is pulled.
-- **Sequence** · [`export let range = func(start: int, end: int) -> Sequence<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L730)
-  Returns the integers in ascending order from `start` inclusive to `end` exclusive. The sequence is empty when `end` is at or below `start`.
-- **Sequence** · [`export let join = func(s: Sequence<string>, separator: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L744)
+- **Sequence** · [`export let range = func(start: int, end: int) -> Sequence<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L731)
+  Returns the integers in ascending order from `start` inclusive to `end` exclusive. The sequence is empty when `end` is at or below `start`. Tagged `#Pure`, `#ThreadSafe`.
+- **Sequence** · [`export let join = func(s: Sequence<string>, separator: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L745)
   The strings with `separator` between consecutive ones.
-- **Sequence** · [`export let sum_int32 = func(s: Sequence<int>) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L760)
+- **Sequence** · [`export let sum_int32 = func(s: Sequence<int>) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L761)
   Consumes the sequence by adding from zero in order. Overflow traps with reason 1.
-- **Sequence** · [`export let sum_int64 = func(s: Sequence<int64>) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L770)
+- **Sequence** · [`export let sum_int64 = func(s: Sequence<int64>) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L771)
   Consumes the sequence by adding from zero in order. Overflow traps with reason 1.
-- **Sequence** · [`export let sum_float64 = func(s: Sequence<float64>) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L780)
+- **Sequence** · [`export let sum_float64 = func(s: Sequence<float64>) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L781)
   Consumes the sequence by adding left to right starting from the first element. Returns 0.0 when empty.
 <!-- END SOURCE API -->
 

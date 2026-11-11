@@ -25,31 +25,31 @@ The following public declarations are taken from the module source; each links t
   Normalizes `raw`; Path.of is the usual spelling.
 - **Path.Path** · [`export let join = func(other: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L31)
   This path followed by `other`; an absolute `other` replaces it. Tagged `#Pure`.
-- **Path.Path** · [`export let parent = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L36)
-  The path without its last component, or nil for the root, `.`, and a single relative component.
-- **Path.Path** · [`export let file_name = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L50)
+- **Path.Path** · [`export let parent = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L37)
+  The path without its last component, or nil for the root, `.`, and a single relative component. Tagged `#Pure`.
+- **Path.Path** · [`export let file_name = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L51)
   The last component; None for the root, `.`, and a path ending in `..`. Tagged `#Pure`.
-- **Path.Path** · [`export let stem = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L60)
+- **Path.Path** · [`export let stem = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L61)
   The file name without its extension. Tagged `#Pure`.
-- **Path.Path** · [`export let extension = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L70)
+- **Path.Path** · [`export let extension = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L71)
   The text after the last `.` of the file name, when that dot is not the name's first character. Tagged `#Pure`.
-- **Path.Path** · [`export let components = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L87)
+- **Path.Path** · [`export let components = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L88)
   The components in order, starting with "/" for an absolute path. The path `.` has none. Tagged `#Pure`.
-- **Path.Path** · [`export let resolve_lexically = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L102)
+- **Path.Path** · [`export let resolve_lexically = func -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L103)
   Removes each `..` together with the component before it, without consulting the file system. `..` directly below the root is removed; leading `..` of a relative path are kept. Tagged `#Pure`.
-- **Path.Path** · [`export let starts_with = func(other: Path) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L121)
+- **Path.Path** · [`export let starts_with = func(other: Path) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L122)
   True when both paths are absolute or both relative and every component of `other` begins this path. Tagged `#Pure`.
-- **Path.Path** · [`export let relative_to = func(base: Path) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L143)
+- **Path.Path** · [`export let relative_to = func(base: Path) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L144)
   A relative path that joined to `base` names this path, or nil when one is absolute and the other relative or when `base` has a `..` component after the common part. Tagged `#Pure`.
-- **Path.Path** · [`export let compare_to = func(other: Path) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L172)
+- **Path.Path** · [`export let compare_to = func(other: Path) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L173)
   Orders paths lexicographically by their normalized UTF-8 bytes. Tagged `#Pure`.
-- **Path.Path** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L176)
+- **Path.Path** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L177)
   Tests equality of the normalized path text. Tagged `#Pure`.
-- **Path.Path** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L185)
+- **Path.Path** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L186)
   Hashes the normalized path text. Tagged `#Pure`.
-- **Path.Path** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L189)
+- **Path.Path** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L190)
   Returns the normalized path text. Tagged `#Pure`.
-- **Path** · [`export let of = func(text: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L194)
+- **Path** · [`export let of = func(text: string) -> Path`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L195)
   Constructs a path and normalizes its separators and dot components. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
