@@ -42,7 +42,7 @@ if [ -z "$archive" ] || [ -z "$version" ] || [ -z "$triple" ] || [ -z "$examples
     exit 2
 fi
 
-work=$(mktemp -d)
+work=$(mktemp -d "${TMPDIR:-/tmp}/neura-qualify.XXXXXX")
 trap 'chmod -R u+w "$work" 2>/dev/null || true; rm -rf "$work"' EXIT
 archive=$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")
 examples=$(cd "$examples" && pwd)
