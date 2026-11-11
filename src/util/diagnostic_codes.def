@@ -133,6 +133,10 @@ NEURA_DIAGNOSTIC(E0707, "conflicting NeuraIR artifact")
 NEURA_DIAGNOSTIC(E0708, "C import failed")
 NEURA_DIAGNOSTIC(E0709, "C header or library not found")
 NEURA_DIAGNOSTIC(E0710, "invalid host or scheduler binding")
+NEURA_DIAGNOSTIC(E0780, "kernel binding outside the standard library")
+NEURA_DIAGNOSTIC(E0781, "kernel binding does not match its kernel")
+NEURA_DIAGNOSTIC(E0782, "unknown kernel or kernel ABI version")
+NEURA_DIAGNOSTIC(E0783, "malformed kernel binding")
 
 // Backend
 NEURA_DIAGNOSTIC(E0801, "not supported by circuit conversion")

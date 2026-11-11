@@ -14,19 +14,19 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 | --- | --- | --- |
 | Magic | 4 bytes | ASCII `NEUR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0 through 5 |
+| Minor | u16 | 0 through 6 |
 | Graph profile | u32 | 1 for checked integer identity and ReLU graphs |
 | Section count | u32 | Number of directory records |
 | File size | u64 | Total size in bytes, including the header and directory |
 
 The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four printable ASCII characters and compare bytewise. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
 
-### Versions 1.0 through 1.5
+### Versions 1.0 through 1.6
 
-Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. Minor version 5 adds scheduler exits, polls, and the `TRNS` transferable-layout table. The graph profile remains 1.
+Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. Minor version 5 adds scheduler exits, polls, and the `TRNS` transferable-layout table. Minor version 6 adds the kernel state operation (code 24) and the `KERN` kernel table ([Kernels](#kernels-16)). The graph profile remains 1.
 
 - A writer emits the lowest minor version whose features the image uses. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
-- The loader accepts major version 1 with minor versions 0 through 5. A feature newer than the version declared by the image makes the image malformed.
+- The loader accepts major version 1 with minor versions 0 through 6. A feature newer than the version declared by the image makes the image malformed.
 - An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
@@ -37,12 +37,13 @@ Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-versi
 | `GLOB` | Global slot declarations | Yes |
 | `GRPH` | Neuron graph records | Yes |
 | `IMPT` | Host import declarations | Yes |
+| `KERN` | Kernel records (1.6); present exactly when the image has a kernel exit | Yes, when present |
 | `LAYO` | Object layout records | Yes |
 | `META` | Entry function index as one `u32` | Yes |
 | `NATV` | The embedded native library (1.4); present only when the image has C imports | Yes, when present |
 | `NAME` | Source names for tools (provenance; not interpreted by the loader) | Optional |
 | `SMAP` | Source locations for function blocks | Optional |
-| `TRNS` | Transferable layout indices (1.5) | Yes, in a 1.5 image: required for a scheduler exit or poll |
+| `TRNS` | Transferable layout indices (1.5) | Yes, when present: required for a scheduler exit or poll, and present exactly when the image has one |
 | `TYPE` | Type records | Yes |
 
 The listed sections other than `META` and `NATV` store vectors. A required table with zero entries still carries a zero count. Readers must consume every byte in each recognized section.
@@ -207,7 +208,7 @@ Runtime violations of the first kind trap with the diagnostic `invalid task oper
 
 ### Transferable layouts
 
-The required `TRNS` section stores a `vector<u32>` of strictly ascending layout indices. It may be empty. The section is present exactly when the image is 1.5: the loader requires it for a scheduler exit or a poll, and the writer declares version 1.5 whenever it writes the table. A marked layout has a marked parent, if it has one, and every one of its fields has a transferable type. Booleans, integers, floating-point types, text, and bytes are transferable. An object type is transferable only when its layout is marked. Arrays and lists are never transferable, and neither is void. The compiler marks the layouts of transferable classes, payload enums, and tuples, closed under parents.
+The required `TRNS` section stores a `vector<u32>` of strictly ascending layout indices. It may be empty. The section is present exactly when the image has tasks: the loader requires it for a scheduler exit or a poll, and the writer declares at least version 1.5 whenever it writes the table (1.6 when the image also calls a kernel). A marked layout has a marked parent, if it has one, and every one of its fields has a transferable type. Booleans, integers, floating-point types, text, and bytes are transferable. An object type is transferable only when its layout is marked. Arrays and lists are never transferable, and neither is void. The compiler marks the layouts of transferable classes, payload enums, and tuples, closed under parents.
 
 At a spawn, a send, a select send arm, and a parallel item, the scheduler checks the actual layout of every object reachable from the transferred value through written fields: each must be marked, or the operation is an invalid task operation. A field that has not been written is skipped; reading it later traps as an uninitialized field, as it would without tasks. An image with a `TRNS` section, a scheduler exit, or a poll cannot carry `CALB`, `NATV`, or `neura.ffi.*` imports. An optional raw `TRNS` tag in a pre-1.5 image stays opaque.
 
@@ -256,8 +257,17 @@ The state-operation exit provides checked storage primitives. Its immediate is z
 | 21 (1.2) | Class cast | Target layout ID | Object reference | Same handle at the target type, preserving nil |
 | 22 (1.2) | Scalar text | Zero | Boolean, integer or float, optionally an unsigned 32-bit ordinal followed by text variants | Deterministically formatted text or the variant name |
 | 23 (1.3) | Allocate repeated collection | Array or list type ID | Unsigned 64-bit length and one assignable element | New collection with that length and value in every slot |
+| 24 (1.6) | Kernel | `KERN` index | One value per parameter of the kernel record, each assignable to it | The record's result type ([Kernels](#kernels-16)) |
 
 Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a byte list, which can grow as text is assembled. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Every list carries a structural version that starts at zero when the list is allocated and grows by one, modulo 2^64, with each successful append or removal; writing an element does not change it. A for-each loop compares versions to detect modification. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Operation 23 checks the requested length against storage and heap limits before allocating. Freeing an object invalidates its handle after language cleanup has completed.
+
+### Kernels (1.6)
+
+A kernel state operation calls a built-in C kernel of the runtime ([Kernels](Kernels.md)). Its immediate is an index into the required `KERN` section, a vector of records `name:text, abi_version:u32, parameter_types:vector<u32>, result_type:u32`: the kernel's name and ABI version, and the signature that the image's kernel exits use, in image types. The pair of name and ABI version is unique. The section is present exactly when the image has a kernel exit, and only in a 1.6 image; before 1.6 an optional `KERN` tag is opaque. The writer emits 1.6 only for an image with a kernel exit, so an image without one keeps its earlier version and bytes.
+
+The loader checks each record against the kernel table compiled into the runtime. A name or ABI version the table lacks, or a kernel the runtime cannot bind, makes the image *unsupported*: it is well formed, but this runtime cannot run it, as for an unknown required section or format version. A signature other than the one the kernel's parameter and result kinds give ([Binding a kernel](Kernels.md#binding-a-kernel)) makes the image *invalid*. For each kernel exit the loader checks that the immediate names a record, that the exit has one argument per parameter, each assignable to the parameter's type, and that the result slot is absent for a void result and otherwise accepts the result type.
+
+A kernel exit is a state operation, not a host request: it names no import and needs no capability, and the NVM runs it as [NVM](NVM.md#kernel-calls) describes. The assembly form of the table is one line per record after the imports, `kernel I "NAME" version V parameters [ T... ] result T`, and the exit is `exit state kernel immediate I arguments [ ... ] result S resume B assign [ ... ]`. The assembler rejects either in an image that declares a version before 1.6. `neura decompile` shows a kernel exit as `kernel "NAME" vV(arguments) [opaque kernel]`: the record names the operation, and what it computes is not in the circuit ([Decompiler](../Decompiler.md)).
 
 ## Imports and optional source maps
 

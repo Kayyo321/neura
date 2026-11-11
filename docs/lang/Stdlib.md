@@ -91,6 +91,12 @@ The installed tool finds its standard-library source root relative to the execut
 
 Trusted library source can bind a bodyless function with the suffix `host("service.name", version)`. The return type is a payload enum with `Ok` and `Error(uint32)` variants, with an optional success payload on `Ok`. Both continuations return to the caller. The emitted import records the signature and version and includes only reachable bindings. A service still needs a matching runtime provider and a capability policy. A declaration alone cannot create either.
 
+### P2a. Kernel bindings in source
+
+Trusted library source can also bind a bodyless function with the suffix `kernel("neura.area.name", version)`. A built-in C kernel of the runtime then computes it ([Kernels](../runtime/Kernels.md)): a deterministic, pure function that keeps the results, errors, and traps of the Neura code it replaces. The function's signature must be the one the kernel's parameter and result kinds give ([Binding a kernel](../runtime/Kernels.md#binding-a-kernel)); lowering checks it against the compiler's kernel table and rejects a binding in user code (`E0780`), a signature that differs (`E0781`), and an unknown kernel or ABI version (`E0782`). A call is a runtime state operation, not a host request: it needs no import, provider, or capability, it is task-safe, and a trace never records it. The image lists the kernels it calls with their signatures, and a runtime without one of them refuses the image before it runs.
+
+`scripts/gen-kernels.py` writes the declarations of every kernel into the internal modules `Std.Internal.Kernels.*` (`stdlib/std/internal/kernels/`), and a public module wraps them. `Std.Digest.Crc32` and `Std.Digest.Sha256` are kernel-backed; every other module runs its Neura code. The Neura code a kernel replaced moves unchanged to the module's tests as the oracle that the kernel is checked against ([CONTRIBUTING](../../CONTRIBUTING.md#kernel-oracles)).
+
 ### P3. Entry point from the library
 
 An override of `Std.Program.Entry.main` can be the image entry point. Its `ExitCode` maps `Ok` to 0, `Failure` to 1, `Status(int)` to the validated process status, and each named variant to its fixed status. The compiler rejects an image with two entry points.
@@ -354,7 +360,7 @@ A function that a spawned task calls must be task-safe ([Concurrency](Concurrenc
 
 - **How to check.** `neura check --task-safety <files>` lists every function of the linked program with `task-safe`, `task-safe; not for a parallel map: <reason>`, or `not task-safe: <reason>`, grouped by source file. Run it on a program that imports the module.
 - **What is pinned.** The `concurrency-frontend` test runs the report over a program that links `Console`, `HashMap`, `ArrayList`, `TreeMap`, `Float64`, `Duration`, `SystemClock`, `Instant`, `Logger`, `TcpStream`, `TcpListener`, `Strings`, `Regex`, `Random`, and `Json`, and fails when a function other than console input is not task-safe.
-- **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`); `Crc32.of` and `update`; `Sha256.of`, `update`, and `finish`; `Hex.decode` and the four fixed-alphabet `Base64` decoders; and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](StandardLibrary.md#task-safety) gives the reason for each and the statement for every area.
+- **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`); `Hex.decode` and the four fixed-alphabet `Base64` decoders; and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](StandardLibrary.md#task-safety) gives the reason for each and the statement for every area.
 - **Changes made for it.** A collection's text conversion keeps its self-containment flag in the instance ([section 5.2](#52-equality-hashing-and-text)). Float parsing reads no module state. The `BigInteger` and `BigDecimal` methods build the small values they need and do not read the exported constants `Zero`, `One`, and `Ten`, which stay for the root task's use.
 
 
@@ -1175,8 +1181,8 @@ The module `Json`:
 
 Both work on built-in `uint8` lists with the 32-bit recipes of [section 7.2](#72-arithmetic-without-wrapping-intrinsics).
 
-- **`Crc32`:** the IEEE 802.3 checksum (reflected polynomial 0xEDB88320, initial value and final exclusive-or of all ones). A 256-entry `uint32` list is computed on first use. `update(bytes)`, `value() → uint32`, `reset()`, and the module function `of(bytes) → uint32`.
-- **`Sha256`:** FIPS 180-4. `update(bytes)`, `finish()` (a built-in list of 32 bytes; a later `update` or `finish` traps with `invalid state: digest finished`), and the module function `of(bytes)`.
+- **`Crc32`:** the IEEE 802.3 checksum (reflected polynomial 0xEDB88320, initial value and final exclusive-or of all ones). `update(bytes)`, `value() → uint32`, `reset()`, and the module function `of(bytes) → uint32`. The kernels `neura.digest.crc32` and `crc32_update` compute it (P2a).
+- **`Sha256`:** FIPS 180-4. `update(bytes)`, `finish()` (a built-in list of 32 bytes; a later `update` or `finish` traps with `invalid state: digest finished`), and the module function `of(bytes)`. The kernels `neura.digest.sha256`, `sha256_init`, `sha256_update`, and `sha256_finish` compute it (P2a); a running digest keeps the kernel's 112-byte state in a private list.
 
 These are for integrity checks and content addressing. The library makes no claim about timing behavior.
 
@@ -1325,7 +1331,7 @@ These rules complete the contracts of the earlier sections. Where a rule here is
 - **Json parse errors.** `Empty` for empty or all-whitespace text; `UnexpectedEnd` at the text length; `Syntax` for structure; `InvalidCharacter` inside a token, with escapes reported at the backslash; `OutOfRange` at the bracket that opens level 513. Top-level scalars are accepted.
 - **Json values.** Numbers compare by a canonical decimal text, including exponents beyond `int64`. `hash` starts each variant from its position (Null 1 through Object 6), and an object's hash combines its member count with the wrapping sum of its distinct member hashes, so it agrees with order-insensitive equality even when names repeat. `number_to_int64` is `None` for anything but a plain integer. `index` keeps the last value of a repeated name. A `StringMap<JsonValue>` supports lookups; its `equals` and `to_string` are rejected at build time because `JsonValue` has no built-in value members.
 - **Json traps.** `number is not finite`, `negative indent`, `number text`, and `number exponent out of range`, after `invalid argument: `.
-- **Sha256** keeps rolled loops: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB.
+- **Sha256** kept rolled loops while it was Neura code: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB. It now calls kernels (P2a), which cut the `sha256` benchmark from 163,795 steps and 861,597 image bytes to 31,043 steps (mostly building the input) and 600,765 bytes.
 
 ### 18.8 Lists, deques, queues, and sorting
 

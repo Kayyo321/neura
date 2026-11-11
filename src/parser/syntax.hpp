@@ -163,6 +163,9 @@ struct Declaration {
     // `scheduler("operation")` in place of a body: a function the NVM
     // scheduler implements (trusted library only; Concurrency.md section 10.1).
     std::optional<std::string> scheduler_binding{};
+    // `kernel("neura.area.name", version)` in place of a body: a function a
+    // built-in C kernel implements (trusted library only; Kernels.md).
+    std::optional<std::pair<std::string, std::uint32_t>> kernel_binding{};
     std::vector<TypeSyntax> interfaces{};
     // Additional signatures in an `or func` declaration.
     std::vector<Declaration> overloads{};

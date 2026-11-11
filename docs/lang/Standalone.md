@@ -300,7 +300,7 @@ Dynamic loading needs a dynamic C library, which is why native interop and a ful
 
 ```text
 native executable: hello
-launcher: neura <version>, x86_64-linux-gnu, default, runs NVR up to 1.5
+launcher: neura <version>, x86_64-linux-gnu, default, runs NVR up to 1.6
 capabilities: console, process exit, files (/var/lib/hello), network
 limits: steps 100000000, frames 10000, heap cells 67108864
 tasks: at most 65536, quantum 1024, queued messages 1048576, pending requests 4096, parallel workers 1

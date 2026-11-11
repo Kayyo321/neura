@@ -15,11 +15,13 @@ From every header in `src/kernels/` (sorted by name) this script writes:
     `KernelInfo` table holding each kernel's name, ABI version, parameter
     and result kinds, and its step charge and buffer sizes as formula text
     and as postfix programs.
-  * `docs/runtime/Kernels.md`: the ABI rules and the kernel reference.
-
-The Neura declarations of the kernels (`kernel("neura.digest.sha256", 1)`
-bindings in the standard library) are not generated yet; see
-`emit_neura_declarations`.
+  * `docs/runtime/Kernels.md`: the ABI rules, the binding rules, and the
+    kernel reference.
+  * `stdlib/std/internal/kernels/<group>.nra`: for each header, the trusted
+    internal module `Std.Internal.Kernels.<Group>` with one bodyless
+    `kernel("neura.area.name", version)` function per kernel that has a
+    binding (`emit_neura_declarations`; the C++ twin of its rules is
+    `src/kernels/kernel_binding.hpp`).
 
 By default the script writes the files. `--check` writes nothing and exits 1
 when a generated file is missing or differs from what would be written.
@@ -393,18 +395,136 @@ def generate_table(root: Path, kernels: list[Kernel]) -> str:
     return "\n".join(out)
 
 
-def emit_neura_declarations(kernels: list[Kernel]) -> None:
-    """WIRING HOOK: the Neura side of each kernel.
+NEURA_SCALARS = {"I8": "int8", "I16": "int16", "I32": "int32", "I64": "int64", "U8": "uint8", "U16": "uint16",
+                 "U32": "uint32", "U64": "uint64", "F32": "float32", "F64": "float64", "Bool": "bool"}
+DECLARATIONS = Path("stdlib/std/internal/kernels")
+LINE_WIDTH = 112
 
-    The kernel wiring (Workstream 4 of the 0.2.0 plan) adds a bodyless
-    standard library function per kernel ending in `kernel("<name>",
-    <version>)`, a StateOp that calls it, and the KERN table of the NVR
-    image. When that lands, this function emits those declarations from
-    `kernels` (the parameter kinds map to Neura types as the reference
-    table's columns describe) and `main` writes and checks them like the
-    other outputs. Until then it emits nothing.
-    """
-    del kernels
+
+@dataclass
+class Binding:
+    """How a kernel binds to a Neura function; src/kernels/kernel_binding.hpp is the C++ twin."""
+    problem: str | None
+    arguments: list[Param]
+    result: str
+
+
+def element(kind: str) -> str:
+    if kind in ("Bytes", "State"):
+        return "U8"
+    for prefix in ("View", "Mut", "Result"):
+        if kind.startswith(prefix):
+            return kind[len(prefix):]
+    return kind
+
+
+def neura_type(kind: str) -> str:
+    if kind in NEURA_SCALARS:
+        return NEURA_SCALARS[kind]
+    if kind in ("Text", "OutText"):
+        return "string"
+    if kind == "OutBytes":
+        return "uint8[list]"
+    return NEURA_SCALARS[element(kind)] + "[list]"
+
+
+def plan_binding(kernel: Kernel) -> Binding:
+    problem = None
+    arguments: list[Param] = []
+    value = None
+    outcome = False
+    buffered = {index for index, _ in kernel.buffers}
+    for index, param in enumerate(kernel.params):
+        if param.kind == "Work":
+            problem = "it takes a work budget, which the runtime does not supply yet"
+        elif param.kind == "ResultI64" and param.name == "error_offset":
+            outcome = True
+        elif param.kind in ("OutText", "OutBytes") or param.kind.startswith("Result"):
+            if value is not None:
+                problem = "it returns more than one value"
+            value = param.kind if param.kind in ("OutText", "OutBytes") else element(param.kind)
+        elif param.kind.startswith("Mut") and index in buffered:
+            pass
+        else:
+            arguments.append(param)
+    if kernel.result != "Status":
+        if value is not None:
+            problem = "it returns more than one value"
+        value = kernel.result
+    if outcome:
+        result = "[uint32, int64]" if value is None else f"[uint32, int64, {neura_type(value)}]"
+    else:
+        result = "void" if value is None else neura_type(value)
+    return Binding(problem, arguments, result)
+
+
+def module_name(header: str) -> tuple[str, str]:
+    """The file stem and module name of a header's declarations: neura_integer_text.h is
+    integer-text.nra and the module IntegerText."""
+    stem = Path(header).stem[len("neura_"):]
+    return stem.replace("_", "-"), "".join(word.capitalize() for word in stem.split("_"))
+
+
+def wrap_doc(text: str, indent: str) -> list[str]:
+    lines: list[str] = []
+    words = text.split()
+    current = indent + "/// @brief"
+    for word in words:
+        if len(current) + 1 + len(word) > LINE_WIDTH:
+            lines.append(current)
+            current = indent + "///"
+        current += " " + word
+    lines.append(current)
+    return lines
+
+
+def emit_neura_declarations(kernels: list[Kernel]) -> dict[Path, str]:
+    """The Neura side of each kernel: for each header, the trusted internal module
+    `Std.Internal.Kernels.<Group>` with one `kernel("<name>", <version>)` declaration per
+    kernel that has a binding (docs/runtime/Kernels.md, "Binding a kernel")."""
+    by_header: dict[str, list[Kernel]] = {}
+    for kernel in kernels:
+        by_header.setdefault(kernel.header, []).append(kernel)
+    files: dict[Path, str] = {}
+    for header, group in by_header.items():
+        stem, module = module_name(header)
+        out = [
+            f"// Generated by scripts/gen-kernels.py from {header}; do not edit.",
+            "",
+        ]
+        out += wrap_doc(f"The kernels of {Path(header).name} (docs/runtime/Kernels.md). Only the standard library "
+                        "may import this module; each function runs the built-in C kernel it names, which "
+                        "keeps the results, errors, and traps of the Neura code it replaces.", "")
+        out.append(f"export let {module} = module (")
+        names: set[str] = set()
+        first = True
+        for kernel in group:
+            binding = plan_binding(kernel)
+            words = kernel.name[len("neura."):].split(".")
+            name = "_".join(words[1:]) if len(words) > 1 else words[0]
+            if name in names:
+                raise KernelError(f"{kernel.header}:{kernel.line}: two kernels of {header} declare '{name}'")
+            names.add(name)
+            if not first:
+                out.append("")
+            first = False
+            if binding.problem:
+                out.append(f"    // {kernel.name} version {kernel.version} has no binding: {binding.problem}.")
+                continue
+            out += wrap_doc(kernel.doc or kernel.name, "    ")
+            out.append(f"    /// Step charge: `{kernel.cost.text}`.")
+            params = ", ".join(f"{p.name}: {neura_type(p.kind)}" for p in binding.arguments)
+            result = "" if binding.result == "void" else f" -> {binding.result}"
+            head = f"    export let {name} = func({params}){result}"
+            binding_text = f"kernel(\"{kernel.name}\", {kernel.version});"
+            if len(head) + 1 + len(binding_text) <= LINE_WIDTH:
+                out.append(f"{head} {binding_text}")
+            else:
+                out += [head, f"        {binding_text}"]
+        out.append(");")
+        out.append("")
+        files[DECLARATIONS / f"{stem}.nra"] = "\n".join(out)
+    return files
 
 
 ABI_RULES = """\
@@ -417,9 +537,11 @@ sorting an array. The kernels live in [`src/kernels/`](../../src/kernels/) and b
 `neura_kernels`. Each one replaces the body of a function of the standard library and keeps its results,
 errors, and traps exactly; the Neura implementation stays as its test oracle.
 
-**Status.** The library, its tests, and this reference exist. Nothing calls a kernel from Neura yet: the
-binding syntax, the runtime state operation, and the image table that declares the kernels an image uses come
-with the kernel wiring, so no program's behaviour depends on this page today.
+**Status.** Every kernel below can be bound, and the generated modules `Std.Internal.Kernels.*` declare them.
+`Std.Digest.Sha256` and `Std.Digest.Crc32` are the first standard library modules that call kernels; every
+other module still runs its Neura code. An image that calls a kernel is NVR 1.6
+([NVR](NVR.md#kernels-16)), and the NVM runs the call as a state operation
+([NVM](NVM.md#kernel-calls)).
 
 ## ABI rules
 
@@ -475,10 +597,82 @@ text and as a postfix program for `neura::kernels::evaluate`.
 
 ### Statuses
 
-A kernel that can fail returns a `neura_status`. `NEURA_ERR_*` statuses become an `Err` of
-`Std.Core.Result`, with the offset the kernel stores through its `error_offset` parameter; `NEURA_TRAP_*`
-statuses become a trap. `neura_kernel_status_message` gives the exact message and
-`neura_kernel_status_error_kind` the `Error` variant.
+A kernel that can fail returns a `neura_status`. `NEURA_ERR_*` statuses reach the Neura wrapper as the outcome
+tuple of its binding (below), which the wrapper turns into an `Err` of `Std.Core.Result` with the offset the
+kernel stores through its `error_offset` parameter; `NEURA_TRAP_*` statuses become a trap.
+`neura_kernel_status_message` gives the exact message and `neura_kernel_status_error_kind` the `Error` variant.
+
+## Binding a kernel
+
+A bodyless function of a trusted standard library module binds a kernel by ending in
+`kernel("<name>", <ABI version>)`, as a host binding ends in `host(...)`:
+
+<!-- example: fragment: a member of a trusted standard library module; user code cannot bind a kernel -->
+```neura
+export let sha256 = func(bytes: uint8[list]) -> uint8[list] kernel("neura.digest.sha256", 1);
+```
+
+Only library source may bind a kernel (`E0780` elsewhere). Lowering looks the kernel up in the compiler's table
+(`E0782` for an unknown name or ABI version), checks that the function's signature is the one the kernel's
+parameter and result kinds give (`E0781`, which spells out the expected signature), and records the
+`kernel.binding` attribute ([NeuraIR 1.10](../NirFormat.md)). A call compiles to a kernel state operation, not
+to a host request. `scripts/gen-kernels.py` writes one such declaration per kernel into
+`stdlib/std/internal/kernels/<header>.nra`, the internal module `Std.Internal.Kernels.<Header>`, which only
+library code may import; [`src/kernels/kernel_binding.hpp`](../../src/kernels/kernel_binding.hpp) holds the same
+rules for the compiler, the loader, and the runtime.
+
+Each C parameter has one role:
+
+| C parameter | Role | Neura side |
+| --- | --- | --- |
+| Integer, float, or `neura_bool` scalar | Argument | The Neura scalar of the same width and signedness: `int8` ... `uint64`, `float32`, `float64`, `bool` |
+| `neura_text` | Argument | `string`, viewed in place |
+| `neura_bytes` | Argument | `uint8[list]` (an array `uint8[]` also binds) |
+| `neura_view_T` | Argument | `T[list]` or `T[]` |
+| `neura_mut_T` without a buffer size | Argument | `T[list]` or `T[]`, written in place |
+| `neura_mut_T` with a buffer size | Scratch | Nothing: the runtime supplies the scratch space |
+| `neura_state*` | Argument | `uint8[list]` (or `uint8[]`) of exactly the declared size, written in place |
+| `neura_out_text*` | Result | `string` |
+| `neura_out_bytes*` | Result | `uint8[list]` |
+| `neura_T*` named `error_offset` | Error offset | The second element of the outcome tuple |
+| Any other `neura_T*` | Result | The scalar `T` |
+| `neura_work*` | None | The kernel has no binding yet: the runtime does not supply a work budget |
+
+The function's result is the kernel's value: its scalar C result, or its one result parameter, or `void` when
+it has neither. A kernel with more than one value has no binding. A kernel with an `error_offset` returns the
+**outcome tuple** `[uint32, int64, T]`, or `[uint32, int64]` without a value: the status, 0 for success or the
+`NEURA_ERR_*` code, then the error offset (0 on success), then the value, which is zero or empty after an error.
+The standard library wrapper turns the outcome into a `Result`, with the message of
+`neura_kernel_status_message`. A `NEURA_TRAP_*` status is the program trap (reason 3) with the message of
+`neura_kernel_status_message`, the same trap and text as the Neura code the kernel replaces.
+
+With these rules every kernel of ABI generation 1 has a binding. Two shapes need care, and both are expressed
+with storage the heap model already has. A writable view and a state are ordinary mutable arrays or lists that
+the kernel writes in place, as a run of element writes would; the runtime copies them in and writes them back
+only when the kernel succeeds, so a trapping kernel leaves them unchanged and two arguments never alias in C. A
+state's contents are the module's private field (for example `Sha256`'s 112 bytes), and a state another module
+corrupts traps with `invalid state: kernel state` instead of misbehaving.
+
+## Running a kernel
+
+A kernel exit runs in the NVM (see [NVM](NVM.md#kernel-calls) for the full contract):
+
+1. Resolve the arguments. Text, an NVR byte string, and an `int64` or `uint64` array or list are viewed in place;
+   any other array or list is packed into a buffer the state reuses.
+2. Evaluate the step charge on the arguments' lengths and values and add it to `steps`, with the step limit
+   check of a block step, before the kernel runs. Under `--profile` the steps count for the calling function.
+3. Size each output from its buffer formula, run the kernel, copy writable arguments back, and allocate the
+   result through the allocator that `ConstructText` and collection allocation use, with the same heap-cell
+   accounting and collection schedule.
+
+A kernel call is not a host request: no trace records it, `--replay` needs nothing for it, `--deny-native` and
+the capability flags do not affect it, and it works in tasks, parallel items, fleets, and the static launcher.
+
+**Step charges.** A charge is one step for the call plus one step per unit of work that takes no longer than an
+average NVM block step on the reference evaluator, so a step limit never lets a kernel do more work than the
+same number of block steps could. For the digests the unit is 64 bytes read: on the measuring host one SHA-256
+compression took about 0.15 µs and CRC-32 over 64 bytes about 0.1 µs (plus about 0.06 µs to pack a list's
+bytes), while an average block step of the replaced SHA-256 code took about 0.75 µs.
 
 """
 
@@ -528,8 +722,12 @@ def main() -> int:
     except KernelError as error:
         print(f"gen-kernels: {error}", file=sys.stderr)
         return 2
-    emit_neura_declarations(kernels)
     outputs = {TABLE: generate_table(root, kernels), REFERENCE: generate_reference(root, kernels)}
+    try:
+        outputs.update(emit_neura_declarations(kernels))
+    except KernelError as error:
+        print(f"gen-kernels: {error}", file=sys.stderr)
+        return 2
     stale = []
     for relative, text in outputs.items():
         path = root / relative

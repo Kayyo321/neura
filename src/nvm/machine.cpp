@@ -7,8 +7,11 @@
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
 
+#include "kernel_binding.hpp"
+
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <thread>
 #include <chrono>
 #include <mutex>
@@ -3453,6 +3456,8 @@ private:
             const auto& right = typed_entry(args[1], types[1].type).bytes;
             return left == right;
         }
+        case nvr::StateOp::Kernel:
+            return run_kernel(exit, args);
         case nvr::StateOp::ScalarText: {
             if (args.size() > 1) {
                 const auto ordinal = args[0];
@@ -3466,6 +3471,322 @@ private:
             text.type = image_.functions[frames_.back().function].frame_types[exit.result_slot];
             text.bytes = scalar_text(type(types[0].type), args[0]);
             return allocate(std::move(text));
+        }
+        }
+        return 0;
+    }
+
+
+    // --- Kernel exits (docs/runtime/Kernels.md, NVM.md "Kernel calls") ---
+    //
+    // A kernel exit is a state operation, not a host request: it issues no
+    // request, writes nothing to a trace, needs no capability, and runs the
+    // same way in a task, a parallel item, a fleet member, and the static
+    // launcher. Its observable effects are the steps it charges, the heap
+    // storage it writes or allocates, and its result or trap.
+
+    // The binding of KERN entry `index`, worked out on first use. The loader
+    // has checked the entry against the kernel table.
+    const kernels::Binding& kernel_binding(std::uint32_t index) {
+        if (kernel_bindings_.size() != image_.kernels.size()) kernel_bindings_.resize(image_.kernels.size());
+        auto& slot = kernel_bindings_[index];
+        if (!slot.info) {
+            const auto& entry = image_.kernels[index];
+            const auto* info = kernels::find_kernel(entry.name, entry.abi_version);
+            if (!info) fault(TrapKind::InvalidCompletion, "no kernel " + entry.name);
+            slot = kernels::plan_binding(*info);
+            if (slot.problem || info->param_count > max_kernel_params) {
+                fault(TrapKind::InvalidCompletion, "kernel " + entry.name + " has no binding");
+            }
+        }
+        return slot;
+    }
+
+    // The value a formula sees for a scalar argument: a negative or NaN
+    // value counts as 0 (neura_kernel.h, "Formulas").
+    static std::uint64_t formula_scalar(kernels::Kind kind, std::uint64_t bits) {
+        const auto width = kernels::scalar_width(kind);
+        if (kernels::float_kind(kind)) {
+            double value = 0;
+            if (kind == kernels::Kind::F32) {
+                float single = 0;
+                const auto low = static_cast<std::uint32_t>(bits);
+                std::memcpy(&single, &low, sizeof single);
+                value = single;
+            } else {
+                std::memcpy(&value, &bits, sizeof value);
+            }
+            if (!(value > 0)) return 0;
+            return value >= 18446744073709551615.0 ? std::numeric_limits<std::uint64_t>::max()
+                                                   : static_cast<std::uint64_t>(value);
+        }
+        if (kernels::signed_kind(kind) && ((bits >> (width - 1)) & 1U) != 0) return 0;
+        return bits & mask(width);
+    }
+
+    // Stores slot bits as the C scalar of `kind` at `out`.
+    static void store_scalar(kernels::Kind kind, std::uint64_t bits, void* out) {
+        using kernels::Kind;
+        switch (kind) {
+        case Kind::I8: case Kind::U8: { const auto v = static_cast<std::uint8_t>(bits); std::memcpy(out, &v, 1); break; }
+        case Kind::Bool: { const std::uint8_t v = bits != 0; std::memcpy(out, &v, 1); break; }
+        case Kind::I16: case Kind::U16: { const auto v = static_cast<std::uint16_t>(bits); std::memcpy(out, &v, 2); break; }
+        case Kind::I32: case Kind::U32: case Kind::F32: {
+            const auto v = static_cast<std::uint32_t>(bits);
+            std::memcpy(out, &v, 4);
+            break;
+        }
+        default: std::memcpy(out, &bits, 8); break;
+        }
+    }
+
+    // The slot bits of the C scalar of `kind` at `in`.
+    static std::uint64_t load_scalar(kernels::Kind kind, const void* in) {
+        using kernels::Kind;
+        switch (kind) {
+        case Kind::I8: case Kind::U8: { std::uint8_t v = 0; std::memcpy(&v, in, 1); return v; }
+        case Kind::Bool: { std::uint8_t v = 0; std::memcpy(&v, in, 1); return v != 0; }
+        case Kind::I16: case Kind::U16: { std::uint16_t v = 0; std::memcpy(&v, in, 2); return v; }
+        case Kind::I32: case Kind::U32: case Kind::F32: { std::uint32_t v = 0; std::memcpy(&v, in, 4); return v; }
+        default: { std::uint64_t v = 0; std::memcpy(&v, in, 8); return v; }
+        }
+    }
+
+    static std::size_t element_bytes(kernels::Kind element) { return kernels::scalar_width(element) / 8; }
+
+    // Charges a kernel's declared steps before it runs, with the limit check
+    // of a block step, to the running task and, under --profile, to the
+    // calling function.
+    void charge_kernel_steps(std::uint64_t cost) {
+        if (cost > limits_.max_steps - std::min(steps_, limits_.max_steps)) {
+            fault(TrapKind::StepLimit, std::to_string(limits_.max_steps) + " steps");
+        }
+        steps_ += cost;
+        if (scheduler_ && limits_.profile) current_task().steps += cost;
+        if (limits_.profile) {
+            if (function_steps_.size() != image_.functions.size()) function_steps_.resize(image_.functions.size());
+            function_steps_[frames_.back().function] += cost;
+        }
+    }
+
+    std::uint64_t run_kernel(const nvr::Exit& exit, const std::vector<std::uint64_t>& args) {
+        using kernels::Kind;
+        using kernels::Role;
+        const auto& binding = kernel_binding(exit.immediate);
+        const auto& info = *binding.info;
+        const auto& entry = image_.kernels[exit.immediate];
+        const auto count = info.param_count;
+
+        // Resolve the arguments and the lengths and values the formulas see.
+        std::array<std::uint64_t, max_kernel_params> values{};
+        std::array<HeapEntry*, max_kernel_params> items{};
+        for (std::size_t a = 0; a < binding.arguments.size(); ++a) {
+            const auto p = binding.arguments[a];
+            const auto kind = info.params[p];
+            if (kernels::scalar_kind(kind)) {
+                values[p] = formula_scalar(kind, args[a]);
+            } else {
+                items[p] = &typed_entry(args[a], exit.arguments[a].type);
+                values[p] = length(*items[p]);
+            }
+        }
+        charge_kernel_steps(kernels::evaluate(info.cost, values.data()));
+
+        // Lay out the C arguments. Read-only text, bytes, and 64-bit integer
+        // views point into the heap entry; other views, writable views, and
+        // states are copied into buffers this state reuses, and writable
+        // ones are copied back only when the kernel succeeds.
+        std::array<std::uint64_t, max_kernel_params> sizes{};
+        for (std::size_t i = 0; i < info.buffer_count; ++i) {
+            sizes[info.buffers[i].param] = kernels::evaluate(info.buffers[i].size, values.data());
+        }
+        if (kernel_buffers_.size() < count) kernel_buffers_.resize(count);
+        struct alignas(16) Cell {
+            unsigned char bytes[32];
+        };
+        std::array<Cell, max_kernel_params> cells{};
+        std::array<std::uint64_t, max_kernel_params> results{};
+        std::array<void*, max_kernel_params> pointers{};
+        const auto view = [](Cell& cell, const void* data, std::uint64_t length) {
+            std::memcpy(cell.bytes, &data, sizeof data);
+            std::memcpy(cell.bytes + sizeof data, &length, sizeof length);
+        };
+        const auto pack = [&](std::size_t p, const HeapEntry& item, Kind element) {
+            auto& buffer = kernel_buffers_[p];
+            const auto width = element_bytes(element);
+            if (item.kind == EntryKind::Text || item.kind == EntryKind::Bytes) {
+                buffer.assign(item.bytes.begin(), item.bytes.end());
+                return;
+            }
+            buffer.resize(item.cells.size() * width);
+            for (std::size_t i = 0; i < item.cells.size(); ++i) store_scalar(element, item.cells[i], &buffer[i * width]);
+        };
+        for (std::size_t p = 0; p < count; ++p) {
+            const auto kind = info.params[p];
+            auto& cell = cells[p];
+            pointers[p] = cell.bytes;
+            switch (binding.roles[p]) {
+            case Role::Argument: {
+                if (kernels::scalar_kind(kind)) {
+                    const auto a = static_cast<std::size_t>(
+                        std::ranges::find(binding.arguments, p) - binding.arguments.begin());
+                    store_scalar(kind, args[a], cell.bytes);
+                    break;
+                }
+                auto& item = *items[p];
+                const auto element = kernels::element_kind(kind);
+                const bool in_place = kind == Kind::Text ||
+                                      ((kind == Kind::Bytes || kernels::view_kind(kind)) &&
+                                       (item.kind == EntryKind::Text || item.kind == EntryKind::Bytes)) ||
+                                      ((kind == Kind::ViewI64 || kind == Kind::ViewU64) &&
+                                       (item.kind == EntryKind::Array || item.kind == EntryKind::List));
+                if (in_place) {
+                    if (item.kind == EntryKind::Text || item.kind == EntryKind::Bytes) {
+                        view(cell, item.bytes.data(), item.bytes.size());
+                    } else {
+                        view(cell, item.cells.data(), item.cells.size());
+                    }
+                    break;
+                }
+                pack(p, item, element);
+                auto& buffer = kernel_buffers_[p];
+                if (kind == Kind::State) {
+                    const auto length = static_cast<std::uint64_t>(buffer.size());
+                    view(cell, buffer.data(), length);
+                } else {
+                    view(cell, buffer.data(), buffer.size() / element_bytes(element));
+                }
+                if (kind == Kind::State) {
+                    // neura_state holds a writable pointer, as neura_mut_T does.
+                    auto* data = buffer.data();
+                    const auto length = static_cast<std::uint64_t>(buffer.size());
+                    std::memcpy(cell.bytes + 16, &data, sizeof data);
+                    std::memcpy(cell.bytes + 16 + sizeof data, &length, sizeof length);
+                    void* state = cell.bytes + 16;
+                    std::memcpy(cell.bytes, &state, sizeof state);
+                }
+                break;
+            }
+            case Role::Scratch: {
+                const auto element = kernels::element_kind(kind);
+                auto& buffer = kernel_buffers_[p];
+                buffer.assign(static_cast<std::size_t>(sizes[p]) * element_bytes(element), 0);
+                view(cell, buffer.data(), sizes[p]);
+                break;
+            }
+            case Role::Output:
+            case Role::ErrorOffset:
+                if (kind == Kind::OutText || kind == Kind::OutBytes) {
+                    auto& buffer = kernel_buffers_[p];
+                    buffer.assign(static_cast<std::size_t>(sizes[p]), 0);
+                    auto* data = buffer.data();
+                    const std::uint64_t zero = 0;
+                    const std::uint64_t capacity = sizes[p];
+                    std::memcpy(cell.bytes + 8, &data, sizeof data);
+                    std::memcpy(cell.bytes + 8 + sizeof data, &zero, sizeof zero);
+                    std::memcpy(cell.bytes + 16 + sizeof data, &capacity, sizeof capacity);
+                    void* out = cell.bytes + 8;
+                    std::memcpy(cell.bytes, &out, sizeof out);
+                } else {
+                    void* result = &results[p];
+                    std::memcpy(cell.bytes, &result, sizeof result);
+                }
+                break;
+            }
+        }
+
+        // Run it. An output that turned out too small (which a correct
+        // capacity formula rules out) is grown and the call repeated without
+        // a second charge.
+        alignas(8) unsigned char returned[8]{};
+        neura_status status = NEURA_OK;
+        for (int attempt = 0;; ++attempt) {
+            info.thunk(pointers.data(), returned);
+            if (info.result != Kind::Status) break;
+            std::memcpy(&status, returned, sizeof status);
+            if (status != NEURA_NEED_CAPACITY || attempt == 1 || binding.value_param == kernels::Binding::none) break;
+            auto& cell = cells[binding.value_param];
+            neura_out_bytes out{};
+            std::memcpy(&out, cell.bytes + 8, sizeof out);
+            if (out.len <= out.cap) break;
+            auto& buffer = kernel_buffers_[binding.value_param];
+            buffer.assign(static_cast<std::size_t>(out.len), 0);
+            out.data = buffer.data();
+            out.cap = out.len;
+            out.len = 0;
+            std::memcpy(cell.bytes + 8, &out, sizeof out);
+        }
+        const bool error = status >= NEURA_ERR_INVALID_START_BYTE && status < NEURA_TRAP_OFFSET_OUT_OF_RANGE;
+        if (status != NEURA_OK && !(error && binding.result == kernels::ResultShape::Outcome)) {
+            // A trap status is the program trap the Neura implementation
+            // raises, with the same message (reason 3).
+            fault(TrapKind::Program, neura_kernel_status_message(status),
+                  static_cast<std::uint32_t>(nvr::TrapReason::ProgramFailure));
+        }
+
+        // Copy writable arguments back.
+        for (std::size_t a = 0; a < binding.arguments.size(); ++a) {
+            const auto p = binding.arguments[a];
+            const auto kind = info.params[p];
+            if (kind != Kind::State && !kernels::mut_kind(kind)) continue;
+            auto& item = *items[p];
+            const auto element = kernels::element_kind(kind);
+            const auto& buffer = kernel_buffers_[p];
+            const auto width = element_bytes(element);
+            for (std::size_t i = 0; i < item.cells.size() && (i + 1) * width <= buffer.size(); ++i) {
+                item.cells[i] = load_scalar(element, &buffer[i * width]) & mask(kernels::scalar_width(element));
+            }
+        }
+
+        // The result, allocated as ConstructText and collection allocation
+        // allocate: the same cell accounting, safepoint, and handle order.
+        const auto value_bits = [&]() -> std::uint64_t {
+            if (binding.value_param == kernels::Binding::none) return load_scalar(binding.value_kind, returned);
+            return load_scalar(binding.value_kind, &results[binding.value_param]);
+        };
+        const auto allocate_value = [&](std::uint32_t value_type, bool empty,
+                                        std::span<const std::uint64_t> roots) -> std::uint64_t {
+            const auto kind = binding.value_kind;
+            if (kind != Kind::OutText && kind != Kind::OutBytes) {
+                if (empty) return 0;
+                return value_bits() & mask(kernels::scalar_width(kind));
+            }
+            neura_out_bytes out{};
+            std::memcpy(&out, cells[binding.value_param].bytes + 8, sizeof out);
+            const auto length = empty ? 0 : static_cast<std::size_t>(std::min(out.len, out.cap));
+            HeapEntry item;
+            item.type = value_type;
+            if (kind == Kind::OutText) {
+                item.kind = EntryKind::Text;
+                item.bytes.assign(reinterpret_cast<const char*>(out.data), length);
+                if (!nvr::valid_utf8(item.bytes)) fault(TrapKind::InvalidText);
+            } else {
+                item.kind = EntryKind::List;
+                item.cells.assign(out.data, out.data + length);
+            }
+            return allocate(std::move(item), roots);
+        };
+        switch (binding.result) {
+        case kernels::ResultShape::Void:
+            return 0;
+        case kernels::ResultShape::Scalar:
+        case kernels::ResultShape::Text:
+        case kernels::ResultShape::Bytes:
+            return allocate_value(entry.result_type, false, {});
+        case kernels::ResultShape::Outcome: {
+            const auto layout = type(entry.result_type).reference;
+            const auto& fields = image_.layouts[layout].fields;
+            HeapEntry outcome;
+            outcome.kind = EntryKind::Object;
+            outcome.type = layout;
+            outcome.cells = {static_cast<std::uint64_t>(status), error ? results[binding.error_param] : 0};
+            std::array<std::uint64_t, 1> roots{};
+            if (fields.size() == 3) {
+                outcome.cells.push_back(allocate_value(fields[2], error, {}));
+                if (nvr::is_reference(type(fields[2]).kind)) roots[0] = outcome.cells.back();
+            }
+            outcome.initialized.assign(outcome.cells.size(), 1);
+            return allocate(std::move(outcome), roots);
         }
         }
         return 0;
@@ -3524,6 +3845,11 @@ private:
     std::vector<GraphKernel> graph_kernels_;
     std::vector<std::pair<std::uint32_t, std::uint64_t>> assignment_scratch_;
     std::vector<std::uint64_t> argument_scratch_;
+    // Kernel exits: each KERN entry's binding, and the argument and output
+    // buffers they reuse, one per kernel parameter.
+    static constexpr std::size_t max_kernel_params = 16;
+    std::vector<kernels::Binding> kernel_bindings_;
+    std::vector<std::vector<std::uint8_t>> kernel_buffers_;
     std::vector<std::int64_t> inputs_;
     std::vector<std::int64_t> outputs_;
     std::vector<std::int64_t> wires_;

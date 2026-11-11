@@ -26,7 +26,7 @@ constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "read-global",     "write-global",     "allocate-collection", "read-length", "read-element",
     "write-element",   "append-element",   "remove-element", "construct-text", "read-version",
     "text-slice",      "text-from-utf8",   "text-equal",    "class-hash",     "class-text",
-    "class-is",        "class-cast",       "scalar-text", "repeat-collection",
+    "class-is",        "class-cast",       "scalar-text", "repeat-collection", "kernel",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -395,6 +395,11 @@ std::string disassemble(const nvr::Image& image) {
             << " parameters " << indices(import.parameter_types) << " success " << import.success_type << " error "
             << import.error_type << "\n";
     }
+    for (std::size_t i = 0; i < image.kernels.size(); ++i) {
+        const auto& kernel = image.kernels[i];
+        out << "kernel " << i << " " << quoted(kernel.name) << " version " << kernel.abi_version << " parameters "
+            << indices(kernel.parameter_types) << " result " << kernel.result_type << "\n";
+    }
     for (std::size_t f = 0; f < image.functions.size(); ++f) {
         const auto& function = image.functions[f];
         out << "\nfunction " << f << " parameters " << function.parameter_count << " result "
@@ -620,6 +625,18 @@ nvr::Image assemble(std::string_view text) {
             in.keyword("error");
             import.error_type = in.index("error type");
             image.imports.push_back(std::move(import));
+        } else if (record == "kernel") {
+            if (image.minor_version < 6) in.error("kernels require NVR 1.6");
+            in.expect_index(static_cast<std::uint32_t>(image.kernels.size()), "kernel");
+            nvr::KernelEntry kernel;
+            kernel.name = in.string("kernel name");
+            in.keyword("version");
+            kernel.abi_version = in.index("ABI version");
+            in.keyword("parameters");
+            kernel.parameter_types = in.indices("parameter type");
+            in.keyword("result");
+            kernel.result_type = in.index("result type");
+            image.kernels.push_back(std::move(kernel));
         } else if (record == "function") {
             in.expect_index(static_cast<std::uint32_t>(image.functions.size()), "function");
             nvr::Function function;
@@ -688,6 +705,9 @@ nvr::Image assemble(std::string_view text) {
                 break;
             case nvr::ExitKind::State:
                 exit.operation = static_cast<nvr::StateOp>(in.choice(state_ops, "state operation"));
+                if (exit.operation == nvr::StateOp::Kernel && image.minor_version < 6) {
+                    in.error("kernel exits require NVR 1.6");
+                }
                 in.keyword("immediate");
                 exit.immediate = in.index("immediate");
                 arguments();

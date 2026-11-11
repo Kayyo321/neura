@@ -154,6 +154,10 @@ Errors about imports, artifacts, and C headers.
 | [E0708](E0708.md) | C import failed |
 | [E0709](E0709.md) | C header or library not found |
 | [E0710](E0710.md) | invalid host or scheduler binding |
+| [E0780](E0780.md) | kernel binding outside the standard library |
+| [E0781](E0781.md) | kernel binding does not match its kernel |
+| [E0782](E0782.md) | unknown kernel or kernel ABI version |
+| [E0783](E0783.md) | malformed kernel binding |
 
 ## E08xx: Backend
 

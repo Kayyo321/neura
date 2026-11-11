@@ -18,7 +18,7 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 5;
+inline constexpr std::uint16_t minor_version = 6;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -165,10 +165,12 @@ enum class StateOp : std::uint8_t {
     TextSlice = 15, TextFromUtf8 = 16, TextEqual = 17,
     ClassHash = 18, ClassText = 19, ClassIs = 20, ClassCast = 21, ScalarText = 22,
     // NVR 1.3.
-    RepeatCollection = 23
+    RepeatCollection = 23,
+    // NVR 1.6. A call of a built-in C kernel; the immediate is its KERN index.
+    Kernel = 24
 };
 
-inline constexpr std::uint8_t state_op_count = 24;
+inline constexpr std::uint8_t state_op_count = 25;
 
 enum class TrapReason : std::uint32_t {
     Arithmetic = 1, Bounds = 2, ProgramFailure = 3, InvalidDispatch = 4,
@@ -254,6 +256,19 @@ struct NativeLibrary {
     bool operator==(const NativeLibrary&) const = default;
 };
 
+// NVR 1.6. A built-in C kernel the image calls (docs/runtime/Kernels.md): its
+// name and ABI version, and the Neura signature its kernel exits use, in
+// image types. A runtime runs the image only when its kernel table has every
+// entry with that signature.
+struct KernelEntry {
+    std::string name;
+    std::uint32_t abi_version = 0;
+    std::vector<std::uint32_t> parameter_types;
+    std::uint32_t result_type = 0;
+
+    bool operator==(const KernelEntry&) const = default;
+};
+
 struct SourceLocation {
     std::uint32_t function = 0;
     std::uint32_t block = 0;
@@ -290,6 +305,9 @@ struct Image {
     std::optional<NativeLibrary> native_library;
     // NVR 1.5. Required TRNS table for scheduler exits and polls.
     std::optional<std::vector<std::uint32_t>> transferable_layouts;
+    // NVR 1.6. Required KERN table, present exactly when the image has a
+    // kernel exit.
+    std::vector<KernelEntry> kernels;
     // The optional SMAP section. Absent when the image carries no source map.
     std::optional<std::vector<SourceLocation>> source_map;
     // Unknown optional sections in ascending tag order.
@@ -300,6 +318,9 @@ struct Image {
 
 // The lowest minor version that can represent `image`.
 std::uint16_t required_minor_version(const Image& image);
+
+// Whether the image has tasks: a TRNS table, a scheduler exit, or a poll.
+bool concurrent_image(const Image& image);
 
 // Number of graph lanes a value of `type` occupies at the graph boundary.
 unsigned lane_count(const Type& type);

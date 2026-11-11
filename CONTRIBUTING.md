@@ -84,6 +84,16 @@ Exercise failure paths that the change can affect. Examples include malformed ar
 
 Every pull request runs the [Tier 1 checks](docs/ContinuousIntegration.md): the documentation and workflow checks, a Release build on Linux x86-64, and the whole CTest suite. A test that is skipped or not run fails the pull request. Run the same commands locally before opening one; that page lists them.
 
+### Kernel oracles
+
+When a standard library function moves to a built-in C kernel ([Kernels](docs/runtime/Kernels.md)), its Neura code becomes the kernel's oracle. Change one module at a time, and keep its public API and documented behaviour:
+
+1. Add the kernel to its header in `src/kernels/` with C tests against published vectors in `tests/kernels/kernel_tests.cpp`, and run `python3 scripts/gen-kernels.py` to regenerate the table, the reference, and the `Std.Internal.Kernels.*` declarations.
+2. Move the module's Neura implementation unchanged, but for the module's name, to `tests/stdlib/<area>/support/reference-<module>.nra`. Only library source may import an `Internal` module, so the oracle lives with the tests, which also keeps it out of the installed library and of every user image.
+3. Rewrite the public module as a thin wrapper over the generated declarations.
+4. Add `tests/stdlib/<area>/kernel-oracle.nra` that imports both and compares them value for value (floats by bit pattern): a fixed edge corpus of the inputs where the implementation changes behaviour (empty, one element, every block or padding boundary, several blocks) and a loop over `Std.Random.seeded` inputs. Exercise each entry point both in one call and in pieces when the module keeps state. [`tests/stdlib/sha256/kernel-oracle.nra`](tests/stdlib/sha256/kernel-oracle.nra) is the pattern.
+5. Keep the area's existing tests and trap programs: they now check the kernel against published vectors and the documented trap text. Rebase `tests/benchmarks/baseline.txt` with `-DUPDATE=ON` when a row changes, and say why in the pull request.
+
 ## Review performance changes
 
 Specify the workload, artifact configuration, execution environment, and baseline. For the standard library, `tests/benchmarks` records NVM steps, peak heap cells, neuron count, and image bytes for representative workloads in `tests/benchmarks/baseline.txt`; the `benchmarks` test fails when a figure rises more than 10%, and a change that raises one updates the baseline with the reason. `neura run --profile` shows the steps each function takes. Compare the same inputs and confirm equivalent results before measuring. Record the cost the change targets, such as compile time, circuit size or depth, serialized size, execution steps, runtime, or memory. Include the cost of any work moved to another stage or to the runtime. Explain which workloads benefit and which regress in the measurements.

@@ -398,6 +398,9 @@ private:
         result.generics = generic_parameters();
         const bool expression_body = function_body(result, branch_keyword);
         const bool host = !result.has_body && current().kind == TokenKind::Identifier && current().text == "host";
+        const bool kernel = !result.has_body && current().kind == TokenKind::Identifier &&
+                            current().text == "kernel" && tokens_[cursor_ + 1].kind == TokenKind::Symbol &&
+                            tokens_[cursor_ + 1].text == "(";
         if (!result.has_body && current().kind == TokenKind::Identifier && current().text == "scheduler" &&
             tokens_[cursor_ + 1].kind == TokenKind::Symbol && tokens_[cursor_ + 1].text == "(") {
             advance();
@@ -412,23 +415,28 @@ private:
         }
         const bool callback = result.has_body && !expression_body && current().kind == TokenKind::Identifier &&
                               current().text == "callback";
-        if (host || callback) {
+        if (host || callback || kernel) {
             advance();
             expect("(");
             const auto& service = current();
-            if (service.kind != TokenKind::String)
+            if (service.kind != TokenKind::String) {
+                if (kernel) throw Diagnostic(service.span, "expected a kernel name").with_code("E0783");
                 throw Diagnostic(service.span, "expected a host service name").with_code("E0213");
+            }
             advance();
             expect(",");
             const auto& version = current();
             std::uint32_t number = 0;
             const auto end = version.text.data() + version.text.size();
             const auto [next, error] = std::from_chars(version.text.data(), end, number);
-            if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0)
+            if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0) {
+                if (kernel)
+                    throw Diagnostic(version.span, "kernel ABI version must be a positive uint32").with_code("E0783");
                 throw Diagnostic(version.span, "host service version must be a positive uint32").with_code("E0213");
+            }
             advance();
             expect(")");
-            auto& binding = host ? result.host_binding : result.host_callback;
+            auto& binding = kernel ? result.kernel_binding : host ? result.host_binding : result.host_callback;
             binding.emplace(service.text.substr(1, service.text.size() - 2), number);
         }
         return expression_body;

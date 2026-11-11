@@ -1,0 +1,7 @@
+error[E0783]: expected a kernel name
+ --> $DIR/kernel-binding-name.nra:3:66
+  |
+3 |     export let crc32 = func(bytes: uint8[list]) -> uint32 kernel(crc32, 1);
+  |                                                                  ^^^^^
+
+For more information about this error, try `neura explain E0783`.

@@ -286,6 +286,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/specialize.cpp
     src/neura-ir/static_initialization.cpp
     src/neura-ir/task_analysis.cpp
+    src/neura-ir/kernel_signature.cpp
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
     src/neura-ir/attributes.cpp
@@ -381,8 +382,10 @@ add_subdirectory(third_party/neura-libclang)
 # checks the archive), so they add nothing to the release binaries' libc,
 # libm, and loader dependencies. Floating point keeps strict binary64
 # semantics: no contraction into fused multiply-add, no fast-math, and no
-# host-specific instruction selection. Nothing links the library into the
-# runtime yet; only its tests use it.
+# host-specific instruction selection. The image format links it, so the
+# loader checks an image's KERN table against the kernel table and the NVM
+# (neura_nvm and neura_nvm_static, hence every launcher) runs kernel exits;
+# the compiler checks kernel bindings against the same table.
 add_library(neura_kernels STATIC
     src/kernels/neura_digest.c
     src/kernels/neura_encoding.c
@@ -406,6 +409,7 @@ else()
         -ffp-contract=off -fno-math-errno
         -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
 endif()
+target_link_libraries(neura_nvr PUBLIC neura_kernels)
 if(BUILD_TESTING)
     # Published vectors and boundary cases for each kernel family, plus the
     # math vectors of tests/stdlib/math/support/math-vectors.nra.

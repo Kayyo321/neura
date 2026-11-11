@@ -74,7 +74,7 @@ Capability options apply in command-line order, and a later option for a group o
 
 ### Run programs with tasks
 
-A program that uses [tasks](Concurrency.md) builds like any other, into an NVR 1.5 image, and `run` and `test` accept these options for it. Each limit ends the run with status 137 at the operation that would exceed it.
+A program that uses [tasks](Concurrency.md) builds like any other, into an NVR 1.5 image (1.6 when it also calls a kernel), and `run` and `test` accept these options for it. Each limit ends the run with status 137 at the operation that would exceed it.
 
 | Option | Commands | Meaning |
 | --- | --- | --- |

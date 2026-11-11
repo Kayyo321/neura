@@ -237,6 +237,14 @@ public:
             case nvr::StateOp::ScalarText:
                 operation = "scalar_text(" + values(function, args, lifted, inputs) + ")";
                 break;
+            case nvr::StateOp::Kernel: {
+                // A built-in C kernel: named by its KERN entry and opaque, as
+                // its behaviour is not in the circuit (Decompiler.md).
+                const auto& kernel = image_.kernels.at(exit.immediate);
+                operation = "kernel " + quoted(kernel.name) + " v" + std::to_string(kernel.abi_version) + "(" +
+                            values(function, args, lifted, inputs) + ") [opaque kernel]";
+                break;
+            }
             }
             return with(result(exit.result_slot) + operation + "; goto b" + std::to_string(exit.resume));
         }
