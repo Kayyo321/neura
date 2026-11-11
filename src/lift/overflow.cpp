@@ -1042,6 +1042,35 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
                 analysis.add_group({{a, 1}, {b, 1}}, *range);
             }
         }
+        // The halves need not be adjacent (a conversion's selections read
+        // halves built far apart): in a small node whose range is still
+        // wider than a bit, any two ReLU sources read with equal weights
+        // are tried the same way.
+        const auto settled = [&] {
+            const auto grouped = analysis.grouped_sum(node);
+            if (!grouped) return false;
+            const auto low = node.activation == nvr::Activation::Relu ? std::max<std::int64_t>(grouped->lo, 0)
+                                                                     : grouped->lo;
+            const auto high = node.activation == nvr::Activation::Relu ? std::max<std::int64_t>(grouped->hi, 0)
+                                                                      : grouped->hi;
+            return low >= 0 && high <= 1;
+        };
+        for (std::size_t e = 0; exact && node.edges.size() <= 6 && e < node.edges.size(); ++e) {
+            for (std::size_t f = e + 1; f < node.edges.size() && !settled(); ++f) {
+                const auto a = node.edges[e].source;
+                const auto b = node.edges[f].source;
+                if (a < graph.input_lanes || node.edges[e].weight != node.edges[f].weight ||
+                    proof.group_of[a] != nvr::absent || proof.group_of[b] != nvr::absent ||
+                    analysis.node(a).activation != nvr::Activation::Relu ||
+                    analysis.node(b).activation != nvr::Activation::Relu) {
+                    continue;
+                }
+                const nvr::Node sum{nvr::Activation::Identity, 0, {{a, 1}, {b, 1}}};
+                auto range = analysis.range(sum, 256, 4);
+                if (!(range && within_bits(*range))) range = analysis.exact_range(sum, 256, 3);
+                if (range && within_bits(*range)) analysis.add_group({{a, 1}, {b, 1}}, *range);
+            }
+        }
         // The final sum once more, with each group read whole as k * its
         // range. Each bound is sound, so their intersection is.
         if (const auto grouped = analysis.grouped_sum(node)) {
