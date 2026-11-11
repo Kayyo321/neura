@@ -15,5 +15,5 @@ let Fields = module:program.Entry (
         console.print_line(entry.level);
         console.print_line(entry.message);
         return program.ExitCode.Ok;
-    }
+    };
 );

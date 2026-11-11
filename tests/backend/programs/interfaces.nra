@@ -103,5 +103,5 @@ let Interfaces = module:program.Entry (
         }
         console.print_line(describe<Series, Series>(new Series(3), new Series(2), new Series(1)));
         return program.ExitCode.Ok;
-    }
+    };
 );

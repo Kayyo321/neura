@@ -46,5 +46,5 @@ let Enums = module:program.Entry (
             console.print_line("an enum in a generic box");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

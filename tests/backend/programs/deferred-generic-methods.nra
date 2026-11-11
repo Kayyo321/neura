@@ -49,5 +49,5 @@ let DeferredGenericMethods = module:program.Entry (
         let read = box.nest;
         console.print_line(read().value.to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );

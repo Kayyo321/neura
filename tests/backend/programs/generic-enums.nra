@@ -58,5 +58,5 @@ let GenericEnums = module:program.Entry (
         test.assert(d as int == 1 && d.to_string() == "Right");
         console.print_line("generic enum specialization passed");
         return program.ExitCode.Ok;
-    }
+    };
 );

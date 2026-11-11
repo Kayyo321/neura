@@ -7,7 +7,7 @@ let Token = class (
     export let.as int64 = func -> int64 {
         console.print_line("cast began");
         trap_with_message("cast failed");
-    }
+    };
 );
 
 let later_argument = func -> int {
@@ -21,5 +21,5 @@ let CastTrap = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         consume(new Token(), later_argument());
         return program.ExitCode.Ok;
-    }
+    };
 );

@@ -15,5 +15,5 @@ let CoreDriver = module:program.Entry (
         console.print_line(core.describe(5));
         console.print_line(core.describe(0));
         return program.ExitCode.Ok;
-    }
+    };
 );

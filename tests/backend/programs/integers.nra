@@ -78,5 +78,5 @@ let Integers = module:program.Entry (
         report(lowest32 % 10 == -8, "int32 minimum literal");
         report(combine(2, 6, 7) == -39, "a sum survives an isolated product");
         return program.ExitCode.Ok;
-    }
+    };
 );

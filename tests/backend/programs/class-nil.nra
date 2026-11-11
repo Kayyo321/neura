@@ -66,5 +66,5 @@ let Classes = module:program.Entry (
         test.assert(xyz.to_string() == "Classes.Integer#2");
         console.print_line("class references and value members passed");
         return program.ExitCode.Ok;
-    }
+    };
 );

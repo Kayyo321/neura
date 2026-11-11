@@ -129,5 +129,5 @@ let Loops = module:program.Entry (
             console.print_line("word " + word);
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

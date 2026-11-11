@@ -8,7 +8,7 @@ let Reentrant = class (
     static let read_pending = func -> int {
         reads++;
         return value + 7;
-    }
+    };
 );
 
 let BaseOfCycle = class (
@@ -36,15 +36,15 @@ let ReentrantStaticInitializationTests = module (
         test.assert_equal_int32(7, Reentrant.value);
         test.assert_equal_int32(7, Reentrant.value);
         test.assert_equal_int32(1, reads);
-    }
+    };
 
     export let test_base_can_reenter_derived_class_before_its_fields_run = func {
         test.assert_equal_int32(1, DerivedOfCycle.actual);
         test.assert_equal_int32(0, BaseOfCycle.observed);
         test.assert_equal_int32(1, reads);
-    }
+    };
 
     export let test_pending_booleans_and_references_have_defaults = func {
         test.assert(Defaults.seen);
-    }
+    };
 );

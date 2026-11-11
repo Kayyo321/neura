@@ -9,5 +9,5 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         Logger.log("hello");
         return program.ExitCode.Ok;
-    }
+    };
 );

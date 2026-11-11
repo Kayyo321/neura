@@ -113,5 +113,5 @@ let GenericClosures = module:program.Entry (
         report(holder.value(21) == 21);
         report(apply<int, bool>(func(value: int) -> bool { return value > 3; }, 8));
         return program.ExitCode.Ok;
-    }
+    };
 );

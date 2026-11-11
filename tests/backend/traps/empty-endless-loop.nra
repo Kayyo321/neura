@@ -12,5 +12,5 @@ let EmptyLoop = module:program.Entry (
         do {
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

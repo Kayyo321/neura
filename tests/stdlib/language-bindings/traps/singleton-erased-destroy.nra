@@ -11,5 +11,5 @@ let App = module:program.Entry (
         let erased: class = service;
         destroy erased;
         return program.ExitCode.Ok;
-    }
+    };
 );

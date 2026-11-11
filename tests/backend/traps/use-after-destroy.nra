@@ -14,5 +14,5 @@ let Lifetime = module:program.Entry (
         destroy note;
         console.print_line(note.text);
         return program.ExitCode.Ok;
-    }
+    };
 );
