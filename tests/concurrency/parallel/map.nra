@@ -1,7 +1,11 @@
 // A parallel map means the sequential map: values in input order, whatever
 // the number of workers. The items carry scalars, text, tuples, payload
-// enums, and a function value with a transferable capture.
+// enums, and a function value with a transferable capture. Items and tasks
+// may call kernel-backed library code: a kernel call is not a host request.
 let console = import:Std.Io.Console;
+let crc32s = import:Std.Digest.Crc32;
+let sha256s = import:Std.Digest.Sha256;
+let strings = import:Std.Text.Strings;
 let program = import:Std.Program;
 let parallel = import:Std.Concurrent.Parallel;
 
@@ -37,6 +41,10 @@ let grow = func(shape: Shape) -> Shape => match (shape) {
 
 let repeat = func(text: string) -> string => text + text;
 
+let checksum = func(text: string) -> uint32 => crc32s.of(strings.to_bytes(text));
+
+let digest_length = func(text: string) -> int => sha256s.of(strings.to_bytes(text)).length;
+
 export let Main = module : program.Entry (
     export let.override main = func(arguments: string[]) -> program.ExitCode {
         let starts: int[] = [27, 97, 871, 6171, 77031, 837799, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -62,6 +70,15 @@ export let Main = module : program.Entry (
         let words: string[] = ["ab", "", "xyz"];
         for (let word: string in parallel.map<string, string>(words, repeat, parallel.limits(100000, 100000))) {
             console.print_line("[" + word + "]");
+        }
+
+        let texts: string[] = ["123456789", ""];
+        let sums = parallel.map<string, uint32>(texts, checksum, parallel.limits(100000, 100000));
+        let lengths_of = parallel.map<string, int>(texts, digest_length, parallel.limits(100000, 100000));
+        console.print_line(sums[0].to_string() + " " + sums[1].to_string() + " " + lengths_of[0].to_string());
+        scope {
+            let task = spawn checksum("abc");
+            console.print_line(task.join().to_string());
         }
 
         let none: int[] = [];

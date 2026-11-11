@@ -1,0 +1,69 @@
+let hex = import:Std.Encoding.Hex;
+let random = import:Std.Random.Random;
+let reference = import:ReferenceSha256;
+let sha256s = import:Std.Digest.Sha256;
+let test = import:Std.Test;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). Std.Digest.Sha256
+// runs the neura.digest.sha256* kernels; ReferenceSha256 (support/) is the
+// Neura implementation they replaced, unchanged. The two must agree byte for
+// byte on a fixed edge corpus and on seeded random inputs, both in one call
+// and through a running digest fed in pieces.
+let Sha256KernelOracle = module (
+    // Bytes that differ from position to position: i * 31 + 7, modulo 256.
+    let pattern = func(length: int) -> uint8[list] {
+        let bytes: uint8[list] = [];
+        for (let i = 0; i < length; i++) {
+            bytes.append(((i * 31 + 7) % 256) as uint8);
+        }
+        return bytes;
+    };
+
+    // The bytes from `start` up to `end`.
+    let slice = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
+        let part: uint8[list] = [];
+        for (let i = start; i < end; i++) {
+            part.append(bytes[i]);
+        }
+        return part;
+    };
+
+    // Kernel and reference agree on the bytes in one call, and through a
+    // running digest fed in pieces of `piece` bytes.
+    let agree = func(bytes: uint8[list], piece: int) {
+        let expected = hex.encode(reference.of(bytes));
+        test.assert_equal_string(expected, hex.encode(sha256s.of(bytes)));
+        let kernel = sha256s.create();
+        let oracle = reference.create();
+        for (let start = 0; start < bytes.length; start += piece) {
+            let end = start + piece;
+            if (end > bytes.length) {
+                end = bytes.length;
+            }
+            let part = slice(bytes, start, end);
+            kernel.update(part);
+            oracle.update(part);
+        }
+        test.assert_equal_string(hex.encode(oracle.finish()), hex.encode(kernel.finish()));
+    };
+
+    // Empty, one byte, around the 55- and 56-byte padding boundary, around
+    // one block, and several blocks.
+    export let test_edge_corpus = func {
+        let lengths = [0, 1, 55, 56, 63, 64, 65, 119, 120, 128, 129, 1000];
+        for (let length in lengths) {
+            agree(pattern(length), 64);
+            agree(pattern(length), 7);
+        }
+        agree(pattern(200), 1);
+    };
+
+    // Seeded random lengths, contents, and piece sizes.
+    export let test_seeded_random = func {
+        let source = random.seeded(20261111);
+        for (let round = 0; round < 24; round++) {
+            let bytes = source.fill_bytes(source.next_int_below(300));
+            agree(bytes, 1 + source.next_int_below(80));
+        }
+    };
+);

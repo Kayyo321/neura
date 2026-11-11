@@ -1,0 +1,63 @@
+let crc32s = import:Std.Digest.Crc32;
+let random = import:Std.Random.Random;
+let reference = import:ReferenceCrc32;
+let test = import:Std.Test;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). Std.Digest.Crc32
+// runs the neura.digest.crc32 and crc32_update kernels; ReferenceCrc32
+// (support/) is the Neura implementation they replaced, unchanged. The two
+// must agree on a fixed edge corpus and on seeded random inputs, both in one
+// call and through a running checksum fed in pieces.
+let Crc32KernelOracle = module (
+    // Bytes that differ from position to position: i * 31 + 7, modulo 256.
+    let pattern = func(length: int) -> uint8[list] {
+        let bytes: uint8[list] = [];
+        for (let i = 0; i < length; i++) {
+            bytes.append(((i * 31 + 7) % 256) as uint8);
+        }
+        return bytes;
+    };
+
+    // Kernel and reference agree on the bytes in one call, and through a
+    // running checksum fed in pieces of `piece` bytes and then reset.
+    let agree = func(bytes: uint8[list], piece: int) {
+        test.assert_equal_uint64(reference.of(bytes) as uint64, crc32s.of(bytes) as uint64);
+        let kernel = crc32s.create();
+        let oracle = reference.create();
+        let part: uint8[list] = [];
+        for (let b in bytes) {
+            part.append(b);
+            if (part.length == piece) {
+                kernel.update(part);
+                oracle.update(part);
+                part = [];
+            }
+        }
+        kernel.update(part);
+        oracle.update(part);
+        test.assert_equal_uint64(oracle.value() as uint64, kernel.value() as uint64);
+        kernel.reset();
+        oracle.reset();
+        test.assert_equal_uint64(oracle.value() as uint64, kernel.value() as uint64);
+    };
+
+    // Empty, one byte, around the kernel's 4-byte and 64-byte strides, and
+    // several blocks.
+    export let test_edge_corpus = func {
+        let lengths = [0, 1, 3, 4, 5, 55, 56, 63, 64, 65, 128, 1000];
+        for (let length in lengths) {
+            agree(pattern(length), 64);
+            agree(pattern(length), 7);
+        }
+        agree(pattern(200), 1);
+    };
+
+    // Seeded random lengths, contents, and piece sizes.
+    export let test_seeded_random = func {
+        let source = random.seeded(20261111);
+        for (let round = 0; round < 24; round++) {
+            let bytes = source.fill_bytes(source.next_int_below(300));
+            agree(bytes, 1 + source.next_int_below(80));
+        }
+    };
+);
