@@ -5,6 +5,7 @@
 </h1>
 
 <p align="center">
+  <a href="https://kayyo321.github.io/neura/"><img src="https://img.shields.io/badge/website-kayyo321.github.io%2Fneura-1f29c9" alt="Website: kayyo321.github.io/neura"></a>
   <a href="#getting-started"><img src="https://img.shields.io/badge/compiler-C%2B%2B20-bf2e70" alt="Compiler: C++20"></a>
   <a href="docs/runtime/NVM.md"><img src="https://img.shields.io/badge/runtime-NVM-087c77" alt="Runtime: Neura Virtual Machine"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-965b0c" alt="License: Apache 2.0"></a>
