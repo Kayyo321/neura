@@ -5,8 +5,8 @@ Run from any directory with `python3 scripts/update-stdlib-wiki-api.py`.
 Use `--check` to report pages that would change without writing them.
 Only the marked SOURCE API block is changed; surrounding prose is maintained
 by hand. Internal modules, members of non-exported classes, and declarations
-tagged `#Hidden` are omitted; `#Deprecated` and `#Since` tags are shown in the
-notes.
+tagged `#Hidden` are omitted; `#Deprecated` and `#Since` tags, and the tags that
+constrain callers, such as `#NoDiscard` and `#Final`, are shown in the notes.
 """
 
 import argparse
@@ -86,9 +86,18 @@ def tags_above(lines, start):
     return tags
 
 
+# Tags that change how a caller may use a declaration, listed after its notes as they are written.
+CALLER_TAGS = ("Experimental", "NoDiscard", "Final", "Sealed", "Pure", "Immutable", "ThreadSafe",
+               "NotThreadSafe", "Synchronized")
+
+
 def tag_notes(tags):
-    """Notes for the tags a reader of the API needs: deprecation and since."""
+    """Notes for the tags a reader of the API needs: deprecation, the tags that
+    constrain callers (docs/lang/Tags.md), and since."""
     notes = []
+    shown = [f"`#{tag}`" for tag in tags if tag_name(tag) in CALLER_TAGS]
+    if shown:
+        notes.append("Tagged " + ", ".join(shown) + ".")
     for tag in tags:
         name = tag_name(tag)
         arguments = dict(re.findall(r'(\w+):\s*"([^"]*)"', tag))

@@ -36,7 +36,7 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         ConsoleLogger.log("Application started");
 
-        let entry = new Logger.LogEntry();
+        let entry: Logger.LogEntry = new;
         entry.level = Logger.default_level;
         entry.message = "Module interface successfully inherited";
 

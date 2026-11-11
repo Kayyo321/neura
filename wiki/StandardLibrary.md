@@ -52,7 +52,7 @@ Ada
 
 Expected failures are `Result<T>` values whose error is the `Error` enum; absent values are `Optional<T>`. A violated precondition traps with one of the messages of [section 5.1](Stdlib-Design#51-failure-model). An `Error` cannot be sent on a channel or given to a spawned task, because a `Custom` error holds an object. `Std.Core.Error.PortableError` is its transferable copy: `to_portable(e)` flattens a `Custom` error to its code and message, and `from_portable(p)` gives back an `Error` with the same message ([Stdlib](Stdlib-Design#63-error)).
 
-`RegexFlags` compares and hashes its three option values. A compiled `Regex` uses its pattern and the options recorded at compilation, and its text is the pattern. A `RegexMatch` uses its input, capture offsets, and group names, and its text is the whole match. `FileMetadata` uses the entry kind, size, and modification time for equality and hashing. Its text is `Kind(size, modified)`, with `nil` when the modification time is absent. Mutating flags or metadata can change their hashes.
+`RegexFlags` compares and hashes its three option values. A compiled `Regex` uses its pattern and the options recorded at compilation, and its text is the pattern. A `RegexMatch` uses its input, capture offsets, and group names, and its text is the whole match. `FileMetadata` uses the entry kind, size, and modification time for equality and hashing; its fields are read-only. Its text is `Kind(size, modified)`, with `nil` when the modification time is absent. Mutating flags can change their hashes.
 
 ## String
 
@@ -177,7 +177,7 @@ let [jobs, next_job, jobs_closer] = channels.open<int>(64);
 
 ## Task safety
 
-A call that `spawn` starts must be [task-safe](Concurrency#52-task-safe-calls): nothing it reaches may read or write a reassignable module binding, read a module constant that is an object, or call native code. `neura check --task-safety <files>` prints the answer for every function of the linked program, with the reason for each one that is not task-safe, so any function can be checked. A generic function is listed once for each specialization the program uses.
+A call that `spawn` starts must be [task-safe](Concurrency#52-task-safe-calls): nothing it reaches may read or write a reassignable module binding, read a module constant that is an object of a class that is not `#Immutable`, or call native code. `neura check --task-safety <files>` prints the answer for every function of the linked program, with the reason for each one that is not task-safe, so any function can be checked. A generic function is listed once for each specialization the program uses.
 
 | Area | Task-safe | Not task-safe |
 | --- | --- | --- |
@@ -186,14 +186,16 @@ A call that `spawn` starts must be [task-safe](Concurrency#52-task-safe-calls): 
 | `Std.Concurrent` | Every function | None |
 | `Std.Fs`, `Std.Net` | Every function. They issue host requests, which a task may do. | None |
 | `Std.Io` | Console output and formatting, `Closeable`, `ByteBuffer`, `BufferedWriter`, `Utf8Writer` | `Console.read_line` and the byte source that `Console.input()` returns: the read-ahead buffer belongs to the root task. In a program that calls `Console.input()`, also the read functions of `BufferedReader` (`read`, `read_exact`, `read_all`) and `Utf8Reader` (`read_scalar`, `read_line`, `read_to_end`), whatever source they were built from, because that source is a function value of the same type. A program that never calls `Console.input()` may use them in a task |
-| `Std.Time` | Every function, `SystemClock`, `FixedClock`, and `Stopwatch` included | None. The constant objects `Duration.Zero`, `Instant.Epoch`, `LocalTime.Midnight`, and `ZoneOffset.Utc` cannot be read by a task (see below) |
-| `Std.Encoding` | `Utf8`, `Json`, `Csv`, the encoders of `Hex` and `Base64`, and `Base64.decode_with` | `Hex.decode`, and `Base64.decode`, `decode_unpadded`, `decode_url`, and `decode_url_unpadded`, which build a lookup table in a module binding on first use |
-| `Std.Digest` | `Crc32.create` and `Sha256.create` | `Crc32.of` and `update`, which build a table on first use, and `Sha256.of`, `update`, and `finish`, whose round constants are a reassignable binding. A spawned task cannot compute either digest |
+| `Std.Time` | Every function, `SystemClock`, `FixedClock`, and `Stopwatch` included. The value classes are `#Immutable`, so a task may be given their instances and may read `Duration.Zero`, `Instant.Epoch`, `LocalTime.Midnight`, and `ZoneOffset.Utc` | None |
+| `Std.Encoding` | Every function. `Utf8.validate`, `Hex`, and `Base64` run built-in kernels, which keep no module state | None |
+| `Std.Digest` | Every function. Both digests run built-in kernels, which keep no module state, so a task or a parallel item can compute either one | None |
 | `Std.DynamicForeign` | | Every function: it cannot be linked into a program with tasks |
 
 The table is the report for a program that links every module of the library except `Std.DynamicForeign`. The `concurrency-frontend` test pins a smaller set: with `Console`, `HashMap`, `ArrayList`, `TreeMap`, `Float64`, `Duration`, `SystemClock`, `Instant`, `Logger`, `TcpStream`, `TcpListener`, `Strings`, `Regex`, `Random`, and `Json` linked, only the console's input functions may be listed. The rows for `Std.Encoding`, `Std.Digest`, the two readers of `Std.Io`, and the two `Std.Time` classes come from the report alone. A function that calls a function value is judged by every function value of that type the program can create, so a program that makes an unsafe function value of a type the library calls, such as a logger's sink or a comparator, adds the library functions that call it to the list.
 
-A spawned task may read a `const` module binding of a transferable type, such as `Int32.Max`. It may not read a constant that is an object: `BigInteger.Zero`, `One`, and `Ten`, `Duration.Zero`, `Instant.Epoch`, `LocalTime.Midnight`, and `ZoneOffset.Utc`. It builds the value with the module's factory function, such as `of_int64` or `of_nanos`. The root task is not restricted.
+A spawned task may read a `const` module binding of a transferable type, such as `Int32.Max` or `Duration.Zero`, whose class is `#Immutable`. It may not read a constant that is an object of another class: `BigInteger.Zero`, `One`, and `Ten`. It builds the value with the module's factory function, such as `of_int64`. The root task is not restricted.
+
+The properties in this table that hold for every program are stated in the source with checked [tags](Tags): `#ThreadSafe` on the module functions of `Std.Core`, `Std.Math`, `Std.Text`, `Std.Encoding`, `Std.Digest`, and `Std.Time`, on the `Std.Concurrent` handles, and on `Console.print_line`, and `#Immutable` with `#ThreadSafe` on the value classes that tasks share ([Stdlib](Stdlib-Design#58-task-safety)). A function whose task safety depends on a program's own overrides or function values, such as `Error.message` or `BufferedReader.read`, is not tagged.
 
 
 ## Host services and capabilities

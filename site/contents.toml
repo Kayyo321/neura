@@ -22,6 +22,7 @@ summary = "Every document in the Neura repository, rendered from the main branch
 # links lead to the published document in docs/ with the same name.
 [wiki]
 Stdlib-Design = "docs/lang/Stdlib.md"
+Diagnostics = "docs/diagnostics/README.md"
 
 [[sections]]
 title = "Start here"
@@ -103,6 +104,7 @@ pages = [
   { source = "docs/runtime/NVM.md", label = "Neura Virtual Machine" },
   { source = "docs/runtime/NVR.md", label = "NVR format" },
   { source = "docs/runtime/Kernels.md", label = "Kernels" },
+  { source = "docs/Benchmarks.md", label = "Wall-clock benchmarks" },
 ]
 
 [[sections]]

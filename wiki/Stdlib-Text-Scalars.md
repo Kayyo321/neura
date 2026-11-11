@@ -17,40 +17,40 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Scalars** · [`export const Replacement: uint32 = 65533`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L9)
+- **Scalars** · [`export const Replacement: uint32 = 65533`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L10)
   U+FFFD REPLACEMENT CHARACTER.
-- **Scalars** · [`export let is_valid = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L12)
-  At most 0x10FFFF and outside the surrogates 0xD800 through 0xDFFF.
-- **Scalars** · [`export let utf8_length = func(scalar: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L17)
-  The number of UTF-8 bytes that encode the scalar value, 1 through 4. Traps with "invalid argument: not a Unicode scalar value" for a surrogate or a value above 0x10FFFF.
-- **Scalars** · [`export let is_ascii = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L34)
-  Tests whether a value is below U+0080.
-- **Scalars** · [`export let is_ascii_digit = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L37)
-  0 through 9.
-- **Scalars** · [`export let is_ascii_hex_digit = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L40)
-  0 through 9, A through F, and a through f.
-- **Scalars** · [`export let is_ascii_alphabetic = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L44)
-  Tests whether the value is an ASCII letter.
-- **Scalars** · [`export let is_ascii_alphanumeric = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L48)
-  Tests whether the value is an ASCII letter or decimal digit.
-- **Scalars** · [`export let is_ascii_uppercase = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L52)
-  Tests whether the value is in the ASCII uppercase letter range.
-- **Scalars** · [`export let is_ascii_lowercase = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L55)
-  Tests whether the value is in the ASCII lowercase letter range.
-- **Scalars** · [`export let is_ascii_whitespace = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L59)
-  Space, tab, LF, vertical tab, form feed, and CR: the set that Strings.trim removes and that the Regex class \s matches.
-- **Scalars** · [`export let is_ascii_punctuation = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L63)
-  The 32 graphic ASCII characters that are not letters or digits.
-- **Scalars** · [`export let is_ascii_control = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L69)
-  U+0000 through U+001F and U+007F.
-- **Scalars** · [`export let to_ascii_upper = func(scalar: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L72)
-  a through z become A through Z; every other value is returned as is.
-- **Scalars** · [`export let to_ascii_lower = func(scalar: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L76)
-  A through Z become a through z; every other value is returned as is.
-- **Scalars** · [`export let digit_value = func(scalar: uint32, radix: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L83)
-  The digit's value in the radix, letters in either case, or -1 when the scalar is not a digit of the radix. A radix outside 2 through 36 traps with "invalid argument: radix outside 2 through 36".
-- **Scalars** · [`export let from_digit = func(value: int, radix: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L98)
-  The lowercase digit for a value from 0 through radix - 1. A radix outside 2 through 36 traps as in digit_value; a value outside the radix traps with "invalid argument: digit out of range".
+- **Scalars** · [`export let is_valid = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L14)
+  At most 0x10FFFF and outside the surrogates 0xD800 through 0xDFFF. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let utf8_length = func(scalar: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L20)
+  The number of UTF-8 bytes that encode the scalar value, 1 through 4. Traps with "invalid argument: not a Unicode scalar value" for a surrogate or a value above 0x10FFFF. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L38)
+  Tests whether a value is below U+0080. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii_digit = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L42)
+  0 through 9. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii_hex_digit = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L46)
+  0 through 9, A through F, and a through f. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii_alphabetic = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L51)
+  Tests whether the value is an ASCII letter. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii_alphanumeric = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L56)
+  Tests whether the value is an ASCII letter or decimal digit. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii_uppercase = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L61)
+  Tests whether the value is in the ASCII uppercase letter range. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii_lowercase = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L65)
+  Tests whether the value is in the ASCII lowercase letter range. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii_whitespace = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L70)
+  Space, tab, LF, vertical tab, form feed, and CR: the set that Strings.trim removes and that the Regex class \s matches. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii_punctuation = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L75)
+  The 32 graphic ASCII characters that are not letters or digits. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let is_ascii_control = func(scalar: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L82)
+  U+0000 through U+001F and U+007F. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let to_ascii_upper = func(scalar: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L86)
+  a through z become A through Z; every other value is returned as is. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let to_ascii_lower = func(scalar: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L91)
+  A through Z become a through z; every other value is returned as is. Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let digit_value = func(scalar: uint32, radix: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L99)
+  The digit's value in the radix, letters in either case, or -1 when the scalar is not a digit of the radix. A radix outside 2 through 36 traps with "invalid argument: radix outside 2 through 36". Tagged `#Pure`, `#ThreadSafe`.
+- **Scalars** · [`export let from_digit = func(value: int, radix: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/scalars.nra#L115)
+  The lowercase digit for a value from 0 through radix - 1. A radix outside 2 through 36 traps as in digit_value; a value outside the radix traps with "invalid argument: digit out of range". Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

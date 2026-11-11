@@ -17,18 +17,18 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Sha256** · [`export let Sha256 = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L23)
-  A running digest. `finish` ends it: a later update or finish traps with "invalid state: digest finished".
-- **Sha256.Sha256** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L39)
-  Initializes the reusable message schedule for a fresh digest.
-- **Sha256.Sha256** · [`export let update = func(bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L47)
-  Adds the bytes to the message. Whole blocks are read in place from `bytes`; only the bytes of an incomplete block are copied.
-- **Sha256.Sha256** · [`export let finish = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L76)
+- **Sha256** · [`export let Sha256 = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L14)
+  A running digest. `finish` ends it: a later update or finish traps with "invalid state: digest finished". Tagged `#Final`.
+- **Sha256.Sha256** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L20)
+  Initializes the state of a fresh digest.
+- **Sha256.Sha256** · [`export let update = func(bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L28)
+  Adds the bytes to the message.
+- **Sha256.Sha256** · [`export let finish = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L33)
   Pads the message, ends the digest, and returns the 32 bytes of the hash.
-- **Sha256** · [`export let create = func -> Sha256`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L163)
-  A new digest with no bytes added.
-- **Sha256** · [`export let of = func(bytes: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L166)
-  The 32-byte hash of the bytes.
+- **Sha256** · [`export let create = func -> Sha256`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L38)
+  A new digest with no bytes added. Tagged `#ThreadSafe`.
+- **Sha256** · [`export let of = func(bytes: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/sha256.nra#L42)
+  The 32-byte hash of the bytes. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -61,8 +61,8 @@ Signed wrapping operations convert to the unsigned pattern, operate, and convert
 
 Both work on built-in `uint8` lists with the 32-bit recipes of [section 7.2](Stdlib-Design#72-arithmetic-without-wrapping-intrinsics).
 
-- **`Crc32`:** the IEEE 802.3 checksum (reflected polynomial 0xEDB88320, initial value and final exclusive-or of all ones). A 256-entry `uint32` list is computed on first use. `update(bytes)`, `value() → uint32`, `reset()`, and the module function `of(bytes) → uint32`.
-- **`Sha256`:** FIPS 180-4. `update(bytes)`, `finish()` (a built-in list of 32 bytes; a later `update` or `finish` traps with `invalid state: digest finished`), and the module function `of(bytes)`.
+- **`Crc32`:** the IEEE 802.3 checksum (reflected polynomial 0xEDB88320, initial value and final exclusive-or of all ones). `update(bytes)`, `value() → uint32`, `reset()`, and the module function `of(bytes) → uint32`. The kernels `neura.digest.crc32` and `crc32_update` compute it (P2a).
+- **`Sha256`:** FIPS 180-4. `update(bytes)`, `finish()` (a built-in list of 32 bytes; a later `update` or `finish` traps with `invalid state: digest finished`), and the module function `of(bytes)`. The kernels `neura.digest.sha256`, `sha256_init`, `sha256_update`, and `sha256_finish` compute it (P2a); a running digest keeps the kernel's 112-byte state in a private list.
 
 These are for integrity checks and content addressing. The library makes no claim about timing behavior.
 
@@ -76,8 +76,8 @@ These are for integrity checks and content addressing. The library makes no clai
 - **Json parse errors.** `Empty` for empty or all-whitespace text; `UnexpectedEnd` at the text length; `Syntax` for structure; `InvalidCharacter` inside a token, with escapes reported at the backslash; `OutOfRange` at the bracket that opens level 513. Top-level scalars are accepted.
 - **Json values.** Numbers compare by a canonical decimal text, including exponents beyond `int64`. `hash` starts each variant from its position (Null 1 through Object 6), and an object's hash combines its member count with the wrapping sum of its distinct member hashes, so it agrees with order-insensitive equality even when names repeat. `number_to_int64` is `None` for anything but a plain integer. `index` keeps the last value of a repeated name. A `StringMap<JsonValue>` supports lookups; its `equals` and `to_string` are rejected at build time because `JsonValue` has no built-in value members.
 - **Json traps.** `number is not finite`, `negative indent`, `number text`, and `number exponent out of range`, after `invalid argument: `.
-- **Sha256** keeps rolled loops: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB.
+- **Sha256** kept rolled loops while it was Neura code: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB. It now calls kernels (P2a), which cut the `sha256` benchmark from 163,795 steps and 861,597 image bytes to 31,043 steps (mostly building the input) and 600,765 bytes.
 
 ### Task safety
 
-A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). `of`, `update`, and `finish` are not: the round constants are a reassignable module binding. `create` is task-safe, which does not let a task compute a digest. Compute it on the root task and give the task the result. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.
+A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). Every function of this module is task-safe: the digest runs on built-in kernels and keeps no module state, so a spawned task or a parallel item can compute one. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.

@@ -17,101 +17,101 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Sequence** · [`export let Sequence = class<T> implements Iterable<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L18)
-  A lazy traversal that can be handed to a downstream operation only once.
-- **Sequence.Sequence** · [`export let init = func(more: func() -> bool, pull: func() -> T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L29)
+- **Sequence** · [`export let Sequence = class<T> implements Iterable<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L20)
+  A lazy traversal that can be handed to a downstream operation only once. Tagged `#Final`, `#NoDiscard`.
+- **Sequence.Sequence** · [`export let init = func(more: func() -> bool, pull: func() -> T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L31)
   Constructs a lazy sequence from an availability check and an element pull.
-- **Sequence.Sequence** · [`export let iterator = func -> Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L36)
+- **Sequence.Sequence** · [`export let iterator = func -> Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L38)
   Uses the sequence up and returns an iterator over its elements, so that for-each can visit a sequence once.
-- **Sequence.Sequence** · [`export let map = func<U>(f: func(T) -> U) -> Sequence<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L42)
+- **Sequence.Sequence** · [`export let map = func<U>(f: func(T) -> U) -> Sequence<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L44)
   Returns a lazy sequence applying `f` once to each element as it is pulled.
-- **Sequence.Sequence** · [`export let filter = func(keep: func(T) -> bool) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L51)
+- **Sequence.Sequence** · [`export let filter = func(keep: func(T) -> bool) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L53)
   The elements that pass `keep`.
-- **Sequence.Sequence** · [`export let flat_map = func<U>(f: func(T) -> U[list]) -> Sequence<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L69)
+- **Sequence.Sequence** · [`export let flat_map = func<U>(f: func(T) -> U[list]) -> Sequence<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L71)
   The elements of each list `f` returns, in order.
-- **Sequence.Sequence** · [`export let take = func(n: int) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L93)
+- **Sequence.Sequence** · [`export let take = func(n: int) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L95)
   Returns a sequence of at most the first `n` elements and stops pulling after the last. Traps with "invalid argument: negative count" for a negative `n`.
-- **Sequence.Sequence** · [`export let skip = func(n: int) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L114)
+- **Sequence.Sequence** · [`export let skip = func(n: int) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L116)
   All but the first `n` elements. Traps with "invalid argument: negative count" for a negative `n`.
-- **Sequence.Sequence** · [`export let take_while = func(test: func(T) -> bool) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L142)
+- **Sequence.Sequence** · [`export let take_while = func(test: func(T) -> bool) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L144)
   Returns a sequence of leading elements accepted by `test` up to the first rejection.
-- **Sequence.Sequence** · [`export let skip_while = func(test: func(T) -> bool) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L165)
+- **Sequence.Sequence** · [`export let skip_while = func(test: func(T) -> bool) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L167)
   The elements from the first that fails `test` on.
-- **Sequence.Sequence** · [`export let enumerate = func -> Sequence<[int, T]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L192)
+- **Sequence.Sequence** · [`export let enumerate = func -> Sequence<[int, T]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L194)
   Each element with its position from 0.
-- **Sequence.Sequence** · [`export let zip = func<U>(other: Sequence<U>) -> Sequence<[T, U]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L206)
+- **Sequence.Sequence** · [`export let zip = func<U>(other: Sequence<U>) -> Sequence<[T, U]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L208)
   Returns pairs of corresponding elements until either sequence ends. Uses `other` up as well.
-- **Sequence.Sequence** · [`export let chain = func(other: Sequence<T>) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L223)
+- **Sequence.Sequence** · [`export let chain = func(other: Sequence<T>) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L225)
   This sequence's elements, then those of `other`. Uses `other` up as well.
-- **Sequence.Sequence** · [`export let peek = func(action: func(T) -> void) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L240)
+- **Sequence.Sequence** · [`export let peek = func(action: func(T) -> void) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L242)
   Calls `action` with each element as it passes.
-- **Sequence.Sequence** · [`export let chunked = func(n: int) -> Sequence<T[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L252)
+- **Sequence.Sequence** · [`export let chunked = func(n: int) -> Sequence<T[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L254)
   Returns successive new lists of `n` elements, with a shorter final list when needed. Traps with "invalid argument: chunk size" when `n` is below 1.
-- **Sequence.Sequence** · [`export let windowed = func(n: int) -> Sequence<T[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L276)
+- **Sequence.Sequence** · [`export let windowed = func(n: int) -> Sequence<T[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L278)
   Every run of `n` consecutive elements, each a new list, advancing by one. There are no windows when there are fewer than `n` elements. Traps with "invalid argument: window size" when `n` is below 1.
-- **Sequence.Sequence** · [`export let sorted = func(c: func(T, T) -> ordering.Ordering) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L313)
+- **Sequence.Sequence** · [`export let sorted = func(c: func(T, T) -> ordering.Ordering) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L315)
   Returns a sequence that buffers and stably sorts the entire input on first demand. The comparator defines a total order.
-- **Sequence.Sequence** · [`export let reversed = func -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L333)
+- **Sequence.Sequence** · [`export let reversed = func -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L335)
   Returns a sequence that buffers the entire input on first demand, then emits it in reverse order.
-- **Sequence.Sequence** · [`export let distinct = func -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L361)
+- **Sequence.Sequence** · [`export let distinct = func -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L363)
   Returns a sequence keeping only the first occurrence under the elements' equality and hash.
-- **Sequence.Sequence** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L380)
+- **Sequence.Sequence** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L382)
   Consumes the sequence into a new built-in list in traversal order.
-- **Sequence.Sequence** · [`export let to_array_list = func -> array_list.ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L390)
+- **Sequence.Sequence** · [`export let to_array_list = func -> array_list.ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L392)
   Consumes the sequence into a new ArrayList in traversal order.
-- **Sequence.Sequence** · [`export let partition = func(test: func(T) -> bool) -> [array_list.ArrayList<T>, array_list.ArrayList<T>]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L393)
+- **Sequence.Sequence** · [`export let partition = func(test: func(T) -> bool) -> [array_list.ArrayList<T>, array_list.ArrayList<T>]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L395)
   Consumes the sequence into two ArrayLists in input order. The first holds matches and the second holds nonmatches.
-- **Sequence.Sequence** · [`export let fold = func<A>(initial: A, f: func(A, T) -> A) -> A`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L410)
+- **Sequence.Sequence** · [`export let fold = func<A>(initial: A, f: func(A, T) -> A) -> A`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L412)
   Consumes the sequence by applying `f` to the accumulator and each successive element. Returns `initial` when empty.
-- **Sequence.Sequence** · [`export let count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L420)
+- **Sequence.Sequence** · [`export let count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L422)
   Consumes the sequence and returns the number of elements. Count overflow traps with reason 1.
-- **Sequence.Sequence** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L431)
+- **Sequence.Sequence** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L433)
   Consumes the sequence and calls `action` on each element in order.
-- **Sequence.Sequence** · [`export let any = func(test: func(T) -> bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L439)
+- **Sequence.Sequence** · [`export let any = func(test: func(T) -> bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L441)
   Returns true at the first element accepted by `test`, or false at exhaustion.
-- **Sequence.Sequence** · [`export let all = func(test: func(T) -> bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L450)
+- **Sequence.Sequence** · [`export let all = func(test: func(T) -> bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L452)
   Returns false at the first element rejected by `test`, or true at exhaustion.
-- **Sequence.Sequence** · [`export let none = func(test: func(T) -> bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L461)
+- **Sequence.Sequence** · [`export let none = func(test: func(T) -> bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L463)
   Returns false at the first element accepted by `test`, or true at exhaustion.
-- **Sequence.Sequence** · [`export let reduce = func(f: func(T, T) -> T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L472)
-  Combines elements from left to right, starting with the first. Returns `None` when empty.
-- **Sequence.Sequence** · [`export let first = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L485)
-  Returns the first element as `Some`, or `None` when empty. Pulls at most one element.
-- **Sequence.Sequence** · [`export let last = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L494)
-  Consumes all elements and returns the last as `Some`, or `None` when empty.
-- **Sequence.Sequence** · [`export let find = func(test: func(T) -> bool) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L507)
-  Returns the first element accepted by `test` as `Some`, or `None` at exhaustion.
-- **Sequence.Sequence** · [`export let min = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L519)
-  Returns the first of the least elements according to `c`, or `None` when empty.
-- **Sequence.Sequence** · [`export let max = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L523)
-  Returns the first of the greatest elements according to `c`, or `None` when empty.
-- **Sequence.Sequence** · [`export let to_set = func -> hash_set.HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L528)
+- **Sequence.Sequence** · [`export let reduce = func(f: func(T, T) -> T) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L475)
+  Combines elements from left to right, starting with the first. Returns `None` when empty. Tagged `#NoDiscard`.
+- **Sequence.Sequence** · [`export let first = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L489)
+  Returns the first element as `Some`, or `None` when empty. Pulls at most one element. Tagged `#NoDiscard`.
+- **Sequence.Sequence** · [`export let last = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L499)
+  Consumes all elements and returns the last as `Some`, or `None` when empty. Tagged `#NoDiscard`.
+- **Sequence.Sequence** · [`export let find = func(test: func(T) -> bool) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L513)
+  Returns the first element accepted by `test` as `Some`, or `None` at exhaustion. Tagged `#NoDiscard`.
+- **Sequence.Sequence** · [`export let min = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L526)
+  Returns the first of the least elements according to `c`, or `None` when empty. Tagged `#NoDiscard`.
+- **Sequence.Sequence** · [`export let max = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L531)
+  Returns the first of the greatest elements according to `c`, or `None` when empty. Tagged `#NoDiscard`.
+- **Sequence.Sequence** · [`export let to_set = func -> hash_set.HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L536)
   A HashSet of the elements in first-occurrence order, by equals and hash_code.
-- **Sequence.Sequence** · [`export let to_map = func<K, V>(key: func(T) -> K, value: func(T) -> V) -> hash_map.HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L540)
+- **Sequence.Sequence** · [`export let to_map = func<K, V>(key: func(T) -> K, value: func(T) -> V) -> hash_map.HashMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L548)
   A HashMap from key(element) to value(element), by the keys' equals and hash_code. Traps with "invalid argument: duplicate key" when two elements give equal keys.
-- **Sequence.Sequence** · [`export let group_by = func<K>(key: func(T) -> K) -> hash_map.HashMap<K, array_list.ArrayList<T>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L556)
+- **Sequence.Sequence** · [`export let group_by = func<K>(key: func(T) -> K) -> hash_map.HashMap<K, array_list.ArrayList<T>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L564)
   The elements grouped by key(element), groups in first-seen key order and each group in sequence order.
-- **Sequence.Sequence** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L568)
+- **Sequence.Sequence** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L576)
   Returns `Sequence` without claiming or evaluating the pipeline.
-- **Sequence** · [`export let from_list = func<T>(items: T[list]) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L658)
+- **Sequence** · [`export let from_list = func<T>(items: T[list]) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L666)
   The list's elements in order. It fails fast with "collection modified during iteration" when the list changes structurally, as the built-in for-each does.
-- **Sequence** · [`export let from_iterator = func<T>(items: Iterator<T>) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L679)
+- **Sequence** · [`export let from_iterator = func<T>(items: Iterator<T>) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L687)
   The remaining elements of an iterator, which keeps its own modification checks.
-- **Sequence** · [`export let empty = func<T> -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L688)
+- **Sequence** · [`export let empty = func<T> -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L696)
   Creates a sequence with no elements.
-- **Sequence** · [`export let generate = func<T>(make: func() -> T) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L697)
+- **Sequence** · [`export let generate = func<T>(make: func() -> T) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L705)
   An infinite sequence of make(), make(), ...
-- **Sequence** · [`export let iterate = func<T>(seed: T, step: func(T) -> T) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L705)
+- **Sequence** · [`export let iterate = func<T>(seed: T, step: func(T) -> T) -> Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L713)
   Returns an infinite sequence starting with `seed` and repeatedly applying `step`. The step runs only when the next element is pulled.
-- **Sequence** · [`export let range = func(start: int, end: int) -> Sequence<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L722)
+- **Sequence** · [`export let range = func(start: int, end: int) -> Sequence<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L730)
   Returns the integers in ascending order from `start` inclusive to `end` exclusive. The sequence is empty when `end` is at or below `start`.
-- **Sequence** · [`export let join = func(s: Sequence<string>, separator: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L736)
+- **Sequence** · [`export let join = func(s: Sequence<string>, separator: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L744)
   The strings with `separator` between consecutive ones.
-- **Sequence** · [`export let sum_int32 = func(s: Sequence<int>) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L752)
+- **Sequence** · [`export let sum_int32 = func(s: Sequence<int>) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L760)
   Consumes the sequence by adding from zero in order. Overflow traps with reason 1.
-- **Sequence** · [`export let sum_int64 = func(s: Sequence<int64>) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L762)
+- **Sequence** · [`export let sum_int64 = func(s: Sequence<int64>) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L770)
   Consumes the sequence by adding from zero in order. Overflow traps with reason 1.
-- **Sequence** · [`export let sum_float64 = func(s: Sequence<float64>) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L772)
+- **Sequence** · [`export let sum_float64 = func(s: Sequence<float64>) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra#L780)
   Consumes the sequence by adding left to right starting from the first element. Returns 0.0 when empty.
 <!-- END SOURCE API -->
 
@@ -125,7 +125,7 @@ There are two kinds of failure and they never mix.
 
 **Returned errors.** A function whose failure depends on input text, input bytes, or the outside world returns `Result<T>` ([section 6.2](Stdlib-Design#62-resultt)). The caller reads it with `match`. There is no propagation shorthand and no exception; passing an error up is an explicit `match` arm that returns it.
 
-**Traps.** A function whose precondition is violated ends the run. The run stops at once with the process status of the trap's class, 134 (`Abort`) for a message trap; no library or user code runs afterwards; nothing can observe or recover it ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). The module `Failure` in `Std.Core` has one function:
+**Traps.** A function whose precondition is violated ends the run. The run stops at once with the process status of the trap's class, 134 (`Abort`) for a message trap; no library or user code runs afterwards; nothing can observe or recover it ([Errors](Errors)). The module `Failure` in `Std.Core` has one function:
 
 | Member | Behavior |
 | --- | --- |

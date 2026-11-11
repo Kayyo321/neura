@@ -4,7 +4,7 @@ Each error that the compiler reports has a code: `E` and four digits, whose hund
 
 A page states the rule, shows a program that breaks it with the error it gets, and shows the program fixed. The examples are compiled by the `doc-examples` test: a failing example must fail with its code, and a fixed one must compile. A few errors cannot be caused by a single source file; their pages say why, and show only the fix.
 
-E0917 to E0929 are free for later tags, and W0006 to W0009 for later warnings.
+E0923 to E0929 are free for later tags, and W0006 to W0009 for later warnings.
 
 ## E01xx: Lexer
 

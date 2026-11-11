@@ -13,6 +13,25 @@ An override uses `let.override` or `const.override` and must match the inherited
 
 A bodyless class method declares a requirement. A class with an unimplemented requirement is abstract and cannot be instantiated; a concrete subclass must implement every inherited requirement. An intermediate subclass may remain abstract. The example's `Renderable` is abstract, `Text` implements `render`, and `Alert` overrides it again. This extends the existing use of bodyless function signatures in module interfaces to classes.
 
+The [`#Final` tag](Tags#final-and-sealed) on a class forbids subclasses (`E0912`), and on a method forbids overrides (`E0913`). `#Sealed` on a class or interface allows subclasses and implementations only inside the module that declares it, or its file for a type declared at the top of a file (`E0914`), so every subtype is known where the type is declared.
+
+<!-- example: check -->
+```neura
+let Shapes = module (
+    #Sealed
+    export let Shape = interface (
+        let sides = func() -> int32;
+    );
+
+    #Final
+    export let Square = class implements Shape (
+        export let.override sides = func() -> int32 {
+            return 4;
+        };
+    );
+);
+```
+
 ## Generic functions and classes
 
 A generic declaration introduces type parameters in angle brackets after `func` or `class`. A call or type application supplies arguments in angle brackets:

@@ -17,38 +17,38 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **LocalTime** · [`export let LocalTime = class implements Comparable<LocalTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L13)
-  An immutable wall-clock time within a 24-hour day.
-- **LocalTime.LocalTime** · [`export let init = func(nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L18)
+- **LocalTime** · [`export let LocalTime = class implements Comparable<LocalTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L15)
+  An immutable wall-clock time within a 24-hour day. Tagged `#Final`, `#NoDiscard`, `#Immutable`, `#ThreadSafe`.
+- **LocalTime.LocalTime** · [`export let init = func(nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L20)
   Stores the supplied nanosecond offset from midnight.
-- **LocalTime.LocalTime** · [`export let hour = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L23)
-  Returns the hour of the day from 0 through 23.
-- **LocalTime.LocalTime** · [`export let minute = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L26)
-  Returns the minute of the hour from 0 through 59.
-- **LocalTime.LocalTime** · [`export let second = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L29)
-  Returns the second of the minute from 0 through 59.
-- **LocalTime.LocalTime** · [`export let nano = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L32)
-  0 through 999,999,999.
-- **LocalTime.LocalTime** · [`export let to_nano_of_day = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L35)
-  0 through 86,399,999,999,999.
-- **LocalTime.LocalTime** · [`export let plus = func(span: duration.Duration) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L38)
-  Wraps around midnight in either direction.
-- **LocalTime.LocalTime** · [`export let compare_to = func(other: LocalTime) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L44)
-  Orders times by their nanosecond offsets from midnight.
-- **LocalTime.LocalTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L55)
-  Tests equality of nanosecond offsets from midnight.
-- **LocalTime.LocalTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L60)
-  Hashes the nanosecond offset from midnight.
-- **LocalTime.LocalTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L64)
-  HH:MM:SS, then a fraction of 3, 6, or 9 digits (the shortest that is exact) when the nanoseconds are not zero.
-- **LocalTime** · [`export const Midnight: LocalTime = new LocalTime(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L68)
+- **LocalTime.LocalTime** · [`export let hour = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L26)
+  Returns the hour of the day from 0 through 23. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let minute = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L30)
+  Returns the minute of the hour from 0 through 59. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let second = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L34)
+  Returns the second of the minute from 0 through 59. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let nano = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L38)
+  0 through 999,999,999. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let to_nano_of_day = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L42)
+  0 through 86,399,999,999,999. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let plus = func(span: duration.Duration) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L46)
+  Wraps around midnight in either direction. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let compare_to = func(other: LocalTime) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L53)
+  Orders times by their nanosecond offsets from midnight. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L65)
+  Tests equality of nanosecond offsets from midnight. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L71)
+  Hashes the nanosecond offset from midnight. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L76)
+  HH:MM:SS, then a fraction of 3, 6, or 9 digits (the shortest that is exact) when the nanoseconds are not zero. Tagged `#Pure`.
+- **LocalTime** · [`export const Midnight: LocalTime = new LocalTime(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L80)
   The time at the start of the day.
-- **LocalTime** · [`export let of = func(hour: int, minute: int, second: int, nano: int) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L72)
-  Traps with "invalid argument: invalid time" unless hour is 0 through 23, minute and second 0 through 59, and nano 0 through 999,999,999.
-- **LocalTime** · [`export let of_nano_of_day = func(nanos: int64) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L82)
-  Traps with "invalid argument: invalid time" outside 0 through 86,399,999,999,999.
-- **LocalTime** · [`export let parse = func(text: string) -> result.Result<LocalTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L93)
-  HH:MM:SS with an optional fraction of one through nine digits. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an hour above 23 or a minute or second above 59.
+- **LocalTime** · [`export let of = func(hour: int, minute: int, second: int, nano: int) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L85)
+  Traps with "invalid argument: invalid time" unless hour is 0 through 23, minute and second 0 through 59, and nano 0 through 999,999,999. Tagged `#Pure`, `#ThreadSafe`.
+- **LocalTime** · [`export let of_nano_of_day = func(nanos: int64) -> LocalTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L96)
+  Traps with "invalid argument: invalid time" outside 0 through 86,399,999,999,999. Tagged `#Pure`, `#ThreadSafe`.
+- **LocalTime** · [`export let parse = func(text: string) -> result.Result<LocalTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L108)
+  HH:MM:SS with an optional fraction of one through nine digits. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an hour above 23 or a minute or second above 59. Tagged `#NoDiscard`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -67,21 +67,23 @@ The value types are immutable classes with `compare_to`, `equals`, `hash_code`, 
 
 **`Instant`** is a point on the UTC time line: `int64` seconds since 1970-01-01T00:00:00Z and an `int` nanosecond adjustment from 0 through 999,999,999. Leap seconds are ignored, as in POSIX time.
 
-- Module functions `of_epoch_seconds(seconds, nanos)`, `of_epoch_millis`, the constant `Epoch`, and `parse`. Members `plus(Duration)`, `minus(Duration)`, `duration_since(other) → Duration`, `epoch_seconds()`, `nanos()`, `to_epoch_millis()`, `to_local(offset: ZoneOffset) → LocalDateTime`.
+- Module functions `of_epoch_seconds(seconds, nanos)`, `of_epoch_millis`, the constant `Epoch`, and `parse`. The read-only fields `epoch_seconds` and `nanos`, and the members `plus(Duration)`, `minus(Duration)`, `duration_since(other) → Duration`, `to_epoch_millis()`, `to_local(offset: ZoneOffset) → LocalDateTime`.
 - `to_string` is `YYYY-MM-DDTHH:MM:SS` with a fraction of 3, 6, or 9 digits when the nanoseconds are not zero (the shortest of those that is exact), then `Z`. `parse` accepts that form and a numeric offset in place of `Z`.
 
 **`Clock`** is an interface with `now() → Result<Instant>`, `monotonic() → Result<Duration>` (elapsed time from an arbitrary fixed origin, never decreasing), and `sleep(duration) → Result<Unit>`.
 
 - `SystemClock` uses the clock host services (P2) and fails with `CapabilityDenied` when they are not allowed.
 - `FixedClock` holds an instant set at construction; `set(instant)` and `advance(duration)` change it; `sleep` advances it and returns at once; it never fails. Library code that needs time takes a `Clock`, so tests pass a `FixedClock`.
-- `Stopwatch` takes a `Clock` and offers `start`, `stop`, `reset`, and `elapsed() → Result<Duration>`.
+- `Stopwatch` takes a `Clock` and offers `start`, `stop`, `reset`, `elapsed() → Result<Duration>`, and the read-only field `is_running`.
 
 **Calendar types** use the proleptic Gregorian calendar.
 
-- `LocalDate` stores `year` (-999,999 through 999,999), `month` (1 through 12), and `day`. The module function `of(year, month, day)` traps for an invalid date. `try_of(year, month, day) → LocalDate` returns `nil` for invalid components. Conversion to and from a day count since 1970-01-01 (`to_epoch_day`, `of_epoch_day`) uses the 400-year cycle of 146,097 days. Shift the year so that it starts in March, split it into the cycle and the year within the cycle, and compute the day of the cycle using floor division so that negative years work. Members include `plus_days`, `plus_months`, `plus_years`, `days_until(other) → int64`, `day_of_week() → DayOfWeek`, `day_of_year()`, `is_leap_year()`, and `length_of_month()`. Month and year changes clamp the day to the end of the target month. `DayOfWeek` runs from `Monday` through `Sunday`, with epoch day 0 on Thursday. Text uses `YYYY-MM-DD`. Years outside 0000 through 9999 have a sign and at least four digits.
-- `LocalTime`: `hour`, `minute`, `second`, `nano`, stored as nanoseconds of the day. `plus(Duration)` wraps around midnight. Text form `HH:MM:SS` with the same fraction rule as `Instant`.
-- `LocalDateTime`: a `LocalDate` and a `LocalTime`. `plus(Duration)` carries into the date. `at_offset(offset) → Instant`. Text form: the date, `T`, the time.
-- `ZoneOffset`: total seconds from -64,800 through 64,800. The constant `Utc`, `of_hours_minutes`, text form `Z` or `±HH:MM`.
+- `LocalDate` stores `year` (-999,999 through 999,999), `month` (1 through 12), and `day`, read-only fields. The module function `of(year, month, day)` traps for an invalid date. `try_of(year, month, day) → LocalDate` returns `nil` for invalid components. Conversion to and from a day count since 1970-01-01 (`to_epoch_day`, `of_epoch_day`) uses the 400-year cycle of 146,097 days. Shift the year so that it starts in March, split it into the cycle and the year within the cycle, and compute the day of the cycle using floor division so that negative years work. Members include `plus_days`, `plus_months`, `plus_years`, `days_until(other) → int64`, `day_of_week() → DayOfWeek`, `day_of_year()`, `is_leap_year()`, and `length_of_month()`. Month and year changes clamp the day to the end of the target month. `DayOfWeek` runs from `Monday` through `Sunday`, with epoch day 0 on Thursday. Text uses `YYYY-MM-DD`. Years outside 0000 through 9999 have a sign and at least four digits.
+- `LocalTime`: `hour()`, `minute()`, `second()`, `nano()`, computed from the nanoseconds of the day that it stores (`to_nano_of_day()`). `plus(Duration)` wraps around midnight. Text form `HH:MM:SS` with the same fraction rule as `Instant`.
+- `LocalDateTime`: a `LocalDate` and a `LocalTime`, the read-only fields `date` and `time`. `plus(Duration)` carries into the date. `at_offset(offset) → Instant`. Text form: the date, `T`, the time.
+- `ZoneOffset`: total seconds from -64,800 through 64,800, the read-only field `total_seconds`. The constant `Utc`, `of_hours_minutes`, text form `Z` or `±HH:MM`.
+
+A read-only field is an exported `last` field (an `is_running` with a get-only [accessor](Types#accessors)): code outside the class reads it as `date.year` and cannot assign it. The value classes are `#Final`, and `#NoDiscard`, so a call whose result is dropped, such as `instant.plus(span);`, warns ([Tags](Tags)).
 
 There is no time zone database, no named zones, and no daylight-saving rules. Conversions between instants and local times take an explicit `ZoneOffset`. The ISO forms above are the only text forms.
 

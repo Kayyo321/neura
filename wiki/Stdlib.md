@@ -231,6 +231,7 @@ The [complete specification](Stdlib-Design) has these sections.
   - [F1. Trap with a message](Stdlib-Design#f1-trap-with-a-message)
   - [P1. Library root](Stdlib-Design#p1-library-root)
   - [P2. Host bindings in source](Stdlib-Design#p2-host-bindings-in-source)
+  - [P2a. Kernel bindings in source](Stdlib-Design#p2a-kernel-bindings-in-source)
   - [P3. Entry point from the library](Stdlib-Design#p3-entry-point-from-the-library)
   - [What the language does not provide](Stdlib-Design#what-the-language-does-not-provide)
 - [4. Architecture](Stdlib-Design#4-architecture)

@@ -17,16 +17,16 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Logger** · [`export let LogLevel = enum (Trace, Debug, Info, Warn, Error, Off)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L11)
+- **Logger** · [`export let LogLevel = enum (Trace, Debug, Info, Warn, Error, Off)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L12)
   In order; levels compare by ordinal. Off disables a logger and is never a record's level.
-- **Logger** · [`export let Logger = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L14)
-  A named logger with its own threshold, sink, and optional clock.
-- **Logger.Logger** · [`export let init = func(name: string, target: func(string) -> void, level: LogLevel, time_source: Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L25)
+- **Logger** · [`export let Logger = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L16)
+  A named logger with its own threshold, sink, and optional clock. Tagged `#Final`.
+- **Logger.Logger** · [`export let level: LogLevel`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L27)
+  The minimum level enabled for this logger. Assigning it changes the level of future records; Off disables the logger. Since 0.2.0.
+- **Logger.Logger** · [`export let init = func(name: string, target: func(string) -> void, level: LogLevel, time_source: Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L30)
   Configures the logger's name, destination, threshold, and optional time source.
-- **Logger.Logger** · [`export let is_enabled = func(level: LogLevel) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L34)
+- **Logger.Logger** · [`export let is_enabled = func(level: LogLevel) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L39)
   True when a record at `level` would reach the sink: the level is not Off and is at least the logger's level.
-- **Logger.Logger** · [`export let set_level = func(level: LogLevel)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L38)
-  Changes the minimum level for future records.
 - **Logger.Logger** · [`export let log = func(level: LogLevel, message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L44)
   Sends one record when the level is enabled: with a clock, the instant's text (or - when the clock fails) and a space; then the level in uppercase, a space, the name, ": ", and the message.
 - **Logger.Logger** · [`export let log_lazy = func(level: LogLevel, make: func() -> string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L51)
@@ -87,7 +87,7 @@ These are the intended source-module contracts. Compiler support for the operati
 - Module functions `create(name: string, sink, level: LogLevel)` and `create_timed(name, sink, level, clock: Clock)`.
 - Each record is one line: with a clock, the instant's text and a space; then the level in uppercase, a space, the name, `: `, and the message. If the clock fails, the timestamp is `-`.
 - Without a clock there is no timestamp, so log output is deterministic by default.
-- Members: `trace`, `debug`, `info`, `warn`, `error` (each taking a message), `log(level, message)`, `log_lazy(level, make: () → string)` (the function runs only when the level is enabled), `is_enabled(level)`, and `set_level(level)`.
+- Members: `trace`, `debug`, `info`, `warn`, `error` (each taking a message), `log(level, message)`, `log_lazy(level, make: () → string)` (the function runs only when the level is enabled), `is_enabled(level)`, and the field `level`, which a program assigns to change the logger's level.
 - There is no global logger registry. A logger is passed to the code that uses it.
 
 ### 18.5 Time, randomness, and logging

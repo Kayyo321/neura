@@ -17,8 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Variadic** · [`export let Argument = enum ( Text(string), Signed(int64), Unsigned(uint64), Floating16(float16), BFloating16(bfloat16), Floating32(float32), Floating(float64), Boolean(bool), Object(class) )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/variadic.nra#L5)
-  Carries a packed argument with its primitive format or object-reference category preserved.
+- **Variadic** · [`export let Argument = enum ( Text(string), Signed(int64), Unsigned(uint64), Floating16(float16), BFloating16(bfloat16), Floating32(float32), Floating(float64), Boolean(bool), Object(class) )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/variadic.nra#L7)
+  Carries a packed argument with its primitive format or object-reference category preserved. Since 0.1.0.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

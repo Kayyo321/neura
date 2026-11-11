@@ -17,21 +17,21 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **FixedClock** · [`export let FixedClock = class implements Clock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L12)
+- **FixedClock** · [`export let FixedClock = class implements Clock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L13)
   A manually controlled clock with independent wall and monotonic readings.
-- **FixedClock.FixedClock** · [`export let init = func(start: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L19)
+- **FixedClock.FixedClock** · [`export let init = func(start: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L20)
   Starts at the supplied instant with a zero monotonic reading.
-- **FixedClock.FixedClock** · [`export let now = func -> result.Result<instant.Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L24)
-  Returns the current simulated wall-clock reading.
-- **FixedClock.FixedClock** · [`export let monotonic = func -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L27)
-  Starts at zero and grows only with advance and sleep, so set never moves it.
-- **FixedClock.FixedClock** · [`export let sleep = func(span: Duration) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L31)
+- **FixedClock.FixedClock** · [`export let now = func -> result.Result<instant.Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L26)
+  Returns the current simulated wall-clock reading. Tagged `#NoDiscard`.
+- **FixedClock.FixedClock** · [`export let monotonic = func -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L30)
+  Starts at zero and grows only with advance and sleep, so set never moves it. Tagged `#NoDiscard`.
+- **FixedClock.FixedClock** · [`export let sleep = func(span: Duration) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L34)
   Advances by a positive duration and returns at once; a zero or negative duration does nothing.
-- **FixedClock.FixedClock** · [`export let set = func(moment: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L39)
+- **FixedClock.FixedClock** · [`export let set = func(moment: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L42)
   Replaces the instant; the monotonic reading does not change.
-- **FixedClock.FixedClock** · [`export let advance = func(span: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L45)
+- **FixedClock.FixedClock** · [`export let advance = func(span: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L48)
   Moves the instant and the monotonic reading forward. A negative duration traps with "invalid argument: negative duration", since the monotonic reading never decreases.
-- **FixedClock** · [`export let of = func(start: instant.Instant) -> FixedClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L55)
+- **FixedClock** · [`export let of = func(start: instant.Instant) -> FixedClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L58)
   Creates a clock starting at the supplied instant.
 <!-- END SOURCE API -->
 
@@ -51,21 +51,23 @@ The value types are immutable classes with `compare_to`, `equals`, `hash_code`, 
 
 **`Instant`** is a point on the UTC time line: `int64` seconds since 1970-01-01T00:00:00Z and an `int` nanosecond adjustment from 0 through 999,999,999. Leap seconds are ignored, as in POSIX time.
 
-- Module functions `of_epoch_seconds(seconds, nanos)`, `of_epoch_millis`, the constant `Epoch`, and `parse`. Members `plus(Duration)`, `minus(Duration)`, `duration_since(other) → Duration`, `epoch_seconds()`, `nanos()`, `to_epoch_millis()`, `to_local(offset: ZoneOffset) → LocalDateTime`.
+- Module functions `of_epoch_seconds(seconds, nanos)`, `of_epoch_millis`, the constant `Epoch`, and `parse`. The read-only fields `epoch_seconds` and `nanos`, and the members `plus(Duration)`, `minus(Duration)`, `duration_since(other) → Duration`, `to_epoch_millis()`, `to_local(offset: ZoneOffset) → LocalDateTime`.
 - `to_string` is `YYYY-MM-DDTHH:MM:SS` with a fraction of 3, 6, or 9 digits when the nanoseconds are not zero (the shortest of those that is exact), then `Z`. `parse` accepts that form and a numeric offset in place of `Z`.
 
 **`Clock`** is an interface with `now() → Result<Instant>`, `monotonic() → Result<Duration>` (elapsed time from an arbitrary fixed origin, never decreasing), and `sleep(duration) → Result<Unit>`.
 
 - `SystemClock` uses the clock host services (P2) and fails with `CapabilityDenied` when they are not allowed.
 - `FixedClock` holds an instant set at construction; `set(instant)` and `advance(duration)` change it; `sleep` advances it and returns at once; it never fails. Library code that needs time takes a `Clock`, so tests pass a `FixedClock`.
-- `Stopwatch` takes a `Clock` and offers `start`, `stop`, `reset`, and `elapsed() → Result<Duration>`.
+- `Stopwatch` takes a `Clock` and offers `start`, `stop`, `reset`, `elapsed() → Result<Duration>`, and the read-only field `is_running`.
 
 **Calendar types** use the proleptic Gregorian calendar.
 
-- `LocalDate` stores `year` (-999,999 through 999,999), `month` (1 through 12), and `day`. The module function `of(year, month, day)` traps for an invalid date. `try_of(year, month, day) → LocalDate` returns `nil` for invalid components. Conversion to and from a day count since 1970-01-01 (`to_epoch_day`, `of_epoch_day`) uses the 400-year cycle of 146,097 days. Shift the year so that it starts in March, split it into the cycle and the year within the cycle, and compute the day of the cycle using floor division so that negative years work. Members include `plus_days`, `plus_months`, `plus_years`, `days_until(other) → int64`, `day_of_week() → DayOfWeek`, `day_of_year()`, `is_leap_year()`, and `length_of_month()`. Month and year changes clamp the day to the end of the target month. `DayOfWeek` runs from `Monday` through `Sunday`, with epoch day 0 on Thursday. Text uses `YYYY-MM-DD`. Years outside 0000 through 9999 have a sign and at least four digits.
-- `LocalTime`: `hour`, `minute`, `second`, `nano`, stored as nanoseconds of the day. `plus(Duration)` wraps around midnight. Text form `HH:MM:SS` with the same fraction rule as `Instant`.
-- `LocalDateTime`: a `LocalDate` and a `LocalTime`. `plus(Duration)` carries into the date. `at_offset(offset) → Instant`. Text form: the date, `T`, the time.
-- `ZoneOffset`: total seconds from -64,800 through 64,800. The constant `Utc`, `of_hours_minutes`, text form `Z` or `±HH:MM`.
+- `LocalDate` stores `year` (-999,999 through 999,999), `month` (1 through 12), and `day`, read-only fields. The module function `of(year, month, day)` traps for an invalid date. `try_of(year, month, day) → LocalDate` returns `nil` for invalid components. Conversion to and from a day count since 1970-01-01 (`to_epoch_day`, `of_epoch_day`) uses the 400-year cycle of 146,097 days. Shift the year so that it starts in March, split it into the cycle and the year within the cycle, and compute the day of the cycle using floor division so that negative years work. Members include `plus_days`, `plus_months`, `plus_years`, `days_until(other) → int64`, `day_of_week() → DayOfWeek`, `day_of_year()`, `is_leap_year()`, and `length_of_month()`. Month and year changes clamp the day to the end of the target month. `DayOfWeek` runs from `Monday` through `Sunday`, with epoch day 0 on Thursday. Text uses `YYYY-MM-DD`. Years outside 0000 through 9999 have a sign and at least four digits.
+- `LocalTime`: `hour()`, `minute()`, `second()`, `nano()`, computed from the nanoseconds of the day that it stores (`to_nano_of_day()`). `plus(Duration)` wraps around midnight. Text form `HH:MM:SS` with the same fraction rule as `Instant`.
+- `LocalDateTime`: a `LocalDate` and a `LocalTime`, the read-only fields `date` and `time`. `plus(Duration)` carries into the date. `at_offset(offset) → Instant`. Text form: the date, `T`, the time.
+- `ZoneOffset`: total seconds from -64,800 through 64,800, the read-only field `total_seconds`. The constant `Utc`, `of_hours_minutes`, text form `Z` or `±HH:MM`.
+
+A read-only field is an exported `last` field (an `is_running` with a get-only [accessor](Types#accessors)): code outside the class reads it as `date.year` and cannot assign it. The value classes are `#Final`, and `#NoDiscard`, so a call whose result is dropped, such as `instant.plus(span);`, warns ([Tags](Tags)).
 
 There is no time zone database, no named zones, and no daylight-saving rules. Conversions between instants and local times take an explicit `ZoneOffset`. The ISO forms above are the only text forms.
 
