@@ -1,0 +1,81 @@
+// Tags tell the compiler how to treat the declaration below them
+// (docs/lang/Tags.md). `neura tags` lists every tag.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+/// Geometry helpers for the example.
+#[Since("0.2.0"), Stable, Owner("examples")]
+let Geometry = module (
+    /// A shape with an area. Every shape is declared in this module.
+    #Sealed
+    export let Shape = interface (
+        let area = func() -> int64;
+    );
+
+    #Final
+    export let Square = class implements Shape (
+        #Unit("cm")
+        export let side: int64 = 0;
+
+        export let init = func(length: int64) {
+            side = length;
+        };
+
+        export let.override area = func() -> int64 {
+            return side * side;
+        };
+    );
+
+    /// The area of a square, computed by the old formula.
+    #Deprecated(as_of: "0.2.0", use_instead: square_area, reason: "it takes an int32")
+    export let area_from_int32 = func(length: int32) -> int64 {
+        return square_area(length as int64);
+    };
+
+    export let square_area = func(length: int64) -> int64 {
+        return length * length;
+    };
+
+    /// Whether a length is even. Small, total, and called in a loop, so the
+    /// optimizer inlines it; always: true would warn (W0004) if it could not.
+    #Inline(always: true)
+    export let is_even = func(length: int64) -> bool {
+        return (length & 1) == 0;
+    };
+
+    /// Kept as a call, so a profile shows it.
+    #NoInline
+    export let is_odd = func(length: int64) -> bool {
+        return (length & 1) == 1;
+    };
+
+    /// Callers must look at the result (W0003 when an expression statement
+    /// drops it).
+    #NoDiscard(reason: "a negative length is rejected")
+    export let valid = func(length: int64) -> bool {
+        return length >= 0;
+    };
+);
+
+let Example = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let square: Geometry.Shape = new Geometry.Square(4);
+        let even: int64 = 0;
+        let odd: int64 = 0;
+        for (let length: int64 = 0; length < 50; length += 1) {
+            if (Geometry.is_even(length)) {
+                even += 1;
+            }
+            if (Geometry.is_odd(length)) {
+                odd += 1;
+            }
+        }
+        if (!Geometry.valid(even)) {
+            return program.ExitCode.Failure;
+        }
+        console.print_line(square.area().to_string());
+        console.print_line(Geometry.square_area(3).to_string());
+        console.print_line(even.to_string() + " " + odd.to_string());
+        return program.ExitCode.Ok;
+    };
+);

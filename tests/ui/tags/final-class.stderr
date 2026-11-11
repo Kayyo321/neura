@@ -1,0 +1,12 @@
+error[E0912]: class 'Point3' extends the final class 'Point'
+ --> $DIR/final-class.nra:7:20
+  |
+2 | #Final
+  | ------ 'Point' is marked #Final here
+...
+7 | let Point3 = class:Point (
+  |                    ^^^^^ extends a final class
+  |
+  = help: extend another class, or hold a 'Point' in a field instead
+
+For more information about this error, try `neura explain E0912`.

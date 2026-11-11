@@ -1,0 +1,5 @@
+// Tags that contradict each other (E0907).
+#[Inline(always: true), NoInline]
+let twice = func(value: int32) -> int32 {
+    return value + value;
+};

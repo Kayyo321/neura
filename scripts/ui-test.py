@@ -3,7 +3,11 @@
 
 Each test is `<name>.nra` with its expected standard error in `<name>.stderr`
 and, when its diagnostics suggest machine-applicable edits, the source after
-those edits in `<name>.fixed`. For each test, in a fresh temporary directory:
+those edits in `<name>.fixed`. A test that needs more files, such as a
+library in another directory, keeps them in the directory `<name>.files`, whose
+contents are copied beside `<name>.nra`. A test passes whether `neura check`
+succeeds (with warnings) or fails; its standard error is what is compared. For
+each test, in a fresh temporary directory:
 
 1. `neura check --error-format=human --color=never <name>.nra` runs with
    COLUMNS=100. Its standard error, with the temporary directory replaced by
@@ -78,6 +82,9 @@ def check_test(neura, source, bless):
         directory = pathlib.Path(temporary).resolve()
         work = directory / source.name
         shutil.copyfile(source, work)
+        extra = source.with_suffix(".files")
+        if extra.is_dir():
+            shutil.copytree(extra, directory, dirs_exist_ok=True)
 
         human = run(neura, ["check", "--error-format=human", "--color=never", source.name], directory)
         if human.returncode not in (0, 1):

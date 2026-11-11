@@ -235,3 +235,62 @@ run_success(help --help)
 if(NOT help MATCHES "emit-ir [^\n]*--no-optimize")
     message(FATAL_ERROR "Usage should document --no-optimize\n${help}")
 endif()
+
+# #Inline and #NoInline (docs/lang/Tags.md) set the inlining directive that
+# inline-calls reads. The optimized and unoptimized programs print the same
+# output; inlining #Inline(always: true) removes calls, so the optimized run
+# takes fewer steps.
+set(tags_example "${SOURCE_DIR}/examples/tags/tags.nra")
+run_success(unused build "${tags_example}" -o tags-optimized.nvr)
+run_success(unused build --no-optimize "${tags_example}" -o tags-unoptimized.nvr)
+function(run_stats output steps image)
+    execute_process(COMMAND "${NEURA}" run --stats "${image}" WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+    if(NOT status STREQUAL "0" OR NOT stderr MATCHES "stats: steps ([0-9]+),")
+        message(FATAL_ERROR "run --stats ${image} failed (${status})\n${stderr}")
+    endif()
+    set("${output}" "${stdout}" PARENT_SCOPE)
+    set("${steps}" "${CMAKE_MATCH_1}" PARENT_SCOPE)
+endfunction()
+run_stats(optimized_output optimized_steps tags-optimized.nvr)
+run_stats(unoptimized_output unoptimized_steps tags-unoptimized.nvr)
+message(STATUS "tags example: ${optimized_steps} steps optimized, ${unoptimized_steps} unoptimized")
+if(NOT optimized_output STREQUAL unoptimized_output OR NOT optimized_output STREQUAL "16\n9\n25 25\n")
+    message(FATAL_ERROR "The tags example prints differently with and without optimization\n"
+                        "${optimized_output}\n---\n${unoptimized_output}")
+endif()
+if(NOT optimized_steps LESS unoptimized_steps)
+    message(FATAL_ERROR "Expected inlining to save steps: ${optimized_steps} optimized, ${unoptimized_steps} not")
+endif()
+
+# W0004: the pass refuses #Inline(always: true) on a recursive function and
+# says why, once per tag, when it optimizes; #Deny(inline) makes it an error.
+file(WRITE "${TEST_DIR}/inline-refused.nra" [=[
+let Math = module (
+    #Inline(always: true)
+    export let factorial = func(value: int64) -> int64 {
+        if (value <= 1) {
+            return 1;
+        }
+        return value * factorial(value - 1);
+    };
+);
+let value: int64 = Math.factorial(5);
+]=])
+execute_process(COMMAND "${NEURA}" emit-ir --error-format=short inline-refused.nra WORKING_DIRECTORY "${TEST_DIR}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE unused ERROR_VARIABLE stderr)
+string(REGEX MATCHALL "warning\\[W0004\\]" refusals "${stderr}")
+list(LENGTH refusals refusal_count)
+if(NOT status STREQUAL "0" OR NOT refusal_count EQUAL 1 OR
+   NOT stderr MATCHES "inline-refused[.]nra:2:5: warning\\[W0004\\]: cannot inline 'factorial': it is recursive")
+    message(FATAL_ERROR "Expected one W0004 for the recursive function (${status})\n${stderr}")
+endif()
+execute_process(COMMAND "${NEURA}" emit-ir --no-optimize --error-format=short inline-refused.nra
+    WORKING_DIRECTORY "${TEST_DIR}" RESULT_VARIABLE status OUTPUT_VARIABLE unused ERROR_VARIABLE stderr)
+if(NOT status STREQUAL "0" OR stderr MATCHES "W0004")
+    message(FATAL_ERROR "Expected no W0004 without optimization (${status})\n${stderr}")
+endif()
+file(READ "${TEST_DIR}/inline-refused.nra" refused_source)
+string(REPLACE "#Inline(always: true)" "#Inline(always: true)\n    #Deny(inline)" denied_source "${refused_source}")
+file(WRITE "${TEST_DIR}/inline-denied.nra" "${denied_source}")
+run_failure(inline-denied "inline-denied[.]nra:2:5: error\\[W0004\\]" emit-ir --error-format=short inline-denied.nra)

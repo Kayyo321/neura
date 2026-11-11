@@ -1,0 +1,7 @@
+// Tags cannot apply to a destructuring declaration (E0909).
+let pair = func() -> [int32, int32] {
+    return [1, 2];
+};
+
+#Todo("name the parts")
+let [first, second] = pair();

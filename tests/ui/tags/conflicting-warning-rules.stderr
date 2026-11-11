@@ -1,0 +1,11 @@
+error[E0907]: #Deny conflicts with #Allow for warning W0001
+ --> $DIR/conflicting-warning-rules.nra:4:1
+  |
+3 | #Allow(deprecated)
+  | ------------------ #Allow given here
+4 | #Deny(W0001)
+  | ^^^^^^^^^^^^ #Deny given here
+  |
+  = help: keep one of them
+
+For more information about this error, try `neura explain E0907`.

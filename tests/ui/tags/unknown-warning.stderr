@@ -1,0 +1,13 @@
+error[E0915]: unknown warning 'unused_reslt' in #Allow
+ --> $DIR/unknown-warning.nra:2:8
+  |
+2 | #Allow(unused_reslt)
+  |        ^^^^^^^^^^^^ not a warning name or code
+  |
+  = note: `neura explain --list` lists the warning codes, and their names follow -W
+help: there is a warning with a similar name
+  |
+2 | #Allow(unused_result)
+  |        ~~~~~~~~~~~~~
+
+For more information about this error, try `neura explain E0915`.

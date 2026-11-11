@@ -1,0 +1,11 @@
+error[E0909]: expected a declaration after tags
+ --> $DIR/tags-before-statement.nra:5:5
+  |
+4 |     #Unroll
+  |     ------- these tags need a declaration to apply to
+5 |     while (total < limit) {
+  |     ^^^^^ expected 'let' or 'const', found 'while'
+  |
+  = note: tags apply to declarations only, not to statements or expressions
+
+For more information about this error, try `neura explain E0909`.

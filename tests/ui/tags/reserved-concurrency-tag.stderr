@@ -1,0 +1,11 @@
+error[E0908]: #Synchronized is reserved: the compiler does not do what it promises yet
+ --> $DIR/reserved-concurrency-tag.nra:6:5
+  |
+6 |     #Synchronized
+  |     ^^^^^^^^^^^^^ reserved tag
+  |
+  = note: #Synchronized: the method runs under its instance's guard
+  = note: reserved tags are rejected so that no program relies on a promise the compiler does not keep
+  = help: keep the state in a Std.Concurrent.Guarded and call with(); #Synchronized lands in a later release
+
+For more information about this error, try `neura explain E0908`.

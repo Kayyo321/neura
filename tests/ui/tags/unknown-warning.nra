@@ -1,0 +1,5 @@
+// #Allow of a warning that does not exist (E0915), with a close one suggested.
+#Allow(unused_reslt)
+let count = func() -> int32 {
+    return 1;
+};

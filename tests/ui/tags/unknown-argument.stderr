@@ -1,0 +1,13 @@
+error[E0902]: #Deprecated has no argument 'as_off'
+ --> $DIR/unknown-argument.nra:3:13
+  |
+3 | #Deprecated(as_off: "0.1.0")
+  |             ^^^^^^ unknown argument
+  |
+  = help: the signature is #Deprecated(as_of: string = "", use_instead: name = "", reason: string = "")
+help: there is an argument with a similar name
+  |
+3 | #Deprecated(as_of: "0.1.0")
+  |             ~~~~~
+
+For more information about this error, try `neura explain E0902`.

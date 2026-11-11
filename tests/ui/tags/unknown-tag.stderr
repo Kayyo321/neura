@@ -1,0 +1,13 @@
+error[E0900]: unknown tag #Depricated
+ --> $DIR/unknown-tag.nra:3:2
+  |
+3 | #Depricated(as_of: "0.2.0", use_instead: "count")
+  |  ^^^^^^^^^^ not a registered tag
+  |
+  = note: `neura tags` lists every tag
+help: there is a tag with a similar name: #Deprecated
+  |
+3 | #Deprecated(as_of: "0.2.0", use_instead: "count")
+  |  ~~~~~~~~~~
+
+For more information about this error, try `neura explain E0900`.

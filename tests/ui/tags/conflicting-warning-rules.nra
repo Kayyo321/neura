@@ -1,0 +1,7 @@
+// #Allow and #Deny of the same warning on one declaration (E0907), named
+// once by name and once by code.
+#Allow(deprecated)
+#Deny(W0001)
+let count = func() -> int32 {
+    return 1;
+};

@@ -1,0 +1,10 @@
+warning[W0002]: function 'fuzzy' is experimental: it belongs to the preview feature 'fuzzy-search'
+  --> $DIR/experimental-use.nra:15:20
+   |
+ 4 |     #Experimental(feature: "fuzzy-search")
+   |     -------------------------------------- 'fuzzy' is marked experimental here
+...
+15 | let score: int32 = Search.fuzzy("neura");
+   |                    ^^^^^^^^^^^^
+   |
+   = note: an experimental declaration may change or disappear without a deprecation period

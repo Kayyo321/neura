@@ -1,0 +1,22 @@
+// Discarded results (W0003): of a #NoDiscard function, and of any call that
+// returns a #NoDiscard type. A result bound to '_' or used is not reported.
+#NoDiscard(reason: "check whether it was written")
+let write = func(text: string) -> bool {
+    return text.byte_length > 0;
+};
+
+#NoDiscard
+let Status = enum (Done, Failed);
+
+let finish = func() -> Status {
+    return Status.Done;
+};
+
+let main_body = func() -> void {
+    write("data");
+    finish();
+    let _ = write("data");
+    if (write("more")) {
+        let _ = finish();
+    }
+};

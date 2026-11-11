@@ -1,10 +1,10 @@
 # Diagnostic codes
 
-Each error that the compiler reports has a code: `E` and four digits, whose hundreds digit names the area of the compiler. `neura explain <CODE>` prints the page of a code, and `neura explain --list` lists the codes with their titles. [Tooling](../lang/Tooling.md#diagnostics) describes the formats in which diagnostics are printed.
+Each error that the compiler reports has a code: `E` and four digits, whose hundreds digit names the area of the compiler. Each warning has a code, `W` and four digits, and a name that `-W<name>`, `-Wno-<name>`, `#Allow`, and `#Deny` accept. `neura explain <CODE>` prints the page of a code, and `neura explain --list` lists the codes with their titles. [Tooling](../lang/Tooling.md#diagnostics) describes the formats in which diagnostics are printed.
 
 A page states the rule, shows a program that breaks it with the error it gets, and shows the program fixed. The examples are compiled by the `doc-examples` test: a failing example must fail with its code, and a fixed one must compile. A few errors cannot be caused by a single source file; their pages say why, and show only the fix.
 
-E0420, E0510, and the E09xx range (tags) are reserved and not in use.
+E0420 and E0510 are reserved and not in use.
 
 ## E01xx: Lexer
 
@@ -162,3 +162,38 @@ Errors about circuit conversion and the image.
 | [E0807](E0807.md) | literal not representable in the circuit |
 | [E0808](E0808.md) | generic specialization limit exceeded |
 | [E0899](E0899.md) | internal compiler error |
+
+## E09xx: Tags
+
+Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
+
+| Code | Error |
+| --- | --- |
+| [E0900](E0900.md) | unknown tag |
+| [E0901](E0901.md) | tag on a declaration it does not apply to |
+| [E0902](E0902.md) | unknown or misplaced tag argument |
+| [E0903](E0903.md) | missing tag argument |
+| [E0904](E0904.md) | duplicate tag argument |
+| [E0905](E0905.md) | tag argument of the wrong type |
+| [E0906](E0906.md) | duplicate tag |
+| [E0907](E0907.md) | conflicting tags |
+| [E0908](E0908.md) | reserved tag |
+| [E0909](E0909.md) | tags without a declaration |
+| [E0910](E0910.md) | malformed tag |
+| [E0911](E0911.md) | use of an internal declaration outside its library |
+| [E0912](E0912.md) | extension of a final class |
+| [E0913](E0913.md) | override of a final method |
+| [E0914](E0914.md) | extension of a sealed type outside its module |
+| [E0915](E0915.md) | unknown warning in a tag |
+| [E0916](E0916.md) | result tag on a function without a result |
+
+## Warnings
+
+Warnings do not stop compilation unless `-Werror` or a `#Deny` tag makes them errors. Warnings in the standard library are hidden unless `--warn-library` is given.
+
+| Code | Name | Warning |
+| --- | --- | --- |
+| [W0001](W0001.md) | `deprecated` | use of a deprecated declaration |
+| [W0002](W0002.md) | `experimental` | use of an experimental declaration |
+| [W0003](W0003.md) | `unused-result` | discarded result of a #NoDiscard call |
+| [W0004](W0004.md) | `inline` | #Inline(always: true) function that cannot be inlined |

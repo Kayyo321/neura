@@ -1,0 +1,17 @@
+error[E0910]: expected a tag name
+ --> $DIR/malformed-tag.nra:3:3
+  |
+3 | # (Deprecated)
+  |   ^ expected a tag name, found '('
+  |
+  = help: a tag is '#Name' or '#Name(arguments)', such as '#Deprecated(use_instead: "next")'
+
+error[E0203]: expected ')'
+ --> $DIR/malformed-tag.nra:8:19
+  |
+8 | #Since(version: 1 + 2)
+  |                   ^ expected ')', found '+'
+  |       - unclosed '(' opened here
+
+Some errors have detailed explanations: E0203, E0910.
+For more information about an error, try `neura explain E0203`.

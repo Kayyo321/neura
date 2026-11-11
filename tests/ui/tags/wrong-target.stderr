@@ -1,0 +1,9 @@
+error[E0901]: #Final does not apply to a field
+ --> $DIR/wrong-target.nra:3:6
+  |
+3 |     #Final
+  |      ^^^^^ #Final applies to classes and methods
+4 |     export let sides: int32 = 0;
+  |                ----- this is a field
+
+For more information about this error, try `neura explain E0901`.

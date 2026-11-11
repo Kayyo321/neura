@@ -1,0 +1,37 @@
+warning[W0001]: function 'old' is deprecated
+  --> $DIR/allow-deny.nra:30:20
+   |
+ 5 |     #Deprecated
+   |     ----------- 'old' is marked deprecated here
+...
+30 | let loose: int32 = Api.old();
+   |                    ^^^^^^^
+
+error[W0001]: function 'old' is deprecated
+  --> $DIR/allow-deny.nra:26:16
+   |
+ 5 |     #Deprecated
+   |     ----------- 'old' is marked deprecated here
+...
+23 | #Deny(deprecated, W0002)
+   | ------------------------ the warning is denied here
+...
+26 |         return Api.old() + Api.preview();
+   |                ^^^^^^^
+
+error[W0002]: function 'preview' is experimental
+  --> $DIR/allow-deny.nra:26:28
+   |
+10 |     #Experimental
+   |     ------------- 'preview' is marked experimental here
+...
+23 | #Deny(deprecated, W0002)
+   | ------------------------ the warning is denied here
+...
+26 |         return Api.old() + Api.preview();
+   |                            ^^^^^^^^^^^
+   |
+   = note: an experimental declaration may change or disappear without a deprecation period
+
+Some errors have detailed explanations: W0001, W0002.
+For more information about an error, try `neura explain W0001`.

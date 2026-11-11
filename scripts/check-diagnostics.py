@@ -10,10 +10,13 @@ sources and documents only, so it needs no build:
     is followed, within its next three lines, by `error.with_code("E....")`.
     A construction that must not have a code (the model's own helpers, a
     forwarding constructor) carries the comment `// diagnostic-code: none:
-    <reason>` on its line or the line above. Warnings (`Diagnostic::warning`)
-    have names, not codes, and are not checked.
+    <reason>` on its line or the line above. Warnings
+    (`Diagnostic::warning(...)`) have a name and take a `W....` code with
+    `.with_code`, which is not checked.
   * Every code given in src/ is registered, and every registered code is
     given somewhere in src/.
+  * The registry also lists warnings, `NEURA_WARNING(W...., "name", "title")`;
+    they follow the same rules as errors below.
   * Every registered code has its explain page, docs/diagnostics/<CODE>.md,
     whose first line is `# <CODE>: <title>` with the registered title, and
     every page in docs/diagnostics/ is for a registered code. The index
@@ -21,7 +24,8 @@ sources and documents only, so it needs no build:
   * Every registered code is exercised: its page has a failing example
     (`<!-- example: error: <CODE> -->`, which the doc-examples test compiles)
     or a UI test under tests/ui expects it (`error[<CODE>]` in a .stderr
-    file). A page whose code no single source file can cause says so with
+    file). A warning's page has `<!-- example: warning: <CODE> -->` instead,
+    and a UI test shows `warning[<CODE>]`. A page whose code no single source file can cause says so with
     `<!-- diagnostic: not reproducible: <reason> -->` instead of a failing
     example, and is then exempt; the reason is required.
   * Every page has at least one example that compiles (`check`, `run`, or
@@ -38,16 +42,16 @@ import re
 import sys
 from pathlib import Path
 
-ENTRY = re.compile(r'^NEURA_DIAGNOSTIC\((E\d{4}), "([^"]*)"\)', re.MULTILINE)
+ENTRY = re.compile(r'^NEURA_(?:DIAGNOSTIC\((E\d{4})|WARNING\((W\d{4}), "[a-z0-9-]+"), "([^"]*)"\)', re.MULTILINE)
 CONSTRUCTION = re.compile(r"(?<![\w:.])(?:Diagnostic|MissingPrimitiveWrapper)\(")
 DECLARATION = re.compile(r"(?<![\w:.])(?:Diagnostic|MissingPrimitiveWrapper)\s+(\w+)\(")
 WITH_CODE = re.compile(r'\s*\.with_code\("(E\d{4})"\)')
-CODE_GIVEN = re.compile(r'with_code\("(E\d{4})"\)')
+CODE_GIVEN = re.compile(r'with_code\("([EW]\d{4})"\)')
 EXEMPT = re.compile(r"//\s*diagnostic-code:\s*none:\s*\S")
-FAILING = re.compile(r"<!--\s*example:\s*error:\s*(E\d{4})\s*-->")
+FAILING = re.compile(r"<!--\s*example:\s*(?:error|warning):\s*([EW]\d{4})\s*-->")
 UNREPRODUCIBLE = re.compile(r"<!--\s*diagnostic:\s*not reproducible:\s*(.*?)\s*-->")
 FIX = re.compile(r"<!--\s*example:\s*(check|run|test|fragment:\s*\S.*?)\s*-->")
-UI_CODE = re.compile(r"^error\[(E\d{4})\]", re.MULTILINE)
+UI_CODE = re.compile(r"^(?:error|warning)\[([EW]\d{4})\]", re.MULTILINE)
 PARAMETER = re.compile(r"^\s*(?:const\s+)?[A-Za-z_][\w:<>]*(?:<[^()]*>)?\s*[&*]*\s+[A-Za-z_]\w*\s*(?:,|=|$)")
 
 
@@ -150,7 +154,8 @@ def main() -> int:
     root = parser.parse_args().root.resolve()
 
     registry = root / "src/util/diagnostic_codes.def"
-    registered = dict(ENTRY.findall(registry.read_text(encoding="utf-8")))
+    registered = {error or warning: title
+                  for error, warning, title in ENTRY.findall(registry.read_text(encoding="utf-8"))}
     problems, given = check_sources(root, registered)
     for code in sorted(set(registered) - given):
         problems.append(f"{registry.relative_to(root).as_posix()}:1: {code} is registered but no diagnostic uses it")
@@ -185,7 +190,8 @@ def main() -> int:
         if unreproducible and not unreproducible.group(1):
             problems.append(f"{name}:1: `diagnostic: not reproducible` needs a reason")
         if not failing and not unreproducible:
-            problems.append(f"{name}:1: the page has no failing example (`<!-- example: error: {code} -->`)")
+            kind = "warning" if code.startswith("W") else "error"
+            problems.append(f"{name}:1: the page has no failing example (`<!-- example: {kind}: {code} -->`)")
         if not FIX.search(text):
             problems.append(f"{name}:1: the page has no example of the fix")
         if code not in exercised and not unreproducible:

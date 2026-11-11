@@ -1,0 +1,46 @@
+// Uses of #Deprecated declarations (W0001): a call through the module, which
+// gets the replacement as a machine-applicable suggestion, a call by its bare
+// name, which gets it too because the replacement resolves there, a type
+// reference without a replacement that resolves,
+// an override of a deprecated method, and a use inside deprecated code, which
+// does not warn.
+let Shapes = module (
+    #Deprecated(as_of: "0.2.0", use_instead: area, reason: "it rounds the result")
+    export let rough_area = func(width: int32) -> int32 {
+        return width * width;
+    };
+
+    export let area = func(width: int32) -> int32 {
+        return width * width;
+    };
+
+    #Deprecated(use_instead: "Shapes.Box")
+    export let OldBox = class (
+        export let width: int32 = 0;
+    );
+
+    #Deprecated(as_of: "0.1.0")
+    export let legacy_total = func() -> int32 {
+        return rough_area(2);
+    };
+
+    export let current_total = func() -> int32 {
+        return rough_area(2);
+    };
+);
+
+let Base = class (
+    #Deprecated(reason: "describe() replaces it")
+    export let name = func() -> string {
+        return "base";
+    };
+);
+
+let Derived = class:Base (
+    export let.override name = func() -> string {
+        return "derived";
+    };
+);
+
+let total: int32 = Shapes.rough_area(3);
+let box: Shapes.OldBox = new Shapes.OldBox();
