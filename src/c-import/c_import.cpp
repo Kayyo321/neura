@@ -265,7 +265,10 @@ private:
         const auto file = file_of(cursor);
         if (file.empty()) return false;
         std::error_code ignored;
-        return fs::weakly_canonical(file, ignored) == fs::weakly_canonical(header_, ignored);
+        if (fs::weakly_canonical(file, ignored) == fs::weakly_canonical(header_, ignored)) return true;
+        // The same file under another spelling, such as through a symbolic
+        // link in an SDK path.
+        return fs::equivalent(file, header_, ignored);
     }
 
     std::string key(CXCursor cursor) {
@@ -357,8 +360,11 @@ private:
         case CXType_Char32: return integer(canonical, false);
         case CXType_Float: return scalar("Float32", "float32", canonical);
         case CXType_Double: return scalar("Float64", "float64", canonical);
-        case CXType_Pointer:
-        case CXType_BlockPointer: {
+        case CXType_BlockPointer:
+            // A block is an object, not a code address: a function stub
+            // cannot stand in for one.
+            return unsupported("a block pointer");
+        case CXType_Pointer: {
             Mapped mapped;
             mapped.kind = Mapped::Kind::Pointer;
             const auto pointee = lib_.clang_getPointeeType(canonical);
@@ -613,7 +619,18 @@ private:
     // --- Declarations ---------------------------------------------------------
 
     void declaration(CXCursor cursor) {
-        if (!in_header(cursor)) return;
+        if (!in_header(cursor)) {
+            // Say where a function went, if it is asked for: a declaration
+            // that comes from an included header is not part of this import.
+            if (lib_.clang_getCursorKind(cursor) == CXCursor_FunctionDecl) {
+                const auto where = file_of(cursor);
+                if (!where.empty())
+                    elsewhere_.emplace(neura_name(text(lib_.clang_getCursorSpelling(cursor))),
+                                       "declared in " + fs::path(where).filename().generic_string() +
+                                           ", not in the imported header " + header_.filename().generic_string());
+            }
+            return;
+        }
         switch (lib_.clang_getCursorKind(cursor)) {
         case CXCursor_FunctionDecl: function(cursor); break;
         case CXCursor_StructDecl:
@@ -1027,6 +1044,8 @@ private:
         out << functions_.str();
         out << ");\n";
         result.source = out.str();
+        for (const auto& [name, reason] : elsewhere_)
+            if (!names_.contains(name)) result.unsupported.emplace(name, reason);
         return result;
     }
 
@@ -1046,6 +1065,8 @@ private:
     std::set<std::string> symbols_;
     std::vector<std::string> macro_names_;
     std::map<std::string, std::string> unsupported_;
+    // Functions declared in headers the imported one includes, with where.
+    std::map<std::string, std::string> elsewhere_;
     std::ostringstream constants_;
     std::ostringstream functions_;
     std::ostringstream shim_;

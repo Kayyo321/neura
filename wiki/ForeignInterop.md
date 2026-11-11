@@ -115,7 +115,7 @@ Only declarations written in the imported header itself are imported, not those 
 | A variadic function | A function whose further arguments are untyped: an integer passes as an `int` when it fits and a `long long` otherwise, a float as a `double`, a bool as an `int`, and a string or segment as an address |
 | A `static inline` function | A call to an exported wrapper compiled into the image's native library |
 
-C names are kept; a name that is a Neura keyword or built-in type name gets a trailing underscore. A declaration with no mapping is left out of the module, and using it is a compile error that names the reason. This covers function-like macros, bit-fields, unions passed by value, `long double`, `_Complex`, 128-bit integers, packed or explicitly aligned structs, and flexible array members. The generated module lists every such declaration in a comment at its top.
+C names are kept; a name that is a Neura keyword or built-in type name gets a trailing underscore. A declaration with no mapping is left out of the module, and using it is a compile error that names the reason. This covers function-like macros, bit-fields, unions passed by value, `long double`, `_Complex`, 128-bit integers, packed or explicitly aligned structs, flexible array members, and block pointers (a block is not a code address, so an upcall stub cannot stand in for one). A function declared in a header that the imported header includes is not part of the import; using it names the file that declares it. Nullability qualifiers such as `_Nonnull` and `_Nullable` do not change a type's mapping. The generated module lists every such declaration in a comment at its top.
 
 ## Upcalls
 
