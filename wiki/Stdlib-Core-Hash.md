@@ -1,6 +1,6 @@
 # `Std.Core.Hash`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Core.Hash`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Core.Hash`. Its [source](https://github.com/Kayyo321/
 
 - [Exported declarations for `Std.Core.Hash`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -31,7 +31,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.2 Equality, hashing, and text
 
@@ -53,7 +53,7 @@ The compiler supplies these results for supported value members. Companion funct
 
 Float equality here deliberately differs from `==`: it is an equivalence relation consistent with the hash, which hash tables need, while `==` stays IEEE 754. The multiplier 31 is chosen because multiplying by 31 is a shift and a subtraction.
 
-The module **`Hash`** has the building blocks, all ordinary functions that work today:
+The module **`Hash`** has the building blocks, all ordinary functions:
 
 | Member | Behavior |
 | --- | --- |
@@ -69,7 +69,7 @@ A class's hash starts from 17 and combines each field's hash in declaration orde
 
 ### 6.1 `Optional<T>`
 
-**Recommendation: a generic payload enum with the variants `None` and `Some(T)`, read with `match`.** The first plan's class (a `present` flag and a late field) is dropped. The enum cannot be read without handling both cases, has no trapping accessor to misuse, and needs no late field.
+**`Optional<T>` is a generic payload enum with the variants `None` and `Some(T)`, read with `match`.** The enum cannot be read without handling both cases, has no trapping accessor to misuse, and needs no late field.
 
 Requires G2. The module `Optional` exports the enum and these functions; the last column says what each needs beyond G2.
 
@@ -103,7 +103,7 @@ All of this needs G3.
 
 ### 9.6 Hash collections
 
-**Decisions kept from the first plan:** hash collections iterate in **insertion order**, so output never depends on hash values, and the load factor is fixed at one half.
+Hash collections iterate in **insertion order**, so output never depends on hash values, and the load factor is fixed at one half.
 
 The index and entry tables are built-in lists grown by `append`. The shared probing core uses indices and hash values. Constructors can use specialized default value members or accept caller-supplied key operations.
 
@@ -117,7 +117,7 @@ The index and entry tables are built-in lists grown by `append`. The shared prob
 
 #### `HashCore`
 
-`Std.Collections.Internal.HashCore` is a **non-generic** class. It knows hashes and entry numbers. It never sees a key. The owning collection keeps the keys and values in its own dense lists, indexed by entry number, and does the key comparison itself. One core therefore serves every hash collection, including the ones that can be written today.
+`Std.Collections.Internal.HashCore` is a **non-generic** class. It knows hashes and entry numbers. It never sees a key. The owning collection keeps the keys and values in its own dense lists, indexed by entry number, and does the key comparison itself. One core therefore serves every hash collection, including `IntMap` and `StringMap`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -151,7 +151,7 @@ When compaction happens:
 
 | Class | Keys | Key operations | Needs |
 | --- | --- | --- | --- |
-| `IntMap<V>` | `int` | `Int32.hash` and `==`, called directly | Nothing: it can be written today |
+| `IntMap<V>` | `int` | `Int32.hash` and `==`, called directly | Nothing |
 | `StringMap<V>` | `string` | `Strings.hash` and `Strings.equals` | T1 |
 | `HashMap<K, V>`, `HashSet<T>` created with `with_keys<K, V>(hash: (K) → uint32, same: (K, K) → bool)` | Any | The two function values, stored in the collection | G1 |
 | `HashMap<K, V>`, `HashSet<T>` created with `create<K, V>()` | Any | `hash_code` and `equals` | G3 |
@@ -190,7 +190,7 @@ An immutable arbitrary-precision integer. Parsing uses T1 and conversion to `flo
 | `to_int64() → Optional<int64>`, `to_float64() → float64` | `to_float64` rounds to nearest, ties to even, and gives an infinity beyond the range. |
 | `to_string()`, `to_string_radix(radix)` | Radix 10 divides repeatedly by 10^9 and joins nine-digit groups. |
 
-Bitwise and, or, and exclusive or on big integers are not in the first version.
+`BigInteger` has no bitwise and, or, or exclusive or.
 
 ### 18.9 Hash collections, trees, and sequences
 

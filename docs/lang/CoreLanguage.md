@@ -13,7 +13,7 @@ const Limit: int32 = 3;
 count = count + 1;
 ```
 
-Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. Shadowing policy remains open. Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. More detailed visibility and inheritance rules remain open.
+Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. A nested block, and a function body, may declare a name that an enclosing scope or a parameter already has; the new binding hides the outer one for the rest of its block. Whether shadowing stays allowed is an open language decision ([Status](Status.md#open-language-decisions)). Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. Visibility and inheritance rules beyond these are not specified.
 
 ### Documentation comments
 

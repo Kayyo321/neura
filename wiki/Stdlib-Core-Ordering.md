@@ -1,6 +1,6 @@
 # `Std.Core.Ordering`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Core.Ordering`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Core.Ordering`. Its [source](https://github.com/Kayyo
 
 - [Exported declarations for `Std.Core.Ordering`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -35,11 +35,11 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.3 Ordering
 
-- **`Ordering`** is a fieldless enum with variants `Less`, `Equal`, and `Greater`. Comparison results are `Ordering` values, never integers, so the subtraction idiom (which would trap on overflow) cannot be written. The module `Ordering` also exports `reverse(o)`, `then(first, second)` (returns `first` unless it is `Equal`), `is_less(o)`, `is_at_most(o)`, `is_greater(o)`, and `is_at_least(o)`. All of this works today.
+- **`Ordering`** is a fieldless enum with variants `Less`, `Equal`, and `Greater`. Comparison results are `Ordering` values, never integers, so the subtraction idiom (which would trap on overflow) cannot be written. The module `Ordering` also exports `reverse(o)`, `then(first, second)` (returns `first` unless it is `Equal`), `is_less(o)`, `is_at_most(o)`, `is_greater(o)`, and `is_at_least(o)`.
 - **A comparator is a native function value** of type `(T, T) → Ordering`. There is no comparator interface or wrapper class. A named function, a bound method, or a closure all serve. A comparator must define a total order; if it does not, the library stays memory safe and terminates, and the resulting order or lookup is unspecified.
 - **Natural orders** are named functions in the companion modules, usable as comparators directly: `Int32.compare`, `Float64.total_compare`, `Strings.compare`, and so on.
 
@@ -106,7 +106,7 @@ The float companions use N1 for bit-level operations. `is_nan` can also use ordi
 
 ### 8.1 `Strings`
 
-All of `Strings` needs T1. String operations are functions that take the string first. **Decision:** all positions are byte offsets into the UTF-8 encoding, of type `int`. No member is named `length`: `byte_length` and `scalar_count` say which unit they count. An offset that is out of range, or not on a character boundary where one is required, traps.
+All of `Strings` needs T1. String operations are functions that take the string first. All positions are byte offsets into the UTF-8 encoding, of type `int`. No member is named `length`: `byte_length` and `scalar_count` say which unit they count. An offset that is out of range, or not on a character boundary where one is required, traps.
 
 | Member | Behavior |
 | --- | --- |
@@ -145,13 +145,13 @@ Functions that return several strings return a built-in list, not an `ArrayList`
 
 **UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
 
-**Unicode scope. Decision:** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 9.1 Contracts
 
 This section fixes the member sets that the concrete classes and the interfaces in [section 9.10](Stdlib-Design#910-interfaces-and-read-only-views) share.
 
-The **Needs** column names the compiler facilities an implementation relies on.
+The **Needs** column names the compiler facilities of [section 3](Stdlib-Design#3-language-facilities) that a member uses.
 
 **List contract** (`ArrayList`, `LinkedList`)
 
@@ -225,7 +225,7 @@ It makes at most about `n log2 n` comparator calls. `ArrayList.sort` calls it on
 
 **`binary_search<T>(items: T[list], value: T, c) → int`** requires `items` sorted by `c`. It finds the lowest index whose element is not `Less` than `value`. If that element compares `Equal`, it returns the index, the first of any equal run. Otherwise it returns `-(insertion point) - 1`.
 
-The module **`Lists`** has helpers for built-in lists that need no callback and work today: `copy<T>(items)`, `concat<T>(a, b)`, `reverse<T>(items)`, `swap<T>(items, i, j)`, `fill<T>(items, value)`, `insert_at<T>(items, index, value)`, `truncate<T>(items, length)`, `clear<T>(items)`, `filled<T>(count, value)`, and `from_array<T>(items: T[])`. There is no conversion from a list to an array, because an array's length must come from a literal.
+The module **`Lists`** has helpers for built-in lists that need no callback: `copy<T>(items)`, `concat<T>(a, b)`, `reverse<T>(items)`, `swap<T>(items, i, j)`, `fill<T>(items, value)`, `insert_at<T>(items, index, value)`, `truncate<T>(items, length)`, `clear<T>(items)`, `filled<T>(count, value)`, and `from_array<T>(items: T[])`. There is no conversion from a list to an array, because an array's length must come from a literal.
 
 ### 10.2 `BigInteger`
 
@@ -253,4 +253,4 @@ An immutable arbitrary-precision integer. Parsing uses T1 and conversion to `flo
 | `to_int64() → Optional<int64>`, `to_float64() → float64` | `to_float64` rounds to nearest, ties to even, and gives an infinity beyond the range. |
 | `to_string()`, `to_string_radix(radix)` | Radix 10 divides repeatedly by 10^9 and joins nine-digit groups. |
 
-Bitwise and, or, and exclusive or on big integers are not in the first version.
+`BigInteger` has no bitwise and, or, or exclusive or.

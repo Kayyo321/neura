@@ -90,7 +90,7 @@ A program that uses [tasks](Concurrency) builds like any other, into an NVR 1.5 
 | `--trace-events <file>` | `run` | Write one JSON object per scheduler event, one per line. `--trace-wall-time` adds wall-clock times, which differ between runs. |
 | `--virtual-time` | `run`, `test` | Timers, deadlines, and the clock follow a clock that starts at zero and moves only when every task is parked, so a timeout takes no real time. It cannot be combined with `--replay` or `--each`. |
 
-For an image with tasks, `--stats` adds the peak numbers of live tasks, queued messages, and pending requests, and `run --profile` adds, for each spawn site, the tasks started there, the steps they executed, and how long they waited for a turn, on a channel or timer, and on host I/O. [Concurrency, section 14](Concurrency#14-tooling) describes the dump, the events, and virtual time. A program that uses tasks cannot use `Std.DynamicForeign` or a C import ([decision C15](Concurrency#3-decisions)).
+For an image with tasks, `--stats` adds the peak numbers of live tasks, queued messages, and pending requests, and `run --profile` adds, for each spawn site, the tasks started there, the steps they executed, and how long they waited for a turn, on a channel or timer, and on host I/O. [Concurrency, section 14](Concurrency#14-tooling) describes the dump, the events, and virtual time. A program that uses tasks cannot use `Std.DynamicForeign` or a C import ([Concurrency, section 16](Concurrency#16-limits)).
 
 ### Package a native executable
 

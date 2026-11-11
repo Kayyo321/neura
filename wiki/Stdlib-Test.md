@@ -8,7 +8,7 @@ Import this module as `Std.Test`. Its [source](https://github.com/Kayyo321/neura
 
 - [Exported declarations for `Std.Test`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Implementation decisions and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -92,7 +92,7 @@ Library trap conditions and their messages. The message text is part of the cont
 
 ### 14.2 `Std.Test`
 
-This module replaces the built-in `Test` as described in [section 4.6](Stdlib-Design#46-retiring-sysio-and-test). An assertion builds its message in Neura and calls `Failure.trap`. The runner reports the message from the trapping test.
+This module replaces the built-in `Test` as described in [section 4.6](Stdlib-Design#46-retired-built-ins). An assertion builds its message in Neura and calls `Failure.trap`. The runner reports the message from the trapping test.
 
 | Member | Failure message | Needs |
 | --- | --- | --- |

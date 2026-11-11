@@ -7,7 +7,7 @@
 - [Install and update](Install)
 - [Native executables](Standalone)
 - [Language overview](Overview)
-- [Feature status and decisions](Status)
+- [Feature status](Status)
 
 **Language reference**
 

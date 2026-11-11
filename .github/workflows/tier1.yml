@@ -49,6 +49,8 @@ jobs:
 
       - name: Check that the wiki pages are generated from docs
         run: python3 scripts/generate-wiki.py --check
+      - name: Check the website
+        run: python3 scripts/build-site.py --check
 
   build-and-test:
     name: Build and test (Linux x86-64)
@@ -99,7 +101,7 @@ jobs:
 
       - name: Require every test to have run
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 123
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 124
 
       - name: Upload the test report
         if: ${{ !cancelled() }}

@@ -1,6 +1,6 @@
 # `Std.Concurrent.WorkerGroup`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Concurrent.WorkerGroup`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -10,7 +10,7 @@ Import this module as `Std.Concurrent.WorkerGroup`. Its [source](https://github.
 - [The `Std.Concurrent` modules and their contracts](Stdlib-Design#19-stdconcurrent)
 - [Concurrency specification](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md): tasks, isolation, the memory model, the scheduler, and limits
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -69,4 +69,4 @@ groups.with_workers<string>(2, 8, record, func(group: groups.WorkerGroup<string>
 - `work` must be task-safe and its captures transferable, as for any spawn. A violation is reported at the program's call of `with_workers`, with the call chain and the place where the library starts the worker ([section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)).
 - The handle holds channel ends, so it is transferable: a task can be given it to submit jobs.
 - The functions are task-safe. They use scheduler operations, so the worker of a parallel map cannot use a group.
-- A program that uses this module cannot use `Std.DynamicForeign` or a C import ([decision C15](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#3-decisions)).
+- A program that uses this module cannot use `Std.DynamicForeign` or a C import ([Concurrency, section 16](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#16-limits)).

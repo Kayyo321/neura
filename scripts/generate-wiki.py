@@ -72,8 +72,18 @@ GENERATED: dict[str, str] = {
     "docs/style/CodingStyle.md": "CodingStyle",
 }
 
-# Docs pages that deliberately have no wiki page.
-REPOSITORY_ONLY = ("docs/Wiki.md",)
+# Docs pages that deliberately have no wiki page: how the project maintains the
+# wiki and the website, and the design notes that record why the design is as
+# it is. The website publishes every docs page itself.
+REPOSITORY_ONLY = (
+    "docs/Wiki.md",
+    "docs/Site.md",
+    "docs/SiteDesign.md",
+    "docs/design/Concurrency.md",
+    "docs/design/GpuExecution.md",
+    "docs/design/Standalone.md",
+    "docs/design/Stdlib.md",
+)
 
 # Wiki pages written by hand. The standard-library module pages, which
 # `update-stdlib-wiki-api.py` maintains, are matched by MODULE_PAGE.

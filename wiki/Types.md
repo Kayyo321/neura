@@ -385,8 +385,10 @@ visible only in their arm. A match expression uses expression arms with a
 common type. When no surrounding type is available, the first arm establishes
 the result type. A match statement uses a statement block in each arm.
 
-Patterns currently cover one variant level. Generic enum declarations, nested
-patterns, guards, and derives are open language decisions.
+Patterns match one variant level. A pattern inside a pattern is a syntax
+error (`expected ')'`), and a guard written as `pattern if condition =>` is a
+syntax error (`expected '=>'`). To test a nested value, bind it and `match`
+again.
 
 ## Scope-bound and transferable types
 
@@ -445,8 +447,8 @@ Under the last rule a program cannot both use tasks and use `Std.DynamicForeign`
 
 ## Inference, conversions, equality, and absence
 
-The proposed initial inference rule is local: an initialized binding without an annotation takes the initializer's type when that type is unambiguous. Public APIs should use explicit parameter and return types. Integer literal default types, inference across generic calls, and ambiguous literals need a precise specification. Empty collection literals require an expected type as described in [Collections](Collections).
+An initialized binding without an annotation takes the initializer's type: `let total = 5;` has type `int32`. The compiler does not infer the type arguments of a generic call; `id(7)` is rejected with `expected 1 type argument(s)`, and `id<int>(7)` is accepted ([Polymorphism](Polymorphism)). Public APIs should use explicit parameter and return types. Empty collection literals require an expected type as described in [Collections](Collections).
 
-There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](Numbers#conversions). Floating-point equality follows IEEE 754. Equality for classes, collections, and strings needs a defined contract; do not assume structural equality or identity equality for these values. Basic scalar comparisons are illustrated in [core.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/core.nra).
+There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](Numbers#conversions). Floating-point equality follows IEEE 754. String equality compares bytes. `==` and `!=` on class and interface references compare identity; `equals` is a separate method ([Umbrella class and nil](#umbrella-class-and-nil)). A fieldless enum supports `==`; an enum with payloads has no built-in equality. Basic scalar comparisons are illustrated in [core.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/core.nra).
 
-Nullability, optional values, and their syntax are open. No implicit null value or null check should be assumed. Generic syntax and its limitations are described in [Polymorphism](Polymorphism).
+Absence of a class or interface reference is `nil`. Absence of any other value is `Std.Core.Optional<T>`, and an expected failure is `Std.Core.Result<T>` ([Errors](Errors)). Generic syntax and its limitations are described in [Polymorphism](Polymorphism).

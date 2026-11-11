@@ -53,4 +53,4 @@ There is no assertion that expects a trap: a trap cannot be caught. Code that mu
 
 The built-in `Test` module and its host services `neura.test.assert` and `neura.test.assert_equal_int32` are retired; importing `Test` is an error that names `Std.Test`.
 
-Wall-clock test timeouts, fixtures, mocking, parameterized and property tests, coverage, and running tests in parallel are future work. The step limit bounds what a test computes. It does not bound a test parked on a real timer or socket; `--virtual-time` removes the wait for timers. See [the example tests](../../examples/testing/math-tests.nra), which import [Core](../../examples/guide/core.nra).
+`neura test` has no wall-clock test timeouts, fixtures, mocking, parameterized or property tests, coverage, or parallel test execution. The step limit bounds what a test computes. It does not bound a test parked on a real timer or socket; `--virtual-time` removes the wait for timers. See [the example tests](../../examples/testing/math-tests.nra), which import [Core](../../examples/guide/core.nra).

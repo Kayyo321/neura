@@ -1,6 +1,6 @@
 # `Std.Random.Random`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Random.Random`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Random.Random`. Its [source](https://github.com/Kayyo
 
 - [Exported declarations for `Std.Random.Random`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -49,7 +49,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.7 Conformance summary
 
@@ -71,7 +71,7 @@ These are the intended source-module contracts. Compiler support for the operati
 
 ### 7.2 Arithmetic without wrapping intrinsics
 
-The first plan asked for wrapping arithmetic and sign reinterpretation as intrinsics. The language's checked operators, shifts that discard high bits, and masks are enough. Each recipe below says why no intermediate value leaves its type. The `uint32` and `uint64` multiplication recipes were probed in both build modes.
+The language has no wrapping arithmetic or sign reinterpretation. The checked operators, shifts that discard high bits, and masks are enough. Each recipe below says why no intermediate value leaves its type. The `uint32` and `uint64` multiplication recipes are tested in both build modes.
 
 | Operation | Recipe | Why it fits |
 | --- | --- | --- |
@@ -89,7 +89,7 @@ The first plan asked for wrapping arithmetic and sign reinterpretation as intrin
 
 Signed wrapping operations convert to the unsigned pattern, operate, and convert back.
 
-**What the recipes do not cover.** A float's bit pattern (N1). Everything else that the first plan routed through intrinsics is on this table: hashing uses the 32-bit rows, `Random` and `Sha256` use the `uint64` and `uint32` rows, `BitSet` uses plain masks and shifts on `uint32`, and `BigInteger` uses the limb row.
+**What the recipes do not cover.** A float's bit pattern (N1). Everything else is on this table: hashing uses the 32-bit rows, `Random` and `Sha256` use the `uint64` and `uint32` rows, `BitSet` uses plain masks and shifts on `uint32`, and `BigInteger` uses the limb row.
 
 ### 12.2 `Std.Random`
 
@@ -109,7 +109,7 @@ Signed wrapping operations convert to the unsigned pattern, operate, and convert
 | `next_float64() → float64` | The top 53 bits of one step, converted to `float64` (exact) and multiplied by 2^-53: uniform in 0 up to but excluding 1. |
 | `next_gaussian() → float64` | Marsaglia's polar method. Each accepted pair yields two values; the second is kept in the generator and returned by the next call. |
 | `fill_bytes(count: int)` | A new built-in `uint8` list. Each step supplies 8 bytes, least significant first; a final partial group uses the low bytes. |
-| `shuffle<T>(items: T[list])` | Fisher–Yates: for `i` from the last index down to 1, swap `i` with `next_int_below(i + 1)`. Generic, with no callback, so it works today. |
+| `shuffle<T>(items: T[list])` | Fisher–Yates: for `i` from the last index down to 1, swap `i` with `next_int_below(i + 1)`. Generic, with no callback. |
 | `choose<T>(items: T[list]) → T` | Traps with `no such element` for an empty list. |
 
 The same seed gives the same sequence of results from every member, on every runtime, in every library version with the same major number. `Random` is not suitable for secrets, and the library offers no cryptographic generator.

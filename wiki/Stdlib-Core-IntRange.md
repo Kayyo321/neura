@@ -1,6 +1,6 @@
 # `Std.Core.IntRange`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Core.IntRange`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Core.IntRange`. Its [source](https://github.com/Kayyo
 
 - [Exported declarations for `Std.Core.IntRange`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -53,21 +53,17 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 6.5 Small types
 
-| Type | Definition | Status |
+| Type | Definition | Available |
 | --- | --- | --- |
-| `Unit` | A fieldless enum with the single variant `Value`. | Today |
-| `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Today |
-| `IntRange` | An immutable class: `start` (inclusive), `end` (exclusive), `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Today |
+| `Unit` | A fieldless enum with the single variant `Value`. | Yes |
+| `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Yes |
+| `IntRange` | An immutable class: `start` (inclusive), `end` (exclusive), `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Yes |
 
-Removed from the first plan:
-
-- **`Pair<A, B>`** is the native tuple `[A, B]`. `partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`.
-- **`Entry<K, V>`** is the tuple `[K, V]`. Its contract was "an immutable snapshot of one association", which a tuple already is. Its text (`key: value`) is produced by the map's `to_string`.
-- **`Boxed<T>`** existed to pass non-class values as `Object`. No API on this page takes an `Object`.
+`Pair`, `Entry`, and `Boxed` do not exist: a pair is the native tuple `[A, B]` (`partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`), and a map entry is the tuple `[K, V]`. No API on this page takes an `Object`.
 
 Named types are kept where the name carries a contract a tuple cannot: `RegexMatch` (group lookup by name), `FileMetadata` (three fields of unrelated types that will grow), and the value classes of `Std.Time`.
 

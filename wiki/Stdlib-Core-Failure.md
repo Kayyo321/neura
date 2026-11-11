@@ -1,6 +1,6 @@
 # `Std.Core.Failure`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Core.Failure`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/failure.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Core.Failure`. Its [source](https://github.com/Kayyo3
 
 - [Exported declarations for `Std.Core.Failure`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -23,7 +23,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.1 Failure model
 
@@ -48,11 +48,11 @@ Library trap conditions and their messages. The message text is part of the cont
 | An assertion failed | The assertion's message | `Std.Test` |
 | A host write that has no error result failed | `console write failed` | `Console.print_line` |
 
-**Decision: the library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
+**The library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
 
-**What the absence of unwinding changes.** The first plan assumed panics that unwind, deferred actions, and recovery. None exists, and this plan asks for none.
+**What the absence of unwinding means.** The language has no panics that unwind, no deferred actions, and no recovery, and the library has none.
 
-| First plan's promise | Now |
+| Not provided | Instead |
 | --- | --- |
 | `Closeables.use` closes the resource even when the body panics | Replaced by the scoped helpers of [section 5.5](Stdlib-Design#55-resources), which close the resource on every ordinary completion. A body cannot fail and return; it either returns or the run ends, and when a run ends, by return or by trap, the host releases every file and socket. |
 | "If the predicate of `remove_if` panics, the collection is left valid" | Removed. A trap inside a callback ends the run, so no state can be observed afterwards. No collection keeps recovery code. |
@@ -62,17 +62,17 @@ Library trap conditions and their messages. The message text is part of the cont
 
 ### 11.3 `Std.Program`
 
-This module replaces `SysIo.Entry` ([section 4.6](Stdlib-Design#46-retiring-sysio-and-test)). It needs P3.
+This module replaces `SysIo.Entry` ([section 4.6](Stdlib-Design#46-retired-built-ins)). It needs P3.
 
-- **`Entry`** is a module with one requirement, `main(args: string[]) → ExitCode`. A program's entry module inherits it and overrides `main`, exactly as programs inherit `SysIo.Entry` today. Program arguments arrive only through this parameter.
-- **`ExitCode`** is a payload enum: `Ok`, `Failure`, `Status(int)`, and the named statuses `SeriousFailure` (2), `CommandNotFound` (127), `IllegalInstruction` (132), `Breakpoint` (133), `Abort` (134), `ArithmeticError` (136), `OutOfMemory` (137), `BusError` (138), `SegmentationFault` (139), `CpuTimeExceeded` (152), and `FileSizeExceeded` (153). `Ok`, `Failure`, and `Status` map to 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. The first plan kept the old one-variant enum; a payload enum lets a program return any status without a host call. Neura enums cannot carry explicit integer values, so the compiler and `status_of(code) → int` hold the table; the named variants follow declaration order after `Status`, so the original three keep their ordinals.
+- **`Entry`** is a module with one requirement, `main(args: string[]) → ExitCode`. A program's entry module inherits it and overrides `main`, as every program does. Program arguments arrive only through this parameter.
+- **`ExitCode`** is a payload enum: `Ok`, `Failure`, `Status(int)`, and the named statuses `SeriousFailure` (2), `CommandNotFound` (127), `IllegalInstruction` (132), `Breakpoint` (133), `Abort` (134), `ArithmeticError` (136), `OutOfMemory` (137), `BusError` (138), `SegmentationFault` (139), `CpuTimeExceeded` (152), and `FileSizeExceeded` (153). `Ok`, `Failure`, and `Status` map to 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. A payload enum lets a program return any status without a host call. Neura enums cannot carry explicit integer values, so the compiler and `status_of(code) → int` hold the table; the named variants follow declaration order after `Status`, so the original three keep their ordinals.
 - **`status_of(code: ExitCode) → int`** returns the status a variant stands for, trapping for an invalid `Status`.
 - **`Environment.get(name: string) → Lookup`**, where `Lookup` is a payload enum: `Found(string)`, `Missing`, and `Failed(Error)`. A purpose-built enum reads better here than a `Result` of an `Optional`. Needs P2.
 - **`Process.exit(status: int)`** ends the run with that status through `neura.process.exit` and does not return. A status outside 0 through 255 traps. The overload `Process.exit(code: ExitCode)` exits with `status_of(code)`. Needs P2. Returning from `main` is preferred; `exit` is for leaving from deep inside a program.
 
 ### 14.2 `Std.Test`
 
-This module replaces the built-in `Test` as described in [section 4.6](Stdlib-Design#46-retiring-sysio-and-test). An assertion builds its message in Neura and calls `Failure.trap`. The runner reports the message from the trapping test.
+This module replaces the built-in `Test` as described in [section 4.6](Stdlib-Design#46-retired-built-ins). An assertion builds its message in Neura and calls `Failure.trap`. The runner reports the message from the trapping test.
 
 | Member | Failure message | Needs |
 | --- | --- | --- |
@@ -87,4 +87,4 @@ This module replaces the built-in `Test` as described in [section 4.6](Stdlib-De
 
 - The typed assertions remain available for callers that prefer a concrete signature.
 - **There is no assertion that expects a trap.** A trap cannot be caught, so a test function cannot observe one and continue. Code that must trap is tested by a separate program with an expected diagnostic ([section 17](Stdlib-Design#17-verification)).
-- A failed assertion ends its test, as today. Tests are discovered and run as [Testing](https://github.com/Kayyo321/neura/wiki/Testing) describes; only the import changes.
+- A failed assertion ends its test. Tests are discovered and run as [Testing](https://github.com/Kayyo321/neura/wiki/Testing) describes; only the import changes.

@@ -1,6 +1,6 @@
 # Continuous integration
 
-GitHub Actions checks every pull request before it is merged. The workflows are in [`.github/workflows/`](../.github/workflows/), and the scripts they run are in [`scripts/`](../scripts/), so each check can be run from a checkout.
+GitHub Actions checks every pull request before it is merged and publishes the [website](Site.md) from `main`. The workflows are in [`.github/workflows/`](../.github/workflows/), and the scripts they run are in [`scripts/`](../scripts/), so each check can be run from a checkout.
 
 ## Tier 1: pull request checks
 
@@ -8,7 +8,7 @@ GitHub Actions checks every pull request before it is merged. The workflows are 
 
 | Job | What it runs | Fails when |
 | --- | --- | --- |
-| Documentation and workflows | `scripts/test-checks.py`, `scripts/check-workflows.py`, `scripts/check-docs.py`, `scripts/update-stdlib-wiki-api.py --check`, and `scripts/generate-wiki.py --check` | A check script misbehaves on its own test inputs; a workflow breaks a [workflow rule](#workflow-rules); a link in a tracked Markdown file names a missing file, wiki page, or heading; a standard library reference page is stale; or a generated wiki page differs from the docs page it is generated from, or `wiki/` holds a page that is neither generated nor listed as hand-written. |
+| Documentation and workflows | `scripts/test-checks.py`, `scripts/check-workflows.py`, `scripts/check-docs.py`, `scripts/update-stdlib-wiki-api.py --check`, `scripts/generate-wiki.py --check`, and `scripts/build-site.py --check` | A check script misbehaves on its own test inputs; a workflow breaks a [workflow rule](#workflow-rules); a link in a tracked Markdown file names a missing file, wiki page, or heading; a standard library reference page is stale; or a generated wiki page differs from the docs page it is generated from, or `wiki/` holds a page that is neither generated nor listed as hand-written. |
 | Build and test (Linux x86-64) | A Release build with GCC 14 on Ubuntu 24.04, then every CTest entry | The build fails; the compiler reports a warning in a file outside `third_party/`; a test fails, including `doc-examples` when a documentation example does not compile or run as its directive says; a test is skipped, disabled, or not run; or the run holds fewer tests than the workflow's `--minimum`. |
 | Tier 1 | Reads the results of the other two jobs | Either job ended as anything other than `success`, including `skipped` and `cancelled`. |
 
@@ -34,7 +34,20 @@ Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does 
 | Build and test (macOS arm64) and (macOS x86-64) | Release, Apple Clang, macOS 15, libffi and pkgconf from Homebrew, every CTest entry CMake registers on macOS. |
 | Address and undefined-behavior sanitizers (Linux x86-64) | GCC 14 with `-fsanitize=address,undefined`, without the static launcher, every CTest entry. |
 
-Each job uploads its build log and CTest report. A Tier 2 job does not yet run `check-test-report.py`, so a skipped test does not fail it: read the report before treating a green job as full coverage of that platform. A green Tier 2 run is not required to merge a pull request.
+Each job uploads its build log and CTest report. A Tier 2 job does not run `check-test-report.py`, so a skipped test does not fail it: read the report before treating a green job as full coverage of that platform. A green Tier 2 run is not required to merge a pull request.
+
+## Pages: website deployment
+
+[`pages.yml`](../.github/workflows/pages.yml) runs on every push to `main`, and when a maintainer starts it by hand. It builds the [website](Site.md) from `site/` and the documents it lists, and deploys it with GitHub Pages. It does not run for pull requests; Tier 1 checks the site there.
+
+| Job | What it runs | Token permissions |
+| --- | --- | --- |
+| Build the site | `actions/configure-pages` to read the path the site is served below, `scripts/build-site.py --output _site`, and `actions/upload-pages-artifact` | `contents: read` and `pages: read` |
+| Deploy to GitHub Pages | `actions/deploy-pages` on the uploaded artifact, in the `github-pages` environment | `pages: write` and `id-token: write` |
+
+The deploy job is the only job in the repository whose token can write. It checks out nothing and runs no script from the repository: it deploys the artifact that the build job made from a commit on `main`. The `github-pages` environment accepts a deployment from `main` only. That rule is a [repository setting](Site.md#repository-settings-the-site-depends-on), so a workflow file on another branch cannot lift it.
+
+The runs share one concurrency group and a run is not cancelled once it has started, so a deployment finishes before the next one begins.
 
 ## Run the checks locally
 
@@ -46,11 +59,12 @@ python3 scripts/check-workflows.py
 python3 scripts/check-docs.py
 python3 scripts/update-stdlib-wiki-api.py --check
 python3 scripts/generate-wiki.py --check
+python3 scripts/build-site.py --check
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
-python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 123
+python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 124
 ```
 
 To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.
@@ -74,4 +88,4 @@ The scripts need Python 3 and Git, and use no packages outside the Python standa
 - Pass `persist-credentials: false` to `actions/checkout`, so the job's token is not left in the checkout for later steps to read.
 - Avoid the `pull_request_target` and `workflow_run` triggers. They run with the base repository's credentials, and a workflow that then checks out or builds a pull request's code gives that code those credentials.
 
-A workflow that runs code from a pull request holds no secrets and a read-only token. Tier 1 is such a workflow: the `pull_request` trigger gives a pull request from a fork a read-only token and no secrets, whatever the workflow file requests.
+A workflow that runs code from a pull request holds no secrets and a read-only token. Tier 1 is such a workflow: the `pull_request` trigger gives a pull request from a fork a read-only token and no secrets, whatever the workflow file requests. [Pages](#pages-website-deployment) holds the repository's only write permissions and never runs for a pull request.

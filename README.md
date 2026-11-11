@@ -5,13 +5,15 @@
 </h1>
 
 <p align="center">
-  <a href="#getting-started"><img src="https://img.shields.io/badge/compiler-C%2B%2B20-bf2e70" alt="Compiler: C++20"></a>
+  <a href="https://kayyo321.github.io/neura/"><img src="https://img.shields.io/badge/website-kayyo321.github.io%2Fneura-1f29c9" alt="Website: kayyo321.github.io/neura"></a>
+  <a href="#build-from-source"><img src="https://img.shields.io/badge/compiler-C%2B%2B20-bf2e70" alt="Compiler: C++20"></a>
   <a href="docs/runtime/NVM.md"><img src="https://img.shields.io/badge/runtime-NVM-087c77" alt="Runtime: Neura Virtual Machine"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-965b0c" alt="License: Apache 2.0"></a>
 </p>
 
 <p align="center">
-  <a href="#getting-started">Quickstart</a>&nbsp;·
+  <a href="https://kayyo321.github.io/neura/">Website</a>&nbsp;·
+  <a href="#install">Install</a>&nbsp;·
   <a href="docs/lang/Overview.md">Language</a>&nbsp;·
   <a href="docs/lang/StandardLibrary.md">Standard&nbsp;library</a>&nbsp;·
   <a href="examples/">Examples</a>&nbsp;·
@@ -19,6 +21,57 @@
 </p>
 
 Neura is a statically typed programming language and a toolchain for compiling its programs into deterministic neuron circuits and decompiling those circuits into readable representations. The compiler derives the topology and weights from the program. The resulting circuits can be run, inspected, tested, and optimized against the behavior defined by the language.
+
+## Install
+
+On Linux, and on Windows inside a WSL 2 distribution, one command installs a release:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases/latest/download/install.sh | sh
+```
+
+It downloads the archive for your machine, verifies it, and installs `neura` under your home directory without `sudo`. That one installation compiles, runs, tests, and decompiles Neura programs. [Install and update](docs/Install.md) lists the supported platforms and describes each step, `neura update`, and `neura uninstall`.
+
+## Your first program
+
+Save this as `hello.nra`:
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let HelloWorld = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("Hello, World!");
+        return program.ExitCode.Ok;
+    }
+);
+```
+
+```text
+Hello, World!
+```
+
+Compile it to an image and run the image:
+
+```sh
+neura build hello.nra -o hello.nvr
+neura run hello.nvr
+```
+
+The `.nvr` image contains the circuit and execution information needed by the Neura Virtual Machine. The same installation does the rest:
+
+| Command | What it does |
+| --- | --- |
+| `neura check hello.nra` | Checks the source without building. |
+| `neura test tests.nra` | Runs a test module. |
+| `neura build --native hello.nra -o hello` | Packages the image as a native executable that runs without Neura installed (Linux). |
+| `neura decompile hello.nvr` | Recovers readable source from an image. |
+| `neura doctor` | Checks the installation and names what optional features need. |
+| `neura update` | Installs a newer release. |
+
+[Tooling](docs/lang/Tooling.md) describes every command, and the [tutorial](docs/lang/Tutorial.md) introduces the language.
 
 ## Compilation and execution
 
@@ -30,62 +83,20 @@ The compiler checks source semantics before producing typed NeuraIR. Optimizatio
 
 Pure computations can use feedforward circuits. Stateful execution carries mutable data and control state across steps. Classes share method circuits while each instance holds its own fields. Decompilation recovers behavior from supported artifacts and can use optional metadata to improve readability. Verification compares the recovered representation with the circuit over a defined input and state domain.
 
-## Getting started
+## Build from source
 
-Clone the repository with its submodule. [`third_party/neura-libclang`](https://github.com/Kayyo321/neura-libclang) holds the libclang C API headers that C header imports are built against, and the build stops with the commands to fetch it if it is missing.
+Installing a release is the way to use Neura. Build from source to work on Neura itself, or on a platform that has no release archive. [CONTRIBUTING.md](CONTRIBUTING.md#set-up-a-checkout) covers the checkout, its submodule, and the build's dependencies in full. In short, with CMake 3.20 or newer, C and C++20 compilers, and the libffi development package:
 
 ```sh
 git clone --recursive https://github.com/Kayyo321/neura.git
-```
-
-After a plain `git clone`, fetch the submodule from the checkout:
-
-```sh
-git submodule update --init --recursive
-```
-
-For a shallow clone, fetch the submodule shallowly as well:
-
-```sh
-git clone --depth 1 --recursive --shallow-submodules https://github.com/Kayyo321/neura.git
-```
-
-In a shallow checkout made without `--recursive`, fetch the submodule with:
-
-```sh
-git submodule update --init --recursive --depth 1
-```
-
-After pulling a change that moves the submodule to a new commit, update your checkout of it:
-
-```sh
-git submodule update --init --recursive
-```
-
-The build needs the libffi development package, which the runner uses to call native code, and finds it with pkg-config. Neura loads libclang when it runs instead of linking it, so the build does not need the libclang development package; importing C headers needs the libclang shared library from LLVM 14 or newer (19 or newer recommended) and the Clang builtin headers of the same version, such as `stddef.h` and `stdarg.h`, which C library headers include. On Debian and Ubuntu:
-
-```sh
-sudo apt install libclang1-19 libclang-common-19-dev libffi-dev
-```
-
-Neura looks for libclang under its usual names. Set `NEURA_LIBCLANG` to the library's path to choose a specific one.
-
-Build the compiler with CMake 3.20 or newer and C and C++20 compilers:
-
-```sh
+cd neura
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
+build/neura --version
 ```
 
-Compile and run the hello world example:
-
-```sh
-build/neura build examples/hello-world/hello-world.nra -o hello.nvr
-build/neura run hello.nvr
-```
-
-The `.nvr` image contains the circuit and execution information needed by the Neura Virtual Machine. See [Tooling](docs/lang/Tooling.md) for checking source, inspecting NeuraIR, testing programs, and decompiling images.
+A source build reports its version as `<version>-dev`, and `neura update` does not manage it.
 
 ## Documentation
 
@@ -95,6 +106,7 @@ The `.nvr` image contains the circuit and execution information needed by the Ne
 - [Neura Virtual Machine](docs/runtime/NVM.md) and [NVR format](docs/runtime/NVR.md) define execution and the executable image. [Neuron conversion and execution](docs/Backend.md) and [Decompiler](docs/Decompiler.md) describe the implementation, and the [release checklist](docs/Release.md) maps each feature to its tests.
 - [Install, update, and uninstall](docs/Install.md) covers installing a release archive, `neura doctor`, `neura update`, and `neura uninstall`.
 - [Wiki maintenance](docs/Wiki.md) explains how to update, review, and publish the repository's wiki sources.
+- [Website maintenance](docs/Site.md) explains how to change, preview, and publish the [website](https://kayyo321.github.io/neura/), whose pages are in [`site/`](site/) and whose documentation is this repository's Markdown, rendered. [The design of the website](docs/SiteDesign.md) records its colors, type, grids, and illustrations.
 - [Contributing](CONTRIBUTING.md) explains how to propose changes and verify them.
 
 ## Rules for agents

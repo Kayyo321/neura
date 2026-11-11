@@ -1,0 +1,1711 @@
+/*
+  The stylesheet of the Neura website. docs/Site.md explains how the site is
+  changed, checked, and published. docs/SiteDesign.md describes the design:
+  the three colors, the three typefaces, the grids, and the plates.
+
+  Every reference here is relative to this file, in site/assets/.
+*/
+
+@font-face {
+  font-family: "Big Shoulders";
+  src: url("fonts/BigShoulders-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Big Shoulders";
+  src: url("fonts/BigShoulders-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Work Sans";
+  src: url("fonts/WorkSans-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Red Hat Mono";
+  src: url("fonts/RedHatMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  /* The colors of a Nissl stain: a violet-black ground, a pale reading color, and an ink that is pink and blue
+     dithered together. The plates in assets/plates/ are printed in the same four (artwork/site/plates.py). */
+  --ground: #09070e;
+  --pale: #e8e0ee;
+  --ink: #d94c8a;
+  --blue: #4a5ee0;
+
+  /* Tones mixed from those. Blue is too dark for text, so it marks places and edges only. */
+  --raised: #121017;
+  --rule: #2d2a32;
+  --quiet: #98929d;
+
+  /* The closing poster's panel, which the light theme prints in its dark blue. */
+  --poster-ground: var(--ground);
+  --poster-text: var(--pale);
+  --poster-accent: var(--ink);
+  --shadow: rgb(0 0 0 / 0.45);
+  /* The logo's color: the reading color on the dark page, the logo's own slate on the light one. */
+  --logo-color: var(--pale);
+
+  /* Three voices: tall headlines, wide reading text, condensed capitals for labels. Code has its own face. */
+  --display: "Big Shoulders", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --text: "Work Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Red Hat Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  /* The artwork canvas, and the narrower reading grid inside it. */
+  --gutter: clamp(1.25rem, 5vw, 3.75rem);
+  --canvas: min(90rem, 100vw);
+  --grid: min(67.5rem, 100vw - 2 * var(--gutter));
+  --gap: 2.5rem;
+  /* The height of the masthead on documentation pages, where it stays at the top. */
+  --bar: 5.5rem;
+
+  color-scheme: dark;
+  scrollbar-color: var(--rule) var(--ground);
+}
+
+/* The light theme, for a reader whose system or browser asks for one: a blueprint. Paper, dark blue text, and a
+   dark gritty blue for the plates and the field around the front page, with the logo in its own slate. The plates
+   have light versions in assets/plates/light/ (artwork/site/plates.py). */
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f2f1ee;
+    --pale: #0f1460;
+    --ink: #1f29c9;
+    --blue: #768092;
+    --raised: #e8e7e3;
+    --rule: #cfd0d8;
+    --quiet: #4a5170;
+    --poster-ground: #161bb4;
+    --poster-text: #f2f1ee;
+    --poster-accent: #b9c2ff;
+    --shadow: rgb(15 20 96 / 0.18);
+    --logo-color: #768092;
+    color-scheme: light;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-padding-top: 2rem;
+}
+
+/* A section reached by its address stays clear of the masthead, which stays at the top of these pages. */
+html:has(body.docs) {
+  scroll-padding-top: calc(var(--bar) + 1.25rem);
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--pale);
+  font-family: var(--text);
+  font-size: 1.09375rem;
+  line-height: 1.6;
+  overflow-x: clip;
+}
+
+/* The front page is the printed sheet: paper grain, and a thin frame of ink around the viewport. */
+body.front {
+  background: var(--ground) url("grain.png");
+}
+
+body.front::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  border: 3px solid var(--ink);
+  pointer-events: none;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+img,
+svg,
+picture {
+  display: block;
+  max-width: 100%;
+}
+
+img {
+  height: auto;
+}
+
+a {
+  color: inherit;
+  text-decoration-color: var(--ink);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+p,
+ul,
+ol,
+figure,
+pre,
+table,
+blockquote {
+  margin: 0;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  line-height: 0.92;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The label voice: navigation, categories, captions, and controls. */
+.label,
+.masthead a,
+.menu summary,
+.button,
+figcaption,
+.listing-name,
+.baseline,
+.docs-nav summary,
+.toc-title,
+.crumbs,
+.pager span {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.72rem 0.9rem 0.66rem;
+  border-radius: 2px;
+  background: var(--ink);
+  color: var(--ground);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.button:hover {
+  background: var(--pale);
+  color: var(--ground);
+}
+
+.button.pale {
+  background: var(--pale);
+}
+
+.button.pale:hover {
+  background: var(--ink);
+}
+
+.skip {
+  position: absolute;
+  left: 1rem;
+  top: -5rem;
+  z-index: 40;
+  padding: 0.6rem 0.8rem;
+  background: var(--pale);
+  color: var(--ground);
+}
+
+.skip:focus {
+  top: 1rem;
+}
+
+/* ---------------------------------------------------------------- masthead */
+
+/* Four links, the logo on the centre axis, four links. Both groups hold the same gap and lean on the logo, so
+   the row is balanced around the middle of the page whatever the length of each label. */
+.masthead {
+  border-bottom: 1px solid var(--rule);
+  background: var(--ground);
+}
+
+.masthead-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  column-gap: clamp(1.75rem, 3vw, 3rem);
+  width: min(90rem, 100vw - 2 * var(--gutter));
+  min-height: var(--bar);
+  margin: 0 auto;
+  padding: 0.35rem 0;
+}
+
+.masthead .side {
+  display: flex;
+  align-items: center;
+  gap: clamp(1.25rem, 2.2vw, 2.25rem);
+}
+
+.masthead .side.near {
+  justify-content: flex-end;
+}
+
+.masthead .side.far {
+  justify-content: flex-start;
+}
+
+.masthead a {
+  color: var(--quiet);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.masthead a:hover {
+  color: var(--pale);
+}
+
+.masthead .button,
+.masthead .button:hover {
+  color: var(--ground);
+}
+
+/* The logo is the project's drawing reversed for the dark ground (artwork/site/plates.py, `logo`). The mask holds
+   its shape, and the color comes from the palette, so it reads as part of the page in every place it appears. */
+.logo {
+  display: block;
+  text-decoration: none;
+}
+
+.logo-mark {
+  display: block;
+  width: var(--logo, 7.5rem);
+  aspect-ratio: 5 / 4;
+  background-color: var(--logo-color);
+  -webkit-mask: url("logo-mask.png") center / contain no-repeat;
+  mask: url("logo-mask.png") center / contain no-repeat;
+}
+
+.logo:hover .logo-mark {
+  background-color: var(--ink);
+}
+
+.menu {
+  display: none;
+}
+
+/* The masthead is the same height on every page. On the front page a band of dither, the same counted marks as
+   the plates, opens the canvas below it. */
+.front .masthead {
+  border-bottom: 0;
+}
+
+.front .hero {
+  padding-top: 18px;
+  background: url("band.png") left top / 1440px 18px repeat-x;
+}
+
+/* On documentation pages the masthead stays at the top while the page scrolls. */
+.docs .masthead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.masthead {
+  --logo: 5.75rem;
+}
+
+/* ------------------------------------------------------------------- hero */
+
+.hero {
+  width: var(--canvas);
+  margin: 0 auto;
+  padding-bottom: 5rem;
+}
+
+.hero-plate img {
+  width: 100%;
+}
+
+figcaption {
+  color: var(--quiet);
+}
+
+.hero-body {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  column-gap: var(--gap);
+  align-items: start;
+  width: var(--grid);
+  margin: 3rem auto 0;
+}
+
+.hero h1 {
+  grid-column: 1 / span 5;
+  font-size: clamp(5rem, 15vw, 11.5rem);
+  line-height: 0.8;
+}
+
+.hero-copy {
+  grid-column: 7 / span 6;
+  padding-top: 0.6rem;
+}
+
+.hero-copy > p:first-child {
+  font-size: 1.3125rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.hero-copy .actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.75rem;
+  margin-top: 2.25rem;
+}
+
+/* ----------------------------------------------- front page sections */
+
+.section {
+  width: var(--grid);
+  margin: 0 auto;
+  padding: 5.5rem 0 0;
+}
+
+.spread {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  column-gap: var(--gap);
+  row-gap: 3rem;
+  align-items: start;
+}
+
+.spread > .narrow {
+  grid-column: 7 / span 6;
+  min-width: 0;
+}
+
+.spread > .wide {
+  grid-column: 1 / span 6;
+  grid-row: 1;
+}
+
+.spread.flipped > .narrow {
+  grid-column: 1 / span 6;
+}
+
+.spread.flipped > .wide {
+  grid-column: 7 / span 6;
+}
+
+.spread .wide img {
+  width: 100%;
+}
+
+.spread .prose h2 {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  font-size: clamp(2.75rem, 6vw, 4.25rem);
+}
+
+.listing {
+  border: 1px solid var(--rule);
+  background: var(--raised);
+}
+
+.listing-name {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.1rem 0.65rem;
+  border-bottom: 1px solid var(--rule);
+  color: var(--quiet);
+}
+
+.listing-name a {
+  text-decoration: none;
+}
+
+.listing pre {
+  padding: 1.2rem 1.1rem 1.35rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  tab-size: 4;
+  scrollbar-color: var(--rule) var(--raised);
+}
+
+.listing pre code {
+  font-size: inherit;
+}
+
+.listing-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  margin-top: 1rem;
+}
+
+/* Marks in code: keywords in ink, comments quiet, strings and numbers between pale and ink. */
+.k {
+  color: var(--ink);
+}
+
+.c {
+  color: var(--quiet);
+}
+
+.s,
+.n {
+  color: color-mix(in srgb, var(--pale) 55%, var(--blue));
+}
+
+/* ------------------------------------------------------ the closing poster */
+
+.poster {
+  position: relative;
+  width: var(--canvas);
+  margin: 8rem auto 0;
+  padding-top: 18px;
+  background: url("band.png") left top / 1440px 18px repeat-x, var(--poster-ground);
+  color: var(--poster-text);
+  overflow: hidden;
+}
+
+.poster-art {
+  width: 100%;
+}
+
+.poster-body {
+  position: relative;
+  width: var(--grid);
+  margin: -7rem auto 0;
+  padding-bottom: 2.2rem;
+}
+
+.wordmark {
+  position: absolute;
+  left: -0.02em;
+  top: -0.2em;
+  margin: 0;
+  color: color-mix(in srgb, var(--poster-ground) 92%, var(--poster-text));
+  font-family: var(--display);
+  font-weight: 400;
+  /* "NEURA" in Big Shoulders Regular is 2.083 em wide: this sets it across the reading grid. */
+  font-size: calc(var(--grid) / 2.083);
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.poster-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.1fr repeat(4, 1fr);
+  column-gap: var(--gap);
+  min-height: 26rem;
+  padding-top: 3.5rem;
+}
+
+/* The poster carries the logo at its largest. */
+.identity .logo {
+  display: inline-block;
+  --logo: 11rem;
+}
+
+.poster h2 {
+  font-size: 2.6rem;
+}
+
+.poster ul {
+  margin-top: 1.4rem;
+}
+
+.poster li a {
+  display: block;
+  padding: 0.38rem 0;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.poster a:hover {
+  color: var(--poster-accent);
+}
+
+.poster :focus-visible {
+  outline-color: var(--poster-accent);
+}
+
+.identity .logo-mark {
+  background-color: var(--poster-text);
+}
+
+.identity .logo:hover .logo-mark {
+  background-color: var(--poster-accent);
+}
+
+.baseline {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.1fr repeat(4, 1fr);
+  column-gap: var(--gap);
+  align-items: center;
+  margin-top: 4rem;
+}
+
+.baseline a {
+  text-decoration: none;
+}
+
+
+/* ------------------------------------------------------------ documentation */
+
+/* Navigation, the page, and its contents: the directory and the contents stay in view while the page scrolls. */
+.docs-shell {
+  display: grid;
+  grid-template-columns: 17.5rem minmax(0, 1fr) 15rem;
+  max-width: 96rem;
+  margin: 0 auto;
+}
+
+.docs-side,
+.docs-toc {
+  position: sticky;
+  top: var(--bar);
+  align-self: start;
+  max-height: calc(100vh - var(--bar));
+}
+
+/* A page without sections, such as a repository file, gives the contents column to the page. */
+.docs-shell:has(.docs-toc:empty) {
+  grid-template-columns: 17.5rem minmax(0, 1fr);
+}
+
+.docs-toc:empty {
+  display: none;
+}
+
+/* The search box stays above the list of documents, which scrolls on its own. The results open over the page. */
+.docs-side {
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--bar));
+  padding: 1.25rem 0 0 var(--gutter);
+  border-right: 1px solid var(--rule);
+}
+
+.docs-side .search {
+  margin-right: 1.25rem;
+}
+
+.docs-nav,
+.docs-toc {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) var(--ground);
+}
+
+.docs-nav {
+  flex: 1;
+  min-height: 0;
+  margin-top: 0.5rem;
+  padding: 0 1.25rem 3rem 0;
+}
+
+.docs-jump {
+  display: none;
+}
+
+.docs-home-link {
+  display: block;
+  margin: 1.1rem 0 0.4rem;
+  color: var(--pale);
+  font-family: var(--display);
+  font-size: 1.75rem;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.docs-nav details {
+  border-top: 1px solid var(--rule);
+}
+
+.docs-nav summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.85rem 0 0.75rem;
+  color: var(--quiet);
+  list-style: none;
+  cursor: pointer;
+}
+
+.docs-nav summary::-webkit-details-marker {
+  display: none;
+}
+
+.docs-nav summary::after {
+  content: "+";
+  font-family: var(--mono);
+  font-weight: 400;
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.docs-nav details[open] > summary::after {
+  content: "\2212";
+}
+
+.docs-nav summary:hover {
+  color: var(--pale);
+}
+
+.docs-nav ul {
+  padding-bottom: 0.75rem;
+}
+
+.docs-nav li a {
+  display: block;
+  padding: 0.3rem 0.6rem 0.3rem 0.75rem;
+  border-left: 2px solid var(--rule);
+  color: var(--quiet);
+  font-size: 0.9375rem;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.docs-nav li a:hover {
+  border-left-color: var(--quiet);
+  color: var(--pale);
+}
+
+.docs-nav li a[aria-current] {
+  border-left-color: var(--ink);
+  background: var(--raised);
+  color: var(--pale);
+}
+
+/* A package of the standard library: a smaller disclosure inside its section. */
+.docs-nav .group details {
+  border-top: 0;
+}
+
+.docs-nav .group summary {
+  padding: 0.35rem 0 0.35rem 0.75rem;
+  border-left: 2px solid var(--rule);
+  font-family: var(--mono);
+  font-weight: 400;
+  font-size: 0.84375rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.docs-nav .group ul {
+  padding: 0 0 0.3rem 0.75rem;
+  border-left: 2px solid var(--rule);
+}
+
+.docs-main {
+  min-width: 0;
+  padding: 1.5rem clamp(1.25rem, 3.5vw, 3.5rem) 5rem;
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0;
+  color: var(--quiet);
+}
+
+.crumbs li + li::before {
+  content: "/";
+  margin: 0 0.6rem;
+  color: var(--rule);
+}
+
+.crumbs a {
+  text-decoration: none;
+}
+
+.crumbs [aria-current] {
+  color: var(--pale);
+}
+
+.docs-toc {
+  padding: 1.6rem var(--gutter) 3rem 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.toc-title {
+  margin-bottom: 0.75rem;
+  color: var(--quiet);
+}
+
+.docs-toc li a {
+  display: block;
+  padding: 0.28rem 0 0.28rem 0.75rem;
+  border-left: 1px solid var(--rule);
+  color: var(--quiet);
+  text-decoration: none;
+}
+
+.docs-toc li.level-3 a {
+  padding-left: 1.5rem;
+}
+
+.docs-toc li a:hover {
+  color: var(--pale);
+}
+
+.docs-toc li a.current {
+  border-left-color: var(--blue);
+  color: var(--pale);
+}
+
+.docs-toc code {
+  font-size: 0.875em;
+}
+
+.toc-top {
+  display: inline-block;
+  margin-top: 1rem;
+  color: var(--quiet);
+}
+
+/* ------------------------------------------------------------- search */
+
+.search {
+  position: relative;
+}
+
+.search input {
+  width: 100%;
+  padding: 0.6rem 2.2rem 0.55rem 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--raised);
+  color: var(--pale);
+  font: inherit;
+  font-size: 0.9375rem;
+}
+
+.search input::placeholder {
+  color: var(--quiet);
+}
+
+.search input:focus {
+  border-color: var(--ink);
+  outline: none;
+}
+
+.search kbd {
+  position: absolute;
+  right: 0.55rem;
+  top: 0.55rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  color: var(--quiet);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.search input:focus + kbd {
+  display: none;
+}
+
+.results {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 25;
+  width: max(100%, min(36rem, 90vw));
+  max-height: min(32rem, 70vh);
+  overflow-y: auto;
+  border: 1px solid var(--rule);
+  background: var(--raised);
+  box-shadow: 0 0.75rem 2rem var(--shadow);
+}
+
+.results a {
+  display: block;
+  padding: 0.55rem 0.85rem;
+  border-left: 2px solid transparent;
+  text-decoration: none;
+}
+
+.results [aria-selected="true"] a,
+.results a:hover {
+  border-left-color: var(--ink);
+  background: var(--rule);
+  color: var(--pale);
+}
+
+.result-label {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.result-meta {
+  display: block;
+  color: var(--quiet);
+  font-size: 0.8125rem;
+}
+
+.results .empty {
+  padding: 0.75rem 0.85rem;
+  color: var(--quiet);
+}
+
+.search.large input {
+  padding: 0.95rem 2.5rem 0.9rem 1rem;
+  font-size: 1.0625rem;
+}
+
+.search.large kbd {
+  top: 0.95rem;
+}
+
+/* ------------------------------------------------------------- the page */
+
+.prose {
+  max-width: 47rem;
+  line-height: 1.7;
+}
+
+.prose > * + *,
+.prose li > * + * {
+  margin-top: 1rem;
+}
+
+.prose h1 {
+  margin: 1.75rem 0 1.5rem;
+  font-size: clamp(2.6rem, 5vw, 3.6rem);
+  line-height: 1;
+}
+
+.prose h2 {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+  font-size: 2.1rem;
+  line-height: 1.05;
+}
+
+.prose h3 {
+  margin-top: 2.25rem;
+  font-family: var(--text);
+  font-size: 1.25rem;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.prose h4,
+.prose h5,
+.prose h6 {
+  margin-top: 1.75rem;
+  font-family: var(--text);
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  letter-spacing: 0;
+  color: var(--pale);
+}
+
+.prose h1 + *,
+.prose h2 + *,
+.prose h3 + *,
+.prose h4 + * {
+  margin-top: 0.85rem;
+}
+
+/* A heading's link appears beside it when pointed at, for copying the address of a section. */
+.anchor {
+  margin-left: 0.4em;
+  color: var(--rule);
+  font-family: var(--mono);
+  font-size: 0.7em;
+  text-decoration: none;
+  opacity: 0;
+}
+
+.anchor::before {
+  content: "#";
+}
+
+:is(h2, h3, h4, h5, h6):hover > .anchor,
+.anchor:focus-visible {
+  opacity: 1;
+}
+
+.anchor:hover {
+  color: var(--ink);
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.35rem;
+}
+
+.prose ul {
+  list-style: square;
+}
+
+.prose ol {
+  list-style: decimal;
+}
+
+.prose li::marker {
+  color: var(--quiet);
+}
+
+.prose li + li {
+  margin-top: 0.4rem;
+}
+
+.prose :not(pre) > code {
+  padding: 0.08em 0.32em;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--raised);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
+}
+
+.prose a code {
+  text-decoration: none;
+}
+
+/* Code in a heading takes the heading's size and color, without the box of code in a paragraph. */
+.prose :is(h1, h2, h3, h4) code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.82em;
+  letter-spacing: -0.02em;
+  overflow-wrap: break-word;
+}
+
+.prose h1 code {
+  font-size: 0.66em;
+}
+
+.prose pre {
+  position: relative;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--raised);
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  tab-size: 4;
+  scrollbar-color: var(--rule) var(--raised);
+}
+
+.prose pre code {
+  font-size: inherit;
+}
+
+.copy {
+  position: absolute;
+  right: 0.4rem;
+  top: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--ground);
+  color: var(--quiet);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0;
+}
+
+/* docs.js puts each block in a frame that does not scroll and holds its copy button. The block keeps room at
+   the end of its lines, so the button never covers their last characters. */
+.code-frame {
+  position: relative;
+}
+
+.code-frame pre {
+  padding-right: 4.75rem;
+}
+
+.code-frame:hover .copy,
+.copy:focus-visible {
+  opacity: 1;
+}
+
+.copy:hover {
+  color: var(--pale);
+}
+
+.prose blockquote {
+  padding: 0.1rem 0 0.1rem 1rem;
+  border-left: 3px solid var(--blue);
+  color: var(--quiet);
+}
+
+.prose hr {
+  margin: 2.5rem 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.prose strong {
+  color: var(--pale);
+  font-weight: 400;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-decoration-thickness: 0.35em;
+  text-underline-offset: -0.15em;
+  text-decoration-skip-ink: none;
+}
+
+.prose details {
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--rule);
+}
+
+.prose summary {
+  cursor: pointer;
+}
+
+.table {
+  overflow-x: auto;
+  scrollbar-color: var(--rule) var(--ground);
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.prose th,
+.prose td {
+  padding: 0.55rem 0.9rem 0.55rem 0;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose th {
+  color: var(--quiet);
+  font-weight: 400;
+  border-bottom-color: var(--quiet);
+}
+
+.prose .align-center {
+  text-align: center;
+}
+
+.prose .align-right {
+  text-align: right;
+}
+
+/* A member of the standard library, reached from the search box. */
+.prose li[id]:target {
+  margin-left: -0.75rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--ink);
+}
+
+.page-plate img {
+  width: 100%;
+  height: 10rem;
+  margin-top: 1.5rem;
+  object-fit: cover;
+}
+
+.page-plate + h1 {
+  margin-top: 1.5rem;
+}
+
+.page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+  max-width: 47rem;
+  margin-top: 4rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+  color: var(--quiet);
+  font-size: 0.875rem;
+}
+
+.page-meta a + a {
+  margin-left: 1.25rem;
+}
+
+.pager {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  max-width: 47rem;
+  margin-top: 1.5rem;
+}
+
+.pager a {
+  display: block;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  text-decoration: none;
+}
+
+.pager a:hover {
+  border-color: var(--ink);
+  color: var(--pale);
+}
+
+.pager span {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--quiet);
+}
+
+.pager .next {
+  grid-column: 2;
+  text-align: right;
+}
+
+/* ------------------------------------------------- the documentation's home */
+
+.docs-intro h1 {
+  margin-top: 1.75rem;
+  font-size: clamp(3rem, 7vw, 5.25rem);
+}
+
+.docs-intro p {
+  margin: 1rem 0 1.75rem;
+  color: var(--quiet);
+}
+
+.docs-intro .search {
+  max-width: 40rem;
+}
+
+/* Two columns that fill from top to bottom, so a short section does not leave a hole beside a long one. */
+.shelves {
+  columns: 2;
+  column-gap: var(--gap);
+  margin-top: 3.5rem;
+}
+
+.shelf {
+  break-inside: avoid;
+  padding-bottom: 3.5rem;
+}
+
+.shelf .plate {
+  width: 100%;
+  height: 7.5rem;
+  object-fit: cover;
+  border-radius: 2px;
+}
+
+.shelf h2 {
+  margin-top: 1.1rem;
+  font-size: 2.2rem;
+}
+
+.shelf ul {
+  margin-top: 0.75rem;
+}
+
+.shelf li {
+  border-top: 1px solid var(--rule);
+}
+
+.shelf li > a {
+  display: block;
+  padding: 0.55rem 0 0;
+  text-decoration: none;
+}
+
+.shelf li > span {
+  display: block;
+  padding-bottom: 0.55rem;
+  color: var(--quiet);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.shelf .packages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.75rem 0;
+}
+
+.shelf .packages a {
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  text-decoration: none;
+}
+
+.shelf .packages a:hover {
+  border-color: var(--ink);
+}
+
+.shelf .packages small {
+  margin-left: 0.4rem;
+  color: var(--quiet);
+  font-size: inherit;
+}
+
+/* ---------------------------------------------------- a repository file */
+
+.source-path {
+  color: var(--quiet);
+  font-size: 0.9375rem;
+}
+
+.source-view {
+  max-width: none;
+}
+
+pre.numbered code {
+  counter-reset: line;
+}
+
+pre.numbered .line {
+  display: block;
+  counter-increment: line;
+}
+
+pre.numbered .line > a {
+  display: inline-block;
+  width: 3.25rem;
+  margin-right: 1rem;
+  color: var(--rule);
+  text-align: right;
+  text-decoration: none;
+  user-select: none;
+}
+
+pre.numbered .line > a::before {
+  content: counter(line);
+}
+
+pre.numbered .line > a:hover {
+  color: var(--quiet);
+}
+
+pre.numbered .line:target {
+  background: color-mix(in srgb, var(--blue) 24%, var(--raised));
+}
+
+pre.numbered .line:target > a {
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------- colophon */
+
+.colophon {
+  border-top: 1px solid var(--rule);
+  color: var(--quiet);
+  font-size: 0.875rem;
+}
+
+.colophon-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 2rem;
+  width: min(90rem, 100vw - 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 1.5rem 0;
+}
+
+.colophon {
+  --logo: 4.5rem;
+}
+
+.colophon nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  margin-left: auto;
+}
+
+.colophon nav a {
+  text-decoration: none;
+}
+
+/* ----------------------------------------------------------- missing page */
+
+.lost {
+  width: var(--grid);
+  margin: 0 auto;
+  padding: 4rem 0 6rem;
+}
+
+.lost h1 {
+  font-size: clamp(3.4rem, 12vw, 7rem);
+}
+
+.lost p {
+  margin-top: 1.5rem;
+  max-width: 34rem;
+}
+
+.lost img {
+  width: min(100%, 34.7rem);
+  margin-top: 3rem;
+}
+
+/* ------------------------------------------------------------ narrower screens */
+
+@media (max-width: 80rem) {
+  .docs-shell {
+    grid-template-columns: 16rem minmax(0, 1fr);
+  }
+
+  .docs-toc {
+    display: none;
+  }
+}
+
+/* Eight links no longer fit beside the logo: they fold into a menu. */
+@media (max-width: 72rem) {
+  .masthead-row {
+    grid-template-columns: auto 1fr auto;
+    gap: 1rem;
+  }
+
+  .masthead .side {
+    display: none;
+  }
+
+  .masthead .logo {
+    grid-column: 1;
+  }
+
+  .masthead {
+    --logo: 5rem;
+  }
+
+  .masthead-row {
+    min-height: 4.5rem;
+  }
+
+  .menu {
+    display: block;
+    grid-column: 3;
+    position: relative;
+  }
+
+  .menu summary {
+    padding: 0.72rem 0.2rem 0.66rem;
+    color: var(--pale);
+    list-style: none;
+    cursor: pointer;
+  }
+
+  .menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .menu[open] summary {
+    color: var(--ink);
+  }
+
+  .menu nav {
+    position: absolute;
+    right: -0.5rem;
+    top: 100%;
+    z-index: 30;
+    width: 16rem;
+    padding: 0.4rem 1rem;
+    border: 1px solid var(--rule);
+    background: var(--raised);
+  }
+
+  .menu nav a {
+    display: block;
+    padding: 0.8rem 0;
+    border-bottom: 1px dotted var(--rule);
+    color: var(--pale);
+  }
+
+  .menu nav a:last-child {
+    border-bottom: 0;
+  }
+
+  .poster-grid,
+  .baseline {
+    grid-template-columns: 1.4fr repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 54rem) {
+  /* Twelve columns and their eleven gaps are wider than a phone, so these grids become one column. */
+  .hero-body,
+  .spread {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hero h1,
+  .hero-copy,
+  .spread > .wide,
+  .spread > .narrow,
+  .spread.flipped > .wide,
+  .spread.flipped > .narrow {
+    grid-column: auto;
+    grid-row: auto;
+    min-width: 0;
+  }
+
+  .hero-copy {
+    margin-top: 2rem;
+    padding-top: 0;
+  }
+
+  .poster-grid,
+  .baseline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 2.5rem;
+  }
+
+  .identity {
+    grid-column: 1 / -1;
+  }
+
+  /* The documentation becomes one column: the search box, the page, then every document, with a link from the
+     top that jumps to the list. */
+  .docs-shell {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .docs-side {
+    display: contents;
+  }
+
+  .docs-nav {
+    overflow: visible;
+  }
+
+  .docs-side .search {
+    order: 0;
+    margin: 1rem var(--gutter) 0;
+  }
+
+  .search kbd {
+    display: none;
+  }
+
+  .docs-jump {
+    display: block;
+    order: 0;
+    margin: 0.75rem var(--gutter) 0;
+    color: var(--quiet);
+    font-size: 0.875rem;
+  }
+
+  .docs-main {
+    order: 1;
+    padding: 0.75rem var(--gutter) 3rem;
+  }
+
+  .docs-nav {
+    order: 2;
+    padding: 0 var(--gutter) 3rem;
+    border-top: 1px solid var(--rule);
+  }
+
+  .shelves {
+    columns: 1;
+  }
+}
+
+@media (max-width: 46rem) {
+  body {
+    font-size: 1.0625rem;
+  }
+
+  .hero {
+    padding-bottom: 3.5rem;
+  }
+
+  .hero-body {
+    margin-top: 2rem;
+  }
+
+  .hero-copy > p:first-child {
+    font-size: 1.1875rem;
+  }
+
+  .section {
+    padding-top: 4rem;
+  }
+
+  .poster {
+    margin-top: 5rem;
+  }
+
+  /* On a phone the poster keeps its strongest crop: the iris and the sweep of the lashes. */
+  .poster-art {
+    height: 17rem;
+    object-fit: cover;
+    object-position: 42% top;
+  }
+
+  .poster-body {
+    margin-top: -3rem;
+  }
+
+  .poster-grid {
+    padding-top: 2rem;
+  }
+
+  .baseline {
+    margin-top: 3rem;
+  }
+
+  .baseline span:empty {
+    display: none;
+  }
+
+  .prose h2 {
+    font-size: 1.85rem;
+  }
+
+  .pager {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pager .next {
+    grid-column: 1;
+  }
+
+  .colophon nav {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@media print {
+  body.front::after,
+  .masthead,
+  .docs-side,
+  .docs-toc,
+  .pager,
+  .colophon {
+    display: none;
+  }
+
+  .docs-shell {
+    display: block;
+  }
+}
+
+/* ------------------------------------------------------------ light theme */
+
+/* On the light front page the field outside the canvas is the dark gritty blue, and the canvas is paper, as a
+   sheet laid on a blueprint table. The frame of ink and the paper grain are left out. */
+@media (prefers-color-scheme: light) {
+  body.front {
+    background: #161bb4 url("grit-light.png");
+  }
+
+  body.front::after {
+    display: none;
+  }
+
+  .front .masthead,
+  .front main {
+    width: var(--canvas);
+    margin-inline: auto;
+  }
+
+  .front .hero {
+    background-image: url("band-light.png");
+  }
+
+  .front main {
+    padding-bottom: 7rem;
+    background: var(--ground);
+  }
+
+  .front .poster {
+    margin-top: 0;
+    background-image: url("band-light.png");
+    background-position: left top;
+    background-size: 1440px 18px;
+    background-repeat: repeat-x;
+  }
+}
+

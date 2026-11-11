@@ -1,6 +1,6 @@
 # `Std.Collections.Iterator`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Collections.Iterator`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/iterator.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Collections.Iterator`. Its [source](https://github.co
 
 - [Exported declarations for `Std.Collections.Iterator`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -23,7 +23,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.1 Failure model
 
@@ -48,11 +48,11 @@ Library trap conditions and their messages. The message text is part of the cont
 | An assertion failed | The assertion's message | `Std.Test` |
 | A host write that has no error result failed | `console write failed` | `Console.print_line` |
 
-**Decision: the library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
+**The library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
 
-**What the absence of unwinding changes.** The first plan assumed panics that unwind, deferred actions, and recovery. None exists, and this plan asks for none.
+**What the absence of unwinding means.** The language has no panics that unwind, no deferred actions, and no recovery, and the library has none.
 
-| First plan's promise | Now |
+| Not provided | Instead |
 | --- | --- |
 | `Closeables.use` closes the resource even when the body panics | Replaced by the scoped helpers of [section 5.5](Stdlib-Design#55-resources), which close the resource on every ordinary completion. A body cannot fail and return; it either returns or the run ends, and when a run ends, by return or by trap, the host releases every file and socket. |
 | "If the predicate of `remove_if` panics, the collection is left valid" | Removed. A trap inside a callback ends the run, so no state can be observed afterwards. No collection keeps recovery code. |
@@ -66,15 +66,15 @@ The loop form depends on the source value.
 
 | Way | Available | Notes |
 | --- | --- | --- |
-| For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Today | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
-| An index loop over `size()` and `get(index)` | Today | For lists and deques. No modification check. |
-| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Today, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
-| For-each directly over the collection | Today | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
+| For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Yes | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
+| An index loop over `size()` and `get(index)` | Yes | For lists and deques. No modification check. |
+| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
+| For-each directly over the collection | Yes | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
 
-- **Decision: iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
-- **Map iteration yields tuples.** A map's iterator returns `[K, V]`. The tuple is an immutable snapshot of the entry, which is the contract the first plan's `Entry` class existed to state.
-- **Decision: no removal through iterators.** Collections remove in bulk with `remove_if` and `retain_if`.
-- **Decision: fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
+- **Iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
+- **Map iteration yields tuples.** A map's iterator returns `[K, V]`. The tuple is an immutable snapshot of the entry, which is an immutable snapshot of one association.
+- **No removal through iterators.** Collections remove in bulk with `remove_if` and `retain_if`.
+- **Fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
 - The iteration order of every collection is specified in section 9.
 - `Iterator<T>` and `Iterable<T>` are the interfaces for this protocol. Concrete iterator classes and collections implement these member signatures.
 
@@ -82,7 +82,7 @@ The loop form depends on the source value.
 
 A class for lazy pipelines, the counterpart of Java's streams. Needs G1; the members that return `Optional` also need G2.
 
-**Redesign.** The first plan wrapped an `Iterator<T>` interface and gave each operation an adapter class implementing it. A sequence is now two native function values, and each operation is a closure over the previous two.
+A sequence is two native function values, and each operation is a closure over the previous two.
 
 - **Layout.** `has_next: () → bool`, `next: () → T`, and a `bool` `consumed`.
 - **Why closures fit.** An adapter's state is exactly what a closure captures. `map` captures the upstream pair and the mapping function and needs no state of its own. Operations that do keep state (`take`'s remaining count, `filter`'s buffered element, `enumerate`'s index) hold it in a captured `Cell`, because captured locals are copies ([section 5.6](Stdlib-Design#56-callbacks)).

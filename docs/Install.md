@@ -1,8 +1,44 @@
 # Install, update, and uninstall
 
-A release of Neura is one archive for each supported platform. The archive holds the `neura` executable, the standard library, the native launchers where the platform has them, and an `install.sh` that installs them for the current user. Three commands of the installed tool manage the result: `neura doctor` checks it, `neura update` replaces it with a newer release, and `neura uninstall` removes it. Installs made some other way, such as a source build or a package manager, are not managed by `neura update`.
+Install Neura from a release. A release is a prebuilt archive for each supported platform, and [one command](#install-with-one-command) downloads, verifies, and installs the one for your machine. Nothing is compiled on your machine, and the installation holds everything Neura does: compiling, running, testing, and decompiling programs, and packaging native executables.
+
+The archive holds the `neura` executable, the standard library, the native launchers, and an `install.sh` that installs them for the current user. Three commands of the installed tool manage the result: `neura doctor` checks it, `neura update` replaces it with a newer release, and `neura uninstall` removes it. A [build from source](#build-from-source) is for working on Neura itself and for platforms without an archive; `neura update` does not manage one.
 
 [Tooling](lang/Tooling.md) covers the compiler commands. This page covers the tool itself.
+
+## Install with one command
+
+On Linux, and on Windows inside a WSL 2 distribution:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases/latest/download/install.sh | sh
+```
+
+One installation holds everything Neura does: `neura build`, `run`, `test`, `decompile`, and `build --native`, with the standard library and the native launchers. Nothing else has to be installed to compile or run a Neura program. [C imports](#supported-platforms) are the one feature that needs system packages, and `neura doctor` names them.
+
+The command downloads `install.sh` from the latest release and runs it. That script, [`packaging/bootstrap.sh`](../packaging/bootstrap.sh) in the repository:
+
+1. Finds the machine's target and stops with a message when no archive exists for it, when the system's C library is not glibc, or when the system is neither Linux nor macOS.
+2. Downloads the release's `neura-release.txt` and the archive for the target over HTTPS.
+3. Checks the archive's size and SHA-256 against `neura-release.txt`, and checks its build provenance with `gh attestation verify` when the GitHub CLI is installed. Without `gh`, it prints that provenance was not verified.
+4. Checks that every member of the archive is inside the one expected directory, unpacks it into a temporary directory, and runs the archive's own `install.sh`, described [below](#install-from-a-release-archive).
+
+It writes only under the install root and the bin directory, never uses `sudo`, and never edits a shell startup file. It needs `curl`, `tar`, and `sha256sum` or `shasum`. To read the script before running it, download it first:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSLO https://github.com/Kayyo321/neura/releases/latest/download/install.sh
+sh install.sh
+```
+
+| Option | Effect |
+| --- | --- |
+| `--version <version>` | Install that version, such as `0.1.0-rc.1`, in place of the latest release. Release candidates are installed only this way. |
+| `--source <url or directory>` | Read the release from another HTTPS location or from a local directory that holds `neura-release.txt` and the archives. |
+| `--force` | Replace an installed copy of the same version. |
+
+When the script is piped, options follow `sh -s --`, as in `... | sh -s -- --version 0.1.0-rc.1`.
+
+No macOS archive is published, so on macOS the command stops and says so ([platforms without an archive](#platforms-without-an-archive)).
 
 ## Supported platforms
 
@@ -33,7 +69,7 @@ Optional features need more, and `neura doctor` reports each one:
 
 ## Install from a release archive
 
-Download the archive for your platform and `SHA256SUMS` from the release page, then:
+The one-line command does these steps for you. To do them by hand, download the archive for your platform and `SHA256SUMS` from the release page, then:
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS      # on macOS: shasum -a 256 -c SHA256SUMS

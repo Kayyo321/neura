@@ -27,9 +27,15 @@ GitHub does not let an author approve their own pull request, so step 3 cannot b
 
 This is a limitation of the project's current size, and the rule returns to full force for every author when a second maintainer joins. Until then no change to `main` has an independent approval that GitHub enforces: the ruleset for `main` requires a pull request, passing checks, and resolved conversations, and requires no approving review.
 
+### Merging before the checks finish
+
+A maintainer with the repository's `admin` role can merge a pull request whose required checks have not finished or have failed, with `gh pr merge --admin` or the merge button's bypass option. The ruleset for `main` allows this to the `admin` role alone, and only through a pull request: nobody pushes to `main` directly, rewrites its history, or deletes it.
+
+The bypass exists so that a change that cannot affect the compiler, such as an edit to the website or the documentation, can be published without waiting for Tier 1's full build and test run. The checks still run on the pull request, and the [Pages workflow](docs/Site.md#how-a-change-is-published) checks the site again before it deploys. A maintainer who merges a change before its checks pass owns any failure the checks report afterward, and fixes it in a new pull request.
+
 ### Enforcement
 
-GitHub rulesets enforce steps 1, 2, and 4, and the rules for release tags below. [Repository settings](docs/RepositorySettings.md) lists each setting, the file that records its expected value, and the script that compares the files with the live repository.
+GitHub rulesets enforce steps 1, 2, and 4, apart from the bypass above, and the rules for release tags below. [Repository settings](docs/RepositorySettings.md) lists each setting, the file that records its expected value, and the script that compares the files with the live repository.
 
 ## Decisions
 

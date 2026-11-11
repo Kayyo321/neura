@@ -1,8 +1,8 @@
 # Standard library reference
 
-The Neura standard library contains source modules for core values, collections, text, arithmetic, time, input/output, host services, and concurrency. Select a module below for its contracts, implementation decisions, source, and exported declarations. See the [standard library overview](StandardLibrary) for imports, string and console formatting, and runtime capabilities.
+The Neura standard library contains source modules for core values, collections, text, arithmetic, time, input/output, host services, and concurrency. Select a module below for its contracts, source, and exported declarations. See the [standard library overview](StandardLibrary) for imports, string and console formatting, and runtime capabilities.
 
-The [full design and implementation decisions](Stdlib-Design) preserve the historical plan and its shared contracts. Current language behavior and unresolved decisions are tracked in [feature status](Status).
+The [standard library specification](Stdlib-Design) gives the shared contracts. Language status and unresolved language decisions are in [feature status](Status).
 
 ## Modules
 
@@ -214,439 +214,104 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Time.SystemClock`](Stdlib-Time-SystemClock) | [Contracts](Stdlib-Time-SystemClock#detailed-contracts) | [Declarations](Stdlib-Time-SystemClock#exported-declarations) |
 | [`Std.Time.ZoneOffset`](Stdlib-Time-ZoneOffset) | [Contracts](Stdlib-Time-ZoneOffset#detailed-contracts) | [Declarations](Stdlib-Time-ZoneOffset#exported-declarations) |
 
-## Design and historical section index
-
-The original numbered sections remain available in the [complete design](Stdlib-Design). Expand the compatibility index to follow an older section link.
-
-<details>
-<summary>Original numbered sections</summary>
-
-## Standard library implementation plan
-
-[Read the complete design](Stdlib-Design).
-
-## 1. How to read this plan
-
-[Read this section in the design](Stdlib-Design#1-how-to-read-this-plan).
-
-## 2. Principles
-
-[Read this section in the design](Stdlib-Design#2-principles).
-
-## 3. Language baseline and gaps
-
-[Read this section in the design](Stdlib-Design#3-language-baseline-and-gaps).
-
-### 3.1 What the probes established
-
-[Read this section in the design](Stdlib-Design#31-what-the-probes-established).
-
-### 3.2 Status of the first plan's blockers
-
-[Read this section in the design](Stdlib-Design#32-status-of-the-first-plans-blockers).
-
-### 3.3 Compiler and runtime dependencies
-
-[Read this section in the design](Stdlib-Design#33-compiler-and-runtime-dependencies).
-
-#### G1. Function types over type parameters
-
-[Read this section in the design](Stdlib-Design#g1-function-types-over-type-parameters).
-
-#### G2. Generic enums
-
-[Read this section in the design](Stdlib-Design#g2-generic-enums).
-
-#### G3. Universal members
-
-[Read this section in the design](Stdlib-Design#g3-universal-members).
-
-#### G4. Interfaces
-
-[Read this section in the design](Stdlib-Design#g4-interfaces).
-
-#### G5. For-each over library collections
-
-[Read this section in the design](Stdlib-Design#g5-for-each-over-library-collections).
-
-#### T1. Text primitives
-
-[Read this section in the design](Stdlib-Design#t1-text-primitives).
-
-#### N1. Float bit access
-
-[Read this section in the design](Stdlib-Design#n1-float-bit-access).
-
-#### F1. Trap with a message
-
-[Read this section in the design](Stdlib-Design#f1-trap-with-a-message).
-
-#### P1. Library root
-
-[Read this section in the design](Stdlib-Design#p1-library-root).
-
-#### P2. Host bindings in source
-
-[Read this section in the design](Stdlib-Design#p2-host-bindings-in-source).
-
-#### P3. Entry point from the library
-
-[Read this section in the design](Stdlib-Design#p3-entry-point-from-the-library).
-
-### 3.4 Optional accelerations
-
-[Read this section in the design](Stdlib-Design#34-optional-accelerations).
-
-## 4. Architecture
-
-[Read this section in the design](Stdlib-Design#4-architecture).
-
-### 4.1 Modules
-
-[Read this section in the design](Stdlib-Design#41-modules).
-
-### 4.2 Source layout
-
-[Read this section in the design](Stdlib-Design#42-source-layout).
-
-### 4.3 Dependency order
-
-[Read this section in the design](Stdlib-Design#43-dependency-order).
-
-### 4.4 Built-in floor
-
-[Read this section in the design](Stdlib-Design#44-built-in-floor).
-
-### 4.5 Host services
-
-[Read this section in the design](Stdlib-Design#45-host-services).
-
-### 4.6 Retiring `SysIo` and `Test`
-
-[Read this section in the design](Stdlib-Design#46-retiring-sysio-and-test).
-
-### 4.7 Versioning
-
-[Read this section in the design](Stdlib-Design#47-versioning).
-
-## 5. Core contracts
-
-[Read this section in the design](Stdlib-Design#5-core-contracts).
-
-### 5.1 Failure model
-
-[Read this section in the design](Stdlib-Design#51-failure-model).
-
-### 5.2 Equality, hashing, and text
-
-[Read this section in the design](Stdlib-Design#52-equality-hashing-and-text).
-
-### 5.3 Ordering
-
-[Read this section in the design](Stdlib-Design#53-ordering).
-
-### 5.4 Iteration
-
-[Read this section in the design](Stdlib-Design#54-iteration).
-
-### 5.5 Resources
-
-[Read this section in the design](Stdlib-Design#55-resources).
-
-### 5.6 Callbacks
-
-[Read this section in the design](Stdlib-Design#56-callbacks).
-
-### 5.7 Conformance summary
-
-[Read this section in the design](Stdlib-Design#57-conformance-summary).
-
-### 5.8 Task safety
-
-[Read this section in the design](Stdlib-Design#58-task-safety).
-
-## 6. `Std.Core` types
-
-[Read this section in the design](Stdlib-Design#6-stdcore-types).
-
-### 6.1 `Optional<T>`
-
-[Read this section in the design](Stdlib-Design#61-optionalt).
-
-### 6.2 `Result<T>`
-
-[Read this section in the design](Stdlib-Design#62-resultt).
-
-### 6.3 `Error`
-
-[Read this section in the design](Stdlib-Design#63-error).
-
-### 6.4 Concrete aliases and absence
-
-[Read this section in the design](Stdlib-Design#64-concrete-aliases-and-absence).
-
-### 6.5 Small types
-
-[Read this section in the design](Stdlib-Design#65-small-types).
-
-## 7. Primitive companion modules
-
-[Read this section in the design](Stdlib-Design#7-primitive-companion-modules).
-
-### 7.1 Integer modules
-
-[Read this section in the design](Stdlib-Design#71-integer-modules).
-
-### 7.2 Arithmetic without wrapping intrinsics
-
-[Read this section in the design](Stdlib-Design#72-arithmetic-without-wrapping-intrinsics).
-
-### 7.3 Float modules
-
-[Read this section in the design](Stdlib-Design#73-float-modules).
-
-### 7.4 `Bool`
-
-[Read this section in the design](Stdlib-Design#74-bool).
-
-### 7.5 Float text conversion
-
-[Read this section in the design](Stdlib-Design#75-float-text-conversion).
-
-## 8. `Std.Text`
-
-[Read this section in the design](Stdlib-Design#8-stdtext).
-
-### 8.1 `Strings`
-
-[Read this section in the design](Stdlib-Design#81-strings).
-
-### 8.2 `StringBuilder`
-
-[Read this section in the design](Stdlib-Design#82-stringbuilder).
-
-### 8.3 `Scalars`
-
-[Read this section in the design](Stdlib-Design#83-scalars).
-
-### 8.4 `Regex`
-
-[Read this section in the design](Stdlib-Design#84-regex).
-
-## 9. `Std.Collections`
-
-[Read this section in the design](Stdlib-Design#9-stdcollections).
-
-### 9.1 Contracts
-
-[Read this section in the design](Stdlib-Design#91-contracts).
-
-### 9.2 Equality of collections
-
-[Read this section in the design](Stdlib-Design#92-equality-of-collections).
-
-### 9.3 `ArrayList<T>`
-
-[Read this section in the design](Stdlib-Design#93-arraylistt).
-
-### 9.4 `ArrayDeque<T>`
-
-[Read this section in the design](Stdlib-Design#94-arraydequet).
-
-### 9.5 `LinkedList<T>`
-
-[Read this section in the design](Stdlib-Design#95-linkedlistt).
-
-### 9.6 Hash collections
-
-[Read this section in the design](Stdlib-Design#96-hash-collections).
-
-#### Layout comparison
-
-[Read this section in the design](Stdlib-Design#layout-comparison).
-
-#### `HashCore`
-
-[Read this section in the design](Stdlib-Design#hashcore).
-
-#### The collections
-
-[Read this section in the design](Stdlib-Design#the-collections).
-
-### 9.7 `TreeMap<K, V>` and `TreeSet<T>`
-
-[Read this section in the design](Stdlib-Design#97-treemapk-v-and-treesett).
-
-### 9.8 `PriorityQueue<T>`
-
-[Read this section in the design](Stdlib-Design#98-priorityqueuet).
-
-### 9.9 `BitSet` and `OrdinalMap<V>`
-
-[Read this section in the design](Stdlib-Design#99-bitset-and-ordinalmapv).
-
-### 9.10 Interfaces and read-only views
-
-[Read this section in the design](Stdlib-Design#910-interfaces-and-read-only-views).
-
-### 9.11 Sorting and searching
-
-[Read this section in the design](Stdlib-Design#911-sorting-and-searching).
-
-### 9.12 `Sequence<T>`
-
-[Read this section in the design](Stdlib-Design#912-sequencet).
-
-## 10. `Std.Math`
-
-[Read this section in the design](Stdlib-Design#10-stdmath).
-
-### 10.1 `Math`
-
-[Read this section in the design](Stdlib-Design#101-math).
-
-### 10.2 `BigInteger`
-
-[Read this section in the design](Stdlib-Design#102-biginteger).
-
-### 10.3 `BigDecimal`
-
-[Read this section in the design](Stdlib-Design#103-bigdecimal).
-
-## 11. Input and output
-
-[Read this section in the design](Stdlib-Design#11-input-and-output).
-
-### 11.1 `Std.Io`
-
-[Read this section in the design](Stdlib-Design#111-stdio).
-
-### 11.2 `Std.Fs`
-
-[Read this section in the design](Stdlib-Design#112-stdfs).
-
-### 11.3 `Std.Program`
-
-[Read this section in the design](Stdlib-Design#113-stdprogram).
-
-### 11.4 `Std.Net`
-
-[Read this section in the design](Stdlib-Design#114-stdnet).
-
-## 12. Time and randomness
-
-[Read this section in the design](Stdlib-Design#12-time-and-randomness).
-
-### 12.1 `Std.Time`
-
-[Read this section in the design](Stdlib-Design#121-stdtime).
-
-### 12.2 `Std.Random`
-
-[Read this section in the design](Stdlib-Design#122-stdrandom).
-
-## 13. Data formats
-
-[Read this section in the design](Stdlib-Design#13-data-formats).
-
-### 13.1 `Std.Encoding`
-
-[Read this section in the design](Stdlib-Design#131-stdencoding).
-
-### 13.2 `Std.Digest`
-
-[Read this section in the design](Stdlib-Design#132-stddigest).
-
-## 14. Diagnostics
-
-[Read this section in the design](Stdlib-Design#14-diagnostics).
-
-### 14.1 `Std.Log`
-
-[Read this section in the design](Stdlib-Design#141-stdlog).
-
-### 14.2 `Std.Test`
-
-[Read this section in the design](Stdlib-Design#142-stdtest).
-
-## 15. Scope and names
-
-[Read this section in the design](Stdlib-Design#15-scope-and-names).
-
-### 15.1 Deferred and excluded
-
-[Read this section in the design](Stdlib-Design#151-deferred-and-excluded).
-
-### 15.2 Name audit
-
-[Read this section in the design](Stdlib-Design#152-name-audit).
-
-## 16. Roadmap
-
-[Read this section in the design](Stdlib-Design#16-roadmap).
-
-### 16.2 Dependencies by module
-
-[Read this section in the design](Stdlib-Design#162-dependencies-by-module).
-
-## 17. Verification
-
-[Read this section in the design](Stdlib-Design#17-verification).
-
-## 18. Implementation decisions
-
-[Read this section in the design](Stdlib-Design#18-implementation-decisions).
-
-### 18.1 Language and layout
-
-[Read this section in the design](Stdlib-Design#181-language-and-layout).
-
-### 18.2 Program, console, and testing
-
-[Read this section in the design](Stdlib-Design#182-program-console-and-testing).
-
-### 18.3 Numbers and text building
-
-[Read this section in the design](Stdlib-Design#183-numbers-and-text-building).
-
-### 18.4 Text
-
-[Read this section in the design](Stdlib-Design#184-text).
-
-### 18.5 Time, randomness, and logging
-
-[Read this section in the design](Stdlib-Design#185-time-randomness-and-logging).
-
-### 18.6 Host services, files, and networking
-
-[Read this section in the design](Stdlib-Design#186-host-services-files-and-networking).
-
-### 18.7 Encodings and digests
-
-[Read this section in the design](Stdlib-Design#187-encodings-and-digests).
-
-### 18.8 Lists, deques, queues, and sorting
-
-[Read this section in the design](Stdlib-Design#188-lists-deques-queues-and-sorting).
-
-### 18.9 Hash collections, trees, and sequences
-
-[Read this section in the design](Stdlib-Design#189-hash-collections-trees-and-sequences).
-
-### 18.10 Math
-
-[Read this section in the design](Stdlib-Design#1810-math).
-
-### 18.11 Verification as built
-
-[Read this section in the design](Stdlib-Design#1811-verification-as-built).
-
-### 18.12 Concurrency
-
-[Read this section in the design](Stdlib-Design#1812-concurrency).
-
-## 19. `Std.Concurrent`
-
-[Read this section in the design](Stdlib-Design#19-stdconcurrent).
-
-</details>
+## Specification sections
+
+The [complete specification](Stdlib-Design) has these sections.
+
+- [1. How to read this page](Stdlib-Design#1-how-to-read-this-page)
+- [2. Principles](Stdlib-Design#2-principles)
+- [3. Language facilities](Stdlib-Design#3-language-facilities)
+  - [G1. Function types over type parameters](Stdlib-Design#g1-function-types-over-type-parameters)
+  - [G2. Generic enums](Stdlib-Design#g2-generic-enums)
+  - [G3. Universal members](Stdlib-Design#g3-universal-members)
+  - [G4. Interfaces](Stdlib-Design#g4-interfaces)
+  - [G5. For-each over library collections](Stdlib-Design#g5-for-each-over-library-collections)
+  - [T1. Text primitives](Stdlib-Design#t1-text-primitives)
+  - [N1. Float bit access](Stdlib-Design#n1-float-bit-access)
+  - [F1. Trap with a message](Stdlib-Design#f1-trap-with-a-message)
+  - [P1. Library root](Stdlib-Design#p1-library-root)
+  - [P2. Host bindings in source](Stdlib-Design#p2-host-bindings-in-source)
+  - [P3. Entry point from the library](Stdlib-Design#p3-entry-point-from-the-library)
+  - [What the language does not provide](Stdlib-Design#what-the-language-does-not-provide)
+- [4. Architecture](Stdlib-Design#4-architecture)
+  - [4.1 Modules](Stdlib-Design#41-modules)
+  - [4.2 Source layout](Stdlib-Design#42-source-layout)
+  - [4.3 Dependency order](Stdlib-Design#43-dependency-order)
+  - [4.4 Built-in floor](Stdlib-Design#44-built-in-floor)
+  - [4.5 Host services](Stdlib-Design#45-host-services)
+  - [4.6 Retired built-ins](Stdlib-Design#46-retired-built-ins)
+  - [4.7 Versioning](Stdlib-Design#47-versioning)
+- [5. Core contracts](Stdlib-Design#5-core-contracts)
+  - [5.1 Failure model](Stdlib-Design#51-failure-model)
+  - [5.2 Equality, hashing, and text](Stdlib-Design#52-equality-hashing-and-text)
+  - [5.3 Ordering](Stdlib-Design#53-ordering)
+  - [5.4 Iteration](Stdlib-Design#54-iteration)
+  - [5.5 Resources](Stdlib-Design#55-resources)
+  - [5.6 Callbacks](Stdlib-Design#56-callbacks)
+  - [5.7 Conformance summary](Stdlib-Design#57-conformance-summary)
+  - [5.8 Task safety](Stdlib-Design#58-task-safety)
+- [6. `Std.Core` types](Stdlib-Design#6-stdcore-types)
+  - [6.1 `Optional<T>`](Stdlib-Design#61-optionalt)
+  - [6.2 `Result<T>`](Stdlib-Design#62-resultt)
+  - [6.3 `Error`](Stdlib-Design#63-error)
+  - [6.4 Concrete aliases and absence](Stdlib-Design#64-concrete-aliases-and-absence)
+  - [6.5 Small types](Stdlib-Design#65-small-types)
+- [7. Primitive companion modules](Stdlib-Design#7-primitive-companion-modules)
+  - [7.1 Integer modules](Stdlib-Design#71-integer-modules)
+  - [7.2 Arithmetic without wrapping intrinsics](Stdlib-Design#72-arithmetic-without-wrapping-intrinsics)
+  - [7.3 Float modules](Stdlib-Design#73-float-modules)
+  - [7.4 `Bool`](Stdlib-Design#74-bool)
+  - [7.5 Float text conversion](Stdlib-Design#75-float-text-conversion)
+- [8. `Std.Text`](Stdlib-Design#8-stdtext)
+  - [8.1 `Strings`](Stdlib-Design#81-strings)
+  - [8.2 `StringBuilder`](Stdlib-Design#82-stringbuilder)
+  - [8.3 `Scalars`](Stdlib-Design#83-scalars)
+  - [8.4 `Regex`](Stdlib-Design#84-regex)
+- [9. `Std.Collections`](Stdlib-Design#9-stdcollections)
+  - [9.1 Contracts](Stdlib-Design#91-contracts)
+  - [9.2 Equality of collections](Stdlib-Design#92-equality-of-collections)
+  - [9.3 `ArrayList<T>`](Stdlib-Design#93-arraylistt)
+  - [9.4 `ArrayDeque<T>`](Stdlib-Design#94-arraydequet)
+  - [9.5 `LinkedList<T>`](Stdlib-Design#95-linkedlistt)
+  - [9.6 Hash collections](Stdlib-Design#96-hash-collections)
+  - [9.7 `TreeMap<K, V>` and `TreeSet<T>`](Stdlib-Design#97-treemapk-v-and-treesett)
+  - [9.8 `PriorityQueue<T>`](Stdlib-Design#98-priorityqueuet)
+  - [9.9 `BitSet` and `OrdinalMap<V>`](Stdlib-Design#99-bitset-and-ordinalmapv)
+  - [9.10 Interfaces and read-only views](Stdlib-Design#910-interfaces-and-read-only-views)
+  - [9.11 Sorting and searching](Stdlib-Design#911-sorting-and-searching)
+  - [9.12 `Sequence<T>`](Stdlib-Design#912-sequencet)
+- [10. `Std.Math`](Stdlib-Design#10-stdmath)
+  - [10.1 `Math`](Stdlib-Design#101-math)
+  - [10.2 `BigInteger`](Stdlib-Design#102-biginteger)
+  - [10.3 `BigDecimal`](Stdlib-Design#103-bigdecimal)
+- [11. Input and output](Stdlib-Design#11-input-and-output)
+  - [11.1 `Std.Io`](Stdlib-Design#111-stdio)
+  - [11.2 `Std.Fs`](Stdlib-Design#112-stdfs)
+  - [11.3 `Std.Program`](Stdlib-Design#113-stdprogram)
+  - [11.4 `Std.Net`](Stdlib-Design#114-stdnet)
+- [12. Time and randomness](Stdlib-Design#12-time-and-randomness)
+  - [12.1 `Std.Time`](Stdlib-Design#121-stdtime)
+  - [12.2 `Std.Random`](Stdlib-Design#122-stdrandom)
+- [13. Data formats](Stdlib-Design#13-data-formats)
+  - [13.1 `Std.Encoding`](Stdlib-Design#131-stdencoding)
+  - [13.2 `Std.Digest`](Stdlib-Design#132-stddigest)
+- [14. Diagnostics](Stdlib-Design#14-diagnostics)
+  - [14.1 `Std.Log`](Stdlib-Design#141-stdlog)
+  - [14.2 `Std.Test`](Stdlib-Design#142-stdtest)
+- [15. Names](Stdlib-Design#15-names)
+- [16. Not provided](Stdlib-Design#16-not-provided)
+- [17. Verification](Stdlib-Design#17-verification)
+- [18. Behavior details](Stdlib-Design#18-behavior-details)
+  - [18.1 Language and layout](Stdlib-Design#181-language-and-layout)
+  - [18.2 Program, console, and testing](Stdlib-Design#182-program-console-and-testing)
+  - [18.3 Numbers and text building](Stdlib-Design#183-numbers-and-text-building)
+  - [18.4 Text](Stdlib-Design#184-text)
+  - [18.5 Time, randomness, and logging](Stdlib-Design#185-time-randomness-and-logging)
+  - [18.6 Host services, files, and networking](Stdlib-Design#186-host-services-files-and-networking)
+  - [18.7 Encodings and digests](Stdlib-Design#187-encodings-and-digests)
+  - [18.8 Lists, deques, queues, and sorting](Stdlib-Design#188-lists-deques-queues-and-sorting)
+  - [18.9 Hash collections, trees, and sequences](Stdlib-Design#189-hash-collections-trees-and-sequences)
+  - [18.10 Math](Stdlib-Design#1810-math)
+  - [18.11 Test layout](Stdlib-Design#1811-test-layout)
+  - [18.12 Concurrency](Stdlib-Design#1812-concurrency)
+- [19. `Std.Concurrent`](Stdlib-Design#19-stdconcurrent)

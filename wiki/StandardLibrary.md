@@ -3,7 +3,7 @@
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-The standard library is Neura source installed with the tool below `share/neura/stdlib` and resolved for every `Std.*` import without an `-I` option ([Modules](Modules#standard-library-imports)). It is compiled together with each program, and an image contains only the library code the program reaches. The [library reference](Stdlib) links to individual modules; the [implementation plan](Stdlib-Design) specifies their design and algorithms, and [section 18](Stdlib-Design#18-implementation-decisions) records decisions made where the plan was open.
+The standard library is Neura source installed with the tool below `share/neura/stdlib` and resolved for every `Std.*` import without an `-I` option ([Modules](Modules#standard-library-imports)). It is compiled together with each program, and an image contains only the library code the program reaches. The [library reference](Stdlib) links to individual modules; the [specification](Stdlib-Design) gives their contracts and algorithms, and [section 18](Stdlib-Design#18-behavior-details) states the rules that complete them.
 
 Each type has its own module, named after it: `Std.Collections.ArrayList` is `stdlib/std/collections/array-list.nra` and exports the class `ArrayList` and its module functions. Import each module you use; there is no prelude.
 
@@ -173,7 +173,7 @@ let [jobs, next_job, jobs_closer] = channels.open<int>(64);
 - **Outcomes, not errors.** Closure and cancellation are expected events, so the operations above report them as enum values and return no `Error`.
 - **Cancellation is cooperative.** It wakes a parked channel operation, timer wait, or cancellable host request with `Cancelled`. A task that is computing asks `Cancellation.requested()`.
 - **The clock.** `cancel_after`, `cancel_at`, `Timer.after`, `Timer.at`, and `Cancellation.remaining` read the monotonic clock, which is granted by default and denied by `--deny-clock`. Under `--virtual-time` they read the virtual clock ([Testing](Testing#tests-of-concurrent-code)).
-- **Native code.** A program that uses any scheduler operation cannot use `Std.DynamicForeign` or a C import ([decision C15](Concurrency#3-decisions)).
+- **Native code.** A program that uses any scheduler operation cannot use `Std.DynamicForeign` or a C import (the compiler rejects the combination; [Concurrency, section 16](Concurrency#16-limits)).
 
 ## Task safety
 

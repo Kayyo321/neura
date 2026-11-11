@@ -1,6 +1,6 @@
 # `Std.Collections.TreeSet`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Collections.TreeSet`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Collections.TreeSet`. Its [source](https://github.com
 
 - [Exported declarations for `Std.Collections.TreeSet`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -89,7 +89,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.7 Conformance summary
 
@@ -113,7 +113,7 @@ These are the intended source-module contracts. Compiler support for the operati
 
 This section fixes the member sets that the concrete classes and the interfaces in [section 9.10](Stdlib-Design#910-interfaces-and-read-only-views) share.
 
-The **Needs** column names the compiler facilities an implementation relies on.
+The **Needs** column names the compiler facilities of [section 3](Stdlib-Design#3-language-facilities) that a member uses.
 
 **List contract** (`ArrayList`, `LinkedList`)
 
@@ -174,9 +174,9 @@ The **Needs** column names the compiler facilities an implementation relies on.
 
 ### 9.7 `TreeMap<K, V>` and `TreeSet<T>`
 
-Sorted collections ordered by a comparator given at construction. They need G1, because the comparator's type mentions `K`. **Decision:** a comparator is always required; for a built-in type pass its `compare` function. Two keys are the same key when the comparator returns `Equal`; `equals` is not consulted.
+Sorted collections ordered by a comparator given at construction. They need G1, because the comparator's type mentions `K`. A comparator is always required; for a built-in type pass its `compare` function. Two keys are the same key when the comparator returns `Equal`; `equals` is not consulted.
 
-**Decision kept:** the balanced tree is an **AVL tree**. Lookups dominate, each comparison is a call through a function value, and an AVL tree is at most about 1.44 log2 of the size tall against about 2 log2 for a red-black tree.
+The balanced tree is an **AVL tree**. Lookups dominate, each comparison is a call through a function value, and an AVL tree is at most about 1.44 log2 of the size tall against about 2 log2 for a red-black tree.
 
 Nodes are separately allocated. Missing child and parent links use `nil`.
 
