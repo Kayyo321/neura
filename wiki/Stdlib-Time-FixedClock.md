@@ -82,4 +82,4 @@ The value types are immutable classes with `compare_to`, `equals`, `hash_code`, 
 
 ### Task safety
 
-A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). `of` is not: creating a `FixedClock` reads the constant object `Duration.Zero`, and a constant that is an object is module state a spawned task may not read. A `FixedClock` is not transferable either, so a spawned task can neither create one nor be given one. Its members are task-safe. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.
+A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). `of` and every member are task-safe. A `FixedClock` is an object and not transferable, so a task creates its own and cannot be given one. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.

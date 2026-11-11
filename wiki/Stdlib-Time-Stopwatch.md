@@ -82,4 +82,4 @@ The value types are immutable classes with `compare_to`, `equals`, `hash_code`, 
 
 ### Task safety
 
-A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). `create` and `reset` are not: they read the constant object `Duration.Zero`, and a constant that is an object is module state a spawned task may not read. The other members are task-safe. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.
+A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). Every member is task-safe. A `Stopwatch` is an object, so a task creates its own. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.

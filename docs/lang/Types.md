@@ -411,7 +411,7 @@ A value check is not enough: a function can reach shared mutable state without b
 - make an active use that could run a [static initializer](#static-initialization);
 - issue a request to a native library.
 
-For a virtual call or a call through a function value, the compiler takes the union over every override or function value of that type that the program can create, so it can reject a call because of an implementation that never runs. Narrow the type, or pass the needed value as an argument. The diagnostic lists the chain of calls from the `spawn` to the offending operation. `neura check --task-safety` prints the verdict for every function of the program. The task that runs `main` is not restricted.
+For a virtual call or a call through a function value, the compiler takes the union over every override and over every function value of that type that code which can run creates (the program's own functions, initializers, and what they reach), so it can reject a call because of an implementation that never runs. Narrow the type, or pass the needed value as an argument. The diagnostic lists the chain of calls from the `spawn` to the offending operation. `neura check --task-safety` prints the verdict for every function of the program. The task that runs `main` is not restricted.
 
 Under the last rule a program cannot both use tasks and use `Std.DynamicForeign` or `import:c(...)`. The compiler rejects the combination for any scheduler operation, not only a `spawn`: a scope, a channel, a timer, a guard, a select, or a parallel map. A parallel map's worker must also issue no host request, use no scheduler operation, and not use an object's identity; [Concurrency](Concurrency.md#12-multicore-parallelmap) gives the rule.
 

@@ -14,9 +14,9 @@ export let Stopwatch = module (
         /// @brief Whether the stopwatch is currently measuring an interval.
         let running: bool = false;
         /// @brief The monotonic reading at the start of the current interval.
-        let started_at: Duration = Zero;
+        let started_at: Duration = of_nanos(0);
         /// @brief The total duration of intervals that have ended.
-        let accumulated: Duration = Zero;
+        let accumulated: Duration = of_nanos(0);
 
         /// @brief Creates a stopped stopwatch using the supplied clock.
         export let init = func(time_source: Clock) {
@@ -65,7 +65,7 @@ export let Stopwatch = module (
         /// @brief Stops and clears the measured time.
         export let reset = func {
             running = false;
-            accumulated = Zero;
+            accumulated = of_nanos(0);
         };
 
         /// @brief The time measured so far, including the current run. A stopped stopwatch does not read the
