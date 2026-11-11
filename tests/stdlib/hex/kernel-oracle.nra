@@ -1,0 +1,70 @@
+let error = import:Std.Core.Error;
+let hexes = import:Std.Encoding.Hex;
+let random = import:Std.Random.Random;
+let reference = import:ReferenceHex;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). Std.Encoding.Hex
+// runs the neura.encoding.hex_encode and hex_decode kernels; ReferenceHex
+// (support/) is the Neura implementation they replaced, unchanged. The
+// encoders must give the same text, and the decoders the same bytes or the
+// same error at the same offset, for a fixed edge corpus and for seeded
+// random bytes and texts.
+let HexKernelOracle = module (
+    let show = func(value: result.Result<uint8[list]>) -> string => match (value) {
+        result.Result.Ok(bytes) => "Ok(" + bytes.to_string() + ")",
+        result.Result.Err(failure) => "Err(" + error.message(failure) + ")",
+    };
+
+    let agree_decode = func(text: string) {
+        test.assert_equal_string(show(reference.decode(text)), show(hexes.decode(text)));
+    };
+
+    let agree = func(bytes: uint8[list]) {
+        let text = hexes.encode(bytes);
+        test.assert_equal_string(reference.encode(bytes), text);
+        agree_decode(text);
+        agree_decode(strings.to_ascii_upper(text));
+    };
+
+    // Every byte value, the empty list, and malformed texts: every byte as a
+    // digit in the high and low position, and odd lengths.
+    export let test_edge_corpus = func {
+        agree([]);
+        let all: uint8[list] = [];
+        for (let b = 0; b < 256; b++) {
+            agree([b as uint8]);
+            all.append(b as uint8);
+        }
+        agree(all);
+        for (let b = 1; b < 128; b++) {
+            let digit = strings.from_scalars([b as uint32]);
+            agree_decode(digit);
+            agree_decode(digit + "0");
+            agree_decode("0" + digit);
+            agree_decode("00" + digit);
+            agree_decode("0" + digit + "0");
+        }
+        for (let text in ["é", "0é", "éé", "abc", "ABC", "aBcD", "0g", "g0", "000", "00000"]) {
+            agree_decode(text);
+        }
+    };
+
+    // Seeded random bytes, and random texts over the digits and a few others.
+    export let test_seeded_random = func {
+        let source = random.seeded(20261111);
+        let digits = "0123456789abcdefABCDEFgG x";
+        for (let round = 0; round < 100; round++) {
+            agree(source.fill_bytes(source.next_int_below(40)));
+            let text = "";
+            let length = source.next_int_below(12);
+            for (let i = 0; i < length; i++) {
+                let at = source.next_int_below(digits.byte_length);
+                text = text + strings.slice(digits, at, at + 1);
+            }
+            agree_decode(text);
+        }
+    };
+);

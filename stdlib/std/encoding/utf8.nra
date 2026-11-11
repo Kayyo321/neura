@@ -1,3 +1,4 @@
+let kernels = import:Std.Internal.Kernels.Encoding;
 let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 
@@ -21,57 +22,7 @@ export let Utf8 = module (
     /// @brief -1 when the bytes are valid UTF-8; otherwise the offset of the first byte that cannot begin or
     /// continue a valid sequence's prefix, which is the length of the longest valid prefix.
     ///
-    /// Valid input costs one string.from_utf8 call; invalid input is rescanned here.
-    export let validate = func(bytes: uint8[list]) -> int {
-        let [valid, _] = string.from_utf8(bytes);
-        if (valid) {
-            return -1;
-        }
-        let count = bytes.length;
-        let i = 0;
-        while (i < count) {
-            let lead = bytes[i];
-            if (lead < 128) {
-                i++;
-                continue;
-            }
-            // The sequence length and the range of the second byte.
-            let size = 0;
-            let low: uint8 = 128;
-            let high: uint8 = 191;
-            if (lead >= 194 && lead <= 223) {
-                size = 2;
-            } else if (lead >= 224 && lead <= 239) {
-                size = 3;
-                if (lead == 224) {
-                    low = 160;
-                } else if (lead == 237) {
-                    high = 159;
-                }
-            } else if (lead >= 240 && lead <= 244) {
-                size = 4;
-                if (lead == 240) {
-                    low = 144;
-                } else if (lead == 244) {
-                    high = 143;
-                }
-            } else {
-                return i;
-            }
-            if (i + size > count) {
-                return i;
-            }
-            let second = bytes[i + 1];
-            if (second < low || second > high) {
-                return i;
-            }
-            for (let k = 2; k < size; k++) {
-                if ((bytes[i + k] & 192) != 128) {
-                    return i;
-                }
-            }
-            i += size;
-        }
-        return -1;
-    };
+    /// The neura.encoding.utf8_validate kernel scans the bytes (docs/runtime/Kernels.md); the Neura code it
+    /// replaced is the oracle of tests/stdlib/utf8/kernel-oracle.nra.
+    export let validate = func(bytes: uint8[list]) -> int => kernels.utf8_validate(bytes) as int;
 );

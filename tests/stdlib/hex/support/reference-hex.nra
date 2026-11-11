@@ -1,0 +1,83 @@
+// The Neura implementation of Std.Encoding.Hex before it became a kernel binding, kept
+// unchanged (but for the module's name) as the oracle of kernel-oracle.nra. It lives with the tests,
+// not in the standard library: only library source may import an Internal module, and code
+// here never reaches a user's image.
+
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief Base 16 (Stdlib.md section 13.1). The encoder writes lowercase digits; the decoder accepts either
+/// case.
+/// @see [Std.Encoding.Hex](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Hex)
+export let ReferenceHex = module (
+    /// @brief The value of each byte as a hex digit, or 255. Built by the first decode that needs it.
+    let digit_values: uint8[list] = [];
+
+    /// @brief Returns the hexadecimal lookup table, creating it on first use.
+    let ready_values = func -> uint8[list] {
+        if (digit_values.length == 0) {
+            let values: uint8[list] = [];
+            for (let b = 0; b < 256; b++) {
+                values.append(255);
+            }
+            for (let v: uint8 = 0; v < 10; v++) {
+                values[(48 + v) as int] = v;
+            }
+            for (let v: uint8 = 10; v < 16; v++) {
+                values[(55 + v) as int] = v;
+                values[(87 + v) as int] = v;
+            }
+            digit_values = values;
+        }
+        return digit_values;
+    };
+
+    /// @brief Two lowercase hex digits per byte, most significant first.
+    export let encode = func(bytes: uint8[list]) -> string {
+        let digits: uint8[list] = [];
+        for (let b in bytes) {
+            // 0 through 9 become 48 through 57 and 10 through 15 become 97
+            // through 102: (n + 6) >> 4 is 1 exactly when n is at least 10.
+            let high = b >> 4;
+            let low = b & 15;
+            digits.append(high + 48 + ((high + 6) >> 4) * 39);
+            digits.append(low + 48 + ((low + 6) >> 4) * 39);
+        }
+        let [_, text] = string.from_utf8(digits);
+        return text;
+    };
+
+    /// @brief The bytes the digits encode.
+    ///
+    /// A byte that is not a hex digit fails with an Encoding error at its offset ("invalid hex digit"); an odd
+    /// number of digits fails at the text's length ("odd number of hex digits").
+    export let decode = func(text: string) -> Result<uint8[list]> {
+        let values = ready_values();
+        let count = text.byte_length;
+        let bytes: uint8[list] = [];
+        let i = 0;
+        while (i + 1 < count) {
+            let high = values[text.byte_at(i) as int];
+            let low = values[text.byte_at(i + 1) as int];
+            if ((high | low) > 15) {
+                if (high > 15) {
+                    return failure(i, "invalid hex digit");
+                }
+                return failure(i + 1, "invalid hex digit");
+            }
+            bytes.append((high << 4) | low);
+            i += 2;
+        }
+        if (i < count) {
+            if (values[text.byte_at(i) as int] > 15) {
+                return failure(i, "invalid hex digit");
+            }
+            return failure(count, "odd number of hex digits");
+        }
+        return Result<uint8[list]>.Ok(bytes);
+    };
+
+    /// @brief Creates an Encoding error with its input byte offset.
+    let failure = func(offset: int, message: string) -> Result<uint8[list]> =>
+        Result<uint8[list]>.Err(Error.Encoding { offset: offset, message: message });
+);
