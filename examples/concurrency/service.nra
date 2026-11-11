@@ -18,7 +18,7 @@ let Request = enum (
 // State owned by one task needs no synchronization: no other task can
 // reach `prices`. The request channel's capacity bounds the backlog.
 let price_owner = func(requests: channels.Receiver<Request>) {
-    let prices = maps.create<string, int>();
+    last prices = maps.create<string, int>();
     do {
         match (requests.receive()) {
             channels.Received.Value(request) => {
@@ -39,7 +39,7 @@ let price_owner = func(requests: channels.Receiver<Request>) {
 };
 
 let price_of = func(requests: channels.Sender<Request>, item: string) -> int {
-    let [reply, answer, closer] = channels.open<int>(1);
+    const [reply, answer, closer] = channels.open<int>(1);
     requests.send(Request.Get { item: item, reply: reply });
     return match (answer.receive()) {
         channels.Received.Value(price) => price,
@@ -64,17 +64,17 @@ let search = func(name: string, steps: int, found: channels.Sender<string>) -> i
 // Asks three backends and keeps the first answer. The scope cancels the
 // others and still waits for them, so nothing they hold outlives the call.
 let first_answer = func -> string {
-    let [found, winner, closer] = channels.open<string>(3);
+    const [found, winner, closer] = channels.open<string>(3);
     scope (group) {
-        let fast = spawn search("fast", 200, found);
-        let slow = spawn search("slow", 200000, found);
-        let slower = spawn search("slower", 400000, found);
-        let name = match (winner.receive()) {
+        last fast = spawn search("fast", 200, found);
+        last slow = spawn search("slow", 200000, found);
+        last slower = spawn search("slower", 400000, found);
+        last name = match (winner.receive()) {
             channels.Received.Value(text) => text,
             _ => "nobody",
         };
         group.cancel();
-        let wasted = slow.join() + slower.join();
+        last wasted = slow.join() + slower.join();
         return name + " answered; the others stopped early: " + (wasted < 600000).to_string();
     }
 };
@@ -90,17 +90,17 @@ let count_visit = func(visits: guards.Guarded<maps.HashMap<string, int>>, page: 
     }
 };
 
-export let Main = module : program.Entry (
+export let Main = module:program.Entry (
     export let.override main = func(arguments: string[]) -> program.ExitCode {
         // State owned by a task.
-        let [requests, incoming, requests_closer] = channels.open<Request>(8);
+        const [requests, incoming, requests_closer] = channels.open<Request>(8);
         scope {
             spawn price_owner(incoming);
             requests.send(Request.Put { item: "tea", price: 3 });
             requests.send(Request.Put { item: "cake", price: 5 });
-            let tea = spawn price_of(requests, "tea");
-            let cake = spawn price_of(requests, "cake");
-            let unknown = spawn price_of(requests, "soup");
+            last tea = spawn price_of(requests, "tea");
+            last cake = spawn price_of(requests, "cake");
+            last unknown = spawn price_of(requests, "soup");
             console.print_line("tea " + tea.join().to_string() + ", cake " + cake.join().to_string() +
                                ", soup " + unknown.join().to_string());
             requests_closer.close();
@@ -110,15 +110,15 @@ export let Main = module : program.Entry (
         console.print_line(first_answer());
 
         // State behind a guard.
-        let visits = guards.create<maps.HashMap<string, int>>(
+        last visits = guards.create<maps.HashMap<string, int>>(
             func -> maps.HashMap<string, int> => maps.create<string, int>());
         scope {
             spawn count_visit(visits, "home", 300);
             spawn count_visit(visits, "about", 200);
             spawn count_visit(visits, "home", 100);
         }
-        let home = visits.with<int>(func(table: maps.HashMap<string, int>) -> int => table.get_or("home", 0));
-        let about = visits.with<int>(func(table: maps.HashMap<string, int>) -> int => table.get_or("about", 0));
+        last home = visits.with<int>(func(table: maps.HashMap<string, int>) -> int => table.get_or("home", 0));
+        last about = visits.with<int>(func(table: maps.HashMap<string, int>) -> int => table.get_or("about", 0));
         console.print_line("home " + home.to_string() + ", about " + about.to_string());
         return program.ExitCode.Ok;
     };

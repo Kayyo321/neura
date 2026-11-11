@@ -51,7 +51,7 @@ let Polymorphism = module (
 
     // Construction initializes base state before derived state.
     export let NamedText = class:Text (
-        export let label: string;
+        export last label: string;
 
         export let init = func(name: string, content: string) -> void {
             super.init();
@@ -70,24 +70,24 @@ let Polymorphism = module (
     );
 
     export let example = func() -> void {
-        let text = new Text();
+        last text: Text = new;
         text.value = "Hello";
-        let alert = new Alert();
+        last alert: Alert = new;
         alert.value = "Attention";
 
-        let first: string = display(text);       // "[Hello]"
-        let second: string = display(alert);     // "[Alert: Attention]"
-        let same: Alert = identity<Alert>(alert);
-        let repeated: string = render_twice<Alert>(same);
+        last first: string = display(text);       // "[Hello]"
+        last second: string = display(alert);     // "[Alert: Attention]"
+        last same: Alert = identity<Alert>(alert);
+        last repeated: string = render_twice<Alert>(same);
         // repeated is "Alert: Attention / Alert: Attention"
 
-        let box = new Box<Text>();
+        last box: Box<Text> = new;                // target-typed new: Box<Text>
         box.value = text;
-        let unboxed: Text = box.get();
-        let third: string = display(unboxed);     // "[Hello]"
+        last unboxed: Text = box.get();
+        last third: string = display(unboxed);     // "[Hello]"
 
-        let named = new NamedText("Note", "Saved");
-        let fourth: string = display(named);      // "[Note: Saved]"
+        last named: NamedText = new("Note", "Saved");
+        last fourth: string = display(named);      // "[Note: Saved]"
         destroy named; // Runs NamedText cleanup, then base cleanup.
     };
 );

@@ -9,31 +9,31 @@ let clib = import:c("stdlib.h");
 
 // Native code from Neura (docs/lang/ForeignInterop.md). Build and run with:
 //   neura build examples/foreign/native.nra -o native.nvr
-//   neura run --allow-native native.nvr
+//   neura run native.nvr        (native code is granted by default; --deny-native refuses it)
 export let Native = module:program.Entry (
     // Orders two C ints for qsort.
     let compare = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
-        let left = values.as_segment(arguments[0]).reinterpret(4).get_int32(0);
-        let right = values.as_segment(arguments[1]).reinterpret(4).get_int32(0);
+        last left = values.as_segment(arguments[0]).reinterpret(4).get_int32(0);
+        last right = values.as_segment(arguments[1]).reinterpret(4).get_int32(0);
         return values.ForeignValue.Int32((left < right) ? -1 : (left > right) ? 1 : 0);
     };
 
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let linker = linkers.native_linker();
+        last linker = linkers.native_linker();
 
         // Std.DynamicForeign: look up strlen at run time and describe it.
-        let strlen = linker.downcall_handle(linker.default_lookup().find_or_trap("strlen"),
+        last strlen = linker.downcall_handle(linker.default_lookup().find_or_trap("strlen"),
             descriptors.of(layouts.UInt64, layouts.Address));
         console.print_line("strlen: " + values.describe(strlen.invoke("neurons")));
 
         // A C import: stdlib.h's declarations as a module, with a Neura
         // comparator passed to qsort as an upcall stub.
-        let arena = arenas.of_confined();
-        let numbers = arena.allocate_array(layouts.Int32, 3);
+        last arena = arenas.of_confined();
+        last numbers = arena.allocate_array(layouts.Int32, 3);
         numbers.set_int32(0, 30);
         numbers.set_int32(4, -5);
         numbers.set_int32(8, 12);
-        let stub = linker.upcall_stub(compare, descriptors.of(layouts.Int32, layouts.Address, layouts.Address), arena);
+        last stub = linker.upcall_stub(compare, descriptors.of(layouts.Int32, layouts.Address, layouts.Address), arena);
         clib.qsort(numbers, 3, 4, stub);
         console.print_line("sorted: " + numbers.get_int32(0).to_string() + " " + numbers.get_int32(4).to_string() +
                            " " + numbers.get_int32(8).to_string());

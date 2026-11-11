@@ -1,29 +1,30 @@
 // Collection syntax and behavior. tests/backend/examples/collections-driver.nra runs it.
 let Collections = module (
     export let example = func {
-        let names: string[] = ["Ada", "Lin"];
+        last names: string[] = ["Ada", "Lin"];
         names[0] = "Grace"; // Replacing an element does not change the length.
-        let count: int = names.length; // 2
+        last count: int = names.length; // 2
 
-        let queue: string[list] = ["first"];
+        last queue: string[list] = ["first"];
         queue.append("second");
         queue.remove_at(0); // queue now contains "second".
 
         // Each row is a separate array and can have a different length.
-        let grid: string[][] = [["a", "b"], ["c"]];
-        let cell: string = grid[0][1]; // "b"
+        last grid: string[][] = [["a", "b"], ["c"]];
+        last cell: string = grid[0][1]; // "b"
 
-        let lists: string[list][list] = [["a"], ["b", "c"]];
+        last lists: string[list][list] = [["a"], ["b", "c"]];
         lists[0].append("d");
-        let list_of_arrays: string[][list] = [["a"], ["b", "c"]];
+        last list_of_arrays: string[][list] = [["a"], ["b", "c"]];
         list_of_arrays.append(["d"]);
-        let array_of_lists: string[list][] = [["a"], []];
+        last array_of_lists: string[list][] = [["a"], []];
         array_of_lists[1].append("b");
 
-        let indices = {0 .. names.length};
-        let even_indices: int[list] = 0 .. names.length : 2;
+        last indices = {0 .. names.length};
+        last even_indices: int[list] = 0 .. names.length : 2;
 
         // names[2] and names[-1] raise a bounds error; neither accesses memory.
         // names.append("new"); is invalid: arrays cannot change length.
+        // `last` fixes each binding, not the collection it holds, so elements still change.
     };
 );

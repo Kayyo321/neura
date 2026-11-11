@@ -6,6 +6,6 @@ let Counter = class (
         // Release resources owned by this object here.
     };
 );
-let counter = new Counter();
+let counter: Counter = new;
 counter.value = counter.value + 1;
 destroy counter; // No use of counter or its aliases after this point.

@@ -32,13 +32,13 @@ let Classes = module (
     };
 
     export let example = func() -> void {
-        let default_name = Animal.DefaultName; // A constant read leaves Animal's statics dormant.
-        let dog = new Dog(); // Animal's static initializer runs before Dog's instance is created.
+        last default_name = Animal.DefaultName; // A constant read leaves Animal's statics dormant.
+        last dog: Dog = new; // Animal's static initializer runs before Dog's instance is created.
         dog.name = "Rover";
-        let cat = new Cat();
+        last cat: Cat = new;
         cat.name = "Mittens";
 
-        let dog_description: string = describe(dog); // "Rover barks"
-        let cat_description: string = describe(cat); // "Mittens meows"
+        last dog_description: string = describe(dog); // "Rover barks"
+        last cat_description: string = describe(cat); // "Mittens meows"
     };
 );
