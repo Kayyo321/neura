@@ -615,7 +615,7 @@ let Config = class (
     export const name = "default";
         | set: name = value;
 );
-]=] "4:11" "E0521.*a constant field cannot have a setter")
+]=] "4:11" "E0521.*a .const. field cannot have a setter")
 check_rejection(accessor-value-field [=[
 let Cell = class (
     export let value = 0;

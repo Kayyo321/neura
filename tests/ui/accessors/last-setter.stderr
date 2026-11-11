@@ -1,0 +1,12 @@
+error[E0521]: a 'last' field cannot have a setter
+ --> $DIR/last-setter.nra:5:11
+  |
+3 |     export last owner: string;
+  |                 ----- 'owner' is declared with 'last'
+4 |         | get: owner;
+5 |         | set: owner = value;
+  |           ^^^ setter of a field that cannot be reassigned
+  |
+  = help: declare the field with 'let', or remove the setter
+
+For more information about this error, try `neura explain E0521`.

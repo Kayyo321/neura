@@ -87,11 +87,14 @@ void Lowering::check_accessor_member(const Declaration& decl, SymbolId owner) co
                 .label(earlier->keyword, "the first '" + word + "' accessor is here")
                 .help("remove one of them; a field has at most one 'get' and one 'set' accessor");
         seen[clause.setter ? 1 : 0] = &clause;
-        if (clause.setter && decl.constant)
-            throw Diagnostic(clause.keyword, "a constant field cannot have a setter").with_code("E0521")
-                .label("setter of a constant field")
-                .label(name, "'" + decl.name + "' is declared with 'const'")
+        if (clause.setter && decl.constant) {
+            // A `last` field is constant too: it is assigned once.
+            const std::string keyword = decl.last ? "last" : "const";
+            throw Diagnostic(clause.keyword, "a '" + keyword + "' field cannot have a setter").with_code("E0521")
+                .label("setter of a field that cannot be reassigned")
+                .label(name, "'" + decl.name + "' is declared with '" + keyword + "'")
                 .help("declare the field with 'let', or remove the setter");
+        }
         if (clause.setter && decl.name == "value")
             throw Diagnostic(clause.keyword, "a field named 'value' cannot have a setter").with_code("E0522")
                 .label("setter of the field 'value'")

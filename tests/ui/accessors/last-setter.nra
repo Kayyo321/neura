@@ -1,0 +1,10 @@
+// A setter on a 'last' field, which is assigned once (E0521).
+let Account = class (
+    export last owner: string;
+        | get: owner;
+        | set: owner = value;
+
+    export let init = func(name: string) {
+        owner = name;
+    };
+);
