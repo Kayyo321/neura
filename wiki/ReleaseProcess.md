@@ -35,9 +35,9 @@ The qualification script runs ten checks and prints `PASS`, `FAIL`, or `NOT RUN`
 4. `neura doctor` reports no failure.
 5. Hello World builds and runs.
 6. `neura test` passes the example test module.
-7. `neura build --native` produces an executable that runs with an empty environment.
+7. On Linux, `neura build --native` produces an executable that runs with an empty environment. On macOS, which has no native launcher, the command is refused.
 8. `neura update --check` finds the release up to date.
-9. An installation of the previous published release updates to this one with `neura update`, and then builds and runs Hello World. The first release has no previous release, and the check is reported as not run.
+9. An installation of the previous published release updates to this one with `neura update`, and then builds and runs Hello World. The check is reported as not run when the previous release has no archive for the target, as for the first release, and in a trial started by hand, whose `-dev` version sorts before every published candidate.
 10. `neura uninstall --yes` leaves nothing behind, and installing again works.
 
 One test is left out on arm64: `neura-libclang-load`, which belongs to the `neura-libclang` submodule and expects `char` to be signed.
@@ -64,7 +64,7 @@ Approve the **Publish** job when the build and qualification jobs have passed. T
 
 The workflow covers what a hosted Linux runner can show. A maintainer checks the rest on real machines before the final release and records the result in the release's pull request or issue.
 
-On Windows with WSL 2 (Ubuntu 24.04), and on any Linux machine that is not a GitHub runner:
+On Windows with WSL 2 (Ubuntu 24.04), on a Mac, and on any Linux machine that is not a GitHub runner, install the candidate with the one-line command from its release notes, or by hand (on a Mac, use the `apple-darwin` archive for its processor and `shasum -a 256 --check` in place of `sha256sum`):
 
 ```sh
 curl -LO https://github.com/Kayyo321/neura/releases/download/v0.1.0-rc.2/neura-0.1.0-rc.2-x86_64-linux-gnu.tar.gz
@@ -82,7 +82,7 @@ Then, with the repository's `examples` directory at hand:
 | Step | Expected |
 | --- | --- |
 | `neura build examples/hello-world/hello-world.nra -o hello.nvr && neura run hello.nvr` | `Hello, World!` |
-| `neura build --native examples/hello-world/hello-world.nra -o hello && ./hello` | `Hello, World!` |
+| `neura build --native examples/hello-world/hello-world.nra -o hello && ./hello` | `Hello, World!` on Linux and WSL 2. On a Mac, an error that says macOS has no native launcher. |
 | `neura update --check` | Exit status 0 and "is up to date": the default source lists final releases only. |
 | Run `neura check examples/hello-world/hello-world.nra` twice in a terminal | No update notice for a candidate; no delay of more than two seconds. |
 | `neura uninstall`, answer `y` | The prompt names the version and the directory; afterwards `~/.local/share/neura` and `~/.local/bin/neura` are gone. |

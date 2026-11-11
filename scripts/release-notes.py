@@ -67,7 +67,7 @@ Supported platforms, system requirements, and every step are in [Install and upd
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/{REPOSITORY}/releases/download/{tag}/install.sh | sh -s -- --version {full}
 ```
 
-That command works on Linux and inside WSL 2. To install by hand instead:
+That command works on Linux, on macOS, and inside WSL 2. To install by hand instead:
 
 ```sh
 # Download the archive for your platform and SHA256SUMS from this page, then:
@@ -82,6 +82,8 @@ sh install.sh
 | --- | --- |
 | `neura-{full}-x86_64-linux-gnu.tar.gz` | Linux on x86-64 with glibc 2.39 or newer, and Windows through WSL 2 |
 | `neura-{full}-aarch64-linux-gnu.tar.gz` | Linux on arm64 with glibc 2.39 or newer |
+| `neura-{full}-aarch64-apple-darwin.tar.gz` | macOS 15 or newer on Apple silicon |
+| `neura-{full}-x86_64-apple-darwin.tar.gz` | macOS 15 or newer on Intel |
 
 ## Update and uninstall
 

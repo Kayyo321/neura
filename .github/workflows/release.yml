@@ -67,10 +67,17 @@ jobs:
         id: previous
         env:
           GH_TOKEN: ${{ github.token }}
+          REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 --json tagName \
-            --jq "[.[].tagName | select(. != \"$REF_NAME\")][0] // \"\"")
+          # A trial builds a -dev version, which sorts before every published
+          # candidate of the same version, so it has nothing to update from.
+          if [ "$REF_TYPE" = tag ]; then
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 --json tagName \
+              --jq "[.[].tagName | select(. != \"$REF_NAME\")][0] // \"\"")
+          else
+            tag=""
+          fi
           echo "previous release: ${tag:-none}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 

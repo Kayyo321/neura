@@ -24,7 +24,7 @@ Neura is a statically typed programming language and a toolchain for compiling i
 
 ## Install
 
-On Linux, and on Windows inside a WSL 2 distribution, one command installs a release:
+On Linux, on macOS, and on Windows inside a WSL 2 distribution, one command installs a release:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases/latest/download/install.sh | sh
@@ -66,7 +66,7 @@ The `.nvr` image contains the circuit and execution information needed by the Ne
 | --- | --- |
 | `neura check hello.nra` | Checks the source without building. |
 | `neura test tests.nra` | Runs a test module. |
-| `neura build --native hello.nra -o hello` | Packages the image as a native executable that runs without Neura installed (Linux). |
+| `neura build --native hello.nra -o hello` | Packages the image as a native executable that runs without Neura installed (Linux only). |
 | `neura decompile hello.nvr` | Recovers readable source from an image. |
 | `neura doctor` | Checks the installation and names what optional features need. |
 | `neura update` | Installs a newer release. |
