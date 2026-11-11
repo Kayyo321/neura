@@ -218,6 +218,56 @@ if(NOT kernel_decompiled MATCHES "kernel \"neura.sort.i64\" v1\\([^)]*\\) \\[opa
     message(FATAL_ERROR "the decompiler did not name the kernel call:\n${kernel_decompiled}")
 endif()
 
+# Tags and kernel trailers together (docs/lang/Tags.md): an #Internal module
+# of #Hidden, bodyless kernel bindings serves another trusted module, and a
+# program outside the library cannot import it (E0911).
+file(WRITE "${library}/tagged-kernels.nra" [=[
+/// Kernel bindings for the library's own use.
+#Internal
+export let TaggedKernels = module (
+    /// The CRC-32 of the bytes.
+    #[Hidden, Since("0.2.0")]
+    export let crc32 = func(bytes: uint8[list]) -> uint32 kernel("neura.digest.crc32", 1);
+
+    #Hidden
+    #NoDiscard
+    export let hex = func(bytes: uint8[list]) -> string kernel("neura.encoding.hex_encode", 1);
+);
+]=])
+file(WRITE "${library}/kernel-facade.nra" [=[
+let kernels = import:Std.TaggedKernels;
+
+export let KernelFacade = module (
+    export let checksum = func(bytes: uint8[list]) -> string {
+        return kernels.hex([0, 15]) + " " + kernels.crc32(bytes).to_string();
+    };
+);
+]=])
+file(WRITE "${TEST_DIR}/tagged-kernels.nra" [=[
+let program = import:Std.Program;
+let services = import:Std.Services;
+let facade = import:Std.KernelFacade;
+
+export let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        services.write(facade.checksum([49, 50, 51, 52, 53, 54, 55, 56, 57]));
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+foreach(flags IN ITEMS "" "--no-optimize")
+    expect(0 "" "" build ${flags} "${TEST_DIR}/tagged-kernels.nra" -o "${TEST_DIR}/tagged-kernels.nvr")
+    expect(0 "000f 3421780262\n" "" run --deny-all "${TEST_DIR}/tagged-kernels.nvr")
+endforeach()
+file(WRITE "${TEST_DIR}/internal-kernels.nra" [=[
+let kernels = import:Std.TaggedKernels;
+
+let checksum = func(bytes: uint8[list]) -> uint32 {
+    return kernels.crc32(bytes);
+};
+]=])
+expect(1 "" "error\\[E0911\\]: module 'TaggedKernels' is internal to its library" check "${TEST_DIR}/internal-kernels.nra")
+
 # A binding's signature must be the one its kernel's kinds give (E0781), and
 # the kernel must exist at that ABI version (E0782).
 foreach(case IN ITEMS

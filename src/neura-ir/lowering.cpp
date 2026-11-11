@@ -1174,8 +1174,8 @@ void Lowering::require_type(const IrType& actual, const IrType& expected, const 
                has_attribute(symbol(type.symbol), AttributeId::ClassAnonymous);
     };
     if (distinct(actual) || distinct(expected)) {
-        error.note("an anonymous class with methods, a constructor, accessors, const or last fields, a base, or "
-                   "interfaces is a type of its own at each place it is written")
+        error.note("an anonymous class with methods, a constructor, accessors, const or last fields, tagged "
+                   "members, a base, or interfaces is a type of its own at each place it is written")
             .help("declare a named class and use it in both places");
     }
     throw error;
@@ -4857,14 +4857,16 @@ bool plain_anonymous(const TypeSyntax& syntax) {
 
 // A body whose members are all plain `let` instance fields denotes a
 // structural class. A method, lifecycle function, static member, cast, base,
-// or interface, and also a `const` or `last` field or an accessor clause,
-// gives the class behaviour of its own, so such a body is a class of its own
-// at each place it is written.
+// or interface, and also a `const` or `last` field, an accessor clause, or a
+// tag on a member (Tags.md), gives the class behaviour or attributes of its
+// own, so such a body is a class of its own at each place it is written. A
+// structural class has no tags, so two bodies with the same fields never
+// merge two different sets of tags.
 bool fields_only(const Declaration& body) {
     if (body.base || !body.interfaces.empty()) return false;
     return std::ranges::all_of(body.members, [](const Declaration& member) {
         return member.kind == DeclKind::Binding && !member.static_member && !member.override_member &&
-               !member.constant && member.accessors.empty() &&
+               !member.constant && member.accessors.empty() && member.tags.empty() &&
                !member.promote_import && !member.cast_target && member.overloads.empty() &&
                member.name != "_" && member.name != "init" && member.name != "deinit" &&
                !(member.initializer && member.initializer->kind == ExprKind::Import);

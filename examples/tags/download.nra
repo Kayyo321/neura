@@ -1,0 +1,70 @@
+// Tags together with `last` fields, accessors, and anonymous classes
+// (docs/lang/Tags.md, docs/lang/Types.md). The tags go above a declaration;
+// a field's accessor clauses stay indented under it.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+/// The settings of one download.
+#Since("0.2.0")
+let Download = class (
+    /// Where the download comes from.
+    #Note("set once by the constructor")
+    export last url: string;
+
+    /// How many times to try; at least 1.
+    export let attempts: int = 3;
+        | get: attempts;
+        | set: {
+            if (value < 1) {
+                trap_with_message("attempts must be at least 1");
+            }
+            attempts = value;
+        };
+
+    /// The old name of attempts. The class itself still uses it without a
+    /// warning; a use from outside warns and suggests attempts.
+    #Deprecated(as_of: "0.2.0", use_instead: attempts)
+    export let tries: int = 3;
+
+    #Unit("ms")
+    export let timeout: int = 500;
+        | get: timeout;
+
+    export let init = func(address: string) -> void {
+        url = address;
+    };
+
+    export let describe = func() -> string {
+        return url + " x" + attempts.to_string() + ", legacy x" + tries.to_string();
+    };
+);
+
+let Example = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let download = new Download("https://example.com/data");
+        download.attempts = 5;
+
+        #Unit("bytes")
+        last limit: int = 1024;
+
+        // Fields only: the same class wherever these fields are written.
+        let progress: class (
+            export let done: int = 0;
+            export let total: int = 0;
+        ) = new;
+        progress.total = limit;
+        progress.done = limit / 4;
+
+        // A tagged member makes this body a class of its own.
+        let backoff: class (
+            #Unit("ms")
+            export let delay: int = 250;
+                | get: delay;
+        ) = new;
+
+        console.print_line(download.describe());
+        console.print_line(progress.done.to_string() + "/" + progress.total.to_string());
+        console.print_line((download.timeout + backoff.delay).to_string());
+        return program.ExitCode.Ok;
+    };
+);

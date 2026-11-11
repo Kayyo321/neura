@@ -1273,3 +1273,27 @@ run_status(output status check -Wdepricated tag-warnings.nra)
 if(NOT status STREQUAL "1" OR NOT output MATCHES "unknown warning 'depricated'; did you mean deprecated[?]")
     message(FATAL_ERROR "Expected -Wdepricated to be rejected with a suggestion (${status})\n${output}")
 endif()
+# The accessors' setter-never-stores warning (W0005) is a named warning like
+# the others: -W and -Wno- take its name, and explain takes name or code.
+file(WRITE "${TEST_DIR}/setter-warning.nra" [=[
+let Gauge = class (
+    export let level: int32 = 0;
+        | get: level;
+        | set: {
+            let ignored = value;
+        };
+);
+]=])
+run_status(output status check --error-format=short -Wsetter-never-stores setter-warning.nra)
+if(NOT status STREQUAL "0" OR NOT output MATCHES "setter-warning[.]nra:4:11: warning\\[W0005\\]: the setter of 'level' never stores 'level'")
+    message(FATAL_ERROR "Expected W0005 under -Wsetter-never-stores (${status})\n${output}")
+endif()
+run_status(output status check --error-format=short -Wno-setter-never-stores setter-warning.nra)
+if(NOT status STREQUAL "0" OR NOT output STREQUAL "")
+    message(FATAL_ERROR "Expected -Wno-setter-never-stores to hide W0005 (${status})\n${output}")
+endif()
+run_success(setter_page explain setter-never-stores)
+run_success(setter_code_page explain W0005)
+if(NOT setter_page MATCHES "^# W0005: setter that never stores its field" OR NOT setter_page STREQUAL setter_code_page)
+    message(FATAL_ERROR "neura explain did not print the W0005 page by name and by code\n${setter_page}")
+endif()

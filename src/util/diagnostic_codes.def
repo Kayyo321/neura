@@ -189,7 +189,7 @@ NEURA_DIAGNOSTIC(E0915, "unknown warning in a tag")
 NEURA_DIAGNOSTIC(E0916, "result tag on a function without a result")
 
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
-// -Wno-<name>, #Allow, and #Deny accept. W0005-W0009 stay free for later
+// -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later
 // warnings. An includer that defines only NEURA_DIAGNOSTIC sees them as codes.
 #ifndef NEURA_WARNING
 #define NEURA_WARNING(code, name, title) NEURA_DIAGNOSTIC(code, title)
@@ -199,6 +199,7 @@ NEURA_WARNING(W0001, "deprecated", "use of a deprecated declaration")
 NEURA_WARNING(W0002, "experimental", "use of an experimental declaration")
 NEURA_WARNING(W0003, "unused-result", "discarded result of a #NoDiscard call")
 NEURA_WARNING(W0004, "inline", "#Inline(always: true) function that cannot be inlined")
+NEURA_WARNING(W0005, "setter-never-stores", "setter that never stores its field")
 #ifdef NEURA_WARNING_FROM_DIAGNOSTIC
 #undef NEURA_WARNING_FROM_DIAGNOSTIC
 #endif

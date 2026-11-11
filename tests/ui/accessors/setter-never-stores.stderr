@@ -1,4 +1,4 @@
-warning: the setter of 'count' never stores 'count'
+warning[W0005]: the setter of 'count' never stores 'count'
  --> $DIR/setter-never-stores.nra:5:11
   |
 5 |         | set: {

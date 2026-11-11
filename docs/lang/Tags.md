@@ -32,9 +32,32 @@ arg  := [ident ':'] literal
 
 A literal is a string, an integer or floating-point number (with an optional `-`), `true` or `false`, a qualified name such as `area` or `Shapes.area`, or a bracketed list of those. Tag names are PascalCase. `#[A, B]` is a group of tags on one line; several tag lines and groups may stack, and their tags apply together. Tags belong to the declaration that follows them:
 
-- a `let` or `const` declaration, with or without `export` and `static`, including functions, overload groups (the tags apply to every alternative), classes, interfaces, modules, enums, and singletons, at the top of a file, inside a module, class, or interface, or as a local binding inside a function body;
+- a `let`, `const`, or `last` declaration, with or without `export` and `static`, including functions, overload groups (the tags apply to every alternative), classes, interfaces, modules, enums, and singletons, at the top of a file, inside a module, class, interface, or [anonymous class](Types.md#anonymous-classes) body, or as a local binding inside a function body;
 - an enum variant, written before the variant's name: `#Likely Ready,`;
 - a parameter, written before its name: `func(#Unit("ms") timeout: int64)`.
+
+A field's [accessor clauses](Types.md#accessors) are part of its declaration: tags go above the field and apply to it, and a clause takes no tags of its own. A bodyless function bound to a host service or a [kernel](../runtime/Kernels.md) takes tags like any other function.
+
+<!-- example: check -->
+```neura
+let Ticket = class (
+    /// The code printed on the ticket.
+    #Deprecated(as_of: "0.2.0", reason: "print the label")
+    export let code = "T-1";
+        | get: code;
+
+    #Note("set once by the constructor")
+    export last label: string;
+
+    export let init = func(text: string) -> void {
+        label = text;
+    };
+);
+```
+
+[download.nra](../../examples/tags/download.nra) shows tags with `last` fields, accessors, and anonymous classes in one program.
+
+A tag on a member of an anonymous class makes that body a class of its own where it is written, as a method or an accessor does, so two bodies whose fields differ only in their tags are never the same type ([Types](Types.md#anonymous-classes)).
 
 Tags cannot precede a statement such as a loop, a destructuring declaration, or the discard binding `_`; each is error `E0909`. A documentation comment may stand before the tags, among them, or between them and the declaration; the comment closest to the declaration documents it.
 
@@ -69,7 +92,7 @@ Every accepted tag is stored on its symbol as a NeuraIR `tag` attribute ([NeuraI
 
 ### Deprecated
 
-`#Deprecated(as_of: string = "", use_instead: name = "", reason: string = "")` marks a declaration that should no longer be used. Every use of it warns with `W0001`, "'f' is deprecated since <as_of>: <reason>", with a label at the tag: a call, a read, a reference to a type in an annotation, a `new`, a base class, or a match arm, an import of a deprecated module, and an override of a deprecated method. Uses inside the deprecated declaration itself, and inside other deprecated code, do not warn. When `use_instead` names a declaration beside the deprecated one that the use would reach the same way, the warning suggests the replacement, and `neura check --fix` applies it; otherwise it says what to use in a help line.
+`#Deprecated(as_of: string = "", use_instead: name = "", reason: string = "")` marks a declaration that should no longer be used. Every use of it warns with `W0001`, "'f' is deprecated since <as_of>: <reason>", with a label at the tag: a call, a read, a reference to a type in an annotation, a `new`, a base class, or a match arm, an import of a deprecated module, and an override of a deprecated method. Uses inside the deprecated declaration itself, and inside other deprecated code, do not warn. A field is part of its class's representation, so the class's own methods, constructors, initializers, and accessor bodies use a deprecated or experimental field without a warning; a use from outside the class warns once, whether it reads or writes the storage or goes through the field's accessors. When `use_instead` names a declaration beside the deprecated one that the use would reach the same way, the warning suggests the replacement, and `neura check --fix` applies it; otherwise it says what to use in a help line.
 
 <!-- example: warning: W0001 -->
 ```neura
@@ -103,7 +126,7 @@ A use of a deprecated declaration of the standard library warns in a user progra
 
 ### NoDiscard
 
-`#NoDiscard(reason: string = "")` on a function or method says that its result must be used. On a class, interface, or enum, it says the same of every call that returns that type. An expression statement that calls such a function discards the result and warns with `W0003`, suggesting `let _ = ...;`, which discards a value on purpose and does not warn. `#NoDiscard` on a function that returns `void` is error `E0916`.
+`#NoDiscard(reason: string = "")` on a function or method says that its result must be used. On a class, interface, or enum, it says the same of every call that returns that type, and on a class also of `new`. An expression statement that calls such a function, or that is a `new` of such a class (`new Lease();`), discards the result and warns with `W0003`, suggesting `let _ = ...;`, which discards a value on purpose and does not warn. `#NoDiscard` on a function that returns `void` is error `E0916`.
 
 <!-- example: warning: W0003 -->
 ```neura
@@ -127,7 +150,7 @@ let save = func() -> void {
 
 ### Allow and Deny
 
-`#Allow(warnings...)` silences the named warnings inside the tagged declaration and everything declared inside it, and `#Deny(warnings...)` makes them errors there, with a label at the `#Deny`. The innermost tag that names a warning decides. Both apply to warnings that are reported inside the declaration, whatever declaration they are about. Command-line options do not override them: `-Wno-<name>` does not hide a denied warning, and `-Werror` makes the remaining warnings errors.
+`#Allow(warnings...)` silences the named warnings (`W0001` to `W0005`, among them the accessors' `setter-never-stores`, [W0005](../diagnostics/W0005.md)) inside the tagged declaration and everything declared inside it, and `#Deny(warnings...)` makes them errors there, with a label at the `#Deny`. The innermost tag that names a warning decides. Both apply to warnings that are reported inside the declaration, whatever declaration they are about. Command-line options do not override them: `-Wno-<name>` does not hide a denied warning, and `-Werror` makes the remaining warnings errors.
 
 <!-- example: check -->
 ```neura

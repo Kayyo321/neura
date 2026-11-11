@@ -1,0 +1,13 @@
+// A #Deprecated field whose replacement is another member: a use through an
+// object gets the replacement as a machine-applicable suggestion, `obj.old`
+// becoming `obj.fresh`, and the fixed program compiles.
+let Settings = class (
+    #Deprecated(use_instead: retries)
+    export let tries: int32 = 1;
+    export let retries: int32 = 3;
+        | get: retries;
+);
+
+let attempts = func(settings: Settings) -> int32 {
+    return settings.tries * 2;
+};

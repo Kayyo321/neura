@@ -191,13 +191,18 @@ void Lowering::lower_accessors(SymbolId field) {
                                                      describe(field_type)).with_code("E0405")
                     .label("the getter must return " + describe(field_type) + " on every path")
                     .note("a path through the body ends without 'return' or a trap");
-            if (clause.setter && !stores_field(instructions, field))
-                report_warning(Diagnostic::warning(clause.keyword, "setter-never-stores",
+            if (clause.setter && !stores_field(instructions, field)) {
+                auto warning = Diagnostic::warning(clause.keyword, "setter-never-stores",
                                                    "the setter of '" + name + "' never stores '" + name + "'")
+                    .with_code("W0005")
                     .label("this setter never assigns '" + name + "'")
                     .note("a write from outside the class calls the setter, so it has no effect on '" + name + "'")
                     .help("assign the field in the setter, such as '" + name + " = value;', or remove the setter "
-                          "to make '" + name + "' read-only outside its class"));
+                          "to make '" + name + "' read-only outside its class");
+                // Scoped from the field, so #Allow and #Deny on the field,
+                // its class, or an enclosing declaration apply.
+                report_scoped_warning(program_, field, std::move(warning));
+            }
         }
         program_.bodies.push_back({function, std::move(instructions)});
     }

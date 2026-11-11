@@ -1,0 +1,8 @@
+warning[W0001]: field 'code' is deprecated since 0.2.0: use label
+  --> $DIR/accessor-field.nra:26:12
+   |
+ 6 |     #Deprecated(as_of: "0.2.0", reason: "use label")
+   |     ------------------------------------------------ 'code' is marked deprecated here
+...
+26 |     return ticket.code + ticket.describe() + width.to_string();
+   |            ^^^^^^^^^^^

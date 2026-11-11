@@ -1,0 +1,13 @@
+warning[W0001]: field 'tries' is deprecated
+  --> $DIR/member-use-instead.nra:12:12
+   |
+ 5 |     #Deprecated(use_instead: retries)
+   |     --------------------------------- 'tries' is marked deprecated here
+...
+12 |     return settings.tries * 2;
+   |            ^^^^^^^^^^^^^^
+   |
+help: use 'retries' instead
+   |
+12 |     return settings.retries * 2;
+   |                     ~~~~~~~

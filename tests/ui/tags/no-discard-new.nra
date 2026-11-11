@@ -1,0 +1,15 @@
+// A `new` of a #NoDiscard class whose object an expression statement drops
+// warns like a call that returns the class (W0003).
+#NoDiscard(reason: "a lease must be returned")
+let Lease = class (
+    export let id: int32 = 0;
+);
+
+let leak = func() -> void {
+    new Lease();
+};
+
+let keep = func() -> Lease {
+    let lease: Lease = new;
+    return lease;
+};

@@ -792,17 +792,22 @@ void check_tagged_use(const IrProgram& program, SymbolId target, const Span& use
     scope = effective_scope(program, scope);
     const std::string what = std::string(kind_word(program, target)) + " ";
     if (has_tag(item, TagId::Internal)) internal_use(program, target, use, scope);
-    if (has_tag(item, TagId::Deprecated) && !within(program, scope, target) &&
-        !inside_tagged(program, scope, TagId::Deprecated))
+    // A field is the representation of its class: the class's own methods,
+    // accessors, and initializers use it without a warning, and only a use
+    // from outside the class (directly or through its accessors) warns.
+    const bool own = within(program, scope, target) ||
+                     (item.kind == SymbolKind::Field && within(program, scope, item.owner));
+    if (has_tag(item, TagId::Deprecated) && !own && !inside_tagged(program, scope, TagId::Deprecated))
         deprecated_use(program, target, use, scope, lookup, what);
-    if (has_tag(item, TagId::Experimental) && !within(program, scope, target) &&
-        !inside_tagged(program, scope, TagId::Experimental))
+    if (has_tag(item, TagId::Experimental) && !own && !inside_tagged(program, scope, TagId::Experimental))
         experimental_use(program, target, use, scope, what);
 }
 
 void check_discarded_result(const IrProgram& program, const IrNode& value, const Span& statement, SymbolId scope) {
+    // A call, or a `new` whose object the statement drops (by its type only:
+    // the symbol of an allocation is its constructor, which returns nothing).
     if (value.op != IrOp::Call && value.op != IrOp::VirtualCall && value.op != IrOp::ExternalCall &&
-        value.op != IrOp::CallClosure)
+        value.op != IrOp::CallClosure && value.op != IrOp::Allocate)
         return;
     if (value.type.kind == TypeKind::Void) return;
     SymbolId tagged = no_symbol;

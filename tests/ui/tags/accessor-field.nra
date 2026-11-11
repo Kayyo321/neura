@@ -1,0 +1,27 @@
+// A #Deprecated field with a getter (W0001): a read from outside the class,
+// which goes through the getter, warns once; the getter and the methods of
+// the class use the field without a warning. Tags also go before `last`
+// fields and `last` locals.
+let Ticket = class (
+    #Deprecated(as_of: "0.2.0", reason: "use label")
+    export let code = "X";
+        | get: code;
+
+    #Note("set once by the constructor")
+    export last label: string;
+
+    export let init = func(text: string) -> void {
+        label = text + code;
+    };
+
+    export let describe = func() -> string {
+        return code + label;
+    };
+);
+
+let read = func() -> string {
+    #Unit("characters")
+    last width: int32 = 3;
+    let ticket = new Ticket("A");
+    return ticket.code + ticket.describe() + width.to_string();
+};

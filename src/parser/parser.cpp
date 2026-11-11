@@ -305,8 +305,9 @@ private:
     // body is not recognized, because `c ? x as class : f()` already means
     // a conditional expression.
     // A class member declaration starts at `offset`: the same words that
-    // begin a declaration anywhere, including a contextual `last` binding.
-    bool at_class_member(std::size_t offset) const { return at_declaration(offset); }
+    // begin a declaration anywhere, including a contextual `last` binding,
+    // or the '#' of its tags, which no expression starts with.
+    bool at_class_member(std::size_t offset) const { return at_declaration(offset) || next_is(offset, "#"); }
 
     bool next_keyword(std::size_t offset, std::string_view text) const {
         if (cursor_ + offset >= tokens_.size()) return false;
@@ -357,7 +358,7 @@ private:
             ~Restore() { depth = saved; }
         } restore{block_depth_, depth};
         while (!at_end() && !at(")")) {
-            auto member = declaration(Declaration::Kind::Class);
+            auto member = tagged_declaration(Declaration::Kind::Class);
             if (member.cast_target) {
                 auto more_casts = std::exchange(member.overloads, {});
                 body->members.push_back(std::move(member));

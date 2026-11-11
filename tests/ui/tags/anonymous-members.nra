@@ -1,0 +1,16 @@
+// A tag on a member of an anonymous class makes the class a type of its own
+// where it is written, as a method or an accessor does: it never merges with
+// a fields-only class of the same fields, whose members have no tags.
+let take = func(point: class (
+    export let x: int32;
+)) -> int32 {
+    return point.x;
+};
+
+let call = func() -> int32 {
+    let tagged: class (
+        #Unit("px")
+        export let x: int32 = 1;
+    ) = new;
+    return take(tagged);
+};

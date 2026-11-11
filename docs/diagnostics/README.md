@@ -4,7 +4,7 @@ Each error that the compiler reports has a code: `E` and four digits, whose hund
 
 A page states the rule, shows a program that breaks it with the error it gets, and shows the program fixed. The examples are compiled by the `doc-examples` test: a failing example must fail with its code, and a fixed one must compile. A few errors cannot be caused by a single source file; their pages say why, and show only the fix.
 
-E0917 to E0929 are free for later tags, and W0005 to W0009 for later warnings.
+E0917 to E0929 are free for later tags, and W0006 to W0009 for later warnings.
 
 ## E01xx: Lexer
 
@@ -230,3 +230,4 @@ Warnings do not stop compilation unless `-Werror` or a `#Deny` tag makes them er
 | [W0002](W0002.md) | `experimental` | use of an experimental declaration |
 | [W0003](W0003.md) | `unused-result` | discarded result of a #NoDiscard call |
 | [W0004](W0004.md) | `inline` | #Inline(always: true) function that cannot be inlined |
+| [W0005](W0005.md) | `setter-never-stores` | setter that never stores its field |

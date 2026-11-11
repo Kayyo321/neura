@@ -195,6 +195,14 @@ foreach(variant IN ITEMS "" -unoptimized)
         "payload\nXY729H08\n1\n" 0 "")
 endforeach()
 
+# Tags with `last` fields, accessors, and anonymous classes (Tags.md).
+build_image("${TEST_DIR}/download.nvr" "${SOURCE_DIR}/examples/tags/download.nra")
+build_image("${TEST_DIR}/download-unoptimized.nvr" --no-optimize "${SOURCE_DIR}/examples/tags/download.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    expect_run("tags download example${variant}" "${TEST_DIR}/download${variant}.nvr"
+        "https://example.com/data x5, legacy x3\n256/1024\n750\n" 0 "")
+endforeach()
+
 # Scoped tasks, a cancellable operation, and shared state: the same output
 # under any quantum.
 build_image("${TEST_DIR}/service.nvr" "${SOURCE_DIR}/examples/concurrency/service.nra")

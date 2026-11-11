@@ -1,0 +1,13 @@
+warning[W0003]: unused value of #NoDiscard type 'Lease': a lease must be returned
+ --> $DIR/no-discard-new.nra:9:5
+  |
+3 | #NoDiscard(reason: "a lease must be returned")
+  | ---------------------------------------------- 'Lease' is marked #NoDiscard here
+...
+9 |     new Lease();
+  |     ^^^^^^^^^^^ the result is discarded
+  |
+help: bind the result to '_' to discard it on purpose
+  |
+9 |     let _ = new Lease();
+  |     ++++++++

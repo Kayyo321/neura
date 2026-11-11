@@ -237,14 +237,15 @@ Each `json` object has `code` (a string, or `null`), `severity` (`error` or `war
 | `-Werror` | Report every warning as an error; the command then exits with status 1. |
 | `--warn-library` | Also report warnings in the standard library, which are otherwise hidden. A warning about a use is reported where the use is, so a program that uses a deprecated standard library declaration gets the warning without this option. |
 
-The warnings come from [tags](Tags.md):
+The warnings come from [tags](Tags.md) and [accessors](Types.md#accessors):
 
 | Code | Name | Warning | Reported by |
 | --- | --- | --- | --- |
 | `W0001` | `deprecated` | A use of a `#Deprecated` declaration, or an override of a deprecated method | `check`, `emit-ir`, `build`, `test` |
 | `W0002` | `experimental` | A use of an `#Experimental` declaration | `check`, `emit-ir`, `build`, `test` |
-| `W0003` | `unused-result` | An expression statement that discards the result of a `#NoDiscard` function or type | `check`, `emit-ir`, `build`, `test` |
+| `W0003` | `unused-result` | An expression statement that discards the result of a `#NoDiscard` function or type, or a `new` of a `#NoDiscard` class | `check`, `emit-ir`, `build`, `test` |
 | `W0004` | `inline` | An `#Inline(always: true)` function that the `inline-calls` pass cannot inline | `emit-ir`, `build`, and `test` when they optimize |
+| `W0005` | `setter-never-stores` | A setter that never assigns its field | `check`, `emit-ir`, `build`, `test` |
 
 `#Allow(<name or code>)` on a declaration silences a warning inside it, and `#Deny(...)` makes it an error there; neither is affected by `-Wno-<name>`, and `-Werror` applies to the warnings that remain.
 

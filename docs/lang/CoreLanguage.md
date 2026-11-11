@@ -50,7 +50,7 @@ let point: class (
 ) = new;
 ```
 
-A declaration may be preceded by [tags](Tags.md), such as `#Deprecated(use_instead: "next")` or `#[Inline(always: true), Since("0.2.0")]`, on the lines above it. A tag tells the compiler how to treat the declaration: to warn at its uses, to restrict who may extend or use it, to require that its result be used, or to inline it. `neura tags` lists them.
+A declaration may be preceded by [tags](Tags.md), such as `#Deprecated(use_instead: "next")` or `#[Inline(always: true), Since("0.2.0")]`, on the lines above it. A tag tells the compiler how to treat the declaration: to warn at its uses, to restrict who may extend or use it, to require that its result be used, or to inline it. Tags apply to `let`, `const`, and `last` declarations alike, including a field written with [accessor clauses](Types.md#accessors) (the tags go above the field, the clauses below it) and the members of an [anonymous class](Types.md#anonymous-classes). `neura tags` lists them.
 
 Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. A nested block, and a function body, may declare a name that an enclosing scope or a parameter already has; the new binding hides the outer one for the rest of its block. Whether shadowing stays allowed is an open language decision ([Status](Status.md#open-language-decisions)). Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. Visibility and inheritance rules beyond these are not specified.
 

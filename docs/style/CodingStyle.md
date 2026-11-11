@@ -239,6 +239,24 @@ export let format_log = func(log_message: string, log_level: int) -> string {
   );
   ```
 - Tag an enum variant or a parameter on the same line, before its name: `#Likely Ready,` and `func(#Unit("ms") timeout: int64)`.
+- On a field with accessor clauses, the tags go above the field and the clauses stay indented under it; never put a tag between the field and its clauses:
+  <!-- example: check -->
+  ```neura
+  let Meter = class (
+      #Unit("mm")
+      export let reading: int = 0;
+          | get: reading;
+          | set: {
+              if (value >= 0) {
+                  reading = value;
+              }
+          };
+
+      #Deprecated(use_instead: reading)
+      export let raw: int = 0;
+  );
+  ```
+- Avoid tags on the members of an anonymous class that should stay fields-only: a tag makes the body a class of its own, so it no longer matches the same fields written elsewhere. Declare a named class when its fields need tags.
 
 ### Comments
 - Use `//` for single-line comments.
