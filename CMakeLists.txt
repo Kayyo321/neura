@@ -539,6 +539,20 @@ if(BUILD_TESTING)
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 
+    # Lifted blocks (src/lift): the structural and overflow proofs, and the
+    # lowered blocks against the reference evaluator over a program corpus.
+    add_executable(neura_lift_tests
+        tests/lift/lift_tests.cpp
+        tests/ir-optimization/main.cpp
+        tests/ir-optimization/support.cpp
+    )
+    target_link_libraries(neura_lift_tests PRIVATE neura_lift neura_compiler neura_nvm)
+    target_include_directories(neura_lift_tests PRIVATE tests)
+    neura_target_defaults(neura_lift_tests)
+    foreach(suite IN ITEMS proof overflow execute corpus)
+        add_test(NAME lift-${suite} COMMAND neura_lift_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
+
     add_test(NAME backend-cli COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
