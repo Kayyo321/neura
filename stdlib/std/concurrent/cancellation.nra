@@ -10,10 +10,12 @@ let system_clock = import:Std.Time.SystemClock;
 export let Cancellation = module (
     /// @brief Whether cancellation was requested for the scope that started this task, or for any scope
     /// above it. The root task is never cancelled.
+    #ThreadSafe
     export let requested = func -> bool => task_cancelled();
 
     /// @brief The time left until the task's deadline, or None when it has none or the clock cannot be
     /// read. The duration is negative once the deadline has passed.
+    #ThreadSafe
     export let remaining = func -> optional.Optional<duration.Duration> {
         last deadline = task_deadline();
         if (deadline == 9223372036854775807) {

@@ -4,7 +4,7 @@
 #Since("0.1.0")
 export let AtomicInt64 = module (
     /// @brief A shared signed 64-bit integer.
-    #Final
+    #[Final, ThreadSafe]
     export let AtomicInt64 = class (
         let cell: int64;
 

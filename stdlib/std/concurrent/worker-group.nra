@@ -16,7 +16,7 @@ export let WorkerGroup = module (
 
     /// @brief The handle through which a body gives a group its jobs. It holds channel ends, so it can be given
     /// to a task. A job is a value of the transferable type T.
-    #Final
+    #[Final, ThreadSafe]
     export let WorkerGroup = class<T> (
         last queue: channels.Sender<T>;
         last closer: channels.Closer<T>;
