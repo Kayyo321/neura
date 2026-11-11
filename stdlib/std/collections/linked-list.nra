@@ -31,6 +31,7 @@ export let LinkedList = module (
     );
 
     /// @brief A doubly linked list that also supports queue and deque operations.
+    #NotThreadSafe
     export let LinkedList = class<T> implements MutableList<T>, Deque<T> (
         /// @brief The first node, or `nil` when the list is empty.
         let head: Node<T> = nil;

@@ -14,7 +14,7 @@ library below `share/neura/stdlib/std/`.
 
 ```text
 #Since("0.1.0") export let ArrayDeque = module (
-export let ArrayDeque = class<T> implements Deque<T> (
+#NotThreadSafe export let ArrayDeque = class<T> implements Deque<T> (
   export let size = func -> int
   export let is_empty = func -> bool
   export let get = func(index: int) -> T
@@ -47,7 +47,7 @@ export let of = func<T>(items: T[list]) -> ArrayDeque<T>
 
 ```text
 #Since("0.1.0") export let ArrayList = module (
-export let ArrayList = class<T> implements MutableList<T> (
+#NotThreadSafe export let ArrayList = class<T> implements MutableList<T> (
   export let init = func(values: T[list])
   export let items = func -> T[list]
   export let size = func -> int
@@ -100,39 +100,39 @@ export let wrap = func<T>(items: T[list]) -> ArrayList<T>
 
 ```text
 #Since("0.1.0") export let BitSet = module (
-export let BitSet = class implements MutableSet<int> (
-  export let size = func -> int
-  export let is_empty = func -> bool
-  export let contains = func(value: int) -> bool
+#NotThreadSafe export let BitSet = class implements MutableSet<int> (
+  #Pure export let size = func -> int
+  #Pure export let is_empty = func -> bool
+  #Pure export let contains = func(value: int) -> bool
   export let add = func(value: int) -> bool
   export let add_all = func(items: int[list])
   export let remove = func(value: int) -> bool
   export let flip = func(value: int)
   export let clear = func
-  export let next_set = func(from: int) -> int
-  export let to_list = func -> int[list]
-  export let iterator = func -> iterators.Iterator<int>
+  #Pure export let next_set = func(from: int) -> int
+  #Pure export let to_list = func -> int[list]
+  #Pure export let iterator = func -> iterators.Iterator<int>
   export let for_each = func(action: func(int) -> void)
   export let remove_if = func(drop: func(int) -> bool) -> int
   export let retain_if = func(keep: func(int) -> bool) -> int
-  export let is_subset_of = func(other: BitSet) -> bool
-  export let is_disjoint_from = func(other: BitSet) -> bool
+  #Pure export let is_subset_of = func(other: BitSet) -> bool
+  #Pure export let is_disjoint_from = func(other: BitSet) -> bool
   export let union_with = func(other: BitSet)
   export let intersect_with = func(other: BitSet)
   export let subtract = func(other: BitSet)
   export let symmetric_difference_with = func(other: BitSet)
-  export let union = func(other: BitSet) -> BitSet
-  export let intersection = func(other: BitSet) -> BitSet
-  export let difference = func(other: BitSet) -> BitSet
-  export let.override equals = func(other: class) -> bool
-  export let.override hash_code = func -> uint32
-  export let.override to_string = func -> string
+  #Pure export let union = func(other: BitSet) -> BitSet
+  #Pure export let intersection = func(other: BitSet) -> BitSet
+  #Pure export let difference = func(other: BitSet) -> BitSet
+  #Pure export let.override equals = func(other: class) -> bool
+  #Pure export let.override hash_code = func -> uint32
+  #Pure export let.override to_string = func -> string
 let BitSetIterator = class implements iterators.Iterator<int> (
   export let init = func(source: uint32[list], counter: cell.Cell<uint64>)
-  export let has_next = func -> bool
+  #Pure export let has_next = func -> bool
   export let next = func -> int
-export let create = func -> BitSet
-export let of = func(items: int[list]) -> BitSet
+#[Pure, ThreadSafe] export let create = func -> BitSet
+#[Pure, ThreadSafe] export let of = func(items: int[list]) -> BitSet
 ```
 
 ## `Std.Collections.Collection`
@@ -165,7 +165,7 @@ export let Deque = interface<T>:Queue<T> (
 
 ```text
 #Since("0.1.0") export let HashMap = module (
-export let HashMap = class<K, V> implements MutableMap<K, V> (
+#NotThreadSafe export let HashMap = class<K, V> implements MutableMap<K, V> (
   export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(K) -> uint32, equal: func(K, K) -> bool)
   export let size = func -> int
   export let is_empty = func -> bool
@@ -208,7 +208,7 @@ export let with_keys_and_capacity = func<K, V>(hash: func(K) -> uint32, same: fu
 
 ```text
 #Since("0.1.0") export let HashSet = module (
-export let HashSet = class<T> implements MutableSet<T> (
+#NotThreadSafe export let HashSet = class<T> implements MutableSet<T> (
   export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(T) -> uint32, equal: func(T, T) -> bool)
   export let size = func -> int
   export let is_empty = func -> bool
@@ -320,7 +320,7 @@ export let of = func<T>(items: T[list]) -> ImmutableSet<T>
 
 ```text
 #Since("0.1.0") export let IntMap = module (
-export let IntMap = class<V> implements MutableMap<int, V> (
+#NotThreadSafe export let IntMap = class<V> implements MutableMap<int, V> (
   export let init = func(seal: Seal, table: hash_core.HashCore)
   export let size = func -> int
   export let is_empty = func -> bool
@@ -383,7 +383,7 @@ let Node = class<T> (
   export let next: Node<T> = nil
   export let previous: Node<T> = nil
   export let init = func(item: T)
-export let LinkedList = class<T> implements MutableList<T>, Deque<T> (
+#NotThreadSafe export let LinkedList = class<T> implements MutableList<T>, Deque<T> (
   export let size = func -> int
   export let is_empty = func -> bool
   export let get = func(index: int) -> T
@@ -549,7 +549,7 @@ export let MutableSet = interface<T>:Set<T>, MutableCollection<T> ()
 
 ```text
 #Since("0.1.0") export let OrdinalMap = module (
-export let OrdinalMap = class<V> implements MutableMap<int, V> (
+#NotThreadSafe export let OrdinalMap = class<V> implements MutableMap<int, V> (
   export let init = func(limit: int)
   export let size = func -> int
   export let is_empty = func -> bool
@@ -587,7 +587,7 @@ export let create = func<V>(size: int) -> OrdinalMap<V>
 
 ```text
 #Since("0.1.0") export let PriorityQueue = module (
-export let PriorityQueue = class<T> implements Queue<T> (
+#NotThreadSafe export let PriorityQueue = class<T> implements Queue<T> (
   export let init = func(items: T[list], c: func(T, T) -> ordering.Ordering)
   export let size = func -> int
   export let is_empty = func -> bool
@@ -627,7 +627,7 @@ export let Queue = interface<T>:Collection<T> (
 
 ```text
 #Since("0.1.0") export let Sequence = module (
-#[Final, NoDiscard] export let Sequence = class<T> implements Iterable<T> (
+#[Final, NoDiscard, NotThreadSafe] export let Sequence = class<T> implements Iterable<T> (
   export let init = func(more: func() -> bool, pull: func() -> T)
   export let iterator = func -> Iterator<T>
   export let map = func<U>(f: func(T) -> U) -> Sequence<U>
@@ -674,7 +674,7 @@ export let from_iterator = func<T>(items: Iterator<T>) -> Sequence<T>
 export let empty = func<T> -> Sequence<T>
 export let generate = func<T>(make: func() -> T) -> Sequence<T>
 export let iterate = func<T>(seed: T, step: func(T) -> T) -> Sequence<T>
-export let range = func(start: int, end: int) -> Sequence<int>
+#[Pure, ThreadSafe] export let range = func(start: int, end: int) -> Sequence<int>
 export let join = func(s: Sequence<string>, separator: string) -> string
 export let sum_int32 = func(s: Sequence<int>) -> int
 export let sum_int64 = func(s: Sequence<int64>) -> int64
@@ -743,7 +743,7 @@ export let binary_search = func<T>(items: T[list], value: T, c: func(T, T) -> or
 
 ```text
 #Since("0.1.0") export let StringMap = module (
-export let StringMap = class<V> implements MutableMap<string, V> (
+#NotThreadSafe export let StringMap = class<V> implements MutableMap<string, V> (
   export let init = func(seal: Seal, table: hash_core.HashCore)
   export let size = func -> int
   export let is_empty = func -> bool
@@ -792,7 +792,7 @@ let Node = class<K, V> (
   export let parent: Node<K, V> = nil
   export let height: int = 1
   export let init = func(item_key: K, item_value: V, above: Node<K, V>)
-export let TreeMap = class<K, V> implements MutableMap<K, V>, SortedMap<K, V> (
+#NotThreadSafe export let TreeMap = class<K, V> implements MutableMap<K, V>, SortedMap<K, V> (
   export let init = func(seal: Seal, comparator: func(K, K) -> ordering.Ordering)
   export let size = func -> int
   export let is_empty = func -> bool
@@ -852,7 +852,7 @@ export let create = func<K, V>(comparator: func(K, K) -> ordering.Ordering) -> T
 
 ```text
 #Since("0.1.0") export let TreeSet = module (
-export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T> (
+#NotThreadSafe export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T> (
   export let init = func(seal: Seal, comparator: func(T, T) -> ordering.Ordering)
   export let size = func -> int
   export let is_empty = func -> bool
@@ -898,7 +898,7 @@ export let create = func<T>(comparator: func(T, T) -> ordering.Ordering) -> Tree
   export let store = func(value: int64)
   export let add = func(delta: int64) -> int64
   #NoDiscard export let compare_exchange = func(expected: int64, desired: int64) -> bool
-export let create = func(initial: int64) -> AtomicInt64
+#[Pure, ThreadSafe] export let create = func(initial: int64) -> AtomicInt64
 ```
 
 ## `Std.Concurrent.Cancellation`
@@ -951,7 +951,7 @@ export let create = func<T>(initializer: func() -> T) -> Guarded<T>
   export last max_steps: int64
   export last max_heap_cells: int64
   export let init = func(steps: int64, heap_cells: int64)
-export let limits = func(steps: int64, heap_cells: int64) -> ItemLimits
+#[Pure, ThreadSafe] export let limits = func(steps: int64, heap_cells: int64) -> ItemLimits
 #NoDiscard(reason: "the worker has no effects, so the results are all a map gives") export let map = func<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[]
 ```
 
@@ -1055,9 +1055,9 @@ export const NaN: bfloat16 = bfloat16.from_bits(32704)
 #[Pure, ThreadSafe] export let equals = func(a: bfloat16, b: bfloat16) -> bool
 #[Pure, ThreadSafe] export let hash = func(v: bfloat16) -> uint32
 #[Pure, ThreadSafe] export let to_string = func(v: bfloat16) -> string
-#ThreadSafe export let to_fixed = func(v: bfloat16, digits: int) -> string
-#ThreadSafe export let to_exponential = func(v: bfloat16, digits: int) -> string
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> Result<bfloat16>
+#[Pure, ThreadSafe] export let to_fixed = func(v: bfloat16, digits: int) -> string
+#[Pure, ThreadSafe] export let to_exponential = func(v: bfloat16, digits: int) -> string
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> Result<bfloat16>
 ```
 
 ## `Std.Core.Bool`
@@ -1135,7 +1135,7 @@ export let to_string = func(e: Error) -> string
 
 ```text
 #Since("0.1.0") export let Failure = module (
-export let trap = func(message: string)
+#[Pure, ThreadSafe] export let trap = func(message: string)
 ```
 
 ## `Std.Core.Float16`
@@ -1169,9 +1169,9 @@ export const NaN: float16 = float16.from_bits(32256)
 #[Pure, ThreadSafe] export let equals = func(a: float16, b: float16) -> bool
 #[Pure, ThreadSafe] export let hash = func(v: float16) -> uint32
 #[Pure, ThreadSafe] export let to_string = func(v: float16) -> string
-#ThreadSafe export let to_fixed = func(v: float16, digits: int) -> string
-#ThreadSafe export let to_exponential = func(v: float16, digits: int) -> string
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> Result<float16>
+#[Pure, ThreadSafe] export let to_fixed = func(v: float16, digits: int) -> string
+#[Pure, ThreadSafe] export let to_exponential = func(v: float16, digits: int) -> string
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> Result<float16>
 ```
 
 ## `Std.Core.Float32`
@@ -1205,9 +1205,9 @@ export const NaN: float32 = float32.from_bits(2143289344)
 #[Pure, ThreadSafe] export let equals = func(a: float32, b: float32) -> bool
 #[Pure, ThreadSafe] export let hash = func(v: float32) -> uint32
 #[Pure, ThreadSafe] export let to_string = func(v: float32) -> string
-#ThreadSafe export let to_fixed = func(v: float32, digits: int) -> string
-#ThreadSafe export let to_exponential = func(v: float32, digits: int) -> string
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> Result<float32>
+#[Pure, ThreadSafe] export let to_fixed = func(v: float32, digits: int) -> string
+#[Pure, ThreadSafe] export let to_exponential = func(v: float32, digits: int) -> string
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> Result<float32>
 ```
 
 ## `Std.Core.Float64`
@@ -1241,9 +1241,9 @@ export const NaN: float64 = float64.from_bits(9221120237041090560)
 #[Pure, ThreadSafe] export let equals = func(a: float64, b: float64) -> bool
 #[Pure, ThreadSafe] export let hash = func(v: float64) -> uint32
 #[Pure, ThreadSafe] export let to_string = func(v: float64) -> string
-#ThreadSafe export let to_fixed = func(v: float64, digits: int) -> string
-#ThreadSafe export let to_exponential = func(v: float64, digits: int) -> string
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> Result<float64>
+#[Pure, ThreadSafe] export let to_fixed = func(v: float64, digits: int) -> string
+#[Pure, ThreadSafe] export let to_exponential = func(v: float64, digits: int) -> string
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> Result<float64>
 ```
 
 ## `Std.Core.Hash`
@@ -1524,23 +1524,23 @@ export let Charset = charsets.Charset
   or func(s: string, other: string_builder.StringBuilder) -> bool
 #[Pure, ThreadSafe] export let compare_to = func(s: string, other: string) -> int
 #[Pure, ThreadSafe] export let compare_to_ignore_ascii_case = func(s: string, other: string) -> int
-#[NoDiscard, ThreadSafe] export let to_lower_case = func(s: string) -> string
+#[NoDiscard, Pure, ThreadSafe] export let to_lower_case = func(s: string) -> string
   or func(s: string, language_tag: string) -> string
-#[NoDiscard, ThreadSafe] export let to_upper_case = func(s: string) -> string
+#[NoDiscard, Pure, ThreadSafe] export let to_upper_case = func(s: string) -> string
   or func(s: string, language_tag: string) -> string
 #[Pure, ThreadSafe] export let compare_to_ignore_case = func(s: string, other: string) -> int
 #[Pure, ThreadSafe] export let equals_ignore_case = func(s: string, other: string) -> bool
-#[NoDiscard, ThreadSafe] export let case_fold = func(s: string) -> string
-#ThreadSafe export let compare_to_fold_case = func(s: string, other: string) -> int
-#ThreadSafe export let equals_fold_case = func(s: string, other: string) -> bool
+#[NoDiscard, Pure, ThreadSafe] export let case_fold = func(s: string) -> string
+#[Pure, ThreadSafe] export let compare_to_fold_case = func(s: string, other: string) -> int
+#[Pure, ThreadSafe] export let equals_fold_case = func(s: string, other: string) -> bool
 #[Pure, ThreadSafe] export let starts_with_at = func(s: string, prefix: string, offset: int) -> bool
 #[Pure, ThreadSafe] export let region_matches = func(s: string, start: int, other: string, other_start: int, byte_count: int)
 export let region_matches_ignore_ascii_case = func(s: string, start: int, other: string, other_start: int, byte_count: int) -> bool
 export let region_matches_ignore_case = func(s: string, start: int, other: string, other_start: int, byte_count: int) -> bool
 #[Pure, ThreadSafe] export let index_of_range = func(s: string, needle: string, start: int, end: int) -> int
-#ThreadSafe export let index_of_code_point = func(s: string, scalar: uint32) -> int
+#[Pure, ThreadSafe] export let index_of_code_point = func(s: string, scalar: uint32) -> int
 #[Pure, ThreadSafe] export let last_index_of_from = func(s: string, needle: string, from: int) -> int
-#ThreadSafe export let last_index_of_code_point = func(s: string, scalar: uint32) -> int
+#[Pure, ThreadSafe] export let last_index_of_code_point = func(s: string, scalar: uint32) -> int
 #[Pure, ThreadSafe] export let code_point_at = func(s: string, offset: int) -> uint32
 #[Pure, ThreadSafe] export let code_point_before = func(s: string, offset: int) -> uint32
 #[Pure, ThreadSafe] export let code_point_count = func(s: string, start: int, end: int) -> int
@@ -1548,12 +1548,12 @@ export let region_matches_ignore_case = func(s: string, start: int, other: strin
 export let get_bytes = func(s: string) -> uint8[list]
   or func(s: string, charset: Charset) -> uint8[list]
   or func(s: string, charset_name: string) -> uint8[list]
-#[NoDiscard, ThreadSafe] export let try_get_bytes = func(s: string, charset: Charset) -> result.Result<uint8[list]>
+#[NoDiscard, Pure, ThreadSafe] export let try_get_bytes = func(s: string, charset: Charset) -> result.Result<uint8[list]>
   or func(s: string, charset_name: string) -> result.Result<uint8[list]>
 export let decode_bytes = func(bytes: uint8[list]) -> string
   or func(bytes: uint8[list], charset: Charset) -> string
   or func(bytes: uint8[list], charset_name: string) -> string
-#[NoDiscard, ThreadSafe] export let try_decode_bytes = func(bytes: uint8[list]) -> result.Result<string>
+#[NoDiscard, Pure, ThreadSafe] export let try_decode_bytes = func(bytes: uint8[list]) -> result.Result<string>
   or func(bytes: uint8[list], charset: Charset) -> result.Result<string>
   or func(bytes: uint8[list], charset_name: string) -> result.Result<string>
 #[Pure, ThreadSafe] export let utf16_length = func(s: string) -> int
@@ -1561,7 +1561,7 @@ export let decode_bytes = func(bytes: uint8[list]) -> string
 #[Pure, ThreadSafe] export let to_char_array = func(s: string) -> uint16[list]
 #[Pure, ThreadSafe] export let chars = func(s: string) -> uint16[list]
 export let get_chars = func(s: string, start: int, end: int, destination: uint16[], destination_start: int)
-#ThreadSafe export let from_char_array = func(units: uint16[list]) -> string
+#[Pure, ThreadSafe] export let from_char_array = func(units: uint16[list]) -> string
 #[Pure, ThreadSafe] export let offset_by_code_points = func(s: string, offset: int, count: int) -> int
 #[NoDiscard, Pure, ThreadSafe] export let.override trim = func(s: string) -> string
 #[Pure, ThreadSafe] export let is_blank = func(s: string) -> bool
@@ -1569,10 +1569,10 @@ export let get_chars = func(s: string, start: int, end: int, destination: uint16
 #[NoDiscard, Pure, ThreadSafe] export let strip_leading = func(s: string) -> string
 #[NoDiscard, Pure, ThreadSafe] export let strip_trailing = func(s: string) -> string
 #[Pure, ThreadSafe] export let.override lines = func(s: string) -> string[list]
-#[NoDiscard, ThreadSafe] export let indent = func(s: string, count: int) -> string
-#[NoDiscard, ThreadSafe] export let strip_indent = func(s: string) -> string
+#[NoDiscard, Pure, ThreadSafe] export let indent = func(s: string, count: int) -> string
+#[NoDiscard, Pure, ThreadSafe] export let strip_indent = func(s: string) -> string
 export let matches = func(s: string, pattern: string) -> bool
-#[NoDiscard, ThreadSafe] export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string
+#[NoDiscard, Pure, ThreadSafe] export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string
 #NoDiscard export let replace_all = func(s: string, pattern: string, replacement: string) -> string
 #NoDiscard export let replace_first_regex = func(s: string, pattern: string, replacement: string) -> string
 export let split_regex = func(s: string, pattern: string) -> string[list]
@@ -1582,14 +1582,14 @@ export let formatted = func(s: string, args: ...) -> string
 export let vformatted = func(s: string, args: variadic.Argument[]) -> string
 export let value_of = func<T>(value: T) -> string
 export let transform = func<T>(s: string, operation: func(string) -> T) -> T
-#[NoDiscard, ThreadSafe] export let translate_escapes = func(s: string) -> string
+#[NoDiscard, Pure, ThreadSafe] export let translate_escapes = func(s: string) -> string
 ```
 
 ## `Std.Core.StringBuilder`
 
 ```text
 #Since("0.1.0") export let StringBuilder = module (
-#[Final, Since("0.1.0")] export let StringBuilder = class (
+#[Final, Since("0.1.0"), NotThreadSafe] export let StringBuilder = class (
   export let init = func(seal: Seal, owner: Cell<StringBuilder>)
   export let append = func(s: string) -> StringBuilder
   export let append_scalar = func(scalar: uint32) -> StringBuilder
@@ -1601,13 +1601,13 @@ export let transform = func<T>(s: string, operation: func(string) -> T) -> T
   export let append_bool = func(v: bool) -> StringBuilder
   export let append_value = func<T>(value: T) -> StringBuilder
   #Since("0.2.0") export let byte_length: int { get }
-  export let is_empty = func -> bool
+  #Pure export let is_empty = func -> bool
   export let truncate = func(new_length: int)
   export let clear = func
-  export let.override equals = func(other: class) -> bool
-  export let.override hash_code = func -> uint32
-  export let.override to_string = func -> string
-#[NoDiscard, Since("0.1.0")] export let create = func -> StringBuilder
+  #Pure export let.override equals = func(other: class) -> bool
+  #Pure export let.override hash_code = func -> uint32
+  #Pure export let.override to_string = func -> string
+#[NoDiscard, Since("0.1.0"), Pure, ThreadSafe] export let create = func -> StringBuilder
 ```
 
 ## `Std.Core.UInt16`
@@ -1826,7 +1826,7 @@ export const Patch: int = 0
   export let init = func
   export let update = func(bytes: uint8[list])
   export let finish = func -> uint8[list]
-#ThreadSafe export let create = func -> Sha256
+#[Pure, ThreadSafe] export let create = func -> Sha256
 #[NoDiscard, Pure, ThreadSafe] export let of = func(bytes: uint8[list]) -> uint8[list]
 ```
 
@@ -1834,18 +1834,18 @@ export const Patch: int = 0
 
 ```text
 #Since("0.1.0") export let Arena = module (
-#Final export let Arena = class (
+#[Final, NotThreadSafe] export let Arena = class (
   export let init = func(scope: scopes.Scope)
   export let allocate = func(size: int64, alignment: int64) -> MemorySegment
   or func(layout: MemoryLayout) -> MemorySegment
   export let allocate_array = func(layout: MemoryLayout, count: int64) -> MemorySegment
   export let allocate_utf8 = func(text: string) -> MemorySegment
   export let allocate_bytes = func(bytes: uint8[list]) -> MemorySegment
-  export let is_alive = func -> bool
-  export let scope = func -> scopes.Scope
+  #Pure export let is_alive = func -> bool
+  #Pure export let scope = func -> scopes.Scope
   export let close = func
-export let of_confined = func -> Arena
-export let of_shared = func -> Arena
+#Pure export let of_confined = func -> Arena
+#Pure export let of_shared = func -> Arena
 export let global = func -> Arena
 ```
 
@@ -1884,9 +1884,9 @@ export let of_void = func(arguments: ...MemoryLayout) -> FunctionDescriptor
 
 ```text
 #Since("0.1.0") export let Linker = module (
-#Final export let Linker = class (
+#[Final, NotThreadSafe] export let Linker = class (
   export let init = func {}
-  export let downcall_handle = func(symbol: MemorySegment, descriptor: FunctionDescriptor) -> MethodHandle
+  #Pure export let downcall_handle = func(symbol: MemorySegment, descriptor: FunctionDescriptor) -> MethodHandle
   or func(symbol: MemorySegment, descriptor: FunctionDescriptor, first_variadic: int) -> MethodHandle
   export let upcall_stub = func(target: func(ForeignValue[list]) -> ForeignValue, descriptor: FunctionDescriptor, arena: Arena) -> MemorySegment
   export let default_lookup = func -> lookups.SymbolLookup
@@ -1920,9 +1920,9 @@ export let Shape = enum (Value, Struct, Union, Sequence, Padding)
   #Pure export let.override to_string = func -> string
 #Pure export let carrier_name = func(carrier: Carrier) -> string
 #Pure export let carrier_size = func(carrier: Carrier) -> int64
-export let value = func(carrier: Carrier) -> MemoryLayout
-export let value_sized = func(carrier: Carrier, size: int64, alignment: int64) -> MemoryLayout
-export let padding_layout = func(bytes: int64) -> MemoryLayout
+#Pure export let value = func(carrier: Carrier) -> MemoryLayout
+#Pure export let value_sized = func(carrier: Carrier, size: int64, alignment: int64) -> MemoryLayout
+#Pure export let padding_layout = func(bytes: int64) -> MemoryLayout
 export let struct_layout = func(members: ...MemoryLayout) -> MemoryLayout
 export let union_layout = func(members: ...MemoryLayout) -> MemoryLayout
 export let sequence_layout = func(elements: int64, element: MemoryLayout) -> MemoryLayout
@@ -1933,16 +1933,16 @@ export let sequence_layout = func(elements: int64, element: MemoryLayout) -> Mem
 
 ```text
 #Since("0.1.0") export let MemorySegment = module (
-#Final export let MemorySegment = class (
+#[Final, NotThreadSafe] export let MemorySegment = class (
   export let init = func(address_value: int64, size: int64, scope: scopes.Scope)
-  export let address = func -> int64
-  export let byte_size = func -> int64
-  export let is_null = func -> bool
-  export let is_alive = func -> bool
-  export let scope = func -> scopes.Scope
-  export let reinterpret = func(size: int64) -> MemorySegment
-  export let as_slice = func(offset: int64, size: int64) -> MemorySegment
-  export let as_slice_from = func(offset: int64) -> MemorySegment
+  #Pure export let address = func -> int64
+  #Pure export let byte_size = func -> int64
+  #Pure export let is_null = func -> bool
+  #Pure export let is_alive = func -> bool
+  #Pure export let scope = func -> scopes.Scope
+  #Pure export let reinterpret = func(size: int64) -> MemorySegment
+  #Pure export let as_slice = func(offset: int64, size: int64) -> MemorySegment
+  #Pure export let as_slice_from = func(offset: int64) -> MemorySegment
   export let get_bool = func(offset: int64) -> bool
   export let get_int8 = func(offset: int64) -> int8
   export let get_uint8 = func(offset: int64) -> uint8
@@ -1973,10 +1973,10 @@ export let sequence_layout = func(elements: int64, element: MemoryLayout) -> Mem
   export let copy_from_bytes = func(offset: int64, bytes: uint8[list])
   export let copy_from = func(source: MemorySegment)
   export let fill = func(value: uint8)
-  export let.override equals = func(other: class) -> bool
-  export let.override hash_code = func -> uint32
-  export let.override to_string = func -> string
-  export let check = func(offset: int64, size: int64)
+  #Pure export let.override equals = func(other: class) -> bool
+  #Pure export let.override hash_code = func -> uint32
+  #Pure export let.override to_string = func -> string
+  #Pure export let check = func(offset: int64, size: int64)
 export let null_segment = func -> MemorySegment
 export let of_address = func(address: int64) -> MemorySegment
 ```
@@ -1985,10 +1985,10 @@ export let of_address = func(address: int64) -> MemorySegment
 
 ```text
 #Since("0.1.0") export let MethodHandle = module (
-#Final export let MethodHandle = class (
+#[Final, NotThreadSafe] export let MethodHandle = class (
   export let init = func(symbol: MemorySegment, descriptor: FunctionDescriptor, variadic_index: int)
-  export let descriptor = func -> FunctionDescriptor
-  export let address = func -> MemorySegment
+  #Pure export let descriptor = func -> FunctionDescriptor
+  #Pure export let address = func -> MemorySegment
   export let invoke = func(args: ...) -> ForeignValue
   export let invoke_with = func(allocator: Arena, args: ...) -> ForeignValue
   export static let call_variadic = func(symbol: MemorySegment, fixed: FunctionDescriptor, args: Argument[list])
@@ -2000,11 +2000,11 @@ export let of_address = func(address: int64) -> MemorySegment
 
 ```text
 #Since("0.1.0") export let SymbolLookup = module (
-#Final export let SymbolLookup = class (
+#[Final, NotThreadSafe] export let SymbolLookup = class (
   export let init = func(library_id: int64, scope: scopes.Scope)
   export let find = func(name: string) -> Optional<MemorySegment>
   export let find_or_trap = func(name: string) -> MemorySegment
-  export let or_else = func(other: SymbolLookup) -> SymbolLookup
+  #Pure export let or_else = func(other: SymbolLookup) -> SymbolLookup
 export let library_lookup = func(path: string, arena: Arena) -> Result<SymbolLookup>
 export let default_lookup = func -> SymbolLookup
 export let embedded = func -> SymbolLookup
@@ -2047,7 +2047,7 @@ export const Address = value(Carrier.Address)
 ```text
 #Since("0.1.0") export let Csv = module (
 #[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> Result<string[list][list]>
-#[NoDiscard, ThreadSafe] export let write = func(rows: string[list][list]) -> string
+#[NoDiscard, Pure, ThreadSafe] export let write = func(rows: string[list][list]) -> string
 ```
 
 ## `Std.Encoding.Hex`
@@ -2067,11 +2067,11 @@ export const Address = value(Carrier.Address)
 #[Pure, ThreadSafe] export let number_of_float64 = func(v: float64) -> JsonValue
 #[NoDiscard, Pure, ThreadSafe] export let member = func(members: [string, JsonValue][list], name: string) -> Optional<JsonValue>
 #[Pure, ThreadSafe] export let number_to_int64 = func(text: string) -> Optional<int64>
-#ThreadSafe export let number_to_float64 = func(text: string) -> float64
+#[Pure, ThreadSafe] export let number_to_float64 = func(text: string) -> float64
 export let number_to_big_decimal = func(text: string) -> big_decimals.BigDecimal
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> Result<JsonValue>
-#[NoDiscard, ThreadSafe] export let write = func(value: JsonValue) -> string
-#[NoDiscard, ThreadSafe] export let write_pretty = func(value: JsonValue, indent: int) -> string
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> Result<JsonValue>
+#[NoDiscard, Pure, ThreadSafe] export let write = func(value: JsonValue) -> string
+#[NoDiscard, Pure, ThreadSafe] export let write_pretty = func(value: JsonValue, indent: int) -> string
 #[Pure, ThreadSafe] export let equals = func(a: JsonValue, b: JsonValue) -> bool
 #ThreadSafe export let hash = func(value: JsonValue) -> uint32
 #ThreadSafe export let index = func(members: [string, JsonValue][list]) -> StringMap<JsonValue>
@@ -2089,7 +2089,7 @@ export let number_to_big_decimal = func(text: string) -> big_decimals.BigDecimal
 
 ```text
 #Since("0.1.0") export let Utf8 = module (
-#[NoDiscard, ThreadSafe] export let encode = func(s: string) -> uint8[list]
+#[NoDiscard, Pure, ThreadSafe] export let encode = func(s: string) -> uint8[list]
 #[NoDiscard, Pure, ThreadSafe] export let decode = func(bytes: uint8[list]) -> Result<string>
 #[NoDiscard, Pure, ThreadSafe] export let decode_lossy = func(bytes: uint8[list]) -> string
 #[NoDiscard, Pure, ThreadSafe] export let validate = func(bytes: uint8[list]) -> int
@@ -2101,7 +2101,7 @@ export let number_to_big_decimal = func(text: string) -> big_decimals.BigDecimal
 #Since("0.1.0") export let File = module (
 export let OpenMode = enum (Read, Write, Append, ReadWrite, CreateNew)
 export let SeekOrigin = enum (Start, Current, End)
-#[Final, NoDiscard(reason: "an open file must be closed")] export let File = class implements Closeable (
+#[Final, NoDiscard(reason: "an open file must be closed"), NotThreadSafe] export let File = class implements Closeable (
   export let init = func(opened: FileHandle)
   #NoDiscard export let read = func(max: int) -> result.Result<uint8[list]>
   #NoDiscard export let write = func(data: uint8[list]) -> result.Result<Unit>
@@ -2122,9 +2122,9 @@ export let FileKind = enum (File, Directory, Other)
   export last size: int64
   export last modified: instant.Instant
   export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant)
-  export let.override equals = func(other: class) -> bool
-  export let.override hash_code = func -> uint32
-  export let.override to_string = func -> string
+  #Pure export let.override equals = func(other: class) -> bool
+  #Pure export let.override hash_code = func -> uint32
+  #Pure export let.override to_string = func -> string
 export const CopyBufferSize: int = 65536
 #NoDiscard export let read_bytes = func(path: Path) -> result.Result<uint8[list]>
 #NoDiscard export let read_text = func(path: Path) -> result.Result<string>
@@ -2151,7 +2151,7 @@ export const CopyBufferSize: int = 65536
   #Since("0.2.0") export last is_absolute: bool
   export let init = func(raw: string)
   #Pure export let join = func(other: string) -> Path
-  export let parent = func -> Path
+  #Pure export let parent = func -> Path
   #Pure export let file_name = func -> optional.Optional<string>
   #Pure export let stem = func -> optional.Optional<string>
   #Pure export let extension = func -> optional.Optional<string>
@@ -2172,13 +2172,13 @@ export const CopyBufferSize: int = 65536
 #Since("0.1.0") export let BufferedReader = module (
 export const DefaultCapacity: int = 8192
 export const MinimumCapacity: int = 16
-#Final export let BufferedReader = class (
+#[Final, NotThreadSafe] export let BufferedReader = class (
   export let init = func(input: func(int) -> Result<uint8[list]>, size: int)
   #NoDiscard export let read = func(max: int) -> Result<uint8[list]>
   #NoDiscard export let read_exact = func(count: int) -> Result<uint8[list]>
   #NoDiscard export let read_all = func -> Result<uint8[list]>
-export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader
-export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader
+#[Pure, ThreadSafe] export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader
+#[Pure, ThreadSafe] export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader
 ```
 
 ## `Std.Io.BufferedWriter`
@@ -2187,29 +2187,29 @@ export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capaci
 #Since("0.1.0") export let BufferedWriter = module (
 export const DefaultCapacity: int = 8192
 export const MinimumCapacity: int = 16
-#Final export let BufferedWriter = class (
+#[Final, NotThreadSafe] export let BufferedWriter = class (
   #Since("0.2.0") export let buffered: int { get }
   export let init = func(output: func(uint8[list]) -> Result<Unit>, size: int)
   #NoDiscard export let write = func(data: uint8[list]) -> Result<Unit>
   #NoDiscard export let flush = func -> Result<Unit>
-export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> BufferedWriter
-export let with_capacity = func(sink: func(uint8[list]) -> Result<Unit>, capacity: int) -> BufferedWriter
+#[Pure, ThreadSafe] export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> BufferedWriter
+#[Pure, ThreadSafe] export let with_capacity = func(sink: func(uint8[list]) -> Result<Unit>, capacity: int) -> BufferedWriter
 ```
 
 ## `Std.Io.ByteBuffer`
 
 ```text
 #Since("0.1.0") export let ByteBuffer = module (
-#Final export let ByteBuffer = class (
+#[Final, NotThreadSafe] export let ByteBuffer = class (
   #Since("0.2.0") export let size: int { get }
   export let write = func(input: uint8[list]) -> Result<Unit>
-  export let to_list = func -> uint8[list]
+  #Pure export let to_list = func -> uint8[list]
   export let clear = func
-  export let.override equals = func(other: class) -> bool
-  export let.override hash_code = func -> uint32
-  export let.override to_string = func -> string
-  #NoDiscard export let reader = func -> func(int) -> Result<uint8[list]>
-export let create = func -> ByteBuffer
+  #Pure export let.override equals = func(other: class) -> bool
+  #Pure export let.override hash_code = func -> uint32
+  #Pure export let.override to_string = func -> string
+  #[NoDiscard, Pure] export let reader = func -> func(int) -> Result<uint8[list]>
+#[Pure, ThreadSafe] export let create = func -> ByteBuffer
 ```
 
 ## `Std.Io.Closeable`
@@ -2246,8 +2246,8 @@ export let write = func(s: string)
 export let error_line = func(s: string)
 #NoDiscard export let try_error_line = func(s: string) -> result.Result<Unit>
 #NoDiscard export let read_line = func -> result.Result<Optional<string>>
-export let output = func -> func(uint8[list]) -> result.Result<Unit>
-export let error = func -> func(uint8[list]) -> result.Result<Unit>
+#[Pure, ThreadSafe] export let output = func -> func(uint8[list]) -> result.Result<Unit>
+#[Pure, ThreadSafe] export let error = func -> func(uint8[list]) -> result.Result<Unit>
 export let input = func -> func(int) -> result.Result<uint8[list]>
 ```
 
@@ -2255,23 +2255,23 @@ export let input = func -> func(int) -> result.Result<uint8[list]>
 
 ```text
 #Since("0.1.0") export let Utf8Reader = module (
-#Final export let Utf8Reader = class (
+#[Final, NotThreadSafe] export let Utf8Reader = class (
   export let init = func(input: func(int) -> result.Result<uint8[list]>)
   #NoDiscard export let read_scalar = func -> result.Result<Optional<uint32>>
   #NoDiscard export let read_line = func -> result.Result<Optional<string>>
   #NoDiscard export let read_to_end = func -> result.Result<string>
-export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader
+#[Pure, ThreadSafe] export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader
 ```
 
 ## `Std.Io.Utf8Writer`
 
 ```text
 #Since("0.1.0") export let Utf8Writer = module (
-#Final export let Utf8Writer = class (
+#[Final, NotThreadSafe] export let Utf8Writer = class (
   export let init = func(output: func(uint8[list]) -> Result<Unit>)
   #NoDiscard export let write = func(text: string) -> Result<Unit>
   #NoDiscard export let write_line = func(text: string) -> Result<Unit>
-export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer
+#[Pure, ThreadSafe] export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer
 ```
 
 ## `Std.Log.Logger`
@@ -2279,10 +2279,10 @@ export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer
 ```text
 #Since("0.1.0") export let Logger = module (
 export let LogLevel = enum (Trace, Debug, Info, Warn, Error, Off)
-#Final export let Logger = class (
+#[Final, NotThreadSafe] export let Logger = class (
   #Since("0.2.0") export let level: LogLevel
   export let init = func(name: string, target: func(string) -> void, level: LogLevel, time_source: Clock)
-  export let is_enabled = func(level: LogLevel) -> bool
+  #Pure export let is_enabled = func(level: LogLevel) -> bool
   export let log = func(level: LogLevel, message: string)
   export let log_lazy = func(level: LogLevel, make: func() -> string)
   export let trace = func(message: string)
@@ -2290,8 +2290,8 @@ export let LogLevel = enum (Trace, Debug, Info, Warn, Error, Off)
   export let info = func(message: string)
   export let warn = func(message: string)
   export let error = func(message: string)
-export let create = func(name: string, sink: func(string) -> void, level: LogLevel) -> Logger
-export let create_timed = func(name: string, sink: func(string) -> void, level: LogLevel, source: Clock) -> Logger
+#[Pure, ThreadSafe] export let create = func(name: string, sink: func(string) -> void, level: LogLevel) -> Logger
+#[Pure, ThreadSafe] export let create_timed = func(name: string, sink: func(string) -> void, level: LogLevel, source: Clock) -> Logger
 ```
 
 ## `Std.Math.BigDecimal`
@@ -2308,21 +2308,21 @@ export let RoundingMode = enum (Up, Down, Ceiling, Floor, HalfUp, HalfDown, Half
   export let abs = func -> BigDecimal
   export let add = func(other: BigDecimal) -> BigDecimal
   export let subtract = func(other: BigDecimal) -> BigDecimal
-  export let multiply = func(other: BigDecimal) -> BigDecimal
+  #Pure export let multiply = func(other: BigDecimal) -> BigDecimal
   export let divide = func(other: BigDecimal, result_scale: int, mode: RoundingMode) -> BigDecimal
   export let set_scale = func(new_scale: int, mode: RoundingMode) -> BigDecimal
   export let round = func(precision: int, mode: RoundingMode) -> BigDecimal
   export let strip_trailing_zeros = func -> BigDecimal
-  export let pow = func(exponent: int) -> BigDecimal
+  #Pure export let pow = func(exponent: int) -> BigDecimal
   export let to_big_integer = func(mode: RoundingMode) -> BigInteger
   export let to_float64 = func -> float64
-  export let compare_to = func(other: BigDecimal) -> Ordering
-  export let.override equals = func(other: class) -> bool
+  #Pure export let compare_to = func(other: BigDecimal) -> Ordering
+  #Pure export let.override equals = func(other: class) -> bool
   export let.override hash_code = func -> uint32
   export let.override to_string = func -> string
-export let of_int64 = func(value: int64) -> BigDecimal
+#[Pure, ThreadSafe] export let of_int64 = func(value: int64) -> BigDecimal
 #Pure export let of_big_integer = func(value: BigInteger, scale: int) -> BigDecimal
-export let of_float64 = func(v: float64) -> BigDecimal
+#[Pure, ThreadSafe] export let of_float64 = func(v: float64) -> BigDecimal
 #NoDiscard export let parse = func(text: string) -> Result<BigDecimal>
 ```
 
@@ -2339,33 +2339,33 @@ export let of_float64 = func(v: float64) -> BigDecimal
   export let abs = func -> BigInteger
   export let add = func(other: BigInteger) -> BigInteger
   export let subtract = func(other: BigInteger) -> BigInteger
-  export let multiply = func(other: BigInteger) -> BigInteger
+  #Pure export let multiply = func(other: BigInteger) -> BigInteger
   export let divide_and_remainder = func(other: BigInteger) -> [BigInteger, BigInteger]
   export let divide = func(other: BigInteger) -> BigInteger
   export let remainder = func(other: BigInteger) -> BigInteger
   export let floor_mod = func(m: BigInteger) -> BigInteger
-  export let pow = func(exponent: int) -> BigInteger
+  #Pure export let pow = func(exponent: int) -> BigInteger
   export let gcd = func(other: BigInteger) -> BigInteger
   export let mod_pow = func(exponent: BigInteger, modulus: BigInteger) -> BigInteger
   export let mod_inverse = func(modulus: BigInteger) -> BigInteger
-  export let shift_left = func(n: int) -> BigInteger
-  export let shift_right = func(n: int) -> BigInteger
+  #Pure export let shift_left = func(n: int) -> BigInteger
+  #Pure export let shift_right = func(n: int) -> BigInteger
   #Pure export let bit_length = func -> int
   #Pure export let test_bit = func(n: int) -> bool
   #Pure export let compare_to = func(other: BigInteger) -> Ordering
   #Pure export let.override equals = func(other: class) -> bool
   #Pure export let.override hash_code = func -> uint32
   #[NoDiscard, Pure] export let to_int64 = func -> Optional<int64>
-  export let to_float64 = func -> float64
-  export let.override to_string = func -> string
-  export let to_string_radix = func(radix: int) -> string
+  #Pure export let to_float64 = func -> float64
+  #Pure export let.override to_string = func -> string
+  #Pure export let to_string_radix = func(radix: int) -> string
 export const Zero: BigInteger = new BigInteger(0, [])
 export const One: BigInteger = new BigInteger(1, [1])
 export const Ten: BigInteger = new BigInteger(1, [10])
-export let of_int64 = func(value: int64) -> BigInteger
-export let of_uint64 = func(value: uint64) -> BigInteger
-#NoDiscard export let parse = func(text: string) -> Result<BigInteger>
-#NoDiscard export let parse_radix = func(text: string, radix: int) -> Result<BigInteger>
+#[Pure, ThreadSafe] export let of_int64 = func(value: int64) -> BigInteger
+#[Pure, ThreadSafe] export let of_uint64 = func(value: uint64) -> BigInteger
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> Result<BigInteger>
+#[NoDiscard, Pure, ThreadSafe] export let parse_radix = func(text: string, radix: int) -> Result<BigInteger>
 ```
 
 ## `Std.Math.Math`
@@ -2406,7 +2406,7 @@ export const Sqrt2: float64 = float64.from_bits(4609047870845172685)
 
 ```text
 #Since("0.1.0") export let TcpListener = module (
-#[Final, NoDiscard(reason: "a listener must be closed")] export let TcpListener = class implements Closeable (
+#[Final, NoDiscard(reason: "a listener must be closed"), NotThreadSafe] export let TcpListener = class implements Closeable (
   #Since("0.2.0") export last local_port: int
   export let init = func(opened: socket.Handle, bound_port: int)
   #NoDiscard export let accept = func -> Result<TcpStream>
@@ -2418,7 +2418,7 @@ export const Sqrt2: float64 = float64.from_bits(4609047870845172685)
 
 ```text
 #Since("0.1.0") export let TcpStream = module (
-#[Final, NoDiscard(reason: "a stream must be closed")] export let TcpStream = class implements Closeable (
+#[Final, NoDiscard(reason: "a stream must be closed"), NotThreadSafe] export let TcpStream = class implements Closeable (
   #Since("0.2.0") export let read_timeout: Duration = of_nanos(0) { get; set }
   export let init = func(opened: socket.Handle)
   #NoDiscard export let read = func(max: int) -> Result<uint8[list]>
@@ -2448,7 +2448,7 @@ export let Process = module (
 
 ```text
 #Since("0.1.0") export let Random = module (
-#Final export let Random = class (
+#[Final, NotThreadSafe] export let Random = class (
   export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64)
   export let next_uint64 = func -> uint64
   export let next_uint32 = func -> uint32
@@ -2460,7 +2460,7 @@ export let Process = module (
   export let fill_bytes = func(count: int) -> uint8[list]
   export let shuffle = func<T>(items: T[list])
   export let choose = func<T>(items: T[list]) -> T
-export let seeded = func(seed: uint64) -> Random
+#[Pure, ThreadSafe] export let seeded = func(seed: uint64) -> Random
 #NoDiscard export let from_entropy = func -> Result<Random>
 ```
 
@@ -2470,11 +2470,11 @@ export let seeded = func(seed: uint64) -> Random
 #Since("0.1.0") export let Uuid = module (
 #[Final, NoDiscard, Immutable, ThreadSafe] export let Uuid = class implements Comparable<Uuid> (
   export let init = func(first: uint64, last: uint64)
-  export let to_bytes = func -> uint8[list]
+  #Pure export let to_bytes = func -> uint8[list]
   #Pure export let compare_to = func(other: Uuid) -> Ordering
   #Pure export let.override equals = func(other: class) -> bool
-  export let.override hash_code = func -> uint32
-  export let.override to_string = func -> string
+  #Pure export let.override hash_code = func -> uint32
+  #Pure export let.override to_string = func -> string
 #ThreadSafe export let random = func(source: Random) -> Uuid
 #[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> Result<Uuid>
 ```
@@ -2483,16 +2483,16 @@ export let seeded = func(seed: uint64) -> Random
 
 ```text
 #Since("0.1.0") export let Test = module (
-export let assert = func(condition: bool)
-export let assert_with = func(condition: bool, message: string)
-export let fail = func(message: string)
-export let assert_equal_int32 = func(expected: int32, actual: int32)
-export let assert_equal_int64 = func(expected: int64, actual: int64)
-export let assert_equal_uint64 = func(expected: uint64, actual: uint64)
-export let assert_equal_bool = func(expected: bool, actual: bool)
-export let assert_equal_string = func(expected: string, actual: string)
-export let assert_equal_float64 = func(expected: float64, actual: float64)
-export let assert_float_near = func(expected: float64, actual: float64, tolerance: float64)
+#[Pure, ThreadSafe] export let assert = func(condition: bool)
+#[Pure, ThreadSafe] export let assert_with = func(condition: bool, message: string)
+#[Pure, ThreadSafe] export let fail = func(message: string)
+#[Pure, ThreadSafe] export let assert_equal_int32 = func(expected: int32, actual: int32)
+#[Pure, ThreadSafe] export let assert_equal_int64 = func(expected: int64, actual: int64)
+#[Pure, ThreadSafe] export let assert_equal_uint64 = func(expected: uint64, actual: uint64)
+#[Pure, ThreadSafe] export let assert_equal_bool = func(expected: bool, actual: bool)
+#[Pure, ThreadSafe] export let assert_equal_string = func(expected: string, actual: string)
+#[Pure, ThreadSafe] export let assert_equal_float64 = func(expected: float64, actual: float64)
+#[Pure, ThreadSafe] export let assert_float_near = func(expected: float64, actual: float64, tolerance: float64)
 export let assert_equal = func<T>(expected: T, actual: T)
 export let assert_not_equal = func<T>(unexpected: T, actual: T)
 export let assert_some = func<T>(o: optional.Optional<T>) -> T
@@ -2508,9 +2508,9 @@ export let assert_err = func<T>(r: Result<T>) -> error.Error
 #Since("0.1.0") export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le)
 #[NoDiscard, Pure, ThreadSafe] export let for_name = func(name: string) -> result.Result<Charset>
 export let encode = func(text: string, charset: Charset) -> uint8[list]
-#[NoDiscard, ThreadSafe] export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]>
+#[NoDiscard, Pure, ThreadSafe] export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]>
 export let decode = func(bytes: uint8[list], charset: Charset) -> string
-#[NoDiscard, ThreadSafe] export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string>
+#[NoDiscard, Pure, ThreadSafe] export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string>
 ```
 
 ## `Std.Text.Regex`
@@ -2521,21 +2521,21 @@ export let decode = func(bytes: uint8[list], charset: Charset) -> string
   export let ignore_ascii_case: bool = false
   export let multi_line: bool = false
   export let dot_all: bool = false
-  export let.override equals = func(other: class) -> bool
-  export let.override hash_code = func -> uint32
-  export let.override to_string = func -> string
+  #Pure export let.override equals = func(other: class) -> bool
+  #Pure export let.override hash_code = func -> uint32
+  #Pure export let.override to_string = func -> string
 #[Final, Since("0.1.0")] export let RegexMatch = class (
   #Since("0.2.0") export last start: int { get }
   #Since("0.2.0") export last end: int { get }
   export let init = func(text: string, captured: int[list], group_names: string[list])
-  #NoDiscard export let text = func -> string
-  export let.override equals = func(other: class) -> bool
-  export let.override hash_code = func -> uint32
-  export let.override to_string = func -> string
-  #NoDiscard export let group = func(index: int) -> optional.Optional<string>
-  export let group_start = func(index: int) -> int
-  #NoDiscard export let named_group = func(name: string) -> optional.Optional<string>
-#[Final, Since("0.1.0")] export let Regex = class (
+  #[NoDiscard, Pure] export let text = func -> string
+  #Pure export let.override equals = func(other: class) -> bool
+  #Pure export let.override hash_code = func -> uint32
+  #Pure export let.override to_string = func -> string
+  #[NoDiscard, Pure] export let group = func(index: int) -> optional.Optional<string>
+  #Pure export let group_start = func(index: int) -> int
+  #[NoDiscard, Pure] export let named_group = func(name: string) -> optional.Optional<string>
+#[Final, Since("0.1.0"), NotThreadSafe] export let Regex = class (
   #Since("0.2.0") export last pattern: string { get }
   #Since("0.2.0") export last group_count: int { get }
   export let init = func(text: string, compiled: machine.Program, group_names: string[list])
@@ -2547,11 +2547,11 @@ export let decode = func(bytes: uint8[list], charset: Charset) -> string
   export let replace_all = func(input: string, replacement: string) -> string
   export let replace_first = func(input: string, replacement: string) -> string
   export let split = func(input: string) -> string[list]
-  export let.override equals = func(other: class) -> bool
-  export let.override hash_code = func -> uint32
-  export let.override to_string = func -> string
-#[NoDiscard, Since("0.1.0")] export let compile = func(pattern: string) -> result.Result<Regex>
-#[NoDiscard, Since("0.1.0")] export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex>
+  #Pure export let.override equals = func(other: class) -> bool
+  #Pure export let.override hash_code = func -> uint32
+  #Pure export let.override to_string = func -> string
+#[NoDiscard, Since("0.1.0"), Pure, ThreadSafe] export let compile = func(pattern: string) -> result.Result<Regex>
+#[NoDiscard, Since("0.1.0"), Pure, ThreadSafe] export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex>
 ```
 
 ## `Std.Text.Scalars`
@@ -2603,8 +2603,8 @@ export const Replacement: uint32 = 65533
 #[Pure, ThreadSafe] export let split = func(s: string, separator: string) -> string[list]
 #[Pure, ThreadSafe] export let split_limit = func(s: string, separator: string, limit: int) -> string[list]
 #[Pure, ThreadSafe] export let lines = func(s: string) -> string[list]
-#ThreadSafe export let join = func(parts: string[list], separator: string) -> string
-#[NoDiscard, ThreadSafe] export let repeat = func(s: string, count: int) -> string
+#[Pure, ThreadSafe] export let join = func(parts: string[list], separator: string) -> string
+#[NoDiscard, Pure, ThreadSafe] export let repeat = func(s: string, count: int) -> string
 #[NoDiscard, Pure, ThreadSafe] export let trim = func(s: string) -> string
 #[NoDiscard, Pure, ThreadSafe] export let trim_start = func(s: string) -> string
 #[NoDiscard, Pure, ThreadSafe] export let trim_end = func(s: string) -> string
@@ -2615,13 +2615,13 @@ export const Replacement: uint32 = 65533
 #[NoDiscard, Pure, ThreadSafe] export let to_ascii_upper = func(s: string) -> string
 #[NoDiscard, Pure, ThreadSafe] export let to_ascii_lower = func(s: string) -> string
 #[Pure, ThreadSafe] export let equals_ignore_ascii_case = func(a: string, b: string) -> bool
-#[NoDiscard, ThreadSafe] export let pad_start = func(s: string, width: int, pad: string) -> string
-#[NoDiscard, ThreadSafe] export let pad_end = func(s: string, width: int, pad: string) -> string
-#[NoDiscard, ThreadSafe] export let reverse = func(s: string) -> string
-#ThreadSafe export let to_bytes = func(s: string) -> uint8[list]
+#[NoDiscard, Pure, ThreadSafe] export let pad_start = func(s: string, width: int, pad: string) -> string
+#[NoDiscard, Pure, ThreadSafe] export let pad_end = func(s: string, width: int, pad: string) -> string
+#[NoDiscard, Pure, ThreadSafe] export let reverse = func(s: string) -> string
+#[Pure, ThreadSafe] export let to_bytes = func(s: string) -> uint8[list]
 #[NoDiscard, Pure, ThreadSafe] export let from_bytes = func(bytes: uint8[list]) -> result.Result<string>
 #[NoDiscard, Pure, ThreadSafe] export let from_bytes_lossy = func(bytes: uint8[list]) -> string
-#ThreadSafe export let from_scalars = func(values: uint32[list]) -> string
+#[Pure, ThreadSafe] export let from_scalars = func(values: uint32[list]) -> string
 ```
 
 ## `Std.Time.Clock`
@@ -2674,7 +2674,7 @@ export const Zero: Duration = new Duration(0)
 #[Pure, ThreadSafe] export let of_minutes = func(minutes: int64) -> Duration
 #[Pure, ThreadSafe] export let of_hours = func(hours: int64) -> Duration
 #[Pure, ThreadSafe] export let of_days = func(days: int64) -> Duration
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> result.Result<Duration>
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> result.Result<Duration>
 let Accumulator = class (
   export let magnitude: uint64 = 0
   export let init = func(bound: uint64)
@@ -2685,14 +2685,14 @@ let Accumulator = class (
 
 ```text
 #Since("0.1.0") export let FixedClock = module (
-export let FixedClock = class implements Clock (
+#NotThreadSafe export let FixedClock = class implements Clock (
   export let init = func(start: instant.Instant)
-  #NoDiscard export let now = func -> result.Result<instant.Instant>
-  #NoDiscard export let monotonic = func -> result.Result<Duration>
+  #[NoDiscard, Pure] export let now = func -> result.Result<instant.Instant>
+  #[NoDiscard, Pure] export let monotonic = func -> result.Result<Duration>
   export let sleep = func(span: Duration) -> result.Result<Unit>
   export let set = func(moment: instant.Instant)
   export let advance = func(span: Duration)
-export let of = func(start: instant.Instant) -> FixedClock
+#[Pure, ThreadSafe] export let of = func(start: instant.Instant) -> FixedClock
 ```
 
 ## `Std.Time.Instant`
@@ -2715,7 +2715,7 @@ export let of = func(start: instant.Instant) -> FixedClock
 export const Epoch: Instant = new Instant(0, 0)
 #[Pure, ThreadSafe] export let of_epoch_seconds = func(seconds: int64, nanos: int) -> Instant
 #[Pure, ThreadSafe] export let of_epoch_millis = func(millis: int64) -> Instant
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> result.Result<Instant>
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> result.Result<Instant>
 ```
 
 ## `Std.Time.LocalDate`
@@ -2743,7 +2743,7 @@ export const Epoch: Instant = new Instant(0, 0)
 #[Pure, ThreadSafe] export let of = func(year: int, month: int, day: int) -> LocalDate
 #[Pure, ThreadSafe] export let try_of = func(year: int, month: int, day: int) -> LocalDate
 #[Pure, ThreadSafe] export let of_epoch_day = func(epoch_day: int64) -> LocalDate
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> result.Result<LocalDate>
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> result.Result<LocalDate>
 ```
 
 ## `Std.Time.LocalDateTime`
@@ -2761,7 +2761,7 @@ export const Epoch: Instant = new Instant(0, 0)
   #Pure export let.override hash_code = func -> uint32
   #Pure export let.override to_string = func -> string
 #[Pure, ThreadSafe] export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> result.Result<LocalDateTime>
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> result.Result<LocalDateTime>
 ```
 
 ## `Std.Time.LocalTime`
@@ -2783,21 +2783,21 @@ export const Epoch: Instant = new Instant(0, 0)
 export const Midnight: LocalTime = new LocalTime(0)
 #[Pure, ThreadSafe] export let of = func(hour: int, minute: int, second: int, nano: int) -> LocalTime
 #[Pure, ThreadSafe] export let of_nano_of_day = func(nanos: int64) -> LocalTime
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> result.Result<LocalTime>
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> result.Result<LocalTime>
 ```
 
 ## `Std.Time.Stopwatch`
 
 ```text
 #Since("0.1.0") export let Stopwatch = module (
-export let Stopwatch = class (
+#NotThreadSafe export let Stopwatch = class (
   export let is_running: bool = false { get }
   export let init = func(time_source: Clock)
   export let start = func -> result.Result<Unit>
   export let stop = func -> result.Result<Unit>
   export let reset = func
   #NoDiscard export let elapsed = func -> result.Result<Duration>
-export let create = func(time_source: Clock) -> Stopwatch
+#[Pure, ThreadSafe] export let create = func(time_source: Clock) -> Stopwatch
 ```
 
 ## `Std.Time.SystemClock`
@@ -2808,7 +2808,7 @@ export let SystemClock = class implements Clock (
   #NoDiscard export let now = func -> result.Result<instant.Instant>
   #NoDiscard export let monotonic = func -> result.Result<Duration>
   export let sleep = func(span: Duration) -> result.Result<Unit>
-export let create = func -> SystemClock
+#[Pure, ThreadSafe] export let create = func -> SystemClock
 ```
 
 ## `Std.Time.ZoneOffset`
@@ -2824,5 +2824,5 @@ export let create = func -> SystemClock
   #Pure export let.override to_string = func -> string
 export const Utc: ZoneOffset = new ZoneOffset(0)
 #[Pure, ThreadSafe] export let of_hours_minutes = func(hours: int, minutes: int) -> ZoneOffset
-#[NoDiscard, ThreadSafe] export let parse = func(text: string) -> result.Result<ZoneOffset>
+#[NoDiscard, Pure, ThreadSafe] export let parse = func(text: string) -> result.Result<ZoneOffset>
 ```

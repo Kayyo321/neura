@@ -249,12 +249,14 @@ export let MemoryLayout = module (
     };
 
     /// @brief A scalar layout with its natural size and alignment.
+    #Pure
     export let value = func(carrier: Carrier) -> MemoryLayout {
         last size = carrier_size(carrier);
         return new(Shape.Value, carrier, size, size, [], [], 0);
     };
 
     /// @brief A scalar layout with an explicit size and alignment, for C types whose size the runner reports.
+    #Pure
     export let value_sized = func(carrier: Carrier, size: int64, alignment: int64) -> MemoryLayout {
         if (size != carrier_size(carrier) || alignment < 1 || (alignment & (alignment - 1)) != 0) {
             trap_with_message("invalid argument: value layout size or alignment");
@@ -263,6 +265,7 @@ export let MemoryLayout = module (
     };
 
     /// @brief `bytes` bytes of padding with alignment 1.
+    #Pure
     export let padding_layout = func(bytes: int64) -> MemoryLayout {
         if (bytes < 1) {
             trap_with_message("invalid argument: padding size");

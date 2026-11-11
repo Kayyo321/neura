@@ -4,6 +4,7 @@ let.promote _ = import:Std.Core.Error;
 /// are the first fourteen IoErrorKind values in order, code 15 is Cancelled, and every other code is Other.
 export let HostError = module (
     /// @brief Maps a provider error code to its library I/O category, defaulting to Other.
+    #Pure
     export let kind_of = func(code: uint32) -> IoErrorKind {
         if (code == 1) { return IoErrorKind.NotFound; }
         if (code == 2) { return IoErrorKind.PermissionDenied; }
@@ -24,6 +25,7 @@ export let HostError = module (
     };
 
     /// @brief Wraps a provider code as an I/O error with the supplied message and path.
+    #Pure
     export let io = func(code: uint32, message: string, path: string) -> Error =>
         Error.Io { kind: kind_of(code), message: message, path: path };
 );

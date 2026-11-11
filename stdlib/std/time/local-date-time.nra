@@ -88,7 +88,7 @@ export let LocalDateTime = module (
     };
 
     /// @brief The LocalDate form, T, and the LocalTime form, with their errors.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> result.Result<LocalDateTime> {
         last scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);

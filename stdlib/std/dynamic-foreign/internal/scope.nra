@@ -24,12 +24,15 @@ export let Scope = module (
         };
 
         /// @brief Whether the scope is still open.
+        #Pure
         export let is_alive = func -> bool => open_now;
 
         /// @brief Whether this is the global scope.
+        #Pure
         export let is_global = func -> bool => global_scope;
 
         /// @brief Traps with "invalid state: arena closed" after close.
+        #Pure
         export let check_alive = func {
             if (!open_now) {
                 trap_with_message("invalid state: arena closed");

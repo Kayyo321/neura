@@ -7,6 +7,7 @@ export let FloatRounding = module (
     ///
     /// Overflow gives an infinity and underflow a subnormal or a zero of the same sign. `top` should hold at
     /// least 55 significant bits when `sticky` is set, so that the sticky bits lie below the rounding bit.
+    #Pure
     export let compose = func(negative: bool, top: uint64, exponent: int, sticky: bool) -> float64 {
         let sign: uint64 = 0;
         if (negative) {

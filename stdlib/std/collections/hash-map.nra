@@ -18,6 +18,7 @@ export let HashMap = module (
     let Seal = enum (Token);
 
     /// @brief A mutable hash table that visits entries in insertion order.
+    #NotThreadSafe
     export let HashMap = class<K, V> implements MutableMap<K, V> (
         /// @brief Never replaced, so iterators can read its modification count.
         last core: hash_core.HashCore;

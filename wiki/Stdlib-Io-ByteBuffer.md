@@ -18,25 +18,25 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **ByteBuffer** · [`export let ByteBuffer = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L12)
-  A growable in-memory byte sink that can create independent readers. Tagged `#Final`.
+  A growable in-memory byte sink that can create independent readers. Tagged `#Final`, `#NotThreadSafe`.
 - **ByteBuffer.ByteBuffer** · [`export let size: int { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L18)
   The current number of bytes. Read-only. Since 0.2.0.
 - **ByteBuffer.ByteBuffer** · [`export let write = func(input: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L22)
   Appends every byte; never fails.
-- **ByteBuffer.ByteBuffer** · [`export let to_list = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L28)
-  A copy of the bytes written so far.
-- **ByteBuffer.ByteBuffer** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L31)
+- **ByteBuffer.ByteBuffer** · [`export let to_list = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L29)
+  A copy of the bytes written so far. Tagged `#Pure`.
+- **ByteBuffer.ByteBuffer** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L32)
   Discards all accumulated bytes.
-- **ByteBuffer.ByteBuffer** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L38)
-  Only the current byte sequence participates. Readers hold their own copies and do not affect the buffer's equality or hash.
-- **ByteBuffer.ByteBuffer** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L47)
-  Hashes the current byte sequence.
-- **ByteBuffer.ByteBuffer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L50)
-  Returns the built-in list representation of the bytes.
-- **ByteBuffer.ByteBuffer** · [`export let reader = func -> func(int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L54)
-  A byte source over a copy of the current contents. A maximum count below 1 traps. Tagged `#NoDiscard`.
-- **ByteBuffer** · [`export let create = func -> ByteBuffer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L71)
-  Creates an empty byte buffer.
+- **ByteBuffer.ByteBuffer** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L40)
+  Only the current byte sequence participates. Readers hold their own copies and do not affect the buffer's equality or hash. Tagged `#Pure`.
+- **ByteBuffer.ByteBuffer** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L50)
+  Hashes the current byte sequence. Tagged `#Pure`.
+- **ByteBuffer.ByteBuffer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L54)
+  Returns the built-in list representation of the bytes. Tagged `#Pure`.
+- **ByteBuffer.ByteBuffer** · [`export let reader = func -> func(int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L58)
+  A byte source over a copy of the current contents. A maximum count below 1 traps. Tagged `#NoDiscard`, `#Pure`.
+- **ByteBuffer** · [`export let create = func -> ByteBuffer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L76)
+  Creates an empty byte buffer. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

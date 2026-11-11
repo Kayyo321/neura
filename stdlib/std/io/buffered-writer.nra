@@ -16,7 +16,7 @@ export let BufferedWriter = module (
     export const MinimumCapacity: int = 16;
 
     /// @brief Wraps a byte sink and batches small writes.
-    #Final
+    #[Final, NotThreadSafe]
     export let BufferedWriter = class (
         /// @brief The destination that receives the outgoing bytes.
         last sink: func(uint8[list]) -> Result<Unit>;
@@ -71,10 +71,12 @@ export let BufferedWriter = module (
     );
 
     /// @brief A writer collecting up to 8,192 bytes.
+    #[Pure, ThreadSafe]
     export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> BufferedWriter =>
         new(sink, DefaultCapacity);
 
     /// @brief A capacity below 16 traps with "invalid argument: capacity below 16".
+    #[Pure, ThreadSafe]
     export let with_capacity = func(sink: func(uint8[list]) -> Result<Unit>, capacity: int) -> BufferedWriter =>
         new(sink, capacity);
 );

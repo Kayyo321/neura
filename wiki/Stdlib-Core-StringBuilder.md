@@ -18,7 +18,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **StringBuilder** · [`export let StringBuilder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L20)
-  Accumulates mutable UTF-8 bytes and produces immutable string snapshots. Tagged `#Final`. Since 0.1.0.
+  Accumulates mutable UTF-8 bytes and produces immutable string snapshots. Tagged `#Final`, `#NotThreadSafe`. Since 0.1.0.
 - **StringBuilder.StringBuilder** · [`export let init = func(seal: Seal, owner: Cell<StringBuilder>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L27)
   Initializes a builder with the supplied backing bytes and construction token.
 - **StringBuilder.StringBuilder** · [`export let append = func(s: string) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L32)
@@ -41,20 +41,20 @@ The following public declarations are taken from the module source; each links t
   Appends `value.to_string()`.
 - **StringBuilder.StringBuilder** · [`export let byte_length: int { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L108)
   The number of accumulated UTF-8 bytes. The getter reads the byte list, so the field itself holds nothing. Since 0.2.0.
-- **StringBuilder.StringBuilder** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L112)
-  Reports whether there are any accumulated bytes.
-- **StringBuilder.StringBuilder** · [`export let truncate = func(new_length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L116)
+- **StringBuilder.StringBuilder** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L113)
+  Reports whether there are any accumulated bytes. Tagged `#Pure`.
+- **StringBuilder.StringBuilder** · [`export let truncate = func(new_length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L117)
   Keeps the first `new_length` bytes. The length must be between 0 and the current byte length and fall on a character boundary.
-- **StringBuilder.StringBuilder** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L137)
+- **StringBuilder.StringBuilder** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L138)
   Removes all accumulated bytes.
-- **StringBuilder.StringBuilder** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L142)
-  The current UTF-8 bytes determine equality and hashing.
-- **StringBuilder.StringBuilder** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L151)
-  Hashes the current text contents.
-- **StringBuilder.StringBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L154)
-  The accumulated text. The builder stays usable.
-- **StringBuilder** · [`export let create = func -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L174)
-  A new, empty builder. Tagged `#NoDiscard`. Since 0.1.0.
+- **StringBuilder.StringBuilder** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L144)
+  The current UTF-8 bytes determine equality and hashing. Tagged `#Pure`.
+- **StringBuilder.StringBuilder** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L154)
+  Hashes the current text contents. Tagged `#Pure`.
+- **StringBuilder.StringBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L158)
+  The accumulated text. The builder stays usable. Tagged `#Pure`.
+- **StringBuilder** · [`export let create = func -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L178)
+  A new, empty builder. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`. Since 0.1.0.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

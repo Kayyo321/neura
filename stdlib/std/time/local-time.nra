@@ -104,7 +104,7 @@ export let LocalTime = module (
     ///
     /// Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at an
     /// hour above 23 or a minute or second above 59.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> result.Result<LocalTime> {
         last scan = new calendar.Scanner(text);
         last nanos = calendar.read_time(scan);

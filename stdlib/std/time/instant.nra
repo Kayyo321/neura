@@ -164,7 +164,7 @@ export let Instant = module (
     ///
     /// Years are -999,999 through 999,999. Errors are those of LocalDate.parse and LocalTime.parse for the date
     /// and time, then those of ZoneOffset.parse for the offset.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> result.Result<Instant> {
         last scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);

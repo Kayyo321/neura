@@ -55,7 +55,7 @@ export let Charsets = module (
         result.expect<uint8[list]>(encode_text(text, charset, false), "encode text");
 
     /// @brief Encodes strictly and returns an Encoding error for the first unrepresentable scalar.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]> =>
         encode_text(text, charset, true);
 
@@ -64,7 +64,7 @@ export let Charsets = module (
         result.expect<string>(decode_bytes(bytes, charset, false), "decode bytes");
 
     /// @brief Decodes strictly and returns an Encoding error at the first malformed input.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string> =>
         decode_bytes(bytes, charset, true);
 

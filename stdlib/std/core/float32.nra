@@ -177,19 +177,19 @@ export let Float32 = module (
 
     /// @brief Exactly `digits` fraction digits (0 through 100; no point for 0), correctly rounded, ties to
     /// even. Other digit counts trap.
-    #ThreadSafe
+    #[Pure, ThreadSafe]
     export let to_fixed = func(v: float32, digits: int) -> string =>
         float_text.to_fixed(v.to_bits() as uint64, 23, 8, digits);
 
     /// @brief `d.ddd` with `digits` fraction digits (0 through 100), `e`, and the decimal exponent; correctly
     /// rounded, ties to even.
-    #ThreadSafe
+    #[Pure, ThreadSafe]
     export let to_exponential = func(v: float32, digits: int) -> string =>
         float_text.to_exponential(v.to_bits() as uint64, 23, 8, digits);
 
     /// @brief The grammar of section 7.5, converted exactly and rounded once, ties to even. Too large becomes
     /// an infinity and too small a signed zero.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<float32> => match (float_text.parse(text, 23, 8)) {
         float_text.Parsed.Failure(failure) => Result<float32>.Err(failure),
         float_text.Parsed.Bits(bits) => Result<float32>.Ok(float32.from_bits(bits as uint32)),

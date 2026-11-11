@@ -65,6 +65,7 @@ export let BigDecimal = module (
         export let subtract = func(other: BigDecimal) -> BigDecimal => add(other.negate());
 
         /// @brief Exact; the result's scale is the sum of the scales.
+        #Pure
         export let multiply = func(other: BigDecimal) -> BigDecimal =>
             new(unscaled.multiply(other.unscaled), scale + other.scale);
 
@@ -147,6 +148,7 @@ export let BigDecimal = module (
 
         /// @brief this^exponent exactly, with scale * exponent. pow(0) is 1 with scale 0; a negative exponent
         /// traps.
+        #Pure
         export let pow = func(exponent: int) -> BigDecimal {
             if (exponent < 0) {
                 trap_with_message("invalid argument: negative exponent");
@@ -192,6 +194,7 @@ export let BigDecimal = module (
         };
 
         /// @brief Compares numerical values independently of scale without aligning widely separated scales.
+        #Pure
         export let compare_to = func(other: BigDecimal) -> Ordering {
             last sa = unscaled.sign();
             last sb = other.unscaled.sign();
@@ -224,6 +227,7 @@ export let BigDecimal = module (
         };
 
         /// @brief Numeric equality: 2.0 equals 2.00.
+        #Pure
         export let.override equals = func(other: class) -> bool {
             if (!(other is BigDecimal)) {
                 return false;
@@ -261,6 +265,7 @@ export let BigDecimal = module (
     );
 
     /// @brief Constructs an exact decimal from an int64 at scale zero.
+    #[Pure, ThreadSafe]
     export let of_int64 = func(value: int64) -> BigDecimal =>
         new(big_integer.of_int64(value), 0);
 
@@ -271,6 +276,7 @@ export let BigDecimal = module (
 
     /// @brief The exact binary value of v with the smallest scale that holds it: 0.5 has scale 1 and 2.0 has
     /// scale 0. NaN and the infinities trap.
+    #[Pure, ThreadSafe]
     export let of_float64 = func(v: float64) -> BigDecimal {
         last bits = v.to_bits();
         last field = ((bits >> 52) & 2047) as int;

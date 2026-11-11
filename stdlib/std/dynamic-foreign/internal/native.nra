@@ -54,6 +54,7 @@ export let Native = module (
     let abi_layouts: uint8[list] = [];
 
     /// @brief Traps for a failed native operation, naming the capability when it was denied.
+    #Pure
     export let fail = func(operation: string, code: uint32) {
         if (code == 14) {
             trap_with_message("invalid state: native access denied: the native capability is not granted");
@@ -231,9 +232,11 @@ export let Native = module (
     };
 
     /// @brief The two's complement bits of a signed value.
+    #Pure
     export let signed_bits = func(value: int64) -> uint64 => int64s.to_unsigned(value);
 
     /// @brief Sign-extends the low `size` bytes of `bits`.
+    #Pure
     export let sign_extend = func(bits: uint64, size: int) -> int64 {
         if (size >= 8) {
             return uint64s.to_signed(bits);

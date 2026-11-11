@@ -18,7 +18,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **Utf8Reader** · [`export let Utf8Reader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L12)
-  Decodes UTF-8 from a byte source and retains bytes read ahead. Tagged `#Final`.
+  Decodes UTF-8 from a byte source and retains bytes read ahead. Tagged `#Final`, `#NotThreadSafe`.
 - **Utf8Reader.Utf8Reader** · [`export let init = func(input: func(int) -> result.Result<uint8[list]>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L21)
   Initializes the reader with a byte source and an empty buffer.
 - **Utf8Reader.Utf8Reader** · [`export let read_scalar = func -> result.Result<Optional<uint32>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L30)
@@ -27,8 +27,8 @@ The following public declarations are taken from the module source; each links t
   The next line without its LF or a CR before it; None at the end of the stream. A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line. Tagged `#NoDiscard`.
 - **Utf8Reader.Utf8Reader** · [`export let read_to_end = func -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L121)
   The rest of the stream as text. Tagged `#NoDiscard`.
-- **Utf8Reader** · [`export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L183)
-  Creates a UTF-8 reader over the supplied byte source.
+- **Utf8Reader** · [`export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L184)
+  Creates a UTF-8 reader over the supplied byte source. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

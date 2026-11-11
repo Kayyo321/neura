@@ -7,7 +7,7 @@ let.promote _ = import:Std.Core.Unit;
 #Since("0.1.0")
 export let Utf8Writer = module (
     /// @brief Adapts a byte sink to receive UTF-8 text.
-    #Final
+    #[Final, NotThreadSafe]
     export let Utf8Writer = class (
         /// @brief The destination that receives the outgoing bytes.
         last sink: func(uint8[list]) -> Result<Unit>;
@@ -28,6 +28,7 @@ export let Utf8Writer = module (
     );
 
     /// @brief Creates a UTF-8 writer over the supplied byte sink.
+    #[Pure, ThreadSafe]
     export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer =>
         new(sink);
 );

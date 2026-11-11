@@ -39,6 +39,7 @@ export let TreeMap = module (
     );
 
     /// @brief A mutable AVL tree map that identifies keys by comparator equality.
+    #NotThreadSafe
     export let TreeMap = class<K, V> implements MutableMap<K, V>, SortedMap<K, V> (
         /// @brief The root node, or `nil` when the tree is empty.
         let root: Node<K, V> = nil;

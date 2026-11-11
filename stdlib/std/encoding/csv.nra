@@ -86,7 +86,7 @@ export let Csv = module (
     ///
     /// A field is quoted, with each quote doubled, only when it contains a comma, a quote, a CR, or an LF. A
     /// row with no fields is written as an empty line, which parses as one empty field.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let write = func(rows: string[list][list]) -> string {
         last out = builders.create();
         for (let row in rows) {

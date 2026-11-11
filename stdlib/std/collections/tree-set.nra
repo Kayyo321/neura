@@ -18,6 +18,7 @@ export let TreeSet = module (
     let Seal = enum (Token);
 
     /// @brief A mutable set that identifies and orders elements using its comparator.
+    #NotThreadSafe
     export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T> (
         /// @brief The backing tree with one unit-valued entry per element.
         last map: tree_map.TreeMap<T, unit.Unit>;

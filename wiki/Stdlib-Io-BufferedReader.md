@@ -22,7 +22,7 @@ The following public declarations are taken from the module source; each links t
 - **BufferedReader** · [`export const MinimumCapacity: int = 16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L15)
   The smallest supported buffer capacity in bytes.
 - **BufferedReader** · [`export let BufferedReader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L19)
-  Wraps a byte source and retains unread bytes between reads. Tagged `#Final`.
+  Wraps a byte source and retains unread bytes between reads. Tagged `#Final`, `#NotThreadSafe`.
 - **BufferedReader.BufferedReader** · [`export let init = func(input: func(int) -> Result<uint8[list]>, size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L30)
   Use create or with_capacity.
 - **BufferedReader.BufferedReader** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L40)
@@ -31,10 +31,10 @@ The following public declarations are taken from the module source; each links t
   Exactly `count` bytes; the source ending first fails with UnexpectedEnd. A negative count traps. Tagged `#NoDiscard`.
 - **BufferedReader.BufferedReader** · [`export let read_all = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L94)
   Every remaining byte. Tagged `#NoDiscard`.
-- **BufferedReader** · [`export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L117)
-  A reader holding up to 8,192 bytes.
-- **BufferedReader** · [`export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L121)
-  A capacity below 16 traps with "invalid argument: capacity below 16".
+- **BufferedReader** · [`export let create = func(source: func(int) -> Result<uint8[list]>) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L118)
+  A reader holding up to 8,192 bytes. Tagged `#Pure`, `#ThreadSafe`.
+- **BufferedReader** · [`export let with_capacity = func(source: func(int) -> Result<uint8[list]>, capacity: int) -> BufferedReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/buffered-reader.nra#L123)
+  A capacity below 16 traps with "invalid argument: capacity below 16". Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

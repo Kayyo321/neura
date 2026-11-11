@@ -20,7 +20,7 @@ let scopes = import:Std.DynamicForeign.Internal.Scope;
 #Since("0.1.0")
 export let MethodHandle = module (
     /// @brief A native function address bound to a descriptor.
-    #Final
+    #[Final, NotThreadSafe]
     export let MethodHandle = class (
         /// @brief The function's address and the scope of the library that holds it.
         last target: MemorySegment;
@@ -43,9 +43,11 @@ export let MethodHandle = module (
         };
 
         /// @brief The C signature.
+        #Pure
         export let descriptor = func -> FunctionDescriptor => signature;
 
         /// @brief The function's address.
+        #Pure
         export let address = func -> MemorySegment => target;
 
         /// @brief Calls the function. Integers, floats, and booleans convert to the declared layouts when they

@@ -17,22 +17,22 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **FixedClock** · [`export let FixedClock = class implements Clock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L13)
-  A manually controlled clock with independent wall and monotonic readings.
-- **FixedClock.FixedClock** · [`export let init = func(start: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L20)
+- **FixedClock** · [`export let FixedClock = class implements Clock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L14)
+  A manually controlled clock with independent wall and monotonic readings. Tagged `#NotThreadSafe`.
+- **FixedClock.FixedClock** · [`export let init = func(start: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L21)
   Starts at the supplied instant with a zero monotonic reading.
-- **FixedClock.FixedClock** · [`export let now = func -> result.Result<instant.Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L26)
-  Returns the current simulated wall-clock reading. Tagged `#NoDiscard`.
-- **FixedClock.FixedClock** · [`export let monotonic = func -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L30)
-  Starts at zero and grows only with advance and sleep, so set never moves it. Tagged `#NoDiscard`.
-- **FixedClock.FixedClock** · [`export let sleep = func(span: Duration) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L34)
+- **FixedClock.FixedClock** · [`export let now = func -> result.Result<instant.Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L27)
+  Returns the current simulated wall-clock reading. Tagged `#NoDiscard`, `#Pure`.
+- **FixedClock.FixedClock** · [`export let monotonic = func -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L31)
+  Starts at zero and grows only with advance and sleep, so set never moves it. Tagged `#NoDiscard`, `#Pure`.
+- **FixedClock.FixedClock** · [`export let sleep = func(span: Duration) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L35)
   Advances by a positive duration and returns at once; a zero or negative duration does nothing.
-- **FixedClock.FixedClock** · [`export let set = func(moment: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L42)
+- **FixedClock.FixedClock** · [`export let set = func(moment: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L43)
   Replaces the instant; the monotonic reading does not change.
-- **FixedClock.FixedClock** · [`export let advance = func(span: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L48)
+- **FixedClock.FixedClock** · [`export let advance = func(span: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L49)
   Moves the instant and the monotonic reading forward. A negative duration traps with "invalid argument: negative duration", since the monotonic reading never decreases.
-- **FixedClock** · [`export let of = func(start: instant.Instant) -> FixedClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L58)
-  Creates a clock starting at the supplied instant.
+- **FixedClock** · [`export let of = func(start: instant.Instant) -> FixedClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L60)
+  Creates a clock starting at the supplied instant. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

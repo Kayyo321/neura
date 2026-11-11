@@ -25,11 +25,11 @@ The following public declarations are taken from the module source; each links t
 - **Charsets** · [`export let encode = func(text: string, charset: Charset) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L54)
   Encodes text, substituting a question mark for unrepresentable ASCII or Latin-1 scalars.
 - **Charsets** · [`export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L59)
-  Encodes strictly and returns an Encoding error for the first unrepresentable scalar. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Encodes strictly and returns an Encoding error for the first unrepresentable scalar. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **Charsets** · [`export let decode = func(bytes: uint8[list], charset: Charset) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L63)
   Decodes bytes, substituting U+FFFD for malformed input.
 - **Charsets** · [`export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/charsets.nra#L68)
-  Decodes strictly and returns an Encoding error at the first malformed input. Tagged `#NoDiscard`, `#ThreadSafe`.
+  Decodes strictly and returns an Encoding error at the first malformed input. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Current text and formatting contracts

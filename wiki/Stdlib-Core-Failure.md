@@ -17,8 +17,8 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Failure** · [`export let trap = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/failure.nra#L7)
-  Stops execution and reports the supplied diagnostic message.
+- **Failure** · [`export let trap = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/failure.nra#L8)
+  Stops execution and reports the supplied diagnostic message. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

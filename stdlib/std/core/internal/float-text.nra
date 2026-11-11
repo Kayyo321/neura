@@ -35,30 +35,35 @@ export let FloatText = module (
     // Bit-level classification. -------------------------------------------
 
     /// @brief Selects the sign bit for the supplied fraction and exponent widths.
+    #Pure
     export let sign_mask = func(f: int, w: int) -> uint64 {
         last one: uint64 = 1;
         return one << (f + w);
     };
 
     /// @brief Selects the exponent field for the supplied fraction and exponent widths.
+    #Pure
     export let exponent_mask = func(f: int, w: int) -> uint64 {
         last one: uint64 = 1;
         return ((one << w) - 1) << f;
     };
 
     /// @brief Selects the low fraction bits.
+    #Pure
     export let fraction_mask = func(f: int) -> uint64 {
         last one: uint64 = 1;
         return (one << f) - 1;
     };
 
     /// @brief Tests for an all-ones exponent and a nonzero fraction.
+    #Pure
     export let is_nan_bits = func(bits: uint64, f: int, w: int) -> bool {
         last exponent = exponent_mask(f, w);
         return (bits & exponent) == exponent && (bits & fraction_mask(f)) != 0;
     };
 
     /// @brief The format's canonical quiet NaN: sign 0, every exponent bit, and only the top fraction bit.
+    #Pure
     export let nan_bits = func(f: int, w: int) -> uint64 {
         last one: uint64 = 1;
         return exponent_mask(f, w) | (one << (f - 1));
@@ -66,6 +71,7 @@ export let FloatText = module (
 
     /// @brief floor (0), ceil (1), trunc (2), round half away from zero (3), and round half to even (4) on a
     /// bit pattern. The sign of zero is kept; a NaN becomes the canonical NaN.
+    #Pure
     export let round_bits = func(bits: uint64, f: int, w: int, mode: int) -> uint64 {
         last exponent_field = ((bits & exponent_mask(f, w)) >> f) as int;
         last bias = (1 << (w - 1)) - 1;
@@ -133,6 +139,7 @@ export let FloatText = module (
 
     /// @brief `digits` fraction digits, correctly rounded, ties to even. NaN and the infinities print as in
     /// to_string; a negative value keeps its `-` even when it rounds to zero.
+    #Pure
     export let to_fixed = func(bits: uint64, f: int, w: int, digits: int) -> string {
         check_digits(digits);
         last special = special_text(bits, f, w);
@@ -161,6 +168,7 @@ export let FloatText = module (
 
     /// @brief One digit, a point and `digits` more digits (no point when `digits` is 0), `e`, and the decimal
     /// exponent with `-` when negative. Correctly rounded, ties to even.
+    #Pure
     export let to_exponential = func(bits: uint64, f: int, w: int, digits: int) -> string {
         check_digits(digits);
         last special = special_text(bits, f, w);
@@ -212,6 +220,7 @@ export let FloatText = module (
     /// (at least one digit), and an optional exponent (`e` or `E`, an optional sign, and digits).
     ///
     /// The value is rounded once, ties to even; too large becomes an infinity and too small a signed zero.
+    #Pure
     export let parse = func(text: string, f: int, w: int) -> Parsed {
         last length = text.byte_length;
         if (length == 0) {

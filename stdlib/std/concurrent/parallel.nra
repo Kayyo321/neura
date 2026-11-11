@@ -28,6 +28,7 @@ export let Parallel = module (
     );
 
     /// @brief Limits of the given steps and heap cells for each item.
+    #[Pure, ThreadSafe]
     export let limits = func(steps: int64, heap_cells: int64) -> ItemLimits => new(steps, heap_cells);
 
     /// @brief Returns what `worker` returns for each item, in input order. T and U are transferable. The worker

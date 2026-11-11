@@ -9,6 +9,7 @@ export let UnicodeCase = module (
     let CasingLocale = enum (Root, Turkic, Lithuanian);
 
     /// @brief Converts to lowercase using full mappings and applicable contextual rules.
+    #Pure
     export let lower = func(s: string, language_tag: string) -> string {
         last locale = casing_locale(language_tag);
         last source = strings.scalars(s);
@@ -25,6 +26,7 @@ export let UnicodeCase = module (
     };
 
     /// @brief Converts to uppercase using full mappings and applicable contextual rules.
+    #Pure
     export let upper = func(s: string, language_tag: string) -> string {
         last locale = casing_locale(language_tag);
         last source = strings.scalars(s);
@@ -36,6 +38,7 @@ export let UnicodeCase = module (
     };
 
     /// @brief Applies full locale-independent Unicode case folding.
+    #Pure
     export let fold = func(s: string) -> string {
         last result = string_builder.create();
         let offset = 0;
@@ -52,6 +55,7 @@ export let UnicodeCase = module (
     };
 
     /// @brief Orders scalars after simple uppercase and then simple lowercase mapping.
+    #Pure
     export let compare_ignore_case = func(left: string, right: string) -> int {
         let a = 0;
         let b = 0;

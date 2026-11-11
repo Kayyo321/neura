@@ -185,10 +185,12 @@ export let Console = module (
     };
 
     /// @brief The output stream as a byte sink.
+    #[Pure, ThreadSafe]
     export let output = func -> func(uint8[list]) -> result.Result<Unit> =>
         func(data: uint8[list]) -> result.Result<Unit> => write_all(1, data);
 
     /// @brief The error stream as a byte sink.
+    #[Pure, ThreadSafe]
     export let error = func -> func(uint8[list]) -> result.Result<Unit> =>
         func(data: uint8[list]) -> result.Result<Unit> => write_all(2, data);
 

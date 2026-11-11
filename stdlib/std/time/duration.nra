@@ -169,7 +169,7 @@ export let Duration = module (
     /// At least one component is required, and letters are uppercase. The to_string form always parses. Errors:
     /// Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first
     /// digit of the component that leaves int64.
-    #[NoDiscard, ThreadSafe]
+    #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> result.Result<Duration> {
         last scan = new calendar.Scanner(text);
         let negative = false;

@@ -18,7 +18,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **Random** · [`export let Random = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L20)
-  A deterministic xoshiro256** generator with an optional cached normal sample. Tagged `#Final`.
+  A deterministic xoshiro256** generator with an optional cached normal sample. Tagged `#Final`, `#NotThreadSafe`.
 - **Random.Random** · [`export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L35)
   Initializes the four state words supplied by the seeding factory.
 - **Random.Random** · [`export let next_uint64 = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L43)
@@ -41,9 +41,9 @@ The following public declarations are taken from the module source; each links t
   Fisher-Yates: for i from the last index down to 1, swaps i with next_int_below(i + 1).
 - **Random.Random** · [`export let choose = func<T>(items: T[list]) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L142)
   An element chosen with next_int_below. An empty list traps with "no such element".
-- **Random** · [`export let seeded = func(seed: uint64) -> Random`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L167)
-  The four words are successive outputs of SplitMix64 started at the seed.
-- **Random** · [`export let from_entropy = func -> Result<Random>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L188)
+- **Random** · [`export let seeded = func(seed: uint64) -> Random`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L168)
+  The four words are successive outputs of SplitMix64 started at the seed. Tagged `#Pure`, `#ThreadSafe`.
+- **Random** · [`export let from_entropy = func -> Result<Random>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L189)
   Seeds with 8 bytes from neura.entropy.fill, read as a little-endian uint64. Needs the entropy capability; a denied or failed request is an Io error (CapabilityDenied when denied). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

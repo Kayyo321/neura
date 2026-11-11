@@ -18,7 +18,7 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **TcpListener** · [`export let TcpListener = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L37)
-  Owns a listening socket and retains its port after close. Tagged `#Final`, `#NoDiscard(reason: "a listener must be closed")`.
+  Owns a listening socket and retains its port after close. Tagged `#Final`, `#NoDiscard(reason: "a listener must be closed")`, `#NotThreadSafe`.
 - **TcpListener.TcpListener** · [`export last local_port: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L46)
   The port the listener is bound to; for a bind to port 0, the one the host chose. Still available after close. Read-only. Since 0.2.0.
 - **TcpListener.TcpListener** · [`export let init = func(opened: socket.Handle, bound_port: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-listener.nra#L49)

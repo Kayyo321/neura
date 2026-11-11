@@ -10,6 +10,7 @@ let.promote _ = import:Std.Core.Unit;
 #Since("0.1.0")
 export let FixedClock = module (
     /// @brief A manually controlled clock with independent wall and monotonic readings.
+    #NotThreadSafe
     export let FixedClock = class implements Clock (
         /// @brief The current simulated instant.
         let current: instant.Instant;
@@ -22,11 +23,11 @@ export let FixedClock = module (
         };
 
         /// @brief Returns the current simulated wall-clock reading.
-        #NoDiscard
+        #[NoDiscard, Pure]
         export let now = func -> result.Result<instant.Instant> => result.Result<instant.Instant>.Ok(current);
 
         /// @brief Starts at zero and grows only with advance and sleep, so set never moves it.
-        #NoDiscard
+        #[NoDiscard, Pure]
         export let monotonic = func -> result.Result<Duration> => result.Result<Duration>.Ok(elapsed);
 
         /// @brief Advances by a positive duration and returns at once; a zero or negative duration does
@@ -55,5 +56,6 @@ export let FixedClock = module (
     );
 
     /// @brief Creates a clock starting at the supplied instant.
+    #[Pure, ThreadSafe]
     export let of = func(start: instant.Instant) -> FixedClock => new(start);
 );

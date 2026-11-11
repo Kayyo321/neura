@@ -16,7 +16,7 @@ export let Random = module (
     let Seal = enum (Token);
 
     /// @brief A deterministic xoshiro256** generator with an optional cached normal sample.
-    #Final
+    #[Final, NotThreadSafe]
     export let Random = class (
         /// @brief The first word of the xoshiro256** state.
         let s0: uint64;
@@ -164,6 +164,7 @@ export let Random = module (
     );
 
     /// @brief The four words are successive outputs of SplitMix64 started at the seed.
+    #[Pure, ThreadSafe]
     export let seeded = func(seed: uint64) -> Random {
         let state = seed;
         state = uint64s.wrapping_add(state, 11400714819323198485);

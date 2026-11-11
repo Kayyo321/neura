@@ -12,6 +12,7 @@ let optional = import:Std.Core.Optional;
 #Since("0.1.0")
 export let OrdinalMap = module (
     /// @brief A mutable map for a fixed range of integer keys. A key outside that range causes a bounds trap.
+    #NotThreadSafe
     export let OrdinalMap = class<V> implements MutableMap<int, V> (
         /// @brief Maps each legal key to its dense slot, or -1 when absent.
         last position: int[list];

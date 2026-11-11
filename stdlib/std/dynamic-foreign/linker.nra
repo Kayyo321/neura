@@ -18,13 +18,14 @@ let strings = import:Std.Text.Strings;
 #Since("0.1.0")
 export let Linker = module (
     /// @brief The platform's C calling convention.
-    #Final
+    #[Final, NotThreadSafe]
     export let Linker = class (
         /// @brief Use native_linker.
         export let init = func {};
 
         /// @brief A handle that calls the function at `symbol` with the C signature `descriptor` (Java's
         /// Linker.downcallHandle).
+        #Pure
         export let downcall_handle = func(symbol: MemorySegment, descriptor: FunctionDescriptor) -> MethodHandle =>
             new(symbol, descriptor, -1)
         /// @brief A handle for a variadic C function such as printf. The descriptor lists every argument of the

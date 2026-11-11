@@ -16,21 +16,21 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **MethodHandle** · [`export let MethodHandle = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L24)
-  A native function address bound to a descriptor. Tagged `#Final`.
+  A native function address bound to a descriptor. Tagged `#Final`, `#NotThreadSafe`.
 - **MethodHandle.MethodHandle** · [`export let init = func(symbol: MemorySegment, descriptor: FunctionDescriptor, variadic_index: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L35)
   Use Linker.downcall_handle.
-- **MethodHandle.MethodHandle** · [`export let descriptor = func -> FunctionDescriptor`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L46)
-  The C signature.
-- **MethodHandle.MethodHandle** · [`export let address = func -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L49)
-  The function's address.
-- **MethodHandle.MethodHandle** · [`export let invoke = func(args: ...) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L54)
+- **MethodHandle.MethodHandle** · [`export let descriptor = func -> FunctionDescriptor`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L47)
+  The C signature. Tagged `#Pure`.
+- **MethodHandle.MethodHandle** · [`export let address = func -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L51)
+  The function's address. Tagged `#Pure`.
+- **MethodHandle.MethodHandle** · [`export let invoke = func(args: ...) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L56)
   Calls the function. Integers, floats, and booleans convert to the declared layouts when they fit; a string passes a NUL-terminated copy that lives for the call; a MemorySegment passes its address, or its bytes for a struct; nil passes a null pointer.
-- **MethodHandle.MethodHandle** · [`export let invoke_with = func(allocator: Arena, args: ...) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L57)
+- **MethodHandle.MethodHandle** · [`export let invoke_with = func(allocator: Arena, args: ...) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L59)
   invoke, copying a struct result into `allocator`.
-- **MethodHandle.MethodHandle** · [`export static let call_variadic = func(symbol: MemorySegment, fixed: FunctionDescriptor, args: Argument[list]) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L64)
+- **MethodHandle.MethodHandle** · [`export static let call_variadic = func(symbol: MemorySegment, fixed: FunctionDescriptor, args: Argument[list]) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L66)
   Calls a variadic C function whose named parameters `fixed` describes with `args`: the named arguments, then the variadic ones. Each variadic argument takes the layout C's default argument promotions give it: an int when an integer fits one and a long long (or unsigned long long) otherwise, a double for a float, an int for a bool, and an address for a string, a MemorySegment, or nil.
-- **MethodHandle.MethodHandle** · [`export let invoke_values = func(values: ForeignValue[list]) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L141)
+- **MethodHandle.MethodHandle** · [`export let invoke_values = func(values: ForeignValue[list]) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L143)
   Calls the function with values already tagged by carrier; each must match its layout exactly.
-- **MethodHandle.MethodHandle** · [`export let invoke_values_with = func(allocator: Arena, values: ForeignValue[list]) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L145)
+- **MethodHandle.MethodHandle** · [`export let invoke_values_with = func(allocator: Arena, values: ForeignValue[list]) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L147)
   invoke_values, copying a struct result into `allocator`.
 <!-- END SOURCE API -->
