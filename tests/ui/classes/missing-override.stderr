@@ -1,0 +1,15 @@
+error[E0502]: inherited member 'area' requires .override
+ --> $DIR/missing-override.nra:6:5
+  |
+3 |     export let area = func() -> int => 0;
+  |                ---- 'area' is inherited from here
+...
+6 |     export let area = func() -> int => 4;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ replaces the inherited 'area'
+  |
+help: declare it as an override
+  |
+6 |     export let.override area = func() -> int => 4;
+  |               +++++++++
+
+For more information about this error, try `neura explain E0502`.

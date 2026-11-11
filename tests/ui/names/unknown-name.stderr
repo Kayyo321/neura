@@ -1,0 +1,12 @@
+error[E0304]: unknown name 'cuont'
+ --> $DIR/unknown-name.nra:4:12
+  |
+4 |     return cuont;
+  |            ^^^^^ not found in this scope
+  |
+help: there is a binding with a similar name: 'count'
+  |
+4 |     return count;
+  |            ~~~~~
+
+For more information about this error, try `neura explain E0304`.

@@ -1,0 +1,8 @@
+// A misspelled member (E0305): the compiler suggests the exported member
+// with the closest spelling.
+let Box = class (
+    export let size: int = 2;
+);
+let look = func(box: Box) -> int {
+    return box.sise;
+};

@@ -1,0 +1,15 @@
+error[E0305]: unknown or inaccessible member 'secret' of Box
+ --> $DIR/private-member.nra:8:12
+  |
+4 |     let secret: int = 1;
+  |         ------ 'secret' is declared here without 'export'
+...
+8 |     return box.secret;
+  |            ^^^^^^^^^^ 'secret' is not exported
+  |
+help: consider exporting it
+  |
+4 |     export let secret: int = 1;
+  |     +++++++
+
+For more information about this error, try `neura explain E0305`.

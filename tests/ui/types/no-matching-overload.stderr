@@ -1,0 +1,16 @@
+error[E0408]: no matching overload of 'describe'
+ --> $DIR/no-matching-overload.nra:7:12
+  |
+3 | let describe = func(value: int) -> string => "number"
+  |     -------- this alternative takes (int32)
+4 |     or func(value: string) -> string => "text"
+  |        ---- this alternative takes (string)
+5 |     or func(value: float64) -> string => "fraction"
+  |        ---- this alternative takes (float64)
+6 |     or func(value: int64) -> string => "wide";
+7 | let kind = describe(true);
+  |            ^^^^^^^^^^^^^^ no alternative of 'describe' accepts this argument
+  |
+  = note: and 1 more alternative
+
+For more information about this error, try `neura explain E0408`.

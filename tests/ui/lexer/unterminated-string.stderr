@@ -1,0 +1,27 @@
+error[E0103]: unterminated string literal
+ --> $DIR/unterminated-string.nra:3:16
+  |
+3 | let greeting = "hello;
+  |                ^ this string is not closed
+  |                       - the line ends here
+  |
+  = note: a string literal ends on the line where it starts
+help: close the string
+  |
+3 | let greeting = "hello";
+  |                      +
+
+error[E0104]: invalid string escape
+ --> $DIR/unterminated-string.nra:4:17
+  |
+4 | let folder = "C:\data";
+  |                 ^^ unknown escape
+  |
+  = note: the escapes are \n, \r, \t, \\, and \"
+help: to write a backslash, escape it
+  |
+4 | let folder = "C:\\data";
+  |                 ~~
+
+Some errors have detailed explanations: E0103, E0104.
+For more information about an error, try `neura explain E0103`.

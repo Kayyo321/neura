@@ -1,0 +1,11 @@
+// The parser recovers at each statement and class member and reports every
+// syntax error: an unexpected token (E0202), a missing expression (E0204),
+// a keyword used as a name, and a member without a type or value (E0205).
+let scale = func(int value) -> int => value * 2;
+let count: int32 = ;
+let in = 3;
+let Box = class (
+    export let size;
+    export let label: string = "box";
+);
+let fine = 1;

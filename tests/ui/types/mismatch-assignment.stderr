@@ -1,0 +1,9 @@
+error[E0403]: expected int32, got string
+ --> $DIR/mismatch-assignment.nra:4:13
+  |
+3 |     let total = 0;
+  |         ----- 'total' is declared here with type int32
+4 |     total = "zero";
+  |             ^^^^^^ expected int32, found string
+
+For more information about this error, try `neura explain E0403`.

@@ -1,0 +1,11 @@
+error[E0302]: duplicate declaration of 'area'
+ --> $DIR/duplicate-declaration.nra:4:5
+  |
+3 | let area = func(side: int) -> int => side * side;
+  |     ---- 'area' is first declared here
+4 | let area = func(width: int, height: int) -> int => width * height;
+  |     ^^^^ 'area' is declared again here
+  |
+  = help: to overload 'area', write the alternatives in one declaration, joined with 'or func'
+
+For more information about this error, try `neura explain E0302`.

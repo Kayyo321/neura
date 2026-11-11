@@ -1,0 +1,4 @@
+// A function without a result type that returns a value (E0406).
+let label = func(text: string) {
+    return text;
+};

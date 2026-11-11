@@ -42,6 +42,8 @@ private:
     // Set when skipping after an error reached the end of the file. Later
     // errors there only restate that something was left open.
     bool skipped_to_end_ = false;
+    // Set when error_limit() errors have been recorded.
+    bool stopped_ = false;
     unsigned block_depth_ = 0;
     std::optional<Span> untyped_variadic_;
 
@@ -119,9 +121,9 @@ private:
         const auto& next = current();
         const bool later_line = cursor_ > 0 &&
             (next.kind == TokenKind::End || next.span.line > tokens_[cursor_ - 1].span.line);
-        auto error = Diagnostic(later_line ? after_previous() : next.span, "expected " + what);
+        auto error = Diagnostic(later_line ? after_previous() : next.span, "expected " + what).with_code("E0202");
         const auto open = token.empty() ? std::nullopt : unclosed(token);
-        error.with_code(open ? "E0203" : "E0202");
+        if (open) error.with_code("E0203");
         if (later_line) {
             error.label("expected " + what + " here");
             error.label(next.span, found_text(next));
@@ -139,10 +141,13 @@ private:
     // to a keyword that begins the next statement. A speculative parse
     // never reaches here: it catches errors itself.
     void recover(const Diagnostic& error, std::size_t start) {
+        // Past the limit, the combined error unwinds through every level.
+        if (stopped_) throw;
         if (!(skipped_to_end_ && error.span.offset >= tokens_.back().span.offset)) errors_.push_back(error);
         if (errors_.size() >= error_limit()) {
             auto first = errors_.front();
             for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
+            stopped_ = true;
             throw first;
         }
         std::size_t depth = 0;
@@ -604,7 +609,9 @@ private:
                 result.initializer = expression();
             }
         } else if (!result.type) {
-            throw Diagnostic(current().span, "expected a type annotation or an initializer").with_code("E0205");
+            throw Diagnostic(current().span, "expected a type annotation or an initializer").with_code("E0205")
+                .label("'" + result.name + "' needs a type, a value, or both")
+                .help("write ': T' after the name for its type, and '= value' for its value");
         }
 
         // Aggregate members and overload groups can end at a block body.
@@ -1238,7 +1245,9 @@ private:
         if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
         if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);
         if (token.kind == TokenKind::String) return token_expression(Expr::Kind::String);
-        throw Diagnostic(token.span, "expected an expression").with_code("E0204");
+        throw Diagnostic(token.span, "expected an expression").with_code("E0204")
+            .label(token.kind == TokenKind::End ? std::string("expected an expression before the end of the file")
+                                                : "expected an expression, found '" + token.text + "'");
     }
 
     Expr token_expression(Expr::Kind kind) {

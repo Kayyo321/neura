@@ -900,7 +900,7 @@ SymbolId Lowering::qualified(const std::string& name, const Span& span, const Co
         auto error = Diagnostic(span, "unknown name '" + parts.front() + "'").with_code("E0304")
             .label("not found in this scope");
         suggest_name(error, Span{span.file, span.line, span.column, span.offset, parts.front().size()}, parts.front(),
-                     visible_names(context), "a declaration");
+                     visible_names(context), "a binding");
         throw error;
     }
     for (std::size_t i = 1; i < parts.size(); ++i) {
@@ -1733,8 +1733,24 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
         throw Diagnostic(decl.span, "no inherited member named '" + decl.name + "'").with_code("E0502");
     }
     if (inherited == no_symbol) return;
-    if (!decl.override_member)
-        throw Diagnostic(decl.span, "inherited member '" + decl.name + "' requires .override").with_code("E0502");
+    if (!decl.override_member) {
+        auto error = Diagnostic(decl.span, "inherited member '" + decl.name + "' requires .override").with_code("E0502")
+            .label("replaces the inherited '" + decl.name + "'")
+            .label(name_span(inherited), "'" + decl.name + "' is inherited from here");
+        // The keyword of the declaration, `let` or `const`, takes `.override`.
+        if (const auto text = source_text(decl.span); text && user_source(decl.span.file)) {
+            const auto keyword = decl.constant ? std::string("const") : std::string("let");
+            for (std::size_t at = 0; (at = text->find(keyword, at)) != std::string::npos; at += keyword.size()) {
+                const bool word = (at == 0 || text->at(at - 1) == ' ') && at + keyword.size() < text->size() &&
+                                  text->at(at + keyword.size()) == ' ';
+                if (!word) continue;
+                if (const auto after = source_span(decl.span.file, decl.span.offset + at + keyword.size(), 0))
+                    error.suggest("declare it as an override", *after, ".override", Applicability::MaybeIncorrect);
+                break;
+            }
+        }
+        throw error;
+    }
     if (!decl.exported) throw Diagnostic(decl.span, "an override must be exported").with_code("E0502");
     if (symbol(owner).kind == SymbolKind::Class && symbol(id).kind != SymbolKind::Function)
         throw Diagnostic(decl.span, "class field overrides are not supported").with_code("E0502");
@@ -2495,8 +2511,9 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
     }
     const auto no_match = [&] {
         auto error = Diagnostic(expr.span, "no matching overload of '" + symbol(group).name + "'").with_code("E0408")
-            .label("no alternative of '" + symbol(group).name + "' accepts " + plural(count, "argument") +
-                   (count == 0 ? "" : " of these types"));
+            .label("no alternative of '" + symbol(group).name + "' accepts " +
+                   (count == 0 ? std::string("no arguments") : count == 1 ? std::string("this argument")
+                                                                           : std::string("these arguments")));
         constexpr std::size_t shown = 3;
         for (std::size_t i = 0; i < branches.size() && i < shown; ++i) {
             std::string signature;
@@ -2903,7 +2920,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         if (id == no_symbol) {
             auto error = Diagnostic(expr.span, "unknown name '" + expr.text + "'").with_code("E0304")
                 .label("not found in this scope");
-            suggest_name(error, expr.span, expr.text, visible_names(context), "a declaration");
+            suggest_name(error, expr.span, expr.text, visible_names(context), "a binding");
             throw error;
         }
         if (symbol(id).kind == SymbolKind::Function &&

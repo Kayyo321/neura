@@ -341,14 +341,22 @@ private:
             advance_text();
         }
         // The string runs to the end of its line: label the opening quote,
-        // and offer the closing one where the line ends.
+        // and offer the closing one where the line ends, before a final ';'
+        // that more likely ends the statement than the text.
         Span end = location();
+        auto close = end;
+        auto last = close.offset;
+        while (last > start.offset + 1 && (source_[last - 1] == ' ' || source_[last - 1] == '\t')) --last;
+        if (last > start.offset + 1 && source_[last - 1] == ';') {
+            close.column -= close.offset - (last - 1);
+            close.offset = last - 1;
+        }
         start.length = 1;
         report(Diagnostic(start, "unterminated string literal").with_code("E0103")
             .label("this string is not closed")
             .label(end, "the line ends here")
             .note("a string literal ends on the line where it starts")
-            .suggest("close the string", end, "\"", Applicability::MaybeIncorrect));
+            .suggest("close the string", close, "\"", Applicability::MaybeIncorrect));
         throw Skipped{};
     }
 

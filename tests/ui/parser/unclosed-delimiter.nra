@@ -1,0 +1,6 @@
+// A parenthesis that is never closed (E0203): the error is labelled at the
+// opening '(' and the parser goes on with the next statement.
+let total = func(a: int, b: int) -> int {
+    let sum = (a + b;
+    return sum;
+};

@@ -1,0 +1,9 @@
+error[E0403]: expected bool, got int32
+ --> $DIR/mismatch-return.nra:4:12
+  |
+3 | let ready = func(count: int) -> bool {
+  |                                 ---- expected because of this result type
+4 |     return count;
+  |            ^^^^^ expected bool, found int32
+
+For more information about this error, try `neura explain E0403`.

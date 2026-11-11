@@ -1,0 +1,10 @@
+error[E0602]: a value of type func(int32) -> void is not transferable, so it cannot be given to a spawned task
+  --> $DIR/not-transferable.nra:13:21
+   |
+10 |         tally.count = tally.count + amount;
+   |         ----- a function value of this type captures a value of type Tally here
+...
+13 |         spawn apply(add);
+   |                     ^^^ not transferable
+
+For more information about this error, try `neura explain E0602`.

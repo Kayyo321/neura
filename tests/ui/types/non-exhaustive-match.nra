@@ -1,0 +1,8 @@
+// A match that leaves variants out (E0410): every missing variant is
+// listed, and the help adds an arm for each.
+let Light = enum (Red, Yellow, Green);
+let wait = func(light: Light) -> int {
+    return match (light) {
+        Light.Red => 30,
+    };
+};

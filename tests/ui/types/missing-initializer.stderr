@@ -1,0 +1,12 @@
+error[E0404]: a local binding requires an initializer
+ --> $DIR/missing-initializer.nra:4:5
+  |
+4 |     let total: int;
+  |     ^^^^^^^^^^^^^^^ 'total' is declared without a value
+  |
+help: give it an initial value
+  |
+4 |     let total: int = <value>;
+  |                   ++++++++++
+
+For more information about this error, try `neura explain E0404`.

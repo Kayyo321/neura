@@ -1,0 +1,8 @@
+error[E0203]: expected ')'
+ --> $DIR/unclosed-delimiter.nra:4:21
+  |
+4 |     let sum = (a + b;
+  |                     ^ expected ')', found ';'
+  |               - unclosed '(' opened here
+
+For more information about this error, try `neura explain E0203`.

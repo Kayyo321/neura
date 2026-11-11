@@ -1,0 +1,10 @@
+error[E0405]: function may exit without returning int32
+ --> $DIR/missing-return.nra:3:32
+  |
+3 | let sign = func(value: int) -> int {
+  |                                ^^^ the function must return int32 on every path
+  |     ---- in this function
+  |
+  = note: a path through the body ends without 'return' or a trap
+
+For more information about this error, try `neura explain E0405`.
