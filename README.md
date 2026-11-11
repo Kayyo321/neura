@@ -42,62 +42,61 @@ curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases
 
 It downloads the archive for your machine, verifies it, and installs `neura` under your home directory without `sudo`. That one installation compiles, runs, tests, and decompiles Neura programs. [Install and update](docs/Install.md) lists the supported platforms and describes each step, `neura update`, and `neura uninstall`.
 
+## Your first program
+
+Save this as `hello.nra`:
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let HelloWorld = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("Hello, World!");
+        return program.ExitCode.Ok;
+    }
+);
+```
+
+```text
+Hello, World!
+```
+
+Compile it to an image and run the image:
+
+```sh
+neura build hello.nra -o hello.nvr
+neura run hello.nvr
+```
+
+The `.nvr` image contains the circuit and execution information needed by the Neura Virtual Machine. The same installation does the rest:
+
+| Command | What it does |
+| --- | --- |
+| `neura check hello.nra` | Checks the source without building. |
+| `neura test tests.nra` | Runs a test module. |
+| `neura build --native hello.nra -o hello` | Packages the image as a native executable that runs without Neura installed (Linux). |
+| `neura decompile hello.nvr` | Recovers readable source from an image. |
+| `neura doctor` | Checks the installation and names what optional features need. |
+| `neura update` | Installs a newer release. |
+
+[Tooling](docs/lang/Tooling.md) describes every command, and the [tutorial](docs/lang/Tutorial.md) introduces the language.
+
 ## Build from source
 
-Clone the repository with its submodule. [`third_party/neura-libclang`](https://github.com/Kayyo321/neura-libclang) holds the libclang C API headers that C header imports are built against, and the build stops with the commands to fetch it if it is missing.
+Installing a release is the way to use Neura. Build from source to work on Neura itself, or on a platform that has no release archive. [CONTRIBUTING.md](CONTRIBUTING.md#set-up-a-checkout) covers the checkout, its submodule, and the build's dependencies in full. In short, with CMake 3.20 or newer, C and C++20 compilers, and the libffi development package:
 
 ```sh
 git clone --recursive https://github.com/Kayyo321/neura.git
-```
-
-After a plain `git clone`, fetch the submodule from the checkout:
-
-```sh
-git submodule update --init --recursive
-```
-
-For a shallow clone, fetch the submodule shallowly as well:
-
-```sh
-git clone --depth 1 --recursive --shallow-submodules https://github.com/Kayyo321/neura.git
-```
-
-In a shallow checkout made without `--recursive`, fetch the submodule with:
-
-```sh
-git submodule update --init --recursive --depth 1
-```
-
-After pulling a change that moves the submodule to a new commit, update your checkout of it:
-
-```sh
-git submodule update --init --recursive
-```
-
-The build needs the libffi development package, which the runner uses to call native code, and finds it with pkg-config. Neura loads libclang when it runs instead of linking it, so the build does not need the libclang development package; importing C headers needs the libclang shared library from LLVM 14 or newer (19 or newer recommended) and the Clang builtin headers of the same version, such as `stddef.h` and `stdarg.h`, which C library headers include. On Debian and Ubuntu:
-
-```sh
-sudo apt install libclang1-19 libclang-common-19-dev libffi-dev
-```
-
-Neura looks for libclang under its usual names. Set `NEURA_LIBCLANG` to the library's path to choose a specific one.
-
-Build the compiler with CMake 3.20 or newer and C and C++20 compilers:
-
-```sh
+cd neura
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
+build/neura --version
 ```
 
-Compile and run the hello world example:
-
-```sh
-build/neura build examples/hello-world/hello-world.nra -o hello.nvr
-build/neura run hello.nvr
-```
-
-The `.nvr` image contains the circuit and execution information needed by the Neura Virtual Machine. See [Tooling](docs/lang/Tooling.md) for checking source, inspecting NeuraIR, testing programs, and decompiling images.
+A source build reports its version as `<version>-dev`, and `neura update` does not manage it.
 
 ## Documentation
 

@@ -3,7 +3,9 @@
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-A release of Neura is one archive for each supported platform. The archive holds the `neura` executable, the standard library, the native launchers where the platform has them, and an `install.sh` that installs them for the current user. Three commands of the installed tool manage the result: `neura doctor` checks it, `neura update` replaces it with a newer release, and `neura uninstall` removes it. Installs made some other way, such as a source build or a package manager, are not managed by `neura update`.
+Install Neura from a release. A release is a prebuilt archive for each supported platform, and [one command](#install-with-one-command) downloads, verifies, and installs the one for your machine. Nothing is compiled on your machine, and the installation holds everything Neura does: compiling, running, testing, and decompiling programs, and packaging native executables.
+
+The archive holds the `neura` executable, the standard library, the native launchers, and an `install.sh` that installs them for the current user. Three commands of the installed tool manage the result: `neura doctor` checks it, `neura update` replaces it with a newer release, and `neura uninstall` removes it. A [build from source](#build-from-source) is for working on Neura itself and for platforms without an archive; `neura update` does not manage one.
 
 [Tooling](Tooling) covers the compiler commands. This page covers the tool itself.
 
