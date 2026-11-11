@@ -5,7 +5,7 @@ error[E0530]: this field initializer of a fields-only anonymous class never runs
   |                                                       ^ never evaluated
   |                            ------------------------------ this class is not the annotation of a binding that 'new' initializes
   |
-  = note: a fields-only anonymous class takes its field initializers from the annotation of the 'let' or 'const' binding that a 'new' initializes; written anywhere else, they would never run
+  = note: a fields-only anonymous class takes its field initializers from the annotation of the 'let', 'const', or 'last' binding that a 'new' initializes; written anywhere else, they would never run
   = help: remove the initializer, and write it where a binding declared with this class is initialized with 'new'
 
 For more information about this error, try `neura explain E0530`.

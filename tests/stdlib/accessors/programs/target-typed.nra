@@ -68,6 +68,9 @@ let Main = module:program.Entry (
         b.count++;
         console.print_line(a.count.to_string() + " " + b.count.to_string());
 
+        last point: class (export let x: int = 1; export let y: int = 2;) = new;
+        console.print_line("point " + point.x.to_string() + "," + point.y.to_string());
+
         let ticket: class (
             export const prefix = "T-";
             export last id: int;

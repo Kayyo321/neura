@@ -18,5 +18,6 @@ set count 6
 get count 1
 get count 6
 1 6
+point 1,2
 Account(kay)
 T-seven 7 kay

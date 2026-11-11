@@ -4954,8 +4954,8 @@ IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& contex
                     .label("never evaluated")
                     .label(syntax.span, "this class is not the annotation of a binding that 'new' initializes")
                     .note("a fields-only anonymous class takes its field initializers from the annotation of the "
-                          "'let' or 'const' binding that a 'new' initializes; written anywhere else, they would "
-                          "never run")
+                          "'let', 'const', or 'last' binding that a 'new' initializes; written anywhere else, they "
+                          "would never run")
                     .help("remove the initializer, and write it where a binding declared with this class is "
                           "initialized with 'new'");
         }
@@ -5103,8 +5103,8 @@ IrNode Lowering::construct(const Expr& expr, Context& context, const IrType* exp
                 .label("constructs a fields-only anonymous class");
             if (origin && !origin->span.file.empty()) error.label(origin->span, origin->text);
             error.note("a fields-only anonymous class takes its field initializers from the class body written in "
-                       "the annotation of the 'let' or 'const' binding that 'new' initializes, and here the type "
-                       "arrives without that body");
+                       "the annotation of the 'let', 'const', or 'last' binding that 'new' initializes, and here the "
+                       "type arrives without that body");
             error.help("declare a binding with the class and initialize it with 'new', as in "
                        "'let value: class ( ... ) = new;', or write the body after 'new', as in "
                        "'new class ( ... )()'");
