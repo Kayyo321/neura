@@ -98,7 +98,8 @@ std::string describe(const TierStatistics& s) {
     }
     if (!s.jit_mode.empty()) {
         if (!s.jit_off.empty() && s.jit_compiled == 0 && s.jit_failures.empty()) {
-            out += "tier: jit " + s.jit_mode + ", off: " + s.jit_off + "\n";
+            out += s.jit_mode == "off" ? std::string("tier: jit off\n")
+                                       : "tier: jit " + s.jit_mode + ", not used: " + s.jit_off + "\n";
         } else {
             std::uint64_t failed = 0;
             for (const auto& [reason, count] : s.jit_failures) failed += count;
