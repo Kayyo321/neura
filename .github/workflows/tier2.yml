@@ -169,10 +169,17 @@ jobs:
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
 
+      # Two tests cannot hold in this configuration and are left out.
+      # native-install requires the default launcher to need only the C
+      # library, and a sanitized launcher also needs the sanitizer runtime.
+      # native-container rewrites an executable it has just run, and the leak
+      # checker's helper process can still hold that file open ("Text file
+      # busy").
       - name: Test
         run: >
           ctest --test-dir build --parallel "$(nproc)" --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml --timeout 3600
+          -E "^(native-install|native-container)$"
 
       - name: Upload the build log and the test report
         if: ${{ !cancelled() }}
