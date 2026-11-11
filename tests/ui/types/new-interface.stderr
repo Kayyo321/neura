@@ -1,0 +1,10 @@
+error[E0420]: target-typed 'new' needs a concrete class type here
+ --> $DIR/new-interface.nra:6:20
+  |
+6 | let shape: Shape = new;
+  |                    ^^^ this would construct Shape, which is an interface
+  |            ----- expected because of this type
+  |
+  = help: name the class to construct, as in 'new T(...)'
+
+For more information about this error, try `neura explain E0420`.

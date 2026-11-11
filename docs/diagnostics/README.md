@@ -4,7 +4,7 @@ Each error that the compiler reports has a code: `E` and four digits, whose hund
 
 A page states the rule, shows a program that breaks it with the error it gets, and shows the program fixed. The examples are compiled by the `doc-examples` test: a failing example must fail with its code, and a fixed one must compile. A few errors cannot be caused by a single source file; their pages say why, and show only the fix.
 
-E0420, E0510, and the E09xx range (tags) are reserved and not in use.
+E0510 and the E09xx range (tags) are reserved and not in use.
 
 ## E01xx: Lexer
 
@@ -81,6 +81,7 @@ Errors about types, values, calls, and statements.
 | [E0417](E0417.md) | wrong number of type arguments |
 | [E0418](E0418.md) | type argument does not satisfy its bound |
 | [E0419](E0419.md) | explicit type arguments required |
+| [E0420](E0420.md) | target-typed new without a class to construct |
 | [E0421](E0421.md) | not a type of the required kind |
 | [E0422](E0422.md) | expected a value |
 | [E0423](E0423.md) | expression is not callable |
@@ -95,6 +96,9 @@ Errors about types, values, calls, and statements.
 | [E0432](E0432.md) | invalid for loop header |
 | [E0433](E0433.md) | invalid overload group |
 | [E0434](E0434.md) | function without a body |
+| [E0435](E0435.md) | parenthesized type after new |
+| [E0436](E0436.md) | destructuring count mismatch |
+| [E0437](E0437.md) | destructuring annotation is not a tuple type |
 
 ## E05xx: Classes and lifecycle
 
@@ -115,6 +119,13 @@ Errors about inheritance, interfaces, construction, and destruction.
 | [E0512](E0512.md) | invalid cast declaration |
 | [E0513](E0513.md) | reference field not definitely bound |
 | [E0514](E0514.md) | invalid destroy |
+| [E0530](E0530.md) | anonymous class field initializer that never runs |
+| [E0531](E0531.md) | anonymous class uses an enclosing type parameter |
+| [E0532](E0532.md) | unexported field in a fields-only anonymous class |
+| [E0533](E0533.md) | new without the field initializers of an anonymous class |
+| [E0534](E0534.md) | anonymous class copies from separately compiled modules |
+| [E0535](E0535.md) | untyped field in a fields-only anonymous class |
+| [E0536](E0536.md) | const field in a fields-only anonymous class |
 
 ## E06xx: Concurrency
 

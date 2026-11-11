@@ -1,0 +1,10 @@
+error[E0420]: target-typed 'new' needs a concrete class type here
+ --> $DIR/new-without-expected-type.nra:5:14
+  |
+5 | let origin = new;
+  |              ^^^ nothing here gives 'new' a type to construct
+  |
+  = note: 'new' without a class takes the type that its value must have: the annotation of the binding or field it initializes, the place it is assigned to, the declared result type of a 'return', the parameter of a call argument, or the element type of a typed collection
+  = help: name the class to construct, as in 'new T(...)'
+
+For more information about this error, try `neura explain E0420`.

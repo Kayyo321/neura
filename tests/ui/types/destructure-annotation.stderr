@@ -1,0 +1,9 @@
+error[E0437]: a destructuring annotation must be a tuple type
+ --> $DIR/destructure-annotation.nra:2:18
+  |
+2 | let [low, high]: int = 1, 9;
+  |                  ^^^ expected a tuple type with 2 elements
+  |
+  = help: write one type per name in brackets, as in 'let [a, b]: [int, string] = ...'
+
+For more information about this error, try `neura explain E0437`.

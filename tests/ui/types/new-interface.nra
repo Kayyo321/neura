@@ -1,0 +1,6 @@
+// A target-typed 'new' whose expected type is an interface (E0420),
+// labelled at the annotation that gives it.
+let Shape = interface (
+    let area = func() -> int;
+);
+let shape: Shape = new;

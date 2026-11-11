@@ -1,0 +1,15 @@
+error[E0435]: a type after 'new' is not parenthesized
+ --> $DIR/new-parenthesized-type.nra:6:14
+  |
+6 | let origin = new (Point)();
+  |              ^^^^^^^^^^^ the class cannot be written in parentheses here
+  |                  - this '(' begins the arguments of a target-typed 'new'
+  |                         - a second argument list follows
+  |
+  = help: where the type is expected, the class can be left out: 'new(x)'
+help: write the class without parentheses
+  |
+6 | let origin = new Point();
+  |                  ~~~~~
+
+For more information about this error, try `neura explain E0435`.

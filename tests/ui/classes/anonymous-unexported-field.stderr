@@ -1,0 +1,13 @@
+error[E0532]: field 'x' of a fields-only anonymous class is not exported
+ --> $DIR/anonymous-unexported-field.nra:3:23
+  |
+3 | let point: class (let x: int = 0;) = new;
+  |                       ^ nothing can read or write 'x'
+  |
+  = note: only the methods of a class can use its unexported fields, and this class has none
+help: export the field
+  |
+3 | let point: class (export let x: int = 0;) = new;
+  |                   +++++++
+
+For more information about this error, try `neura explain E0532`.

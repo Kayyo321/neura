@@ -1,0 +1,10 @@
+error[E0531]: an anonymous class cannot use a type parameter of an enclosing declaration
+ --> $DIR/anonymous-type-parameter.nra:4:38
+  |
+4 |     let box: class (export let item: T;) = new;
+  |                                      ^ the type of 'item' uses a type parameter
+  |
+  = note: an anonymous class is not generic, and it is not part of the generic declaration that encloses it
+  = help: declare a generic class, as in 'let Box = class<T> ( ... );', and use 'Box<T>' here
+
+For more information about this error, try `neura explain E0531`.
