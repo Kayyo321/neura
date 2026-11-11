@@ -4,11 +4,16 @@
 /// module; each function runs the built-in C kernel it names, which keeps the results, errors, and traps of the
 /// Neura code it replaces.
 export let Text = module (
-    /// @brief Strings.index_of_from (and index_of with from = 0): the first occurrence at or after `from`, or
-    /// -1; an empty needle matches at `from`. `from` outside 0 through the length gives
-    /// NEURA_TRAP_OFFSET_OUT_OF_RANGE and one on a continuation byte NEURA_TRAP_NOT_CHARACTER_BOUNDARY.
-    /// Step charge: `1 + s / 16`.
-    export let index_of = func(s: string, needle: string, from: int64) -> int64
+    /// @brief One window of Strings.index_of_from (and index_of with from = 0): the first occurrence that
+    /// starts in the window, at or after `from` and before `from + limit` (a limit below 1 counts as 1) moved
+    /// forward to a character boundary. The result is the occurrence, or -1 when there is none in the rest of
+    /// the text, or -2 - e when there is none in the window and later candidates remain, where e is the
+    /// window's end, a boundary to search on from. An empty needle matches at `from`. `from` outside 0 through
+    /// the length gives NEURA_TRAP_OFFSET_OUT_OF_RANGE and one on a continuation byte
+    /// NEURA_TRAP_NOT_CHARACTER_BOUNDARY. The wrapper doubles the window on each call, so a search is charged
+    /// in proportion to the distance it covers.
+    /// Step charge: `1 + min(s - from, limit + needle) / 16`.
+    export let index_of = func(s: string, needle: string, from: int64, limit: int64) -> int64
         kernel("neura.text.index_of", 1);
 
     /// @brief Strings.last_index_of: the last occurrence, or -1; an empty needle matches at the length.
@@ -67,15 +72,16 @@ export let Text = module (
     /// @brief Strings.replace (limit 2147483647) and replace_first (limit 1): replaces up to `limit`
     /// non-overlapping occurrences, left to right; a limit below 1 replaces nothing, as Strings.replace_up_to
     /// does. An empty target gives NEURA_TRAP_EMPTY_TARGET.
-    /// Step charge: `1 + s / 16 + s / target * replacement / 64`.
+    /// Step charge: `1 + s / 16 + min(s / target, limit) * replacement / 64`.
     export let replace = func(s: string, target: string, replacement: string, limit: int64) -> string
         kernel("neura.text.replace", 1);
 
-    /// @brief The scan step of Strings.split and split_limit: the offset of the first separator at or after
-    /// `start`, or -1 (Strings.find, unchecked: a `start` past the end finds nothing). An empty separator gives
-    /// NEURA_TRAP_EMPTY_SEPARATOR. Strings never passes a negative `start`; the kernel answers one with
-    /// NEURA_TRAP_OFFSET_OUT_OF_RANGE instead of reading outside the text.
-    /// Step charge: `1 + (s - start) / 16`.
-    export let split_next = func(s: string, separator: string, start: int64) -> int64
-        kernel("neura.text.split_next", 1);
+    /// @brief Strings.split, split_limit, and lines: the offsets of the first `limit` non-overlapping
+    /// occurrences of the separator, left to right (none for a limit below 1). The offsets of the first ones
+    /// are written to `offsets`, as many as it holds, and the result is the number found. The wrapper calls it
+    /// with an empty list to count, then with a list of that length. An empty separator gives
+    /// NEURA_TRAP_EMPTY_SEPARATOR.
+    /// Step charge: `1 + (s + offsets) / 16`.
+    export let split = func(s: string, separator: string, limit: int64, offsets: int64[list]) -> int64
+        kernel("neura.text.split", 1);
 );

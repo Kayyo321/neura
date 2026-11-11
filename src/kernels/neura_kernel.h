@@ -20,6 +20,10 @@
  *  - Charged in advance. Each kernel declares a step charge, a formula over
  *    its arguments (below) that the runtime evaluates and charges before the
  *    call, so a step limit fires at the same point in every execution mode.
+ *    The charge counts the most work the arguments allow (the bytes or
+ *    elements the call can read or write, not the whole of a text it cannot
+ *    reach), and the kernel's worst-case work is within a constant factor of
+ *    its charge, so no call does unbounded work for a bounded charge.
  *    A kernel whose work depends on the data beyond its argument sizes also
  *    takes a neura_work and reports the extra work it consumed (below).
  *

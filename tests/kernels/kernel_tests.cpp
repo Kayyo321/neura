@@ -423,10 +423,28 @@ std::string replaced(const std::string& s, const std::string& target, const std:
     return status == NEURA_OK ? out.str() : "status " + std::to_string(status);
 }
 
-std::int64_t index_of(const std::string& s, const std::string& needle, std::int64_t from = 0) {
+// One window of neura.text.index_of: the raw result, or -1000 - status.
+std::int64_t window_of(const std::string& s, const std::string& needle, std::int64_t from, std::int64_t limit) {
     std::int64_t result = -99;
-    neura_status status = neura_k_text_index_of(text(s), text(needle), from, &result);
+    neura_status status = neura_k_text_index_of(text(s), text(needle), from, limit, &result);
     return status == NEURA_OK ? result : -1000 - status;
+}
+
+// Strings.search: windows that start at `first` and double, as the wrapper
+// calls them, or -1000 - status.
+std::int64_t index_of(const std::string& s, const std::string& needle, std::int64_t from = 0,
+                      std::int64_t first = 128) {
+    std::int64_t limit = first;
+    for (;;) {
+        std::int64_t found = -99;
+        neura_status status = neura_k_text_index_of(text(s), text(needle), from, limit, &found);
+        if (status != NEURA_OK) return -1000 - status;
+        if (found >= -1) return found;
+        std::int64_t end = -2 - found;
+        if (end <= from || end > static_cast<std::int64_t>(s.size())) return -5000;  // no progress
+        from = end;
+        limit *= 2;
+    }
 }
 
 std::int64_t count_of(const std::string& s, const std::string& target) {
@@ -435,16 +453,46 @@ std::int64_t count_of(const std::string& s, const std::string& target) {
     return status == NEURA_OK ? result : -1000 - status;
 }
 
-std::vector<std::string> split(const std::string& s, const std::string& separator) {
-    // Strings.split_pieces with the scan kernel.
+// Strings.separators: count with an empty list, then fill a list of that length.
+std::vector<std::int64_t> separators(const std::string& s, const std::string& separator, std::int64_t limit,
+                                     neura_status* status) {
+    std::int64_t count = -99;
+    *status = neura_k_text_split(text(s), text(separator), limit, neura_mut_i64{nullptr, 0}, &count);
+    if (*status != NEURA_OK) return {};
+    std::vector<std::int64_t> offsets(static_cast<std::size_t>(count), -7);
+    std::int64_t again = -99;
+    *status = neura_k_text_split(text(s), text(separator), count, neura_mut_i64{offsets.data(), offsets.size()},
+                                 &again);
+    if (again != count) *status = NEURA_NEED_CAPACITY;  // a mismatch the tests report
+    return offsets;
+}
+
+// Strings.split_pieces with the split kernel.
+std::vector<std::string> split(const std::string& s, const std::string& separator,
+                               std::int64_t limit = 2147483647) {
+    neura_status status = NEURA_OK;
+    std::vector<std::int64_t> offsets = separators(s, separator, limit - 1, &status);
+    if (status != NEURA_OK) return {"status " + std::to_string(status)};
     std::vector<std::string> pieces;
     std::int64_t start = 0;
-    for (;;) {
-        std::int64_t found = -1;
-        if (neura_k_text_split_next(text(s), text(separator), start, &found) != NEURA_OK) return {"status"};
-        if (found < 0) break;
+    for (std::int64_t found : offsets) {
         pieces.push_back(s.substr(start, found - start));
         start = found + static_cast<std::int64_t>(separator.size());
+    }
+    pieces.push_back(s.substr(start));
+    return pieces;
+}
+
+// Strings.split_pieces as the Neura code wrote it, on std::string::find.
+std::vector<std::string> split_reference(const std::string& s, const std::string& separator,
+                                         std::int64_t limit = 2147483647) {
+    std::vector<std::string> pieces;
+    std::size_t start = 0;
+    for (std::int64_t remaining = limit - 1; remaining > 0; --remaining) {
+        std::size_t found = s.find(separator, start);
+        if (found == std::string::npos) break;
+        pieces.push_back(s.substr(start, found - start));
+        start = found + separator.size();
     }
     pieces.push_back(s.substr(start));
     return pieces;
@@ -554,23 +602,75 @@ int text_suite() {
     CHECK(split("", ",") == (std::vector<std::string>{""}));
     CHECK(split(",", ",") == (std::vector<std::string>{"", ""}));
     CHECK(split("a::b:::c", "::") == (std::vector<std::string>{"a", "b", ":c"}));
-    CHECK(split("abc", "") == (std::vector<std::string>{"status"}));
-    std::int64_t found = 0;
-    CHECK(neura_k_text_split_next(text("abc"), text("c"), 4, &found) == NEURA_OK);
-    CHECK_EQ(found, -1);
-    CHECK(neura_k_text_split_next(text("abc"), text("c"), -1, &found) == NEURA_TRAP_OFFSET_OUT_OF_RANGE);
+    CHECK(split("abc", "") == (std::vector<std::string>{"status " + std::to_string(NEURA_TRAP_EMPTY_SEPARATOR)}));
+    CHECK(split("abc", "", 1) == (std::vector<std::string>{"status " + std::to_string(NEURA_TRAP_EMPTY_SEPARATOR)}));
+    CHECK(split("a,b,c", ",", 1) == (std::vector<std::string>{"a,b,c"}));
+    CHECK(split("a,b,c", ",", 2) == (std::vector<std::string>{"a", "b,c"}));
+    CHECK(split("a,b,c", ",", 3) == (std::vector<std::string>{"a", "b", "c"}));
+    CHECK(split("a,b,c", ",", 9) == (std::vector<std::string>{"a", "b", "c"}));
+    CHECK(split("aaa", "aa") == (std::vector<std::string>{"", "a"}));
+    CHECK(split(euro + "x" + euro, euro) == (std::vector<std::string>{"", "x", ""}));
+    {
+        // The count stops at the limit; a short list receives the first offsets only.
+        std::int64_t count = -1;
+        CHECK(neura_k_text_split(text("a,b,c,d"), text(","), 2, neura_mut_i64{nullptr, 0}, &count) == NEURA_OK);
+        CHECK_EQ(count, 2);
+        CHECK(neura_k_text_split(text("a,b,c,d"), text(","), 0, neura_mut_i64{nullptr, 0}, &count) == NEURA_OK);
+        CHECK_EQ(count, 0);
+        CHECK(neura_k_text_split(text("a,b,c,d"), text(","), -3, neura_mut_i64{nullptr, 0}, &count) == NEURA_OK);
+        CHECK_EQ(count, 0);
+        std::int64_t one[1] = {-7};
+        CHECK(neura_k_text_split(text("a,b,c,d"), text(","), 9, neura_mut_i64{one, 1}, &count) == NEURA_OK);
+        CHECK_EQ(count, 3);
+        CHECK_EQ(one[0], 1);
+        CHECK(neura_k_text_split(text(","), text(",,"), 9, neura_mut_i64{one, 1}, &count) == NEURA_OK);
+        CHECK_EQ(count, 0);
+    }
 
-    // Against a plain byte search on random ASCII text, where the boundary rule never applies.
+    // The bounded window of index_of. Candidates start in [from, from + limit), with the end moved past
+    // continuation bytes; -2 - end means "none in the window, search on from end".
+    const std::string padded = "ab" + euro + "cd" + euro + "ef";  // euro at 2..4 and 7..9
+    CHECK_EQ(window_of(padded, "ef", 0, 3), -2 - 5);    // end 3 is inside the first euro: moved to 5
+    CHECK_EQ(window_of(padded, "ef", 5, 3), -2 - 10);   // end 8 moved to 10
+    CHECK_EQ(window_of(padded, "ef", 10, 1), 10);
+    CHECK_EQ(window_of(padded, "zz", 0, 3), -2 - 5);
+    CHECK_EQ(window_of(padded, "zz", 5, 100), -1);      // the window reaches the last candidate
+    CHECK_EQ(window_of(padded, "zz", 10, 1), -1);       // the only candidate left was in the window
+    CHECK_EQ(window_of(padded, "cd", 0, 6), 5);         // an occurrence starting at end - 1 is found
+    CHECK_EQ(window_of(padded, "cd", 0, 4), -2 - 5);    // and one starting at the end is not
+    CHECK_EQ(window_of(padded, "cd", 5, 0), 5);         // a limit below 1 counts as 1
+    CHECK_EQ(window_of(padded, "d", 5, -9), -2 - 6);
+    CHECK_EQ(window_of(padded, "", 8, 1), -1000 - NEURA_TRAP_NOT_CHARACTER_BOUNDARY);
+    CHECK_EQ(window_of(padded, "", 5, 1), 5);
+    CHECK_EQ(window_of(padded, padded, 0, 1), 0);
+    CHECK_EQ(window_of(padded, padded + "x", 0, 1), -1);
+    CHECK_EQ(window_of(padded, "a", 13, 1), -1000 - NEURA_TRAP_OFFSET_OUT_OF_RANGE);
+    CHECK_EQ(window_of(padded, "a", 12, 9223372036854775807), -1);  // from + limit does not overflow
+    for (std::int64_t first : {1, 2, 3, 128}) {
+        CHECK_EQ(index_of(padded, "ef", 0, first), 10);
+        CHECK_EQ(index_of(padded, euro + "e", 0, first), 7);
+        CHECK_EQ(index_of(padded, "q", 0, first), -1);
+    }
+
+    // Against a plain byte search on random ASCII text, where the boundary rule never applies. Two- and
+    // three-letter alphabets and needles up to 12 bytes reach both the periodic and the non-periodic paths of
+    // the two-way scan; the first window of 1 to 4 bytes makes the search cross many window ends.
     std::mt19937_64 random(20261111);
-    for (int round = 0; round < 3000; ++round) {
+    for (int round = 0; round < 6000; ++round) {
         std::string hay, needle;
-        std::size_t n = random() % 40, m = random() % 4 + 1;
-        for (std::size_t i = 0; i < n; ++i) hay += "ab"[random() % 2];
-        for (std::size_t i = 0; i < m; ++i) needle += "ab"[random() % 2];
+        const char* letters = round % 3 == 0 ? "abc" : "ab";
+        std::size_t alphabet = round % 3 == 0 ? 3 : 2;
+        std::size_t n = random() % 60, m = random() % (round % 2 == 0 ? 4 : 12) + 1;
+        for (std::size_t i = 0; i < n; ++i) hay += letters[random() % alphabet];
+        for (std::size_t i = 0; i < m; ++i) needle += letters[random() % alphabet];
+        if (round % 5 == 0 && n > m) needle = hay.substr(random() % (n - m), m);  // one that occurs
         std::size_t from = random() % (n + 1);
         std::size_t expected = hay.find(needle, from);
-        CHECK_EQ(index_of(hay, needle, static_cast<std::int64_t>(from)),
+        CHECK_EQ(index_of(hay, needle, static_cast<std::int64_t>(from), static_cast<std::int64_t>(random() % 4 + 1)),
                  expected == std::string::npos ? -1 : static_cast<std::int64_t>(expected));
+        std::int64_t limit = static_cast<std::int64_t>(random() % 6) + 1;
+        CHECK(split(hay, needle, limit) == split_reference(hay, needle, limit));
+        CHECK(split(hay, needle) == split_reference(hay, needle));
         std::size_t last = hay.rfind(needle);
         CHECK_EQ(neura_k_text_last_index_of(text(hay), text(needle)),
                  last == std::string::npos ? -1 : static_cast<std::int64_t>(last));
@@ -588,6 +688,23 @@ int text_suite() {
         CHECK_EQ(neura_k_text_compare(text(hay), text(needle)), hay < needle ? -1 : (hay == needle ? 0 : 1));
         if (failures > 20) break;
     }
+
+    // The inputs on which a naive search takes n * m steps: a run of one byte searched for a run of it with
+    // one other byte at an end. The two-way scan reads each byte a bounded number of times, so these take
+    // milliseconds; a quadratic search would take seconds and the test's timeout would catch it.
+    const std::string run(1u << 20, 'a');
+    const std::string tail_needle = std::string(1u << 14, 'a') + "b";
+    const std::string head_needle = "b" + std::string(1u << 14, 'a');
+    CHECK_EQ(index_of(run, tail_needle), -1);
+    CHECK_EQ(index_of(run + "b", tail_needle), static_cast<std::int64_t>(run.size() + 1 - tail_needle.size()));
+    CHECK_EQ(neura_k_text_last_index_of(text(run), text(head_needle)), -1);
+    CHECK_EQ(neura_k_text_last_index_of(text("b" + run), text(head_needle)), 0);
+    CHECK(neura_k_text_contains(text(run), text(tail_needle)) == 0);
+    CHECK_EQ(count_of(run, tail_needle), 0);
+    CHECK_EQ(count_of(run, std::string(1u << 14, 'a')), static_cast<std::int64_t>(run.size() >> 14));
+    CHECK_EQ(replaced(run, tail_needle, "x"), run);
+    CHECK_EQ(split(run, tail_needle).size(), 1u);
+    CHECK_EQ(split(run, "a").size(), run.size() + 1);
     return failures;
 }
 
@@ -975,6 +1092,68 @@ int table_suite() {
         const std::uint64_t n[] = {1024, 1024};
         CHECK_EQ(evaluate(sort->cost, n), 1u + 1024u * 11u / 8u);
     }
+    // Charges against work: every charge is at least 1 + touched / 64 steps for the elements the call can
+    // touch (no unbounded work for a few steps), and at most 1 + touched / 8 (no charge for work the call
+    // cannot do). Arguments are in parameter order: a length for a view or output, a value for a scalar.
+    struct Charge {
+        const char* name;
+        std::vector<std::uint64_t> args;
+        std::uint64_t touched;
+    };
+    const std::uint64_t mega = 1u << 20;
+    const std::vector<Charge> charges = {
+        {"neura.text.index_of", {mega, 4, 0, 128, 0}, 132},           // the first window
+        {"neura.text.index_of", {mega, 4, mega - 1000, 128, 0}, 132},  // a window far into the text
+        {"neura.text.index_of", {mega, 4, mega - 100, 128, 0}, 100},   // the rest is shorter than the window
+        {"neura.text.index_of", {mega, 4, 0, mega, 0}, mega},
+        {"neura.text.index_of", {mega, mega / 2, 0, 128, 0}, mega / 2 + 128},  // a long needle is read once
+        {"neura.text.last_index_of", {mega, 4}, mega},
+        {"neura.text.contains", {mega, mega / 2}, mega},
+        {"neura.text.count", {mega, 1, 0}, mega},
+        {"neura.text.split", {mega, 1, 2147483646, 0, 0}, mega},
+        {"neura.text.split", {mega, 1, 2147483646, mega, 0}, 2 * mega},  // the offsets are copied too
+        {"neura.text.replace", {mega, 1, 1, 2147483647, 0}, 2 * mega},
+        // replace_first of a one-byte target with a long replacement copies the text and one replacement.
+        {"neura.text.replace", {mega, 1, 4096, 1, 0}, mega + 4096},
+        {"neura.text.replace", {mega, 1, 4096, 0, 0}, mega},
+        {"neura.text.starts_with", {mega, 64}, 64},
+        {"neura.text.compare", {mega, 64}, 64},
+        {"neura.text.ascii_lower", {mega, 0}, 2 * mega},
+        {"neura.text.space_prefix_length", {mega}, mega},
+        {"neura.hash.string", {mega}, mega},
+        {"neura.encoding.utf8_validate", {mega}, mega},
+        {"neura.encoding.base64_decode", {mega, 0, 0, 0, 0}, mega},
+        {"neura.integer.parse_i64", {64, 10, 0, 0}, 64},
+        {"neura.digest.sha256_update", {112, mega}, mega},
+    };
+    for (const Charge& c : charges) {
+        const KernelInfo* k = find(c.name);
+        CHECK(k != nullptr);
+        if (k == nullptr) continue;
+        CHECK_EQ(c.args.size(), k->param_count);
+        if (c.args.size() != k->param_count) continue;
+        std::uint64_t charge = evaluate(k->cost, c.args.data());
+        if (charge < 1 + c.touched / 64 || charge > 1 + c.touched / 8) {
+            check(false, std::string(c.name) + " charges " + std::to_string(charge) + " steps for " +
+                             std::to_string(c.touched) + " elements", __LINE__);
+        }
+    }
+    // A sort is charged by its comparisons and moves, about n * log2(n).
+    if (sort) {
+        for (std::uint64_t n : {std::uint64_t{1}, std::uint64_t{16}, std::uint64_t{1000}, mega}) {
+            const std::uint64_t items[] = {n, n};
+            std::uint64_t work = n * (1 + static_cast<std::uint64_t>(std::log2(static_cast<double>(n))));
+            std::uint64_t charge = evaluate(sort->cost, items);
+            CHECK(charge >= 1 + work / 64 && charge <= 1 + work / 4);
+        }
+    }
+    // The replace capacity is bounded by the limit too: replace_first never asks for more than one copy.
+    const KernelInfo* replace_kernel = find("neura.text.replace");
+    if (replace_kernel) {
+        const std::uint64_t first[] = {mega, 1, 4096, 1, 0};
+        CHECK_EQ(evaluate(replace_kernel->buffers[0].size, first), mega + 4096);
+    }
+
     // Calls through the thunks.
     const KernelInfo* sha = find("neura.digest.sha256");
     CHECK(sha != nullptr && sha->result == Kind::Status && sha->params[0] == Kind::Bytes);
@@ -1058,9 +1237,13 @@ int table_suite() {
         for (std::size_t i = 0; i < n; ++i) hay += "ab"[random() % 2];
         for (std::size_t i = 0, m = random() % 3 + 1; i < m; ++i) target += "ab"[random() % 2];
         replacement = std::string(random() % 9, 'r');
-        std::vector<std::uint8_t> rbuffer(capacity(repl, {hay.size(), target.size(), replacement.size(), 0, 0}));
+        std::int64_t rlimit = round % 4 == 0 ? static_cast<std::int64_t>(random() % 3) - 1 : 2147483647;
+        // The runtime passes a negative scalar to a formula as 0.
+        const std::uint64_t formula_limit = static_cast<std::uint64_t>(std::max<std::int64_t>(rlimit, 0));
+        std::vector<std::uint8_t> rbuffer(
+            capacity(repl, {hay.size(), target.size(), replacement.size(), formula_limit, 0}));
         neura_out_text rout{rbuffer.data(), 0, rbuffer.size()};
-        CHECK(neura_k_text_replace(text(hay), text(target), text(replacement), 2147483647, &rout) == NEURA_OK);
+        CHECK(neura_k_text_replace(text(hay), text(target), text(replacement), rlimit, &rout) == NEURA_OK);
         if (failures > 20) break;
     }
     return failures;

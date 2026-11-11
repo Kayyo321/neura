@@ -114,12 +114,14 @@ export let Strings = module (
     export let contains = func(s: string, needle: string) -> bool => text_kernels.contains(s, needle);
 
     /// @brief The offset of the first occurrence, or -1. An empty needle matches at 0.
-    export let index_of = func(s: string, needle: string) -> int => text_kernels.index_of(s, needle, 0) as int;
+    export let index_of = func(s: string, needle: string) -> int => search(s, needle, 0);
 
     /// @brief The offset of the first occurrence at or after `from`, or -1. An empty needle matches at `from`.
     /// `from` must be a boundary from 0 through the byte length.
-    export let index_of_from = func(s: string, needle: string, from: int) -> int =>
-        text_kernels.index_of(s, needle, from as int64) as int;
+    ///
+    /// Linear in the distance searched: a loop that calls it with `from` after each occurrence is linear in
+    /// the text.
+    export let index_of_from = func(s: string, needle: string, from: int) -> int => search(s, needle, from);
 
     /// @brief The offset of the last occurrence, or -1. An empty needle matches at the byte length.
     export let last_index_of = func(s: string, needle: string) -> int =>
@@ -147,17 +149,13 @@ export let Strings = module (
         last pieces: string[list] = [];
         last length = s.byte_length;
         let start = 0;
-        let i = 0;
-        while (i < length) {
-            if (s.byte_at(i) == 10) {
-                let end = i;
-                if (end > start && s.byte_at(end - 1) == 13) {
-                    end -= 1;
-                }
-                pieces.append(s.slice(start, end));
-                start = i + 1;
+        for (let found in separators(s, "\n", 2147483647)) {
+            let end = found as int;
+            if (end > start && s.byte_at(end - 1) == 13) {
+                end -= 1;
             }
-            i += 1;
+            pieces.append(s.slice(start, end));
+            start = found as int + 1;
         }
         if (start < length || length == 0) {
             pieces.append(s.slice(start, length));
@@ -411,64 +409,47 @@ export let Strings = module (
         return 4;
     };
 
-    /// @brief Whether the needle's bytes occur at the offset. A candidate whose end is not a boundary cannot
-    /// match, so the slice compared is always valid.
-    let matches_at = func(s: string, needle: string, offset: int) -> bool {
-        last end = offset + needle.byte_length;
-        if (end > s.byte_length) {
-            return false;
+    /// @brief The first occurrence at or after `from`, searched in windows of the neura.text.index_of kernel
+    /// that double in length, so the steps charged grow with the distance covered rather than with the rest of
+    /// the text. The kernel checks `from` on the first call; each later call starts at the boundary where the
+    /// previous window ended.
+    let search = func(s: string, needle: string, from: int) -> int {
+        let window: int64 = 128;
+        let found = text_kernels.index_of(s, needle, from as int64, window);
+        while (found < -1) {
+            window *= 2;
+            found = text_kernels.index_of(s, needle, -2 - found, window);
         }
-        if (end < s.byte_length && (s.byte_at(end) & 192) == 128) {
-            return false;
-        }
-        if (offset < s.byte_length && (s.byte_at(offset) & 192) == 128) {
-            return false;
-        }
-        return s.slice(offset, end) == needle;
+        return found as int;
     };
 
-    /// @brief The first occurrence at or after `from`: scan for the needle's first byte, then compare the
-    /// candidate.
-    ///
-    /// split keeps this scan instead of the neura.text.split_next kernel: the kernel is charged for the whole
-    /// rest of the text on every call, `1 + (s - start) / 16` steps, so splitting n bytes into k pieces would be
-    /// charged about k * n / 32 steps, while this scan costs steps in proportion to the distance it covers.
-    let find = func(s: string, needle: string, from: int) -> int {
-        last n = needle.byte_length;
-        if (n == 0) {
-            return from;
+    /// @brief The offsets of the first `limit` non-overlapping occurrences of a separator, left to right: the
+    /// neura.text.split kernel counts them, then writes them into a list of that length, built by appending
+    /// (a range would compile to a much larger circuit and take more steps). An empty separator traps with
+    /// "invalid argument: empty separator".
+    let separators = func(s: string, separator: string, limit: int) -> int64[list] {
+        last count = text_kernels.split(s, separator, limit as int64, []);
+        if (count == 0) {
+            return [];
         }
-        last final_start = s.byte_length - n;
-        last first = needle.byte_at(0);
-        let i = from;
-        while (i <= final_start) {
-            if (s.byte_at(i) == first) {
-                if (n == 1 || matches_at(s, needle, i)) {
-                    return i;
-                }
-            }
-            i += 1;
+        last offsets: int64[list] = [];
+        let k: int64 = 0;
+        while (k < count) {
+            offsets.append(0);
+            k += 1;
         }
-        return -1;
+        text_kernels.split(s, separator, count, offsets);
+        return offsets;
     };
 
     /// @brief Splits into at most the given number of pieces, leaving the remainder in the final piece.
     let split_pieces = func(s: string, separator: string, limit: int) -> string[list] {
         last n = separator.byte_length;
-        if (n == 0) {
-            trap_with_message("invalid argument: empty separator");
-        }
         last pieces: string[list] = [];
         let start = 0;
-        let remaining = limit - 1;
-        while (remaining > 0) {
-            last found = find(s, separator, start);
-            if (found < 0) {
-                break;
-            }
-            pieces.append(s.slice(start, found));
-            start = found + n;
-            remaining -= 1;
+        for (let found in separators(s, separator, limit - 1)) {
+            pieces.append(s.slice(start, found as int));
+            start = found as int + n;
         }
         pieces.append(s.slice(start, s.byte_length));
         return pieces;
