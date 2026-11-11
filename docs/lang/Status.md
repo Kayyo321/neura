@@ -46,6 +46,7 @@ These are not decided. For most of them the compiler rejects or does not offer t
 - Identifiers use ASCII letters, digits, and underscores. Source strings and comments support UTF-8. String literals support escaped quotes, backslashes, tabs, carriage returns, and newlines.
 - Decimal integer literals default to `int32` and decimal floating-point literals default to `float64`. A numeric context selects a literal of a different width; [Numbers](Numbers.md) specifies ranges and rounding.
 - Keywords such as `for`, `in`, `as`, `is`, `nil`, `enum`, `match`, `interface`, `implements`, `and`, and `or` cannot name bindings.
+- Every declaration ends with `;`, including a function, overload group, class, interface, or module member whose body ends at `}` or `)`; statement blocks take none. A missing `;` is error `E0201`, and `neura check --fix` inserts it.
 - Local value bindings require an initializer. A nonempty collection literal without an expected type infers an array, and an empty literal requires an expected collection type.
 - The examples initialize some fields after construction. The frontend accepts that pattern; reading a field before any store is a runtime fault.
 

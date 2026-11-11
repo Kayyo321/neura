@@ -135,7 +135,7 @@ let LogEntry = class (
 
     export let format = func() -> string {
         return "[" + level + "] " + message;
-    }
+    };
 );
 
 let entry = new LogEntry();
@@ -310,7 +310,7 @@ let Reading = class (
 
     export let init = func(initial: int16) {
         instance.value = initial;
-    }
+    };
 
     export let.as int16 = func -> int16 => value
         or as int64 = func -> int64 => value as int64;

@@ -38,7 +38,7 @@ let Geometry = module (
 
     export let area = func(radius: float64) -> float64 {
         return Pi * square(radius);
-    }
+    };
 );
 
 let ring = Geometry.area(2.0);
@@ -48,7 +48,7 @@ let where = Geometry.Quadrant.First;
 ```
 
 - Access exports as `Module.member`; nested types and modules chain: `new Geometry.Point()`, `Geometry.Quadrant.First`.
-- Members end with `;`, or follow a block body's `}` directly. Both forms are accepted.
+- Every member ends with `;`, including one whose block body ends at `}` (`};`).
 - A module is not a type. `func(store: Store)` fails with `'Store' is not a type`. To pass behavior around at run time, use an [interface](syntax.md#interfaces) or a class.
 - Imports may appear inside a module body; they are visible only there.
 
@@ -141,14 +141,14 @@ let Logger = module (
 
         export let format = func -> string {
             return "[" + level + "] " + message;
-        }
+        };
     );
 
     export let log = func(message: string) -> void;          // requirement: no body
 
     export let log_entry = func(entry: LogEntry) -> void {   // uses the requirement
         log(entry.format());
-    }
+    };
 );
 
 let ConsoleLogger = module:Logger (                           // implements Logger
@@ -156,13 +156,13 @@ let ConsoleLogger = module:Logger (                           // implements Logg
 
     export let.override log = func(message: string) -> void {
         console.print_line(prefix + " -> " + message);
-    }
+    };
 );
 
 let QuietLogger = module:Logger (
     export const.override default_level: string = "WARN";     // override data, constant
     export let.override log = func(message: string) -> void {
-    }
+    };
 );
 
 let App = module:program.Entry (
@@ -173,7 +173,7 @@ let App = module:program.Entry (
         ConsoleLogger.log_entry(entry);
         QuietLogger.log("never shown");
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -236,7 +236,7 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(greeter.greet("Neura"));
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

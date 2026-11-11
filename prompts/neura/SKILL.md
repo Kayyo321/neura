@@ -39,7 +39,7 @@ let App = module:program.Entry (
         let name = args.length > 0 ? args[0] : "Neura";
         console.print_line("Hello, " + name + "!");
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -63,7 +63,7 @@ These are the mistakes an LLM is most likely to make. Each was confirmed against
 1. Everything is a binding: `let name = func(...) -> T { ... };`, `let Name = class ( ... );`, `let Name = module ( ... );`, `let Name = enum (A, B);`, `let Name = interface ( ... );`. There is no `fn`, `function`, `def`, `struct`, or `type` keyword.
 2. Class, module, and interface bodies use **parentheses**, not braces: `class ( ... )`. Function and control-flow bodies use braces.
 3. Types follow names: `let count: int32 = 0;`, `func(value: int) -> int`. A `void` function may omit `-> void`; a function with no parameters may omit `()`: `let reset = func { ... };`, `let answer = func -> int => 42;`.
-4. `=> expression` is an expression body. A named declaration with an expression body ends with `;`.
+4. `=> expression` is an expression body. Every declaration ends with `;`, whatever its body: `let f = func { ... };`, `let C = class ( ... );`, `let g = func => 1;`. Statement blocks (`if`, `while`, `for`, `match`, `scope`, bare `{ }`) take no `;`.
 5. Local `let` bindings require an initializer. `const` prevents reassignment of the binding, not mutation through it.
 6. Members are private unless marked `export`. A class that implements an interface method must `export` the implementing member, or the compiler reports `member '...' does not match the interface requirement`.
 7. Overriding uses `let.override` (or `const.override`), including when you give a body to an inherited bodyless signature such as `main`.
@@ -118,7 +118,7 @@ let Square = class implements Shape (
 
     export let init = func(side_length: float64) {
         side = side_length;
-    }
+    };
 
     export let area = func -> float64 => side * side;
 );

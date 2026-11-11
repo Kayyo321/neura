@@ -47,7 +47,7 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(report().to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -96,7 +96,7 @@ let App = module:program.Entry (
         }
         console.println("total {}", total);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -259,7 +259,7 @@ let App = module:program.Entry (
         let results = tasks.all<int>(calls);                   // results in call order
         console.println("{}", results[0] + results[1]);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
