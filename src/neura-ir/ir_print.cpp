@@ -1,4 +1,5 @@
 #include "ir.hpp"
+#include "attributes.hpp"
 
 #include <ostream>
 #include <string_view>
@@ -173,6 +174,45 @@ void print_type(std::ostream& output, const IrType& type) {
     print_type_arguments(output, type.arguments);
 }
 
+// Attribute payloads: true/false, 7u, -7i, "text", %12, type, span(...), [..].
+void print_attribute_value(std::ostream& output, const IrAttributeValue& value) {
+    switch (value.kind) {
+    case AttributeValueKind::Bool: output << (value.integer != 0 ? "true" : "false"); break;
+    case AttributeValueKind::Signed: output << attribute_signed_value(value) << 'i'; break;
+    case AttributeValueKind::Unsigned: output << value.integer << 'u'; break;
+    case AttributeValueKind::Text: print_quoted(output, value.text); break;
+    case AttributeValueKind::Symbol: output << '%' << value.symbol; break;
+    case AttributeValueKind::Type: print_type(output, value.type); break;
+    case AttributeValueKind::Span:
+        output << "span(";
+        print_quoted(output, value.span.file);
+        output << ':' << value.span.line << ':' << value.span.column << '+' << value.span.length << ')';
+        break;
+    case AttributeValueKind::List:
+        output << '[';
+        for (std::size_t index = 0; index < value.items.size(); ++index) {
+            if (index != 0) output << ", ";
+            print_attribute_value(output, value.items[index]);
+        }
+        output << ']';
+        break;
+    }
+}
+
+void print_attributes(std::ostream& output, const std::vector<IrAttribute>& attributes) {
+    for (const auto& attribute : attributes) {
+        output << " @";
+        if (const auto* info = find_attribute_info(static_cast<std::uint16_t>(attribute.id))) {
+            output << info->name;
+        } else {
+            output << static_cast<unsigned>(attribute.id);
+        }
+        output << '(';
+        print_attribute_value(output, attribute.value);
+        output << ')';
+    }
+}
+
 void print_reference(std::ostream& output, std::string_view label, SymbolId symbol) {
     if (symbol != no_symbol) {
         output << ' ' << label << '%' << symbol;
@@ -240,6 +280,7 @@ void print_symbol(std::ostream& output, SymbolId id, const IrSymbol& symbol) {
     if (symbol.has_body) {
         output << " defined";
     }
+    print_attributes(output, symbol.attributes);
     print_span(output, symbol.span);
     output << '\n';
 }
@@ -271,6 +312,9 @@ void print_nodes(std::ostream& output, const std::vector<IrNode>& nodes, std::si
         }
         if (node.poll) {
             output << " poll";
+        }
+        if (is_deferred_initialize(node)) {
+            output << " deferred";
         }
         output << " : ";
         print_type(output, node.type);

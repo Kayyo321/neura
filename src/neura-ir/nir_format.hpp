@@ -17,7 +17,7 @@ inline constexpr std::uint16_t nir_major_version = 1;
 // The highest minor version this code reads and writes. The writer emits the
 // lowest minor version that can represent the program, so a program that
 // uses no newer feature is written as 1.0.
-inline constexpr std::uint16_t nir_minor_version = 9;
+inline constexpr std::uint16_t nir_minor_version = 10;
 
 std::vector<std::uint8_t> write_nir(const IrProgram& program);
 
@@ -27,7 +27,8 @@ public:
 };
 
 // Decodes a .nir file and checks its structure: magic, version, enum tags,
-// symbol and file references, nesting depth, and that every byte is read.
+// symbol and file references, nesting depth, the attribute registry's rules
+// (attributes.def), and that every byte is read.
 // Semantic checks belong to the NeuraIR verifier, which the build runs on
 // the result. Throws NirError naming `origin`.
 IrProgram read_nir(std::span<const std::uint8_t> bytes, const std::string& origin,

@@ -257,6 +257,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/task_analysis.cpp
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
+    src/neura-ir/attributes.cpp
     src/neura-ir/linker.cpp
     src/neura-ir/reference_initialization.cpp
     src/neura-ir/reference_storage.cpp

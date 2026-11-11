@@ -1,5 +1,7 @@
 #include "specialize.hpp"
 
+#include "attributes.hpp"
+
 #include "task_analysis.hpp"
 #include "nominal.hpp"
 
@@ -142,6 +144,8 @@ public:
                 auto rewritten_interface = type(interfaces[interface], context, span);
                 program_.symbols[id].interfaces[interface] = std::move(rewritten_interface);
             }
+            auto attributes = specialized_attributes(program_.symbols[id].attributes, context, span);
+            program_.symbols[id].attributes = std::move(attributes);
         }
         for (std::size_t i = 0; i < original_bodies_; ++i) {
             const auto owner = program_.bodies[i].owner;
@@ -244,6 +248,33 @@ private:
     SymbolId add(IrSymbol item) {
         program_.symbols.push_back(std::move(item));
         return program_.symbols.size() - 1;
+    }
+
+    // A copy's attributes (attributes.hpp): types are substituted like the
+    // copy's own, and a reference to a member of a generic class, or to a
+    // parameter or local of the function being copied, names that member's
+    // copy in the instance. A deferred method it names is copied now.
+    std::vector<IrAttribute> specialized_attributes(std::vector<IrAttribute> attributes, const Context& context,
+                                                    const Span& where) {
+        if (attributes.empty()) return attributes;
+        for_each_attribute_type(attributes, [&](IrType& item) { item = type(item, context, where); });
+        for_each_attribute_symbol(attributes, [&](SymbolId& item) {
+            if (context.symbols) {
+                if (const auto found = context.symbols->find(item); found != context.symbols->end()) {
+                    item = found->second;
+                    return;
+                }
+            }
+            if (context.instance != no_symbol && owned_by_generic_class(item)) item = member_of(item, context.instance);
+        });
+        return attributes;
+    }
+
+    void specialize_attributes(SymbolId id, const Context& context) {
+        if (program_.symbols[id].attributes.empty()) return;
+        const auto span = program_.symbols[id].span;
+        auto attributes = specialized_attributes(program_.symbols[id].attributes, context, span);
+        program_.symbols[id].attributes = std::move(attributes);
     }
 
     IrType callable_type(const IrType& signature, const Span& span) {
@@ -360,6 +391,15 @@ private:
                 }
             }
         }
+        // Every eager member exists now, so links between members resolve.
+        specialize_attributes(instance, inner);
+        std::vector<SymbolId> copies;
+        for (const auto& [member, copy] : member_map_[instance]) copies.push_back(copy);
+        for (const auto copy : copies) {
+            specialize_attributes(copy, inner);
+            for (const auto parameter : std::vector<SymbolId>(symbol(copy).parameters))
+                specialize_attributes(parameter, inner);
+        }
         if (const auto body = body_of_.find(generic); body != body_of_.end()) {
             work_.push_back({body->second, instance, substitution, {}, generic, instance, origin});
         }
@@ -387,6 +427,11 @@ private:
             symbol(function).parameters.push_back(id);
             item.symbols[parameter] = id;
         }
+        Context links = inner;
+        links.symbols = &item.symbols;
+        specialize_attributes(function, links);
+        for (const auto parameter : std::vector<SymbolId>(symbol(function).parameters))
+            specialize_attributes(parameter, links);
         if (const auto body = body_of_.find(original); body != body_of_.end()) {
             item.body = body->second;
             work_.push_back(std::move(item));
@@ -522,6 +567,7 @@ private:
             IrSymbol local = program_.symbols[node.symbol];
             local.owner = context.owner;
             local.type = type(local.type, context, local.span);
+            local.attributes = specialized_attributes(std::move(local.attributes), context, local.span);
             const auto copy = add(std::move(local));
             (*context.symbols)[node.symbol] = copy;
         }
@@ -583,6 +629,7 @@ private:
                 IrSymbol local = program_.symbols[node.symbol];
                 local.owner = context.owner;
                 local.type = type(local.type, context, local.span);
+                local.attributes = specialized_attributes(std::move(local.attributes), context, local.span);
                 result.symbol = add(std::move(local));
                 (*context.symbols)[node.symbol] = result.symbol;
             } else if (owned_by_generic_class(node.symbol)) {
