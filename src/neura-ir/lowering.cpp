@@ -693,8 +693,11 @@ SymbolId Lowering::qualified(const std::string& name, const Span& span, const Co
                    kind != SymbolKind::Enum) {
             throw Diagnostic(span, "'" + parts[i - 1] + "' is not a namespace");
         }
-        id = member(id, parts[i], !inside(lexical_owner(context), id));
-        if (id == no_symbol) throw Diagnostic(span, "unknown or inaccessible name '" + name + "'");
+        const auto owner = id;
+        id = member(owner, parts[i], !inside(lexical_owner(context), owner));
+        if (id == no_symbol)
+            throw Diagnostic(span, "unknown or inaccessible name '" + name + "'")
+                .arg("kind", "name").arg("name", parts[i]).arg("owner", symbol(owner).name);
     }
     if (!(nominal_type && (symbol(id).kind == SymbolKind::Enum || class_or_interface(symbol(id).kind)) &&
           entries_[id].resolution == Resolution::Resolving)) resolve(id);
@@ -1710,7 +1713,8 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
         target = value_member(receiver.type, expr.text, exported);
     if (target == no_symbol)
         throw Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " +
-                                    describe(nominal));
+                                    describe(nominal))
+            .arg("kind", "member").arg("name", expr.text).arg("owner", describe(nominal));
     auto result = reference(target, expr.span, context, false);
     if (static_member(target)) {
         if (!type_reference) {
@@ -2198,6 +2202,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         if (!contextual(input)) {
             inputs.back() = value(input, context);
         } else if (input.kind != ExprKind::Nil) {
+            // Lowered again below with the chosen parameter type.
+            SpeculativeDiagnostics speculative;
             try {
                 defaults.back() = value(input, context).type;
             } catch (const Diagnostic&) {
@@ -2237,6 +2243,7 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
                     break;
                 }
             } else {
+                SpeculativeDiagnostics speculative;
                 try {
                     value(input, context, &expected);
                 } catch (const Diagnostic&) {
@@ -2758,8 +2765,12 @@ void Lowering::place(const IrNode& destination) const {
         throw Diagnostic(destination.span, "assignment requires a mutable binding, field, or element");
     if (symbol(destination.symbol).name.starts_with("$capture"))
         throw Diagnostic(destination.span, "a captured binding cannot be reassigned");
-    if (symbol(destination.symbol).constant)
-        throw Diagnostic(destination.span, "cannot assign to const '" + symbol(destination.symbol).name + "'");
+    if (const auto& target = symbol(destination.symbol); target.constant) {
+        auto error = Diagnostic(destination.span, "cannot assign to const '" + target.name + "'")
+            .with_code("E0401").label("cannot assign to a constant binding");
+        if (!target.span.file.empty()) error.label(target.span, "declared constant here");
+        throw error;
+    }
 }
 
 IrNode Lowering::discard_binding(const Declaration& decl, Context& context) {
@@ -3225,8 +3236,15 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
             throw Diagnostic(declaration.span, "expected a local value binding");
         }
         if (declaration.name == "_") return discard_binding(declaration, context);
-        if (context.scopes.back().contains(declaration.name)) {
-            throw Diagnostic(declaration.span, "duplicate local binding '" + declaration.name + "'");
+        if (const auto earlier = context.scopes.back().find(declaration.name);
+            earlier != context.scopes.back().end()) {
+            auto error = Diagnostic(declaration.span, "duplicate local binding '" + declaration.name + "'")
+                .with_code("E0301").label("'" + declaration.name + "' is bound again here");
+            const auto& first = symbol(earlier->second);
+            if (!first.span.file.empty()) error.label(first.span, "first bound here");
+            error.help(first.constant ? "give the second binding another name"
+                                      : "give the second binding another name, or assign to the first one");
+            throw error;
         }
         if (!declaration.initializer) {
             throw Diagnostic(declaration.span, "a local binding requires an initializer");

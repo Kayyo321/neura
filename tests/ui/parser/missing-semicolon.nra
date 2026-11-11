@@ -1,0 +1,3 @@
+// A binding without its terminating semicolon (E0201).
+let limit = 10
+let half = limit / 2;

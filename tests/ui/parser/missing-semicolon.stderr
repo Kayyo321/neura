@@ -1,0 +1,12 @@
+error[E0201]: expected ';'
+ --> $DIR/missing-semicolon.nra:2:15
+  |
+2 | let limit = 10
+  |               ^ expected ';' here
+3 | let half = limit / 2;
+  | --- found 'let'
+  |
+help: add the missing ';'
+  |
+2 | let limit = 10;
+  |               +
