@@ -1,6 +1,7 @@
 #include "lowered_block.hpp"
 
 #include "checked.hpp"
+#include "evaluate.hpp"
 
 #include <algorithm>
 #include <cfloat>
@@ -18,22 +19,6 @@
 
 namespace neura::lift {
 namespace {
-
-std::int64_t sign_extend(std::uint64_t value, unsigned width) {
-    if (width >= 64) {
-        return static_cast<std::int64_t>(value);
-    }
-    const auto sign = std::uint64_t{1} << (width - 1);
-    return static_cast<std::int64_t>((value ^ sign) - sign);
-}
-
-std::int64_t signed_min(unsigned width) {
-    return width >= 64 ? std::numeric_limits<std::int64_t>::min() : -(std::int64_t{1} << (width - 1));
-}
-
-std::int64_t signed_max(unsigned width) {
-    return width >= 64 ? std::numeric_limits<std::int64_t>::max() : (std::int64_t{1} << (width - 1)) - 1;
-}
 
 FloatType float_type(const nvr::Type& type) {
     if (type.kind == nvr::TypeKind::BFloat) return FloatType::BFloat16;
@@ -502,6 +487,97 @@ LoweringResult lower(const nvr::Image& image, const nvr::Block& block, const Lif
     return result;
 }
 
+std::uint64_t evaluate_float(const Instruction& in, std::uint64_t a, std::uint64_t b, bool& failed) {
+    const unsigned w = in.width;
+    std::uint64_t r = 0;
+    switch (in.op) {
+    case Opcode::FloatAdd:
+    case Opcode::FloatSubtract:
+    case Opcode::FloatMultiply:
+    case Opcode::FloatDivide:
+        if (in.format == FloatType::Binary32) {
+            const float x = to_single(a);
+            const float y = to_single(b);
+            const float z = in.op == Opcode::FloatAdd        ? x + y
+                            : in.op == Opcode::FloatSubtract ? x - y
+                            : in.op == Opcode::FloatMultiply ? x * y
+                                                             : x / y;
+            r = single_bits(z);
+        } else {
+            const double x = to_double(a);
+            const double y = to_double(b);
+            const double z = in.op == Opcode::FloatAdd        ? x + y
+                             : in.op == Opcode::FloatSubtract ? x - y
+                             : in.op == Opcode::FloatMultiply ? x * y
+                                                              : x / y;
+            r = double_bits(z);
+        }
+        break;
+    case Opcode::FloatNegate:
+        r = a ^ (std::uint64_t{1} << (float_width(in.format) - 1));
+        break;
+    case Opcode::FloatEqual:
+    case Opcode::FloatNotEqual:
+    case Opcode::FloatLess:
+    case Opcode::FloatLessEqual:
+    case Opcode::FloatGreater:
+    case Opcode::FloatGreaterEqual: {
+        const double x = decode(a, in.format);
+        const double y = decode(b, in.format);
+        bool holds = false;
+        switch (in.op) {
+        case Opcode::FloatEqual: holds = x == y; break;
+        case Opcode::FloatNotEqual: holds = x != y; break;
+        case Opcode::FloatLess: holds = x < y; break;
+        case Opcode::FloatLessEqual: holds = x <= y; break;
+        case Opcode::FloatGreater: holds = x > y; break;
+        default: holds = x >= y; break;
+        }
+        r = holds ? 1 : 0;
+        break;
+    }
+    case Opcode::FloatFromInteger:
+        r = in.to_format == FloatType::Binary32 ? single_bits(integer_to_single(a, in.is_signed, w))
+                                                : double_bits(integer_to_double(a, in.is_signed, w));
+        break;
+    case Opcode::FloatToInteger: {
+        const double t = std::trunc(decode(a, in.format));
+        const unsigned to = in.to_width;
+        // Powers of two are exact doubles, so the bounds compare exactly;
+        // NaN fails every comparison.
+        const double low = in.to_signed ? std::ldexp(-1.0, static_cast<int>(to) - 1) : 0.0;
+        const double high = std::ldexp(1.0, in.to_signed ? static_cast<int>(to) - 1 : static_cast<int>(to));
+        if (!(t >= low && t < high)) {
+            failed = true;
+        } else if (in.to_signed) {
+            r = static_cast<std::uint64_t>(static_cast<std::int64_t>(t)) & width_mask(to);
+        } else if (t < 9223372036854775808.0) {
+            r = static_cast<std::uint64_t>(static_cast<std::int64_t>(t));
+        } else {
+            r = static_cast<std::uint64_t>(static_cast<std::int64_t>(t - 9223372036854775808.0)) +
+                (std::uint64_t{1} << 63);
+        }
+        break;
+    }
+    case Opcode::FloatConvert: {
+        const double x = decode(a, in.format);
+        if (std::isnan(x)) {
+            r = in.to_format == FloatType::Binary32 ? canonical_nan32 : canonical_nan64;
+        } else if (in.to_format == FloatType::Binary64) {
+            r = double_bits(x);
+        } else {
+            // Exact for a binary32 or 16-bit source; rounded to nearest
+            // even from binary64.
+            r = single_bits(static_cast<float>(x));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    return r;
+}
+
 std::optional<std::uint32_t> execute(const LoweredBlock& block, std::span<const std::uint64_t> inputs,
                                      std::span<std::uint64_t> outputs) {
     thread_local std::vector<std::uint64_t> registers;
@@ -520,235 +596,8 @@ std::optional<std::uint32_t> execute(const LoweredBlock& block, std::span<const 
     }
     for (std::size_t k = 0; k < block.code.size(); ++k) {
         const auto& in = block.code[k];
-        const auto a = registers[in.a];
-        const auto b = registers[in.b];
-        const unsigned w = in.width;
-        const auto m = width_mask(w);
-        std::uint64_t r = 0;
         bool failed = false;
-        switch (in.op) {
-        case Opcode::Constant:
-            r = in.immediate;
-            break;
-        case Opcode::Add:
-            r = (a + b) & m;
-            if (in.is_signed) {
-                std::int64_t sum = 0;
-                failed = !checked_add(sign_extend(a, w), sign_extend(b, w), sum) || sum < signed_min(w) ||
-                         sum > signed_max(w);
-            } else {
-                failed = w >= 64 ? r < a : a + b > m;
-            }
-            break;
-        case Opcode::AddWrapping:
-            r = (a + b) & m;
-            break;
-        case Opcode::Subtract:
-            r = (a - b) & m;
-            if (in.is_signed) {
-                const auto x = sign_extend(a, w);
-                const auto y = sign_extend(b, w);
-                if (w >= 64) {
-                    failed = (y < 0 && x > std::numeric_limits<std::int64_t>::max() + y) ||
-                             (y > 0 && x < std::numeric_limits<std::int64_t>::min() + y);
-                } else {
-                    const auto difference = x - y;
-                    failed = difference < signed_min(w) || difference > signed_max(w);
-                }
-            } else {
-                failed = a < b;
-            }
-            break;
-        case Opcode::Negate:
-            r = (0 - a) & m;
-            failed = in.is_signed ? a == (std::uint64_t{1} << (w - 1)) : a != 0;
-            break;
-        case Opcode::Multiply:
-            r = (a * b) & m;
-            if (in.is_signed) {
-                std::int64_t product = 0;
-                failed = !checked_multiply(sign_extend(a, w), sign_extend(b, w), product) ||
-                         product < signed_min(w) || product > signed_max(w);
-            } else if (w >= 64) {
-                failed = a != 0 && b > std::numeric_limits<std::uint64_t>::max() / a;
-            } else {
-                failed = a * b > m;
-            }
-            break;
-        case Opcode::Divide:
-            if (b == 0) {
-                failed = true;
-            } else if (in.is_signed) {
-                const auto x = sign_extend(a, w);
-                const auto y = sign_extend(b, w);
-                if (x == signed_min(w) && y == -1) {
-                    failed = true;
-                } else {
-                    r = static_cast<std::uint64_t>(x / y) & m;
-                }
-            } else {
-                r = a / b;
-            }
-            break;
-        case Opcode::Remainder:
-            if (b == 0) {
-                failed = true;
-            } else if (in.is_signed) {
-                const auto y = sign_extend(b, w);
-                r = y == -1 ? 0 : static_cast<std::uint64_t>(sign_extend(a, w) % y) & m;
-            } else {
-                r = a % b;
-            }
-            break;
-        case Opcode::Equal:
-            r = a == b ? 1 : 0;
-            break;
-        case Opcode::NotEqual:
-            r = a != b ? 1 : 0;
-            break;
-        case Opcode::Less:
-            r = (in.is_signed ? sign_extend(a, w) < sign_extend(b, w) : a < b) ? 1 : 0;
-            break;
-        case Opcode::LessEqual:
-            r = (in.is_signed ? sign_extend(a, w) <= sign_extend(b, w) : a <= b) ? 1 : 0;
-            break;
-        case Opcode::Greater:
-            r = (in.is_signed ? sign_extend(a, w) > sign_extend(b, w) : a > b) ? 1 : 0;
-            break;
-        case Opcode::GreaterEqual:
-            r = (in.is_signed ? sign_extend(a, w) >= sign_extend(b, w) : a >= b) ? 1 : 0;
-            break;
-        case Opcode::And:
-            r = a & b & 1U;
-            break;
-        case Opcode::Or:
-            r = (a | b) & 1U;
-            break;
-        case Opcode::Not:
-            r = (a ^ 1U) & 1U;
-            break;
-        case Opcode::BitAnd:
-            r = a & b;
-            break;
-        case Opcode::BitOr:
-            r = a | b;
-            break;
-        case Opcode::BitXor:
-            r = a ^ b;
-            break;
-        case Opcode::BitNot:
-            r = ~a & m;
-            break;
-        case Opcode::ShiftLeft:
-        case Opcode::ShiftRight:
-            // The count is read as unsigned, so a negative count fails too.
-            if (b >= w) {
-                failed = true;
-            } else if (in.op == Opcode::ShiftLeft) {
-                r = (a << b) & m;
-            } else {
-                r = (in.is_signed ? static_cast<std::uint64_t>(sign_extend(a, w) >> b) : a >> b) & m;
-            }
-            break;
-        case Opcode::Index:
-            r = a;
-            failed = in.is_signed && ((a >> (w - 1)) & 1U) != 0;
-            break;
-        case Opcode::ConvertInteger: {
-            const unsigned to = in.to_width;
-            if (in.is_signed) {
-                const auto x = sign_extend(a, w);
-                failed = in.to_signed ? x < signed_min(to) || x > signed_max(to)
-                                      : x < 0 || static_cast<std::uint64_t>(x) > width_mask(to);
-                r = static_cast<std::uint64_t>(x) & width_mask(to);
-            } else {
-                failed = a > (in.to_signed ? static_cast<std::uint64_t>(signed_max(to)) : width_mask(to));
-                r = a & width_mask(to);
-            }
-            break;
-        }
-        case Opcode::FloatAdd:
-        case Opcode::FloatSubtract:
-        case Opcode::FloatMultiply:
-        case Opcode::FloatDivide:
-            if (in.format == FloatType::Binary32) {
-                const float x = to_single(a);
-                const float y = to_single(b);
-                const float z = in.op == Opcode::FloatAdd        ? x + y
-                                : in.op == Opcode::FloatSubtract ? x - y
-                                : in.op == Opcode::FloatMultiply ? x * y
-                                                                 : x / y;
-                r = single_bits(z);
-            } else {
-                const double x = to_double(a);
-                const double y = to_double(b);
-                const double z = in.op == Opcode::FloatAdd        ? x + y
-                                 : in.op == Opcode::FloatSubtract ? x - y
-                                 : in.op == Opcode::FloatMultiply ? x * y
-                                                                  : x / y;
-                r = double_bits(z);
-            }
-            break;
-        case Opcode::FloatNegate:
-            r = a ^ (std::uint64_t{1} << (float_width(in.format) - 1));
-            break;
-        case Opcode::FloatEqual:
-        case Opcode::FloatNotEqual:
-        case Opcode::FloatLess:
-        case Opcode::FloatLessEqual:
-        case Opcode::FloatGreater:
-        case Opcode::FloatGreaterEqual: {
-            const double x = decode(a, in.format);
-            const double y = decode(b, in.format);
-            bool holds = false;
-            switch (in.op) {
-            case Opcode::FloatEqual: holds = x == y; break;
-            case Opcode::FloatNotEqual: holds = x != y; break;
-            case Opcode::FloatLess: holds = x < y; break;
-            case Opcode::FloatLessEqual: holds = x <= y; break;
-            case Opcode::FloatGreater: holds = x > y; break;
-            default: holds = x >= y; break;
-            }
-            r = holds ? 1 : 0;
-            break;
-        }
-        case Opcode::FloatFromInteger:
-            r = in.to_format == FloatType::Binary32 ? single_bits(integer_to_single(a, in.is_signed, w))
-                                                    : double_bits(integer_to_double(a, in.is_signed, w));
-            break;
-        case Opcode::FloatToInteger: {
-            const double t = std::trunc(decode(a, in.format));
-            const unsigned to = in.to_width;
-            // Powers of two are exact doubles, so the bounds compare exactly;
-            // NaN fails every comparison.
-            const double low = in.to_signed ? std::ldexp(-1.0, static_cast<int>(to) - 1) : 0.0;
-            const double high = std::ldexp(1.0, in.to_signed ? static_cast<int>(to) - 1 : static_cast<int>(to));
-            if (!(t >= low && t < high)) {
-                failed = true;
-            } else if (in.to_signed) {
-                r = static_cast<std::uint64_t>(static_cast<std::int64_t>(t)) & width_mask(to);
-            } else if (t < 9223372036854775808.0) {
-                r = static_cast<std::uint64_t>(static_cast<std::int64_t>(t));
-            } else {
-                r = static_cast<std::uint64_t>(static_cast<std::int64_t>(t - 9223372036854775808.0)) +
-                    (std::uint64_t{1} << 63);
-            }
-            break;
-        }
-        case Opcode::FloatConvert: {
-            const double x = decode(a, in.format);
-            if (std::isnan(x)) {
-                r = in.to_format == FloatType::Binary32 ? canonical_nan32 : canonical_nan64;
-            } else if (in.to_format == FloatType::Binary64) {
-                r = double_bits(x);
-            } else {
-                // Exact for a binary32 or 16-bit source; rounded to nearest
-                // even from binary64.
-                r = single_bits(static_cast<float>(x));
-            }
-            break;
-        }
-        }
+        const auto r = evaluate(in, registers[in.a], registers[in.b], failed);
         if (failed) {
             return in.trap_exit == no_exit ? std::nullopt : std::optional<std::uint32_t>(in.trap_exit);
         }
