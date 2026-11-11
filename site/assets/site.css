@@ -495,6 +495,37 @@ figcaption {
   margin-top: 1rem;
 }
 
+/* The prompt that installs the Neura language skill in an agent. Its lines wrap so the whole prompt can be read
+   at any width; copy-prompt.js copies the text with its own line breaks. */
+.agent-skill {
+  max-width: 54rem;
+}
+
+.prose.agent-skill h2 {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  font-size: clamp(2.75rem, 6vw, 4.25rem);
+}
+
+.prose.agent-skill pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prose.agent-skill .actions {
+  margin-top: 1.5rem;
+}
+
+.button[hidden] {
+  display: none;
+}
+
+button.button {
+  border: 0;
+  cursor: pointer;
+}
+
 /* Marks in code: keywords in ink, comments quiet, strings and numbers between pale and ink. */
 .k {
   color: var(--ink);
