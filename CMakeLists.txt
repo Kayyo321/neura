@@ -331,7 +331,7 @@ add_subdirectory(third_party/neura-libclang)
 # libm, and loader dependencies. Floating point keeps strict binary64
 # semantics: no contraction into fused multiply-add, no fast-math, and no
 # host-specific instruction selection. Nothing links the library into the
-# runtime yet.
+# runtime yet; only its tests use it.
 add_library(neura_kernels STATIC
     src/kernels/neura_digest.c
     src/kernels/neura_encoding.c
@@ -354,6 +354,17 @@ else()
     target_compile_options(neura_kernels PRIVATE
         -ffp-contract=off -fno-math-errno
         -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+if(BUILD_TESTING)
+    # Published vectors and boundary cases for each kernel family, plus the
+    # math vectors of tests/stdlib/math/support/math-vectors.nra.
+    add_executable(neura_kernel_tests tests/kernels/kernel_tests.cpp)
+    target_link_libraries(neura_kernel_tests PRIVATE neura_kernels)
+    neura_target_defaults(neura_kernel_tests)
+    foreach(suite IN ITEMS abi digest encoding text integer hash sort math table)
+        add_test(NAME kernels-${suite}
+            COMMAND neura_kernel_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
 endif()
 # --- End of kernels -----------------------------------------------------------
 
