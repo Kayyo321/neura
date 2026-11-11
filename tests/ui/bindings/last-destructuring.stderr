@@ -1,0 +1,14 @@
+error[E0536]: a destructuring declaration cannot use 'last'
+ --> $DIR/last-destructuring.nra:8:5
+  |
+8 |     last [first, second]: [Counter, Counter] = new, new;
+  |     ^^^^ 'last' declares a single name
+  |     -------------------- these names are destructured
+  |
+  = note: 'last' is a contextual word: followed by '[' it is a binding named 'last' being indexed
+help: declare the names with 'const', which binds each of them once
+  |
+8 |     const [first, second]: [Counter, Counter] = new, new;
+  |     ~~~~~
+
+For more information about this error, try `neura explain E0536`.

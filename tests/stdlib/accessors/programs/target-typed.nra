@@ -1,0 +1,87 @@
+// Target-typed `new` with accessors and `last` fields (ObjectLifecycle.md,
+// Target-typed new; Types.md, Accessors): a `last` field initialized with
+// `new(...)`, a setter given `new` (the field's type is the expected type, and
+// the setter runs once), typed destructuring of two `new` values updated
+// through accessors, and an anonymous class with `const` and `last` fields.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Account = class (
+    export let name: string = "";
+
+    export let init = func() {
+        name = "anonymous";
+        console.print_line("Account()");
+    } or func(name: string) {
+        instance.name = name;
+        console.print_line("Account(" + name + ")");
+    };
+);
+
+let Counter = class (
+    export let count: int = 0;
+        | get: {
+            console.print_line("get count " + count.to_string());
+            return count;
+        };
+        | set: {
+            console.print_line("set count " + value.to_string());
+            count = value;
+        };
+
+    export let init = func() {
+    } or func(start: int) {
+        count = start;
+    };
+);
+
+let Ledger = class (
+    export last owner: Account = new("ada");
+    export last backup: Account;
+    export let holder: Account = new;
+        | get: holder;
+        | set: {
+            console.print_line("set holder " + value.name);
+            holder = value;
+        };
+
+    export let init = func() {
+        backup = new("bob");
+    };
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last first: Account = new;
+        last second: Account = new("eve");
+        console.print_line(first.name + " " + second.name);
+
+        let ledger: Ledger = new;
+        console.print_line(ledger.owner.name + " " + ledger.backup.name + " " + ledger.holder.name);
+        ledger.holder = new;
+        console.print_line(ledger.holder.name);
+        ledger.holder = new("zed");
+        console.print_line(ledger.holder.name);
+
+        let [a, b]: [Counter, Counter] = new, new(5);
+        a.count += 1;
+        b.count++;
+        console.print_line(a.count.to_string() + " " + b.count.to_string());
+
+        let ticket: class (
+            export const prefix = "T-";
+            export last id: int;
+            export last issued: Account = new("kay");
+            export let label: string = "";
+                | get: prefix + label;
+                | set: label = value;
+
+            export let init = func() {
+                id = 7;
+            };
+        ) = new;
+        ticket.label = "seven";
+        console.print_line(ticket.label + " " + ticket.id.to_string() + " " + ticket.issued.name);
+        return program.ExitCode.Ok;
+    };
+);

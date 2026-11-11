@@ -1,0 +1,6 @@
+// A `last` field makes an anonymous class a class of its own, and a class of
+// its own with a deferred `last` field needs an `init` that assigns it (E0446).
+let ticket: class (
+    export last id: int;
+    export let label: string = "";
+) = new;

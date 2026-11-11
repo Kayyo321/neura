@@ -211,7 +211,7 @@ export let format_log = func(log_message: string, log_level: int) -> string {
   let origin: Point = new;
   let corner = new Point(3, 4);
   ```
-- Use an anonymous class for a small group of fields that one or two places pass around, and a named class for anything with methods or used across modules. Lay out a multi-line anonymous class like a class definition, with the closing parenthesis on its own line:
+- Use an anonymous class for a small group of fields that one or two places pass around, and a named class for anything with methods or used across modules. An anonymous class with accessors or `const` or `last` fields suits a single value, such as one settings object; it is a class of its own, so no other place can name its type. Lay out a multi-line anonymous class like a class definition, with the closing parenthesis on its own line:
   <!-- example: check -->
   ```neura
   let settings: class (

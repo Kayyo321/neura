@@ -132,7 +132,7 @@ NEURA_DIAGNOSTIC(E0531, "anonymous class uses an enclosing type parameter")
 NEURA_DIAGNOSTIC(E0532, "unexported field in a fields-only anonymous class")
 NEURA_DIAGNOSTIC(E0533, "new without the field initializers of an anonymous class")
 NEURA_DIAGNOSTIC(E0534, "untyped field in a fields-only anonymous class")
-NEURA_DIAGNOSTIC(E0535, "const field in a fields-only anonymous class")
+NEURA_DIAGNOSTIC(E0536, "destructuring declared with last")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

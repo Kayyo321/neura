@@ -173,8 +173,10 @@ private:
             bool first = true;
             for (const auto& member : body.members) {
                 if (member.kind != DeclKind::Binding || member.static_member || member.cast_target) continue;
-                result += std::string(first ? "" : ", ") + (member.constant ? "const " : "") + member.name;
+                result += std::string(first ? "" : ", ") +
+                          (member.last ? "last " : member.constant ? "const " : "") + member.name;
                 if (member.type) result += ": " + type_text(*member.type);
+                result += accessor_text(member);
                 first = false;
             }
             result += ')';
@@ -195,6 +197,16 @@ private:
         return result;
     }
 
+    // A field's accessor clauses (Types.md, Accessors), getter first.
+    static std::string accessor_text(const Declaration& declaration) {
+        const auto has = [&](bool setter) {
+            return std::ranges::any_of(declaration.accessors,
+                                       [&](const AccessorClause& clause) { return clause.setter == setter; });
+        };
+        if (!has(false) && !has(true)) return {};
+        return has(false) ? (has(true) ? " { get; set }" : " { get }") : " { set }";
+    }
+
     std::string signature(const Declaration& declaration, std::string_view kind) const {
         std::string result;
         if (kind == "variant") {
@@ -210,14 +222,7 @@ private:
                 result += ": ";
                 result += type_text(*declaration.type);
             }
-            // Accessor clauses (Types.md, Accessors), getter first.
-            const auto has = [&](bool setter) {
-                return std::ranges::any_of(declaration.accessors,
-                                           [&](const AccessorClause& clause) { return clause.setter == setter; });
-            };
-            if (has(false) || has(true)) {
-                result += has(false) ? (has(true) ? " { get; set }" : " { get }") : " { set }";
-            }
+            result += accessor_text(declaration);
             return result;
         } else {
             result = declaration.name + " = ";

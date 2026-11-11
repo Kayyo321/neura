@@ -1,0 +1,13 @@
+error[E0510]: 'code' is read-only outside its class
+ --> $DIR/anonymous-read-only.nra:7:1
+  |
+4 |         | get: code;
+  |         ------------ 'code' declares only a getter
+...
+7 | my_data.code = "XY000000";
+  | ^^^^^^^^^^^^ cannot assign to 'code' here
+  |
+  = note: 'code' has no 'set' accessor, so only code inside 'class(code)@anonymous-read-only.nra:2:14' can change it
+  = help: add a setter to the field, such as '| set: code = value;', or change it through a method of 'class(code)@anonymous-read-only.nra:2:14'
+
+For more information about this error, try `neura explain E0510`.

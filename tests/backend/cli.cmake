@@ -185,6 +185,16 @@ foreach(variant IN ITEMS "" -unoptimized)
     expect_run("accessors example${variant}" "${TEST_DIR}/accessors${variant}.nvr" "payload\nXY729H08\nAB12\n1\n" 0 "")
 endforeach()
 
+# The same accessors on the fields of an anonymous class (Types.md, Anonymous
+# classes).
+build_image("${TEST_DIR}/anonymous-accessors.nvr" "${SOURCE_DIR}/examples/types/anonymous-accessors.nra")
+build_image("${TEST_DIR}/anonymous-accessors-unoptimized.nvr" --no-optimize
+    "${SOURCE_DIR}/examples/types/anonymous-accessors.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    expect_run("anonymous accessors example${variant}" "${TEST_DIR}/anonymous-accessors${variant}.nvr"
+        "payload\nXY729H08\n1\n" 0 "")
+endforeach()
+
 # Scoped tasks, a cancellable operation, and shared state: the same output
 # under any quantum.
 build_image("${TEST_DIR}/service.nvr" "${SOURCE_DIR}/examples/concurrency/service.nra")

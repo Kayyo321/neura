@@ -1,0 +1,28 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): non_zero must not be zero in function [0-9]+ block [0-9]+ at std/core/failure[.]nra:[0-9]+:[0-9]+
+// The setter of a field of an anonymous class runs for an assignment from
+// outside the class body, and its trap ends the run (Types.md, Accessors).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let failure = import:Std.Core.Failure;
+
+let my_data: class (
+    export let non_zero = 18000;
+        | get: non_zero;
+        | set: {
+            if (value == 0) {
+                failure.trap("non_zero must not be zero");
+            }
+            non_zero = value;
+        };
+) = new;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        my_data.non_zero = 5;
+        console.print_line(my_data.non_zero.to_string());
+        my_data.non_zero = 0;
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

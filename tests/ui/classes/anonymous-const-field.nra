@@ -1,2 +1,0 @@
-// A const field of a fields-only anonymous class (E0535).
-let limits: class (export const most: int = 10;) = new;

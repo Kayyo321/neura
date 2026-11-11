@@ -143,7 +143,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0532](E0532.md) | unexported field in a fields-only anonymous class |
 | [E0533](E0533.md) | new without the field initializers of an anonymous class |
 | [E0534](E0534.md) | untyped field in a fields-only anonymous class |
-| [E0535](E0535.md) | const field in a fields-only anonymous class |
+| [E0536](E0536.md) | destructuring declared with last |
 
 ## E06xx: Concurrency
 

@@ -1164,8 +1164,8 @@ void Lowering::require_type(const IrType& actual, const IrType& expected, const 
                has_attribute(symbol(type.symbol), AttributeId::ClassAnonymous);
     };
     if (distinct(actual) || distinct(expected)) {
-        error.note("an anonymous class with methods, a constructor, a base, or interfaces is a type of its own at "
-                   "each place it is written")
+        error.note("an anonymous class with methods, a constructor, accessors, const or last fields, a base, or "
+                   "interfaces is a type of its own at each place it is written")
             .help("declare a named class and use it in both places");
     }
     throw error;
@@ -4826,11 +4826,16 @@ bool plain_anonymous(const TypeSyntax& syntax) {
     return syntax.anonymous && syntax.collections.empty() && !syntax.reference;
 }
 
-// A body whose members are all instance fields denotes a structural class.
+// A body whose members are all plain `let` instance fields denotes a
+// structural class. A method, lifecycle function, static member, cast, base,
+// or interface, and also a `const` or `last` field or an accessor clause,
+// gives the class behaviour of its own, so such a body is a class of its own
+// at each place it is written.
 bool fields_only(const Declaration& body) {
     if (body.base || !body.interfaces.empty()) return false;
     return std::ranges::all_of(body.members, [](const Declaration& member) {
         return member.kind == DeclKind::Binding && !member.static_member && !member.override_member &&
+               !member.constant && member.accessors.empty() &&
                !member.promote_import && !member.cast_target && member.overloads.empty() &&
                member.name != "_" && member.name != "init" && member.name != "deinit" &&
                !(member.initializer && member.initializer->kind == ExprKind::Import);
@@ -4942,13 +4947,6 @@ IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& contex
                     .suggest("export the field",
                              Span{member.span.file, member.span.line, member.span.column, member.span.offset, 0},
                              "export ", Applicability::MachineApplicable);
-            if (member.constant)
-                throw Diagnostic(at, "field '" + member.name + "' of a fields-only anonymous class cannot be const")
-                    .with_code("E0535")
-                    .label("declared with 'const'")
-                    .note("'new' gives the fields of a fields-only anonymous class their values after it allocates "
-                          "the object, and only a class's own field initializers can give a const field its value")
-                    .help("declare the field with 'let', or declare a named class for the shape");
             if (member.initializer && !binding)
                 throw Diagnostic(member.initializer->span,
                                  "this field initializer of a fields-only anonymous class never runs")
@@ -4976,7 +4974,8 @@ IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& contex
             if (field->kind == TypeKind::Void)
                 throw Diagnostic(member.type->span, "a field cannot have type void").with_code("E0416");
         }
-        fields += (fields.empty() ? "" : ", ") + std::string(member.constant ? "const " : "") + member.name +
+        const std::string keyword = member.last ? "last " : member.constant ? "const " : "";
+        fields += (fields.empty() ? "" : ", ") + keyword + member.name +
                   (field ? ": " + describe(*field) : std::string());
         if (structural) {
             key += field_key(member.constant, member.name, *field);

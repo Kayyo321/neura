@@ -304,15 +304,9 @@ private:
     // Bare `class` stays the umbrella type. `class : Base ( )` with an empty
     // body is not recognized, because `c ? x as class : f()` already means
     // a conditional expression.
-    bool at_class_member(std::size_t offset) const {
-        if (cursor_ + offset >= tokens_.size()) return false;
-        const auto& token = tokens_[cursor_ + offset];
-        // The words that begin a class member declaration. Extension point:
-        // a member start added to declaration() (such as a contextual
-        // `last` binding or a `#` tag) belongs here too.
-        return token.kind == TokenKind::Keyword &&
-               (token.text == "export" || token.text == "static" || token.text == "let" || token.text == "const");
-    }
+    // A class member declaration starts at `offset`: the same words that
+    // begin a declaration anywhere, including a contextual `last` binding.
+    bool at_class_member(std::size_t offset) const { return at_declaration(offset); }
 
     bool next_keyword(std::size_t offset, std::string_view text) const {
         if (cursor_ + offset >= tokens_.size()) return false;
@@ -535,16 +529,19 @@ private:
             tokens_[cursor_ + 1].kind == TokenKind::Keyword && tokens_[cursor_ + 1].text == branch_keyword;
     }
 
-    bool at_declaration() const {
-        return at("export") || at("static") || at("let") || at("const") || at_last_declaration();
+    bool at_declaration(std::size_t offset = 0) const {
+        return next_keyword(offset, "export") || next_keyword(offset, "static") || next_keyword(offset, "let") ||
+               next_keyword(offset, "const") || at_last_declaration(offset);
     }
 
     // `last` is contextual: it starts a declaration only when an identifier
     // follows, which no expression statement can begin with, so `last = v;`,
     // `last(x);`, `last.next`, and `last[i] = v;` keep their meaning.
-    bool at_last_declaration() const {
-        return at_contextual("last") && cursor_ + 1 < tokens_.size() &&
-               tokens_[cursor_ + 1].kind == TokenKind::Identifier;
+    bool at_last_declaration(std::size_t offset = 0) const {
+        if (cursor_ + offset + 1 >= tokens_.size()) return false;
+        const auto& word = tokens_[cursor_ + offset];
+        return word.kind == TokenKind::Identifier && word.text == "last" &&
+               tokens_[cursor_ + offset + 1].kind == TokenKind::Identifier;
     }
 
     Declaration declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
@@ -754,6 +751,30 @@ private:
             .suggest("or give it its value now", after, " = <value>", Applicability::HasPlaceholders);
     }
 
+    // `last [a, b] ...`: `last` declares one name, and an index into a
+    // binding named `last` can hold neither a ',' nor a ':' after its ']',
+    // so this can only be meant as a destructuring declaration.
+    bool at_last_destructuring() const {
+        return at_contextual("last") && next_is(1, "[") && cursor_ + 3 < tokens_.size() &&
+               tokens_[cursor_ + 2].kind == TokenKind::Identifier &&
+               (next_is(3, ",") || (next_is(3, "]") && next_is(4, ":")));
+    }
+
+    Diagnostic last_destructuring() const {
+        const auto& word = current().span;
+        auto close = cursor_ + 1;
+        while (close + 1 < tokens_.size() && !next_is(close - cursor_, "]")) ++close;
+        const auto& end = tokens_[close].span;
+        Span names = word;
+        names.length = end.offset + end.length - word.offset;
+        return Diagnostic(word, "a destructuring declaration cannot use 'last'").with_code("E0536")
+            .label("'last' declares a single name")
+            .label(names, "these names are destructured")
+            .note("'last' is a contextual word: followed by '[' it is a binding named 'last' being indexed")
+            .suggest("declare the names with 'const', which binds each of them once", word, "const",
+                     Applicability::MachineApplicable);
+    }
+
     // Accessor clauses after a member's ';' (Types.md, Accessors). No member
     // begins with '|', so the position is unambiguous, and `get`, `set`, and
     // `value` stay ordinary identifiers everywhere else. Lowering checks
@@ -864,6 +885,8 @@ private:
             } while (match(",") && !at("]"));
             expect("]");
             destructure_tail(result);
+        } else if (at_last_destructuring()) {
+            throw last_destructuring();
         } else if (at_declaration()) {
             result.kind = Statement::Kind::Binding;
             result.declaration = std::make_unique<Declaration>(declaration());

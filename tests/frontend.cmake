@@ -979,7 +979,42 @@ let reset = func() { p = new; };
 ]=] "3:26" "E0533")
 check_rejection(anonymous-element-new "let items: class (export let x: int;)[] = [new];" "2:44" "E0533")
 check_rejection(anonymous-untyped "let p: class (export let x = 1;) = new;" "2:26" "E0534")
-check_rejection(anonymous-const "let p: class (export const x: int = 1;) = new;" "2:28" "E0535")
+# A `const` or `last` field, or an accessor clause, makes a body a class of its
+# own: its own field initializers run, and two such bodies are distinct.
+check_rejection(anonymous-const-distinct [=[
+let p: class (export const x: int = 1;) = new;
+let q: class (export const x: int = 1;) = p;
+]=] "3:43" "E0403.*expected class[(]const x: int32[)]@anonymous-const-distinct[.]nra:3:8")
+check_rejection(anonymous-last-distinct [=[
+let p: class (export last x: int = 1;) = new;
+let q: class (export last x: int = 1;) = p;
+]=] "3:42" "E0403.*expected class[(]last x: int32[)]@anonymous-last-distinct[.]nra:3:8")
+check_rejection(anonymous-const-assigned "let p: class (export const x: int = 1;) = new; let f = func() { p.x = 2; };" "2:65" "E0401")
+check_rejection(anonymous-last-outside-init [=[
+let p: class (
+    export last id: int;
+    export let init = func() {
+        id = 4;
+    };
+) = new;
+let f = func() { p.id = 3; };
+]=] "8:18" "E0445")
+check_rejection(anonymous-last-destructuring "let f = func() { last [a, b] = 1, 2; };" "2:18" "E0536")
+file(WRITE "${TEST_DIR}/anonymous-behaviour.nra" [=[
+let p: class ( export last id: int = 1; ) = new;
+let limits: class (
+    last hidden: int = 2;
+    export const most: int = 10;
+    export last least: int;
+    export let init = func() {
+        least = hidden;
+    };
+) = new;
+let named: class ( export let code = "XY"; | get: code; ) = new;
+let code = named.code;
+let total = p.id + limits.most + limits.least;
+]=])
+run_success(unused check "${TEST_DIR}/anonymous-behaviour.nra")
 check_rejection(anonymous-duplicate-field "let p: class (export let x: int; export let x: int;) = new;" "2:45" "E0302.*duplicate declaration of 'x'")
 check_rejection(anonymous-unknown-field "let p: class (export let x: int = 1;) = new; let y = p.y;" "2:54" "E0305.*unknown or inaccessible member 'y'")
 check_rejection(anonymous-arguments "let p: class (export let x: int;) = new(1);" "2:37" "E0407.*expected 0 argument")

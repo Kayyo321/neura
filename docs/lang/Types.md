@@ -399,7 +399,7 @@ my_data.non_zero += 1;
 ```
 
 ```text
-field     = "export" ("let" | "const") name [":" type] ["=" expression] ";" { accessor }
+field     = "export" ("let" | "const" | "last") name [":" type] ["=" expression] ";" { accessor }
 accessor  = "|" "get" ":" (expression | block) ";"
           | "|" "set" ":" (simple-statement | block) ";"
 ```
@@ -431,7 +431,7 @@ A class body can be written wherever a type is expected: in the annotation of a 
 anonymous-class := "class" [":" base] ["implements" interface ("," interface)*] "(" member* ")"
 ```
 
-The members use the grammar of a class declaration's body, and each ends with `;`. In a type position, `class` begins a body only when it is followed by `(` and then `)` or a member (`export`, `static`, `let`, `const`), by `implements`, or by `: Base` and then `implements` or `(` and a member. Anything else after `class` leaves it the [umbrella type](#umbrella-class-and-nil), so `x as class`, `x is class`, `<T: class>`, and `c ? x as class : y` keep their meaning. A body with a base and no members, `class : Base ()`, is therefore not recognized; write a member, or use `Base`. After `new`, `class()` followed by anything but `(` is the umbrella type with no arguments, as before, and `new class()()` constructs the empty anonymous class. The rule against an annotation on a definition, `let X: T = class (...)` ([E0208](../diagnostics/E0208.md)), is unrelated: an anonymous class is a type, not a definition.
+The members use the grammar of a class declaration's body, and each ends with `;`. In a type position, `class` begins a body only when it is followed by `(` and then `)` or a member (`export`, `static`, `let`, `const`, or `last` and a name), by `implements`, or by `: Base` and then `implements` or `(` and a member. Anything else after `class` leaves it the [umbrella type](#umbrella-class-and-nil), so `x as class`, `x is class`, `<T: class>`, and `c ? x as class : y` keep their meaning. A body with a base and no members, `class : Base ()`, is therefore not recognized; write a member, or use `Base`. After `new`, `class()` followed by anything but `(` is the umbrella type with no arguments, as before, and `new class()()` constructs the empty anonymous class. The rule against an annotation on a definition, `let X: T = class (...)` ([E0208](../diagnostics/E0208.md)), is unrelated: an anonymous class is a type, not a definition.
 
 <!-- example: check -->
 ```neura
@@ -447,13 +447,44 @@ origin.x = 3;
 let text = describe(origin);
 ```
 
-**Identity.** A body whose members are all instance fields is *fields-only*. Its class is identified by its fields: their order, names, and types. Two fields-only bodies with the same fields, anywhere in the program or in the prebuilt modules it links, are the same class, so the parameter of `describe` above and the annotation of `origin` name one type. Field initializers are not part of the identity. Every field of a fields-only body is exported (otherwise nothing could use it, [E0532](../diagnostics/E0532.md)), has a type annotation ([E0534](../diagnostics/E0534.md)), and is declared with `let` ([E0535](../diagnostics/E0535.md)), so exportedness and mutability are part of the identity only in that they are always the same. A body with a method, an `init` or `deinit`, a static member, a cast, a base, or interfaces is a class of its own at each place it is written: two such bodies are different types even when their text is the same.
+**Identity.** A body whose members are all `let` instance fields without accessor clauses is *fields-only*. Its class is identified by its fields: their order, names, and types. Two fields-only bodies with the same fields, anywhere in the program or in the prebuilt modules it links, are the same class, so the parameter of `describe` above and the annotation of `origin` name one type. Field initializers are not part of the identity. Every field of a fields-only body is exported (otherwise nothing could use it, [E0532](../diagnostics/E0532.md)) and has a type annotation ([E0534](../diagnostics/E0534.md)), so exportedness and mutability are part of the identity only in that they are always the same. Any other body is a class of its own at each place it is written: one with a method, an `init` or `deinit`, a static member, a cast, a base, or interfaces, and also one with a `const` or `last` field or a field with [accessors](#accessors), because each of these gives the class behaviour that its fields alone do not describe. Two such bodies are different types even when their text is the same. A class of its own accepts every member that a declared class accepts, including unexported fields and fields whose type is inferred from their initializer.
 
 **Construction.** A class of its own behaves like a declared class: its field initializers run when it is constructed, wherever `new` names it. A fields-only class takes its field initializers from one body: the body in the annotation of the `let` or `const` binding (local, file-level, or field) that a `new` initializes, or the body written after `new` itself, as in `new class (export let x: int = 1;)()`. `new` allocates the object and then runs that body's initializers in field order, at the `new`, with the names visible there. Fields without an initializer start uninitialized, as in any class. Initializers written in any other occurrence, such as a parameter or result type or a collection element type, would never run and are [E0530](../diagnostics/E0530.md). A target-typed `new` whose type arrives without a body, such as the value of an assignment to a binding whose body has initializers, cannot tell which initializers to run ([E0533](../diagnostics/E0533.md)); a `new` for a parameter or result type whose body has no initializers constructs the object with every field uninitialized.
 
+**Accessors and `last` fields.** A field of an anonymous class can have `| get:` and `| set:` clauses. The rules of [accessors](#accessors) apply with the body as the declaring class: inside the body a bare field name is the storage, and every access from outside it, such as `my_data.data = text` or `let v = my_data.code;`, calls the accessors. Writing a get-only field from outside is [E0510](../diagnostics/E0510.md). A `last` field follows the rules of [`last` fields](ObjectLifecycle.md#last-fields), so one declared without a value needs an `init` in the body that assigns it ([E0446](../diagnostics/E0446.md)).
+
+<!-- example: check -->
+```neura
+let failure = import:Std.Core.Failure;
+
+let my_data: class (
+    export let data: string = "";
+        | set: data = value;
+        | get: data;
+
+    export let code = "XY729H08";
+        | get: code;
+
+    export let non_zero = 18000;
+        | get: non_zero;
+        | set: {
+            if (value == 0) {
+                failure.trap("non_zero must not be zero");
+            }
+            non_zero = value;
+        };
+) = new;
+
+my_data.data = "payload";
+let v = my_data.code;
+my_data.non_zero += 1;
+```
+
+The body has accessors, so it is a class of its own: `code` and `non_zero` take their types from their initializers, and `new` runs the body's own initializers. See [anonymous-accessors.nra](../../examples/types/anonymous-accessors.nra).
+
 **Scope.** Names in the body resolve in the module or file that encloses it, as for a class declared there. A field type cannot use a type parameter of an enclosing generic function or class ([E0531](../diagnostics/E0531.md)): an anonymous class is not generic. Unexported members of a class of its own are visible only in its body, as for any class.
 
-**Names.** Diagnostics, `to_string`, and the names an image keeps for tools describe a fields-only class by its fields, as in `class(x: int32, y: int32)`, with each type spelled as diagnostics spell it. A class of its own adds where it is written, as in `class(count: int32)@counter.nra:3:12`; its runtime name is qualified by its enclosing module like any class's. `neura docs` prints the fields with the types as written, as in `class(x: int, y: int)`.
+**Names.** Diagnostics, `to_string`, and the names an image keeps for tools describe a fields-only class by its fields, as in `class(x: int32, y: int32)`, with each type spelled as diagnostics spell it. A `const` or `last` field is marked with its keyword, and a field whose type is inferred appears by its name alone. A class of its own adds where it is written, as in `class(count: int32)@counter.nra:3:12`; its runtime name is qualified by its enclosing module like any class's. `neura docs` prints the fields with the types as written and the accessors they have, as in `class(x: int, y: int)` or `class(data: string { get; set }, code { get })`.
 
 **Separate compilation.** A fields-only class is the same class in every module that writes its fields, including prebuilt NeuraIR modules compiled separately: a program can pass an object that one module created to a function of another module whose parameter writes the same fields. In NeuraIR the class is declared in a generated file of its own, named after a hash of its fields, so every module that writes those fields declares the same file and linking coalesces it ([NeuraIR format](../NirFormat.md#anonymous-classes)). A class of its own belongs to the source file where it is written. Every anonymous class carries the [`class.anonymous`](../NirFormat.md#symbol-attributes) attribute.
 

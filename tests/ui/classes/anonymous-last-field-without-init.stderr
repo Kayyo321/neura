@@ -1,0 +1,9 @@
+error[E0446]: class 'class(last id: int32, label: string)@anonymous-last-field-without-init.nra:3:13' has no 'init' to assign 'last' field 'id'
+ --> $DIR/anonymous-last-field-without-init.nra:4:17
+  |
+4 |     export last id: int;
+  |                 ^^ declared here without a value
+  |
+  = help: give it its value here, or add an 'init' that assigns it exactly once
+
+For more information about this error, try `neura explain E0446`.

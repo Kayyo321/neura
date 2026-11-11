@@ -234,3 +234,32 @@ if(NOT stubs MATCHES "/// A point[.]\nNeuraObject point;" OR
    NOT stubs MATCHES "/// Shows a point[.]\nstring show[(]NeuraObject p[)];")
     message(FATAL_ERROR "Doxygen filter lost an anonymous class type\n${stubs}")
 endif()
+
+# An anonymous class with accessors, `last`, and `const` fields lists each
+# field with its keyword and its accessors, as a field signature does.
+set(anonymous_accessors "${TEST_DIR}/anonymous-accessors.nra")
+file(WRITE "${anonymous_accessors}" [=[
+/// The owner's record.
+let my_data: class (
+    export let data: string = "";
+        | set: data = value;
+        | get: data;
+
+    export let code = "XY729H08";
+        | get: code;
+) = new;
+/// A ticket.
+let ticket: class (export last id: int = 1; export const prefix = "T";) = new;
+]=])
+run_docs(index "${anonymous_accessors}")
+expect_json("let my_data: class(data: string { get; set }, code { get })" files 0 symbols 0 signature)
+expect_json("let ticket: class(last id: int, const prefix)" files 0 symbols 1 signature)
+run_docs(stubs --doxygen "${anonymous_accessors}")
+file(READ "${anonymous_accessors}" original)
+string(REGEX MATCHALL "\n" original_newlines "${original}")
+string(REGEX MATCHALL "\n" stub_newlines "${stubs}")
+list(LENGTH original_newlines original_count)
+list(LENGTH stub_newlines stub_count)
+if(NOT original_count EQUAL stub_count OR NOT stubs MATCHES "/// A ticket[.]\nNeuraObject ticket;")
+    message(FATAL_ERROR "Doxygen filter mishandled an anonymous class with accessors\n${stubs}")
+endif()

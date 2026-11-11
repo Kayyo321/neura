@@ -284,6 +284,51 @@ meter.serial = "G-2";
 reject("accessor-read-only.nra:3:1: error\\[E0510\\]: 'serial' is read-only outside its class"
     check "${artifacts}/accessor-read-only.nra")
 
+# An anonymous class with accessors is a class of its own; a program that
+# imports it from a .nir file reaches its fields through the accessors too.
+file(WRITE "${source}/knobs.nra" [=[
+let console = import:Std.Io.Console;
+
+let Knobs = module (
+    export let settings: class (
+        export let level = 1;
+            | get: level;
+            | set: {
+                console.print_line("set level " + value.to_string());
+                level = value;
+            };
+        export let name = "knobs";
+            | get: name;
+    ) = new;
+);
+]=])
+neura(emit-ir "${source}/knobs.nra" -o "${artifacts}/knobs.nir")
+file(WRITE "${artifacts}/knobs-app.nra" [=[
+let knobs = import:"knobs.nir".Knobs;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        knobs.settings.level = 3;
+        knobs.settings.level += 1;
+        console.print_line(knobs.settings.name + " " + knobs.settings.level.to_string());
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+neura(build "${artifacts}/knobs-app.nra" -o "${TEST_DIR}/knobs-app.nvr")
+neura(run "${TEST_DIR}/knobs-app.nvr")
+if(NOT output STREQUAL "set level 3\nset level 4\nknobs 4\n")
+    message(FATAL_ERROR "anonymous class accessors through .nir produced:\n${output}")
+endif()
+file(WRITE "${artifacts}/knobs-read-only.nra" [=[
+let knobs = import:"knobs.nir".Knobs;
+let rename = func() { knobs.settings.name = "x"; };
+]=])
+reject("knobs-read-only.nra:2:23: error\\[E0510\\]: 'name' is read-only outside its class"
+    check "${artifacts}/knobs-read-only.nra")
+
 # A fields-only anonymous class is one class across a module and the program
 # that links its artifact, and across modules compiled separately that write
 # the same fields (Types.md, Anonymous classes): each declares the class in
