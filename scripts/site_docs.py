@@ -11,6 +11,7 @@ by its path below the site's address. Three things happen here:
   * Markdown includes. `<!-- markdown: README.md#getting-started -->` is
     replaced by that section of the document, rendered, with its heading.
     An empty fragment (`README.md#`) names the text before the first heading.
+    `without-code` after the fragment leaves out the section's fenced code.
   * Documents. `site/contents.toml` lists the repository's Markdown documents
     that the site publishes, grouped into the sections of the documentation's
     navigation. Each is rendered into a page with the documentation layout.
@@ -44,7 +45,9 @@ CONTENTS = "contents.toml"
 DEFAULT_BRANCH = "main"
 
 INCLUDE = re.compile(r"<!--\s*include:\s*([A-Za-z0-9_-]+)\s*-->")
-MARKDOWN_INCLUDE = re.compile(r"<!--\s*markdown:\s*([^#\s]+)#([^\s]*)\s*-->")
+MARKDOWN_INCLUDE = re.compile(r"<!--\s*markdown:\s*([^#\s]+)#([^\s]*)(\s+without-code)?\s*-->")
+# A fenced code block, with its fences, in Markdown text.
+FENCED_CODE = re.compile(r"^( {0,3})(`{3,}|~{3,})[^\n]*\n.*?^ {0,3}\2[`~]*[ \t]*(?:\n|\Z)", re.MULTILINE | re.DOTALL)
 # Text files a reader can open in the site's source view, by their suffix.
 SOURCE_VIEW = {".nra", ".cpp", ".hpp", ".h", ".c", ".py", ".yml", ".yaml", ".toml", ".json", ".txt", ".cmake",
                ".html", ".css", ".js", ".sh", ".ir"}
@@ -227,7 +230,7 @@ class Assembly:
                 origin.segments.append((built_line, source_line, match.group(1)))
             else:
                 replacement = self.markdown_section(name, match.group(2), match.group(3), origin_name,
-                                                    source_line)
+                                                    source_line, without_code=bool(match.group(4)))
                 origin.segments.append((built_line, source_line, ""))
             advance(replacement)
             origin.segments.append((built_line, source_line, ""))
@@ -240,7 +243,8 @@ class Assembly:
     def fill(partial: str, root: str) -> str:
         return partial.replace("{{root}}", root).replace("{{home}}", root or "./").rstrip("\n")
 
-    def markdown_section(self, page: str, source: str, fragment: str, origin_name: str, line: int) -> str:
+    def markdown_section(self, page: str, source: str, fragment: str, origin_name: str, line: int,
+                         without_code: bool = False) -> str:
         path = self.root / source
         if not path.is_file():
             self.report(origin_name, line, f"the markdown include names `{source}`, which is not a file")
@@ -270,6 +274,9 @@ class Assembly:
             self.report(origin_name, line, f"`{source}` has no heading `#{fragment}`")
             return ""
         chosen = "\n".join(lines[start:end])
+        if without_code:
+            # The section's prose alone: a page can leave out a listing it does not need.
+            chosen = FENCED_CODE.sub("", chosen)
         if fragment:
             # The section's heading becomes the section heading of the page.
             chosen = re.sub(r"^ {0,3}#{1,6}", "##", chosen, count=1)

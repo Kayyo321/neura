@@ -276,7 +276,8 @@ def documents_build() -> None:
     """A build renders each listed document, a page for each linked file, and the partials."""
     global failures
     with tempfile.TemporaryDirectory() as directory:
-        home_page = HOME.replace("<body>", "<body>\n<!-- include: masthead -->\n<!-- markdown: docs/Ref.md#a-table -->")
+        home_page = HOME.replace("<body>", "<body>\n<!-- include: masthead -->\n<!-- markdown: docs/Ref.md#a-table -->"
+                                           "\n<!-- markdown: docs/Guide.md#guide without-code -->")
         write_site(directory, {**SITE, **DOCUMENTS, "site/index.html": home_page})
         output = Path(directory) / "out"
         expect("site: documents: a build", site_command(directory, "--output", str(output)), None)
@@ -297,6 +298,9 @@ def documents_build() -> None:
             "the documentation has a home page": 'href="Guide.html"' in read("docs/index.html"),
             "a partial is expanded with the path to the top": '<a href="./">Home</a> <a href="docs/">Docs</a>' in front,
             "a markdown include renders that section": '<h2 id="a-table">' in front and "<table>" in front,
+            "an include without code leaves out the section's code and keeps its prose":
+                "its [table]" not in front and "line 1 of the example" in front and "a comment" not in front
+                and "a comment" in guide,
             "the search index lists pages and sections": '"9.3 ArrayList<T>"' in read("assets/search.json"),
             "contents.toml and partials are not published":
                 not (output / "contents.toml").exists() and not (output / "partials").exists(),

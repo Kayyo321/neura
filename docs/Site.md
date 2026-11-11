@@ -89,7 +89,7 @@ A pull request is not deployed anywhere, so a reviewer previews it from a checko
 Because the site has no templates, the build replaces two kinds of comment in a page of `site/`:
 
 - `<!-- include: masthead -->` is replaced by `site/partials/masthead.html`. In a partial, `{{root}}` becomes the path from the page to the top of the site (empty at the top, `../` one directory down), and `{{home}}` the same path or `./`. Change the masthead, the head, or the documentation's footer once, in its partial.
-- `<!-- markdown: README.md#documentation -->` is replaced by that section of the document, rendered, heading and all. An empty fragment, as in `<!-- markdown: README.md# -->`, names the text before the document's first heading. The front page takes its words from the README this way.
+- `<!-- markdown: README.md#documentation -->` is replaced by that section of the document, rendered, heading and all. An empty fragment, as in `<!-- markdown: README.md# -->`, names the text before the document's first heading. The front page takes its words from the README this way. Add `without-code` after the fragment, as in `<!-- markdown: README.md#compilation-and-execution without-code -->`, to leave out the section's fenced code blocks and keep its prose; the front page leaves out the README's pipeline diagram this way.
 
 ## Rules the build checks
 
