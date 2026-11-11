@@ -145,10 +145,10 @@ function(check_rejection name declarations body location message_pattern)
 endfunction()
 check_rejection(worker_prints "let noisy = func(x: int) -> int { console.print_line(\"x\"); return x; };\n"
     "        let out = parallel.map<int, int>([1, 2], noisy, parallel.limits(1000, 1000));\n"
-    "9:19" "must compute in isolation: it reaches 'noisy' \\(called at worker_prints.nra:9:50\\), and it reaches 'print_line' [^\n]*issues a host request")
+    "9:19" "the worker of a parallel map must compute in isolation: it reaches '[a-z_]+', which issues a host request")
 check_rejection(worker_writes_global "let hits: int = 0;\nlet counting = func(x: int) -> int { hits = hits + 1; return x; };\n"
     "        let out = parallel.map<int, int>([1, 2], counting, parallel.limits(1000, 1000));\n"
-    "10:19" "is not task-safe: it reaches 'counting' [^\n]*uses the reassignable binding 'hits'")
+    "10:19" "the worker of a parallel map is not task-safe: it reaches 'counting', which uses the reassignable binding 'hits'")
 check_rejection(worker_spawns "let nested = func(x: int) -> int { scope { let t = spawn nested(x); } return x; };\n"
     "        let out = parallel.map<int, int>([1, 2], nested, parallel.limits(1000, 1000));\n"
     "9:19" "must compute in isolation: [^\n]*starts or scopes tasks")

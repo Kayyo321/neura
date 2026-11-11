@@ -1,0 +1,4 @@
+// Two functions with one name (E0302): the second is labelled, the first
+// is labelled where it is declared, and the help says how to overload.
+let area = func(side: int) -> int => side * side;
+let area = func(width: int, height: int) -> int => width * height;

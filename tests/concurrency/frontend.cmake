@@ -27,6 +27,21 @@ function(write_program name declarations body)
     file(WRITE "${TEST_DIR}/${name}.nra" "${prelude}${declarations}${entry_open}${body}${entry_close}")
 endfunction()
 
+# The call chain of a task-safety error is a list of labels: each call on the
+# way and the operation itself, with their locations (`--error-format=json`).
+function(check_labels name)
+    execute_process(
+        COMMAND "${NEURA}" check --error-format=json "${name}.nra"
+        WORKING_DIRECTORY "${TEST_DIR}"
+        OUTPUT_QUIET ERROR_VARIABLE stderr
+    )
+    foreach(label IN LISTS ARGN)
+        if(NOT stderr MATCHES "${label}")
+            message(FATAL_ERROR "${name}: expected a label matching '${label}'\n${stderr}")
+        endif()
+    endforeach()
+endfunction()
+
 # The fixture files begin with the two prelude lines, so a declaration on
 # line N of `declarations` is on line N + 2, and a line of `body` follows
 # the declarations and the two lines that open the entry module.
@@ -245,7 +260,11 @@ let audit = func(entry: int) { bump(); };
         scope {
             spawn audit(3);
         }
-]=] "9:13" "not task-safe: it reaches 'audit' \\(called at call_writes_global.nra:9:19\\), and it reaches 'bump' \\(called at call_writes_global.nra:5:32\\), and that code uses the reassignable binding 'counter' at call_writes_global.nra:4:19")
+]=] "9:13" "error\\[E0601\\]: the spawned call is not task-safe: it reaches 'bump', which uses the reassignable binding 'counter'")
+check_labels(call_writes_global
+    "\"line\":9,\"column\":19,\"primary\":false,\"label\":\"calls 'audit'\""
+    "\"line\":5,\"column\":32,\"primary\":false,\"label\":\"calls 'bump'\""
+    "\"line\":4,\"column\":19,\"primary\":false,\"label\":\"uses the reassignable binding 'counter' here\"")
 
 check_rejection(call_reads_mutable_global [=[
 let limit: int = 3;
@@ -864,7 +883,12 @@ let add = func(job: int) -> void { total = total + job; };
 " [=[
         groups.with_workers<int>(1, 1, add, func(group: groups.WorkerGroup<int>) -> void { });
 ]=] "10:9"
-    "the spawned call is not task-safe: it reaches 'run_worker<int32>' \\(called at worker-group.nra:[0-9]+:[0-9]+\\), and it reaches 'add' \\(called at group_work_writes_a_global.nra:10:40\\), and that code uses the reassignable binding 'total' at group_work_writes_a_global.nra:7:36 \\(the library starts the task at worker-group.nra:[0-9]+:[0-9]+\\)")
+    "the spawned call is not task-safe: it reaches 'add', which uses the reassignable binding 'total'")
+check_labels(group_work_writes_a_global
+    "worker-group.nra\",[^}]*,\"primary\":false,\"label\":\"calls 'run_worker<int32>'\""
+    "\"line\":10,\"column\":40,\"primary\":false,\"label\":\"calls 'add'\""
+    "\"line\":7,\"column\":36,\"primary\":false,\"label\":\"uses the reassignable binding 'total' here\""
+    "worker-group.nra\",[^}]*,\"primary\":false,\"label\":\"the library starts the task here\"")
 
 # When the helper's function value captures an object, the message names the capture.
 check_rejection(group_work_captures_an_object "${box_class}${groups_import}" [=[
@@ -872,7 +896,10 @@ check_rejection(group_work_captures_an_object "${box_class}${groups_import}" [=[
         let add = func(job: int) -> void { box.value = box.value + job; };
         groups.with_workers<int>(1, 1, add, func(group: groups.WorkerGroup<int>) -> void { });
 ]=] "14:9"
-    "a value of type func\\(int32\\) -> void is not transferable, so it cannot be given to a spawned task: a function value of this type captures a value of type Box at group_work_captures_an_object.nra:[0-9]+:[0-9]+ \\(the library starts the task at worker-group.nra:[0-9]+:[0-9]+\\)")
+    "a value of type func\\(int32\\) -> void is not transferable, so it cannot be given to a spawned task")
+check_labels(group_work_captures_an_object
+    "group_work_captures_an_object.nra\",[^}]*,\"primary\":false,\"label\":\"a function value of this type captures a value of type Box here\""
+    "worker-group.nra\",[^}]*,\"primary\":false,\"label\":\"the library starts the task here\"")
 
 check_rejection(tasks_all_call_writes_a_global "${groups_import}\
 let total: int = 0;
@@ -881,14 +908,21 @@ let add = func -> int { total = total + 1; return total; };
         let calls: (func() -> int)[list] = [add];
         tasks.all<int>(calls);
 ]=] "11:9"
-    "the spawned call is not task-safe: it reaches 'add' \\(called at tasks_all_call_writes_a_global.nra:10:45\\), and that code uses the reassignable binding 'total' at tasks_all_call_writes_a_global.nra:7:25 \\(the library starts the task at tasks.nra:[0-9]+:[0-9]+\\)")
+    "the spawned call is not task-safe: it reaches 'add', which uses the reassignable binding 'total'")
+check_labels(tasks_all_call_writes_a_global
+    "\"line\":10,\"column\":45,\"primary\":false,\"label\":\"calls 'add'\""
+    "\"line\":7,\"column\":25,\"primary\":false,\"label\":\"uses the reassignable binding 'total' here\""
+    "tasks.nra\",[^}]*,\"primary\":false,\"label\":\"the library starts the task here\"")
 
 check_rejection(tasks_all_ok_call_captures_an_object "${box_class}${groups_import}" [=[
         let box = new Box(1);
         let calls: (func() -> result.Result<int>)[list] = [func() -> result.Result<int> => result.Result<int>.Ok(box.value)];
         tasks.all_ok<int>(calls);
 ]=] "14:9"
-    "a value of type func\\(\\) -> Result<int32> is not transferable, so it cannot be given to a spawned task: a function value of this type captures a value of type Box at tasks_all_ok_call_captures_an_object.nra:[0-9]+:[0-9]+ \\(the library starts the task at tasks.nra:[0-9]+:[0-9]+\\)")
+    "a value of type func\\(\\) -> Result<int32> is not transferable, so it cannot be given to a spawned task")
+check_labels(tasks_all_ok_call_captures_an_object
+    "tasks_all_ok_call_captures_an_object.nra\",[^}]*,\"primary\":false,\"label\":\"a function value of this type captures a value of type Box here\""
+    "tasks.nra\",[^}]*,\"primary\":false,\"label\":\"the library starts the task here\"")
 
 # ---------------------------------------------------------------------------
 # The union rule for function values ranges over the closures that code which can run creates. Std.Io.Console
@@ -917,7 +951,10 @@ check_rejection(reader_in_a_task_beside_console_input "${reader_declarations}" [
         scope {
             let task = spawn lines();
         }
-]=] "17:24" "the spawned call is not task-safe: it reaches 'lines' [^\n]*that code uses the reassignable binding 'pending[a-z_]*' at console.nra")
+]=] "17:24" "the spawned call is not task-safe: it reaches '[a-z_]+', which uses the reassignable binding 'pending[a-z_]*'")
+check_labels(reader_in_a_task_beside_console_input
+    "\"line\":17,\"column\":30,\"primary\":false,\"label\":\"calls 'lines'\""
+    "console.nra\",[^}]*,\"primary\":false,\"label\":\"uses the reassignable binding 'pending[a-z_]*' here\"")
 
 # ---------------------------------------------------------------------------
 # Forms that an earlier compiler refused.

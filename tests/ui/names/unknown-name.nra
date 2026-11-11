@@ -1,0 +1,5 @@
+// A misspelled parameter (E0304): the compiler suggests the visible name
+// with the closest spelling.
+let total = func(count: int) -> int {
+    return cuont;
+};

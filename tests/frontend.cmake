@@ -88,6 +88,54 @@ if(NOT ir STREQUAL repeated_ir)
 endif()
 
 check_rejection(lexical "let count = @;" "2:13" "[@]")
+
+# The lexer and the parser report every syntax error in source order, up to
+# --max-errors, and the first one is the one a single-error run reported.
+function(count_errors output)
+    execute_process(
+        COMMAND "${NEURA}" check --error-format=short ${ARGN}
+        WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status
+        ERROR_VARIABLE stderr
+    )
+    string(REGEX MATCHALL "error\\[E[0-9]+\\]" found "${stderr}")
+    list(LENGTH found count)
+    if(status STREQUAL "0")
+        message(FATAL_ERROR "Expected ${ARGN} to fail\n${stderr}")
+    endif()
+    set("${output}" "${count}" PARENT_SCOPE)
+    set("${output}_stderr" "${stderr}" PARENT_SCOPE)
+endfunction()
+file(WRITE "${TEST_DIR}/several-lexical.nra" "let a = 1 $ 2;\nlet b = 3 @ 4;\nlet c = 5 ` 6;\n")
+count_errors(lexical several-lexical.nra)
+if(NOT lexical EQUAL 3 OR NOT lexical_stderr MATCHES "^[^\n]*several-lexical[.]nra:1:11: error\\[E0101\\]")
+    message(FATAL_ERROR "Expected three lexical errors, the first at 1:11\n${lexical_stderr}")
+endif()
+count_errors(limited --max-errors 2 several-lexical.nra)
+if(NOT limited EQUAL 2)
+    message(FATAL_ERROR "--max-errors 2 should stop after two errors\n${limited_stderr}")
+endif()
+file(WRITE "${TEST_DIR}/several-syntax.nra" [=[
+let a = func() -> int {
+    let x = (1 + 2;
+    return x;
+};
+let b = ;
+let C = class (
+    export let size;
+    export let label: string = "c";
+);
+let d = 4
+let e = 5;
+]=])
+count_errors(syntax several-syntax.nra)
+if(NOT syntax EQUAL 4 OR NOT syntax_stderr MATCHES "2:19: error\\[E0203\\][^\n]*\n[^\n]*5:9: error\\[E0204\\][^\n]*\n[^\n]*7:20: error\\[E0205\\][^\n]*\n[^\n]*10:10: error\\[E0201\\]")
+    message(FATAL_ERROR "Expected four syntax errors with no cascade\n${syntax_stderr}")
+endif()
+count_errors(one --max-errors=1 several-syntax.nra)
+if(NOT one EQUAL 1)
+    message(FATAL_ERROR "--max-errors=1 should stop after one error\n${one_stderr}")
+endif()
 check_rejection(syntax "let count: int32 = ;" "2:20" "expected")
 check_rejection(old-parameter-syntax "let f = func(int value) {};" "2:18" "expected ':'")
 check_rejection(rest-position "let f = func(args: ..., last: int) {};" "2:23" "variadic parameter must be last")

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <string>
 #include <optional>
 #include <utility>
 
@@ -33,6 +35,10 @@ constexpr auto compound_symbols = std::to_array<std::string_view>({
     "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=",
 });
 
+// Thrown inside the lexer after an error is recorded, to abandon the token
+// being scanned; the lexer goes on with the next one.
+struct Skipped {};
+
 class Lexer {
 public:
     Lexer(std::string_view source, const std::string& file) : source_(source), file_(file) {}
@@ -53,7 +59,13 @@ public:
                 continue;
             }
             const Span start = location();
-            const TokenKind kind = scan(start);
+            TokenKind kind;
+            try {
+                kind = scan(start);
+            } catch (const Skipped&) {
+                documentation_.reset();
+                continue;
+            }
             const auto width = offset_ - start.offset;
             std::shared_ptr<const DocComment> documentation;
             if (documentation_ && start.line == documentation_end_line_ + 1) {
@@ -64,6 +76,7 @@ public:
                               {file_, start.line, start.column, start.offset, width},
                               std::move(documentation)});
         }
+        if (!errors_.empty()) throw combined();
         tokens.push_back({TokenKind::End, {}, location()});
         return tokens;
     }
@@ -86,6 +99,41 @@ private:
     }
 
     Span location() const { return {file_, line_, column_, offset_, 0}; }
+
+    // The first error, carrying the others (Tooling.md, Diagnostics).
+    Diagnostic combined() const {
+        auto first = errors_.front();
+        for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
+        return first;
+    }
+
+    // Records a lexical error and goes on, up to error_limit() errors.
+    void report(Diagnostic error) {
+        errors_.push_back(std::move(error));
+        if (errors_.size() >= error_limit()) throw combined();
+    }
+
+    // Skips the code point at the current offset, which is not a line end.
+    void skip_code_point() {
+        ++offset_;
+        while (offset_ < source_.size() && (static_cast<unsigned char>(source_[offset_]) & 0xC0) == 0x80) ++offset_;
+        ++column_;
+    }
+
+    // The code point at the current offset as U+XXXX, for a label.
+    std::string code_point() const {
+        const auto lead = static_cast<unsigned char>(peek());
+        std::uint32_t value = lead;
+        std::size_t width = 1;
+        if (lead >= 0xF0) { value = lead & 0x07; width = 4; }
+        else if (lead >= 0xE0) { value = lead & 0x0F; width = 3; }
+        else if (lead >= 0xC0) { value = lead & 0x1F; width = 2; }
+        for (std::size_t i = 1; i < width; ++i) value = (value << 6) | (static_cast<unsigned char>(peek(i)) & 0x3F);
+        constexpr char digits[] = "0123456789ABCDEF";
+        std::string hex;
+        for (int shift = value > 0xFFFF ? 20 : 12; shift >= 0; shift -= 4) hex += digits[(value >> shift) & 0xF];
+        return "U+" + hex;
+    }
 
     void comment() {
         const auto start = location();
@@ -131,7 +179,12 @@ private:
         if (!valid) {
             auto invalid = location();
             invalid.length = 1;
-            throw Diagnostic(std::move(invalid), "invalid UTF-8");
+            report(Diagnostic(std::move(invalid), "invalid UTF-8").with_code("E0102")
+                .label("this byte does not begin a valid UTF-8 sequence")
+                .note("Neura source files are UTF-8 text"));
+            ++offset_;
+            ++column_;
+            return;
         }
         offset_ += width;
         ++column_;
@@ -171,11 +224,43 @@ private:
             return TokenKind::Symbol;
         }
         auto invalid = start;
-        invalid.length = 1;
         if (peek() >= '!' && peek() <= '~') {
-            throw Diagnostic(std::move(invalid), "invalid character '" + std::string(1, peek()) + "'");
+            invalid.length = 1;
+            report(Diagnostic(std::move(invalid), "invalid character '" + std::string(1, peek()) + "'")
+                .with_code("E0101").label("not a token of the language"));
+            advance();
+            throw Skipped{};
         }
-        throw Diagnostic(std::move(invalid), "invalid source character");
+        const auto lead = static_cast<unsigned char>(peek());
+        if (lead < 0x80) {
+            invalid.length = 1;
+            report(Diagnostic(std::move(invalid), "invalid source character").with_code("E0101")
+                .label("a control character is not valid here"));
+            advance();
+            throw Skipped{};
+        }
+        const auto before = offset_;
+        advance_text();
+        if (offset_ == before + 1 && errors_.size() && errors_.back().code() == "E0102") throw Skipped{};
+        invalid.length = offset_ - before;
+        offset_ = before;
+        --column_;
+        const auto name = code_point();
+        const std::string text(source_.substr(before, invalid.length));
+        auto error = Diagnostic(invalid, "invalid source character").with_code("E0101")
+            .label(name + " is not valid here");
+        // Typographic quotes, as a word processor writes them.
+        if (text == "\u201C" || text == "\u201D")
+            error.suggest("use an ASCII double quote", invalid, "\"", Applicability::MaybeIncorrect);
+        else if (text == "\u2018" || text == "\u2019")
+            error.note("Neura has no character literals; strings use '\"'");
+        else if (text == "\u2212" || text == "\u2013")
+            error.suggest("use an ASCII minus sign", invalid, "-", Applicability::MaybeIncorrect);
+        else if (text == "\u00A0")
+            error.suggest("use an ordinary space", invalid, " ", Applicability::MachineApplicable);
+        report(std::move(error));
+        skip_code_point();
+        throw Skipped{};
     }
 
     TokenKind number() {
@@ -199,7 +284,10 @@ private:
             }
             if (!is_digit(peek())) {
                 exponent.length = offset_ - exponent.offset;
-                throw Diagnostic(std::move(exponent), "expected digits in numeric exponent");
+                report(Diagnostic(std::move(exponent), "expected digits in numeric exponent").with_code("E0105")
+                    .label("an exponent needs at least one digit"));
+                while (is_name_char(peek())) advance();
+                throw Skipped{};
             }
             while (is_digit(peek())) {
                 advance();
@@ -208,7 +296,11 @@ private:
         if (is_name_start(peek())) {
             auto invalid = location();
             invalid.length = 1;
-            throw Diagnostic(std::move(invalid), "unexpected character after numeric literal");
+            report(Diagnostic(std::move(invalid), "unexpected character after numeric literal").with_code("E0105")
+                .label("a number cannot continue with a letter")
+                .help("separate the number from a following name with a space or an operator"));
+            while (is_name_char(peek())) advance();
+            throw Skipped{};
         }
         return kind;
     }
@@ -223,21 +315,49 @@ private:
             if (peek() == '\0') {
                 auto invalid = location();
                 invalid.length = 1;
-                throw Diagnostic(std::move(invalid), "null byte in string literal");
+                report(Diagnostic(std::move(invalid), "null byte in string literal").with_code("E0104")
+                    .label("a string cannot contain a null byte"));
+                advance();
+                continue;
             }
             if (peek() == '\\') {
                 auto escape = location();
                 advance();
                 constexpr std::string_view escapes = "nrt\\\"";
                 if (escapes.find(peek()) == std::string_view::npos) {
-                    escape.length = offset_ < source_.size() ? 2 : 1;
-                    throw Diagnostic(std::move(escape), "invalid string escape");
+                    const bool more = offset_ < source_.size() && peek() != '\n' && peek() != '\r';
+                    escape.length = more ? 2 : 1;
+                    auto error = Diagnostic(escape, "invalid string escape").with_code("E0104")
+                        .label("unknown escape")
+                        .note("the escapes are \\n, \\r, \\t, \\\\, and \\\"");
+                    if (more) {
+                        escape.length = 1;
+                        error.suggest("to write a backslash, escape it", escape, "\\\\", Applicability::MaybeIncorrect);
+                    }
+                    report(std::move(error));
+                    if (!more) continue;
                 }
             }
             advance_text();
         }
-        start.length = offset_ - start.offset;
-        throw Diagnostic(std::move(start), "unterminated string literal");
+        // The string runs to the end of its line: label the opening quote,
+        // and offer the closing one where the line ends, before a final ';'
+        // that more likely ends the statement than the text.
+        Span end = location();
+        auto close = end;
+        auto last = close.offset;
+        while (last > start.offset + 1 && (source_[last - 1] == ' ' || source_[last - 1] == '\t')) --last;
+        if (last > start.offset + 1 && source_[last - 1] == ';') {
+            close.column -= close.offset - (last - 1);
+            close.offset = last - 1;
+        }
+        start.length = 1;
+        report(Diagnostic(start, "unterminated string literal").with_code("E0103")
+            .label("this string is not closed")
+            .label(end, "the line ends here")
+            .note("a string literal ends on the line where it starts")
+            .suggest("close the string", close, "\"", Applicability::MaybeIncorrect));
+        throw Skipped{};
     }
 
     std::string_view source_;
@@ -248,6 +368,7 @@ private:
     std::size_t line_start_{};
     std::optional<DocComment> documentation_;
     std::size_t documentation_end_line_{};
+    std::vector<Diagnostic> errors_;
 };
 
 } // namespace

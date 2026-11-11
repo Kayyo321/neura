@@ -245,7 +245,7 @@ foreach(library IN ITEMS guide/core guide/errors testing/math-tests types/classe
                          types/overlay types/polymorphism modules/multi-file/acme/greetings
                          modules/multi-file/acme/greetings/punctuation)
     get_filename_component(name "${library}" NAME)
-    expect_build_failure("${library}" "error: the program has no entry point" "${TEST_DIR}/${name}.nvr"
+    expect_build_failure("${library}" "error(\\[E0803\\])?: the program has no entry point" "${TEST_DIR}/${name}.nvr"
         ${roots} -I "${SOURCE_DIR}/examples/modules/multi-file" "${SOURCE_DIR}/examples/${library}.nra")
 endforeach()
 
@@ -332,3 +332,22 @@ neura(help "${TEST_DIR}" --help)
 if(NOT help_stdout MATCHES "neura build [^\n]*-o <file[.]nvr>" OR NOT help_stdout MATCHES "neura run [^\n]*-- args")
     message(FATAL_ERROR "usage should document build and run\n${help_stdout}")
 endif()
+if(NOT help_stdout MATCHES "neura explain <code> [|] --explain <code> [|] explain --list" OR
+   NOT help_stdout MATCHES "--max-errors N")
+    message(FATAL_ERROR "usage should document explain and --max-errors\n${help_stdout}")
+endif()
+# neura explain prints a code's page, which is embedded in the binary; an
+# unknown code is an error that names the closest registered code.
+neura(explain "${TEST_DIR}" explain E0401)
+if(NOT explain_stdout MATCHES "^# E0401: assignment to a constant binding\n")
+    message(FATAL_ERROR "neura explain E0401 should print its page\n${explain_stdout}")
+endif()
+neura(explain_option "${TEST_DIR}" --explain e0401)
+if(NOT explain_option_stdout STREQUAL explain_stdout)
+    message(FATAL_ERROR "neura --explain e0401 should print the same page\n${explain_option_stdout}")
+endif()
+neura(explain_list "${TEST_DIR}" explain --list)
+if(NOT explain_list_stdout MATCHES "\nE0401  assignment to a constant binding\n")
+    message(FATAL_ERROR "neura explain --list should list the codes\n${explain_list_stdout}")
+endif()
+expect_failure("unknown code" "'E0499' is not a diagnostic code; did you mean E0409[?]" explain E0499)

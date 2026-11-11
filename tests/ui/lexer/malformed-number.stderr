@@ -1,0 +1,15 @@
+error[E0105]: unexpected character after numeric literal
+ --> $DIR/malformed-number.nra:2:15
+  |
+2 | let width = 10px;
+  |               ^ a number cannot continue with a letter
+  |
+  = help: separate the number from a following name with a space or an operator
+
+error[E0105]: expected digits in numeric exponent
+ --> $DIR/malformed-number.nra:3:14
+  |
+3 | let large = 1e;
+  |              ^ an exponent needs at least one digit
+
+For more information about this error, try `neura explain E0105`.

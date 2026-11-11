@@ -1,5 +1,6 @@
 #include "argument_lists.hpp"
 #include "diagnostic_render.hpp"
+#include "explain.hpp"
 #include "backend/converter.hpp"
 #include "decompiler/assembly.hpp"
 #include "decompiler/decompile.hpp"
@@ -90,6 +91,7 @@ void usage(std::ostream& out) {
            "       neura assemble <file.nvra> -o <file.nvr>\n"
            "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
            "       neura c-bindings [--linked] [c-options] <header.h>\n"
+           "       neura explain <code> | --explain <code> | explain --list\n"
            "       neura --version | version\n"
            "       neura --help | help\n"
            "       neura doctor\n"
@@ -157,6 +159,8 @@ void usage(std::ostream& out) {
            "  --color=auto|always|never\n"
            "                           color human output; auto colors a terminal unless NO_COLOR is set\n"
            "                           or TERM is dumb\n"
+           "  --max-errors N           stop after N syntax errors (default 20); the lexer and the parser\n"
+           "                           recover and report several, and any of them stops compilation\n"
            "  -W<name>, -Wno-<name>    enable or disable the warning <name>\n"
            "  -Werror                  report every warning as an error\n"
            "  --warn-library           also report warnings in the standard library\n"
@@ -165,12 +169,12 @@ void usage(std::ostream& out) {
 
 enum class Command {
     Check, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble, Assemble, Decompile, CBindings,
-    Version, Help, Doctor, Update, Uninstall
+    Version, Help, Doctor, Update, Uninstall, Explain
 };
 
 constexpr const char* commands =
     "expected check, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, c-bindings, "
-    "doctor, update, uninstall, version, or help";
+    "doctor, update, uninstall, explain, version, or help";
 
 neura::nvm::Capabilities granted_capabilities() {
     neura::nvm::Capabilities capabilities;
@@ -231,6 +235,9 @@ struct Options {
     std::vector<std::string> link_arguments;
     // c-bindings: generate as if the import named libraries.
     bool linked = false;
+    // explain: a code, or --list.
+    std::string explain_code;
+    bool explain_list = false;
     // update and uninstall.
     neura::lifecycle::UpdateOptions update;
     neura::lifecycle::UninstallOptions uninstall;
@@ -429,6 +436,18 @@ Options read_options(int argc, char** argv) {
         options.command = Command::Update;
     } else if (command == "uninstall") {
         options.command = Command::Uninstall;
+    } else if (command == "explain" || command == "--explain") {
+        options.command = Command::Explain;
+        for (int i = 2; i < argc; ++i) {
+            const std::string_view arg = argv[i];
+            if (arg == "--list") options.explain_list = true;
+            else if (arg.starts_with('-')) throw std::runtime_error("unknown option for explain: " + std::string(arg));
+            else if (!options.explain_code.empty()) throw std::runtime_error("explain takes one code");
+            else options.explain_code = arg;
+        }
+        if (options.explain_list == !options.explain_code.empty())
+            throw std::runtime_error("explain expects a code, such as `neura explain E0401`, or --list");
+        return options;
     } else {
         throw std::runtime_error(commands);
     }
@@ -494,6 +513,14 @@ Options read_options(int argc, char** argv) {
                     throw std::runtime_error("expected a warning name after " + std::string(enable ? "-W" : "-Wno-"));
                 options.diagnostics.warnings.insert_or_assign(std::string(warning), enable);
             }
+        } else if (arg == "--max-errors" || arg.starts_with("--max-errors=")) {
+            if (!compiles) throw std::runtime_error("--max-errors applies only to check, emit-ir, build, and test");
+            const std::string_view text = arg == "--max-errors" ? std::string_view(next()) : arg.substr(13);
+            std::size_t limit = 0;
+            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), limit);
+            if (error != std::errc{} || end != text.data() + text.size() || limit == 0)
+                throw std::runtime_error("expected a positive integer after --max-errors");
+            neura::error_limit() = limit;
         } else if (arg == "--fix") {
             if (options.command != Command::Check) throw std::runtime_error("--fix applies only to check");
             options.fix = true;
@@ -1495,6 +1522,7 @@ int check_fix(const Options& options) {
             check_program(load_source_program(options));
         } catch (const neura::Diagnostic& error) {
             found.push_back(error);
+            found.insert(found.end(), error.following().begin(), error.following().end());
         }
         if (sink) found.insert(found.end(), sink->entries().begin(), sink->entries().end());
         std::map<std::string, std::vector<neura::DiagnosticEdit>> edits;
@@ -1603,6 +1631,10 @@ int dispatch(const Options& options) {
         return neura::lifecycle::update(options.executable, options.update);
     case Command::Uninstall:
         return neura::lifecycle::uninstall(options.executable, options.uninstall);
+    case Command::Explain:
+        if (options.explain_list) neura::cli::explain_list(std::cout);
+        else neura::cli::explain(options.explain_code, std::cout);
+        return 0;
     case Command::Check: {
         if (options.fix) return check_fix(options);
         auto program = load_source_program(options);
@@ -1663,6 +1695,8 @@ int main(int argc, char** argv) {
         auto print = printer();
         print.warnings(std::cerr, sink.entries());
         print.print(std::cerr, error);
+        for (const auto& next : error.following()) print.print(std::cerr, next);
+        print.finish(std::cerr);
     } catch (const std::exception& error) {
         std::cerr << "neura: error: " << error.what() << '\n';
     }

@@ -1,0 +1,12 @@
+error[E0701]: cannot resolve standard library import 'Std.Io.Consol'
+ --> $DIR/unknown-library-module.nra:3:15
+  |
+3 | let console = import:Std.Io.Consol;
+  |               ^^^^^^^^^^^^^^^^^^^^ no standard library module has this name
+  |
+help: there is a module with a similar name: 'Std.Io.Console'
+  |
+3 | let console = import:Std.Io.Console;
+  |                      ~~~~~~~~~~~~~~
+
+For more information about this error, try `neura explain E0701`.

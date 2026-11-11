@@ -1,0 +1,4 @@
+// A string literal that reaches the end of its line (E0103), labelled at
+// its opening quote, and an unknown escape (E0104) on the next line.
+let greeting = "hello;
+let folder = "C:\data";

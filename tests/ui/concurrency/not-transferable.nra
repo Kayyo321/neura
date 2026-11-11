@@ -1,0 +1,15 @@
+// A lambda that captures an object, given to a spawned task (E0602): the
+// capture that makes it not transferable is labelled.
+let Tally = class (
+    export let count: int = 0;
+);
+let apply = func(step: func(int) -> void) {};
+let run = func() {
+    let tally = new Tally();
+    let add = func(amount: int) -> void {
+        tally.count = tally.count + amount;
+    };
+    scope {
+        spawn apply(add);
+    }
+};

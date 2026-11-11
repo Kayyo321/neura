@@ -1,9 +1,12 @@
 #pragma once
 
+#include "util/diagnostic.hpp"
+
 #include <cstddef>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -61,5 +64,18 @@ private:
     mutable std::mutex mutex_;
     std::map<std::string, std::shared_ptr<const SourceFile>, std::less<>> files_;
 };
+
+// Helpers for building suggestions from the files in SourceMap::global().
+// They find nothing for a file that is not registered (such as a test that
+// lowers source it never registered), and callers then omit the suggestion.
+
+// The span of `length` bytes at byte `offset` of `file`, with its line and
+// column.
+std::optional<Span> source_span(std::string_view file, std::size_t offset, std::size_t length);
+// The text that `span` covers.
+std::optional<std::string> source_text(const Span& span);
+// Whether `file` is a registered file that the user wrote (not the standard
+// library or a generated C import), so that an edit to it may be suggested.
+bool user_source(std::string_view file);
 
 } // namespace neura

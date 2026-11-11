@@ -1,0 +1,10 @@
+error[E0203]: expected ')'
+ --> $DIR/expected-at-line-end.nra:4:21
+  |
+4 | let three = add(1, 2
+  |                     ^ expected ')' here
+  |                - unclosed '(' opened here
+5 | let four = 4;
+  | --- found 'let'
+
+For more information about this error, try `neura explain E0203`.

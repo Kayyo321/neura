@@ -1,0 +1,6 @@
+// An assignment of the wrong type (E0403), labelled at the binding.
+let update = func() -> int {
+    let total = 0;
+    total = "zero";
+    return total;
+};

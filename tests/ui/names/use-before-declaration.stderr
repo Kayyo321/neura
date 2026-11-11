@@ -1,0 +1,11 @@
+error[E0306]: 'limit' is used before its declaration
+ --> $DIR/use-before-declaration.nra:3:15
+  |
+3 | let doubled = limit * 2;
+  |               ^^^^^ used here
+4 | let limit = 10;
+  |     ----- 'limit' is declared here, later in the file
+  |
+  = help: move the declaration of 'limit' above its first use
+
+For more information about this error, try `neura explain E0306`.

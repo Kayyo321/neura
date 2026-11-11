@@ -11,6 +11,8 @@
 
 namespace neura {
 
+class Diagnostic;
+
 struct Span {
     std::string file;
     std::size_t line{1};
@@ -63,14 +65,21 @@ struct DiagnosticData {
     // Structured facts for programmatic consumers, such as the kind and name
     // of an unresolved reference. Never rendered.
     std::map<std::string, std::string, std::less<>> args;
+    // Further errors found by a stage that recovers (the lexer and the
+    // parser), in source order. The diagnostic that carries them is the
+    // first error, so a caller that reads only what() and span sees the
+    // same first error as before recovery existed.
+    std::vector<Diagnostic> more;
 };
 
 class Diagnostic : public std::runtime_error {
 public:
+    // diagnostic-code: none: the constructor itself; sites add with_code.
     Diagnostic(Span location, std::string message)
         : std::runtime_error(std::move(message)), span(std::move(location)) {}
 
     static Diagnostic warning(Span location, std::string name, std::string message) {
+        // diagnostic-code: none: a warning has a name instead of a code.
         Diagnostic result(std::move(location), std::move(message));
         result.edit().severity = Severity::Warning;
         result.edit().name = std::move(name);
@@ -117,6 +126,14 @@ public:
         return std::move(arg(std::move(key), std::move(value)));
     }
 
+    // Appends a further error reported after this one (see DiagnosticData::more).
+    Diagnostic& also(Diagnostic next) & { edit().more.push_back(std::move(next)); return *this; }
+    // The further errors, empty for a diagnostic that carries none.
+    const std::vector<Diagnostic>& following() const {
+        static const std::vector<Diagnostic> none;
+        return data_ ? data_->more : none;
+    }
+
     // The extra data, or null for a plain diagnostic.
     const DiagnosticData* data() const { return data_.get(); }
     std::string_view code() const { return data_ ? std::string_view(data_->code) : std::string_view{}; }
@@ -137,6 +154,7 @@ public:
 
     // A copy with `message` in place of this one's, keeping span and data.
     Diagnostic with_message(std::string message) const {
+        // diagnostic-code: none: the copy keeps this diagnostic's code.
         Diagnostic result(span, std::move(message));
         result.data_ = data_;
         return result;
@@ -154,6 +172,13 @@ public:
 private:
     std::shared_ptr<DiagnosticData> data_;
 };
+
+// The most errors a recovering stage (the lexer, the parser) reports before it
+// stops, set by the command line's --max-errors. At least 1.
+inline std::size_t& error_limit() {
+    static std::size_t limit = 20;
+    return limit;
+}
 
 // Collects warnings while the pipeline runs. Errors still throw; a warning is
 // appended here and printed by the command line before an error or at a

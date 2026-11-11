@@ -1,0 +1,15 @@
+error[E0410]: non-exhaustive match, missing variant 'Yellow'
+ --> $DIR/non-exhaustive-match.nra:5:12
+  |
+5 |     return match (light) {
+  |            ^^^^^ 'Yellow' and 'Green' are not covered
+  |
+  = note: a match without a '_' arm needs an arm for every variant
+help: add an arm for each missing variant
+  |
+7 |         Light.Yellow => <value>,
+  |         ++++++++++++++++++++++++
+8 |         Light.Green => <value>,
+  |         +++++++++++++++++++++++
+
+For more information about this error, try `neura explain E0410`.

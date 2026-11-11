@@ -1,0 +1,7 @@
+// No alternative of an overload group accepts the argument (E0408): each
+// alternative is labelled, up to three, and a note counts the rest.
+let describe = func(value: int) -> string => "number"
+    or func(value: string) -> string => "text"
+    or func(value: float64) -> string => "fraction"
+    or func(value: int64) -> string => "wide";
+let kind = describe(true);

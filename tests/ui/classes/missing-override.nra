@@ -1,0 +1,7 @@
+// A member that replaces an inherited one without '.override' (E0502).
+let Shape = class (
+    export let area = func() -> int => 0;
+);
+let Square = class : Shape (
+    export let area = func() -> int => 4;
+);

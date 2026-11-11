@@ -1,0 +1,6 @@
+// A value that does not match a binding's annotation (E0403): the
+// annotation is labelled as the origin of the expected type.
+let describe = func() -> int {
+    let result: int = "none";
+    return result;
+};

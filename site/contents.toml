@@ -75,6 +75,15 @@ pages = [
   { source = "docs/Decompiler.md", label = "Decompiler", plate = "eye-scan" },
 ]
 
+# The explain page of every diagnostic code, after the index.
+[[sections]]
+title = "Diagnostic codes"
+plate = "caliper"
+pages = [
+  { source = "docs/diagnostics/README.md", label = "Index of codes" },
+]
+modules = "docs/diagnostics/E*.md"
+
 [[sections]]
 title = "Compiler and circuits"
 plate = "neuron-slide"

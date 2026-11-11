@@ -1,0 +1,3 @@
+// A letter directly after a number and an exponent without digits (E0105).
+let width = 10px;
+let large = 1e;

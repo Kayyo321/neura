@@ -1,0 +1,4 @@
+// A top-level initializer that reads a later binding (E0306), labelled at
+// the declaration.
+let doubled = limit * 2;
+let limit = 10;

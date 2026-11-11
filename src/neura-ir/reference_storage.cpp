@@ -73,7 +73,7 @@ void Materialization::collect(const IrNode& node) {
         const auto found = boxes_.find(node.type.symbol);
         if (found == boxes_.end() || found->second.value == no_symbol ||
             found->second.empty == no_symbol || found->second.initialized == no_symbol) {
-            throw Diagnostic(node.span, "invalid primitive reference layout");
+            throw Diagnostic(node.span, "invalid primitive reference layout").with_code("E0899");
         }
         storage_.try_emplace(node.symbol, Storage{&found->second, node.symbol});
     }
@@ -148,7 +148,7 @@ void Materialization::plan() {
         if (symbol(id).type != symbol(box.value).type || symbol(id).constant ||
             (kind != SymbolKind::Local && kind != SymbolKind::Parameter &&
              kind != SymbolKind::Field && kind != SymbolKind::Global)) {
-            throw Diagnostic(span, "invalid primitive reference storage");
+            throw Diagnostic(span, "invalid primitive reference storage").with_code("E0899");
         }
         if (kind == SymbolKind::Parameter) {
             const auto initial = operation(IrOp::Load, span, symbol(id).type, id);

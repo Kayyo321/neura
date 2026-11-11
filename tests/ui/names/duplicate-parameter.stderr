@@ -1,0 +1,8 @@
+error[E0303]: duplicate parameter 'side'
+ --> $DIR/duplicate-parameter.nra:2:28
+  |
+2 | let area = func(side: int, side: int) -> int => side * side;
+  |                            ^^^^ 'side' is declared again here
+  |                 ---- 'side' is first declared here
+
+For more information about this error, try `neura explain E0303`.

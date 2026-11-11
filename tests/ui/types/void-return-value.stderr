@@ -1,0 +1,11 @@
+error[E0406]: a void function cannot return a value
+ --> $DIR/void-return-value.nra:3:5
+  |
+2 | let label = func(text: string) {
+  |     ----- this function declares no result type
+3 |     return text;
+  |     ^^^^^^^^^^^^ returns a value
+  |
+  = help: declare the result type with '-> T' after the parameters, or return without a value
+
+For more information about this error, try `neura explain E0406`.

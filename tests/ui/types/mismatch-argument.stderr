@@ -1,0 +1,9 @@
+error[E0403]: expected int32, got string
+ --> $DIR/mismatch-argument.nra:4:26
+  |
+3 | let repeat = func(text: string, times: int) -> int => times;
+  |                                 ----- parameter 'times' is declared here
+4 | let count = repeat("ab", "3");
+  |                          ^^^ expected int32, found string
+
+For more information about this error, try `neura explain E0403`.

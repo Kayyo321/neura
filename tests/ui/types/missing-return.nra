@@ -1,0 +1,7 @@
+// A body that can end without returning (E0405), reported at the declared
+// result type.
+let sign = func(value: int) -> int {
+    if (value > 0) {
+        return 1;
+    }
+};

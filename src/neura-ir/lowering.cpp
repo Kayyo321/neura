@@ -11,6 +11,8 @@
 #include "reference_storage.hpp"
 #include "static_initialization.hpp"
 #include "parser/syntax.hpp"
+#include "util/source_map.hpp"
+#include "util/suggest.hpp"
 
 #include <algorithm>
 #include <array>
@@ -196,7 +198,7 @@ public:
     IrProgram reference_builtins(const std::string& name, const Span& span) {
         const auto referent = primitive(name);
         if (!referent || referent->name != name)
-            throw Diagnostic(span, "invalid primitive reference layout '&" + name + "'");
+            throw Diagnostic(span, "invalid primitive reference layout '&" + name + "'").with_code("E0428");
         primitive_reference(*referent, span);
         return std::move(program_);
     }
@@ -235,6 +237,32 @@ private:
     SymbolId root_class_ = no_symbol;
     // Trusted library functions bound to a scheduler operation, by name.
     std::map<SymbolId, std::string> scheduler_bindings_;
+
+    // Source positions that only diagnostics use: the name of a declared
+    // symbol, the `const` keyword of a constant binding, and the declared
+    // result type of a function.
+    std::map<SymbolId, Span> name_spans_;
+    std::map<SymbolId, Span> const_spans_;
+    std::map<SymbolId, Span> result_spans_;
+    // Where the expected type of the next value() comes from, so that a
+    // mismatch can label it. value() takes it on entry; nested calls do not
+    // see it.
+    struct ExpectedOrigin {
+        Span span;
+        std::string text;
+    };
+    std::optional<ExpectedOrigin> expected_origin_;
+
+    Span name_span(SymbolId id) const;
+    void record_names(SymbolId id, const Declaration& decl);
+    std::vector<std::string> visible_names(const Context& context) const;
+    std::vector<std::string> member_names(const IrType& receiver, bool exported) const;
+    void suggest_name(Diagnostic& error, const Span& at, std::string_view name,
+                      const std::vector<std::string>& candidates, std::string_view what) const;
+    void not_exported(Diagnostic& error, SymbolId hidden) const;
+    Diagnostic duplicate_local(const Span& at, std::string message, SymbolId earlier) const;
+    Diagnostic missing_return(const Span& at, SymbolId function, const Declaration& declaration) const;
+    Diagnostic non_exhaustive(const Statement& stmt, const std::vector<SymbolId>& missing, bool produces_value) const;
 
     IrSymbol& symbol(SymbolId id) { return program_.symbols[id]; }
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols[id]; }
@@ -288,7 +316,8 @@ private:
                                 const Span& span, const Context& context);
     IrType apply_arguments(IrType type, const Substitution& arguments);
     bool assignable(const IrType& actual, const IrType& expected) const;
-    void require_type(const IrType& actual, const IrType& expected, const Span& span) const;
+    void require_type(const IrType& actual, const IrType& expected, const Span& span,
+                      const ExpectedOrigin* origin = nullptr) const;
     IrType receiver_type(const IrType& type) const;
     Substitution receiver_arguments(const IrType& type, SymbolId owner = no_symbol) const;
 
@@ -359,6 +388,173 @@ private:
     IrNode spawn(const Expr& expr, Context& context, bool handle = true);
 };
 
+static std::string plural(std::size_t count, std::string_view noun) {
+    return std::to_string(count) + " " + std::string(noun) + (count == 1 ? "" : "s");
+}
+
+Span Lowering::name_span(SymbolId id) const {
+    const auto found = name_spans_.find(id);
+    return found != name_spans_.end() ? found->second : symbol(id).span;
+}
+
+void Lowering::record_names(SymbolId id, const Declaration& decl) {
+    if (decl.name_span && !decl.name_span->file.empty()) name_spans_.insert_or_assign(id, *decl.name_span);
+    // A constant binding that is neither exported nor static starts with
+    // its `const` keyword.
+    if (decl.constant && !decl.exported && !decl.static_member && decl.kind == DeclKind::Binding &&
+        !decl.span.file.empty())
+        const_spans_.insert_or_assign(id, Span{decl.span.file, decl.span.line, decl.span.column, decl.span.offset, 5});
+}
+
+// The names a reference at `context` could mean: locals from the innermost
+// scope out, then the members of each enclosing declaration, then promoted
+// module members. Compiler-generated names (with '$') are left out.
+std::vector<std::string> Lowering::visible_names(const Context& context) const {
+    std::vector<std::string> result;
+    std::set<std::string, std::less<>> seen;
+    const auto add_name = [&](const std::string& name) {
+        if (name.find('$') == std::string::npos && seen.insert(name).second) result.push_back(name);
+    };
+    for (const auto* current = &context; current; current = current->closure ? &current->closure->enclosing : nullptr) {
+        for (auto it = current->scopes.rbegin(); it != current->scopes.rend(); ++it)
+            for (const auto& [name, id] : *it) add_name(name);
+        for (auto scope = current->owner; scope != no_symbol; scope = symbol(scope).owner) {
+            for (const auto& [name, id] : entries_[scope].names) add_name(name);
+            for (auto base = symbol(scope).base; base != no_symbol; base = symbol(base).base) {
+                for (const auto& [name, id] : entries_[base].names)
+                    if (symbol(id).exported) add_name(name);
+            }
+            for (const auto module : entries_[scope].promoted_modules) {
+                for (const auto& [name, id] : entries_[module].names)
+                    if (symbol(id).exported) add_name(name);
+            }
+        }
+    }
+    return result;
+}
+
+// The members of `receiver` that a reference may name: its own (exported
+// ones only when `exported`), then those of its bases and interfaces.
+std::vector<std::string> Lowering::member_names(const IrType& receiver, bool exported) const {
+    std::vector<std::string> result;
+    std::set<std::string, std::less<>> seen;
+    for (const auto& view : nominal_views(program_, receiver)) {
+        if (view.symbol == no_symbol || view.symbol >= entries_.size()) continue;
+        bool own = true;
+        for (auto scope = view.symbol; scope != no_symbol; scope = symbol(scope).base) {
+            for (const auto& [name, id] : entries_[scope].names) {
+                if ((exported || !own) && !symbol(id).exported) continue;
+                if (name.find('$') == std::string::npos && seen.insert(name).second) result.push_back(name);
+            }
+            own = false;
+        }
+    }
+    return result;
+}
+
+// A "did you mean" suggestion that replaces the text of `name` at the start
+// of `at` (or at its end, for a member) with the closest candidate.
+void Lowering::suggest_name(Diagnostic& error, const Span& at, std::string_view name,
+                            const std::vector<std::string>& candidates, std::string_view what) const {
+    const auto close = closest_name(name, candidates);
+    if (!close) return;
+    error.arg("suggestion", *close);
+    for (const auto offset : {at.offset, at.offset + at.length - name.size()}) {
+        if (at.length < name.size()) break;
+        const auto span = source_span(at.file, offset, name.size());
+        if (span && source_text(*span) == name) {
+            error.suggest("there is " + std::string(what) + " with a similar name: '" + *close + "'", *span, *close,
+                          Applicability::MaybeIncorrect);
+            return;
+        }
+    }
+    error.help("there is " + std::string(what) + " with a similar name: '" + *close + "'");
+}
+
+// Labels a member that exists but is not exported, and suggests exporting it
+// when its declaration is in the program's own source.
+void Lowering::not_exported(Diagnostic& error, SymbolId hidden) const {
+    const auto& item = symbol(hidden);
+    error.label("'" + item.name + "' is not exported");
+    error.label(name_span(hidden), "'" + item.name + "' is declared here without 'export'");
+    const auto* declaration = hidden < entries_.size() ? entries_[hidden].declaration : nullptr;
+    if (declaration && !declaration->span.file.empty() && user_source(declaration->span.file)) {
+        if (const auto start = source_span(declaration->span.file, declaration->span.offset, 0)) {
+            error.suggest("consider exporting it", *start, "export ", Applicability::MaybeIncorrect);
+            return;
+        }
+    }
+    error.note("only exported members are visible outside the declaration that contains them");
+}
+
+Diagnostic Lowering::duplicate_local(const Span& at, std::string message, SymbolId earlier) const {
+    auto error = Diagnostic(at, std::move(message)).with_code("E0301").label("bound again here");
+    const auto& first = symbol(earlier);
+    if (!first.span.file.empty()) error.label(name_span(earlier), "first bound here");
+    return error;
+}
+
+// A body that can reach its end without a return. The error points at the
+// declared result type, which is what the body fails to produce.
+Diagnostic Lowering::missing_return(const Span& at, SymbolId function, const Declaration& declaration) const {
+    const auto type = describe(symbol(function).type);
+    const bool typed = declaration.type && !declaration.type->span.file.empty();
+    auto error = Diagnostic(typed ? declaration.type->span : at, "function may exit without returning " + type)
+        .with_code("E0405").label("the function must return " + type + " on every path");
+    if (name_spans_.contains(function)) error.label(name_span(function), "in this function");
+    error.note("a path through the body ends without 'return' or a trap");
+    return error;
+}
+
+// A match on an enum without a wildcard arm that leaves variants out. The
+// suggestion adds an arm per variant before the closing brace when that
+// brace is on a line of its own after a complete arm.
+Diagnostic Lowering::non_exhaustive(const Statement& stmt, const std::vector<SymbolId>& missing,
+                                    bool produces_value) const {
+    std::string names;
+    for (std::size_t i = 0; i < missing.size(); ++i)
+        names += (i == 0 ? "'" : i + 1 == missing.size() ? " and '" : ", '") + symbol(missing[i]).name + "'";
+    auto error = Diagnostic(Span{stmt.span.file, stmt.span.line, stmt.span.column, stmt.span.offset, 5},
+                            "non-exhaustive match, missing variant '" + symbol(missing.front()).name + "'")
+        .with_code("E0410").label(names + (missing.size() == 1 ? " is" : " are") + " not covered");
+    error.note("a match without a '_' arm needs an arm for every variant");
+    std::string qualifier;
+    for (const auto& arm : stmt.arms) {
+        if (const auto dot = arm.variant.rfind('.'); arm.variant != "_" && dot != std::string::npos) {
+            qualifier = arm.variant.substr(0, dot + 1);
+            break;
+        }
+    }
+    const auto close = source_span(stmt.span.file, stmt.span.offset + stmt.span.length - 1, 1);
+    const auto file = SourceMap::global().find(stmt.span.file);
+    if (!close || !file || !user_source(stmt.span.file) || source_text(*close) != "}" || stmt.arms.empty())
+        return error;
+    const auto& text = file->text();
+    const auto line_start = file->line_start(close->line - 1);
+    const auto indent = text.substr(line_start, close->offset - line_start);
+    if (indent.find_first_not_of(" \t") != std::string::npos) return error;
+    auto before = line_start;
+    while (before > 0 && std::string_view(" \t\r\n").find(text[before - 1]) != std::string_view::npos) --before;
+    if (before == 0 || (text[before - 1] != ',' && text[before - 1] != '{')) return error;
+    const auto arm_indent = std::string(stmt.arms.front().span.column - 1, ' ');
+    std::string arms;
+    for (const auto variant : missing) {
+        std::string pattern = qualifier + symbol(variant).name;
+        const auto* declaration = variant < entries_.size() ? entries_[variant].declaration : nullptr;
+        if (declaration && !declaration->parameters.empty()) {
+            std::string fields;
+            for (const auto& field : declaration->parameters)
+                fields += (fields.empty() ? "" : ", ") + (declaration->named_payload ? field.name : std::string("_"));
+            pattern += declaration->named_payload ? " { " + fields + " }" : "(" + fields + ")";
+        }
+        arms += arm_indent + pattern + (produces_value ? " => <value>,\n" : " => {},\n");
+    }
+    error.suggest(missing.size() == 1 ? "add an arm for it" : "add an arm for each missing variant",
+                  *source_span(stmt.span.file, line_start, 0),
+                  arms, Applicability::HasPlaceholders);
+    return error;
+}
+
 SymbolId Lowering::add(SymbolKind kind, std::string name, const Span& span, SymbolId owner) {
     auto id = program_.symbols.size();
     IrSymbol entry{};
@@ -374,6 +570,7 @@ SymbolId Lowering::add(SymbolKind kind, std::string name, const Span& span, Symb
 
 SymbolId Lowering::function_branch(const Declaration& decl, SymbolId owner, std::string name) {
     const auto id = add(SymbolKind::Function, std::move(name), decl.span, owner);
+    record_names(id, decl);
     entries_[id].declaration = &decl;
     entries_[id].resolution = Resolution::Pending;
     symbol(id).constant = decl.constant;
@@ -388,7 +585,8 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         if (decl.kind != DeclKind::Binding || decl.exported || decl.override_member ||
             decl.static_member || !decl.initializer ||
             (symbol(owner).kind != SymbolKind::File && symbol(owner).kind != SymbolKind::Module))
-            throw Diagnostic(decl.span, "'_' requires a value initializer and does not declare a member");
+            throw Diagnostic(decl.span, "'_' requires a value initializer and does not declare a member")
+                .with_code("E0310");
         return no_symbol;
     }
     switch (decl.kind) {
@@ -402,7 +600,8 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     if (decl.cast_target) {
         if (symbol(owner).kind != SymbolKind::Class || decl.static_member || decl.override_member ||
             !decl.has_body || !decl.generics.empty() || !decl.parameters.empty()) {
-            throw Diagnostic(decl.span, "a cast requires a class instance method with a body and no parameters");
+            throw Diagnostic(decl.span, "a cast requires a class instance method with a body and no parameters")
+                .with_code("E0512");
         }
         const auto id = function_branch(decl, owner, "$as$" + std::to_string(entries_.size()));
         entries_[owner].casts.push_back(id);
@@ -412,13 +611,24 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     if (decl.static_member) {
         if (!class_or_interface(symbol(owner).kind) || decl.override_member || decl.promote_import ||
             decl.kind == DeclKind::Module || decl.name == "init" || decl.name == "deinit")
-            throw Diagnostic(decl.span, "static requires a non-override class or interface member");
+            throw Diagnostic(decl.span, "static requires a non-override class or interface member").with_code("E0501");
         owner = static_scope(owner);
         if (kind == SymbolKind::Field) kind = SymbolKind::Global;
     }
     auto id = add(kind, decl.name, decl.span, owner);
-    if (!entries_[lexical].names.emplace(decl.name, id).second)
-        throw Diagnostic(decl.span, "duplicate declaration of '" + decl.name + "'");
+    record_names(id, decl);
+    if (const auto [earlier, added] = entries_[lexical].names.emplace(decl.name, id); !added) {
+        auto error = Diagnostic(decl.name_span.value_or(decl.span), "duplicate declaration of '" + decl.name + "'")
+            .with_code("E0302")
+            .label("'" + decl.name + "' is declared again here")
+            .label(name_span(earlier->second), "'" + decl.name + "' is first declared here");
+        if (decl.kind == DeclKind::Function && symbol(earlier->second).kind == SymbolKind::Function)
+            error.help("to overload '" + decl.name + "', write the alternatives in one declaration, "
+                       "joined with 'or func'");
+        else
+            error.help("rename one of them");
+        throw error;
+    }
     entries_[id].declaration = &decl;
     entries_[id].resolution = Resolution::Pending;
     symbol(id).constant = decl.constant ||
@@ -432,11 +642,13 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         };
         if (decl.override_member || symbol(lexical).kind == SymbolKind::Interface ||
             !valid_branch(decl)) {
-            throw Diagnostic(decl.span, "overloads require implemented, non-generic, fixed-arity functions without .override");
+            throw Diagnostic(decl.span, "overloads require implemented, non-generic, fixed-arity functions without .override")
+                .with_code("E0433");
         }
         for (const auto& branch : decl.overloads) {
             if (!valid_branch(branch))
-                throw Diagnostic(branch.span, "overloads require implemented, non-generic, fixed-arity functions");
+                throw Diagnostic(branch.span, "overloads require implemented, non-generic, fixed-arity functions")
+                    .with_code("E0433");
             auto name = decl.name == "init" && symbol(lexical).kind == SymbolKind::Class ? decl.name
                 : decl.name + "$" + std::to_string(id) + "$" +
                     std::to_string(entries_[id].overloads.size() + 1);
@@ -449,7 +661,8 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         symbol(id).type = {TypeKind::Module, decl.name, id, {}};
     if (decl.singleton) {
         if (symbol(owner).kind != SymbolKind::File && symbol(owner).kind != SymbolKind::Module)
-            throw Diagnostic(decl.span, "a singleton must be a file, module, or static class member");
+            throw Diagnostic(decl.span, "a singleton must be a file, module, or static class member")
+                .with_code("E0511");
         const auto instance = add(SymbolKind::Global, decl.name, decl.span, owner);
         entries_[id].singleton_instance = instance;
         symbol(id).singleton_instance = instance;
@@ -517,9 +730,9 @@ bool Lowering::class_reference(const IrType& type) const {
 
 SymbolId Lowering::resolve_import(const Expr& expr) {
     if (expr.text.ends_with(".*"))
-        throw Diagnostic(expr.span, "wildcard imports require 'let.promote _'");
+        throw Diagnostic(expr.span, "wildcard imports require 'let.promote _'").with_code("E0704");
     auto source = std::ranges::find(*files_, expr.span.file, &ParsedFile::file);
-    if (source == files_->end()) throw Diagnostic(expr.span, "cannot locate importing file");
+    if (source == files_->end()) throw Diagnostic(expr.span, "cannot locate importing file").with_code("E0899");
     auto import = std::ranges::find_if(source->imports, [&](const ResolvedImport& import) {
         return import.name == expr.text && import.artifact_path == expr.import_path.value_or("");
     });
@@ -528,11 +741,11 @@ SymbolId Lowering::resolve_import(const Expr& expr) {
         // standard library (Stdlib.md section 4.6); name their replacements.
         if (expr.text == "SysIo")
             throw Diagnostic(expr.span, "cannot resolve import 'SysIo': the built-in SysIo module was removed; "
-                                        "use Std.Io.Console and Std.Program");
+                                        "use Std.Io.Console and Std.Program").with_code("E0701");
         if (expr.text == "Test")
             throw Diagnostic(expr.span, "cannot resolve import 'Test': the built-in Test module was removed; "
-                                        "use Std.Test");
-        throw Diagnostic(expr.span, "cannot resolve import '" + expr.text + "'");
+                                        "use Std.Test").with_code("E0701");
+        throw Diagnostic(expr.span, "cannot resolve import '" + expr.text + "'").with_code("E0701");
     }
     auto result = resolve_import_target(*import, expr.span);
     resolve(result);
@@ -543,7 +756,7 @@ SymbolId Lowering::resolve_import_target(const ResolvedImport& import, const Spa
     if (import.artifact) {
         const auto linked = linked_modules_.find({import.file, import.target_module});
         if (linked != linked_modules_.end()) return linked->second;
-        throw Diagnostic(span, "cannot link module from '" + import.file + "'");
+        throw Diagnostic(span, "cannot link module from '" + import.file + "'").with_code("E0899");
     }
     auto target_file = std::ranges::find(*files_, import.file, &ParsedFile::file);
     SymbolId file;
@@ -552,29 +765,31 @@ SymbolId Lowering::resolve_import_target(const ResolvedImport& import, const Spa
     } else if (const auto linked = linked_files_.find(import.file); linked != linked_files_.end()) {
         file = linked->second;
     } else {
-        throw Diagnostic(span, "cannot load source file for import '" + import.name + "'");
+        throw Diagnostic(span, "cannot load source file for import '" + import.name + "'").with_code("E0899");
     }
     auto name = import.name.ends_with(".*") ? import.target_module
         : import.name.substr(import.name.find_last_of('.') + 1);
     if (name.empty())
-        throw Diagnostic(span, "imported file '" + import.file + "' must declare a module matching its name");
+        throw Diagnostic(span, "imported file '" + import.file + "' must declare a module matching its name")
+            .with_code("E0705");
     auto result = own_member(file, name);
     if (result == no_symbol || symbol(result).kind != SymbolKind::Module)
-        throw Diagnostic(span, "imported file must declare module '" + name + "'");
+        throw Diagnostic(span, "imported file must declare module '" + name + "'").with_code("E0705");
     return result;
 }
 
 void Lowering::prepare_promotions(const Declaration& decl, SymbolId owner) {
     if (decl.promote_import || (decl.name == "_" && decl.initializer && decl.initializer->kind == ExprKind::Import)) {
         if (symbol(owner).kind != SymbolKind::Module && symbol(owner).kind != SymbolKind::File)
-            throw Diagnostic(decl.span, "promoted and discarded imports require a file or module binding");
+            throw Diagnostic(decl.span, "promoted and discarded imports require a file or module binding")
+                .with_code("E0704");
         if (decl.type || decl.exported || !decl.initializer || decl.initializer->kind != ExprKind::Import)
-            throw Diagnostic(decl.span, "let.promote requires an unannotated import alias");
+            throw Diagnostic(decl.span, "let.promote requires an unannotated import alias").with_code("E0704");
         const auto& expr = *decl.initializer;
         if (expr.text.ends_with(".*") && (!decl.promote_import || decl.name != "_"))
-            throw Diagnostic(expr.span, "wildcard imports require 'let.promote _'");
+            throw Diagnostic(expr.span, "wildcard imports require 'let.promote _'").with_code("E0704");
         const auto source = std::ranges::find(*files_, expr.span.file, &ParsedFile::file);
-        if (source == files_->end()) throw Diagnostic(expr.span, "cannot locate importing file");
+        if (source == files_->end()) throw Diagnostic(expr.span, "cannot locate importing file").with_code("E0899");
         bool found = false;
         for (const auto& import : source->imports) {
             if (import.name != expr.text || import.artifact_path != expr.import_path.value_or("")) continue;
@@ -586,7 +801,7 @@ void Lowering::prepare_promotions(const Declaration& decl, SymbolId owner) {
                 symbol(dependency).type = symbol(target).type;
             }
         }
-        if (!found) throw Diagnostic(expr.span, "cannot resolve import '" + expr.text + "'");
+        if (!found) throw Diagnostic(expr.span, "cannot resolve import '" + expr.text + "'").with_code("E0701");
     }
     if (!decl.members.empty()) {
         const auto id = own_member(owner, decl.name);
@@ -638,7 +853,7 @@ SymbolId Lowering::find(std::string_view name, const Context& context, const Spa
         static_context |= is_static_scope(symbol(scope));
         if (auto id = member(scope, name, false); id != no_symbol) {
             if (static_context && symbol(id).kind == SymbolKind::TypeParameter && class_or_interface(symbol(scope).kind))
-                throw Diagnostic(span, "static member cannot use an enclosing class type parameter");
+                throw Diagnostic(span, "static member cannot use an enclosing class type parameter").with_code("E0501");
             return id;
         }
         if (class_or_interface(symbol(scope).kind)) {
@@ -659,7 +874,7 @@ SymbolId Lowering::find(std::string_view name, const Context& context, const Spa
             const auto candidate = member(module, name, true);
             if (candidate == no_symbol || module == source) continue;
             if (result != no_symbol)
-                throw Diagnostic(span, "ambiguous promoted name '" + std::string(name) + "'");
+                throw Diagnostic(span, "ambiguous promoted name '" + std::string(name) + "'").with_code("E0307");
             result = candidate;
             source = module;
         }
@@ -681,7 +896,13 @@ bool Lowering::inside(SymbolId scope, SymbolId owner) const {
 SymbolId Lowering::qualified(const std::string& name, const Span& span, const Context& context, bool nominal_type) {
     const auto parts = components(name);
     auto id = find(parts.front(), context, span);
-    if (id == no_symbol) throw Diagnostic(span, "unknown name '" + parts.front() + "'");
+    if (id == no_symbol) {
+        auto error = Diagnostic(span, "unknown name '" + parts.front() + "'").with_code("E0304")
+            .label("not found in this scope");
+        suggest_name(error, Span{span.file, span.line, span.column, span.offset, parts.front().size()}, parts.front(),
+                     visible_names(context), "a binding");
+        throw error;
+    }
     for (std::size_t i = 1; i < parts.size(); ++i) {
         resolve(id);
         auto kind = symbol(id).kind;
@@ -691,13 +912,26 @@ SymbolId Lowering::qualified(const std::string& name, const Span& span, const Co
             id = symbol(id).type.symbol;
         } else if (kind != SymbolKind::Module && !class_or_interface(kind) &&
                    kind != SymbolKind::Enum) {
-            throw Diagnostic(span, "'" + parts[i - 1] + "' is not a namespace");
+            throw Diagnostic(span, "'" + parts[i - 1] + "' is not a namespace").with_code("E0308");
         }
         const auto owner = id;
-        id = member(owner, parts[i], !inside(lexical_owner(context), owner));
-        if (id == no_symbol)
-            throw Diagnostic(span, "unknown or inaccessible name '" + name + "'")
+        const bool outside = !inside(lexical_owner(context), owner);
+        id = member(owner, parts[i], outside);
+        if (id == no_symbol) {
+            auto error = Diagnostic(span, "unknown or inaccessible name '" + name + "'").with_code("E0304")
                 .arg("kind", "name").arg("name", parts[i]).arg("owner", symbol(owner).name);
+            if (const auto hidden = member(owner, parts[i], false); hidden != no_symbol) {
+                not_exported(error, hidden);
+            } else {
+                error.label("'" + symbol(owner).name + "' has no member '" + parts[i] + "'");
+                std::size_t prefix = 0;
+                for (std::size_t j = 0; j < i; ++j) prefix += parts[j].size() + 1;
+                if (span.length >= prefix + parts[i].size())
+                    suggest_name(error, Span{span.file, span.line, span.column, span.offset + prefix, parts[i].size()},
+                                 parts[i], member_names(symbol(owner).type, outside), "a member");
+            }
+            throw error;
+        }
     }
     if (!(nominal_type && (symbol(id).kind == SymbolKind::Enum || class_or_interface(symbol(id).kind)) &&
           entries_[id].resolution == Resolution::Resolving)) resolve(id);
@@ -712,16 +946,17 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
                                      const std::vector<TypeSyntax>& args,
                                      const Span& span, const Context& context) {
     if (params.size() != args.size())
-        throw Diagnostic(span, "expected " + std::to_string(params.size()) + " type argument(s)");
+        throw Diagnostic(span, "expected " + std::to_string(params.size()) + " type argument(s)").with_code("E0417");
     Substitution result;
     for (std::size_t i = 0; i < args.size(); ++i) {
         auto actual = type(args[i], context);
-        if (actual.kind == TypeKind::Void) throw Diagnostic(args[i].span, "void is not a type argument");
+        if (actual.kind == TypeKind::Void) throw Diagnostic(args[i].span, "void is not a type argument")
+            .with_code("E0416");
         if (is_primitive_reference(actual))
-            throw Diagnostic(args[i].span, "a primitive reference cannot be a type argument");
+            throw Diagnostic(args[i].span, "a primitive reference cannot be a type argument").with_code("E0428");
         if (scope_bound(actual))
             throw Diagnostic(args[i].span, "a value of type " + describe(actual) +
-                                           " cannot leave its scope: it cannot be a type argument");
+                                           " cannot leave its scope: it cannot be a type argument").with_code("E0605");
         result.emplace(params[i], std::move(actual));
     }
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -731,7 +966,8 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
             const auto& actual = result.at(params[i]);
             if (!assignable(actual, bound)) {
                 throw Diagnostic(args[i].span, "type argument " + describe(actual) + " does not satisfy the bound " +
-                                               describe(bound) + " of type parameter '" + parameter.name + "'");
+                                               describe(bound) + " of type parameter '" + parameter.name + "'")
+                    .with_code("E0418");
             }
         };
         if (parameter.bound) check(*parameter.bound);
@@ -747,7 +983,7 @@ IrType Lowering::type(const TypeSyntax& syntax, const Context& context) {
         for (const auto& part : syntax.arguments) {
             auto element = type(part, context);
             if (element.kind == TypeKind::Void)
-                throw Diagnostic(part.span, "a tuple element cannot have type void");
+                throw Diagnostic(part.span, "a tuple element cannot have type void").with_code("E0416");
             result.arguments.push_back(std::move(element));
         }
     } else if (syntax.name == "[function]") {
@@ -757,25 +993,26 @@ IrType Lowering::type(const TypeSyntax& syntax, const Context& context) {
     } else if (syntax.name == "class") {
         result = symbol(root_class()).type;
     } else if (auto builtin = primitive(syntax.name)) {
-        if (!syntax.arguments.empty()) throw Diagnostic(syntax.span, "builtin type takes no arguments");
+        if (!syntax.arguments.empty()) throw Diagnostic(syntax.span, "builtin type takes no arguments")
+            .with_code("E0417");
         result = *builtin;
     } else {
         auto id = qualified(syntax.name, syntax.span, context, true);
         auto kind = symbol(id).kind;
         if (!class_or_interface(kind) && kind != SymbolKind::Alias &&
             kind != SymbolKind::Enum && kind != SymbolKind::TypeParameter) {
-            throw Diagnostic(syntax.span, "'" + syntax.name + "' is not a type");
+            throw Diagnostic(syntax.span, "'" + syntax.name + "' is not a type").with_code("E0421");
         }
         const auto params = symbol(id).generics;
         if (entries_[id].resolution == Resolution::Resolving && kind == SymbolKind::Enum &&
             params.size() != entries_[id].declaration->generics.size())
-            throw Diagnostic(syntax.span, "recursive reference in an enum's type parameter bounds");
+            throw Diagnostic(syntax.span, "recursive reference in an enum's type parameter bounds").with_code("E0421");
         auto replacements = type_arguments(params, syntax.arguments, syntax.span, context);
         result = apply_arguments(symbol(id).type, replacements);
     }
     for (auto suffix : syntax.collections) {
         if (result.kind == TypeKind::Void)
-            throw Diagnostic(syntax.span, "void is not a collection element type");
+            throw Diagnostic(syntax.span, "void is not a collection element type").with_code("E0416");
         result = collection_type(suffix == CollectionKind::Array ? TypeKind::Array : TypeKind::List,
                                  result);
     }
@@ -785,7 +1022,7 @@ IrType Lowering::type(const TypeSyntax& syntax, const Context& context) {
 IrType Lowering::primitive_reference(const IrType& referent, const Span& span) {
     if (referent.kind != TypeKind::Integer && referent.kind != TypeKind::Float &&
         referent.kind != TypeKind::Bool && referent.kind != TypeKind::String)
-        throw Diagnostic(span, "a primitive reference needs a Boolean, numeric, or string type");
+        throw Diagnostic(span, "a primitive reference needs a Boolean, numeric, or string type").with_code("E0428");
     if (const auto found = reference_layouts_.find(referent.name); found != reference_layouts_.end())
         return symbol(found->second).type;
 
@@ -843,7 +1080,7 @@ IrNode Lowering::bind_reference(IrNode place, const IrType& type) {
     if (place.type == type) return place;
     if (!can_bind_reference(place, type))
         throw Diagnostic(place.span, describe(type) + " requires mutable storage of type " +
-                                     describe(symbol(reference_field(type)).type));
+                                     describe(symbol(reference_field(type)).type)).with_code("E0428");
     if (place.op == IrOp::Field && place.symbol == reference_field(type))
         return std::move(place.operands.front());
     auto result = node(IrOp::ReferencePlace, place.span, type);
@@ -856,9 +1093,13 @@ bool Lowering::assignable(const IrType& actual, const IrType& expected) const {
     return nominal_assignable(program_, actual, expected);
 }
 
-void Lowering::require_type(const IrType& actual, const IrType& expected, const Span& span) const {
-    if (!assignable(actual, expected))
-        throw Diagnostic(span, "expected " + describe(expected) + ", got " + describe(actual));
+void Lowering::require_type(const IrType& actual, const IrType& expected, const Span& span,
+                            const ExpectedOrigin* origin) const {
+    if (assignable(actual, expected)) return;
+    auto error = Diagnostic(span, "expected " + describe(expected) + ", got " + describe(actual)).with_code("E0403")
+        .label("expected " + describe(expected) + ", found " + describe(actual));
+    if (origin && !origin->span.file.empty()) error.label(origin->span, origin->text);
+    throw error;
 }
 
 IrType Lowering::receiver_type(const IrType& type) const {
@@ -905,7 +1146,7 @@ Context Lowering::context(SymbolId owner) {
 IrType Lowering::callable_type(std::vector<IrType> signature, const Span& span) {
     for (std::size_t i = 0; i + 1 < signature.size(); ++i) {
         if (signature[i].kind == TypeKind::Void) {
-            throw Diagnostic(span, "a function parameter cannot have type void");
+            throw Diagnostic(span, "a function parameter cannot have type void").with_code("E0416");
         }
     }
     return {TypeKind::Callable, "func", no_symbol, std::move(signature)};
@@ -936,7 +1177,7 @@ SymbolId Lowering::closure_method(SymbolId layout, const IrType& type, const Spa
     for (std::size_t i = 0; i < names.size(); ++i) {
         const auto parameter = add(SymbolKind::Parameter, names[i], span, method);
         if (!entries_[method].names.emplace(names[i], parameter).second) {
-            throw Diagnostic(span, "duplicate parameter '" + names[i] + "'");
+            throw Diagnostic(span, "duplicate parameter '" + names[i] + "'").with_code("E0303");
         }
         symbol(parameter).type = type.arguments[i];
         symbol(method).parameters.push_back(parameter);
@@ -960,7 +1201,7 @@ IrNode Lowering::capture(ClosureEnvironment& environment, SymbolId key, IrNode i
     }
     if (scope_bound(input.type))
         throw Diagnostic(span, "a value of type " + describe(input.type) +
-                               " cannot leave its scope: a lambda cannot capture it");
+                               " cannot leave its scope: a lambda cannot capture it").with_code("E0605");
     const auto field = add(SymbolKind::Field, "$capture" + std::to_string(environment.inputs.size()),
                            span, environment.layout);
     symbol(field).type = input.type;
@@ -1024,13 +1265,13 @@ IrType Lowering::parameter_type(const Parameter& parameter, const Context& conte
         const auto module = resolve_import(dependency);
         const auto argument = own_member(module, "Argument");
         if (argument == no_symbol || symbol(argument).kind != SymbolKind::Enum)
-            throw Diagnostic(parameter.span, "Std.Core.Variadic must export its Argument enum");
+            throw Diagnostic(parameter.span, "Std.Core.Variadic must export its Argument enum").with_code("E0899");
         resolve(argument);
         return collection_type(TypeKind::Array, symbol(argument).type);
     }
     auto element = type(parameter.type, context);
     if (element.kind == TypeKind::Void)
-        throw Diagnostic(parameter.span, "a variadic parameter cannot have elements of type void");
+        throw Diagnostic(parameter.span, "a variadic parameter cannot have elements of type void").with_code("E0416");
     return collection_type(TypeKind::Array, element);
 }
 
@@ -1040,7 +1281,7 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
     std::vector<std::string> names;
     for (const auto& parameter : declaration.parameters) {
         if (parameter.variadic)
-            throw Diagnostic(parameter.span, "a variadic parameter requires a named function");
+            throw Diagnostic(parameter.span, "a variadic parameter requires a named function").with_code("E0207");
         signature.push_back(parameter_type(parameter, context));
         names.push_back(parameter.name);
     }
@@ -1048,11 +1289,11 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
     const auto callable = callable_type(std::move(signature), span);
     ClosureEnvironment environment{closure_layout(span, lexical_owner(context)), context, {}, {}};
     const auto method = closure_method(environment.layout, callable, span, names);
+    if (declaration.type && symbol(method).type.kind != TypeKind::Void) result_spans_.emplace(method, declaration.type->span);
     Context inner{method, method, context.receiver, 0, {entries_[method].names}, &environment};
     auto instructions = body(declaration.body, inner);
-    if (symbol(method).type.kind != TypeKind::Void && !always_returns(instructions)) {
-        throw Diagnostic(span, "function may exit without returning " + describe(symbol(method).type));
-    }
+    if (symbol(method).type.kind != TypeKind::Void && !always_returns(instructions))
+        throw missing_return(span, method, declaration);
     program_.bodies.push_back({method, std::move(instructions)});
     return closure_value(callable, environment, span);
 }
@@ -1060,16 +1301,16 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
 IrNode Lowering::bind_function(IrNode callee, Context& context) {
     const auto target = callee.symbol;
     if (!entries_[target].overloads.empty())
-        throw Diagnostic(callee.span, "an overloaded function must be called directly");
+        throw Diagnostic(callee.span, "an overloaded function must be called directly").with_code("E0433");
     const auto& span = callee.span;
     if (callee.type.name == "super.init") {
-        throw Diagnostic(span, "super.init must be called directly in a constructor");
+        throw Diagnostic(span, "super.init must be called directly in a constructor").with_code("E0506");
     }
     if (!symbol(target).generics.empty()) {
-        throw Diagnostic(span, "a generic function must be called with explicit type arguments");
+        throw Diagnostic(span, "a generic function must be called with explicit type arguments").with_code("E0419");
     }
     if (callee.operands.empty() && !symbol(target).external && !symbol(target).has_body) {
-        throw Diagnostic(span, "function requires an implementation");
+        throw Diagnostic(span, "function requires an implementation").with_code("E0434");
     }
     auto qualifier = static_qualifier(callee);
     auto replacements = callee.operands.empty() ? Substitution{}
@@ -1123,7 +1364,7 @@ void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& c
     for (const auto& parameter : decl.generics) {
         auto generic = add(SymbolKind::TypeParameter, parameter.name, parameter.span, id);
         if (!entries_[id].names.emplace(parameter.name, generic).second)
-            throw Diagnostic(parameter.span, "duplicate type parameter '" + parameter.name + "'");
+            throw Diagnostic(parameter.span, "duplicate type parameter '" + parameter.name + "'").with_code("E0303");
         symbol(generic).type = {TypeKind::TypeParameter, parameter.name, generic, {}};
         symbol(id).generics.push_back(generic);
     }
@@ -1132,7 +1373,7 @@ void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& c
         for (const auto& syntax : decl.generics[i].bounds) {
             auto bound = type(syntax, context);
             if (bound.kind != TypeKind::Object) {
-                throw Diagnostic(syntax.span, "a type parameter bound must be a class or interface");
+                throw Diagnostic(syntax.span, "a type parameter bound must be a class or interface").with_code("E0421");
             }
             auto& parameter = symbol(generic);
             if (!parameter.bound) {
@@ -1140,7 +1381,7 @@ void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& c
             } else {
                 if (*parameter.bound == bound ||
                     std::ranges::find(parameter.additional_bounds, bound) != parameter.additional_bounds.end()) {
-                    throw Diagnostic(syntax.span, "duplicate type parameter bound");
+                    throw Diagnostic(syntax.span, "duplicate type parameter bound").with_code("E0303");
                 }
                 parameter.additional_bounds.push_back(std::move(bound));
             }
@@ -1151,7 +1392,7 @@ void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& c
 void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     auto ctx = context(symbol(id).owner);
     if (decl.initializer && decl.initializer->kind == ExprKind::Import) {
-        if (decl.type) throw Diagnostic(decl.span, "import aliases cannot have a type annotation");
+        if (decl.type) throw Diagnostic(decl.span, "import aliases cannot have a type annotation").with_code("E0704");
         auto target = resolve_import(*decl.initializer);
         symbol(id).kind = SymbolKind::Import;
         symbol(id).type = symbol(target).type;
@@ -1170,14 +1411,14 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
             auto kind = symbol(initializer.symbol).kind;
             if (kind == SymbolKind::Alias || class_or_interface(kind) || kind == SymbolKind::Enum) {
                 if (!symbol(initializer.symbol).generics.empty() && init.kind != ExprKind::TypeApplication)
-                    throw Diagnostic(init.span, "generic type overlays are not supported");
+                    throw Diagnostic(init.span, "generic type overlays are not supported").with_code("E0421");
                 symbol(id).kind = SymbolKind::Alias;
                 symbol(id).type = initializer.type;
                 return;
             }
             if (kind == SymbolKind::Variant) {
                 if (!symbol(initializer.symbol).payload_types.empty())
-                    throw Diagnostic(init.span, "enum variant requires a payload");
+                    throw Diagnostic(init.span, "enum variant requires a payload").with_code("E0427");
                 if (has_enum_payload(program_, initializer.type.symbol)) initializer.op = IrOp::EnumConstruct;
             }
         }
@@ -1191,29 +1432,33 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
             initializer.op == IrOp::Reference) {
             if (initializer.symbol == no_symbol ||
                 symbol(initializer.symbol).kind != SymbolKind::Variant)
-                throw Diagnostic(init.span, "expected a value initializer");
+                throw Diagnostic(init.span, "expected a value initializer").with_code("E0422");
         }
         if (scope_bound(initializer.type))
             throw Diagnostic(init.span, "a value of type " + describe(initializer.type) +
-                                        " cannot leave its scope: it cannot be stored in a field or global");
+                                        " cannot leave its scope: it cannot be stored in a field or global")
+                .with_code("E0605");
         symbol(id).type = initializer.type;
         entries_[id].initializer = std::move(initializer);
         return;
     }
-    if (!decl.type) throw Diagnostic(decl.span, "declaration needs a type or initializer");
+    if (!decl.type) throw Diagnostic(decl.span, "declaration needs a type or initializer").with_code("E0205");
     auto declared = type(*decl.type, ctx);
-    if (declared.kind == TypeKind::Void) throw Diagnostic(decl.span, "a binding cannot have type void");
+    if (declared.kind == TypeKind::Void) throw Diagnostic(decl.span, "a binding cannot have type void")
+        .with_code("E0416");
     if (scope_bound(declared))
         throw Diagnostic(decl.type->span, "a value of type " + describe(declared) +
-                                          " cannot leave its scope: it cannot be stored in a field or global");
+                                          " cannot leave its scope: it cannot be stored in a field or global")
+            .with_code("E0605");
     if (is_primitive_reference(declared)) {
         if (decl.static_member)
-            throw Diagnostic(decl.span, "a static binding cannot have a primitive reference type");
+            throw Diagnostic(decl.span, "a static binding cannot have a primitive reference type").with_code("E0428");
         if (symbol(id).kind == SymbolKind::Field)
             symbol(id).constant = false; // A constructor can perform the first binding.
     }
     symbol(id).type = declared;
     if (decl.initializer) {
+        expected_origin_ = ExpectedOrigin{decl.type->span, "expected because of this type"};
         entries_[id].initializer = value(*decl.initializer, ctx, &declared);
     } else if (decl.static_member && !symbol(id).constant &&
                (declared.kind == TypeKind::Integer || declared.kind == TypeKind::Float ||
@@ -1225,7 +1470,7 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
         if (op != IrOp::Nil) initializer.text = op == IrOp::Boolean ? "false" : "0";
         entries_[id].initializer = std::move(initializer);
     } else if (symbol(id).kind != SymbolKind::Field || (decl.constant && !is_primitive_reference(declared))) {
-        throw Diagnostic(decl.span, "binding requires an initializer");
+        throw Diagnostic(decl.span, "binding requires an initializer").with_code("E0404");
     }
 }
 
@@ -1233,7 +1478,7 @@ void Lowering::resolve(SymbolId id) {
     auto state = entries_[id].resolution;
     if (state == Resolution::Resolved) return;
     if (state == Resolution::Resolving)
-        throw Diagnostic(symbol(id).span, "cyclic declaration of '" + symbol(id).name + "'");
+        throw Diagnostic(symbol(id).span, "cyclic declaration of '" + symbol(id).name + "'").with_code("E0309");
     if (const auto* destructure = entries_[id].destructure) {
         resolve_destructure(*destructure, symbol(id).owner);
         return;
@@ -1255,34 +1500,34 @@ void Lowering::resolve(SymbolId id) {
             if (symbol(base).kind == SymbolKind::Alias && symbol(base).type.kind == TypeKind::Object)
                 base = symbol(base).type.symbol;
             if (symbol(base).kind != symbol(id).kind)
-                throw Diagnostic(decl.base->span, "base must have the same declaration kind");
+                throw Diagnostic(decl.base->span, "base must have the same declaration kind").with_code("E0503");
             if (entries_[base].singleton_instance != no_symbol)
-                throw Diagnostic(decl.base->span, "a singleton cannot be extended");
+                throw Diagnostic(decl.base->span, "a singleton cannot be extended").with_code("E0503");
             if (symbol(base).kind == SymbolKind::Module && symbol(base).constant)
-                throw Diagnostic(decl.base->span, "cannot inherit a constant module");
+                throw Diagnostic(decl.base->span, "cannot inherit a constant module").with_code("E0503");
             if (!symbol(base).generics.empty() || !decl.base->arguments.empty() ||
                 !decl.base->collections.empty())
-                throw Diagnostic(decl.base->span, "generic inheritance is not supported");
+                throw Diagnostic(decl.base->span, "generic inheritance is not supported").with_code("E0503");
             symbol(id).base = base;
         } else if (class_or_interface(symbol(id).kind)) {
             if (decl.base && !decl.base->collections.empty())
-                throw Diagnostic(decl.base->span, "a base must be a class type");
+                throw Diagnostic(decl.base->span, "a base must be a class type").with_code("E0421");
             symbol(id).base = root_class();
         } else if (decl.base) {
-            throw Diagnostic(decl.base->span, "a module cannot inherit from class");
+            throw Diagnostic(decl.base->span, "a module cannot inherit from class").with_code("E0503");
         }
         for (const auto& syntax : decl.interfaces) {
             auto interface = type(syntax, ctx);
             if (interface.kind != TypeKind::Object || symbol(interface.symbol).kind != SymbolKind::Interface) {
-                throw Diagnostic(syntax.span, "an interface is required here");
+                throw Diagnostic(syntax.span, "an interface is required here").with_code("E0421");
             }
             const auto views = nominal_views(program_, interface);
             if (std::ranges::find(views, id, &IrType::symbol) != views.end()) {
-                throw Diagnostic(syntax.span, "cyclic interface inheritance");
+                throw Diagnostic(syntax.span, "cyclic interface inheritance").with_code("E0503");
             }
             if (std::ranges::find(symbol(id).interfaces, interface.symbol, &IrType::symbol) !=
                 symbol(id).interfaces.end()) {
-                throw Diagnostic(syntax.span, "interface is listed more than once");
+                throw Diagnostic(syntax.span, "interface is listed more than once").with_code("E0503");
             }
             symbol(id).interfaces.push_back(std::move(interface));
         }
@@ -1304,13 +1549,15 @@ void Lowering::resolve(SymbolId id) {
             std::set<std::string> names;
             for (const auto& field : member.parameters) {
                 if (member.named_payload && !names.insert(field.name).second)
-                    throw Diagnostic(field.span, "duplicate enum payload field '" + field.name + "'");
+                    throw Diagnostic(field.span, "duplicate enum payload field '" + field.name + "'")
+                        .with_code("E0303");
                 auto payload = type(field.type, ctx);
                 if (payload.kind == TypeKind::Void)
-                    throw Diagnostic(field.span, "an enum payload cannot have type void");
+                    throw Diagnostic(field.span, "an enum payload cannot have type void").with_code("E0416");
                 if (scope_bound(payload))
                     throw Diagnostic(field.span, "a value of type " + describe(payload) +
-                                                 " cannot leave its scope: it cannot be an enum payload");
+                                                 " cannot leave its scope: it cannot be an enum payload")
+                        .with_code("E0605");
                 symbol(variant).payload_types.push_back(std::move(payload));
             }
         }
@@ -1320,17 +1567,22 @@ void Lowering::resolve(SymbolId id) {
         if (decl.cast_target) {
             const auto target = type(*decl.cast_target, ctx);
             if (is_primitive_reference(target))
-                throw Diagnostic(decl.cast_target->span, "a cast cannot create a primitive reference");
+                throw Diagnostic(decl.cast_target->span, "a cast cannot create a primitive reference")
+                    .with_code("E0428");
             if (target.kind == TypeKind::Void || target != symbol(id).type)
-                throw Diagnostic(decl.type->span, "cast must return its declared target type " + describe(target));
+                throw Diagnostic(decl.type->span, "cast must return its declared target type " + describe(target))
+                    .with_code("E0512");
         }
         for (const auto& parameter : decl.parameters) {
             auto argument_type = parameter_type(parameter, ctx);
             if (argument_type.kind == TypeKind::Void)
-                throw Diagnostic(parameter.span, "a parameter cannot have type void");
+                throw Diagnostic(parameter.span, "a parameter cannot have type void").with_code("E0416");
             auto arg = add(SymbolKind::Parameter, parameter.name, parameter.span, id);
-            if (!entries_[id].names.emplace(parameter.name, arg).second)
-                throw Diagnostic(parameter.span, "duplicate parameter '" + parameter.name + "'");
+            if (const auto [earlier, added] = entries_[id].names.emplace(parameter.name, arg); !added) {
+                throw Diagnostic(parameter.span, "duplicate parameter '" + parameter.name + "'").with_code("E0303")
+                    .label("'" + parameter.name + "' is declared again here")
+                    .label(symbol(earlier->second).span, "'" + parameter.name + "' is first declared here");
+            }
             symbol(arg).type = std::move(argument_type);
             symbol(id).parameters.push_back(arg);
             if (parameter.variadic) {
@@ -1340,24 +1592,29 @@ void Lowering::resolve(SymbolId id) {
         }
         if (!decl.has_body && symbol(symbol(id).owner).kind != SymbolKind::Module &&
             !class_or_interface(symbol(symbol(id).owner).kind))
-            throw Diagnostic(decl.span, "only class, interface or module members may omit a function body");
+            throw Diagnostic(decl.span, "only class, interface or module members may omit a function body")
+                .with_code("E0434");
         if (!decl.has_body && decl.static_member)
-            throw Diagnostic(decl.span, "a static function requires a body");
+            throw Diagnostic(decl.span, "a static function requires a body").with_code("E0501");
         if (decl.host_binding) {
             const auto file = source_file(program_, id);
             if (file == no_symbol || symbol(file).library_path.empty() ||
                 symbol(symbol(id).owner).kind != SymbolKind::Module)
-                throw Diagnostic(decl.span, "host bindings are only allowed in standard library modules");
+                throw Diagnostic(decl.span, "host bindings are only allowed in standard library modules")
+                    .with_code("E0710");
             if (!decl.generics.empty() || decl.override_member ||
                 std::ranges::any_of(decl.parameters, &Parameter::variadic) ||
                 !host_service_name(decl.host_binding->first))
-                throw Diagnostic(decl.span, "a host binding needs a non-generic function and a qualified service name");
+                throw Diagnostic(decl.span, "a host binding needs a non-generic function and a qualified service name")
+                    .with_code("E0710");
             for (auto parameter : symbol(id).parameters) {
                 if (!host_data_type(symbol(parameter).type))
-                    throw Diagnostic(symbol(parameter).span, "this parameter cannot cross the host boundary");
+                    throw Diagnostic(symbol(parameter).span, "this parameter cannot cross the host boundary")
+                        .with_code("E0710");
             }
             if (!host_variants(program_, symbol(id).type))
-                throw Diagnostic(decl.span, "a host result needs exactly Ok or Ok(T), and Error(uint32)");
+                throw Diagnostic(decl.span, "a host result needs exactly Ok or Ok(T), and Error(uint32)")
+                    .with_code("E0710");
             symbol(id).external = true;
             symbol(id).host_binding = IrHostBinding{decl.host_binding->first, decl.host_binding->second};
         }
@@ -1368,15 +1625,18 @@ void Lowering::resolve(SymbolId id) {
             const auto file = source_file(program_, id);
             if (file == no_symbol || symbol(file).library_path.empty() ||
                 symbol(symbol(id).owner).kind != SymbolKind::Module)
-                throw Diagnostic(decl.span, "scheduler bindings are only allowed in standard library modules");
+                throw Diagnostic(decl.span, "scheduler bindings are only allowed in standard library modules")
+                    .with_code("E0710");
             const auto operation = scheduler_operation(*decl.scheduler_binding);
             if (!operation)
-                throw Diagnostic(decl.span, "unknown scheduler operation '" + *decl.scheduler_binding + "'");
+                throw Diagnostic(decl.span, "unknown scheduler operation '" + *decl.scheduler_binding + "'")
+                    .with_code("E0710");
             if (decl.exported || decl.override_member || decl.static_member ||
                 std::ranges::any_of(decl.parameters, &Parameter::variadic) ||
                 decl.parameters.size() != operation->arguments.size() ||
                 (operation->typed && decl.generics.size() != 1))
-                throw Diagnostic(decl.span, "a scheduler binding needs a private function with the operation's arguments");
+                throw Diagnostic(decl.span, "a scheduler binding needs a private function with the operation's arguments")
+                    .with_code("E0710");
             scheduler_bindings_.emplace(id, *decl.scheduler_binding);
         }
         if (decl.host_callback) {
@@ -1387,17 +1647,21 @@ void Lowering::resolve(SymbolId id) {
             const auto file = source_file(program_, id);
             if (file == no_symbol || symbol(file).library_path.empty() ||
                 symbol(symbol(id).owner).kind != SymbolKind::Module)
-                throw Diagnostic(decl.span, "host callbacks are only allowed in standard library modules");
+                throw Diagnostic(decl.span, "host callbacks are only allowed in standard library modules")
+                    .with_code("E0710");
             if (!decl.generics.empty() || decl.override_member ||
                 std::ranges::any_of(decl.parameters, &Parameter::variadic) ||
                 !host_service_name(decl.host_callback->first))
-                throw Diagnostic(decl.span, "a host callback needs a non-generic function and a qualified service name");
+                throw Diagnostic(decl.span, "a host callback needs a non-generic function and a qualified service name")
+                    .with_code("E0710");
             for (auto parameter : symbol(id).parameters) {
                 if (!host_data_type(symbol(parameter).type))
-                    throw Diagnostic(symbol(parameter).span, "this parameter cannot cross the host boundary");
+                    throw Diagnostic(symbol(parameter).span, "this parameter cannot cross the host boundary")
+                        .with_code("E0710");
             }
             if (symbol(id).type.kind != TypeKind::Void && !host_data_type(symbol(id).type))
-                throw Diagnostic(decl.span, "a host callback result must be void or cross the host boundary");
+                throw Diagnostic(decl.span, "a host callback result must be void or cross the host boundary")
+                    .with_code("E0710");
             symbol(id).host_binding = IrHostBinding{decl.host_callback->first, decl.host_callback->second};
         }
     } else {
@@ -1416,7 +1680,7 @@ void Lowering::check_overloads(SymbolId id) {
         for (const auto previous : seen) {
             if (std::ranges::equal(symbol(previous).parameters, symbol(branch).parameters, equal_type))
                 throw Diagnostic(symbol(branch).span, "duplicate overload parameter signature for '" +
-                                                       symbol(id).name + "'");
+                                                       symbol(id).name + "'").with_code("E0433");
         }
         seen.push_back(branch);
     }
@@ -1432,12 +1696,13 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
             const auto ancestor = own_member(scope, decl.name);
             if (ancestor != no_symbol &&
                 (!decl.overloads.empty() || !entries_[ancestor].overloads.empty()))
-                throw Diagnostic(decl.span, "inherited overload groups cannot be redeclared or overridden");
+                throw Diagnostic(decl.span, "inherited overload groups cannot be redeclared or overridden")
+                    .with_code("E0502");
         }
     }
     if (inherited != no_symbol && (decl.static_member || static_member(inherited))) {
         if (decl.override_member)
-            throw Diagnostic(decl.span, "a static member is hidden without .override");
+            throw Diagnostic(decl.span, "a static member is hidden without .override").with_code("E0501");
         if (symbol(id).kind == SymbolKind::Function || symbol(inherited).kind == SymbolKind::Function) {
             resolve(inherited);
             const auto same_parameter = [&](SymbolId a, SymbolId b) { return symbol(a).type == symbol(b).type; };
@@ -1446,7 +1711,8 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
                 !symbol(id).generics.empty() || !symbol(inherited).generics.empty() ||
                 !assignable(symbol(id).type, symbol(inherited).type) ||
                 !std::ranges::equal(symbol(id).parameters, symbol(inherited).parameters, same_parameter))
-                throw Diagnostic(decl.span, "static function does not match inherited member '" + decl.name + "'");
+                throw Diagnostic(decl.span, "static function does not match inherited member '" + decl.name + "'")
+                    .with_code("E0501");
         }
         return;
     }
@@ -1457,20 +1723,37 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
             if (view.symbol != owner && symbol(view.symbol).kind == SymbolKind::Interface) {
                 const auto requirement = own_member(view.symbol, decl.name);
                 if (requirement != no_symbol && !static_member(requirement)) {
-                    if (!symbol(id).exported) throw Diagnostic(decl.span, "an override must be exported");
+                    if (!symbol(id).exported) throw Diagnostic(decl.span, "an override must be exported")
+                        .with_code("E0502");
                     symbol(id).overrides = requirement;
                     return;
                 }
             }
         }
-        throw Diagnostic(decl.span, "no inherited member named '" + decl.name + "'");
+        throw Diagnostic(decl.span, "no inherited member named '" + decl.name + "'").with_code("E0502");
     }
     if (inherited == no_symbol) return;
-    if (!decl.override_member)
-        throw Diagnostic(decl.span, "inherited member '" + decl.name + "' requires .override");
-    if (!decl.exported) throw Diagnostic(decl.span, "an override must be exported");
+    if (!decl.override_member) {
+        auto error = Diagnostic(decl.span, "inherited member '" + decl.name + "' requires .override").with_code("E0502")
+            .label("replaces the inherited '" + decl.name + "'")
+            .label(name_span(inherited), "'" + decl.name + "' is inherited from here");
+        // The keyword of the declaration, `let` or `const`, takes `.override`.
+        if (const auto text = source_text(decl.span); text && user_source(decl.span.file)) {
+            const auto keyword = decl.constant ? std::string("const") : std::string("let");
+            for (std::size_t at = 0; (at = text->find(keyword, at)) != std::string::npos; at += keyword.size()) {
+                const bool word = (at == 0 || text->at(at - 1) == ' ') && at + keyword.size() < text->size() &&
+                                  text->at(at + keyword.size()) == ' ';
+                if (!word) continue;
+                if (const auto after = source_span(decl.span.file, decl.span.offset + at + keyword.size(), 0))
+                    error.suggest("declare it as an override", *after, ".override", Applicability::MaybeIncorrect);
+                break;
+            }
+        }
+        throw error;
+    }
+    if (!decl.exported) throw Diagnostic(decl.span, "an override must be exported").with_code("E0502");
     if (symbol(owner).kind == SymbolKind::Class && symbol(id).kind != SymbolKind::Function)
-        throw Diagnostic(decl.span, "class field overrides are not supported");
+        throw Diagnostic(decl.span, "class field overrides are not supported").with_code("E0502");
     resolve(inherited);
     bool match = symbol(id).kind == symbol(inherited).kind &&
                  symbol(id).type == symbol(inherited).type &&
@@ -1480,7 +1763,8 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
     match = match && std::ranges::equal(ours, theirs, [this](auto a, auto b) {
         return symbol(a).type == symbol(b).type;
     });
-    if (!match) throw Diagnostic(decl.span, "override does not match inherited member '" + decl.name + "'");
+    if (!match) throw Diagnostic(decl.span, "override does not match inherited member '" + decl.name + "'")
+        .with_code("E0502");
     symbol(id).overrides = inherited;
 }
 
@@ -1496,7 +1780,8 @@ void Lowering::check_interfaces(SymbolId id) {
         if (symbol(view.symbol).kind != SymbolKind::Interface) continue;
         const auto [previous, added] = seen.emplace(view.symbol, view);
         if (!added && previous->second != view) {
-            throw Diagnostic(symbol(id).span, "cannot inherit different instances of interface '" + view.name + "'");
+            throw Diagnostic(symbol(id).span, "cannot inherit different instances of interface '" + view.name + "'")
+                .with_code("E0503");
         }
         // resolve() can add entries and reallocate entries_, which would move
         // the map being iterated, so iterate a copy of the names.
@@ -1521,7 +1806,8 @@ void Lowering::check_interfaces(SymbolId id) {
         const auto required = signature(methods.front().method, methods.front().interface);
         for (const auto& method : methods) {
             if (signature(method.method, method.interface) != required) {
-                throw Diagnostic(symbol(id).span, "incompatible interface requirements for '" + name + "'");
+                throw Diagnostic(symbol(id).span, "incompatible interface requirements for '" + name + "'")
+                    .with_code("E0504");
             }
         }
         const auto implementation = is_class ? member(id, name, false) : own_member(id, name);
@@ -1532,7 +1818,8 @@ void Lowering::check_interfaces(SymbolId id) {
                 !entries_[implementation].overloads.empty() ||
                 !candidate.exported || !candidate.generics.empty() ||
                 signature(implementation, nominal) != required) {
-                throw Diagnostic(candidate.span, "member '" + name + "' does not match the interface requirement");
+                throw Diagnostic(candidate.span, "member '" + name + "' does not match the interface requirement")
+                    .with_code("E0504");
             }
             continue;
         }
@@ -1545,10 +1832,11 @@ void Lowering::check_interfaces(SymbolId id) {
             if (!shadowed) ++defaults;
         }
         if (defaults > 1) {
-            throw Diagnostic(symbol(id).span, "multiple interface defaults for '" + name + "' require an override");
+            throw Diagnostic(symbol(id).span, "multiple interface defaults for '" + name + "' require an override")
+                .with_code("E0504");
         }
         if (defaults == 0 && is_class) {
-            throw Diagnostic(symbol(id).span, "class must declare interface method '" + name + "'");
+            throw Diagnostic(symbol(id).span, "class must declare interface method '" + name + "'").with_code("E0504");
         }
     }
 }
@@ -1564,7 +1852,10 @@ IrNode Lowering::reference(SymbolId id, const Span& span, Context& context, bool
     if (context.function == no_symbol && target.owner == context.owner &&
         (target.kind == SymbolKind::Global || target.kind == SymbolKind::Field) &&
         target.span.file == span.file && target.span.offset > span.offset) {
-        throw Diagnostic(span, "'" + target.name + "' is used before its declaration");
+        throw Diagnostic(span, "'" + target.name + "' is used before its declaration").with_code("E0306")
+            .label("used here")
+            .label(name_span(id), "'" + target.name + "' is declared here, later in the file")
+            .help("move the declaration of '" + target.name + "' above its first use");
     }
     auto result = node(IrOp::Reference, span, target.type);
     result.symbol = id;
@@ -1591,7 +1882,7 @@ IrNode Lowering::reference(SymbolId id, const Span& span, Context& context, bool
     if (implicit_receiver && result.operands.empty() && owner != no_symbol &&
         class_or_interface(symbol(owner).kind) &&
         (target.kind == SymbolKind::Field || target.kind == SymbolKind::Function))
-        throw Diagnostic(span, "instance member '" + target.name + "' requires a receiver");
+        throw Diagnostic(span, "instance member '" + target.name + "' requires a receiver").with_code("E0508");
     return result;
 }
 
@@ -1599,17 +1890,20 @@ IrNode Lowering::wrapped_member(const Expr& expr, const IrType& type, Context& c
                                std::optional<IrNode> receiver) {
     const auto wrapper = primitive_wrapper(type);
     const auto message = "type " + describe(type) + " has no member '" + expr.text + "'";
-    if (!wrapper) throw Diagnostic(expr.span, message);
+    if (!wrapper) throw Diagnostic(expr.span, message).with_code("E0305");
     const auto file = library_files_.find(wrapper->path);
-    if (file == library_files_.end())
-        throw MissingPrimitiveWrapper(expr.span, message, std::string(wrapper->path));
+    if (file == library_files_.end()) {
+        MissingPrimitiveWrapper missing(expr.span, message, std::string(wrapper->path));
+        missing.with_code("E0305");
+        throw missing;
+    }
     const auto module = own_member(file->second, wrapper->module);
     if (module == no_symbol || symbol(module).kind != SymbolKind::Module)
-        throw Diagnostic(expr.span, "invalid primitive wrapper for " + describe(type));
+        throw Diagnostic(expr.span, "invalid primitive wrapper for " + describe(type)).with_code("E0899");
     resolve(module);
     const auto method = member(module, expr.text, true);
     if (method == no_symbol || symbol(method).kind != SymbolKind::Function)
-        throw Diagnostic(expr.span, message);
+        throw Diagnostic(expr.span, message).with_code("E0305");
     const auto from = source_file(program_, lexical_owner(context));
     if (from != no_symbol && from != file->second && wrapper_imports_.emplace(from, module).second) {
         const auto dependency = add(SymbolKind::Import, "$primitive", expr.span, from);
@@ -1629,7 +1923,7 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
             symbol(receiver).kind != SymbolKind::Class || symbol(receiver).base == no_symbol ||
             symbol(receiver).base == root_class_ ||
             symbol(context.function).name != "init" || expr.text != "init")
-            throw Diagnostic(expr.span, "super.init is only available in a derived constructor");
+            throw Diagnostic(expr.span, "super.init is only available in a derived constructor").with_code("E0506");
         auto base = symbol(receiver).base;
         auto input = node(IrOp::Receiver, operand.span, symbol(base).type);
         input.symbol = receiver;
@@ -1685,7 +1979,8 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
             result.operands.push_back(std::move(receiver));
             return result;
         }
-        throw Diagnostic(expr.span, "type " + describe(nominal) + " has no member '" + expr.text + "'");
+        throw Diagnostic(expr.span, "type " + describe(nominal) + " has no member '" + expr.text + "'")
+            .with_code("E0305");
     }
     if (nominal.kind != TypeKind::Object && nominal.kind != TypeKind::Module &&
         nominal.kind != TypeKind::Enum) {
@@ -1694,27 +1989,40 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
         if (receiver.op == IrOp::Reference && receiver.symbol != no_symbol &&
             symbol(receiver.symbol).kind == SymbolKind::Alias && primitive_wrapper(nominal))
             return wrapped_member(expr, nominal, context);
-        throw Diagnostic(expr.span, "type " + describe(nominal) + " has no members");
+        throw Diagnostic(expr.span, "type " + describe(nominal) + " has no members").with_code("E0305");
     }
     if (nominal.kind == TypeKind::Enum &&
         (receiver.op != IrOp::Reference || receiver.symbol == no_symbol ||
          (symbol(receiver.symbol).kind != SymbolKind::Enum && symbol(receiver.symbol).kind != SymbolKind::Alias))) {
-        throw Diagnostic(expr.span, "qualify a variant with its enum type");
+        throw Diagnostic(expr.span, "qualify a variant with its enum type").with_code("E0427");
     }
     bool type_reference = receiver.op == IrOp::Reference && receiver.symbol != no_symbol &&
         (class_or_interface(symbol(receiver.symbol).kind) ||
          symbol(receiver.symbol).kind == SymbolKind::Alias);
     if (nominal.kind == TypeKind::Object && (expr.text == "init" || expr.text == "deinit"))
-        throw Diagnostic(expr.span, "lifecycle functions require new, super.init, or destroy");
+        throw Diagnostic(expr.span, "lifecycle functions require new, super.init, or destroy").with_code("E0509");
     const bool exported = !inside(lexical_owner(context), nominal.symbol);
     auto target = type_reference || nominal.kind != TypeKind::Object
         ? member(nominal.symbol, expr.text, exported) : no_symbol;
     if (target == no_symbol && nominal.kind == TypeKind::Object)
         target = value_member(receiver.type, expr.text, exported);
-    if (target == no_symbol)
-        throw Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " +
-                                    describe(nominal))
+    if (target == no_symbol) {
+        auto error = Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " +
+                                           describe(nominal)).with_code("E0305")
             .arg("kind", "member").arg("name", expr.text).arg("owner", describe(nominal));
+        auto hidden = type_reference || nominal.kind != TypeKind::Object
+            ? member(nominal.symbol, expr.text, false) : no_symbol;
+        if (hidden == no_symbol && nominal.kind == TypeKind::Object) hidden = value_member(receiver.type, expr.text, false);
+        if (hidden != no_symbol && exported) {
+            not_exported(error, hidden);
+        } else {
+            error.label(describe(nominal) + " has no member '" + expr.text + "'");
+            suggest_name(error, expr.span, expr.text,
+                         member_names(type_reference || nominal.kind != TypeKind::Object ? nominal : receiver.type, exported),
+                         "a member");
+        }
+        throw error;
+    }
     auto result = reference(target, expr.span, context, false);
     if (static_member(target)) {
         if (!type_reference) {
@@ -1722,7 +2030,8 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
             const auto declaring_type = symbol(symbol(target).owner).owner;
             if ((kind != SymbolKind::Global && kind != SymbolKind::Function) ||
                 (kind == SymbolKind::Function && symbol(declaring_type).kind == SymbolKind::Interface)) {
-                throw Diagnostic(expr.span, "static member '" + expr.text + "' requires a class or interface name");
+                throw Diagnostic(expr.span, "static member '" + expr.text + "' requires a class or interface name")
+                    .with_code("E0501");
             }
             result.operands.push_back(std::move(receiver));
         }
@@ -1733,12 +2042,13 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
         if (!symbol(nominal.symbol).generics.empty() &&
             symbol(receiver.symbol).kind != SymbolKind::Alias &&
             operand.kind != ExprKind::TypeApplication)
-            throw Diagnostic(expr.span, "qualify a generic enum variant with explicit type arguments");
+            throw Diagnostic(expr.span, "qualify a generic enum variant with explicit type arguments")
+                .with_code("E0419");
         result.type = nominal;
     }
     if (kind == SymbolKind::Field || kind == SymbolKind::Function || kind == SymbolKind::Global) {
         if (type_reference)
-            throw Diagnostic(expr.span, "member '" + expr.text + "' requires an instance");
+            throw Diagnostic(expr.span, "member '" + expr.text + "' requires an instance").with_code("E0508");
         result.type = substitute(std::move(result.type), receiver_arguments(receiver.type, symbol(target).owner));
         result.operands.clear();
         result.operands.push_back(std::move(receiver));
@@ -1753,11 +2063,21 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
     const bool rest = variadic != VariadicKind::None;
     const auto fixed = params.size() - leading - (rest ? 1 : 0);
     const auto count = expr.operands.size() - first;
-    if (count < fixed || (!rest && count != fixed))
-        throw Diagnostic(expr.span, "expected " + std::string(rest ? "at least " : "") +
-                                    std::to_string(fixed) + " argument(s)");
+    if (count < fixed || (!rest && count != fixed)) {
+        auto error = Diagnostic(expr.span, "expected " + std::string(rest ? "at least " : "") +
+                                           std::to_string(fixed) + " argument(s)").with_code("E0407")
+            .label("expected " + std::string(rest ? "at least " : "") + plural(fixed, "argument") + ", found " +
+                   std::to_string(count));
+        if (target != no_symbol && !symbol(target).span.file.empty())
+            error.label(name_span(target), "'" + symbol(target).name + "' takes " +
+                                               std::string(rest ? "at least " : "") + plural(fixed, "parameter"));
+        throw error;
+    }
     for (std::size_t i = 0; i < fixed; ++i) {
         auto expected = substitute(symbol(params[i + leading]).type, replacements);
+        const auto& parameter = symbol(params[i + leading]);
+        if (!parameter.span.file.empty())
+            expected_origin_ = ExpectedOrigin{parameter.span, "parameter '" + parameter.name + "' is declared here"};
         call.operands.push_back(value(expr.operands[i + first], context, &expected, true));
     }
     if (!rest) return;
@@ -1786,7 +2106,7 @@ SymbolId Lowering::cast_method(const IrType& source, const IrType& target, const
             if (substitute(symbol(method).type, replacements) != target) continue;
             if (found != no_symbol) {
                 if (diagnose_ambiguity)
-                    throw Diagnostic(symbol(method).span, "ambiguous cast to " + describe(target));
+                    throw Diagnostic(symbol(method).span, "ambiguous cast to " + describe(target)).with_code("E0409");
                 return no_symbol;
             }
             found = method;
@@ -1823,7 +2143,8 @@ IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context
     } else if (input.type != string_type) {
         if (!supports_value_members(program_, input.type))
             throw Diagnostic(expr.span, "cannot pack " + describe(input.type) +
-                                        " as a variadic argument; pass its text representation explicitly");
+                                        " as a variadic argument; pass its text representation explicitly")
+                .with_code("E0403");
         auto text = node(IrOp::ValueText, expr.span, string_type);
         text.operands.push_back(std::move(input));
         input = std::move(text);
@@ -1853,9 +2174,10 @@ IrNode Lowering::enum_construct(const IrNode& target, const Expr& expr, Context&
     const bool named = expr.kind == ExprKind::NamedVariant;
     const auto fields = symbol(variant).payload_types;
     if (!payload || fields.empty() || !expr.type_arguments.empty() || named != payload->named_payload)
-        throw Diagnostic(expr.span, "use the variant's declared payload constructor");
+        throw Diagnostic(expr.span, "use the variant's declared payload constructor").with_code("E0427");
     if (fields.size() != expr.operands.size() - 1)
-        throw Diagnostic(expr.span, "expected " + std::to_string(fields.size()) + " enum payload field(s)");
+        throw Diagnostic(expr.span, "expected " + std::to_string(fields.size()) + " enum payload field(s)")
+            .with_code("E0427");
     auto result = node(IrOp::EnumConstruct, expr.span, target.type);
     result.symbol = variant;
     const auto replacements = enum_arguments(target.type);
@@ -1866,7 +2188,7 @@ IrNode Lowering::enum_construct(const IrNode& target, const Expr& expr, Context&
             const auto& name = expr.field_names[i];
             const auto field = std::ranges::find(payload->parameters, name, &Parameter::name);
             if (field == payload->parameters.end() || !seen.insert(name).second)
-                throw Diagnostic(expr.span, "unknown or repeated enum payload field '" + name + "'");
+                throw Diagnostic(expr.span, "unknown or repeated enum payload field '" + name + "'").with_code("E0427");
             index = static_cast<std::size_t>(field - payload->parameters.begin());
             if (i != 0) result.text += ',';
             result.text += std::to_string(index);
@@ -1879,7 +2201,7 @@ IrNode Lowering::enum_construct(const IrNode& target, const Expr& expr, Context&
 
 IrNode Lowering::tuple(const Expr& expr, Context& context, const IrType* expected) {
     if (expr.operands.empty() || (expected && expr.operands.size() != expected->arguments.size()))
-        throw Diagnostic(expr.span, "tuple literal has the wrong number of elements");
+        throw Diagnostic(expr.span, "tuple literal has the wrong number of elements").with_code("E0426");
     auto result = node(IrOp::Tuple, expr.span, expected ? *expected : IrType{TypeKind::Tuple, {}, no_symbol, {}});
     for (std::size_t i = 0; i < expr.operands.size(); ++i) {
         auto element = value(expr.operands[i], context, expected ? &expected->arguments[i] : nullptr);
@@ -1900,7 +2222,7 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
     const auto bits_type = callee.text == "from_bits" ? float_bits_type(*target) : std::nullopt;
     if (!from_utf8 && !bits_type) return std::nullopt;
     if (!expr.type_arguments.empty() || expr.operands.size() != 2)
-        throw Diagnostic(expr.span, "expected one argument and no type arguments");
+        throw Diagnostic(expr.span, "expected one argument and no type arguments").with_code("E0407");
     const auto& input = expr.operands[1];
     if (bits_type) {
         auto result = node(IrOp::ReinterpretFloat, expr.span, *target);
@@ -1910,7 +2232,7 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
     const auto byte_array = collection_type(TypeKind::Array, uint8_type);
     auto bytes = value(input, context, input.kind == ExprKind::Collection ? &byte_array : nullptr);
     if (!collection(bytes.type) || bytes.type.arguments.front() != uint8_type)
-        throw Diagnostic(input.span, "string.from_utf8 requires an array or list of bytes");
+        throw Diagnostic(input.span, "string.from_utf8 requires an array or list of bytes").with_code("E0403");
     auto result = node(IrOp::TextFromUtf8, expr.span, {TypeKind::Tuple, {}, no_symbol, {bool_type, string_type}});
     result.operands.push_back(std::move(bytes));
     return result;
@@ -1923,7 +2245,8 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     // say what the form requires (Concurrency.md section 4.4).
     if (callee_expr.kind == ExprKind::Name && callee_expr.text == "spawn" && expr.open &&
         find("spawn", context, callee_expr.span) == no_symbol)
-        throw Diagnostic(*expr.open, "a spawn operand begins with a name; bind the callee to a name first");
+        throw Diagnostic(*expr.open, "a spawn operand begins with a name; bind the callee to a name first")
+            .with_code("E0603");
     auto callee = callee_expr.kind == ExprKind::Member
         ? select(callee_expr, context, true) : expression(callee_expr, context);
     if (callee.op == IrOp::Reference && callee.symbol != no_symbol &&
@@ -1931,10 +2254,12 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         return enum_construct(callee, expr, context);
     }
     if (is_function_value(callee.type)) {
-        if (!expr.type_arguments.empty()) throw Diagnostic(expr.span, "function values take no type arguments");
+        if (!expr.type_arguments.empty()) throw Diagnostic(expr.span, "function values take no type arguments")
+            .with_code("E0417");
         const auto signature = callee.type.arguments;
         if (expr.operands.size() != signature.size()) {
-            throw Diagnostic(expr.span, "expected " + std::to_string(signature.size() - 1) + " argument(s)");
+            throw Diagnostic(expr.span, "expected " + std::to_string(signature.size() - 1) + " argument(s)")
+                .with_code("E0407");
         }
         auto result = node(IrOp::CallClosure, expr.span, signature.back());
         result.operands.push_back(std::move(callee));
@@ -1944,17 +2269,17 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         return result;
     }
     if (callee.type.kind != TypeKind::Callable)
-        throw Diagnostic(expr.operands.front().span, "expression is not callable");
+        throw Diagnostic(expr.operands.front().span, "expression is not callable").with_code("E0423");
     auto target = callee.symbol;
     auto result = node(IrOp::Call, expr.span);
     result.symbol = target;
     if (callee.type.name == "super.init") {
         const auto& first = entries_[context.function].declaration->body.front();
         if (expr.span.offset != first.expressions.front().span.offset) {
-            throw Diagnostic(expr.span, "super.init must be the first statement of the constructor");
+            throw Diagnostic(expr.span, "super.init must be the first statement of the constructor").with_code("E0506");
         }
         if (!expr.type_arguments.empty())
-            throw Diagnostic(expr.span, "super.init takes no type arguments");
+            throw Diagnostic(expr.span, "super.init takes no type arguments").with_code("E0417");
         if (target == no_symbol) require_implicit_constructor(callee.operands.front().type.symbol, expr.span);
         result.op = IrOp::BaseInitialize;
         result.operands = std::move(callee.operands);
@@ -1966,7 +2291,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
             const bool equality = *operation == IrOp::ValueEquals;
             if (!expr.type_arguments.empty() || expr.operands.size() != (equality ? 2U : 1U))
                 throw Diagnostic(expr.span, equality ? "equals requires one argument" :
-                                                      "hash_code and to_string take no arguments");
+                                                      "hash_code and to_string take no arguments").with_code("E0407");
             auto input = std::move(callee.operands.front());
             const auto input_type = input.type;
             result.op = *operation;
@@ -1979,7 +2304,8 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
             const auto& method = callee.type.name;
             const std::size_t count = method == "to_bits" ? 0 : method == "byte_at" ? 1 : 2;
             if (!expr.type_arguments.empty() || expr.operands.size() != count + 1)
-                throw Diagnostic(expr.span, "expected " + std::to_string(count) + " argument(s) and no type arguments");
+                throw Diagnostic(expr.span, "expected " + std::to_string(count) + " argument(s) and no type arguments")
+                    .with_code("E0407");
             auto input = std::move(callee.operands.front());
             if (method == "to_bits") {
                 result.op = IrOp::ReinterpretFloat;
@@ -1997,7 +2323,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
             return result;
         }
         if (!expr.type_arguments.empty() || expr.operands.size() != 2)
-            throw Diagnostic(expr.span, "expected one argument and no type arguments");
+            throw Diagnostic(expr.span, "expected one argument and no type arguments").with_code("E0407");
         auto receiver = std::move(callee.operands.front());
         if (callee.type.name == "append") {
             result.op = IrOp::Append;
@@ -2008,13 +2334,13 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
             result.op = IrOp::RemoveAt;
             auto index = value(expr.operands[1], context);
             if (index.type.kind != TypeKind::Integer)
-                throw Diagnostic(index.span, "collection index must be an integer");
+                throw Diagnostic(index.span, "collection index must be an integer").with_code("E0414");
             result.operands = {std::move(receiver), std::move(index)};
         }
         return result;
     }
     if (symbol(target).kind != SymbolKind::Function)
-        throw Diagnostic(expr.span, "expression is not callable");
+        throw Diagnostic(expr.span, "expression is not callable").with_code("E0423");
     resolve(target);
     if (const auto bound = scheduler_bindings_.find(target); bound != scheduler_bindings_.end()) {
         auto replacements = type_arguments(symbol(target).generics, expr.type_arguments, expr.span, context);
@@ -2041,7 +2367,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     } else if (!callee.operands.empty()) {
         result.op = IrOp::VirtualCall;
     } else if (!symbol(target).has_body) {
-        throw Diagnostic(expr.span, "function requires an implementation");
+        throw Diagnostic(expr.span, "function requires an implementation").with_code("E0434");
     }
     std::optional<IrType> wrapped_receiver;
     if (callee.operands.size() == 2) wrapped_receiver = callee.operands[1].type;
@@ -2061,12 +2387,12 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
 IrNode Lowering::allocate(const Expr& expr, Context& context) {
     auto object = type(*expr.type, context);
     if (object.kind != TypeKind::Object || symbol(object.symbol).kind != SymbolKind::Class)
-        throw Diagnostic(expr.span, "new requires a class type");
+        throw Diagnostic(expr.span, "new requires a class type").with_code("E0505");
     const auto id = object.symbol;
     if (entries_[id].singleton_instance != no_symbol)
-        throw Diagnostic(expr.span, "a singleton cannot be constructed with new");
+        throw Diagnostic(expr.span, "a singleton cannot be constructed with new").with_code("E0505");
     if (id == root_class_)
-        throw Diagnostic(expr.span, "class is an umbrella type and cannot be constructed");
+        throw Diagnostic(expr.span, "class is an umbrella type and cannot be constructed").with_code("E0505");
     Names effective;
     for (auto scope = id; scope != no_symbol; scope = symbol(scope).base) {
         for (const auto& [name, member_id] : entries_[scope].names) {
@@ -2076,13 +2402,13 @@ IrNode Lowering::allocate(const Expr& expr, Context& context) {
     for (const auto& [name, member_id] : effective) {
         if (symbol(member_id).kind == SymbolKind::Function && !symbol(member_id).has_body)
             throw Diagnostic(expr.span, "cannot instantiate abstract class " + describe(object) +
-                                        " with unimplemented method '" + name + "'");
+                                        " with unimplemented method '" + name + "'").with_code("E0505");
     }
     auto target = own_member(id, "init");
     if (target != no_symbol) {
         resolve(target);
         if (!symbol(target).exported && !inside(lexical_owner(context), id))
-            throw Diagnostic(expr.span, "constructor is not exported");
+            throw Diagnostic(expr.span, "constructor is not exported").with_code("E0507");
     } else {
         require_implicit_constructor(id, expr.span);
     }
@@ -2104,11 +2430,12 @@ IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative)
         const auto format = float_format(result.type);
         const auto parsed = parse_float_literal(result.text, *format);
         if (parsed.error == FloatLiteralError::Overflow)
-            throw Diagnostic(expr.span, "float literal is outside the range of " + result.type.name);
+            throw Diagnostic(expr.span, "float literal is outside the range of " + result.type.name).with_code("E0424");
         if (parsed.error == FloatLiteralError::Underflow)
-            throw Diagnostic(expr.span, "nonzero float literal rounds to zero in " + result.type.name);
+            throw Diagnostic(expr.span, "nonzero float literal rounds to zero in " + result.type.name)
+                .with_code("E0424");
         if (parsed.error)
-            throw Diagnostic(expr.span, "malformed float literal");
+            throw Diagnostic(expr.span, "malformed float literal").with_code("E0105");
         return result;
     }
     const auto& name = result.type.name;
@@ -2128,7 +2455,7 @@ IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative)
     auto [end, error] = std::from_chars(expr.text.data(), expr.text.data() + expr.text.size(), magnitude);
     if (error != std::errc{} || end != expr.text.data() + expr.text.size() ||
         magnitude > limit || (negative && !signed_integer))
-        throw Diagnostic(expr.span, "integer literal is outside the range of " + name);
+        throw Diagnostic(expr.span, "integer literal is outside the range of " + name).with_code("E0424");
     return result;
 }
 
@@ -2164,12 +2491,12 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
     if (group == no_symbol || entries_[group].overloads.empty()) {
         if (!usable_receiver(group))
             throw Diagnostic(expr.span, "primitive method '" + symbol(group).name +
-                                        "' requires a matching receiver parameter");
+                                        "' requires a matching receiver parameter").with_code("E0899");
         arguments(call, expr, first, group, replacements, context, leading);
         return group;
     }
     if (!expr.type_arguments.empty())
-        throw Diagnostic(expr.span, "overloaded functions take no type arguments");
+        throw Diagnostic(expr.span, "overloaded functions take no type arguments").with_code("E0417");
     auto branches = entries_[group].overloads;
     branches.insert(branches.begin(), group);
     std::vector<SymbolId> candidates;
@@ -2183,7 +2510,19 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         return candidates.front();
     }
     const auto no_match = [&] {
-        return Diagnostic(expr.span, "no matching overload of '" + symbol(group).name + "'");
+        auto error = Diagnostic(expr.span, "no matching overload of '" + symbol(group).name + "'").with_code("E0408")
+            .label("no alternative of '" + symbol(group).name + "' accepts " +
+                   (count == 0 ? std::string("no arguments") : count == 1 ? std::string("this argument")
+                                                                           : std::string("these arguments")));
+        constexpr std::size_t shown = 3;
+        for (std::size_t i = 0; i < branches.size() && i < shown; ++i) {
+            std::string signature;
+            for (std::size_t p = leading; p < symbol(branches[i]).parameters.size(); ++p)
+                signature += (signature.empty() ? "" : ", ") + describe(symbol(symbol(branches[i]).parameters[p]).type);
+            error.label(name_span(branches[i]), "this alternative takes (" + signature + ")");
+        }
+        if (branches.size() > shown) error.note("and " + plural(branches.size() - shown, "more alternative"));
+        return error;
     };
     if (candidates.empty()) throw no_match();
 
@@ -2275,7 +2614,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
     for (const auto& match : matches) {
         if (std::ranges::any_of(matches, [&](const Match& other) { return better(other, match); }))
             continue;
-        if (selected) throw Diagnostic(expr.span, "ambiguous overload of '" + symbol(group).name + "'");
+        if (selected) throw Diagnostic(expr.span, "ambiguous overload of '" + symbol(group).name + "'")
+            .with_code("E0409");
         selected = &match;
     }
     if (!selected) throw no_match();
@@ -2305,9 +2645,9 @@ IrNode arithmetic(std::string op, const Span& span, IrNode left, IrNode right) {
         : kind == TypeKind::Integer || kind == TypeKind::Float ||
           (kind == TypeKind::String && op == "+");
     if (!valid)
-        throw Diagnostic(span, "operator '" + op + "' is not defined for " + describe(left.type));
+        throw Diagnostic(span, "operator '" + op + "' is not defined for " + describe(left.type)).with_code("E0413");
     if (is_shift(op) && right.type.kind != TypeKind::Integer)
-        throw Diagnostic(right.span, "a shift count must be an integer");
+        throw Diagnostic(right.span, "a shift count must be an integer").with_code("E0413");
     auto result = node(IrOp::Binary, span, left.type);
     result.text = std::move(op);
     result.operands.push_back(std::move(left));
@@ -2356,7 +2696,8 @@ IrNode Lowering::binary(const Expr& expr, Context& context, const IrType* expect
     if (!comparison)
         return arithmetic(op, expr.span, std::move(left), std::move(right));
     if (!comparable(program_, receiver_type(left.type), op))
-        throw Diagnostic(expr.span, "operator '" + op + "' is not defined for " + describe(left.type));
+        throw Diagnostic(expr.span, "operator '" + op + "' is not defined for " + describe(left.type))
+            .with_code("E0413");
     const auto op_kind = equality && left.type.kind == TypeKind::String ? IrOp::TextEqual : IrOp::Binary;
     auto result = node(op_kind, expr.span, bool_type);
     result.text = op;
@@ -2395,7 +2736,8 @@ IrNode Lowering::comparison_chain(const Expr& expr, Context& context) {
     auto subject = value(subject_expr, context, first ? &first->type : nullptr);
     const auto subject_type = subject.type;
     if (!comparable(program_, receiver_type(subject_type), expr.text)) {
-        throw Diagnostic(subject_expr.span, "operator '" + expr.text + "' is not defined for " + describe(subject_type));
+        throw Diagnostic(subject_expr.span, "operator '" + expr.text + "' is not defined for " + describe(subject_type))
+            .with_code("E0413");
     }
 
     auto owner = context.owner;
@@ -2442,7 +2784,7 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
     auto start = value(expr.operands[0], context, expected_element);
     const auto element = start.type;
     const auto format = specified_integer_format(element);
-    if (!format) throw Diagnostic(start.span, "a range requires integer bounds and step");
+    if (!format) throw Diagnostic(start.span, "a range requires integer bounds and step").with_code("E0429");
     auto result = node(IrOp::ScopedValue, span,
                        expected_element ? *expected : collection_type(TypeKind::Array, element));
     const auto integer = [&](const IrType& type, std::string digits) {
@@ -2558,7 +2900,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||
             symbol(target.symbol).kind != SymbolKind::Enum)
-            throw Diagnostic(expr.span, "a parameterized type reference requires a generic enum");
+            throw Diagnostic(expr.span, "a parameterized type reference requires a generic enum").with_code("E0417");
         target.type = apply_arguments(target.type,
             type_arguments(symbol(target.symbol).generics, expr.type_arguments, expr.span, context));
         target.span = expr.span;
@@ -2575,11 +2917,16 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             class_or_interface(symbol(context.receiver).kind)) {
             return receiver(context.receiver, expr.span, context);
         }
-        if (id == no_symbol) throw Diagnostic(expr.span, "unknown name '" + expr.text + "'");
+        if (id == no_symbol) {
+            auto error = Diagnostic(expr.span, "unknown name '" + expr.text + "'").with_code("E0304")
+                .label("not found in this scope");
+            suggest_name(error, expr.span, expr.text, visible_names(context), "a binding");
+            throw error;
+        }
         if (symbol(id).kind == SymbolKind::Function &&
             owner_kind(symbol(id).owner, SymbolKind::Class) != no_symbol &&
             (expr.text == "init" || expr.text == "deinit")) {
-            throw Diagnostic(expr.span, "lifecycle functions require new, super.init, or destroy");
+            throw Diagnostic(expr.span, "lifecycle functions require new, super.init, or destroy").with_code("E0509");
         }
         auto result = reference(id, expr.span, context, promoted_receiver == no_symbol);
         if (promoted_receiver != no_symbol &&
@@ -2600,7 +2947,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     }
     case ExprKind::Nil: {
         if (expected && !class_reference(*expected))
-            throw Diagnostic(expr.span, "nil requires a class reference type");
+            throw Diagnostic(expr.span, "nil requires a class reference type").with_code("E0425");
         const auto target = expected ? *expected : symbol(root_class()).type;
         return node(IrOp::Nil, expr.span, target);
     }
@@ -2619,9 +2966,9 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         bool logical = expr.text == "!";
         auto input = value(child, context, logical ? &bool_type : expected);
         if (expr.text == "~" && input.type.kind != TypeKind::Integer)
-            throw Diagnostic(expr.span, "unary '~' requires an integer operand");
+            throw Diagnostic(expr.span, "unary '~' requires an integer operand").with_code("E0413");
         if (expr.text == "-" && input.type.kind != TypeKind::Integer && input.type.kind != TypeKind::Float)
-            throw Diagnostic(expr.span, "unary minus requires a numeric operand");
+            throw Diagnostic(expr.span, "unary minus requires a numeric operand").with_code("E0413");
         auto result = node(IrOp::Unary, expr.span, input.type);
         result.text = expr.text;
         result.operands.push_back(std::move(input));
@@ -2646,17 +2993,18 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             const auto& index = expr.operands[1];
             const auto field = index.kind == ExprKind::Integer ? aggregate_index(index.text) : std::nullopt;
             if (!field || *field >= receiver.type.arguments.size())
-                throw Diagnostic(index.span, "tuple indexing requires a nonnegative literal in range");
+                throw Diagnostic(index.span, "tuple indexing requires a nonnegative literal in range")
+                    .with_code("E0414");
             auto result = node(IrOp::Project, expr.span, receiver.type.arguments[*field]);
             result.text = std::to_string(*field);
             result.operands.push_back(std::move(receiver));
             return result;
         }
         if (!collection(receiver.type))
-            throw Diagnostic(expr.span, "indexing requires an array or list");
+            throw Diagnostic(expr.span, "indexing requires an array or list").with_code("E0414");
         auto index = value(expr.operands[1], context);
         if (index.type.kind != TypeKind::Integer)
-            throw Diagnostic(index.span, "collection index must be an integer");
+            throw Diagnostic(index.span, "collection index must be an integer").with_code("E0414");
         auto result = node(IrOp::Index, expr.span, receiver.type.arguments.front());
         result.operands.push_back(std::move(receiver));
         result.operands.push_back(std::move(index));
@@ -2669,7 +3017,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             result.type = *expected;
         } else {
             if (expr.operands.empty())
-                throw Diagnostic(expr.span, "empty collection literal needs an expected type");
+                throw Diagnostic(expr.span, "empty collection literal needs an expected type").with_code("E0425");
             auto first = value(expr.operands.front(), context);
             result.type = collection_type(TypeKind::Array, first.type);
             result.operands.push_back(std::move(first));
@@ -2687,7 +3035,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         const auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||
             symbol(target.symbol).kind != SymbolKind::Variant) {
-            throw Diagnostic(expr.span, "expected a named enum variant");
+            throw Diagnostic(expr.span, "expected a named enum variant").with_code("E0427");
         }
         return enum_construct(target, expr, context);
     }
@@ -2697,7 +3045,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::Cast: {
         auto target = type(*expr.type, context);
         if (is_primitive_reference(target))
-            throw Diagnostic(expr.type->span, "a primitive reference must be bound to storage");
+            throw Diagnostic(expr.type->span, "a primitive reference must be bound to storage").with_code("E0428");
         auto source = value(expr.operands.front(), context);
         if (expr.kind == ExprKind::Cast) {
             if (const auto method = cast_method(source.type, target, context); method != no_symbol)
@@ -2711,7 +3059,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             return result;
         }
         if (expr.kind == ExprKind::TypeTest)
-            throw Diagnostic(expr.span, "is requires class reference types");
+            throw Diagnostic(expr.span, "is requires class reference types").with_code("E0415");
         const auto numeric = [](const IrType& t) {
             return t.kind == TypeKind::Integer || t.kind == TypeKind::Float;
         };
@@ -2719,18 +3067,20 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             (numeric(source.type) || (source.type.kind == TypeKind::Enum && target.kind == TypeKind::Integer &&
                                       !has_enum_payload(program_, source.type.symbol)));
         if (!allowed)
-            throw Diagnostic(expr.span, "cannot convert " + describe(source.type) + " to " + describe(target));
+            throw Diagnostic(expr.span, "cannot convert " + describe(source.type) + " to " + describe(target))
+                .with_code("E0415");
         auto result = node(IrOp::Convert, expr.span, std::move(target));
         result.operands.push_back(std::move(source));
         return result;
     }
     case ExprKind::Import:
-        throw Diagnostic(expr.span, "import must initialize a module-level alias");
+        throw Diagnostic(expr.span, "import must initialize a module-level alias").with_code("E0704");
     }
-    throw Diagnostic(expr.span, "unsupported expression");
+    throw Diagnostic(expr.span, "unsupported expression").with_code("E0899");
 }
 
 IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
+    const auto origin = std::exchange(expected_origin_, std::nullopt);
     auto result = expression(expr, context, expected, call_argument);
     if (expected && is_primitive_reference(*expected))
         return bind_reference(std::move(result), *expected);
@@ -2738,7 +3088,7 @@ IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expecte
         symbol(result.symbol).kind == SymbolKind::Variant) {
         const auto& variant = symbol(result.symbol);
         if (!variant.payload_types.empty())
-            throw Diagnostic(expr.span, "enum variant '" + variant.name + "' requires a payload");
+            throw Diagnostic(expr.span, "enum variant '" + variant.name + "' requires a payload").with_code("E0427");
         if (has_enum_payload(program_, variant.owner)) result.op = IrOp::EnumConstruct;
     }
     if (result.op == IrOp::Reference && result.type.kind == TypeKind::Callable && result.symbol != no_symbol &&
@@ -2749,33 +3099,38 @@ IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expecte
         (result.type.kind == TypeKind::Callable && !is_function_value(result.type)) ||
         (result.op == IrOp::Reference &&
          (result.symbol == no_symbol || symbol(result.symbol).kind != SymbolKind::Variant))) {
-        throw Diagnostic(expr.span, "expected a value");
+        throw Diagnostic(expr.span, "expected a value").with_code("E0422");
     }
     if (expected && call_argument && !assignable(result.type, *expected)) {
         if (const auto method = cast_method(result.type, *expected, context); method != no_symbol)
             return cast_call(method, std::move(result), *expected, expr.span);
     }
-    if (expected) require_type(result.type, *expected, expr.span);
+    if (expected) require_type(result.type, *expected, expr.span, origin ? &*origin : nullptr);
     return result;
 }
 
 void Lowering::place(const IrNode& destination) const {
     if (destination.op == IrOp::Index) return;
     if (destination.op != IrOp::Load && destination.op != IrOp::Field)
-        throw Diagnostic(destination.span, "assignment requires a mutable binding, field, or element");
+        throw Diagnostic(destination.span, "assignment requires a mutable binding, field, or element")
+            .with_code("E0402");
     if (symbol(destination.symbol).name.starts_with("$capture"))
-        throw Diagnostic(destination.span, "a captured binding cannot be reassigned");
+        throw Diagnostic(destination.span, "a captured binding cannot be reassigned").with_code("E0402");
     if (const auto& target = symbol(destination.symbol); target.constant) {
         auto error = Diagnostic(destination.span, "cannot assign to const '" + target.name + "'")
             .with_code("E0401").label("cannot assign to a constant binding");
-        if (!target.span.file.empty()) error.label(target.span, "declared constant here");
+        if (!target.span.file.empty()) error.label(name_span(destination.symbol), "declared constant here");
+        if (const auto keyword = const_spans_.find(destination.symbol);
+            keyword != const_spans_.end() && user_source(keyword->second.file) &&
+            source_text(keyword->second) == "const")
+            error.suggest("consider declaring it with 'let'", keyword->second, "let", Applicability::MaybeIncorrect);
         throw error;
     }
 }
 
 IrNode Lowering::discard_binding(const Declaration& decl, Context& context) {
     if (!decl.initializer)
-        throw Diagnostic(decl.span, "'_' requires a value initializer");
+        throw Diagnostic(decl.span, "'_' requires a value initializer").with_code("E0310");
     std::optional<IrType> expected;
     if (decl.type) expected = type(*decl.type, context);
     auto result = node(IrOp::Discard, decl.span);
@@ -2821,7 +3176,7 @@ IrNode Lowering::update(const Expr& expr, Context& context) {
     auto destination = capture_place(expr.operands.front(), result.body, context);
     const auto kind = destination.type.kind;
     if (kind != TypeKind::Integer && kind != TypeKind::Float)
-        throw Diagnostic(expr.span, "'" + expr.text + "' requires a mutable numeric operand");
+        throw Diagnostic(expr.span, "'" + expr.text + "' requires a mutable numeric operand").with_code("E0413");
     result.type = destination.type;
 
     const bool postfix = expr.kind == ExprKind::PostfixUpdate;
@@ -2885,7 +3240,8 @@ void Lowering::require_scope_local(const IrNode& place, const IrType& stored, co
                                    const Context& context) const {
     if (!scope_bound(stored) || declared_in_task_scope(place, context)) return;
     throw Diagnostic(span, "a value of type " + describe(stored) +
-                           " cannot leave its scope: it can be stored only in a local declared inside that scope");
+                           " cannot leave its scope: it can be stored only in a local declared inside that scope")
+        .with_code("E0605");
 }
 
 // The module `module` of trusted library file `path`. The source loader
@@ -2895,10 +3251,14 @@ void Lowering::require_scope_local(const IrNode& place, const IrType& stored, co
 SymbolId Lowering::library_module(std::string_view path, std::string_view module, const Span& span,
                                   const Context& context, const std::string& message) {
     const auto file = library_files_.find(path);
-    if (file == library_files_.end()) throw MissingPrimitiveWrapper(span, message, std::string(path));
+    if (file == library_files_.end()) {
+        MissingPrimitiveWrapper missing(span, message, std::string(path));
+        missing.with_code("E0701");
+        throw missing;
+    }
     const auto result = own_member(file->second, module);
     if (result == no_symbol || symbol(result).kind != SymbolKind::Module)
-        throw Diagnostic(span, "invalid standard library module " + std::string(path));
+        throw Diagnostic(span, "invalid standard library module " + std::string(path)).with_code("E0899");
     resolve(result);
     const auto from = source_file(program_, lexical_owner(context));
     if (from != no_symbol && from != file->second && wrapper_imports_.emplace(from, result).second) {
@@ -2912,7 +3272,7 @@ IrNode Lowering::task_scope(const Statement& stmt, Context& context) {
     // Open decision "scope in initialization" (Concurrency.md section 18):
     // decided no. Globals are still being initialized there.
     if (context.function == no_symbol)
-        throw Diagnostic(stmt.keyword, "a scope block is only allowed inside a function body");
+        throw Diagnostic(stmt.keyword, "a scope block is only allowed inside a function body").with_code("E0607");
     auto result = node(IrOp::TaskScope, stmt.span);
     const auto base = context.task_scope_base;
     ++context.task_scopes;
@@ -2926,10 +3286,11 @@ IrNode Lowering::task_scope(const Statement& stmt, Context& context) {
                                                  "a scope handle requires Std.Concurrent.Scope");
         const auto scope_class = own_member(scope_module, "Scope");
         if (scope_class == no_symbol || !scope_bound_class(scope_class))
-            throw Diagnostic(name.span, "Std.Concurrent.Scope must declare the class Scope");
+            throw Diagnostic(name.span, "Std.Concurrent.Scope must declare the class Scope").with_code("E0899");
         resolve(scope_class);
         const auto scope_init = own_member(scope_class, "init");
-        if (scope_init == no_symbol) throw Diagnostic(name.span, "Std.Concurrent.Scope.Scope needs a constructor");
+        if (scope_init == no_symbol) throw Diagnostic(name.span, "Std.Concurrent.Scope.Scope needs a constructor")
+            .with_code("E0899");
         resolve(scope_init);
         const auto identity = add(SymbolKind::Local, "$scope", name.span, context.owner);
         symbol(identity).type = uint64_type;
@@ -2965,7 +3326,7 @@ IrNode Lowering::task_scope(const Statement& stmt, Context& context) {
 // committed outcome into what the member would have returned on its own.
 IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
     if (context.function == no_symbol)
-        throw Diagnostic(stmt.keyword, "select is only allowed inside a function body");
+        throw Diagnostic(stmt.keyword, "select is only allowed inside a function body").with_code("E0606");
     struct Arm {
         const SelectArm* syntax = nullptr;
         std::string member;
@@ -2987,19 +3348,21 @@ IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
     };
     for (const auto& arm : stmt.select_arms) {
         if (!arm.operation) {
-            if (fallback) throw Diagnostic(arm.span, "a select has at most one '_' arm");
+            if (fallback) throw Diagnostic(arm.span, "a select has at most one '_' arm").with_code("E0606");
             fallback = &arm;
             continue;
         }
         const auto& operation = *arm.operation;
         if (operation.kind != ExprKind::Call || operation.operands.front().kind != ExprKind::Member)
-            throw Diagnostic(operation.span, "a select arm is a call of send, receive, join, or wait");
+            throw Diagnostic(operation.span, "a select arm is a call of send, receive, join, or wait")
+                .with_code("E0606");
         const auto& callee = operation.operands.front();
         const auto kind = callee.text == "receive" ? select_receive : callee.text == "send" ? select_send
                         : callee.text == "join" ? select_join : callee.text == "wait" ? select_timer : 4U;
         const std::size_t expected = kind == select_send ? 1 : 0;
         if (kind == 4U || operation.operands.size() != 1 + expected || !operation.type_arguments.empty())
-            throw Diagnostic(operation.span, "a select arm is a call of send, receive, join, or wait");
+            throw Diagnostic(operation.span, "a select arm is a call of send, receive, join, or wait")
+                .with_code("E0606");
         // The receiver is evaluated once and kept for the committed arm.
         auto receiver = value(callee.operands.front(), context);
         const auto index = std::to_string(arms.size());
@@ -3007,7 +3370,7 @@ IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
         if (receiver.type.kind != TypeKind::Object || value_member(receiver.type, "select_handle", true) == no_symbol ||
             value_member(receiver.type, callee.text + "_selected", true) == no_symbol)
             throw Diagnostic(receiver_span, "type " + describe(receiver.type) + " has no selectable member '" +
-                                            callee.text + "'");
+                                            callee.text + "'").with_code("E0305");
         Arm lowered{&arm, callee.text, "$select" + index, receiver.type};
         const auto saved = save_temporary(std::move(receiver), result.body, context, lowered.receiver_name);
         context.scopes.back().emplace(lowered.receiver_name, saved.symbol);
@@ -3024,7 +3387,7 @@ IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
             const auto member = value_member(lowered.receiver_type, "send", true);
             if (member != no_symbol) resolve(member);
             if (member == no_symbol || symbol(member).parameters.size() != 1)
-                throw Diagnostic(operation.span, "send takes the value to send");
+                throw Diagnostic(operation.span, "send takes the value to send").with_code("E0407");
             const auto parameter = substitute(symbol(symbol(member).parameters.front()).type,
                                               receiver_arguments(lowered.receiver_type, symbol(member).owner));
             auto sent = save_temporary(value(operation.operands[1], context, &parameter, true), result.body, context,
@@ -3036,7 +3399,7 @@ IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
         }
         arms.push_back(std::move(lowered));
     }
-    if (arms.empty()) throw Diagnostic(stmt.span, "a select needs at least one arm that waits");
+    if (arms.empty()) throw Diagnostic(stmt.span, "a select needs at least one arm that waits").with_code("E0606");
     call.text = std::string(fallback ? select_with_default : select_operation);
     const auto committed = save_temporary(std::move(call), result.body, context, "$selected");
     // The low half of the result is the committed arm, the high half its outcome.
@@ -3073,9 +3436,11 @@ IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
             auto produced = expression(finish, context);
             if (arm.binding) {
                 if (produced.type.kind == TypeKind::Void)
-                    throw Diagnostic(arm.binding->span, "this operation has no result to bind");
+                    throw Diagnostic(arm.binding->span, "this operation has no result to bind").with_code("E0606");
                 if (arm.binding->text != "_" && context.scopes.back().contains(arm.binding->text))
-                    throw Diagnostic(arm.binding->span, "duplicate local binding '" + arm.binding->text + "'");
+                    throw duplicate_local(arm.binding->span, "duplicate local binding '" + arm.binding->text + "'",
+                                          context.scopes.back().find(arm.binding->text)->second)
+                        .with_code("E0301");
                 const auto binding = add(SymbolKind::Local, arm.binding->text, arm.binding->span, context.owner);
                 symbol(binding).type = produced.type;
                 symbol(binding).constant = arm.constant_binding;
@@ -3128,16 +3493,17 @@ IrNode Lowering::select_statement(const Statement& stmt, Context& context) {
 IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
     const auto& operand = expr.operands.front();
     if (context.function == no_symbol || context.task_scopes == 0)
-        throw Diagnostic(expr.span, "spawn requires an enclosing scope block in the same function body");
+        throw Diagnostic(expr.span, "spawn requires an enclosing scope block in the same function body")
+            .with_code("E0603");
     const std::string missing = "spawn requires Std.Concurrent.Task";
     const auto task_module = library_module("std/concurrent/task.nra", "Task", expr.span, context, missing);
     const auto task_class = own_member(task_module, "Task");
     if (task_class == no_symbol || !scope_bound_class(task_class))
-        throw Diagnostic(expr.span, "Std.Concurrent.Task must declare the class Task");
+        throw Diagnostic(expr.span, "Std.Concurrent.Task must declare the class Task").with_code("E0899");
     resolve(task_class);
     const auto task_init = own_member(task_class, "init");
     if (task_init == no_symbol || symbol(task_class).generics.size() != 1)
-        throw Diagnostic(expr.span, "Std.Concurrent.Task.Task must be Task<T> with a constructor");
+        throw Diagnostic(expr.span, "Std.Concurrent.Task.Task must be Task<T> with a constructor").with_code("E0899");
     resolve(task_init);
 
     auto invocation = call(operand, context);
@@ -3150,7 +3516,8 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
         invocation = std::move(inner);
     }
     if (invocation.op != IrOp::Call && invocation.op != IrOp::VirtualCall && invocation.op != IrOp::CallClosure)
-        throw Diagnostic(operand.span, "spawn requires a call of a function, a method, or a function value");
+        throw Diagnostic(operand.span, "spawn requires a call of a function, a method, or a function value")
+            .with_code("E0603");
 
     ClosureEnvironment environment{closure_layout(expr.span, lexical_owner(context)), context, {}, {}};
     for (std::size_t i = 0; i < invocation.operands.size(); ++i) {
@@ -3162,7 +3529,7 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
         }
         if (scope_bound(input.type))
             throw Diagnostic(input.span, "a value of type " + describe(input.type) +
-                                         " cannot leave its scope: it cannot be passed to spawn");
+                                         " cannot leave its scope: it cannot be passed to spawn").with_code("E0605");
         const auto span = input.span;
         const auto field = add(SymbolKind::Field, "$capture" + std::to_string(environment.inputs.size()),
                                span, environment.layout);
@@ -3178,11 +3545,11 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
         const auto unit_module = library_module("std/core/unit.nra", "Unit", expr.span, context, missing);
         const auto unit = own_member(unit_module, "Unit");
         if (unit == no_symbol || symbol(unit).kind != SymbolKind::Enum)
-            throw Diagnostic(expr.span, "Std.Core.Unit must export its Unit enum");
+            throw Diagnostic(expr.span, "Std.Core.Unit must export its Unit enum").with_code("E0899");
         resolve(unit);
         const auto unit_value = own_member(unit, "Value");
         if (unit_value == no_symbol || symbol(unit_value).kind != SymbolKind::Variant)
-            throw Diagnostic(expr.span, "Std.Core.Unit.Unit must declare the variant Value");
+            throw Diagnostic(expr.span, "Std.Core.Unit.Unit must declare the variant Value").with_code("E0899");
         result_type = symbol(unit).type;
         auto discard = node(IrOp::Discard, operand.span);
         discard.operands.push_back(std::move(invocation));
@@ -3195,7 +3562,7 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
     } else {
         if (scope_bound(result_type))
             throw Diagnostic(operand.span, "a value of type " + describe(result_type) +
-                                           " cannot leave its scope: a task cannot return it");
+                                           " cannot leave its scope: a task cannot return it").with_code("E0605");
         auto finish = node(IrOp::Return, operand.span);
         finish.operands.push_back(std::move(invocation));
         instructions.push_back(std::move(finish));
@@ -3233,32 +3600,40 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         const auto& declaration = *stmt.declaration;
         if (declaration.kind != DeclKind::Binding || declaration.exported ||
             declaration.override_member || declaration.promote_import || declaration.static_member) {
-            throw Diagnostic(declaration.span, "expected a local value binding");
+            throw Diagnostic(declaration.span, "expected a local value binding").with_code("E0431");
         }
         if (declaration.name == "_") return discard_binding(declaration, context);
         if (const auto earlier = context.scopes.back().find(declaration.name);
             earlier != context.scopes.back().end()) {
-            auto error = Diagnostic(declaration.span, "duplicate local binding '" + declaration.name + "'")
+            auto error = Diagnostic(declaration.name_span.value_or(declaration.span),
+                                    "duplicate local binding '" + declaration.name + "'")
                 .with_code("E0301").label("'" + declaration.name + "' is bound again here");
             const auto& first = symbol(earlier->second);
-            if (!first.span.file.empty()) error.label(first.span, "first bound here");
+            if (!first.span.file.empty()) error.label(name_span(earlier->second), "first bound here");
             error.help(first.constant ? "give the second binding another name"
                                       : "give the second binding another name, or assign to the first one");
             throw error;
         }
         if (!declaration.initializer) {
-            throw Diagnostic(declaration.span, "a local binding requires an initializer");
+            auto error = Diagnostic(declaration.span, "a local binding requires an initializer").with_code("E0404")
+                .label("'" + declaration.name + "' is declared without a value");
+            const auto after = declaration.type ? std::optional<Span>(declaration.type->span) : declaration.name_span;
+            if (const auto at = after ? source_span(after->file, after->offset + after->length, 0) : std::nullopt)
+                error.suggest("give it an initial value", *at, " = <value>", Applicability::HasPlaceholders);
+            throw error;
         }
 
         std::optional<IrType> declared;
         if (declaration.type) {
             declared = type(*declaration.type, context);
             if (declared->kind == TypeKind::Void) {
-                throw Diagnostic(declaration.type->span, "a binding cannot have type void");
+                throw Diagnostic(declaration.type->span, "a binding cannot have type void").with_code("E0416");
             }
         }
+        if (declared) expected_origin_ = ExpectedOrigin{declaration.type->span, "expected because of this type"};
         auto initializer = value(*declaration.initializer, context, declared ? &*declared : nullptr);
         auto id = add(SymbolKind::Local, declaration.name, declaration.span, context.owner);
+        record_names(id, declaration);
         symbol(id).constant = declaration.constant;
         symbol(id).type = declared.value_or(initializer.type);
         context.scopes.back().emplace(declaration.name, id);
@@ -3274,7 +3649,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
             syntax.operands.front().text == "trap_with_message" &&
             find("trap_with_message", context, syntax.span) == no_symbol) {
             if (!syntax.type_arguments.empty() || syntax.operands.size() != 2)
-                throw Diagnostic(syntax.span, "trap_with_message requires one string argument and no type arguments");
+                throw Diagnostic(syntax.span, "trap_with_message requires one string argument and no type arguments")
+                    .with_code("E0407");
             auto result = node(IrOp::TrapMessage, syntax.span);
             result.operands.push_back(value(syntax.operands[1], context, &string_type));
             return result;
@@ -3285,11 +3661,11 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         auto operand = expression(stmt.expressions.front(), context);
         if (operand.op == IrOp::Reference &&
             (operand.symbol == no_symbol || symbol(operand.symbol).kind != SymbolKind::Variant)) {
-            throw Diagnostic(operand.span, "expected an executable expression");
+            throw Diagnostic(operand.span, "expected an executable expression").with_code("E0422");
         }
         if (operand.op == IrOp::Reference && has_enum_payload(program_, operand.type.symbol)) {
             if (!symbol(operand.symbol).payload_types.empty())
-                throw Diagnostic(operand.span, "enum variant requires a payload");
+                throw Diagnostic(operand.span, "enum variant requires a payload").with_code("E0427");
             operand.op = IrOp::EnumConstruct;
         }
         result.operands.push_back(std::move(operand));
@@ -3317,6 +3693,10 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         }
         auto destination = expression(stmt.expressions[0], context);
         place(destination);
+        if ((destination.op == IrOp::Load || destination.op == IrOp::Field) && destination.symbol != no_symbol)
+            expected_origin_ = ExpectedOrigin{name_span(destination.symbol),
+                                              "'" + symbol(destination.symbol).name + "' is declared here with type " +
+                                                  describe(destination.type)};
         auto source = value(stmt.expressions[1], context, &destination.type);
         require_scope_local(destination, source.type, source.span, context);
         auto result = node(IrOp::Store, stmt.span);
@@ -3339,7 +3719,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     case StmtKind::Match:
         return lower_match(stmt, context, false);
     case StmtKind::Destructure:
-        throw Diagnostic(stmt.span, "destructuring requires a statement list");
+        throw Diagnostic(stmt.span, "destructuring requires a statement list").with_code("E0899");
     case StmtKind::While: {
         auto result = node(IrOp::Loop, stmt.span);
         result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
@@ -3356,23 +3736,35 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return for_each(stmt, context);
     case StmtKind::Return: {
         if (context.function == no_symbol) {
-            throw Diagnostic(stmt.span, "return is only allowed inside a function");
+            throw Diagnostic(stmt.span, "return is only allowed inside a function").with_code("E0431");
         }
         const auto expected = symbol(context.function).type;
+        const auto result_span = result_spans_.find(context.function);
         auto result = node(IrOp::Return, stmt.span);
         if (stmt.expressions.empty()) {
             if (expected.kind != TypeKind::Void) {
-                throw Diagnostic(stmt.span, "return requires a value of type " + describe(expected));
+                auto error = Diagnostic(stmt.span, "return requires a value of type " + describe(expected))
+                    .with_code("E0406").label("return without a value");
+                if (result_span != result_spans_.end())
+                    error.label(result_span->second, "the function returns " + describe(expected));
+                throw error;
             }
         } else {
             if (expected.kind == TypeKind::Void) {
-                throw Diagnostic(stmt.span, "a void function cannot return a value");
+                auto error = Diagnostic(stmt.span, "a void function cannot return a value").with_code("E0406")
+                    .label("returns a value");
+                if (name_spans_.contains(context.function))
+                    error.label(name_span(context.function), "this function declares no result type");
+                error.help("declare the result type with '-> T' after the parameters, or return without a value");
+                throw error;
             }
+            if (result_span != result_spans_.end())
+                expected_origin_ = ExpectedOrigin{result_span->second, "expected because of this result type"};
             result.operands.push_back(value(stmt.expressions.front(), context, &expected));
             if (scope_bound(result.operands.back().type))
                 throw Diagnostic(result.operands.back().span,
                                  "a value of type " + describe(result.operands.back().type) +
-                                 " cannot leave its scope: it cannot be returned from a function");
+                                 " cannot leave its scope: it cannot be returned from a function").with_code("E0605");
         }
         return result;
     }
@@ -3383,16 +3775,16 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     case StmtKind::Break:
     case StmtKind::Continue:
         if (context.loops == 0) {
-            throw Diagnostic(stmt.span, "loop control is only allowed inside a loop");
+            throw Diagnostic(stmt.span, "loop control is only allowed inside a loop").with_code("E0431");
         }
         return node(stmt.kind == StmtKind::Break ? IrOp::Break : IrOp::Continue, stmt.span);
     case StmtKind::Destroy: {
         auto object = value(stmt.expressions.front(), context);
         if (object.type.kind != TypeKind::Object) {
-            throw Diagnostic(object.span, "destroy requires an object");
+            throw Diagnostic(object.span, "destroy requires an object").with_code("E0514");
         }
         if (entries_[object.type.symbol].singleton_instance != no_symbol)
-            throw Diagnostic(object.span, "a singleton cannot be destroyed");
+            throw Diagnostic(object.span, "a singleton cannot be destroyed").with_code("E0511");
         auto result = node(IrOp::Destroy, stmt.span);
         result.symbol = object.type.symbol;
         result.operands.push_back(std::move(object));
@@ -3459,7 +3851,8 @@ IrNode Lowering::for_loop(const Statement& stmt, Context& context) {
     for (const auto& init : stmt.initializer) {
         if (init.kind != StmtKind::Binding && init.kind != StmtKind::Assignment &&
             init.kind != StmtKind::Expression)
-            throw Diagnostic(init.span, "a for loop initializer must be a binding, an assignment, or an expression");
+            throw Diagnostic(init.span, "a for loop initializer must be a binding, an assignment, or an expression")
+                .with_code("E0432");
         result.body.push_back(statement(init, context));
     }
     auto loop = node(IrOp::Loop, stmt.span);
@@ -3475,7 +3868,7 @@ IrNode Lowering::for_loop(const Statement& stmt, Context& context) {
     --context.loops;
     for (const auto& step : stmt.step) {
         if (step.kind != StmtKind::Assignment && step.kind != StmtKind::Expression)
-            throw Diagnostic(step.span, "a for loop step must be an assignment or an expression");
+            throw Diagnostic(step.span, "a for loop step must be an assignment or an expression").with_code("E0432");
         loop.alternative.push_back(statement(step, context));
     }
     context.scopes.pop_back();
@@ -3595,18 +3988,19 @@ IrNode Lowering::for_each_iterable(const Statement& stmt, Context& context, IrNo
     });
     if (iterable == views.end()) {
         throw Diagnostic(items.span, "for-each requires an array or list or Iterable<T>, got " +
-                                     describe(items.type));
+                                     describe(items.type)).with_code("E0430");
     }
     const auto invoke = [&](const IrType& view, std::string_view name, IrNode receiver) {
         const auto method = value_member(view, name, true);
         if (method == no_symbol) {
-            throw Diagnostic(stmt.span, describe(view) + " must provide '" + std::string(name) + "()'");
+            throw Diagnostic(stmt.span, describe(view) + " must provide '" + std::string(name) + "()'")
+                .with_code("E0430");
         }
         resolve(method);
         const auto& declaration = symbol(method);
         if (declaration.kind != SymbolKind::Function || !declaration.generics.empty() ||
             !declaration.parameters.empty()) {
-            throw Diagnostic(stmt.span, std::string(name) + "() must take no arguments");
+            throw Diagnostic(stmt.span, std::string(name) + "() must take no arguments").with_code("E0430");
         }
         auto call = node(IrOp::VirtualCall, stmt.span, substitute(declaration.type,
                          receiver_arguments(view, declaration.owner)));
@@ -3672,7 +4066,7 @@ void Lowering::destructure(std::vector<IrNode>& instructions, const Statement& s
         ? tuple(initializer, context, nullptr) : value(initializer, context);
     const auto tuple_type = source.type;
     if (tuple_type.kind != TypeKind::Tuple || tuple_type.arguments.size() != stmt.bindings.size())
-        throw Diagnostic(stmt.span, "destructuring requires a tuple with one element per binding");
+        throw Diagnostic(stmt.span, "destructuring requires a tuple with one element per binding").with_code("E0426");
     const auto temporary = add(SymbolKind::Local, "$tuple", stmt.span, context.owner);
     symbol(temporary).type = tuple_type;
     symbol(temporary).constant = true;
@@ -3689,7 +4083,8 @@ void Lowering::destructure(std::vector<IrNode>& instructions, const Statement& s
         } else {
             auto& names = context.scopes.back();
             if (names.contains(binding.text))
-                throw Diagnostic(binding.span, "duplicate local binding '" + binding.text + "'");
+                throw duplicate_local(binding.span, "duplicate local binding '" + binding.text + "'",
+                                      names.find(binding.text)->second);
             id = add(SymbolKind::Local, binding.text, binding.span, context.owner);
             names.emplace(binding.text, id);
         }
@@ -3711,7 +4106,7 @@ void Lowering::resolve_destructure(const Statement& stmt, SymbolId file) {
     auto& group = destructures_.at(&stmt);
     if (group.resolution == Resolution::Resolved) return;
     if (group.resolution == Resolution::Resolving)
-        throw Diagnostic(stmt.span, "cyclic destructuring declaration");
+        throw Diagnostic(stmt.span, "cyclic destructuring declaration").with_code("E0309");
     group.resolution = Resolution::Resolving;
     for (const auto id : group.bindings) {
         if (id != no_symbol) entries_[id].resolution = Resolution::Resolving;
@@ -3729,7 +4124,7 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
     auto subject = value(stmt.expressions.front(), context);
     const auto enum_type = subject.type;
     if (enum_type.kind != TypeKind::Enum)
-        throw Diagnostic(subject.span, "match requires an enum value");
+        throw Diagnostic(subject.span, "match requires an enum value").with_code("E0411");
     auto owner = context.owner;
     if (symbol(owner).kind == SymbolKind::Global || symbol(owner).kind == SymbolKind::Field)
         owner = symbol(owner).owner;
@@ -3755,23 +4150,25 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
     const auto replacements = enum_arguments(enum_type);
     for (const auto& arm : stmt.arms) {
         if (wildcard)
-            throw Diagnostic(arm.span, "a wildcard match arm must be last");
+            throw Diagnostic(arm.span, "a wildcard match arm must be last").with_code("E0412");
         wildcard = arm.variant == "_";
         const auto variant = wildcard ? no_symbol : qualified(arm.variant, arm.span, context);
         if (!wildcard && (symbol(variant).kind != SymbolKind::Variant || symbol(variant).owner != enum_type.symbol))
-            throw Diagnostic(arm.span, "match arm must name a variant of " + describe(enum_type));
+            throw Diagnostic(arm.span, "match arm must name a variant of " + describe(enum_type)).with_code("E0412");
         if (const auto separator = arm.variant.rfind('.'); !wildcard && separator != std::string::npos) {
             const auto qualifier = qualified(arm.variant.substr(0, separator), arm.span, context);
             if (symbol(qualifier).kind == SymbolKind::Alias && symbol(qualifier).type != enum_type)
-                throw Diagnostic(arm.span, "match arm must use an overlay of " + describe(enum_type));
+                throw Diagnostic(arm.span, "match arm must use an overlay of " + describe(enum_type))
+                    .with_code("E0412");
         }
         if (!wildcard && !seen.insert(variant).second)
-            throw Diagnostic(arm.span, "duplicate match arm for '" + arm.variant + "'");
+            throw Diagnostic(arm.span, "duplicate match arm for '" + arm.variant + "'").with_code("E0412");
         auto fields = wildcard ? std::vector<IrType>{} : symbol(variant).payload_types;
         for (auto& field : fields) field = substitute(std::move(field), replacements);
         const auto* declaration = wildcard ? nullptr : entries_[variant].declaration;
         if (arm.bindings.size() != fields.size() || arm.named != (declaration && declaration->named_payload))
-            throw Diagnostic(arm.span, "match pattern must bind each payload field, using _ to ignore a field");
+            throw Diagnostic(arm.span, "match pattern must bind each payload field, using _ to ignore a field")
+                .with_code("E0412");
 
         auto region = node(produces_value ? IrOp::ScopedValue : IrOp::Block, arm.span);
         context.scopes.emplace_back();
@@ -3782,14 +4179,16 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
                 const auto& name = arm.fields[i];
                 const auto found = std::ranges::find(declaration->parameters, name, &Parameter::name);
                 if (found == declaration->parameters.end() || !seen_fields.insert(name).second)
-                    throw Diagnostic(arm.span, "unknown or repeated enum payload field '" + name + "'");
+                    throw Diagnostic(arm.span, "unknown or repeated enum payload field '" + name + "'")
+                        .with_code("E0427");
                 field = static_cast<std::size_t>(found - declaration->parameters.begin());
             }
             const auto& binding = arm.bindings[i];
             if (binding.text == "_") continue;
             auto& names = context.scopes.back();
             if (names.contains(binding.text))
-                throw Diagnostic(binding.span, "duplicate match binding '" + binding.text + "'");
+                throw duplicate_local(binding.span, "duplicate match binding '" + binding.text + "'",
+                                      names.find(binding.text)->second);
             const auto local = add(SymbolKind::Local, binding.text, binding.span, owner);
             names.emplace(binding.text, local);
             symbol(local).type = fields[field];
@@ -3816,13 +4215,15 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
         arms.emplace_back(variant, std::move(region));
     }
     if (!wildcard) {
+        std::vector<SymbolId> missing;
         for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
             const auto& item = symbol(id);
             if (item.kind == SymbolKind::Variant && item.owner == enum_type.symbol && !seen.contains(id))
-                throw Diagnostic(stmt.span, "non-exhaustive match, missing variant '" + item.name + "'");
+                missing.push_back(id);
         }
+        if (!missing.empty()) throw non_exhaustive(stmt, missing, produces_value);
     }
-    if (arms.empty()) throw Diagnostic(stmt.span, "match requires at least one arm");
+    if (arms.empty()) throw Diagnostic(stmt.span, "match requires at least one arm").with_code("E0411");
     if (match_type) result.type = *match_type;
     const auto tag_type = has_enum_payload(program_, enum_type.symbol)
         ? IrType{TypeKind::Integer, "uint32", no_symbol, {}} : enum_type;
@@ -3881,14 +4282,16 @@ void Lowering::check_constructor(SymbolId id, const Declaration& decl) {
     if (symbol(owner).kind != SymbolKind::Class || (decl.name != "init" && decl.name != "deinit"))
         return;
     if (decl.kind != DeclKind::Function)
-        throw Diagnostic(decl.span, "init and deinit are reserved lifecycle functions");
+        throw Diagnostic(decl.span, "init and deinit are reserved lifecycle functions").with_code("E0509");
     if (entries_[owner].singleton_instance != no_symbol &&
         (decl.name == "deinit" || !decl.parameters.empty()))
-        throw Diagnostic(decl.span, "a singleton can declare only a zero-argument init lifecycle function");
+        throw Diagnostic(decl.span, "a singleton can declare only a zero-argument init lifecycle function")
+            .with_code("E0511");
     if (!decl.has_body || !decl.generics.empty() || symbol(id).type.kind != TypeKind::Void)
-        throw Diagnostic(decl.span, "a lifecycle function needs a body, no type parameters, and void return");
+        throw Diagnostic(decl.span, "a lifecycle function needs a body, no type parameters, and void return")
+            .with_code("E0509");
     if (decl.name == "deinit" && !decl.parameters.empty())
-        throw Diagnostic(decl.span, "deinit takes no parameters");
+        throw Diagnostic(decl.span, "deinit takes no parameters").with_code("E0509");
     if (decl.name != "init" || symbol(owner).base == no_symbol || symbol(owner).base == root_class_) return;
     if (!decl.body.empty()) {
         const auto& first = decl.body.front();
@@ -3902,7 +4305,7 @@ void Lowering::check_constructor(SymbolId id, const Declaration& decl) {
             }
         }
     }
-    throw Diagnostic(decl.span, "derived constructor must start with super.init");
+    throw Diagnostic(decl.span, "derived constructor must start with super.init").with_code("E0506");
 }
 
 void Lowering::require_implicit_constructor(SymbolId cls, const Span& span) {
@@ -3916,7 +4319,8 @@ void Lowering::require_implicit_constructor(SymbolId cls, const Span& span) {
             return symbol(candidate).parameters.empty();
         };
         if (!accepts_zero(inherited) && std::ranges::none_of(branches, accepts_zero))
-            throw Diagnostic(span, "class '" + symbol(cls).name + "' needs a constructor to initialize its base");
+            throw Diagnostic(span, "class '" + symbol(cls).name + "' needs a constructor to initialize its base")
+                .with_code("E0506");
         return;
     }
 }
@@ -3944,10 +4348,10 @@ void Lowering::lower_declaration(SymbolId id) {
                 reference_field_bindings_.insert(bindings.begin(), bindings.end());
             }
         }
+        if (declaration.type && symbol(id).type.kind != TypeKind::Void) result_spans_.emplace(id, declaration.type->span);
         auto instructions = body(declaration.body, ctx);
         if (symbol(id).type.kind != TypeKind::Void && !always_returns(instructions))
-            throw Diagnostic(declaration.span, "function may exit without returning " +
-                                               describe(symbol(id).type));
+            throw missing_return(declaration.span, id, declaration);
         program_.bodies.push_back({id, std::move(instructions)});
         const auto branches = entries_[id].overloads;
         for (const auto branch : branches) lower_declaration(branch);
@@ -3963,7 +4367,8 @@ void Lowering::lower_declaration(SymbolId id) {
                         if (!field.has_initializer) {
                             const auto member = own_member(id, field.name);
                             throw Diagnostic(symbol(member).span, "reference field '" + field.name +
-                                                                  "' needs an initializer or constructor");
+                                                                  "' needs an initializer or constructor")
+                                .with_code("E0513");
                         }
                     }
                 }
@@ -3974,7 +4379,7 @@ void Lowering::lower_declaration(SymbolId id) {
                 if (member.static_member) continue;
                 if (member.kind != DeclKind::Function || !member.generics.empty() ||
                     member.name == "init" || member.name == "deinit") {
-                    throw Diagnostic(member.span, "interfaces may declare only non-generic methods");
+                    throw Diagnostic(member.span, "interfaces may declare only non-generic methods").with_code("E0504");
                 }
             }
         }
@@ -3985,7 +4390,7 @@ void Lowering::lower_declaration(SymbolId id) {
             resolve(cast);
             const auto target = symbol(cast).type;
             if (std::ranges::find(cast_types, target) != cast_types.end())
-                throw Diagnostic(symbol(cast).span, "duplicate cast to " + describe(target));
+                throw Diagnostic(symbol(cast).span, "duplicate cast to " + describe(target)).with_code("E0512");
             cast_types.push_back(target);
             lower_declaration(cast);
         }
@@ -4017,7 +4422,7 @@ void Lowering::lower_declaration(SymbolId id) {
         if (entries_[id].singleton_instance != no_symbol) {
             for (const auto& member : declaration.members) {
                 if (member.kind == DeclKind::Function && !member.has_body)
-                    throw Diagnostic(member.span, "a singleton cannot have an abstract method");
+                    throw Diagnostic(member.span, "a singleton cannot have an abstract method").with_code("E0511");
             }
             auto instance = node(IrOp::Allocate, declaration.span, symbol(id).type);
             instance.symbol = own_member(id, "init");
@@ -4127,7 +4532,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             if (stmt.kind == StmtKind::Binding) {
                 if (file.library_path.empty() && stmt.declaration->kind == DeclKind::Module &&
                     stmt.declaration->name == "Std")
-                    throw Diagnostic(stmt.declaration->span, "the Std module namespace is reserved");
+                    throw Diagnostic(stmt.declaration->span, "the Std module namespace is reserved").with_code("E0311");
                 declare(*stmt.declaration, file_id, SymbolKind::Global);
             }
             if (stmt.kind == StmtKind::Destructure) {
@@ -4138,8 +4543,11 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
                         continue;
                     }
                     const auto id = add(SymbolKind::Global, binding.text, binding.span, file_id);
-                    if (!entries_[file_id].names.emplace(binding.text, id).second)
-                        throw Diagnostic(binding.span, "duplicate declaration of '" + binding.text + "'");
+                    if (const auto [earlier, added] = entries_[file_id].names.emplace(binding.text, id); !added) {
+                        throw Diagnostic(binding.span, "duplicate declaration of '" + binding.text + "'")
+                            .with_code("E0302").label("'" + binding.text + "' is declared again here")
+                            .label(name_span(earlier->second), "'" + binding.text + "' is first declared here");
+                    }
                     entries_[id].resolution = Resolution::Pending;
                     entries_[id].destructure = &stmt;
                     group.bindings.push_back(id);

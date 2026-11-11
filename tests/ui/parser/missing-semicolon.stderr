@@ -10,3 +10,5 @@ help: add the missing ';'
   |
 2 | let limit = 10;
   |               +
+
+For more information about this error, try `neura explain E0201`.

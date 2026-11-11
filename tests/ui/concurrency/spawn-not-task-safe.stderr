@@ -1,0 +1,16 @@
+error[E0601]: the spawned call is not task-safe: it reaches 'bump', which uses the reassignable binding 'counter'
+  --> $DIR/spawn-not-task-safe.nra:12:9
+   |
+ 5 |     counter = counter + 1;
+   |     ------- uses the reassignable binding 'counter' here
+...
+ 8 |     bump();
+   |     ------ calls 'bump'
+...
+12 |         spawn audit(3);
+   |         ^^^^^^^^^^^^^^ this call must be task-safe
+   |               -------- calls 'audit'
+   |
+   = note: `neura check --task-safety` reports for every function whether it is task-safe, and why not
+
+For more information about this error, try `neura explain E0601`.

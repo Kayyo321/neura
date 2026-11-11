@@ -1,0 +1,5 @@
+// A returned value of the wrong type (E0403), labelled at the declared
+// result type.
+let ready = func(count: int) -> bool {
+    return count;
+};

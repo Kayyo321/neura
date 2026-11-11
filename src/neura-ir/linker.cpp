@@ -67,7 +67,7 @@ Index index(const IrProgram& program, const Span& site) {
     result.children.resize(program.symbols.size());
     std::vector<bool> defined(program.symbols.size());
     for (const auto& body : program.bodies) {
-        if (body.owner >= defined.size()) throw Diagnostic(site, "invalid body owner in .nir");
+        if (body.owner >= defined.size()) throw Diagnostic(site, "invalid body owner in .nir").with_code("E0706");
         defined[body.owner] = true;
     }
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
@@ -75,14 +75,15 @@ Index index(const IrProgram& program, const Span& site) {
         if (symbol.kind == SymbolKind::File) {
             if (symbol.owner != no_symbol || !result.file_names.emplace(symbol.name, id).second ||
                 !result.files.emplace(file_key(symbol), id).second)
-                throw Diagnostic(site, "invalid or repeated file identity '" + file_key(symbol).second + "' in .nir");
+                throw Diagnostic(site, "invalid or repeated file identity '" + file_key(symbol).second + "' in .nir")
+                    .with_code("E0706");
         } else if (symbol.owner < result.children.size()) {
             result.children[symbol.owner].push_back(id);
         } else if (symbol.owner == no_symbol && symbol.kind == SymbolKind::Class && symbol.name == "$class" &&
                    result.umbrella == no_symbol) {
             result.umbrella = id;
         } else {
-            throw Diagnostic(site, "invalid owner of '" + symbol.name + "' in .nir");
+            throw Diagnostic(site, "invalid owner of '" + symbol.name + "' in .nir").with_code("E0706");
         }
         const auto correct_type = [&](TypeKind kind) {
             return symbol.type.kind == kind && symbol.type.symbol == id;
@@ -91,44 +92,44 @@ Index index(const IrProgram& program, const Span& site) {
         if ((symbol.kind == SymbolKind::Module && !correct_type(TypeKind::Module)) ||
             (is_nominal && !correct_type(TypeKind::Object)) ||
             (symbol.kind == SymbolKind::Enum && !correct_type(TypeKind::Enum))) {
-            throw Diagnostic(site, "invalid type of '" + symbol.name + "' in .nir");
+            throw Diagnostic(site, "invalid type of '" + symbol.name + "' in .nir").with_code("E0706");
         }
         if (symbol.kind == SymbolKind::Import &&
             (symbol.type.kind != TypeKind::Module || symbol.type.symbol >= program.symbols.size() ||
              program.symbols[symbol.type.symbol].kind != SymbolKind::Module)) {
-            throw Diagnostic(site, "invalid imported module '" + symbol.name + "' in .nir");
+            throw Diagnostic(site, "invalid imported module '" + symbol.name + "' in .nir").with_code("E0706");
         }
         if (symbol.kind == SymbolKind::Alias && symbol.type.kind == TypeKind::Object &&
             (symbol.type.symbol >= program.symbols.size() ||
              (program.symbols[symbol.type.symbol].kind != SymbolKind::Class &&
               program.symbols[symbol.type.symbol].kind != SymbolKind::Interface))) {
-            throw Diagnostic(site, "invalid type alias '" + symbol.name + "' in .nir");
+            throw Diagnostic(site, "invalid type alias '" + symbol.name + "' in .nir").with_code("E0706");
         }
         if (symbol.owner < program.symbols.size() && program.symbols[symbol.owner].kind == SymbolKind::Class &&
             (symbol.name == "init" || symbol.name == "deinit") &&
             (symbol.kind != SymbolKind::Function || symbol.type.kind != TypeKind::Void ||
              symbol.external || !symbol.has_body || !symbol.generics.empty() ||
              (symbol.name == "deinit" && !symbol.parameters.empty()))) {
-            throw Diagnostic(site, "invalid lifecycle declaration '" + symbol.name + "' in .nir");
+            throw Diagnostic(site, "invalid lifecycle declaration '" + symbol.name + "' in .nir").with_code("E0706");
         }
         if (symbol.kind == SymbolKind::Function && symbol.has_body && !defined[id])
-            throw Diagnostic(site, "missing body of '" + symbol.name + "' in .nir");
+            throw Diagnostic(site, "missing body of '" + symbol.name + "' in .nir").with_code("E0706");
     }
 
     for (const auto& symbol : program.symbols) {
         if (symbol.overload_group != no_symbol) {
             const auto encoded = legacy_overload_group(symbol.name);
             if (encoded != no_symbol && encoded != symbol.overload_group)
-                throw Diagnostic(site, "inconsistent overload group name in .nir");
+                throw Diagnostic(site, "inconsistent overload group name in .nir").with_code("E0706");
         }
         if (symbol.base == no_symbol) continue;
         if (symbol.base >= program.symbols.size())
-            throw Diagnostic(site, "invalid base symbol in .nir");
+            throw Diagnostic(site, "invalid base symbol in .nir").with_code("E0706");
         const auto kind = program.symbols[symbol.base].kind;
         if (!((symbol.kind == SymbolKind::Module && kind == SymbolKind::Module) ||
               (symbol.kind == SymbolKind::Class && kind == SymbolKind::Class) ||
               (symbol.kind == SymbolKind::Interface && symbol.base == result.umbrella))) {
-            throw Diagnostic(site, "invalid base of '" + symbol.name + "' in .nir");
+            throw Diagnostic(site, "invalid base of '" + symbol.name + "' in .nir").with_code("E0706");
         }
     }
     // Lowering and conversion walk these chains without cycle checks.
@@ -138,10 +139,10 @@ Index index(const IrProgram& program, const Span& site) {
         for (SymbolId id = 0; id < state.size(); ++id) {
             auto cursor = id;
             while (cursor != no_symbol) {
-                if (cursor >= state.size()) throw Diagnostic(site, "invalid symbol chain in .nir");
+                if (cursor >= state.size()) throw Diagnostic(site, "invalid symbol chain in .nir").with_code("E0706");
                 if (state[cursor] == State::Done) break;
                 if (state[cursor] == State::Visiting)
-                    throw Diagnostic(site, "cyclic owner, base, or override chain in .nir");
+                    throw Diagnostic(site, "cyclic owner, base, or override chain in .nir").with_code("E0706");
                 state[cursor] = State::Visiting;
                 cursor = program.symbols[cursor].*member;
             }
@@ -155,7 +156,7 @@ Index index(const IrProgram& program, const Span& site) {
 
 [[noreturn]] void conflict(const Span& site, std::string_view file, std::string_view item) {
     throw Diagnostic(site, "incompatible definitions of '" + std::string(file) +
-                           "' in linked NeuraIR (at '" + std::string(item) + "')");
+                           "' in linked NeuraIR (at '" + std::string(item) + "')").with_code("E0707");
 }
 
 void pair_symbols(const IrProgram& destination, const Index& indexed, const IrProgram& incoming,
@@ -332,13 +333,13 @@ std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const 
     if (incoming.native_library) {
         if (destination.native_library && !(*destination.native_library == *incoming.native_library))
             throw Diagnostic(import_site, "the imported NeuraIR artifact links a different native library; "
-                                          "an image holds one native library");
+                                          "an image holds one native library").with_code("E0707");
         destination.native_library = incoming.native_library;
     }
     for (auto& unit : incoming.native_units) destination.native_units.push_back(std::move(unit));
     const auto imported = index(incoming, import_site);
     if (const auto issues = verify_ir(incoming); !issues.empty())
-        throw Diagnostic(import_site, "invalid imported NeuraIR: " + issues.front().message);
+        throw Diagnostic(import_site, "invalid imported NeuraIR: " + issues.front().message).with_code("E0706");
     const auto indexed = index(destination, import_site);
     std::vector<SymbolId> mapping(incoming.symbols.size(), no_symbol);
     for (const auto& [key, current] : imported.files) {

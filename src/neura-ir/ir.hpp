@@ -256,8 +256,9 @@ struct IrProgram {
 // The source loader can supply this trusted library file and retry lowering.
 class MissingPrimitiveWrapper : public Diagnostic {
 public:
+    // diagnostic-code: none: forwards to Diagnostic; each throw site gives the code.
     MissingPrimitiveWrapper(const Span& span, std::string message, std::string path)
-        : Diagnostic(span, std::move(message)), path(std::move(path)) {}
+        : Diagnostic(span, std::move(message)), path(std::move(path)) {} // diagnostic-code: none: as above
 
     std::string path;
 };

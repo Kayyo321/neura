@@ -47,13 +47,6 @@ std::string display(const IrType& type) {
     return type.name.empty() ? std::string("value") : type.name;
 }
 
-std::string location(const Span& span) {
-    if (span.file.empty()) return {};
-    const auto slash = span.file.find_last_of("/\\");
-    return (slash == std::string::npos ? span.file : span.file.substr(slash + 1)) + ':' +
-           std::to_string(span.line) + ':' + std::to_string(span.column);
-}
-
 } // namespace
 
 bool has_spawn(const IrProgram& program) {
@@ -445,9 +438,9 @@ void TaskAnalysis::check() const {
     SymbolId first_operation_owner = no_symbol;
     // For a function type that is not transferable, the capture that makes it
     // so: under the union rule the reason is a closure somewhere else in the
-    // program, which the type alone does not show.
-    const auto capture_note = [&](const IrType& type) -> std::string {
-        if (type.kind != TypeKind::Object || !valid(type.symbol)) return {};
+    // program, which the type alone does not show. Labelled at the capture.
+    const auto capture_note = [&](Diagnostic& error, const IrType& type) {
+        if (type.kind != TypeKind::Object || !valid(type.symbol)) return;
         std::vector<SymbolId> layouts;
         if (signature_layout(type.symbol)) {
             if (const auto found = derived_.find(type.symbol); found != derived_.end()) layouts = found->second;
@@ -458,16 +451,34 @@ void TaskAnalysis::check() const {
             if (!created_.contains(layout)) continue;
             for (const auto field : all_fields(layout)) {
                 if (transferable(symbol(field).type)) continue;
-                return ": a function value of this type captures a value of type " + display(symbol(field).type) +
-                       " at " + location(symbol(field).span);
+                error.label(symbol(field).span, "a function value of this type captures a value of type " +
+                                                    display(symbol(field).type) + " here");
+                return;
             }
         }
-        return {};
     };
     // A check that fails inside a library helper is reported where the
-    // user's code calls into the library, and says where the task starts.
-    const auto started_by_library = [&](SymbolId owner, const Span& span) -> std::string {
-        return library_code(owner) ? " (the library starts the task at " + location(span) + ")" : std::string();
+    // user's code calls into the library, and labels where the task starts.
+    const auto started_by_library = [&](Diagnostic& error, SymbolId owner, const Span& span) {
+        if (library_code(owner)) error.label(span, "the library starts the task here");
+    };
+    // A task-safety error: the rule's first clause and, in the message, the
+    // function that breaks it and what it does; each call on the way from the
+    // checked call is a label, as is the operation itself.
+    const auto unsafe_error = [&](const Span& at, std::string rule, const Unsafe& reason) {
+        std::vector<std::pair<SymbolId, Span>> hops;
+        for (const auto& [callee, span] : reason.calls) {
+            if (symbol(callee).name == "$invoke" || symbol(callee).kind != SymbolKind::Function) continue;
+            hops.emplace_back(callee, span);
+        }
+        auto text = std::move(rule) + ": ";
+        text += hops.empty() ? "it " + reason.operation
+                             : "it reaches '" + symbol(hops.back().first).name + "', which " + reason.operation;
+        auto error = Diagnostic(at, std::move(text)).with_code("E0601").label("this call must be task-safe");
+        for (const auto& [callee, span] : hops) error.label(span, "calls '" + symbol(callee).name + "'");
+        error.label(reason.span, reason.operation + " here");
+        error.note("`neura check --task-safety` reports for every function whether it is task-safe, and why not");
+        return error;
     };
     for (const auto& body : program_.bodies) {
         each_node(body.instructions, [&](const IrNode& node) {
@@ -480,9 +491,11 @@ void TaskAnalysis::check() const {
                 // What a channel carries is given to another task (5.1).
                 const auto require = [&](const IrType& type, const char* role) {
                     if (transferable(type)) return;
-                    throw Diagnostic(user_site(body.owner, node.span),
-                                     "a value of type " + display(type) + " is not transferable, so it cannot be " + role +
-                                     capture_note(type));
+                    auto error = Diagnostic(user_site(body.owner, node.span),
+                                            "a value of type " + display(type) + " is not transferable, so it cannot be " +
+                                            role).with_code("E0602").label("not transferable");
+                    capture_note(error, type);
+                    throw error;
                 };
                 if (node.text == "transfer.check" && node.operands.size() == 1) {
                     require(node.operands.front().type, "used where a transferable value is required");
@@ -497,22 +510,16 @@ void TaskAnalysis::check() const {
                         const auto& item = symbol(id);
                         if (item.kind == SymbolKind::Function && item.owner == layout && item.name == "$invoke") invoke = id;
                     }
-                    if (invoke == no_symbol) throw Diagnostic(node.span, "an isolated function value has no body");
+                    if (invoke == no_symbol) throw Diagnostic(node.span, "an isolated function value has no body")
+                        .with_code("E0899");
                     require(symbol(invoke).type, "the result of a parallel item");
-                    const auto describe_chain = [&](const Unsafe& reason, const char* rule) {
-                        std::string text = std::string("the worker of a parallel map ") + rule + ": ";
-                        for (const auto& [callee, span] : reason.calls) {
-                            if (symbol(callee).name == "$invoke" || symbol(callee).kind != SymbolKind::Function) continue;
-                            text += "it reaches '" + symbol(callee).name + "' (called at " + location(span) + "), and ";
-                        }
-                        return text + "that code " + reason.operation + " at " + location(reason.span);
-                    };
                     if (const auto reason = chain(unsafe_, invoke)) {
-                        throw Diagnostic(user_site(body.owner, node.span), describe_chain(*reason, "is not task-safe"));
+                        throw unsafe_error(user_site(body.owner, node.span),
+                                           "the worker of a parallel map is not task-safe", *reason);
                     }
                     if (const auto reason = chain(impure_, invoke)) {
-                        throw Diagnostic(user_site(body.owner, node.span),
-                                         describe_chain(*reason, "must compute in isolation"));
+                        throw unsafe_error(user_site(body.owner, node.span),
+                                           "the worker of a parallel map must compute in isolation", *reason);
                     }
                 } else if (node.text == "channel.open" && !node.type_arguments.empty()) {
                     require(node.type_arguments.front(), "a channel's element type");
@@ -531,17 +538,20 @@ void TaskAnalysis::check() const {
             if (!first_spawn) first_spawn = &node;
             if (node.operands.size() != 1 || node.operands.front().op != IrOp::Allocate ||
                 !valid(node.operands.front().symbol)) {
-                throw Diagnostic(node.span, "spawn must be checked after specialization");
+                throw Diagnostic(node.span, "spawn must be checked after specialization").with_code("E0899");
             }
             const auto layout = symbol(node.operands.front().symbol).owner;
             // The captures are the callee value, a receiver, and the
             // arguments, each at the span of the expression it came from.
             for (const auto field : all_fields(layout)) {
                 if (!transferable(symbol(field).type)) {
-                    throw Diagnostic(user_site(body.owner, symbol(field).span),
-                                     "a value of type " + display(symbol(field).type) +
-                                     " is not transferable, so it cannot be given to a spawned task" +
-                                     capture_note(symbol(field).type) + started_by_library(body.owner, node.span));
+                    auto error = Diagnostic(user_site(body.owner, symbol(field).span),
+                                            "a value of type " + display(symbol(field).type) +
+                                            " is not transferable, so it cannot be given to a spawned task")
+                        .with_code("E0602").label("not transferable");
+                    capture_note(error, symbol(field).type);
+                    started_by_library(error, body.owner, node.span);
+                    throw error;
                 }
             }
             SymbolId invoke = no_symbol;
@@ -549,15 +559,12 @@ void TaskAnalysis::check() const {
                 const auto& item = symbol(id);
                 if (item.kind == SymbolKind::Function && item.owner == layout && item.name == "$invoke") invoke = id;
             }
-            if (invoke == no_symbol) throw Diagnostic(node.span, "a spawned function value has no body");
+            if (invoke == no_symbol) throw Diagnostic(node.span, "a spawned function value has no body")
+                .with_code("E0899");
             if (const auto reason = unsafe(invoke)) {
-                std::string text = "the spawned call is not task-safe: ";
-                for (const auto& [callee, span] : reason->calls) {
-                    if (symbol(callee).name == "$invoke" || symbol(callee).kind != SymbolKind::Function) continue;
-                    text += "it reaches '" + symbol(callee).name + "' (called at " + location(span) + "), and ";
-                }
-                text += "that code " + reason->operation + " at " + location(reason->span);
-                throw Diagnostic(user_site(body.owner, node.span), text + started_by_library(body.owner, node.span));
+                auto error = unsafe_error(user_site(body.owner, node.span), "the spawned call is not task-safe", *reason);
+                started_by_library(error, body.owner, node.span);
+                throw error;
             }
         });
     }
@@ -573,12 +580,13 @@ void TaskAnalysis::check() const {
     if (native && first_spawn) {
         throw Diagnostic(first_spawn->span,
                          "a program that spawns a task cannot use Std.DynamicForeign or import:c(...): "
-                         "tasks and native calls cannot share an image yet");
+                         "tasks and native calls cannot share an image yet").with_code("E0604");
     }
     if (native) {
         throw Diagnostic(user_site(first_operation_owner, first_operation->span),
                          "a program that uses a scope, a channel, or another scheduler operation cannot use "
-                         "Std.DynamicForeign or import:c(...): tasks and native calls cannot share an image yet");
+                         "Std.DynamicForeign or import:c(...): tasks and native calls cannot share an image yet")
+            .with_code("E0604");
     }
 }
 

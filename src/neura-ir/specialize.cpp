@@ -97,10 +97,6 @@ std::string display(const std::vector<IrType>& arguments) {
     return result + ">";
 }
 
-std::string location(const Span& span) {
-    return span.file + ":" + std::to_string(span.line) + ":" + std::to_string(span.column);
-}
-
 class Specializer {
 public:
     Specializer(IrProgram& program, const SpecializationLimits& limits)
@@ -211,16 +207,25 @@ private:
     }
 
     void check_limits(const std::string& name, std::size_t nesting, const Span& where, const Origin& origin) {
+        // The instantiation that the program wrote, where the chain starts.
+        const auto start = [&](Diagnostic& error) {
+            error.label(origin.span, origin.name.empty() ? "the chain of instantiations starts here"
+                                                         : "in this instantiation of '" + origin.name + "'");
+        };
         if (nesting > limits_.max_depth) {
-            throw Diagnostic(where, "generic specialization does not terminate: the type arguments of '" + name +
-                                        "' nest deeper than " + std::to_string(limits_.max_depth) +
-                                        " levels (the chain starts at " + location(origin.span) +
-                                        (origin.name.empty() ? "" : " with " + origin.name) + ")");
+            auto error = Diagnostic(where, "generic specialization does not terminate: the type arguments of '" + name +
+                                               "' nest deeper than " + std::to_string(limits_.max_depth) + " levels")
+                .with_code("E0808").label("instantiates '" + name + "'");
+            start(error);
+            error.note("each instantiation here instantiates a deeper one, so specialization would never finish");
+            throw error;
         }
         if (instances_.size() >= limits_.max_instances) {
-            throw Diagnostic(where, "generic specialization creates more than " +
-                                        std::to_string(limits_.max_instances) + " instances (the chain starts at " +
-                                        location(origin.span) + ")");
+            auto error = Diagnostic(where, "generic specialization creates more than " +
+                                               std::to_string(limits_.max_instances) + " instances")
+                .with_code("E0808").label("instantiates '" + name + "'");
+            start(error);
+            throw error;
         }
     }
 

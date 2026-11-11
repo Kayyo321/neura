@@ -230,19 +230,37 @@ A value check alone is not enough: a function can reach shared mutable state wit
 - makes an active use that could run a [static initializer](Types.md#static-initialization). A class with no static fields that need run-time initialization, and whose bases and interfaces have none, is safe to construct. The guard function that first-use initialization calls records that it started in a reassignable binding of the class's static scope, so a spawned call that reaches a guard is rejected through the first rule, with the binding `$static_started`;
 - issues a `neura.ffi.*` request (section 16).
 
-The compiler computes one effect summary per function over the whole linked program, including [prebuilt NeuraIR modules](Modules.md#prebuilt-neurair-modules), and checks it at each `spawn`. The summary of a function is its own direct reasons together with those of everything it can call: the callee of a call, every override of a virtual call, every constructor, field initializer, and destructor an allocation or `destroy` can run. For a virtual call or a call through a function value, the summary is the union over every override and over every function value of that type the program can create. A function value can be created only where code that can run allocates it: the program's own functions, initializers, and whatever those reach. A closure in a library function that nothing reaches is not counted. That is still conservative: a call rejected for an implementation it never reaches is fixed by narrowing the type or passing the needed value explicitly. The diagnostic lists the call chain from the `spawn` to the offending operation. The messages here are in the one-line form that `--error-format=short` prints ([Tooling](Tooling.md#diagnostics)):
+The compiler computes one effect summary per function over the whole linked program, including [prebuilt NeuraIR modules](Modules.md#prebuilt-neurair-modules), and checks it at each `spawn`. The summary of a function is its own direct reasons together with those of everything it can call: the callee of a call, every override of a virtual call, every constructor, field initializer, and destructor an allocation or `destroy` can run. For a virtual call or a call through a function value, the summary is the union over every override and over every function value of that type the program can create. A function value can be created only where code that can run allocates it: the program's own functions, initializers, and whatever those reach. A closure in a library function that nothing reaches is not counted. That is still conservative: a call rejected for an implementation it never reaches is fixed by narrowing the type or passing the needed value explicitly. The diagnostic names the function that breaks the rule and what it does, and labels the call chain from the `spawn` to the offending operation: each call on the way, and the operation itself. This is the one-line form that `--error-format=short` prints ([Tooling](Tooling.md#diagnostics)), then the default form:
 
 ```text
-f.nra:11:13: error: the spawned call is not task-safe: it reaches 'audit' (called at f.nra:11:19), and it reaches 'bump' (called at f.nra:6:32), and that code uses the reassignable binding 'counter' at f.nra:5:19
+f.nra:11:13: error[E0601]: the spawned call is not task-safe: it reaches 'bump', which uses the reassignable binding 'counter'
 ```
 
-This is the message for a program that declares `let counter: int = 0;`, `let bump = func { counter = counter + 1; };`, and `let audit = func(entry: int) { bump(); };` and spawns `audit(3)`.
+```text
+error[E0601]: the spawned call is not task-safe: it reaches 'bump', which uses the reassignable binding 'counter'
+  --> f.nra:11:13
+   |
+ 5 | let bump = func { counter = counter + 1; };
+   |                   ------- uses the reassignable binding 'counter' here
+ 6 | let audit = func(entry: int) { bump(); };
+   |                                ------ calls 'bump'
+...
+11 |             spawn audit(3);
+   |             ^^^^^^^^^^^^^^ this call must be task-safe
+   |                   -------- calls 'audit'
+   |
+   = note: `neura check --task-safety` reports for every function whether it is task-safe, and why not
 
-When the rule is one that a library operation enforces, for example a transferable type that a library function requires, the diagnostic is reported at the program's own call and not inside the library. The same holds for a `spawn` that a library helper makes, such as the workers of `WorkerGroup.with_workers` or the calls of `Tasks.all`: the check is reported at the program's call into the library, and the message ends with the place where the library starts the task. A function value that is not transferable names the capture that makes it so. These are the messages for a `with_workers` whose `work` function writes the module binding `total`, and for one whose `work` is a lambda that captures an object of class `Box`:
+For more information about this error, try `neura explain E0601`.
+```
+
+This is the diagnostic for a program that declares `let counter: int = 0;`, `let bump = func { counter = counter + 1; };`, and `let audit = func(entry: int) { bump(); };` and spawns `audit(3)` in its `main`.
+
+When the rule is one that a library operation enforces, for example a transferable type that a library function requires, the diagnostic is reported at the program's own call and not inside the library. The same holds for a `spawn` that a library helper makes, such as the workers of `WorkerGroup.with_workers` or the calls of `Tasks.all`: the check is reported at the program's call into the library, and a label marks the place where the library starts the task. A function value that is not transferable has a label at the capture that makes it so. These are the messages for a `with_workers` whose `work` function writes the module binding `total`, and for one whose `work` is a lambda that captures an object of class `Box`:
 
 ```text
-shop.nra:9:9: error: the spawned call is not task-safe: it reaches 'run_worker<int32>' (called at worker-group.nra:92:23), and it reaches 'add' (called at shop.nra:9:40), and that code uses the reassignable binding 'total' at shop.nra:5:36 (the library starts the task at worker-group.nra:92:17)
-boxed.nra:13:9: error: a value of type func(int32) -> void is not transferable, so it cannot be given to a spawned task: a function value of this type captures a value of type Box at boxed.nra:12:44 (the library starts the task at worker-group.nra:92:17)
+shop.nra:9:9: error[E0601]: the spawned call is not task-safe: it reaches 'add', which uses the reassignable binding 'total'
+boxed.nra:13:9: error[E0602]: a value of type func(int32) -> void is not transferable, so it cannot be given to a spawned task
 ```
 
 `neura check --task-safety` prints the summary of every function of the linked program: whether it is task-safe, the reason when it is not, and whether it could also be the worker of a parallel map (section 12). It never rejects a program for what it reports.

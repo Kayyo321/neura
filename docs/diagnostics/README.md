@@ -1,0 +1,164 @@
+# Diagnostic codes
+
+Each error that the compiler reports has a code: `E` and four digits, whose hundreds digit names the area of the compiler. `neura explain <CODE>` prints the page of a code, and `neura explain --list` lists the codes with their titles. [Tooling](../lang/Tooling.md#diagnostics) describes the formats in which diagnostics are printed.
+
+A page states the rule, shows a program that breaks it with the error it gets, and shows the program fixed. The examples are compiled by the `doc-examples` test: a failing example must fail with its code, and a fixed one must compile. A few errors cannot be caused by a single source file; their pages say why, and show only the fix.
+
+E0420, E0510, and the E09xx range (tags) are reserved and not in use.
+
+## E01xx: Lexer
+
+Errors about characters, literals, and comments.
+
+| Code | Error |
+| --- | --- |
+| [E0101](E0101.md) | invalid character |
+| [E0102](E0102.md) | invalid UTF-8 |
+| [E0103](E0103.md) | unterminated string literal |
+| [E0104](E0104.md) | invalid escape or character in a string literal |
+| [E0105](E0105.md) | malformed numeric literal |
+
+## E02xx: Parser
+
+Errors about the grammar.
+
+| Code | Error |
+| --- | --- |
+| [E0201](E0201.md) | expected a semicolon |
+| [E0202](E0202.md) | unexpected token |
+| [E0203](E0203.md) | unclosed delimiter |
+| [E0204](E0204.md) | expected an expression |
+| [E0205](E0205.md) | declaration without a type or an initializer |
+| [E0206](E0206.md) | invalid type syntax |
+| [E0207](E0207.md) | misplaced variadic parameter |
+| [E0208](E0208.md) | type annotation on a definition |
+| [E0209](E0209.md) | enum without variants |
+| [E0210](E0210.md) | malformed comparison chain |
+| [E0211](E0211.md) | malformed scope statement |
+| [E0212](E0212.md) | braces that do not enclose a range |
+| [E0213](E0213.md) | malformed binding clause |
+
+## E03xx: Names
+
+Errors about declarations, scopes, and name resolution.
+
+| Code | Error |
+| --- | --- |
+| [E0301](E0301.md) | duplicate local binding |
+| [E0302](E0302.md) | duplicate declaration |
+| [E0303](E0303.md) | duplicate parameter or field name |
+| [E0304](E0304.md) | unknown name |
+| [E0305](E0305.md) | unknown or inaccessible member |
+| [E0306](E0306.md) | use before declaration |
+| [E0307](E0307.md) | ambiguous promoted name |
+| [E0308](E0308.md) | not a namespace |
+| [E0309](E0309.md) | cyclic declaration |
+| [E0310](E0310.md) | misuse of the discard name '_' |
+| [E0311](E0311.md) | reserved name |
+
+## E04xx: Types and bindings
+
+Errors about types, values, calls, and statements.
+
+| Code | Error |
+| --- | --- |
+| [E0401](E0401.md) | assignment to a constant binding |
+| [E0402](E0402.md) | invalid assignment target |
+| [E0403](E0403.md) | mismatched types |
+| [E0404](E0404.md) | local binding without an initializer |
+| [E0405](E0405.md) | missing return |
+| [E0406](E0406.md) | return does not match the function's result type |
+| [E0407](E0407.md) | wrong number of arguments |
+| [E0408](E0408.md) | no matching overload |
+| [E0409](E0409.md) | ambiguous overload or cast |
+| [E0410](E0410.md) | non-exhaustive match |
+| [E0411](E0411.md) | invalid match subject |
+| [E0412](E0412.md) | invalid match arm |
+| [E0413](E0413.md) | operator not defined for the operand type |
+| [E0414](E0414.md) | invalid indexing |
+| [E0415](E0415.md) | invalid conversion |
+| [E0416](E0416.md) | void in a value position |
+| [E0417](E0417.md) | wrong number of type arguments |
+| [E0418](E0418.md) | type argument does not satisfy its bound |
+| [E0419](E0419.md) | explicit type arguments required |
+| [E0421](E0421.md) | not a type of the required kind |
+| [E0422](E0422.md) | expected a value |
+| [E0423](E0423.md) | expression is not callable |
+| [E0424](E0424.md) | literal out of range |
+| [E0425](E0425.md) | type cannot be inferred |
+| [E0426](E0426.md) | tuple arity mismatch |
+| [E0427](E0427.md) | invalid enum variant use |
+| [E0428](E0428.md) | invalid primitive reference |
+| [E0429](E0429.md) | invalid range bounds |
+| [E0430](E0430.md) | value is not iterable |
+| [E0431](E0431.md) | statement outside its context |
+| [E0432](E0432.md) | invalid for loop header |
+| [E0433](E0433.md) | invalid overload group |
+| [E0434](E0434.md) | function without a body |
+
+## E05xx: Classes and lifecycle
+
+Errors about inheritance, interfaces, construction, and destruction.
+
+| Code | Error |
+| --- | --- |
+| [E0501](E0501.md) | invalid static member |
+| [E0502](E0502.md) | invalid override |
+| [E0503](E0503.md) | invalid inheritance |
+| [E0504](E0504.md) | interface not satisfied |
+| [E0505](E0505.md) | type cannot be constructed |
+| [E0506](E0506.md) | invalid base constructor call |
+| [E0507](E0507.md) | inaccessible constructor |
+| [E0508](E0508.md) | member needs a receiver |
+| [E0509](E0509.md) | invalid lifecycle function |
+| [E0511](E0511.md) | invalid singleton |
+| [E0512](E0512.md) | invalid cast declaration |
+| [E0513](E0513.md) | reference field not definitely bound |
+| [E0514](E0514.md) | invalid destroy |
+
+## E06xx: Concurrency
+
+Errors about tasks, scopes, and isolation.
+
+| Code | Error |
+| --- | --- |
+| [E0601](E0601.md) | function is not task-safe |
+| [E0602](E0602.md) | value is not transferable |
+| [E0603](E0603.md) | invalid spawn |
+| [E0604](E0604.md) | tasks combined with foreign code |
+| [E0605](E0605.md) | scope-bound value leaves its scope |
+| [E0606](E0606.md) | invalid select |
+| [E0607](E0607.md) | scope block outside a function body |
+
+## E07xx: Modules and imports
+
+Errors about imports, artifacts, and C headers.
+
+| Code | Error |
+| --- | --- |
+| [E0701](E0701.md) | unresolved import |
+| [E0702](E0702.md) | import of an internal standard library module |
+| [E0703](E0703.md) | ambiguous import |
+| [E0704](E0704.md) | invalid import declaration |
+| [E0705](E0705.md) | imported file does not declare the module |
+| [E0706](E0706.md) | invalid NeuraIR artifact |
+| [E0707](E0707.md) | conflicting NeuraIR artifact |
+| [E0708](E0708.md) | C import failed |
+| [E0709](E0709.md) | C header or library not found |
+| [E0710](E0710.md) | invalid host or scheduler binding |
+
+## E08xx: Backend
+
+Errors about circuit conversion and the image.
+
+| Code | Error |
+| --- | --- |
+| [E0801](E0801.md) | not supported by circuit conversion |
+| [E0802](E0802.md) | type without a circuit representation |
+| [E0803](E0803.md) | missing entry point |
+| [E0804](E0804.md) | more than one entry point |
+| [E0805](E0805.md) | invalid entry point signature |
+| [E0806](E0806.md) | external function without a runtime binding |
+| [E0807](E0807.md) | literal not representable in the circuit |
+| [E0808](E0808.md) | generic specialization limit exceeded |
+| [E0899](E0899.md) | internal compiler error |
