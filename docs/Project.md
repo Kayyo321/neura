@@ -56,6 +56,8 @@ A C header import (`import:c(...)`) runs before parsing for the importing file's
 
 The stages should be inspectable independently. A diagnostic or test should be able to identify whether a discrepancy came from source analysis, an IR transformation, lowering, serialization, or circuit execution.
 
+A stage reports an error by throwing a diagnostic: a primary span and a message, and optionally a code registered in `src/util/diagnostic_codes.def`, secondary labels at other spans, notes, suggested edits with how safely a tool may apply them, and named arguments for programs that consume diagnostics. The first error ends compilation. A warning goes to a sink that the command line installs, and work that a stage does speculatively, such as trying a parse or ranking an overload, discards the warnings it reported. Stages never format diagnostics: the command line renders them, with source snippets from the files that the source loader recorded, in the formats of [Tooling](lang/Tooling.md#diagnostics).
+
 ## NeuraIR and optimization
 
 NeuraIR is the semantic boundary shared by the compiler, optimization passes, and verification tools. It should represent typed values and operation widths, function signatures and calls, control-flow edges, reads and writes, and the operations that can fail or request an external effect. Module names and object layouts should be resolved before the backend relies on them. The IR verifier should catch invalid operands, incompatible control-flow edges, and malformed state or effect operations before lowering.

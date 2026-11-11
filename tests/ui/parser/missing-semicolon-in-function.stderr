@@ -1,0 +1,12 @@
+error[E0201]: expected ';'
+ --> $DIR/missing-semicolon-in-function.nra:3:33
+  |
+3 |     let product = width * height
+  |                                 ^ expected ';' here
+4 |     return product
+  |     ------ found 'return'
+  |
+help: add the missing ';'
+  |
+3 |     let product = width * height;
+  |                                 +

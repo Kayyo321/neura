@@ -1,0 +1,2 @@
+// The last declaration of a file without its semicolon.
+let ready = true

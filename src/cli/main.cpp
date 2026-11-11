@@ -1,4 +1,5 @@
 #include "argument_lists.hpp"
+#include "diagnostic_render.hpp"
 #include "backend/converter.hpp"
 #include "decompiler/assembly.hpp"
 #include "decompiler/decompile.hpp"
@@ -22,6 +23,7 @@
 #include "runner/runner.hpp"
 #include "source_docs.hpp"
 #include "source_loader.hpp"
+#include "util/source_map.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -44,6 +46,7 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <sys/ioctl.h>
 #include <unistd.h>
 #endif
 
@@ -67,7 +70,7 @@ using neura::runner::read_file;
 using neura::runner::write_file;
 
 void usage(std::ostream& out) {
-    out << "usage: neura check [-I source-root] [--task-safety] <file.nra>...\n"
+    out << "usage: neura check [-I source-root] [--task-safety | --fix] <file.nra>...\n"
            "       neura docs <file.nra>... [-o <file.json>]\n"
            "       neura docs --doxygen <file.nra>\n"
            "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>... [-o <file.nir>]\n"
@@ -144,7 +147,20 @@ void usage(std::ostream& out) {
            "  --c-define <name[=value]> define a macro while reading C headers\n"
            "  --libclang <file>        the libclang library to load (default: NEURA_LIBCLANG, then a search)\n"
            "  --cc <compiler>          the C compiler that links the native library (default: $CC, then cc)\n"
-           "  --c-link-arg <arg>       pass an argument to that link\n";
+           "  --c-link-arg <arg>       pass an argument to that link\n"
+           "\n"
+           "diagnostics: every command accepts the first two; the others apply to check, emit-ir, build, and test\n"
+           "  --error-format=human|short|json\n"
+           "                           human (default) shows source snippets; short is one stable line\n"
+           "                           per diagnostic, file:line:column: error[CODE]: message; json is one\n"
+           "                           object per line\n"
+           "  --color=auto|always|never\n"
+           "                           color human output; auto colors a terminal unless NO_COLOR is set\n"
+           "                           or TERM is dumb\n"
+           "  -W<name>, -Wno-<name>    enable or disable the warning <name>\n"
+           "  -Werror                  report every warning as an error\n"
+           "  --warn-library           also report warnings in the standard library\n"
+           "  --fix                    (check) apply machine-applicable suggestions to the source files\n";
 }
 
 enum class Command {
@@ -179,6 +195,9 @@ struct Options {
     std::optional<neura::nvm::TaskDumpFormat> task_dump;
     // check --task-safety: report every function instead of only checking.
     bool task_safety = false;
+    // check --fix: apply machine-applicable suggestions in place.
+    bool fix = false;
+    neura::cli::DiagnosticConfig diagnostics;
     std::optional<fs::path> trace_events;
     bool trace_wall_time = false;
     // Testing concurrent code (Concurrency.md section 14.4).
@@ -448,6 +467,36 @@ Options read_options(int argc, char** argv) {
             }
         } else if (arg == "--") {
             positional_only = true;
+        } else if (arg.starts_with("--error-format=")) {
+            const auto format = arg.substr(15);
+            if (format == "human") options.diagnostics.format = neura::cli::ErrorFormat::Human;
+            else if (format == "short") options.diagnostics.format = neura::cli::ErrorFormat::Short;
+            else if (format == "json") options.diagnostics.format = neura::cli::ErrorFormat::Json;
+            else throw std::runtime_error("--error-format expects human, short, or json");
+        } else if (arg.starts_with("--color=")) {
+            const auto choice = arg.substr(8);
+            if (choice == "auto") options.diagnostics.color = neura::cli::ColorChoice::Auto;
+            else if (choice == "always") options.diagnostics.color = neura::cli::ColorChoice::Always;
+            else if (choice == "never") options.diagnostics.color = neura::cli::ColorChoice::Never;
+            else throw std::runtime_error("--color expects auto, always, or never");
+        } else if (arg.starts_with("-W") || arg == "--warn-library") {
+            if (!compiles || options.command == Command::CBindings)
+                throw std::runtime_error(std::string(arg) + " applies only to check, emit-ir, build, and test");
+            if (arg == "--warn-library") {
+                options.diagnostics.library_warnings = true;
+            } else if (arg == "-Werror") {
+                options.diagnostics.warnings_are_errors = true;
+            } else {
+                const bool enable = !arg.starts_with("-Wno-");
+                const auto warning = arg.substr(enable ? 2 : 5);
+                if (warning.empty() || warning.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") !=
+                                           std::string_view::npos)
+                    throw std::runtime_error("expected a warning name after " + std::string(enable ? "-W" : "-Wno-"));
+                options.diagnostics.warnings.insert_or_assign(std::string(warning), enable);
+            }
+        } else if (arg == "--fix") {
+            if (options.command != Command::Check) throw std::runtime_error("--fix applies only to check");
+            options.fix = true;
         } else if (compiles && arg == "-I") {
             const auto root = fs::canonical(next());
             if (!fs::is_directory(root)) {
@@ -602,6 +651,9 @@ Options read_options(int argc, char** argv) {
     }
     if (options.command == Command::Build && !options.output) {
         throw std::runtime_error(options.native_executable ? "build --native requires -o <file>" : "build requires -o <file.nvr>");
+    }
+    if (options.fix && options.task_safety) {
+        throw std::runtime_error("--fix cannot be combined with --task-safety");
     }
     if (options.doxygen && options.files.size() != 1) {
         throw std::runtime_error("--doxygen requires one source file");
@@ -1412,6 +1464,118 @@ int task_safety_report(neura::IrProgram program) {
 
 namespace {
 
+int check_program(neura::IrProgram program) {
+    if (neura::uses_tasks(program)) {
+        // The isolation rules of a spawn need concrete types, which
+        // exist after specialization (Concurrency.md section 5).
+        neura::require_valid_ir(program, "before specialization");
+        neura::materialize_reference_storage(program);
+        neura::specialize(program);
+    }
+    return 0;
+}
+
+// check --fix: checks the program, applies the machine-applicable suggestions
+// of what it reports to user source files, and repeats until no suggestion
+// applies (or a bound is reached), then reports what remains as check does.
+int check_fix(const Options& options) {
+    auto& sources = neura::SourceMap::global();
+    auto* sink = neura::DiagnosticSink::current();
+    // Each round reports one error, so the bound allows a file with many
+    // missing semicolons while still ending a loop of suggestions.
+    constexpr int rounds = 200;
+    std::size_t applied = 0;
+    std::set<std::string> edited;
+    std::map<std::string, std::string> refused;
+    for (int round = 0; round < rounds; ++round) {
+        sources.clear();
+        if (sink) sink->clear();
+        std::vector<neura::Diagnostic> found;
+        try {
+            check_program(load_source_program(options));
+        } catch (const neura::Diagnostic& error) {
+            found.push_back(error);
+        }
+        if (sink) found.insert(found.end(), sink->entries().begin(), sink->entries().end());
+        std::map<std::string, std::vector<neura::DiagnosticEdit>> edits;
+        for (const auto& diagnostic : found) {
+            const auto* data = diagnostic.data();
+            if (!data) continue;
+            for (const auto& suggestion : data->suggestions) {
+                if (suggestion.applicability != neura::Applicability::MachineApplicable) continue;
+                // A suggestion applies whole or not at all.
+                bool usable = !suggestion.edits.empty();
+                for (const auto& edit : suggestion.edits) {
+                    const auto file = sources.find(edit.span.file);
+                    if (!file) {
+                        usable = false;
+                    } else if (file->kind() != neura::SourceKind::User) {
+                        refused.emplace(file->name(), file->kind() == neura::SourceKind::Library
+                                                          ? "it is a standard library file"
+                                                          : "it was generated from a C header");
+                        usable = false;
+                    }
+                }
+                if (!usable) continue;
+                for (const auto& edit : suggestion.edits) edits[edit.span.file].push_back(edit);
+            }
+        }
+        std::size_t this_round = 0;
+        for (auto& [name, list] : edits) {
+            const auto file = sources.find(name);
+            const auto bytes = read_file(name);
+            if (!std::ranges::equal(bytes, file->text(), [](std::uint8_t a, char b) {
+                    return a == static_cast<unsigned char>(b);
+                })) {
+                refused.emplace(name, "it changed while it was being checked");
+                continue;
+            }
+            auto text = file->text();
+            const auto count = neura::cli::apply_edits(text, std::move(list));
+            if (count == 0) continue;
+            write_file(name, std::vector<std::uint8_t>(text.begin(), text.end()));
+            this_round += count;
+            edited.insert(name);
+        }
+        applied += this_round;
+        if (this_round == 0) break;
+    }
+    sources.clear();
+    if (sink) sink->clear();
+    for (const auto& [name, reason] : refused)
+        std::cerr << "neura: check --fix did not edit " << name << ": " << reason << "\n";
+    std::cerr << "neura: check --fix applied " << applied << (applied == 1 ? " edit" : " edits") << " to "
+              << edited.size() << (edited.size() == 1 ? " file" : " files") << "\n";
+    return check_program(load_source_program(options));
+}
+
+// Whether human diagnostics are colored (Tooling.md, Diagnostics).
+bool use_color(neura::cli::ColorChoice choice) {
+    if (choice != neura::cli::ColorChoice::Auto) return choice == neura::cli::ColorChoice::Always;
+    if (const char* no_color = std::getenv("NO_COLOR"); no_color && *no_color) return false;
+    if (const char* term = std::getenv("TERM"); term && std::string_view(term) == "dumb") return false;
+#ifdef _WIN32
+    return false;
+#else
+    return ::isatty(2) == 1;
+#endif
+}
+
+// The terminal width: the terminal's own, then COLUMNS, then 100.
+std::size_t terminal_width() {
+#ifndef _WIN32
+    winsize size{};
+    if (::ioctl(2, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) return size.ws_col;
+#endif
+    if (const char* columns = std::getenv("COLUMNS"); columns && *columns) {
+        std::size_t value = 0;
+        const std::string_view text(columns);
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (error == std::errc{} && end == text.data() + text.size() && value > 0) return value;
+    }
+    return 100;
+}
+
 // Commands after which an update notice may appear: the ones that do their
 // work and exit. run and test execute user programs, and the lifecycle
 // commands manage the install themselves.
@@ -1440,16 +1604,10 @@ int dispatch(const Options& options) {
     case Command::Uninstall:
         return neura::lifecycle::uninstall(options.executable, options.uninstall);
     case Command::Check: {
+        if (options.fix) return check_fix(options);
         auto program = load_source_program(options);
         if (options.task_safety) return task_safety_report(std::move(program));
-        if (neura::uses_tasks(program)) {
-            // The isolation rules of a spawn need concrete types, which
-            // exist after specialization (Concurrency.md section 5).
-            neura::require_valid_ir(program, "before specialization");
-            neura::materialize_reference_storage(program);
-            neura::specialize(program);
-        }
-        return 0;
+        return check_program(std::move(program));
     }
     case Command::Docs:
         return docs(options);
@@ -1482,14 +1640,29 @@ int main(int argc, char** argv) {
         usage(std::cerr);
         return 1;
     }
+    // Warnings collect here while a command runs and print before its error
+    // or at its end.
+    neura::DiagnosticSink sink;
+    const neura::DiagnosticSinkScope sink_scope(sink);
+    neura::cli::DiagnosticConfig diagnostics;
+    const auto printer = [&] {
+        return neura::cli::DiagnosticPrinter(diagnostics, {use_color(diagnostics.color), terminal_width()},
+                                             neura::SourceMap::global());
+    };
     try {
         const auto options = read_options(argc, argv);
-        const int status = dispatch(options);
+        diagnostics = options.diagnostics;
+        int status = dispatch(options);
+        if (!sink.entries().empty()) {
+            auto print = printer();
+            if (print.warnings(std::cerr, sink.entries()) > 0 && diagnostics.warnings_are_errors) status = 1;
+        }
         if (status == 0 && shows_update_notice(options.command)) neura::lifecycle::update_notice(options.executable);
         return status;
     } catch (const neura::Diagnostic& error) {
-        const auto& span = error.span;
-        std::cerr << span.file << ':' << span.line << ':' << span.column << ": error: " << error.what() << '\n';
+        auto print = printer();
+        print.warnings(std::cerr, sink.entries());
+        print.print(std::cerr, error);
     } catch (const std::exception& error) {
         std::cerr << "neura: error: " << error.what() << '\n';
     }

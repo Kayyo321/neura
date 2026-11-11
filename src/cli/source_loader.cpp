@@ -6,6 +6,7 @@
 #include "neura-ir/ir.hpp"
 #include "neura-ir/linker.hpp"
 #include "neura-ir/nir_format.hpp"
+#include "util/source_map.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -29,6 +30,8 @@ struct CImports {
     // Generated source by its virtual path: the header's path with the
     // module name and .nra appended.
     std::map<fs::path, std::string> sources;
+    // The C header each generated module was made from.
+    std::map<fs::path, std::string> headers;
     std::vector<IrNativeUnit> units;
     // Declarations each generated module could not import, by module name.
     std::map<std::string, std::map<std::string, std::string>> unsupported;
@@ -249,8 +252,11 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             continue;
         }
         std::string source;
+        const auto name = file.generic_string();
+        const auto in_library = !library_path(file, trusted).empty();
         if (c_imports && c_imports->sources.contains(file)) {
             source = c_imports->sources.at(file);
+            SourceMap::global().add(name, source, SourceKind::Generated, c_imports->headers[file]);
         } else {
             if (!fs::is_regular_file(file)) {
                 throw std::runtime_error("not a regular input file: " + file.string());
@@ -263,8 +269,9 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             if (input.bad()) {
                 throw std::runtime_error("error reading " + file.string());
             }
+            SourceMap::global().add(name, source, in_library ? SourceKind::Library : SourceKind::User);
         }
-        auto syntax = parse(lex(source, file.generic_string()));
+        auto syntax = parse(lex(source, name));
         syntax.library_path = library_path(file, trusted);
         std::vector<const Expr*> imports;
         for (const auto& statement : syntax.statements) {
@@ -313,6 +320,7 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
                 if (!c_imports->sources.contains(generated)) {
                     auto imported = import_c_header(header, !libraries.empty(), module, c_import_options, import->span);
                     c_imports->sources.emplace(generated, std::move(imported.source));
+                    c_imports->headers.emplace(generated, header.string());
                     c_imports->units.push_back({header.string(), std::move(libraries), std::move(imported.shim),
                                                 std::move(imported.symbols)});
                     c_imports->unsupported[module] = std::move(imported.unsupported);
@@ -508,7 +516,7 @@ std::string c_import_source(const fs::path& header, const std::vector<fs::path>&
 namespace {
 
 // One load and lowering of `inputs`. A use of a C declaration that the
-// importer could not map names the reason instead of an unknown member.
+// importer could not map gets a note that names the reason.
 IrProgram lower_once(const std::vector<fs::path>& inputs, const std::vector<fs::path>& roots,
                      const fs::path& trusted) {
     CImports c_imports;
@@ -522,36 +530,33 @@ IrProgram lower_once(const std::vector<fs::path>& inputs, const std::vector<fs::
     } catch (const MissingPrimitiveWrapper&) {
         throw;
     } catch (const Diagnostic& error) {
-        const std::string message = error.what();
-        // A qualified type name such as m.flags names the member last.
-        const std::string name_marker = "unknown or inaccessible name '";
-        if (const auto at = message.find(name_marker); at != std::string::npos) {
-            const auto end = message.find('\'', at + name_marker.size());
-            const auto qualified = message.substr(at + name_marker.size(), end - at - name_marker.size());
-            const auto dot = qualified.find_last_of('.');
-            if (dot != std::string::npos) {
-                const auto name = qualified.substr(dot + 1);
-                for (const auto& [module, reasons] : c_imports.unsupported) {
-                    if (const auto reason = reasons.find(name); reason != reasons.end())
-                        throw Diagnostic(error.span, "the C declaration '" + name + "' was not imported: it is " +
-                                                         reason->second);
+        // Lowering records what it could not resolve: the kind of
+        // reference, the name, and the namespace it was looked up in.
+        const auto* kind = error.argument("kind");
+        const auto* name = error.argument("name");
+        const auto* owner = error.argument("owner");
+        if (!kind || !name || (*kind != "name" && *kind != "member")) throw;
+        const std::string* reason = nullptr;
+        if (owner) {
+            if (const auto found = c_imports.unsupported.find(*owner); found != c_imports.unsupported.end()) {
+                if (const auto at = found->second.find(*name); at != found->second.end()) reason = &at->second;
+            }
+        }
+        // A qualified type name such as m.flags names its module through an
+        // import binding, so look in every generated module.
+        if (!reason && *kind == "name") {
+            for (const auto& [module, reasons] : c_imports.unsupported) {
+                if (const auto at = reasons.find(*name); at != reasons.end()) {
+                    reason = &at->second;
+                    break;
                 }
             }
         }
-        const std::string marker = "unknown or inaccessible member '";
-        const auto at = message.find(marker);
-        if (at != std::string::npos) {
-            const auto name_end = message.find('\'', at + marker.size());
-            const auto name = message.substr(at + marker.size(), name_end - at - marker.size());
-            const auto of = message.find(" of ", name_end);
-            const auto module = of == std::string::npos ? std::string{} : message.substr(of + 4);
-            if (const auto found = c_imports.unsupported.find(module); found != c_imports.unsupported.end()) {
-                if (const auto reason = found->second.find(name); reason != found->second.end())
-                    throw Diagnostic(error.span, "the C declaration '" + name + "' was not imported: it is " +
-                                                     reason->second);
-            }
-        }
-        throw;
+        if (!reason) throw;
+        auto explained = error;
+        if (!error.data() || error.data()->primary_label.empty()) explained.label("not imported from the C header");
+        explained.note("the C declaration '" + *name + "' was not imported: it is " + *reason);
+        throw explained;
     }
 }
 
@@ -563,15 +568,31 @@ IrProgram lower_sources(const std::vector<fs::path>& files, const std::vector<fs
     const auto trusted = library.empty() ? fs::path{} : fs::canonical(library);
     std::set<std::string> wrappers;
     for (;;) {
+        // A load that is repeated with another wrapper reports its warnings
+        // again, so drop those of the abandoned attempt.
+        SpeculativeDiagnostics attempt;
         try {
-            return lower_once(inputs, roots, trusted);
+            auto program = lower_once(inputs, roots, trusted);
+            attempt.commit();
+            return program;
         } catch (const MissingPrimitiveWrapper& missing) {
-            if (library.empty() || !wrappers.insert(missing.path).second) throw;
-            const auto path = trusted / missing.path;
-            if (!fs::is_regular_file(path)) throw;
-            auto actual = fs::canonical(path);
-            if (library_path(actual, trusted) != missing.path) throw;
-            inputs.push_back(std::move(actual));
+            const auto retry = [&] {
+                if (library.empty() || !wrappers.insert(missing.path).second) return false;
+                const auto path = trusted / missing.path;
+                if (!fs::is_regular_file(path)) return false;
+                auto actual = fs::canonical(path);
+                if (library_path(actual, trusted) != missing.path) return false;
+                inputs.push_back(std::move(actual));
+                return true;
+            };
+            if (!retry()) {
+                attempt.commit();
+                throw;
+            }
+        } catch (...) {
+            // Warnings found before an error are reported with it.
+            attempt.commit();
+            throw;
         }
     }
 }

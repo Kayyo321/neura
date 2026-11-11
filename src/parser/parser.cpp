@@ -48,8 +48,34 @@ private:
 
     void expect(std::string_view text) {
         if (!match(text)) {
+            if (text == ";" && cursor_ > 0) missing_semicolon();
             throw Diagnostic(current().span, "expected '" + std::string(text) + "'");
         }
+    }
+
+    // A missing ';' is reported where it belongs, immediately after the
+    // previous token, with an insertion that `neura check --fix` applies.
+    [[noreturn]] void missing_semicolon() const {
+        const auto& previous = tokens_[cursor_ - 1].span;
+        Span after{previous.file, previous.line, previous.column, previous.offset + previous.length, 0};
+        // Columns count code points, and lines end as the lexer ends them.
+        const std::string_view text = tokens_[cursor_ - 1].text;
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            const auto c = static_cast<unsigned char>(text[i]);
+            if (c == '\r' || c == '\n') {
+                if (c == '\r' && i + 1 < text.size() && text[i + 1] == '\n') ++i;
+                ++after.line;
+                after.column = 1;
+            } else if ((c & 0xC0) != 0x80) {
+                ++after.column;
+            }
+        }
+        const auto& next = current();
+        auto error = Diagnostic(after, "expected ';'").with_code("E0201").label("expected ';' here");
+        if (next.span.offset != after.offset)
+            error.label(next.span, next.kind == TokenKind::End ? "found the end of the file" : "found '" + next.text + "'");
+        error.suggest("add the missing ';'", after, ";", Applicability::MachineApplicable);
+        throw error;
     }
 
     const Token& identifier() {
@@ -887,9 +913,11 @@ private:
     std::vector<TypeSyntax> postfix_type_arguments() {
         const auto start = cursor_;
         advance();
+        SpeculativeDiagnostics speculative;
         try {
             auto result = type_arguments();
             if (at("(") || at(".") || at(";")) {
+                speculative.commit();
                 return result;
             }
         } catch (const Diagnostic&) {

@@ -242,6 +242,7 @@ neura_target_defaults(neura_lifecycle)
 
 add_library(neura_compiler STATIC
     src/c-import/c_import.cpp
+    src/cli/diagnostic_render.cpp
     src/cli/source_loader.cpp
     src/cli/source_docs.cpp
     src/lexer/lexer.cpp
@@ -267,6 +268,7 @@ add_library(neura_compiler STATIC
     src/backend/circuit.cpp
     src/backend/float_circuit.cpp
     src/backend/converter.cpp
+    src/util/source_map.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
 target_link_libraries(neura_compiler PUBLIC neura_nvr PRIVATE neura_libclang)
@@ -402,6 +404,23 @@ if(BUILD_TESTING)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/nir-link-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/nir-link.cmake"
     )
+
+    # Diagnostics: the core's unit tests, and one UI test per area under
+    # tests/ui that compares rendered errors and applied fixes.
+    add_executable(neura_diagnostic_tests tests/diagnostics/unit_tests.cpp)
+    target_link_libraries(neura_diagnostic_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_diagnostic_tests)
+    foreach(suite IN ITEMS sink source-map render width edits)
+        add_test(NAME diagnostics-unit-${suite} COMMAND neura_diagnostic_tests ${suite})
+    endforeach()
+    file(GLOB neura_ui_areas CONFIGURE_DEPENDS LIST_DIRECTORIES true "${CMAKE_CURRENT_SOURCE_DIR}/tests/ui/*")
+    foreach(area_dir IN LISTS neura_ui_areas)
+        if(IS_DIRECTORY "${area_dir}")
+            get_filename_component(area "${area_dir}" NAME)
+            add_test(NAME ui-${area} COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ui-test.py" --neura "$<TARGET_FILE:neura>" "${area_dir}")
+        endif()
+    endforeach()
 
     add_executable(neura_ir_tests
         tests/ir-optimization/behavior_tests.cpp
