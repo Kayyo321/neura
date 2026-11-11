@@ -5,6 +5,7 @@
 - [Tutorial](Tutorial)
 - [Tooling](Tooling)
 - [Install and update](Install)
+- [Native executables](Standalone)
 - [Language overview](Overview)
 - [Feature status and decisions](Status)
 
@@ -20,6 +21,8 @@
 - [Errors](Errors)
 - [Testing](Testing)
 - [Resources and concurrency](ResourcesConcurrency)
+- [Tasks and the scheduler](Concurrency)
+- [GPU execution](GpuExecution)
 - [Foreign interop](ForeignInterop)
 - [Project structure](ProjectStructure)
 
@@ -39,3 +42,11 @@
 - [Neura Virtual Machine](NVM)
 - [Decompiler](Decompiler)
 - [Release checklist](Release)
+
+**Contributing**
+
+- [Coding style](CodingStyle)
+- [Continuous integration](ContinuousIntegration)
+- [Repository settings](RepositorySettings)
+- [Release process](ReleaseProcess)
+- [Code signing policy](CodeSigning)

@@ -1,15 +1,7 @@
-
-## C imports
-
-`check`, `emit-ir`, `build`, and `test` read the headers of [`import:c(...)`](https://github.com/Kayyo321/neura/wiki/ForeignInterop#c-imports) with libclang. The tool loads libclang when the first C import is compiled, from `--libclang <file>`, else the `NEURA_LIBCLANG` environment variable, else the platform's usual names, such as `libclang-19.so.1` and `/usr/lib/llvm-19/lib`. Builds without C imports never load it. libclang also needs its builtin headers, such as `stddef.h` and `stdarg.h`, which C library headers include. The tool looks for them in `/usr/lib/llvm-<major>/lib/clang/<major>`, `/usr/lib/clang/<major>`, `/usr/local/lib/clang/<major>`, and `clang/<major>` beside the loaded library, where `<major>` is libclang's major version, and names the first that exists as libclang's resource directory. When libclang cannot find them, a header that includes `<stddef.h>` fails with `'stddef.h' file not found`. `--c-include <dir>` adds a header search directory, and `--c-define <name[=value]>` defines a macro while reading headers.
-
-`emit-ir`, `build`, and `test` link the libraries of C imports with the system C compiler: `--cc <compiler>`, else `$CC`, else `cc`. `--c-link-arg <arg>` passes an argument to that link. `check` reads headers but does not link.
-
-`neura c-bindings [--linked] [c-options] <header.h>` prints the module that a C import of the header generates. `--linked` generates it as an import that names libraries does.
+<!-- Generated from docs/lang/Tooling.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Tooling and project workflow
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
-
 
 ## Build the compiler
 
@@ -30,11 +22,11 @@ build/neura check examples/modules/multi-file/main.nra
 build/neura check -I examples/guide examples/testing/math-tests.nra
 ```
 
-`Std` imports resolve in the trusted standard library: below `share/neura/stdlib` of an installed tool, or the checkout's `stdlib` directory for a build directory directly inside the checkout ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#standard-library-imports)).
+`Std` imports resolve in the trusted standard library: below `share/neura/stdlib` of an installed tool, or the checkout's `stdlib` directory for a build directory directly inside the checkout ([Modules](Modules#standard-library-imports)).
 
 Both commands accept multiple input paths and resolve imports across the source roots. `check` validates the source and succeeds silently on valid input. It does not run the optimizer. `emit-ir` writes a typed NeuraIR listing with resolved symbol references and explicit operations for control flow, state, and calls. The listing is for inspection. A source diagnostic reports the path, line, and column and returns a nonzero exit status.
 
-`check --task-safety` prints a report instead of only checking: for every function of the linked program, whether a spawned task may call it, the reason when it may not, and whether it could also be the worker of a parallel map ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). Functions are grouped by source file, and a generic function is listed once for each specialization the program uses. The report ends with a count, and the command exits with status 0 whatever the report says. The option applies only to `check`.
+`check --task-safety` prints a report instead of only checking: for every function of the linked program, whether a spawned task may call it, the reason when it may not, and whether it could also be the worker of a parallel map ([Concurrency](Concurrency#52-task-safe-calls)). Functions are grouped by source file, and a generic function is listed once for each specialization the program uses. The report ends with a count, and the command exits with status 0 whatever the report says. The option applies only to `check`.
 
 `emit-ir` prints optimized IR by default. Pass `--no-optimize` to print the IR exactly as lowered. To see what the optimizer changed, compare the two listings:
 
@@ -44,7 +36,7 @@ build/neura emit-ir tests/ir-optimization/fixtures/folding.nra > after.ir
 diff before.ir after.ir
 ```
 
-The two listings for this fixture share a symbol table, so the diff shows rewritten instructions. For programs that take primitive references or specialize generics, the optimized listing can also show new or rewritten symbols from those compilation stages. The listing is separate from the versioned `.nir` file described below, which holds NeuraIR before those transformations. See [NeuraIR optimization](https://github.com/Kayyo321/neura/wiki/IrOptimization) for the passes and their preconditions.
+The two listings for this fixture share a symbol table, so the diff shows rewritten instructions. For programs that take primitive references or specialize generics, the optimized listing can also show new or rewritten symbols from those compilation stages. The listing is separate from the versioned `.nir` file described below, which holds NeuraIR before those transformations. See [NeuraIR optimization](IrOptimization) for the passes and their preconditions.
 
 ## Build and run executables
 
@@ -55,37 +47,37 @@ build/neura build examples/hello-world/hello-world.nra -o hello.nvr
 build/neura run hello.nvr -- arg1 arg2
 ```
 
-`emit-ir -o` writes the program as lowered, before optimization, to a versioned [`.nir` file](https://github.com/Kayyo321/neura/wiki/NirFormat). `emit-ir` also accepts one `.nir` file in place of sources and prints its listing. `build` takes sources or one `.nir` file. It verifies and optimizes the IR, converts it to neuron graphs, and writes the `.nvr` image only when every step succeeds. Both routes produce the same bytes for the same program and options, and repeating a build reproduces them. `--no-optimize` converts the verified IR without optimizing it. `--no-source-map` omits the optional source map, which otherwise labels blocks with paths relative to the sources' common directory.
+`emit-ir -o` writes the program as lowered, before optimization, to a versioned [`.nir` file](NirFormat). `emit-ir` also accepts one `.nir` file in place of sources and prints its listing. `build` takes sources or one `.nir` file. It verifies and optimizes the IR, converts it to neuron graphs, and writes the `.nvr` image only when every step succeeds. Both routes produce the same bytes for the same program and options, and repeating a build reproduces them. `--no-optimize` converts the verified IR without optimizing it. `--no-source-map` omits the optional source map, which otherwise labels blocks with paths relative to the sources' common directory.
 
-Sources can [import prebuilt modules](https://github.com/Kayyo321/neura/wiki/Modules#prebuilt-neurair-modules) with `import:"library.nir".Module`. `check`, `emit-ir`, `build`, and `test` resolve and link those imports during source compilation.
+Sources can [import prebuilt modules](Modules#prebuilt-neurair-modules) with `import:"library.nir".Module`. `check`, `emit-ir`, `build`, and `test` resolve and link those imports during source compilation.
 
-`neura docs <file.nra>...` exports declaration documentation and source ranges as JSON for IDE tooling. Pass `-o <file.json>` to save the index. `neura docs --doxygen <file.nra>` emits a declaration view for Doxygen's input filter. [Documentation comments](https://github.com/Kayyo321/neura/wiki/CoreLanguage#documentation-comments)
+`neura docs <file.nra>...` exports declaration documentation and source ranges as JSON for IDE tooling. Pass `-o <file.json>` to save the index. `neura docs --doxygen <file.nra>` emits a declaration view for Doxygen's input filter. [Documentation comments](CoreLanguage#documentation-comments)
 
-`run` loads and validates an image, binds its host imports to the runner's services ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services)), and passes the arguments after `--` to the entry function as UTF-8 text. The image needs no source files. The exit status is the `ExitCode` that `main` returns, or the status given to `Std.Program.Process.exit`. A runtime trap prints its reason and source location, when the image has a source map, to standard error and exits with the status of its class, such as 136 for an arithmetic trap or 134 for a message trap ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). Load, bind, and usage errors exit with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` bound a run. A program with tasks has further limits and options ([Run programs with tasks](#run-programs-with-tasks)). `--stats` prints the run's step count, peak heap cells, host requests, graph, neuron, and edge counts, and image bytes to standard error. `cmake --install build --prefix <dir>` installs the `neura` executable, which contains both the compiler and the runner, and the standard library below `<dir>/share/neura/stdlib`, where the installed tool finds it without any `-I` option.
+`run` loads and validates an image, binds its host imports to the runner's services ([NVM](NVM#host-services)), and passes the arguments after `--` to the entry function as UTF-8 text. The image needs no source files. The exit status is the `ExitCode` that `main` returns, or the status given to `Std.Program.Process.exit`. A runtime trap prints its reason and source location, when the image has a source map, to standard error and exits with the status of its class, such as 136 for an arithmetic trap or 134 for a message trap ([Errors](Errors)). Load, bind, and usage errors exit with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` bound a run. A program with tasks has further limits and options ([Run programs with tasks](#run-programs-with-tasks)). `--stats` prints the run's step count, peak heap cells, host requests, graph, neuron, and edge counts, and image bytes to standard error. `cmake --install build --prefix <dir>` installs the `neura` executable, which contains both the compiler and the runner, and the standard library below `<dir>/share/neura/stdlib`, where the installed tool finds it without any `-I` option.
 
 Console input and output and `Std.Program.Process.exit` are always available. Every other host service is granted by default: with no capability option, `run`, `test`, and the policy that `build --native` records grant files, the network, environment variables, clocks, entropy, and native code. A `--deny-*` option turns a group off. A denied service still binds, and every call returns the `CapabilityDenied` error (error 14), exactly as if the program had no access:
 
 | Group | Services | Turn it off | Grant it again |
 | --- | --- | --- | --- |
-| Files | Files and directories ([`Std.Fs`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#112-stdfs)) | `--deny-fs` | `--allow-fs`, or `--allow-fs=prefix,...` for only the paths at or below the listed prefixes, after resolving symbolic links |
-| Network | TCP connections and listeners ([`Std.Net`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#114-stdnet)) | `--deny-net` | `--allow-net` |
+| Files | Files and directories ([`Std.Fs`](Stdlib-Design#112-stdfs)) | `--deny-fs` | `--allow-fs`, or `--allow-fs=prefix,...` for only the paths at or below the listed prefixes, after resolving symbolic links |
+| Network | TCP connections and listeners ([`Std.Net`](Stdlib-Design#114-stdnet)) | `--deny-net` | `--allow-net` |
 | Environment | Environment variables (`Std.Program.Environment`) | `--deny-env` | `--allow-env` |
 | Clock | The wall and monotonic clocks and sleeping (`Std.Time.SystemClock`) | `--deny-clock` | `--allow-clock` |
 | Entropy | Operating-system entropy (`Std.Random.Random.from_entropy`) | `--deny-entropy` | `--allow-entropy` |
-| Native | Native libraries, memory, and calls ([`Std.DynamicForeign`](https://github.com/Kayyo321/neura/wiki/ForeignInterop)); native code runs outside Neura's memory-safety and determinism guarantees | `--deny-native` | `--allow-native` |
+| Native | Native libraries, memory, and calls ([`Std.DynamicForeign`](ForeignInterop)); native code runs outside Neura's memory-safety and determinism guarantees | `--deny-native` | `--allow-native` |
 | Every group above | | `--deny-all` | |
 
 Capability options apply in command-line order, and a later option for a group overrides an earlier one. `--deny-all --allow-net --allow-fs=data` grants exactly the network and the files at or below `data`; `--allow-net --deny-all` grants nothing. The `--allow-*` options matter after a `--deny-*` option, and they keep their old meaning for files: `--allow-fs=prefix,...` narrows the default, so only the listed prefixes are reachable. Several lists accumulate (`--allow-fs=a --allow-fs=b` reaches `a` and `b`) until `--deny-fs` or `--deny-all` clears them. A plain `--allow-fs` grants every path again and replaces any list before it, so `--allow-fs=a --allow-fs` reaches every path. A list after it narrows it, so `--allow-fs --allow-fs=a` reaches only `a`.
 
 > **Security.** Nothing is denied by default. An image runs with everything the user who starts it can do: it can read, write, and delete their files, open connections, read their environment, and load native libraries that run outside Neura's guarantees. To run an image you do not trust, pass `--deny-all` and add only the `--allow-*` options it needs, for example `neura run --deny-all --allow-fs=data image.nvr`. The same holds for `neura test` and for the policy of an executable built with `neura build --native`.
 
-`neura run --record trace.txt` writes every host request and response, and how the run ended, to a text trace. `neura run --replay trace.txt` runs the image answering each request from the trace instead of calling any service, so it needs no capability, and reproduces the console output of the recorded run. A replay whose requests differ from the trace stops with status 1 and names the first difference. The trace of a program with tasks also records which task issued each request, when each overlapping request was answered, and the clock readings that expired a timer or a deadline, so its replay reproduces the schedule; such a trace carries the quantum and the task limits of the recorded run, and a replay uses them in place of its own options. [NVM](https://github.com/Kayyo321/neura/wiki/NVM#determinism-limits-and-observability) describes the trace format.
+`neura run --record trace.txt` writes every host request and response, and how the run ended, to a text trace. `neura run --replay trace.txt` runs the image answering each request from the trace instead of calling any service, so it needs no capability, and reproduces the console output of the recorded run. A replay whose requests differ from the trace stops with status 1 and names the first difference. The trace of a program with tasks also records which task issued each request, when each overlapping request was answered, and the clock readings that expired a timer or a deadline, so its replay reproduces the schedule; such a trace carries the quantum and the task limits of the recorded run, and a replay uses them in place of its own options. [NVM](NVM#determinism-limits-and-observability) describes the trace format.
 
-[Neuron conversion and execution](https://github.com/Kayyo321/neura/wiki/Backend) lists the supported operations and the build diagnostics for unsupported ones. The status of each example is in [Feature status](https://github.com/Kayyo321/neura/wiki/Status).
+[Neuron conversion and execution](Backend) lists the supported operations and the build diagnostics for unsupported ones. The status of each example is in [Feature status](Status).
 
 ### Run programs with tasks
 
-A program that uses [tasks](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) builds like any other, into an NVR 1.5 image, and `run` and `test` accept these options for it. Each limit ends the run with status 137 at the operation that would exceed it.
+A program that uses [tasks](Concurrency) builds like any other, into an NVR 1.5 image, and `run` and `test` accept these options for it. Each limit ends the run with status 137 at the operation that would exceed it.
 
 | Option | Commands | Meaning |
 | --- | --- | --- |
@@ -98,7 +90,7 @@ A program that uses [tasks](https://github.com/Kayyo321/neura/blob/main/docs/lan
 | `--trace-events <file>` | `run` | Write one JSON object per scheduler event, one per line. `--trace-wall-time` adds wall-clock times, which differ between runs. |
 | `--virtual-time` | `run`, `test` | Timers, deadlines, and the clock follow a clock that starts at zero and moves only when every task is parked, so a timeout takes no real time. It cannot be combined with `--replay` or `--each`. |
 
-For an image with tasks, `--stats` adds the peak numbers of live tasks, queued messages, and pending requests, and `run --profile` adds, for each spawn site, the tasks started there, the steps they executed, and how long they waited for a turn, on a channel or timer, and on host I/O. [Concurrency, section 14](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#14-tooling) describes the dump, the events, and virtual time. A program that uses tasks cannot use `Std.DynamicForeign` or a C import ([decision C15](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#3-decisions)).
+For an image with tasks, `--stats` adds the peak numbers of live tasks, queued messages, and pending requests, and `run --profile` adds, for each spawn site, the tasks started there, the steps they executed, and how long they waited for a turn, on a channel or timer, and on host I/O. [Concurrency, section 14](Concurrency#14-tooling) describes the dump, the events, and virtual time. A program that uses tasks cannot use `Std.DynamicForeign` or a C import ([decision C15](Concurrency#3-decisions)).
 
 ### Package a native executable
 
@@ -114,7 +106,7 @@ Set `NEURA_RUN_OPTIONS` to space- or tab-separated options to lower a recorded l
 
 `--static` selects the fully static flavor, which excludes native interop, so the policy it records grants every group except native code and `--static --allow-native` is an error. Set the CMake option `NEURA_STATIC_LAUNCHER` to `ON` to require that flavor or `OFF` to disable it. `AUTO` builds it when a static C library is available. Linux launchers install below `lib/neura/launchers/<triple>/`. Use `--target <triple>` to choose an installed ELF target or `--launcher <file>` to supply the launcher. Linux x86-64 is the verified target.
 
-`inspect` reports the launcher, the recorded policy with its limits and task settings, and the image. A file that is not a native executable is reported as `not a native executable (no NEURAEXE footer)` with status 1. Its `-o` option extracts the original image bytes. `run`, `disassemble`, and `decompile` also accept a packaged executable. `neura run` uses the supplied command-line policy. Run the file directly to apply the recorded policy. [Native executable format and contract](https://github.com/Kayyo321/neura/blob/main/docs/lang/Standalone.md)
+`inspect` reports the launcher, the recorded policy with its limits and task settings, and the image. A file that is not a native executable is reported as `not a native executable (no NEURAEXE footer)` with status 1. Its `-o` option extracts the original image bytes. `run`, `disassemble`, and `decompile` also accept a packaged executable. `neura run` uses the supplied command-line policy. Run the file directly to apply the recorded policy. [Native executable format and contract](Standalone)
 
 ### Choose graph execution
 
@@ -138,15 +130,23 @@ The file is read and validated in full before a member runs. LF separates lines.
 
 A member with status 0 has no report. For other outcomes, standard error shows `<image>: <lists>:<line>: exit status <status>` or `<image>: <lists>:<line>: trap: <diagnostic>`. The image path is canonical and the list path retains its command-line spelling. Later members still run. The command returns the first nonzero status in file order, including the status assigned to a trap, or 0 if all members succeed. `--stats` reports the number of members, exact totals for steps and host requests, the largest member heap peak, and the costs and byte size of the loaded image, followed by the `gpu:` line. `--each` applies only to `run` and may appear once. It conflicts with `--record`, `--replay`, `--profile`, and `--virtual-time`, checked in that order when more than one is present.
 
+## C imports
+
+`check`, `emit-ir`, `build`, and `test` read the headers of [`import:c(...)`](ForeignInterop#c-imports) with libclang. The tool loads libclang when the first C import is compiled, from `--libclang <file>`, else the `NEURA_LIBCLANG` environment variable, else the platform's usual names, such as `libclang-19.so.1` and `/usr/lib/llvm-19/lib`. Builds without C imports never load it. libclang also needs its builtin headers, such as `stddef.h` and `stdarg.h`, which C library headers include. The tool looks for them in `/usr/lib/llvm-<major>/lib/clang/<major>`, `/usr/lib/clang/<major>`, `/usr/local/lib/clang/<major>`, and `clang/<major>` beside the loaded library, where `<major>` is libclang's major version, and names the first that exists as libclang's resource directory. When libclang cannot find them, a header that includes `<stddef.h>` fails with `'stddef.h' file not found`. `--c-include <dir>` adds a header search directory, and `--c-define <name[=value]>` defines a macro while reading headers.
+
+`emit-ir`, `build`, and `test` link the libraries of C imports with the system C compiler: `--cc <compiler>`, else `$CC`, else `cc`. `--c-link-arg <arg>` passes an argument to that link. `check` reads headers but does not link.
+
+`neura c-bindings [--linked] [c-options] <header.h>` prints the module that a C import of the header generates. `--linked` generates it as an import that names libraries does.
+
 ## Test
 
 ```sh
 build/neura test -I examples/guide examples/testing/math-tests.nra
 ```
 
-`test` builds the listed files, runs every test they declare in a fresh execution, prints `PASS` or `FAIL` with the failure and its location for each, and a summary line. It exits with status 0 only when every test passes. It accepts the capability options of `run`, `--stats`, the run limits, and the task options of [Run programs with tasks](#run-programs-with-tasks) other than `--trace-events`. [Testing](https://github.com/Kayyo321/neura/wiki/Testing) defines tests and the `Std.Test` assertions.
+`test` builds the listed files, runs every test they declare in a fresh execution, prints `PASS` or `FAIL` with the failure and its location for each, and a summary line. It exits with status 0 only when every test passes. It accepts the capability options of `run`, `--stats`, the run limits, and the task options of [Run programs with tasks](#run-programs-with-tasks) other than `--trace-events`. [Testing](Testing) defines tests and the `Std.Test` assertions.
 
-These options test concurrent code ([Testing](https://github.com/Kayyo321/neura/wiki/Testing#tests-of-concurrent-code)):
+These options test concurrent code ([Testing](Testing#tests-of-concurrent-code)):
 
 | Option | Meaning |
 | --- | --- |
@@ -164,7 +164,7 @@ build/neura decompile hello.nvr
 
 `disassemble` writes the lossless text form of an image: every table, graph, neuron, weight, block, exit, import, the source map, and any optional section, in order. `assemble` turns that text back into an image, validates it with the same loader as `run`, and writes it; assembling an unedited disassembly reproduces the original bytes. Edited assembly is how tests and tools construct images by hand.
 
-`decompile` writes a typed reconstruction of the image: functions, blocks, state operations, calls, host effects, and the operations each block's graph computes, with every block labeled by how its meaning was established. `--no-provenance` omits names and source locations from the optional NAME section and source map. [Decompiler](https://github.com/Kayyo321/neura/wiki/Decompiler) specifies both forms and the evidence behind them.
+`decompile` writes a typed reconstruction of the image: functions, blocks, state operations, calls, host effects, and the operations each block's graph computes, with every block labeled by how its meaning was established. `--no-provenance` omits names and source locations from the optional NAME section and source map. [Decompiler](Decompiler) specifies both forms and the evidence behind them.
 
 ## Version, install, and update
 
@@ -194,8 +194,8 @@ Each status below is the tool's own. The exit status of a program that `neura ru
 
 ## Execution contract
 
-The [NVM specification](https://github.com/Kayyo321/neura/wiki/NVM#toolchain-and-distribution) defines how `neura build` produces an executable `.nvr` image from source or `.nir` and how `neura run` executes that image. Package configuration is not part of this release.
+The [NVM specification](NVM#toolchain-and-distribution) defines how `neura build` produces an executable `.nvr` image from source or `.nir` and how `neura run` executes that image. Package configuration is not part of this release.
 
 Diagnostics should identify the source file, line and column, the offending span, a clear explanation and, where possible, a correction. For example, passing a `string` to a function expecting `int32` should report both types and the argument location. Diagnostics go to standard error and compilation fails on errors. Exact format, encoding of column offsets and warning policy remain open.
 
-A formatter should produce stable, idempotent output consistent with [Coding style](https://github.com/Kayyo321/neura/blob/main/docs/style/CodingStyle.md). Editor integration should eventually expose diagnostics, navigation and completion; debugger support should include source locations, stepping and local variables. These are tooling goals, not promises of first-release support.
+A formatter should produce stable, idempotent output consistent with [Coding style](CodingStyle). Editor integration should eventually expose diagnostics, navigation and completion; debugger support should include source locations, stepping and local variables. These are tooling goals, not promises of first-release support.

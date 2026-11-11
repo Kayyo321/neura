@@ -1,16 +1,15 @@
-
+<!-- Generated from docs/lang/Stdlib.md by scripts/generate-wiki.py. Edit that file, not this one. -->
+# Standard library implementation plan
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-# Standard library implementation plan
-
-This page defines the Neura standard library's source modules, contracts, and algorithms. The language and runtime already supply the facilities in [section 3](#3-language-baseline-and-gaps). Every module and host service on this page is implemented in `stdlib/` and the runner, and tested as [section 17](#17-verification) describes; [Status](https://github.com/Kayyo321/neura/wiki/Status) and [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary) list what shipped. [Section 18](#18-implementation-decisions) records the decisions made where this plan left a choice open, and where the implementation departs from it.
+This page defines the Neura standard library's source modules, contracts, and algorithms. The language and runtime already supply the facilities in [section 3](#3-language-baseline-and-gaps). Every module and host service on this page is implemented in `stdlib/` and the runner, and tested as [section 17](#17-verification) describes; [Status](Status) and [Standard library](StandardLibrary) list what shipped. [Section 18](#18-implementation-decisions) records the decisions made where this plan left a choice open, and where the implementation departs from it.
 
 ## 1. How to read this plan
 
 - **Syntax is not specified here.** This page describes behavior, data layout, and algorithms in prose and tables. It contains no Neura source.
 - **Member notation.** Tables write a member as `name(parameter: Type, ...) → Result`. A function type is written `(A, B) → R`. A tuple type is written `[A, B]`, as in the language. This is documentation notation.
-- **Names are binding.** Module, type, and member names on this page are the names to implement. They follow the [coding style](https://github.com/Kayyo321/neura/blob/main/docs/style/CodingStyle.md). No member is named with a keyword; [section 15.2](#152-name-audit) lists the names that changed for that reason.
+- **Names are binding.** Module, type, and member names on this page are the names to implement. They follow the [coding style](CodingStyle). No member is named with a keyword; [section 15.2](#152-name-audit) lists the names that changed for that reason.
 - **Dependency labels.** Labels such as G1 and T1 point to compiler facilities used by an API. Their presence in an API table records what the implementation relies on. Host bindings also require registered providers.
 - **"Decision"** marks a choice this plan makes. Decisions are final for the first version. Changing one requires editing this page first.
 - **Sizes and indices** are `int` (`int32`), matching the built-in `length`. Hash codes are `uint32`.
@@ -35,7 +34,7 @@ This page defines the Neura standard library's source modules, contracts, and al
 
 ### 3.1 What the probes established
 
-The former frontend rejections for generic callbacks, generic enums, interface declarations, type tests, and string operations no longer describe the current compiler. These fixtures exercise the corresponding behavior through source, optimized and unoptimized NVR builds, and execution. The supported API contracts and remaining restrictions are in [Status](https://github.com/Kayyo321/neura/wiki/Status) and the language pages.
+The former frontend rejections for generic callbacks, generic enums, interface declarations, type tests, and string operations no longer describe the current compiler. These fixtures exercise the corresponding behavior through source, optimized and unoptimized NVR builds, and execution. The supported API contracts and remaining restrictions are in [Status](Status) and the language pages.
 
 | Capability | Evidence and boundary |
 | --- | --- |
@@ -56,7 +55,7 @@ The former frontend rejections for generic callbacks, generic enums, interface d
 | L1 Interfaces, L12 iterable for-each | [G4](#g4-interfaces) and [G5](#g5-for-each-over-library-collections) supply the language machinery. The collection interfaces and adapters still need source implementations. |
 | L2 Universal members and an `Object` root | [G3](#g3-universal-members) supplies operations for supported values and an explicit class-reference root spelled `class`. Scalar values are not boxed into it. |
 | L3 Function types and closures | [G1](#g1-function-types-over-type-parameters) permits concrete and generic callback types. |
-| L4 Automatic reclamation | [NVM](https://github.com/Kayyo321/neura/wiki/NVM#garbage-collection) supplies deterministic tracing and reclaims cycles. Host resources still require explicit close. |
+| L4 Automatic reclamation | [NVM](NVM#garbage-collection) supplies deterministic tracing and reclaims cycles. Host resources still require explicit close. |
 | L5 Vacant storage and storage operations | Runtime-sized arrays, clearing vacant slots, and bulk copy are unnecessary for the chosen layouts. Lists supply growing storage and `nil` supplies absent node links. [Optional accelerations](#34-optional-accelerations) |
 | L6 Bitwise operators and wrapping arithmetic | Checked shifts and bitwise operators are available. [Arithmetic recipes](#72-arithmetic-without-wrapping-intrinsics) implement modular operations without changing ordinary checked arithmetic. [N1](#n1-float-bit-access) supplies exact float bit access. |
 | L7 `char` and string semantics | [T1](#t1-text-primitives) supplies immutable UTF-8 text primitives. [Scalars](#83-scalars) represent code points as `uint32`. |
@@ -173,13 +172,13 @@ None of these blocks anything. Each replaces a loop of storage operations with o
 | `Std.Log` | `Logger` | [14.1](#141-stdlog) |
 | `Std.Test` | Assertions | [14.2](#142-stdtest) |
 | `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` | [Foreign interop](ForeignInterop) |
-| `Std.Concurrent` | `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, `Guarded` | [19](#19-stdconcurrent), [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#9-stdconcurrent) |
+| `Std.Concurrent` | `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, `Guarded` | [19](#19-stdconcurrent), [Concurrency](Concurrency#9-stdconcurrent) |
 
 `Std.Program`, `Std.Io.Console`, and `Std.Test` replace the built-in `SysIo` and `Test` modules, which are deleted ([section 4.6](#46-retiring-sysio-and-test)).
 
 ### 4.2 Source layout
 
-- The library source tree is `stdlib/`, laid out by the rules in [Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure). The installed tool discovers its trusted copy automatically. Ordinary `-I` roots cannot provide `Std` modules.
+- The library source tree is `stdlib/`, laid out by the rules in [Project structure](ProjectStructure). The installed tool discovers its trusted copy automatically. Ordinary `-I` roots cannot provide `Std` modules.
 - **Decision: one module per type, named after the type.** `stdlib/std/collections/array-list.nra` declares the module `ArrayList`, imported as `Std.Collections.ArrayList`, which exports the class `ArrayList`. The probes confirmed that a module can export a class of its own name and that the importer can construct it and use the module's enums in `match`.
 - **Factories are module functions.** Where Java writes a static method on a class, this library has an exported function in the type's module. This is why the first plan's class-level members are not needed. In the tables below, a type's "module functions" are these.
 - **Internal helpers** are unexported members of the module that uses them, or separate modules under an `Internal` component (`Std.Collections.Internal.HashCore`) when two types share them. Nothing outside `Std` imports an `Internal` module; P1's namespace rule extends to enforce that.
@@ -211,7 +210,7 @@ Wrapping arithmetic, integer sign reinterpretation, vacant storage, bulk copy, a
 
 ### 4.5 Host services
 
-Every interaction with the outside world is a host service with a name, a version, typed arguments, and typed success and error results ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-calls-and-standard-output)). An error result is a `uint32` code that the library maps to an `IoErrorKind` ([section 6.3](#63-error)): 1 `NotFound`, 2 `PermissionDenied`, 3 `AlreadyExists`, 4 `InvalidInput`, 5 `Interrupted`, 6 `UnexpectedEnd`, 7 `NotADirectory`, 8 `IsADirectory`, 9 `DirectoryNotEmpty`, 10 `ConnectionRefused`, 11 `ConnectionReset`, 12 `TimedOut`, 13 `Unsupported`, 14 `CapabilityDenied`, 15 `Cancelled` (the answer of a cancelled version 2 request), and every other code `Other` (the providers use 100).
+Every interaction with the outside world is a host service with a name, a version, typed arguments, and typed success and error results ([NVM](NVM#host-calls-and-standard-output)). An error result is a `uint32` code that the library maps to an `IoErrorKind` ([section 6.3](#63-error)): 1 `NotFound`, 2 `PermissionDenied`, 3 `AlreadyExists`, 4 `InvalidInput`, 5 `Interrupted`, 6 `UnexpectedEnd`, 7 `NotADirectory`, 8 `IsADirectory`, 9 `DirectoryNotEmpty`, 10 `ConnectionRefused`, 11 `ConnectionReset`, 12 `TimedOut`, 13 `Unsupported`, 14 `CapabilityDenied`, 15 `Cancelled` (the answer of a cancelled version 2 request), and every other code `Other` (the providers use 100).
 
 | Service | Version | Arguments | Success | Used by |
 | --- | --- | --- | --- | --- |
@@ -229,7 +228,7 @@ Every interaction with the outside world is a host service with a name, a versio
 | `neura.net.connect`, `accept`, `read`, `write` | 1, 2 | [section 11.4](#114-stdnet) | socket ID, bytes, or count | `Std.Net` (version 2); overlap in an image with tasks |
 | `neura.ffi.abi`, `arena.open`, `arena.close`, `alloc`, `library.open`, `library.default`, `library.embedded`, `symbol`, `read`, `write`, `strlen`, `call` | 1 | [NVM](NVM#host-services) | layouts, IDs, addresses, bytes, or packed results | `Std.DynamicForeign` |
 
-The exact signatures are in [NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services). The retired `neura.test.assert` and `neura.test.assert_equal_int32` services are no longer registered.
+The exact signatures are in [NVM](NVM#host-services). The retired `neura.test.assert` and `neura.test.assert_equal_int32` services are no longer registered.
 
 - **Capabilities.** `neura run` and `neura test` grant every group by default: files, network, environment, clock, entropy, and native code, as well as the console group and `neura.process.exit`. `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, and `--deny-all` turn groups off; `--allow-*` options grant a group again, and `--allow-fs` takes an optional list of path prefixes that narrows files to them. Options apply in command-line order. A denied service still binds, and each call returns error 14. The library default of `nvm::Capabilities` is all-denied: an embedder grants each group explicitly.
 - **Replay.** The NVM library already records and replays host interactions (`nvm::record`, `nvm::replay`). `neura run --record file` and `--replay file` expose that. Tests of I/O, time, and entropy run under replay.
@@ -271,7 +270,7 @@ There are two kinds of failure and they never mix.
 
 **Returned errors.** A function whose failure depends on input text, input bytes, or the outside world returns `Result<T>` ([section 6.2](#62-resultt)). The caller reads it with `match`. There is no propagation shorthand and no exception; passing an error up is an explicit `match` arm that returns it.
 
-**Traps.** A function whose precondition is violated ends the run. The run stops at once with the process status of the trap's class, 134 (`Abort`) for a message trap; no library or user code runs afterwards; nothing can observe or recover it ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)). The module `Failure` in `Std.Core` has one function:
+**Traps.** A function whose precondition is violated ends the run. The run stops at once with the process status of the trap's class, 134 (`Abort`) for a message trap; no library or user code runs afterwards; nothing can observe or recover it ([Errors](Errors)). The module `Failure` in `Std.Core` has one function:
 
 | Member | Behavior |
 | --- | --- |
@@ -373,7 +372,7 @@ The loop form depends on the source value.
 
 - A host resource (`File`, `TcpStream`, `TcpListener`) has `close() → Result<Unit>`. Closing again does nothing and returns `Ok`. Any other operation on a closed resource returns an `Io` error of kind `Closed`. If `close` reports an error the resource is still closed.
 - **Closing is always explicit.** Reclaiming an unreachable resource object frees its storage and does nothing else: `deinit` does not run and the host ID stays open until the run ends. No library class declares `deinit`. `Fs` and `Net` each allow at most 1,024 simultaneously open IDs per run; exceeding that returns an `Io` error of kind `Other`.
-- **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. The earlier decision here was "there is no scoped helper"; it is reversed, because with tasks a body can end early by cancellation and the close must still happen ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#7-cancellation-deadlines-and-resources)).
+- **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. The earlier decision here was "there is no scoped helper"; it is reversed, because with tasks a body can end early by cancellation and the close must still happen ([Concurrency](Concurrency#7-cancellation-deadlines-and-resources)).
   - If the open fails, the helper returns that error and does not call the body.
   - The body runs in a `scope` the helper owns, so every task started in that scope has finished before the resource is closed.
   - If the close succeeds, the helper returns the body's result unchanged. If the close fails after a body `Ok`, it returns the close error. If the close fails after a body `Err`, it returns a `Context` error whose cause is the body's error and whose message carries the close error's message: `closing the resource also failed: ` and that message from `with_open`, `close failed after the body failed: ` and that message from `with_connection`.
@@ -381,7 +380,7 @@ The loop form depends on the source value.
   - A trap in the body ends the run without cleanup; the runner then closes what the run left open.
 - **`Closeable.release<T>(resource: Closeable, outcome: Result<T>) → Result<T>`** is the closing rule on its own: it closes the resource and combines the result with the outcome of the work, as `with_open` does. A program that owns another kind of closeable resource calls it exactly once, after the work, on every ordinary completion.
 - Where a wrapper owns a closeable resource, it can use the `Closeable` interface. A wrapper over a bare function value does not own or close the function's receiver.
-- **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
+- **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
 
 ### 5.6 Callbacks
 
@@ -412,11 +411,11 @@ These are the intended source-module contracts. Compiler support for the operati
 
 ### 5.8 Task safety
 
-A function that a spawned task calls must be task-safe ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). For library code that means: no reassignable binding at module or file level, no module constant that is an object on the path of a function a task should be able to call, and no first-use static initialization. State that a function needs between calls belongs in an instance or in an argument.
+A function that a spawned task calls must be task-safe ([Concurrency](Concurrency#52-task-safe-calls)). For library code that means: no reassignable binding at module or file level, no module constant that is an object on the path of a function a task should be able to call, and no first-use static initialization. State that a function needs between calls belongs in an instance or in an argument.
 
 - **How to check.** `neura check --task-safety <files>` lists every function of the linked program with `task-safe`, `task-safe; not for a parallel map: <reason>`, or `not task-safe: <reason>`, grouped by source file. Run it on a program that imports the module.
 - **What is pinned.** The `concurrency-frontend` test runs the report over a program that links `Console`, `HashMap`, `ArrayList`, `TreeMap`, `Float64`, `Duration`, `SystemClock`, `Instant`, `Logger`, `TcpStream`, `TcpListener`, `Strings`, `Regex`, `Random`, and `Json`, and fails when a function other than console input is not task-safe.
-- **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`); `Crc32.of` and `update`; `Sha256.of`, `update`, and `finish`; `Hex.decode` and the four fixed-alphabet `Base64` decoders; and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary#task-safety) gives the reason for each and the statement for every area.
+- **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`); `Crc32.of` and `update`; `Sha256.of`, `update`, and `finish`; `Hex.decode` and the four fixed-alphabet `Base64` decoders; and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](StandardLibrary#task-safety) gives the reason for each and the statement for every area.
 - **Changes made for it.** A collection's text conversion keeps its self-containment flag in the instance ([section 5.2](#52-equality-hashing-and-text)). Float parsing reads no module state. The `BigInteger` and `BigDecimal` methods build the small values they need and do not read the exported constants `Zero`, `One`, and `Ten`, which stay for the root task's use.
 
 
@@ -474,12 +473,12 @@ There is no accessor for the error alone: `match` reads it.
 | `Custom` | One `ErrorDetail` | An error defined outside the library. |
 | `Context` | `message: string`, `cause: Error` | Another error with a description of what was being attempted. |
 
-- `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`, `Cancelled`. The first fourteen map from host error codes 1 through 14, and `Cancelled` from code 15, the answer of a cancelled version 2 request ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#104-host-io)); it comes last so that the kinds before it keep their order. `Closed` and `InvalidData` are produced by the library.
+- `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`, `Cancelled`. The first fourteen map from host error codes 1 through 14, and `Cancelled` from code 15, the answer of a cancelled version 2 request ([Concurrency](Concurrency#104-host-io)); it comes last so that the kinds before it keep their order. `Closed` and `InvalidData` are produced by the library.
 - `ParseErrorKind`, in order: `Empty`, `InvalidCharacter`, `OutOfRange`, `UnexpectedEnd`, `Syntax`.
 - **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works today. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
 - Adding a variant to `Error` breaks every `match` without a wildcard arm, so the variant list changes only with a major version. Code that only reports errors should end its `match` with a wildcard arm that calls `Errors.message`.
 - Errors are immutable. A cause is set at construction, so chains are finite and acyclic.
-- **`PortableError`** is the transferable copy of an `Error`, for a failure that must cross a channel or a spawn. `Error` itself is not transferable, because `Custom` holds an `ErrorDetail` object ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#51-transferable-types)). `PortableError` has the same variants and fields with one change: `Custom` is `Custom { code: string, message: string }`, and the cause of its `Context` is a `PortableError`.
+- **`PortableError`** is the transferable copy of an `Error`, for a failure that must cross a channel or a spawn. `Error` itself is not transferable, because `Custom` holds an `ErrorDetail` object ([Concurrency](Concurrency#51-transferable-types)). `PortableError` has the same variants and fields with one change: `Custom` is `Custom { code: string, message: string }`, and the cause of its `Context` is a `PortableError`.
 
 The module `Error` exports the enum, the two kind enums, `ErrorDetail`, `SimpleDetail`, and:
 
@@ -521,7 +520,7 @@ Named types are kept where the name carries a contract a tuple cannot: `RegexMat
 
 ## 7. Primitive companion modules
 
-`Std.Core` has one module per primitive type: `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `Float16`, `BFloat16`, `Float32`, `Float64`, `Bool`, and [`String`](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string). The integer modules have identical member lists, as do the float modules. Each is a separate hand-written source file.
+`Std.Core` has one module per primitive type: `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `Float16`, `BFloat16`, `Float32`, `Float64`, `Bool`, and [`String`](StandardLibrary#string). The integer modules have identical member lists, as do the float modules. Each is a separate hand-written source file.
 
 ### 7.1 Integer modules
 
@@ -653,7 +652,7 @@ Functions that return several strings return a built-in list, not an `ArrayList`
 
 **UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
 
-**Unicode scope. Decision:** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope. Decision:** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 8.2 `StringBuilder`
 
@@ -1006,7 +1005,7 @@ The module also has functions for sequences of one element type, which a member 
 - **`sqrt`** is correctly rounded. It unpacks the operand, computes the integer square root of the significand shifted to an even exponent, one result bit per step with a running remainder, and rounds to nearest, ties to even. Negative operands other than `-0.0` give NaN.
 - **Other functions:** `cbrt`, `hypot`, `exp`, `expm1`, `log`, `log1p`, `log2`, `log10`, `pow`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `to_radians`, and `to_degrees`.
 
-**Decision:** these functions are a port of fdlibm 5.3, operation for operation, including its argument reduction, its polynomial coefficients (written as exact bit patterns through `Float64.from_bits`), and its special cases. fdlibm relies only on IEEE 754 double arithmetic with round-to-nearest and no fused or reassociated operations, which is what [Numbers](https://github.com/Kayyo321/neura/wiki/Numbers) guarantees, and on reading and writing the high and low 32-bit words of a double, which is N1. The functions are therefore defined by their source: every runtime produces bit-identical results. Every NaN result is the canonical NaN. fdlibm's copyright notice must be kept in the ported files, following the third-party rule in [CONTRIBUTING](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md).
+**Decision:** these functions are a port of fdlibm 5.3, operation for operation, including its argument reduction, its polynomial coefficients (written as exact bit patterns through `Float64.from_bits`), and its special cases. fdlibm relies only on IEEE 754 double arithmetic with round-to-nearest and no fused or reassociated operations, which is what [Numbers](Numbers) guarantees, and on reading and writing the high and low 32-bit words of a double, which is N1. The functions are therefore defined by their source: every runtime produces bit-identical results. Every NaN result is the canonical NaN. fdlibm's copyright notice must be kept in the ported files, following the third-party rule in [CONTRIBUTING](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md).
 
 ### 10.2 `BigInteger`
 
@@ -1059,7 +1058,7 @@ An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`
 | `print_line(s: string)` | Writes the text and one LF through `neura.console.write_line`. A failed write traps with `console write failed`, as `SysIo.println` does today. | F1 for the message |
 | `try_print_line(s: string) → Result<Unit>` | The same write, returning the failure. | |
 | `write(s)`, `error_line(s)`, and their `try_` forms | Write raw text through `neura.console.write`, to output or to the error stream. | T1 (text to bytes) |
-| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](https://github.com/Kayyo321/neura/wiki/StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
+| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
 | `print`, `println`, `eprint`, `eprintln`, and their `try_` forms | Format first and then write to output or to the error stream. The newline forms append one LF. | T1, P2 |
 | `read_line() → Result<Optional<string>>` | A line without its terminator; `None` at the end of input. | T1 |
 | `output() → ByteSink`, `error() → ByteSink`, `input() → ByteSource` | The console as streams. | |
@@ -1127,7 +1126,7 @@ This module replaces `SysIo.Entry` ([section 4.6](#46-retiring-sysio-and-test)).
 
 ### 11.4 `Std.Net`
 
-TCP only. A call waits for its result; in a program with tasks the waiting task parks and the others run, and cancelling its scope ends the wait with kind `Cancelled` ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#104-host-io)). Needs P2 and T1.
+TCP only. A call waits for its result; in a program with tasks the waiting task parks and the others run, and cancelling its scope ends the wait with kind `Cancelled` ([Concurrency](Concurrency#104-host-io)). Needs P2 and T1.
 
 - `TcpStream`: the module functions `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>` and `with_connection<T>(host, port, body)`, the scoped helper of [section 5.5](#55-resources). Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `set_read_timeout(timeout: Duration)` (zero for none; an expired timeout fails with kind `TimedOut`), and `close()`. A write that is cancelled while it waits fails with kind `Cancelled` and the message `stream write cancelled after N bytes`, where N is the number of bytes already sent.
 - `TcpListener`: the module function `bind(host: string, port: int) → Result<TcpListener>`. Members `accept() → Result<TcpStream>`, `local_port() → int`, and `close()`. Port 0 asks the host for a free port.
@@ -1278,7 +1277,7 @@ This module replaces the built-in `Test` as described in [section 4.6](#46-retir
 
 - The typed assertions remain available for callers that prefer a concrete signature.
 - **There is no assertion that expects a trap.** A trap cannot be caught, so a test function cannot observe one and continue. Code that must trap is tested by a separate program with an expected diagnostic ([section 17](#17-verification)).
-- A failed assertion ends its test, as today. Tests are discovered and run as [Testing](https://github.com/Kayyo321/neura/wiki/Testing) describes; only the import changes.
+- A failed assertion ends its test, as today. Tests are discovered and run as [Testing](Testing) describes; only the import changes.
 
 ## 15. Scope and names
 
@@ -1320,7 +1319,7 @@ Contracts deliberately kept: insertion-ordered hash collections, separate read-o
 
 ## 16. Roadmap
 
-The library was implemented in these independent source tracks, on the compiler support of [section 3](#3-language-baseline-and-gaps). Every track is complete: its modules are installed, tested through the installed compiler and NVM, and listed in [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary).
+The library was implemented in these independent source tracks, on the compiler support of [section 3](#3-language-baseline-and-gaps). Every track is complete: its modules are installed, tested through the installed compiler and NVM, and listed in [Standard library](StandardLibrary).
 
 | Track | Modules and acceptance criteria |
 | --- | --- |
@@ -1330,7 +1329,7 @@ The library was implemented in these independent source tracks, on the compiler 
 | Collections and iteration | Implement list, deque, linked list, hash, ordinal, tree, priority, and sequence modules against their interfaces. Check deterministic order, key equality, list aliasing, nil links, and structural modifications. |
 | Pure algorithms and data formats | Implement math, seeded randomness, calendar arithmetic, JSON and other encodings, and digests. Compare the outputs with independent reference models and published vectors where applicable. |
 | Host providers and capabilities | Register concrete providers for console input, files, environment, process, time, entropy, and networking. Specify denial, lifetime, error codes, and replay before considering the source modules complete. |
-| Concurrency | Implement `Std.Concurrent` over the scheduler operations of [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md), the scoped resource helpers, `PortableError`, and the overlapping, cancellable forms of the console, clock, and network calls. Check the library's task safety with `check --task-safety`. |
+| Concurrency | Implement `Std.Concurrent` over the scheduler operations of [Concurrency](Concurrency), the scoped resource helpers, `PortableError`, and the overlapping, cancellable forms of the console, clock, and network calls. Check the library's task safety with `check --task-safety`. |
 
 Within a track, establish the public contract and failure behavior, then implement, test, and document the module. A source module is supported only when the complete path through the installed compiler and NVM is verified.
 
@@ -1379,8 +1378,8 @@ The library follows this plan. Where the plan left a choice open, or where the l
 
 - **Receivers.** A method cannot name its own receiver, so a member that returns "the same object" needs a stored self reference. `StringBuilder` keeps one, set by its factory `create()`. Classes whose invariants need a factory (`StringBuilder`, `Random`, `File`, `TcpStream`, `TcpListener`) take a module-private token or an internal handle in their constructors.
 - **Constructor visibility.** An unexported `init` is private to its class, not to its module, so a module function cannot call it. `Regex` exports its constructor for that reason; an object built directly with it traps on use.
-- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure).
-- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#initialization)).
+- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](ProjectStructure).
+- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](Modules#initialization)).
 - **Extra members.** `Error` and `Result` have `equals`, `hash`, and `to_string`, and `SimpleDetail` compares its code and message, so errors compare structurally. `Comparable<T>` is `Std.Core.Comparable`. The collection interfaces declare `add(T) → bool` for every mutable collection (lists return true), and a sorted map's `first`, `last`, `range`, and `descending` give entries while `floor`, `ceiling`, `lower`, and `higher` give keys, with `_entry` forms for entries.
 
 ### 18.2 Program, console, and testing
@@ -1442,7 +1441,7 @@ The library follows this plan. Where the plan left a choice open, or where the l
 
 - **Modification counts.** `ArrayList` uses its backing list's `version`; `ArrayDeque`, `LinkedList`, `PriorityQueue`, `BitSet`, and `OrdinalMap` share a `Cell<uint64>` count with their iterators. A callback or comparator that changes the collection traps with `collection modified during iteration`, and `Sorting` checks the list's version after every comparator call, also when it sorts a built-in list directly.
 - **Construction.** `new ArrayList<T>(items)` adopts the list, as `wrap` does. `PriorityQueue`'s constructor takes the items and the comparator and heapifies a copy. `ArrayDeque`, `LinkedList`, and `BitSet` also have `create` and `of`.
-- **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)).
+- **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](Concurrency#52-task-safe-calls)).
 - **LinkedList.** `sort` and `binary_search` work on a copy; `sort` and `reverse` move values between existing nodes, which is not a structural change; `clear` unlinks every node. Positional access outside the list traps with `invalid argument: index out of range`.
 - **ArrayList.add_all** reads the argument up to its starting length, so `add_all(items())` doubles the list instead of trapping.
 - **Equality direction.** Search members call `value.equals(element)` with the probe as the receiver.
@@ -1487,7 +1486,7 @@ The library follows this plan. Where the plan left a choice open, or where the l
 
 ## 19. `Std.Concurrent`
 
-The modules of `Std.Concurrent` are implemented. [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) specifies the language forms they serve, the memory model, the scheduler, and the limits; this section gives the library contracts. Source: `stdlib/std/concurrent/`, one module per file, importing only `Std.Core` and `Std.Time`.
+The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) specifies the language forms they serve, the memory model, the scheduler, and the limits; this section gives the library contracts. Source: `stdlib/std/concurrent/`, one module per file, importing only `Std.Core` and `Std.Time`.
 
 | Module | Contract |
 | --- | --- |
@@ -1503,8 +1502,8 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](https://github.co
 | `Semaphore` | A fixed number of permits. `create(permits)` traps with `invalid argument: permits` for a negative count. `acquire()` parks until a permit is free and returns `AcquireOutcome`: `Acquired` or `Cancelled`. `try_acquire()` returns a `bool` and never parks. `release()` returns a permit and wakes the task that has waited longest; releasing more permits than were created traps with `invalid state: released more permits than were created`. |
 | `Guarded` | Mutable state that tasks share one at a time. `create<T>(initializer)` builds the state inside the guard. `with<U>(body)` runs `body` with exclusive access and returns its result; a second task that calls `with` parks until the first returns, and that wait is not cancellable. The captures of `initializer` and `body` and the result `U` are transferable, so no reference to the state escapes. Calling `with` on a guard the task already holds traps with `invalid state: guard already held`. |
 
-- Every handle except `Task<T>` and `Scope` is transferable ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#51-transferable-types)). The compiler recognizes the handle classes by the trusted file that declares them.
+- Every handle except `Task<T>` and `Scope` is transferable ([Concurrency](Concurrency#51-transferable-types)). The compiler recognizes the handle classes by the trusted file that declares them.
 - The classes `Sender`, `Receiver`, `Task`, and `Timer` also export `select_handle()` and a `<member>_selected(code)` function. The `select` statement calls them; a program does not.
 - `Channel.State` is the identity the three ends of one channel share. A program does not construct one.
-- Tests: `stdlib-concurrent` for `Tasks` and `WorkerGroup`; the `concurrency-*` and `backend-concurrency` entries for the rest ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#15-verification)).
+- Tests: `stdlib-concurrent` for `Tasks` and `WorkerGroup`; the `concurrency-*` and `backend-concurrency` entries for the rest ([Concurrency](Concurrency#15-verification)).
 - Task safety of the library as a whole is in [section 5.8](#58-task-safety).

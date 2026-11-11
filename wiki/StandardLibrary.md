@@ -1,12 +1,13 @@
+<!-- Generated from docs/lang/StandardLibrary.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Standard library and I/O
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-
-The standard library is Neura source installed with the tool below `share/neura/stdlib` and resolved for every `Std.*` import without an `-I` option ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#standard-library-imports)). It is compiled together with each program, and an image contains only the library code the program reaches. The [library reference](https://github.com/Kayyo321/neura/wiki/Stdlib) links to individual modules; the [implementation plan](https://github.com/Kayyo321/neura/wiki/Stdlib-Design) specifies their design and algorithms, and [section 18](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#18-implementation-decisions) records decisions made where the plan was open.
+The standard library is Neura source installed with the tool below `share/neura/stdlib` and resolved for every `Std.*` import without an `-I` option ([Modules](Modules#standard-library-imports)). It is compiled together with each program, and an image contains only the library code the program reaches. The [library reference](Stdlib) links to individual modules; the [implementation plan](Stdlib-Design) specifies their design and algorithms, and [section 18](Stdlib-Design#18-implementation-decisions) records decisions made where the plan was open.
 
 Each type has its own module, named after it: `Std.Collections.ArrayList` is `stdlib/std/collections/array-list.nra` and exports the class `ArrayList` and its module functions. Import each module you use; there is no prelude.
 
+<!-- example: run -->
 ```neura
 let array_list = import:Std.Collections.ArrayList;
 let console = import:Std.Io.Console;
@@ -22,6 +23,12 @@ export let App = module:program.Entry (
         return program.ExitCode.Ok;
     };
 );
+```
+
+The program prints:
+
+```text
+Ada
 ```
 
 | Area | Modules |
@@ -40,17 +47,16 @@ export let App = module:program.Entry (
 | `Std.Net` | `TcpStream`, `TcpListener` |
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` |
 | `Std.Log` | `Logger` |
-| `Std.Test` | The assertions of [Testing](https://github.com/Kayyo321/neura/wiki/Testing) |
-| `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` ([Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop)) |
-| `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` ([Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop)) |
+| `Std.Test` | The assertions of [Testing](Testing) |
+| `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` ([Foreign interop](ForeignInterop)) |
 
-Expected failures are `Result<T>` values whose error is the `Error` enum; absent values are `Optional<T>`. A violated precondition traps with one of the messages of [section 5.1](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#51-failure-model). An `Error` cannot be sent on a channel or given to a spawned task, because a `Custom` error holds an object. `Std.Core.Error.PortableError` is its transferable copy: `to_portable(e)` flattens a `Custom` error to its code and message, and `from_portable(p)` gives back an `Error` with the same message ([Stdlib](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#63-error)).
+Expected failures are `Result<T>` values whose error is the `Error` enum; absent values are `Optional<T>`. A violated precondition traps with one of the messages of [section 5.1](Stdlib-Design#51-failure-model). An `Error` cannot be sent on a channel or given to a spawned task, because a `Custom` error holds an object. `Std.Core.Error.PortableError` is its transferable copy: `to_portable(e)` flattens a `Custom` error to its code and message, and `from_portable(p)` gives back an `Error` with the same message ([Stdlib](Stdlib-Design#63-error)).
 
 `RegexFlags` compares and hashes its three option values. A compiled `Regex` uses its pattern and the options recorded at compilation, and its text is the pattern. A `RegexMatch` uses its input, capture offsets, and group names, and its text is the whole match. `FileMetadata` uses the entry kind, size, and modification time for equality and hashing. Its text is `Kind(size, modified)`, with `nil` when the modification time is absent. Mutating flags or metadata can change their hashes.
 
 ## String
 
-`Std.Core.String` is the companion module for the immutable `string` primitive. It inherits the receiver-first functions of [`Std.Text.Strings`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#81-strings), including `contains`, `repeat`, UTF-8 construction, and ASCII case mapping. Import the module to call those functions explicitly or use the [primitive member syntax](https://github.com/Kayyo321/neura/wiki/Types#primitive-companions) on a string value.
+`Std.Core.String` is the companion module for the immutable `string` primitive. It inherits the receiver-first functions of [`Std.Text.Strings`](Stdlib-Design#81-strings), including `contains`, `repeat`, UTF-8 construction, and ASCII case mapping. Import the module to call those functions explicitly or use the [primitive member syntax](Types#primitive-companions) on a string value.
 
 Text positions and range lengths count UTF-8 bytes except in the explicit UTF-16 adapters. Use `byte_length` for bytes, `scalar_count` for Unicode scalar values, and `utf16_length` for UTF-16 code units. A slice includes its start and excludes its end. Byte slice endpoints must be on UTF-8 boundaries.
 
@@ -69,7 +75,7 @@ Text positions and range lengths count UTF-8 bytes except in the explicit UTF-16
 | `trim(s)`, `strip(s)`, `strip_leading(s)`, `strip_trailing(s)`, `is_blank(s)` | `trim` removes values through U+0020 at either end. The other operations use the whitespace definition below. An empty string is blank. |
 | `lines(s)` | Split at CR, LF, or CRLF. The empty string gives no lines. A terminal separator contributes no extra line. |
 | `indent(s, count)`, `strip_indent(s)` | `indent` adds spaces for positive counts or removes up to the magnitude in leading whitespace scalars for negative counts, then ends each line with LF. `strip_indent` removes the indentation common to nonblank lines and the final line, strips trailing whitespace from each line, and normalizes separators to LF. A terminal separator fixes the common indentation at zero. |
-| `matches(s, pattern)`, `replace_all(s, pattern, replacement)`, `replace_first_regex(s, pattern, replacement)` | Compile with [`Std.Text.Regex`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#84-regex). `matches` requires a whole-string match. An invalid pattern or replacement traps. |
+| `matches(s, pattern)`, `replace_all(s, pattern, replacement)`, `replace_first_regex(s, pattern, replacement)` | Compile with [`Std.Text.Regex`](Stdlib-Design#84-regex). `matches` requires a whole-string match. An invalid pattern or replacement traps. |
 | `split_regex(s, pattern)`, `split_regex_limit(s, pattern, limit)`, `split_with_delimiters(s, pattern, limit)` | Split at regular-expression matches. Limits must be positive and count pieces before interleaving matched delimiters. The last piece holds the remainder, and empty pieces are kept. |
 | `formatted(s, args...)`, `vformatted(s, args)` | Use the [console format grammar](#console-formatting) and return the result as text. The second accepts a prebuilt `Argument[]`. Invalid formats trap. Neither writes to a stream. |
 | `value_of<T>(value)`, `transform<T>(s, operation)` | Format a value that supports `to_string` or apply a callback of type `func(string) -> T`. |
@@ -105,6 +111,7 @@ When encoding to ASCII or Latin-1, an unrepresentable scalar becomes `?`. Decodi
 
 The byte-order-aware `Utf16` and `Utf32` variants encode a big-endian byte-order mark at the start and read either byte order when a mark is present. They decode unmarked input as big-endian. The explicit-endian variants omit a mark when encoding and preserve a decoded U+FEFF as text. Charset conversion always returns ordinary UTF-8 text on decode. [Java SE 26 Charset](https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/nio/charset/Charset.html)
 
+<!-- example: check -->
 ```neura
 let lower = "I".to_lower_case("tr");              // ı
 let bytes = lower.get_bytes("UTF-16LE");
@@ -115,6 +122,7 @@ let decoded = string.decode_bytes(bytes, "UTF-16LE");
 
 `Console.format(pattern, args...)` and the static `Console.Formatter.format` return a UTF-8 string. `print` and `println` format to stdout, and `eprint` and `eprintln` format to stderr. The two newline forms append one LF. The module functions have `try_` counterparts that return a `Result` containing the string or `Unit`. For an existing `Std.Core.Variadic.Argument[]`, use `vformat` or `try_vformat`. Use `write`, `print_line`, or `error_line` for already-formatted text that may contain literal braces.
 
+<!-- example: check -->
 ```neura
 let console = import:Std.Io.Console;
 
@@ -138,8 +146,9 @@ Format strings are checked at runtime and may come from any string expression. I
 
 ## Std.Concurrent
 
-`Std.Concurrent` holds the library side of [tasks](https://github.com/Kayyo321/neura/wiki/CoreLanguage#tasks-scopes-and-select): handles for the tasks and scopes that `spawn` and `scope` create, channels, cancellation, timers, helpers that run groups of calls, and handles for shared state. [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) is the specification, with the memory model and the scheduler. Each type has its own module, as elsewhere:
+`Std.Concurrent` holds the library side of [tasks](CoreLanguage#tasks-scopes-and-select): handles for the tasks and scopes that `spawn` and `scope` create, channels, cancellation, timers, helpers that run groups of calls, and handles for shared state. [Concurrency](Concurrency) is the specification, with the memory model and the scheduler. Each type has its own module, as elsewhere:
 
+<!-- example: check -->
 ```neura
 let channels = import:Std.Concurrent.Channel;
 
@@ -163,12 +172,12 @@ let [jobs, next_job, jobs_closer] = channels.open<int>(64);
 - **Transferable handles.** Channel ends, `Timer`, `AtomicInt64`, `Semaphore`, `Guarded<T>`, and a `WorkerGroup<T>` handle can be given to a spawned task or sent on a channel. `Task<T>` and `Scope` cannot leave their scope. No other library class is transferable: a collection belongs to the task that created it.
 - **Outcomes, not errors.** Closure and cancellation are expected events, so the operations above report them as enum values and return no `Error`.
 - **Cancellation is cooperative.** It wakes a parked channel operation, timer wait, or cancellable host request with `Cancelled`. A task that is computing asks `Cancellation.requested()`.
-- **The clock.** `cancel_after`, `cancel_at`, `Timer.after`, `Timer.at`, and `Cancellation.remaining` read the monotonic clock, which is granted by default and denied by `--deny-clock`. Under `--virtual-time` they read the virtual clock ([Testing](https://github.com/Kayyo321/neura/wiki/Testing#tests-of-concurrent-code)).
-- **Native code.** A program that uses any scheduler operation cannot use `Std.DynamicForeign` or a C import ([decision C15](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#3-decisions)).
+- **The clock.** `cancel_after`, `cancel_at`, `Timer.after`, `Timer.at`, and `Cancellation.remaining` read the monotonic clock, which is granted by default and denied by `--deny-clock`. Under `--virtual-time` they read the virtual clock ([Testing](Testing#tests-of-concurrent-code)).
+- **Native code.** A program that uses any scheduler operation cannot use `Std.DynamicForeign` or a C import ([decision C15](Concurrency#3-decisions)).
 
 ## Task safety
 
-A call that `spawn` starts must be [task-safe](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls): nothing it reaches may read or write a reassignable module binding, read a module constant that is an object, or call native code. `neura check --task-safety <files>` prints the answer for every function of the linked program, with the reason for each one that is not task-safe, so any function can be checked. A generic function is listed once for each specialization the program uses.
+A call that `spawn` starts must be [task-safe](Concurrency#52-task-safe-calls): nothing it reaches may read or write a reassignable module binding, read a module constant that is an object, or call native code. `neura check --task-safety <files>` prints the answer for every function of the linked program, with the reason for each one that is not task-safe, so any function can be checked. A generic function is listed once for each specialization the program uses.
 
 | Area | Task-safe | Not task-safe |
 | --- | --- | --- |
@@ -189,12 +198,12 @@ A spawned task may read a `const` module binding of a transferable type, such as
 
 ## Host services and capabilities
 
-Everything that reaches outside the program goes through a named, versioned host service ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services)). `neura run` and `neura test` grant every host service by default: files, the network, environment variables, clocks, entropy, and native code work with no option. `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, and `--deny-all` turn groups off ([Tooling](https://github.com/Kayyo321/neura/wiki/Tooling#build-and-run-executables)). A call to a denied service returns an `Io` error of kind `CapabilityDenied`. `neura run --record` and `--replay` capture and replay every host interaction, which makes programs that use time, entropy, files, or sockets reproducible.
+Everything that reaches outside the program goes through a named, versioned host service ([NVM](NVM#host-services)). `neura run` and `neura test` grant every host service by default: files, the network, environment variables, clocks, entropy, and native code work with no option. `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, and `--deny-all` turn groups off ([Tooling](Tooling#build-and-run-executables)). A call to a denied service returns an `Io` error of kind `CapabilityDenied`. `neura run --record` and `--replay` capture and replay every host interaction, which makes programs that use time, entropy, files, or sockets reproducible.
 
-A host resource (`File`, `TcpStream`, `TcpListener`) is closed explicitly with `close()`. When a run ends, the runner closes whatever the program left open; reclaiming an unreachable resource object does not close it. Two scoped helpers close for the program: `File.with_open<T>(path, mode, body)` and `TcpStream.with_connection<T>(host, port, body)` open the resource, run `body` with it, and close it exactly once when the body returns a value, returns an error, or returns because its scope was cancelled. If the open fails, the body is not called. If the close fails after a body `Ok`, the helper returns the close error; after a body `Err`, a `Context` error whose cause is the body's error. `Std.Io.Closeable.release<T>(resource, outcome)` applies the same rule to any `Closeable`. A trap in the body still ends the run without cleanup ([Stdlib](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#55-resources)).
+A host resource (`File`, `TcpStream`, `TcpListener`) is closed explicitly with `close()`. When a run ends, the runner closes whatever the program left open; reclaiming an unreachable resource object does not close it. Two scoped helpers close for the program: `File.with_open<T>(path, mode, body)` and `TcpStream.with_connection<T>(host, port, body)` open the resource, run `body` with it, and close it exactly once when the body returns a value, returns an error, or returns because its scope was cancelled. If the open fails, the body is not called. If the close fails after a body `Ok`, the helper returns the close error; after a body `Err`, a `Context` error whose cause is the body's error. `Std.Io.Closeable.release<T>(resource, outcome)` applies the same rule to any `Closeable`. A trap in the body still ends the run without cleanup ([Stdlib](Stdlib-Design#55-resources)).
 
-In a program with tasks, the calls that wait on the outside world overlap: a task parked in `TcpStream.read`, `write`, or `connect`, `TcpListener.accept`, `Console.read_line`, or `SystemClock.sleep` lets the other tasks run. Cancelling its scope ends the wait with an `Io` error of kind `Cancelled`, unless the operation had already finished; a cancelled write reports the bytes it had written. File operations and console output complete before another task runs ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#104-host-io)).
+In a program with tasks, the calls that wait on the outside world overlap: a task parked in `TcpStream.read`, `write`, or `connect`, `TcpListener.accept`, `Console.read_line`, or `SystemClock.sleep` lets the other tasks run. Cancelling its scope ends the wait with an `Io` error of kind `Cancelled`, unless the operation had already finished; a cancelled write reports the bytes it had written. File operations and console output complete before another task runs ([Concurrency](Concurrency#104-host-io)).
 
 ## Testing the library
 
-Each module's tests are in `tests/stdlib/<area>/` ([Contributing](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md)): test files for `neura test`, trap programs with expected diagnostics, and programs with expected output. CTest runs every area against a fresh installation in optimized and unoptimized builds and checks repeated runs for identical output and step counts. `backend-reference` runs every library test function under the NeuraIR reference evaluator as well and compares outcomes with NVM. `tests/benchmarks` records step counts, peak heap cells, neuron counts, and image sizes for representative workloads against a checked-in baseline. `tests/stdlib/concurrent` holds the tests of `Tasks` and `WorkerGroup`; the other `Std.Concurrent` modules are tested with the language forms under `tests/concurrency` and `tests/backend` ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#15-verification)).
+Each module's tests are in `tests/stdlib/<area>/` ([Contributing](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md)): test files for `neura test`, trap programs with expected diagnostics, and programs with expected output. CTest runs every area against a fresh installation in optimized and unoptimized builds and checks repeated runs for identical output and step counts. `backend-reference` runs every library test function under the NeuraIR reference evaluator as well and compares outcomes with NVM. `tests/benchmarks` records step counts, peak heap cells, neuron counts, and image sizes for representative workloads against a checked-in baseline. `tests/stdlib/concurrent` holds the tests of `Tasks` and `WorkerGroup`; the other `Std.Concurrent` modules are tested with the language forms under `tests/concurrency` and `tests/backend` ([Concurrency](Concurrency#15-verification)).

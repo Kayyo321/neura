@@ -1,7 +1,7 @@
+<!-- Generated from docs/lang/Testing.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Testing
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
-
 
 `neura test` builds and runs tests. A test is an exported, zero-argument function returning `void` whose name starts with `test_`, declared in a module of one of the files listed on the command line. Imported files contribute no tests. Functions that are not exported, take arguments, or return a value are not tests.
 
@@ -9,7 +9,7 @@
 neura test -I examples/guide examples/testing/math-tests.nra
 ```
 
-Tests import [`Std.Test`](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#142-stdtest), whose assertions are ordinary Neura functions: `assert`, `assert_with`, `fail`, the typed `assert_equal_int32`, `assert_equal_int64`, `assert_equal_uint64`, `assert_equal_bool`, `assert_equal_string`, `assert_equal_float64`, and `assert_float_near`, the generic `assert_equal<T>` and `assert_not_equal<T>`, and `assert_some<T>`, `assert_none<T>`, `assert_ok<T>`, and `assert_err<T>` for `Optional` and `Result` values. A failed assertion builds its message and ends the test with a message trap (reason 3). The runner reports that message at the innermost frame that belongs to one of the listed test files, which is the assertion's call site, and continues with the next test. A test that returns normally passes. A test that traps or faults otherwise fails with the runtime diagnostic.
+Tests import [`Std.Test`](Stdlib-Design#142-stdtest), whose assertions are ordinary Neura functions: `assert`, `assert_with`, `fail`, the typed `assert_equal_int32`, `assert_equal_int64`, `assert_equal_uint64`, `assert_equal_bool`, `assert_equal_string`, `assert_equal_float64`, and `assert_float_near`, the generic `assert_equal<T>` and `assert_not_equal<T>`, and `assert_some<T>`, `assert_none<T>`, `assert_ok<T>`, and `assert_err<T>` for `Optional` and `Result` values. A failed assertion builds its message and ends the test with a message trap (reason 3). The runner reports that message at the innermost frame that belongs to one of the listed test files, which is the assertion's call site, and continues with the next test. A test that returns normally passes. A test that traps or faults otherwise fails with the runtime diagnostic.
 
 ```text
 PASS Suite.test_counter_starts_fresh
@@ -19,13 +19,13 @@ FAIL Suite.test_trap: index out of bounds: index 3 for length 1 at suite.nra:35:
 3 test(s), 1 passed, 2 failed
 ```
 
-Tests may be advanced together. Each test’s output, host effects, and report line appear in declaration order, exactly as when run one at a time. Each test runs in a fresh execution of one image: module globals, the heap, and every object start from the program's initial state, so a test cannot observe another's effects and order does not matter. Before each test, the program's initialization runs, as it does before `main` ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#initialization)). Output from `Std.Io.Console` appears interleaved with the report. When a test ends, the runner closes every file and socket it left open.
+Tests may be advanced together. Each test’s output, host effects, and report line appear in declaration order, exactly as when run one at a time. Each test runs in a fresh execution of one image: module globals, the heap, and every object start from the program's initial state, so a test cannot observe another's effects and order does not matter. Before each test, the program's initialization runs, as it does before `main` ([Modules](Modules#initialization)). Output from `Std.Io.Console` appears interleaved with the report. When a test ends, the runner closes every file and socket it left open.
 
-The runner exits with status 0 when every test passes and 1 when any test fails, when no test is found, or when the build fails. `--no-optimize` builds without optimization, and `--max-steps`, `--max-frames`, and `--max-heap-cells` limit each test as they limit `neura run`. `--stats` appends each passing test's step count and peak heap cells. The capability options of `neura run` apply to every test, and so do its task options: the task limits, `--task-quantum`, `--parallel-workers`, and `--task-dump` ([Tooling](https://github.com/Kayyo321/neura/wiki/Tooling#run-programs-with-tasks)).
+The runner exits with status 0 when every test passes and 1 when any test fails, when no test is found, or when the build fails. `--no-optimize` builds without optimization, and `--max-steps`, `--max-frames`, and `--max-heap-cells` limit each test as they limit `neura run`. `--stats` appends each passing test's step count and peak heap cells. The capability options of `neura run` apply to every test, and so do its task options: the task limits, `--task-quantum`, `--parallel-workers`, and `--task-dump` ([Tooling](Tooling#run-programs-with-tasks)).
 
 ## Tests of concurrent code
 
-A test may open scopes, spawn tasks, and use everything in `Std.Concurrent`. A test is a function body, so the rules for tasks apply to it unchanged, and a test that leaves every task parked fails with the deadlock diagnostic. Three modes make such tests fast and repeatable. [Concurrency, section 14.4](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#144-testing-concurrent-code) specifies them.
+A test may open scopes, spawn tasks, and use everything in `Std.Concurrent`. A test is a function body, so the rules for tasks apply to it unchanged, and a test that leaves every task parked fails with the deadlock diagnostic. Three modes make such tests fast and repeatable. [Concurrency, section 14.4](Concurrency#144-testing-concurrent-code) specifies them.
 
 **Virtual time.** `neura test --virtual-time` gives each test a clock of its own that starts at zero and moves only when every task of the test is parked, to the earliest timer, deadline, or sleep. A test of a two-hour timeout finishes at once, and the time it observes is exact: after `clock.sleep(durations.of_hours(2))`, the monotonic clock has moved by 7,200,000,000,000 nanoseconds. The wall clock reads the virtual clock's nanoseconds after 2000-01-01T00:00:00Z. The clock capability still applies. Sockets stay real, and the clock does not wait for them, so a test that needs a timeout and a real peer together runs without the option.
 

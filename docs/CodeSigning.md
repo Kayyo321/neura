@@ -21,11 +21,11 @@ Release files carry no signature from an operating-system vendor's program: no A
 
 - **Linux.** Linux has no vendor signing step for a downloaded archive. The checksum and the attestation are the evidence.
 - **Windows.** Neura has no native Windows build. On Windows, Neura is the Linux x86-64 archive run under WSL 2, where Windows does not check Authenticode signatures. There is no Windows executable or installer to sign.
-- **macOS.** No macOS archive is published in this release, so there is nothing to notarize.
+- **macOS.** No macOS archive is published ([supported platforms](Install.md#supported-platforms)), so there is nothing to notarize.
 
 ### SignPath Foundation
 
-The project is not enrolled in the [SignPath Foundation](https://signpath.org) code signing program for open-source projects, and no release file is signed by it. The program signs Windows binaries, and its [conditions](https://signpath.org/terms) require that a project "must already be released in the form that should be signed". Neura has never published a Windows binary. When a native Windows build exists and has been released, the project will apply, and this page will then name SignPath Foundation as the certificate's publisher.
+The project is not enrolled in the [SignPath Foundation](https://signpath.org) code signing program for open-source projects, and no release file is signed by it. The program signs Windows binaries, and its [conditions](https://signpath.org/terms) require that a project "must already be released in the form that should be signed". Neura has never published a Windows binary. The project can apply once a native Windows build exists and has been released; from then on this page names SignPath Foundation as the certificate's publisher.
 
 ## Roles
 

@@ -1,4 +1,7 @@
+<!-- Generated from docs/Install.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Install, update, and uninstall
+
+[Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
 A release of Neura is one archive for each supported platform. The archive holds the `neura` executable, the standard library, the native launchers where the platform has them, and an `install.sh` that installs them for the current user. Three commands of the installed tool manage the result: `neura doctor` checks it, `neura update` replaces it with a newer release, and `neura uninstall` removes it. Installs made some other way, such as a source build or a package manager, are not managed by `neura update`.
 
@@ -6,17 +9,30 @@ A release of Neura is one archive for each supported platform. The archive holds
 
 ## Supported platforms
 
-| Platform | Archive target | Notes |
-| --- | --- | --- |
-| Linux on x86-64, glibc | `x86_64-linux-gnu` | Includes native launchers, so `neura build --native` works. |
-| Linux on arm64, glibc | `aarch64-linux-gnu` | Includes native launchers. |
-| macOS on Apple silicon | `aarch64-apple-darwin` | No native launchers; `neura build --native` is unavailable. |
-| macOS on Intel | `x86_64-apple-darwin` | No native launchers; `neura build --native` is unavailable. |
-| Windows | `x86_64-linux-gnu` under WSL2 | Windows has no archive of its own. Install the Linux archive inside a WSL2 distribution. `doctor`, `update`, and `uninstall` report that they are not supported on Windows itself. |
+A release has one archive for each supported target.
 
-The operating system versions that each archive is built and tested on:
+| Platform | Archive target | Requirements | Notes |
+| --- | --- | --- | --- |
+| Linux on x86-64 | `x86_64-linux-gnu` | glibc 2.39 or newer | Every feature. Built and tested on Ubuntu 24.04. |
+| Linux on arm64 | `aarch64-linux-gnu` | glibc 2.39 or newer | Every feature. Built and tested on Ubuntu 24.04. C imports map `char` to `uint8` here, as the platform's C compilers do. |
+| Windows 10 and 11 on x86-64 | `x86_64-linux-gnu`, under WSL 2 | A WSL 2 distribution with glibc 2.39 or newer, such as Ubuntu 24.04 | Windows has no archive of its own. Install the Linux archive inside the distribution and run `neura` there. |
 
-PLATFORM-TABLE-PENDING
+The archives need nothing else from the system: `neura` and the native launchers carry the C++ runtime and libffi, and the release workflow fails if either file needs a library other than the C library, or a C library newer than glibc 2.39. Distributions with an older glibc, such as Debian 12 and Ubuntu 22.04, and distributions with another C library, such as Alpine, are not supported by the archives.
+
+Optional features need more, and `neura doctor` reports each one:
+
+| Feature | Needs |
+| --- | --- |
+| C imports (`import:c`) | libclang 14 or newer and Clang's builtin headers; on Debian and Ubuntu, `libclang1-19` and `libclang-common-19-dev`. Linking a C import also needs a C compiler. |
+| GPU execution | The release archives are built without the GPU backend. Build from source with the Vulkan headers and `glslangValidator` to get it. |
+| `neura update` | `curl` and `tar`; `gh` to verify build provenance. |
+
+### Platforms without an archive
+
+| Platform | State |
+| --- | --- |
+| macOS | Neura builds from source on macOS 15, on Apple silicon and Intel. 97 of the 108 tests CMake registers there pass. The failures are in file-system services, native interop, C imports, and tests that read Linux's `/proc`, so no macOS archive is published. `neura build --native` has no macOS launcher. |
+| Windows without WSL | Not supported. No Windows build has been compiled or tested. |
 
 ## Install from a release archive
 

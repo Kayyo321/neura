@@ -383,6 +383,12 @@ if(BUILD_TESTING)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/source-docs-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/source-docs.cmake"
     )
+    # Every Neura example in the documentation is compiled or run.
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME doc-examples COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-doc-examples.py"
+        --neura "$<TARGET_FILE:neura>" --root "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
     add_test(NAME nir-link COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/nir-link-tests"
