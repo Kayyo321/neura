@@ -3,6 +3,7 @@
 // records. Behavior is compared in behavior_tests.cpp.
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/attributes.hpp"
+#include "neura-ir/purity.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "support.hpp"
@@ -91,6 +92,26 @@ NEURA_TEST(structure, hoists_only_pure_and_total_invariants) {
                   "(load total) (binary + (load total) (integer 1)))}) (store (load index) (binary + (load index) "
                   "(integer 1)))}) (return (load total))"}},
                 {"Dataflow.keep_trapping_invariant", "Dataflow.keep_variant", "Dataflow.keep_zero_trip_trap"});
+}
+
+// A kernel that sorts a list in place writes that list (neura-ir/purity.hpp):
+// a method that passes it a list it did not allocate is impure, so its calls
+// are neither reused nor removed, and a read of the list after the kernel is
+// not replaced by one before it. A function that sorts only a list of its own,
+// or calls that method only on an object of its own, is pure.
+NEURA_TEST(structure, kernel_writes_block_reuse_and_removal) {
+    expect_pass(environment, "purity.nra", "eliminate-common-subexpressions", {},
+                {"Purity.keep_kernel_writer_calls", "Purity.reread_after_kernel_write"});
+    expect_pass(environment, "purity.nra", "remove-pure-discards", {}, {"Purity.keep_unused_kernel_writer"});
+    for (const bool specialized : {false, true}) {
+        const auto program = specialized ? prepared(environment, "purity.nra") : lower_fixture(environment, "purity.nra");
+        const PurityAnalysis purity(program);
+        check(!purity.pure(find_symbol(program, "Purity.Bag.first_then_sort")), "first_then_sort writes its receiver's list");
+        check(purity.pure(find_symbol(program, "Purity.smaller")), "smaller writes only a list it allocated");
+        // It calls the impure method only on a bag it allocated.
+        check(purity.pure(find_symbol(program, "Purity.keep_kernel_writer_calls")),
+              "keep_kernel_writer_calls writes only a bag it allocated");
+    }
 }
 
 NEURA_TEST(structure, removes_dead_stores_to_value_locals) {

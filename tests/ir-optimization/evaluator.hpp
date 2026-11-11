@@ -30,7 +30,8 @@ namespace neura::testing {
 // lists with lengths, indexing, append, remove_at, and structural versions;
 // and external calls, which are recorded as effects whose response is
 // `void`, or for a standard library host binding, the success variant `Ok`
-// when it carries no payload. `neura.process.exit` ends the run with
+// when it carries no payload. The kernels neura.sort.i64 and neura.sort.u64
+// also sort the list they are given in place. `neura.process.exit` ends the run with
 // Status::Exited.
 //
 // Scoped tasks (docs/lang/Concurrency.md sections 4 and 10.2): TaskScope,

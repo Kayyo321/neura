@@ -2,6 +2,7 @@
 
 #include "neura-ir/attributes.hpp"
 #include "neura-ir/host_binding.hpp"
+#include "neura-ir/kernel_signature.hpp"
 #include "neura-ir/nominal.hpp"
 #include "neura-ir/reference_storage.hpp"
 
@@ -1106,6 +1107,17 @@ private:
         case IrOp::ExternalCall: {
             auto values = arguments(node, 0, frame);
             effects_.push_back({qualified_name(program_, node.symbol), values});
+            if (const auto kernel = kernel_binding(symbol(node.symbol));
+                kernel && (kernel->first == "neura.sort.i64" || kernel->first == "neura.sort.u64")) {
+                // Sorts the list in place, the write that makes the kernel
+                // call an effect on its argument.
+                auto& entry = collection_entry(values.at(0), node);
+                std::ranges::stable_sort(entry.elements, [](const Value& left, const Value& right) {
+                    if (left.negative != right.negative) return left.negative;
+                    return left.negative ? left.magnitude > right.magnitude : left.magnitude < right.magnitude;
+                });
+                return Value{};
+            }
             if (const auto& binding = symbol(node.symbol).host_binding;
                 binding && binding->name == "neura.process.exit") {
                 // The host ends the run; no task continues.

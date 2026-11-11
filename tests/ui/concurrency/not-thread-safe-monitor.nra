@@ -1,0 +1,12 @@
+// A #NotThreadSafe class with a #Synchronized method (E0610): its instances
+// stay in one task, so it cannot be a monitor that tasks share.
+#NotThreadSafe
+let Buffer = class (
+    let size: int64 = 0;
+
+    #Synchronized
+    export let grow = func() -> int64 {
+        size = size + 1;
+        return size;
+    };
+);

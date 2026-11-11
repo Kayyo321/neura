@@ -1,0 +1,16 @@
+error[E0917]: #Pure function 'total' is not pure: it reaches 'area', which assigns the binding 'calls'
+  --> $DIR/pure-interface-implementation.nra:18:1
+   |
+13 |         calls = calls + 1;
+   |         ----- assigns the binding 'calls' here
+...
+18 | #Pure
+   | ^^^^^ the function is marked #Pure here
+19 | let total = func(shape: Shape) -> int64 {
+20 |     return shape.area() + 1;
+   |            ------------ calls 'area'
+   |
+   = note: a #Pure function may allocate and trap, but it writes only objects it allocates, reads no reassignable state, and calls only pure functions
+   = help: remove #Pure, or move the effect to the caller
+
+For more information about this error, try `neura explain E0917`.

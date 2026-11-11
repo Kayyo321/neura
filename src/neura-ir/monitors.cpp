@@ -201,6 +201,49 @@ void declare_checked_tags(IrProgram& program, SymbolId first, const std::functio
             }
         }
         if (item.kind != SymbolKind::Class) continue;
+        // #NotThreadSafe on a class, or on a base: its instances stay in one
+        // task, so the class cannot promise that tasks may share them
+        // (E0610). The same declaration's #Immutable or #Synchronized is
+        // E0907.
+        {
+            SymbolId marked = no_symbol;
+            std::set<SymbolId> chain;
+            for (auto scope = id; valid(program, scope) && chain.insert(scope).second;
+                 scope = program.symbols[scope].base) {
+                if (marked == no_symbol && has_tag(program.symbols[scope], TagId::NotThreadSafe)) marked = scope;
+            }
+            if (marked != no_symbol) {
+                const auto declined = tag_or(marked, TagId::NotThreadSafe);
+                const auto here = marked == id ? std::string("here") : "on " + quoted(program.symbols[marked].name);
+                const auto conflict = [&](const Span& at, const std::string& what, const std::string& label) {
+                    return Diagnostic(at, "class " + quoted(item.name) + " is #NotThreadSafe and " + what)
+                        .with_code("E0610").label(label).label(declined, "#NotThreadSafe given " + here)
+                        .note("the instances of a #NotThreadSafe class stay in the task that holds them, so tasks "
+                              "never share one")
+                        .help("remove #NotThreadSafe, or the promise that tasks may share the instances");
+                };
+                if (const auto tag = tag_span(item, TagId::ThreadSafe); tag && marked != id) {
+                    throw conflict(*tag, "cannot be #ThreadSafe", "#ThreadSafe given here");
+                }
+                if (const auto tag = tag_span(item, TagId::Immutable); tag && marked != id) {
+                    throw conflict(*tag, "cannot be #Immutable", "#Immutable given here");
+                }
+                for (SymbolId member = 0; member < count; ++member) {
+                    const auto& function = program.symbols[member];
+                    if (function.kind != SymbolKind::Function || !chain.contains(function.owner) ||
+                        !synchronized_method(function)) {
+                        continue;
+                    }
+                    // The method's tag, or the class's, which marks every
+                    // exported method.
+                    auto at = tag_span(function, TagId::Synchronized);
+                    if (!at) at = tag_span(program.symbols[function.owner], TagId::Synchronized);
+                    throw conflict(at.value_or(function.span),
+                                   "cannot be a monitor: method " + quoted(function.name) + " is #Synchronized",
+                                   "#Synchronized given here");
+                }
+            }
+        }
         // #Immutable: no field changes after construction (E0918-E0920).
         const bool immutable = has_tag(item, TagId::Immutable);
         if (valid(program, item.base) && !umbrella_class(program, item.base)) {

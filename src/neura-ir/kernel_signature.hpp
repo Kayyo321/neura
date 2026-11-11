@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace neura {
 
@@ -21,6 +22,14 @@ std::optional<std::pair<std::string, std::uint32_t>> kernel_binding(const IrSymb
 inline bool kernel_bound(const IrSymbol& symbol) {
     return !symbol.has_body && has_attribute(symbol, AttributeId::KernelBinding);
 }
+
+// For each Neura parameter of a kernel-bound function, whether the kernel
+// writes the list or array passed for it in place: a writable view (neura_mut_*)
+// or a state (neura_state*). Every other parameter is only read, and a value
+// the kernel returns is storage the runtime allocates for the call
+// (docs/runtime/Kernels.md). Nothing when the binding names no kernel this
+// compiler knows, so a caller must assume that every argument is written.
+std::optional<std::vector<bool>> kernel_writes(const IrSymbol& function);
 
 // Whether this compiler's kernel table has the kernel at this ABI version.
 bool kernel_known(const std::string& name, std::uint32_t version);

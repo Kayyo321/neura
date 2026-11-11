@@ -1,0 +1,16 @@
+error[E0917]: #Pure function 'describe' is not pure: it reaches 'to_string', which assigns the binding 'calls'
+  --> $DIR/pure-implicit-to-string.nra:13:1
+   |
+ 8 |         calls = calls + 1;
+   |         ----- assigns the binding 'calls' here
+...
+13 | #Pure
+   | ^^^^^ the function is marked #Pure here
+14 | let describe = func(tags: Tag[list]) -> string {
+15 |     return tags.to_string();
+   |            ---------------- calls 'to_string'
+   |
+   = note: a #Pure function may allocate and trap, but it writes only objects it allocates, reads no reassignable state, and calls only pure functions
+   = help: remove #Pure, or move the effect to the caller
+
+For more information about this error, try `neura explain E0917`.

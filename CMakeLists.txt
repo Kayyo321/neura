@@ -289,6 +289,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/static_initialization.cpp
     src/neura-ir/task_analysis.cpp
     src/neura-ir/purity.cpp
+    src/neura-ir/dispatch.cpp
     src/neura-ir/monitors.cpp
     src/neura-ir/kernel_signature.cpp
     src/neura-ir/verifier.cpp
