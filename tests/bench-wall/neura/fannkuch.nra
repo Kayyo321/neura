@@ -1,0 +1,73 @@
+// sizes: quick 8 full 9
+// Fannkuch-redux: over every permutation of 0 to n - 1, the most prefix
+// reversals needed to bring 0 to the front, and the alternating checksum of
+// the counts. The size is the first argument; java/Fannkuch.java prints the
+// same line.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Fannkuch = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let perm = lists.filled<int32>(n, 0);
+        let perm1 = lists.filled<int32>(n, 0);
+        let count = lists.filled<int32>(n, 0);
+        for (let i = 0; i < n; i = i + 1) {
+            perm1[i] = i;
+        }
+        let max_flips = 0;
+        let checksum = 0;
+        let permutation = 0;
+        let r = n;
+        while (true) {
+            while (r != 1) {
+                count[r - 1] = r;
+                r = r - 1;
+            }
+            for (let i = 0; i < n; i = i + 1) {
+                perm[i] = perm1[i];
+            }
+            let flips = 0;
+            let k = perm[0];
+            while (k != 0) {
+                let half = (k + 1) / 2;
+                for (let i = 0; i < half; i = i + 1) {
+                    let swapped = perm[i];
+                    perm[i] = perm[k - i];
+                    perm[k - i] = swapped;
+                }
+                flips = flips + 1;
+                k = perm[0];
+            }
+            if (flips > max_flips) {
+                max_flips = flips;
+            }
+            if (permutation % 2 == 0) {
+                checksum = checksum + flips;
+            } else {
+                checksum = checksum - flips;
+            }
+            // Rotate prefixes of perm1 to reach the next permutation.
+            while (true) {
+                if (r == n) {
+                    console.println("fannkuch {} {}", checksum, max_flips);
+                    return program.ExitCode.Ok;
+                }
+                let first = perm1[0];
+                for (let i = 0; i < r; i = i + 1) {
+                    perm1[i] = perm1[i + 1];
+                }
+                perm1[r] = first;
+                count[r] = count[r] - 1;
+                if (count[r] > 0) {
+                    break;
+                }
+                r = r + 1;
+            }
+            permutation = permutation + 1;
+        }
+    };
+);

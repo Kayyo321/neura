@@ -1,0 +1,61 @@
+// sizes: quick 20 full 64
+// Spectral norm of the infinite matrix A(i, j) = 1 / ((i + j)(i + j + 1) / 2
+// + i + 1), truncated to n by n, by ten rounds of the power method on A^T A,
+// as a float64 bit pattern. The size is the first argument;
+// java/SpectralNorm.java prints the same line.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let math = import:Std.Math.Math;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let SpectralNorm = module:program.Entry (
+    let entry = func(i: int, j: int) -> float64 {
+        return 1.0 / (((i + j) * (i + j + 1) / 2 + i + 1) as float64);
+    };
+
+    // out = A v
+    let multiply = func(n: int, v: float64[list], out: float64[list]) {
+        for (let i = 0; i < n; i = i + 1) {
+            let sum = 0.0;
+            for (let j = 0; j < n; j = j + 1) {
+                sum = sum + entry(i, j) * v[j];
+            }
+            out[i] = sum;
+        }
+    };
+
+    // out = A^T v
+    let multiply_transposed = func(n: int, v: float64[list], out: float64[list]) {
+        for (let i = 0; i < n; i = i + 1) {
+            let sum = 0.0;
+            for (let j = 0; j < n; j = j + 1) {
+                sum = sum + entry(j, i) * v[j];
+            }
+            out[i] = sum;
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let u = lists.filled<float64>(n, 1.0);
+        let v = lists.filled<float64>(n, 0.0);
+        let scratch = lists.filled<float64>(n, 0.0);
+        for (let round = 0; round < 10; round = round + 1) {
+            multiply(n, u, scratch);
+            multiply_transposed(n, scratch, v);
+            multiply(n, v, scratch);
+            multiply_transposed(n, scratch, u);
+        }
+        let vbv = 0.0;
+        let vv = 0.0;
+        for (let i = 0; i < n; i = i + 1) {
+            vbv = vbv + u[i] * v[i];
+            vv = vv + v[i] * v[i];
+        }
+        let norm = math.sqrt(vbv / vv);
+        console.println("spectral-norm {:x}", norm.to_bits());
+        return program.ExitCode.Ok;
+    };
+);

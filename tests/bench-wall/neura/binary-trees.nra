@@ -1,0 +1,55 @@
+// sizes: quick 13 full 16
+// Allocates and walks perfect binary trees: a stretch tree one level deeper
+// than n, a long-lived tree of depth n, and many short-lived trees of each
+// depth from 4 to n in steps of 2, printing each node count. The size is the
+// first argument; java/BinaryTrees.java prints the same lines.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let BinaryTrees = module:program.Entry (
+    const MinDepth: int = 4;
+
+    let TreeNode = class (
+        export let left: TreeNode = nil;
+        export let right: TreeNode = nil;
+    );
+
+    let bottom_up = func(depth: int) -> TreeNode {
+        let node = new TreeNode();
+        if (depth > 0) {
+            node.left = bottom_up(depth - 1);
+            node.right = bottom_up(depth - 1);
+        }
+        return node;
+    };
+
+    let check = func(node: TreeNode) -> int {
+        if (node.left == nil) {
+            return 1;
+        }
+        return 1 + check(node.left) + check(node.right);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let max_depth = n;
+        if (max_depth < MinDepth + 2) {
+            max_depth = MinDepth + 2;
+        }
+        let stretch_depth = max_depth + 1;
+        console.println("stretch tree of depth {} check: {}", stretch_depth, check(bottom_up(stretch_depth)));
+        let long_lived = bottom_up(max_depth);
+        for (let depth = MinDepth; depth <= max_depth; depth = depth + 2) {
+            let iterations = 1 << (max_depth - depth + MinDepth);
+            let total = 0;
+            for (let i = 0; i < iterations; i = i + 1) {
+                total = total + check(bottom_up(depth));
+            }
+            console.println("{} trees of depth {} check: {}", iterations, depth, total);
+        }
+        console.println("long lived tree of depth {} check: {}", max_depth, check(long_lived));
+        return program.ExitCode.Ok;
+    };
+);

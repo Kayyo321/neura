@@ -1,0 +1,36 @@
+// sizes: quick 10000 full 100000
+// Collatz chain lengths for every start from 1 to n: the longest chain, the
+// start that gives it, and the total length of all chains. The size is the
+// first argument; java/Collatz.java prints the same line.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Collatz = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let best_start = 0;
+        let best_length: int64 = 0;
+        let total: int64 = 0;
+        for (let start = 1; start <= n; start = start + 1) {
+            let value = start as int64;
+            let length: int64 = 1;
+            while (value != 1) {
+                if (value % 2 == 0) {
+                    value = value / 2;
+                } else {
+                    value = 3 * value + 1;
+                }
+                length = length + 1;
+            }
+            total = total + length;
+            if (length > best_length) {
+                best_length = length;
+                best_start = start;
+            }
+        }
+        console.println("collatz {} {} {}", best_start, best_length, total);
+        return program.ExitCode.Ok;
+    };
+);

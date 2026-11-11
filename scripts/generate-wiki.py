@@ -76,6 +76,7 @@ GENERATED: dict[str, str] = {
 # wiki and the website, and the design notes that record why the design is as
 # it is. The website publishes every docs page itself.
 REPOSITORY_ONLY = (
+    "docs/Benchmarks.md",
     "docs/Wiki.md",
     "docs/Site.md",
     "docs/SiteDesign.md",
