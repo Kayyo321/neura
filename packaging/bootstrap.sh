@@ -136,15 +136,19 @@ main() {
     [ "$actual" = "$expected" ] || die "SHA-256 mismatch for $file: got $actual, the release metadata says $expected"
     echo "Verified: size and SHA-256 of $file against the release metadata"
 
-    if [ "$remote" = 1 ] && command -v gh > /dev/null 2>&1; then
-        if gh attestation verify "$work/$file" --repo "$repository" > "$work/attestation.log" 2>&1; then
-            echo "Verified: build provenance with gh attestation verify --repo $repository"
-        else
-            sed 's/^/  /' "$work/attestation.log" >&2
-            die "gh attestation verify did not confirm the build provenance of $file. Nothing was installed"
-        fi
+    # gh can verify nothing until it is signed in. That is a missing tool, not
+    # a failed verification: only a check that ran and failed stops the install.
+    if [ "$remote" != 1 ]; then
+        echo "Not verified: build provenance (the source is a local directory)"
+    elif ! command -v gh > /dev/null 2>&1; then
+        echo "Not verified: build provenance (gh, the GitHub CLI, is not installed)"
+    elif ! gh auth status > /dev/null 2>&1; then
+        echo "Not verified: build provenance (gh is installed but not signed in; run \"gh auth login\" to enable the check)"
+    elif gh attestation verify "$work/$file" --repo "$repository" > "$work/attestation.log" 2>&1; then
+        echo "Verified: build provenance with gh attestation verify --repo $repository"
     else
-        echo "Not verified: build provenance (gh is not installed, or the source is a local directory)"
+        sed 's/^/  /' "$work/attestation.log" >&2
+        die "gh attestation verify did not confirm the build provenance of $file. Nothing was installed"
     fi
 
     # Every member must be inside the one expected directory.

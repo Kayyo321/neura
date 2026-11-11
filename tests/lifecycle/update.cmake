@@ -224,6 +224,15 @@ file(CREATE_LINK "${LC_TAR}" "${work}/no-gh/tar" SYMBOLIC)
 lc_expect_failure("--require-attestation without gh" "${work}/good" "gh (the GitHub CLI), which is not on PATH"
     ENV "PATH=${work}/no-gh" ARGS --require-attestation)
 
+# A gh that is installed and not signed in can verify nothing. With
+# --require-attestation that stops the update; `gh auth status` is what says so.
+file(MAKE_DIRECTORY "${work}/signed-out-gh")
+file(CREATE_LINK "${LC_TAR}" "${work}/signed-out-gh/tar" SYMBOLIC)
+file(WRITE "${work}/signed-out-gh/gh" "#!/bin/sh\nexit 1\n")
+file(CHMOD "${work}/signed-out-gh/gh" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+lc_expect_failure("--require-attestation with gh signed out" "${work}/good" "needs gh (the GitHub CLI) to be signed in"
+    ENV "PATH=${work}/signed-out-gh" ARGS --require-attestation)
+
 # The update lock: another update, and a lock that is more than an hour old.
 file(WRITE "${LC_ROOT}/.update-lock" "1\n")
 lc_exec(locked ENV ${update_env} COMMAND "${LC_LINK}" update --source "${work}/good")

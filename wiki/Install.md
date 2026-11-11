@@ -23,7 +23,7 @@ The command downloads `install.sh` from the latest release and runs it. That scr
 
 1. Finds the machine's target and stops with a message when no archive exists for it, when the system's C library is not glibc, or when the system is neither Linux nor macOS.
 2. Downloads the release's `neura-release.txt` and the archive for the target over HTTPS.
-3. Checks the archive's size and SHA-256 against `neura-release.txt`, and checks its build provenance with `gh attestation verify` when the GitHub CLI is installed. Without `gh`, it prints that provenance was not verified.
+3. Checks the archive's size and SHA-256 against `neura-release.txt`, and checks its build provenance with `gh attestation verify` when the GitHub CLI is installed and signed in. Without `gh`, or with a `gh` that is not signed in, it prints that provenance was not verified and continues. It stops only when the check ran and did not confirm the archive.
 4. Checks that every member of the archive is inside the one expected directory, unpacks it into a temporary directory, and runs the archive's own `install.sh`, described [below](#install-from-a-release-archive).
 
 It writes only under the install root and the bin directory, never uses `sudo`, and never edits a shell startup file. It needs `curl`, `tar`, and `sha256sum` or `shasum`. To read the script before running it, download it first:
@@ -172,7 +172,7 @@ neura update [--check] [--source <https-url-or-directory>] [--require-attestatio
 | --- | --- |
 | `--check` | Report only. |
 | `--source <location>` | Where `neura-release.txt` and the archives are. An `https://` URL, or a local directory. The default is `https://github.com/Kayyo321/neura/releases/latest/download`. A URL with any other scheme, including `http://`, is rejected. |
-| `--require-attestation` | Fail unless build provenance is verified. Without `gh` on `PATH` this fails before anything is downloaded. With a local directory source, it also runs the check that is otherwise skipped. |
+| `--require-attestation` | Fail unless build provenance is verified. Without `gh` on `PATH` this fails before anything is downloaded, and with a `gh` that is not signed in it fails before anything is installed. With a local directory source, it also runs the check that is otherwise skipped. |
 
 | Exit status | Meaning |
 | --- | --- |
@@ -203,7 +203,7 @@ The staging directory and the lock are removed on every exit path.
 | --- | --- | --- |
 | Size and SHA-256 of the archive against `neura-release.txt` | Always. The metadata arrives over HTTPS. | Always. The metadata is read from the directory. |
 | Build provenance: `gh attestation verify <file> --repo Kayyo321/neura` | When `gh` is on `PATH`. A failure aborts the update. | Only with `--require-attestation`. |
-| Without `gh` | A line says that build provenance was not verified and that integrity rests on the SHA-256 from the metadata fetched over HTTPS. With `--require-attestation` the update stops with status 1. | The same line, or with `--require-attestation` status 1. |
+| Without `gh`, or with `gh` not signed in | A line says that build provenance was not verified and that integrity rests on the SHA-256 from the metadata fetched over HTTPS. With `--require-attestation` the update stops with status 1. | The same line, or with `--require-attestation` status 1. |
 
 The update prints which verifications ran. A SHA-256 taken from the same place as the archive detects corruption and tampering in transit. It does not detect a replaced release, because whoever can replace the archive can replace the digest. Build provenance covers that case: it proves the file was produced by the repository's workflow. Install `gh` and run `neura doctor` to see whether it is available.
 

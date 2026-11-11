@@ -48,6 +48,10 @@ No version has been published. The [release checklist](docs/Release.md) lists th
 - The trap for denied native access reads `native access denied: the native capability is not granted`.
 - A program that uses a scope, a channel, or another scheduler operation cannot also use `Std.DynamicForeign` or `import:c(...)`.
 
+### Fixed
+
+- The install script and `neura update` treated a `gh` that is installed but not signed in as a failed provenance check and stopped. They now report that provenance was not verified and continue, as they do without `gh`; `--require-attestation` still stops. Found by the release workflow on `v0.1.0-rc.1`, whose published `install.sh` has this defect.
+
 ### Known issues
 
 - `neura run --each <file> --gpu=always` does not finish for an image whose tasks wait on cancellable host I/O, such as `tests/concurrency/io/cancelled.nra`; the same fleet finishes with `--gpu=off` and with the default `--gpu=auto`. [GPU execution](docs/lang/GpuExecution.md) specifies that a fleet gives the results of running its members in order, so this is a defect, not a documented limit. The release archives are built without the GPU backend and are not affected; a build from source with the backend is.
