@@ -16,7 +16,7 @@ export let Program = module (
 ]=])
 file(WRITE "${library}/internal/helper.nra" [=[
 export let Helper = module (
-    export let name = func() -> string { return "HOME"; }
+    export let name = func() -> string { return "HOME"; };
 );
 ]=])
 file(WRITE "${library}/services.nra" [=[
@@ -36,7 +36,7 @@ export let Services = module (
             Lookup.Ok(_) => false,
             Lookup.Error(code) => code == 14,
         };
-    }
+    };
 );
 ]=])
 file(WRITE "${TEST_DIR}/shadow/std/program.nra" "invalid source from an untrusted root")
@@ -59,7 +59,7 @@ export let App = module:program.Entry (
             services.Outcome.Ok => { return program.ExitCode.Status(42); },
             services.Outcome.Error(_) => { return program.ExitCode.Failure; },
         }
-    }
+    };
 );
 ]=])
 
@@ -105,7 +105,7 @@ let io = import:SysIo;
 export let Legacy = module:io.Entry (
     export let.override main = func(args: string[]) -> Entry.ExitCode {
         return Entry.ExitCode.Ok;
-    }
+    };
 );
 ]=])
 expect(1 "" "cannot resolve import 'SysIo': the built-in SysIo module was removed; use Std.Io.Console and Std.Program"
@@ -125,7 +125,7 @@ let program = import:Std.Program;
 export let Second = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
-    }
+    };
 );
 ]=])
 expect(1 "" "more than one entry point" build "${TEST_DIR}/main.nra" "${TEST_DIR}/second.nra" -o "${TEST_DIR}/two.nvr")
@@ -143,7 +143,7 @@ export let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         wrong.write(1);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ]=])
 expect(0 "" "" build "${TEST_DIR}/bad-binding.nra" -o "${TEST_DIR}/bad-binding.nvr")

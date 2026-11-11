@@ -478,7 +478,7 @@ NEURA_TEST(nir, linking_coalesces_shared_definitions_and_preserves_metadata) {
                 export static const Width: int = 16;
                 export let.as int = func -> int => 19;
                 export let init = func {}
-                    or func(value: int) {}
+                    or func(value: int) {};
             );
             export let echo = func(x: int) -> int => x
                 or func(x: string) -> string => x;
