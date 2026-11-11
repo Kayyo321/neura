@@ -6,13 +6,15 @@ let kernels = import:Std.Internal.Kernels.Digest;
 /// (docs/runtime/Kernels.md). The Neura implementation they replaced is the oracle of
 /// tests/stdlib/sha256/kernel-oracle.nra.
 /// @see [Std.Digest.Sha256](https://github.com/Kayyo321/neura/wiki/Stdlib-Digest-Sha256)
+#Since("0.1.0")
 export let Sha256 = module (
     /// @brief A running digest. `finish` ends it: a later update or finish traps with "invalid state: digest
     /// finished".
+    #Final
     export let Sha256 = class (
         /// @brief The kernel's running state: the hash words, the message length, the bytes of an incomplete
         /// block, and whether the digest is finished, in the 112-byte layout of neura_digest.h.
-        let state: uint8[list] = [];
+        last state: uint8[list] = [];
 
         /// @brief Initializes the state of a fresh digest.
         export let init = func {
@@ -32,8 +34,9 @@ export let Sha256 = module (
     );
 
     /// @brief A new digest with no bytes added.
-    export let create = func -> Sha256 => new Sha256();
+    export let create = func -> Sha256 => new;
 
     /// @brief The 32-byte hash of the bytes.
+    #NoDiscard
     export let of = func(bytes: uint8[list]) -> uint8[list] => kernels.sha256(bytes);
 );
