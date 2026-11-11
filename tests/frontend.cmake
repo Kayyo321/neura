@@ -545,3 +545,243 @@ let Tools = module (
     } callback("user.callback", 1);
 );
 ]=] "3:5" "host callbacks are only allowed in standard library modules")
+
+# `last` bindings (CoreLanguage.md, "Deferred assignment"). `last` is a
+# contextual word: it declares only when an identifier follows it.
+file(WRITE "${TEST_DIR}/last-accepted.nra" [=[
+let Collection = class (
+    export let last = func -> int => 3;
+    export last first: int;
+    export last size: int = 2;
+    static last limit: int = 9;
+    export let init = func(value: int) {
+        if (value > 0) {
+            first = value;
+        } else {
+            instance.first = 0;
+        }
+    };
+);
+let last = func(values: int[]) -> int => values[values.length - 1];
+let tail = func(values: int[]) -> int {
+    let last = [0, 0];
+    last[0] = values[0];
+    last = [1, 2];
+    return last[0];
+};
+let latest = func(items: Collection) -> int => items.last() + last([1, 2]);
+let choose = func(flag: bool, other: bool) -> int {
+    last value: int;
+    if (flag && other) {
+        value = 1;
+    } else if (flag || other) {
+        value = 2;
+    } else {
+        return 0;
+    }
+    last doubled = value * 2;
+    let read = func() -> int => doubled + value;
+    return read();
+};
+let guarded = func(flag: bool) -> int {
+    last value: int;
+    if (!flag) {
+        trap_with_message("unreachable");
+    }
+    value = 1;
+    while (true) {
+        last step: int;
+        step = value;
+        if (step > 0) {
+            break;
+        }
+    }
+    return value;
+};
+]=])
+run_success(unused check "${TEST_DIR}/last-accepted.nra")
+run_success(last_ir emit-ir --no-optimize "${TEST_DIR}/last-accepted.nra")
+if(NOT last_ir MATCHES "@binding[.]last[(]true[)]" OR NOT last_ir MATCHES "@binding[.]last[(]false[)]")
+    message(FATAL_ERROR "Expected binding.last attributes on the `last` bindings\n${last_ir}")
+endif()
+
+check_rejection(last-twice [=[
+let f = func() -> int {
+    last x: int;
+    x = 10;
+    x = 20;
+    return x;
+};
+]=] "5:5" "\\[E0440\\]: cannot assign twice to 'x'")
+check_rejection(last-maybe-twice [=[
+let f = func(flag: bool) -> int {
+    last x: int;
+    if (flag) {
+        x = 1;
+    }
+    x = 2;
+    return x;
+};
+]=] "7:5" "\\[E0440\\]: cannot assign twice to 'x'")
+check_rejection(last-update [=[
+let f = func() -> int {
+    last x: int;
+    x = 1;
+    x += 1;
+    return x;
+};
+]=] "5:5" "\\[E0440\\]: cannot assign twice to 'x'")
+check_rejection(last-unassigned-read [=[
+let f = func() -> int {
+    last x: int;
+    return x;
+};
+]=] "4:12" "\\[E0441\\]: 'x' is used before it is assigned")
+check_rejection(last-maybe-read [=[
+let f = func(flag: bool) -> int {
+    last x: int;
+    if (flag) {
+        x = 1;
+    }
+    return x;
+};
+]=] "7:12" "\\[E0441\\]: 'x' may be used before it is assigned")
+check_rejection(last-match-read [=[
+let Shape = enum(Circle(int), Dot);
+let f = func(shape: Shape) -> int {
+    last x: int;
+    match (shape) {
+        Shape.Circle(r) => {
+            x = r;
+        },
+        Shape.Dot => {
+        },
+    }
+    return x;
+};
+]=] "12:12" "\\[E0441\\]: 'x' may be used before it is assigned")
+check_rejection(last-short-circuit-read [=[
+let f = func(flag: bool) -> bool {
+    last x: bool;
+    return flag && x;
+};
+]=] "4:20" "\\[E0441\\]")
+check_rejection(last-in-loop [=[
+let f = func(count: int) -> int {
+    last x: int;
+    while (count > 0) {
+        x = count;
+        break;
+    }
+    return 0;
+};
+]=] "5:9" "\\[E0442\\]: 'x' is assigned inside a loop")
+check_rejection(last-early-capture [=[
+let f = func() -> int {
+    last x: int;
+    let read = func() -> int => x;
+    x = 1;
+    return read();
+};
+]=] "4:33" "\\[E0443\\]: closure captures 'x' before it is assigned")
+check_rejection(last-without-type [=[
+let f = func() -> int {
+    last x;
+    x = 1;
+    return x;
+};
+]=] "3:10" "\\[E0444\\]: a deferred 'last' binding needs a type")
+check_rejection(last-reassigned [=[
+let f = func() -> int {
+    last x = 10;
+    x = 20;
+    return x;
+};
+]=] "4:5" "\\[E0401\\]: cannot assign twice to 'x'")
+check_rejection(last-field-method [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        size = initial;
+    };
+    export let grow = func {
+        size = size + 1;
+    };
+);
+]=] "8:9" "\\[E0445\\]: cannot assign to 'last' field 'size' here")
+check_rejection(last-field-outside [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        size = initial;
+    };
+);
+let resize = func(box: Box) {
+    box.size = 3;
+};
+]=] "9:5" "\\[E0445\\]")
+check_rejection(last-field-skipped [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        if (initial > 0) {
+            size = initial;
+        }
+    };
+);
+]=] "4:16" "\\[E0446\\]: 'init' may end without assigning 'last' field 'size'")
+check_rejection(last-field-overload [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        size = initial;
+    } or func() {
+    };
+);
+]=] "6:10" "\\[E0446\\]")
+check_rejection(last-field-early-return [=[
+let Box = class (
+    export last size: int;
+    export let init = func(initial: int) {
+        if (initial < 0) {
+            return;
+        }
+        size = initial;
+    };
+);
+]=] "6:13" "\\[E0446\\]: 'init' may return without assigning 'last' field 'size'")
+check_rejection(last-field-no-init [=[
+let Box = class (
+    export last size: int;
+);
+]=] "3:17" "\\[E0446\\]: class 'Box' has no 'init'")
+check_rejection(last-field-read-in-init [=[
+let Box = class (
+    export last size: int;
+    export let doubled: int = 0;
+    export let init = func(initial: int) {
+        doubled = instance.size * 2;
+        size = initial;
+    };
+);
+]=] "6:19" "\\[E0441\\]: 'size' is used before it is assigned")
+check_rejection(last-field-with-value [=[
+let Box = class (
+    export last size: int = 3;
+    export let init = func(initial: int) {
+        size = initial;
+    };
+);
+]=] "5:9" "\\[E0401\\]: cannot assign twice to 'size'")
+check_rejection(last-global-deferred "last limit: int;" "2:6" "\\[E0447\\]")
+check_rejection(last-static-deferred [=[
+let Counter = class (
+    static last limit: int;
+);
+]=] "3:17" "\\[E0447\\]")
+check_rejection(let-without-value-mentions-last [=[
+let f = func() -> int {
+    let x: int;
+    return 0;
+};
+]=] "3:5" "\\[E0404\\]")

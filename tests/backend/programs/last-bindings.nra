@@ -1,0 +1,130 @@
+// `last` bindings: assigned once, with a value or later on every path, and
+// `last` still an ordinary identifier where no declaration can start.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = enum(Circle(int), Square(int), Dot);
+
+/// A class whose `last` fields each `init` overload assigns exactly once.
+let Account = class(
+    export last owner: string;
+    export last limit: int;
+    export last currency: string = "EUR";
+    let balance: int = 0;
+
+    export let init = func(owner: string) {
+        instance.owner = owner;
+        limit = 100;
+    } or func(name: string, premium: bool) {
+        owner = name;
+        if (premium) {
+            limit = 1000;
+        } else {
+            return_early_guard();
+            limit = 10;
+        }
+    };
+
+    let return_early_guard = func {
+        balance = 0;
+    };
+
+    // A method named `last` is still a method.
+    export let last = func -> string => owner + ":" + limit.to_string();
+);
+
+/// A class with a field named `last`.
+let Node = class(
+    export let value: int = 0;
+    export let last: bool = false;
+);
+
+let classify = func(flag: bool, count: int) -> string {
+    last label: string;
+    if (flag && count > 0) {
+        label = "positive";
+    } else if (count == 0) {
+        label = "zero";
+    } else {
+        label = "other";
+    }
+    return label;
+};
+
+let area = func(shape: Shape) -> int {
+    last result: int;
+    match (shape) {
+        Shape.Circle(radius) => {
+            result = 3 * radius * radius;
+        },
+        Shape.Square(side) => {
+            result = side * side;
+        },
+        Shape.Dot => {
+            result = 0;
+        },
+    }
+    return result;
+};
+
+let first_even = func(values: int[]) -> int {
+    for (let value: int in values) {
+        // Declared inside the loop body, so each iteration assigns its own.
+        last half: int;
+        half = value / 2;
+        if (half * 2 == value) {
+            return value;
+        }
+    }
+    return -1;
+};
+
+let early = func(limit: int) -> int {
+    last bound: int;
+    if (limit < 0) {
+        return 0;
+    }
+    bound = limit * 2;
+    last adder = func(value: int) -> int => value + bound;
+    return adder(1);
+};
+
+// `last` as a function value: called, and reassigned.
+let tail_value = func(values: int[]) -> int {
+    let last = func(items: int[]) -> int => items[items.length - 1];
+    let first = last(values);
+    last = func(items: int[]) -> int => items[0];
+    return first * 10 + last(values);
+};
+
+let LastBindings = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last greeting = "last bindings";
+        console.print_line(greeting);
+        console.print_line(classify(true, 3));
+        console.print_line(classify(false, 0));
+        console.print_line(classify(false, -2));
+        console.print_line(area(Shape.Circle(2)).to_string());
+        console.print_line(area(Shape.Square(5)).to_string());
+        console.print_line(area(Shape.Dot).to_string());
+        console.print_line(first_even([3, 5, 8, 10]).to_string());
+        console.print_line(early(20).to_string());
+        console.print_line(early(-1).to_string());
+
+        let basic = new Account("ada");
+        let premium = new Account("grace", true);
+        let plain = new Account("linus", false);
+        console.print_line(basic.last() + " " + premium.last() + " " + plain.last() + " " + basic.currency);
+
+        // `last` as an ordinary local name, with every expression form.
+        let last = new Node();
+        last.value = 7;
+        last.last = true;
+        console.print_line(last.value.to_string() + " " + last.last.to_string());
+        let lasts = [1, 2, 3];
+        lasts[0] = 9;
+        console.print_line(lasts[0].to_string());
+        console.print_line(tail_value([4, 5, 6]).to_string());
+        return program.ExitCode.Ok;
+    };
+);

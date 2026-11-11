@@ -1,0 +1,36 @@
+// Deferred `last` locals: a declaration without a value, then one store on
+// each path. The optimizer must keep each store and must not read a value
+// before it.
+let DeferredLast = module (
+    export let chosen = func(flag: bool, value: int8) -> int8 {
+        last result: int8;
+        if (flag) {
+            result = value;
+        } else {
+            result = value / 2;
+        }
+        return result + 1;
+    };
+
+    export let per_iteration = func(limit: int8) -> int8 {
+        let total: int8 = 0;
+        let index: int8 = 0;
+        while (index < limit && index < 5) {
+            last step: int8;
+            step = index * 2;
+            total = total + step;
+            index = index + 1;
+        }
+        return total;
+    };
+
+    export let captured = func(value: int8) -> int8 {
+        last base: int8;
+        if (value > 3) {
+            return 0;
+        }
+        base = value + 1;
+        last read = func() -> int8 => base * 2;
+        return read();
+    };
+);

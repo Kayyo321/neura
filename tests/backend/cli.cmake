@@ -268,7 +268,8 @@ endforeach()
 
 # The new source constructs produce the same image after a NIR round trip.
 foreach(name IN ITEMS operators closures aggregates class-nil generic-closures generic-enums interfaces
-                      stdlib-primitives control-and-updates ranges-and-variadics overloads primitive-references)
+                      stdlib-primitives control-and-updates ranges-and-variadics overloads primitive-references
+                      last-bindings)
     neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
     if(NOT emit_status STREQUAL "0")
         message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")

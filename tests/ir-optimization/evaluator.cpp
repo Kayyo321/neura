@@ -1,5 +1,6 @@
 #include "evaluator.hpp"
 
+#include "neura-ir/attributes.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/nominal.hpp"
 #include "neura-ir/reference_storage.hpp"
@@ -753,6 +754,9 @@ private:
     Flow run_statement(const IrNode& node, Frame& frame) {
         switch (node.op) {
         case IrOp::Initialize: {
+            // NeuraIR 1.10: a deferred `last` local has no value until its
+            // first store, and the declaration does not reset it.
+            if (is_deferred_initialize(node)) return Flow::Next;
             auto value = evaluate(node.operands.at(0), frame);
             const auto kind = symbol(node.symbol).kind;
             if (kind == SymbolKind::Local) {
@@ -929,6 +933,9 @@ private:
                 return found->second;
             }
             const auto found = frame.locals.find(node.symbol);
+            if (found == frame.locals.end() && deferred_binding(symbol(node.symbol))) {
+                fault(node, "read of an uninitialized local");
+            }
             if (found == frame.locals.end()) {
                 unsupported(node, "read of an unset local");
             }
@@ -2049,7 +2056,8 @@ std::vector<Outcome> Evaluator::initialize() {
             }
             for (const auto& instruction : body.instructions) {
                 Item item{&instruction, kind == SymbolKind::Module ? body.owner : no_symbol};
-                if (instruction.op == IrOp::Initialize && literal(instruction.operands.front())) {
+                if (instruction.op == IrOp::Initialize && !instruction.operands.empty() &&
+                    literal(instruction.operands.front())) {
                     literals.push_back(item);
                 } else {
                     switch (reference_preparation(instruction)) {
