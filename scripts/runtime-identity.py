@@ -19,9 +19,19 @@ with one binary: each capture passes its tier to every `run` and `test`, and
     scripts/runtime-identity.py capture --neura build/neura --images DIR --out t2 --extended --run-option=--tier=2
     scripts/runtime-identity.py compare t0 t2
 
+Native code for tier 2 regions (docs/runtime/NVM.md, "Native compilation")
+is one more mode of the same comparison: --jit=on compiles every region,
+--jit=off runs every region on the region interpreter, and --jit MODE is a
+shorthand for --run-option=--jit=MODE. A capture with --jit=on first checks
+that the binary can run native code here, and stops if it cannot.
+
+    scripts/runtime-identity.py capture --neura build/neura --images DIR --out jit --extended --jit on
+    scripts/runtime-identity.py compare t0 jit
+
 The environment is passed on, so NEURA_TIER_EAGER=1 (lift blocks and form
-regions at their first execution) and NEURA_TIER_CHECK=1 (check every lifted
-block and region against the slower path) apply to a capture.
+regions at their first execution), NEURA_TIER_CHECK=1 (check every lifted
+block and region, native code included, against the slower path), and
+NEURA_JIT apply to a capture.
 
 Images are built once, by the first capture, so both runs execute the same
 NVR bytes and the comparison isolates the runtime. Each case records the
@@ -264,14 +274,24 @@ def capture(args):
     images = Path(args.images).resolve()
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    RUN_OPTIONS[:] = args.run_option
+    RUN_OPTIONS[:] = args.run_option + ([f"--jit={args.jit}"] if args.jit else [])
     programs = PROGRAMS + (extended_programs() if args.extended else [])
     build_images(neura, images, programs)
+    if "--jit=on" in RUN_OPTIONS:
+        # Every case would fail the same way: say why once instead.
+        status, _, stderr = run([neura, "run", str(images / "hello-world.nvr")], ROOT)
+        if status != 0 and b"--jit=on" in stderr:
+            sys.exit(stderr.decode(errors="replace").strip())
     work = out / "work"
     work.mkdir(exist_ok=True)
 
     def record(case, command, trace=None):
         status, stdout, stderr = run(command, work)
+        # A diagnostic names its file by its path, which is under the
+        # capture's own directory: name that directory the same way in every
+        # capture.
+        stdout = stdout.replace(bytes(out), b"<capture>")
+        stderr = stderr.replace(bytes(out), b"<capture>")
         (out / f"{case}.status").write_text(f"{status}\n")
         (out / f"{case}.stdout").write_bytes(stdout)
         (out / f"{case}.stderr").write_bytes(stderr)
@@ -385,6 +405,9 @@ def main():
                                      "library, and concurrency programs, step sweeps, replays, and --each)")
     capture_parser.add_argument("--run-option", action="append", default=[], metavar="OPTION",
                                 help="pass OPTION to every run and test, for example --run-option=--tier=0")
+    capture_parser.add_argument("--jit", choices=["off", "on", "auto"],
+                                help="run tier 2 regions as native code (on), on the interpreter (off), or as the "
+                                     "binary decides (auto): --run-option=--jit=MODE")
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("left")
     compare_parser.add_argument("right")

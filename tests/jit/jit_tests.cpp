@@ -5,17 +5,18 @@
 //   from scripts/jit-encodings.py), for x86-64 and AArch64;
 // - every integer instruction compiled inline, and those that call
 //   lift::evaluate, against lift::evaluate on edge values of every width,
-//   in and out of machine registers (executed on x86-64 only);
+//   in and out of machine registers;
 // - random region programs (loops, branches, switches, budgets, polls,
 //   gathers, stores) against a transcription of the region interpreter,
-//   down to every register and initialized flag (executed on x86-64);
+//   down to every register and initialized flag;
 // - whole runs with native code against tier 0 and the region interpreter:
 //   each deoptimization kind, step limits and task quanta inside regions,
 //   collections at region ends, and the fallback when code cannot be
 //   mapped.
 //
-// The AArch64 generator is checked by its encodings and by generating code
-// for the same programs; this host cannot run it.
+// Where native code is not enabled by default, the generator is checked by
+// its encodings and by generating code for the same programs; NEURA_JIT=on
+// runs the rest there too.
 #include "backend/fixtures.hpp"
 #include "backend/graph_test_support.hpp"
 
@@ -242,7 +243,14 @@ using nvm::tier2::Code;
 using nvm::tier2::Op;
 using nvm::tier2::Region;
 
-bool native_runs_here() { return jit::host_has_backend() && jit::host_arch() == jit::Arch::X86_64; }
+// Generated code is run where `auto` enables it (x86-64 Linux), and
+// anywhere else the environment asks for it with NEURA_JIT=on, as the
+// native-code workflow does (.github/workflows/jit.yml).
+bool native_runs_here() {
+    if (!jit::host_has_backend()) return false;
+    if (jit::environment_mode() == jit::Mode::On) return jit::availability(jit::Mode::On).enabled;
+    return jit::availability(jit::Mode::Auto).enabled;
+}
 
 struct Machine {
     std::uint64_t steps = 0;

@@ -133,7 +133,7 @@ The native code generator (`src/jit`) compiles a region program to machine code,
 
 `--jit=on` starts by running a small generated program; when it cannot be mapped or does not run as generated, or there is no code generator for the processor and system, the run fails before it starts. `auto` uses the interpreter in those cases, silently. A CI job definition (`.github/workflows/jit.yml`) runs the identity comparison with `--jit=on` on AArch64 Linux and macOS runners, so `auto` can be extended once it passes there.
 
-Native code is not a [native capability](../lang/Tooling.md#capabilities): `--deny-native` governs C code a program calls through `import:c` and `Std.DynamicForeign`, and does not turn the code generator off. Parallel items, which run on worker threads, share the cache's code: published code is immutable, and each run keeps its own context and registers.
+Native code is not the [native capability](../lang/Tooling.md#build-and-run-executables): `--deny-native` governs C code a program calls through `import:c` and `Std.DynamicForeign`, and does not turn the code generator off. Parallel items, which run on worker threads, share the cache's code: published code is immutable, and each run keeps its own context and registers.
 
 #### Controls
 

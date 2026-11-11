@@ -7,7 +7,7 @@
 - "Must" states a requirement on the implementation. An option name, message, or record layout given here is fixed.
 - Two terms distinguish the image from the executable and from foreign code:
   - **Standalone image.** [Overview](Overview.md) and [Status](Status.md) call a `.nvr` image standalone because it runs without its source. It still needs a runner.
-  - **Native code.** `--deny-native`, `Std.DynamicForeign`, and the `NATV` section concern C code that a program calls ([Foreign interop](ForeignInterop.md)). `--native` compiles nothing to machine code (the launcher's faster tiers run lifted blocks through its own fixed native routines, and regions of them through a portable interpreter, from the image's graphs and its `LIFT` hints, and generate no code); whether the packaged program may call native code is the policy's native capability, which is granted unless `--deny-native` or `--deny-all` is given.
+  - **Native code.** `--deny-native`, `Std.DynamicForeign`, and the `NATV` section concern C code that a program calls ([Foreign interop](ForeignInterop.md)). `--native` compiles nothing to machine code when it builds the executable. At run time the launcher's faster tiers run lifted blocks through its own fixed native routines, and regions of them as machine code that the launcher generates in memory for that run from the image's graphs and its `LIFT` hints, where its native code generator is enabled (by default on x86-64 Linux), or else through a portable interpreter ([native compilation](../runtime/NVM.md#native-compilation)). Nothing generated is written to the executable or to disk, and generated code calls no C code a program could name; whether the packaged program may call native code is the policy's native capability, which is granted unless `--deny-native` or `--deny-all` is given.
 
 | Term | Meaning |
 | --- | --- |
@@ -34,7 +34,7 @@ Because the image is embedded unchanged, everything that inspects images keeps w
 
 **Not provided.**
 
-- Ahead-of-time compilation. `--native` does not turn neuron graphs into machine code.
+- Ahead-of-time compilation. `--native` does not turn neuron graphs into machine code; only the run-time code generator of tier 2 does, in memory, for one run.
 - Bundled data. Files a program reads at run time are not embedded. A program that needs them ships them beside the executable and is built with a file-system grant.
 - Bundled shared libraries (section 6.5).
 - Payload compression, self-update, and installers. A packaged program has no installer or updater. The `neura` tool's own install, update, and uninstall commands concern the toolchain ([Install](../Install.md)).
@@ -247,6 +247,7 @@ An operator sometimes needs to bound or record a deployed program without rebuil
 | `--no-gpu`, `--gpu=off` | Accepted as requests for the launcher's CPU execution mode. The launcher has no GPU backend. |
 | `--stats`, `--profile` | As for `neura run`, on standard error. |
 | `--tier=0`, `--tier=1`, `--tier=2`, `--tier-stats` | Lower the execution tier, or report the tiers, as for `neura run` ([execution tiers](../runtime/NVM.md#execution-tiers)). The variable cannot raise the tier: `--tier=2` keeps the default. The tier changes only speed, so a sealed executable that ignores the variable still honors `NEURA_TIER=0` or `NEURA_TIER=1` in the environment. |
+| `--jit=off`, `--jit=on`, `--jit=auto` | Run tier 2 regions on the interpreter, as native code (an error at start-up where the platform cannot), or as the platform's default, as for `neura run` ([native compilation](../runtime/NVM.md#native-compilation)). Native code changes only speed, so a sealed executable still honors `NEURA_JIT` in the environment. `--deny-native` does not turn it off. |
 | `--record <file>` | Writes the run's host trace ([NVM](../runtime/NVM.md#determinism-limits-and-observability)). |
 | `--replay <file>` | Answers every host request from the trace. No service runs, so the policy's capabilities are not used. |
 

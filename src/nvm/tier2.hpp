@@ -15,8 +15,9 @@ namespace neura::nvm::tier2 {
 // is a set of blocks of one function, entered at one block, whose proven
 // blocks run one after another without returning to the per-step
 // dispatcher. A region program is the region compiled to one flat register
-// program. It is the input of a native compiler as well as of the portable
-// interpreter in tier2_steps.inc, so it says everything explicitly:
+// program. It is the input of the native code generator (src/jit) as well
+// as of the portable interpreter in tier2_steps.inc, so it says everything
+// explicitly:
 //
 // - Registers. Register r < slots.size() caches frame slot slots[r] for the
 //   whole region; the others are temporaries and values loaded at entry. A

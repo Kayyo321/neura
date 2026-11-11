@@ -116,7 +116,7 @@ Options apply left to right: `neura run --deny-all --allow-fs=data app.nvr` gran
 
 Raise `--max-steps` for long computations: a loop that runs past the default ends with `trap: step limit exceeded: 100000000 steps`. Concurrency options (`--max-tasks`, `--task-quantum`, `--parallel-workers`, `--task-dump`, `--trace-events`, `--virtual-time`) are in [concurrency.md](concurrency.md#running-and-testing-concurrent-programs).
 
-Execution tiers: tier 0 evaluates every block by reference; tier 1, the default, also runs blocks it has proven to compute typed operations natively. The output, steps, traps, and traces are identical at both tiers. `--tier=0` forces the reference tier (as does `NEURA_TIER=0` in the environment), `--tier=1` is the default, and `--tier-stats` prints the blocks lifted and the steps each tier ran. `run` and `test` take them; `NEURA_RUN_OPTIONS` may lower a native executable's tier.
+Execution tiers: tier 0 evaluates every block by reference; tier 1 also runs blocks it has proven to compute typed operations natively; tier 2, the default, also runs regions of proven blocks of one function together. The output, steps, traps, and traces are identical at every tier. `--tier=0` forces the reference tier (as does `NEURA_TIER=0` in the environment), `--tier=1` stops at lifted blocks, and `--tier-stats` prints the blocks lifted, the regions, and the steps each tier ran. `--jit=auto` (default) compiles tier 2 regions to machine code on x86-64 Linux and interprets them elsewhere, `--jit=on` compiles them wherever the runner has a code generator (x86-64 and AArch64 on Linux and macOS; experimental off x86-64 Linux) and fails the run at its start where it cannot, and `--jit=off` interprets them; `NEURA_JIT=off|on|auto` sets it for every run. Results are identical in every mode, and `--deny-native` does not affect it. `run` and `test` take these options; `NEURA_RUN_OPTIONS` may lower a native executable's tier and set `--jit`.
 
 GPU execution: `--gpu=auto` (default) uses a Vulkan device only when it is predicted to be faster; `--gpu=off` or `--no-gpu` forces the CPU; `--require-gpu` fails without a device. Release archives are built without the GPU backend. Results never depend on the device.
 
@@ -128,7 +128,7 @@ neura test -I src tests/math-tests.nra tests/text-tests.nra
 
 - Runs every exported zero-argument `void` function named `test_*` in a module of each listed file (imported files contribute no tests), each in a fresh execution after normal program initialization.
 - Prints `PASS Module.test_name` or `FAIL Module.test_name: <message> at file.nra:line:col`, then `N test(s), P passed, F failed`. Exits 0 only when every test passes, and 1 when any fails, none is found, or the build fails.
-- Accepts the capability options, `--max-steps`/`--max-frames`/`--max-heap-cells` (per test), `--stats`, `--tier=0|1`, `--tier-stats`, `--no-optimize`, the diagnostic options, and the concurrency options, plus `--virtual-time`, `--schedules N`, `--schedule-seed S`, `--save-schedule FILE`, and `--schedule FILE`.
+- Accepts the capability options, `--max-steps`/`--max-frames`/`--max-heap-cells` (per test), `--stats`, `--tier=0|1|2`, `--jit=off|on|auto`, `--tier-stats`, `--no-optimize`, the diagnostic options, and the concurrency options, plus `--virtual-time`, `--schedules N`, `--schedule-seed S`, `--save-schedule FILE`, and `--schedule FILE`.
 - No fixtures, mocks, timeouts, or parallel test execution. A test file does not need an entry module.
 
 ## Native executables

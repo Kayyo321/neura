@@ -25,6 +25,10 @@
 // - State operations inside a region call the reference state() with the
 //   same arguments, checks, and traps; they read and write existing
 //   storage only.
+// - Native code. A region the cache has compiled (src/jit) runs as machine
+//   code instead of interpret_region: the same program, op for op, with the
+//   same entry checks, write-back, and counts around it, which are this
+//   file's code for both.
 
     // A write of a state operation to heap or global storage, logged under
     // NEURA_TIER_CHECK=1 (checked_region).

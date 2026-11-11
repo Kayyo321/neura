@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Run boundary arithmetic at tiers 0, 1, and 2 and compare every byte.
+"""Run boundary arithmetic at tiers 0, 1, and 2 (with and without native code)
+and compare every byte.
 
 For each integer width and signedness, and for float32 and float64, the
 script writes a program whose operations each get a block of their own (a
@@ -19,7 +20,14 @@ region run again block by block, aborting on a difference). Status,
 standard output, and standard error must be identical, and --tier-stats
 must show that tier 1 ran lifted blocks and tier 2 ran regions.
 
+Tier 2 runs once for each native-code mode in --jit (docs/runtime/NVM.md,
+"Native compilation"): `off` runs regions on the region interpreter, `on`
+compiles them to native code, and --tier-stats must then show compiled
+regions. The default, `off,on`, needs a platform with a code generator;
+`--jit off` leaves native code out.
+
     scripts/tier-boundary.py --neura build/neura --out build/tier-boundary
+    scripts/tier-boundary.py --neura build/neura --out build/tier-boundary --jit on
 """
 
 import argparse
@@ -215,7 +223,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--neura", default="build/neura")
     parser.add_argument("--out", default="build/tier-boundary")
+    parser.add_argument("--jit", default="off,on",
+                        help="comma-separated native-code modes to run tier 2 in (off, on, auto)")
     args = parser.parse_args()
+    modes = [mode for mode in args.jit.split(",") if mode]
+    if not modes or any(mode not in ("off", "on", "auto") for mode in modes):
+        sys.exit("--jit takes off, on, and auto, separated by commas")
     neura = str(Path(args.neura).resolve())
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -238,18 +251,27 @@ def main():
         # thresholds.
         eager = dict(os.environ, NEURA_TIER_EAGER="1")
         runs = {}
-        for tier in (1, 2):
-            runs[f"tier {tier}"] = run([neura, "run", f"--tier={tier}", "--each", str(lists), str(image)], eager)
-            runs[f"tier {tier} checked"] = run([neura, "run", f"--tier={tier}", "--each", str(lists), str(image)],
-                                               dict(eager, NEURA_TIER_CHECK="1"))
-        stats = run([neura, "run", "--tier=2", "--tier-stats", "--each", str(lists), str(image)], eager)
-        lifted_line = next((line for line in stats[2].decode(errors="replace").splitlines()
-                            if line.startswith("tier: steps")), "tier: no statistics")
+        configurations = [("tier 1", ["--tier=1"])]
+        configurations += [(f"tier 2 jit {mode}", ["--tier=2", f"--jit={mode}"]) for mode in modes]
+        for label, options in configurations:
+            runs[label] = run([neura, "run", *options, "--each", str(lists), str(image)], eager)
+            runs[f"{label} checked"] = run([neura, "run", *options, "--each", str(lists), str(image)],
+                                           dict(eager, NEURA_TIER_CHECK="1"))
+        stats = run([neura, "run", "--tier=2", f"--jit={modes[-1]}", "--tier-stats", "--each", str(lists),
+                     str(image)], eager)
+        stats_lines = stats[2].decode(errors="replace").splitlines()
+        lifted_line = next((line for line in stats_lines if line.startswith("tier: steps")), "tier: no statistics")
+        jit_line = next((line for line in stats_lines if line.startswith("tier: jit")), "")
+        if modes[-1] == "on" and " regions compiled" not in jit_line:
+            print(f"{name}: --jit=on compiled no region: {jit_line or 'no jit statistics'}", file=sys.stderr)
+            failures += 1
         traps = reference[2].count(b": trap: ")
         same = all(other == reference for other in runs.values())
         total += len(cases)
         print(f"{name:8} {len(cases):5} cases, {traps:4} traps: {'identical' if same else 'DIFFERENT'}; "
               f"{lifted_line}", flush=True)
+        if jit_line:
+            print(f"{'':8} {jit_line}", flush=True)
         if not same:
             failures += 1
             for label, other in runs.items():
